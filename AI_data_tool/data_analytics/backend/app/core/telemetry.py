@@ -158,19 +158,49 @@ class _QuerystringScrubber:
     exporter, after which nothing else touches it.
     """
 
-    _SCRUB_KEYS = ("http.url", "http.target")
+    #: Hold a URL or path; the query string is cut off. `url.full` is the
+    #: stable HTTP semantic convention's name for `http.url`, emitted when
+    #: OTEL_SEMCONV_STABILITY_OPT_IN includes "http" (and, in time, by default).
+    _SCRUB_KEYS = ("http.url", "http.target", "url.full")
+    #: Hold nothing BUT the query string, so they are dropped outright.
+    _DROP_KEYS = ("url.query",)
 
     def on_start(self, span, parent_context=None) -> None:
         pass
 
+    def _on_ending(self, span) -> None:
+        # opentelemetry-sdk 1.3x+ calls this on every processor at span end;
+        # without the method the first span raises AttributeError. The scrub
+        # itself stays in on_end, which sees the same attributes. (This class
+        # duck-types rather than subclassing SpanProcessor, to keep otel
+        # imports out of module import; older SDKs never call it.)
+        pass
+
     def on_end(self, span) -> None:
-        attrs = getattr(span, "_attributes", None)
+        self._scrub(getattr(span, "_attributes", None))
+
+    @classmethod
+    def _scrub(cls, attrs) -> None:
         if not attrs:
             return
-        for key in self._SCRUB_KEYS:
-            value = attrs.get(key)
-            if isinstance(value, str) and "?" in value:
-                attrs[key] = value.split("?", 1)[0]
+        # Newer SDKs freeze a span's attributes (`_immutable`) before any
+        # end-of-span hook runs, and a write then raises TypeError. Lift the
+        # flag for the scrub alone and put it back: redaction is the one write
+        # that must still happen after the span is otherwise final.
+        frozen = getattr(attrs, "_immutable", False)
+        if frozen:
+            attrs._immutable = False
+        try:
+            for key in cls._SCRUB_KEYS:
+                value = attrs.get(key)
+                if isinstance(value, str) and "?" in value:
+                    attrs[key] = value.split("?", 1)[0]
+            for key in cls._DROP_KEYS:
+                if key in attrs:
+                    del attrs[key]
+        finally:
+            if frozen:
+                attrs._immutable = True
 
     def shutdown(self) -> None:
         pass
