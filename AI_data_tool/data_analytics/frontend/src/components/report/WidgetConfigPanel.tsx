@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef, useMemo, cloneElement} from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, cloneElement, lazy, Suspense} from 'react'
 import RelativeDateEditor from './RelativeDateEditor'
 import { LATTICE_WIDGETS } from './chartRenderers/LatticeRenderer'
 import { ANIMATION_WIDGETS } from './chartRenderers/AnimatedRenderer'
@@ -7,8 +7,9 @@ const LATTICE_SEARCH_TERMS = ['lattice', 'small multiples', 'trellis', 'facet', 
 import { DEFAULT_SPEC, parseSpec, specProblem } from '../../lib/relativeDates'
 import type { Widget, WidgetType, ReportPage, HierarchyNode, Bookmark } from '../../types/report'
 import BoundarySetPicker from './BoundarySetPicker'
-import { useGeoMatch } from './GeoMatchCheck'
-import { geoMatchSentence } from '../../lib/geoMatch'
+import GeoMatchStatus from './GeoMatchStatus'
+// Lazy: matching a column against map regions needs the bundled world geometry.
+const GeoMatchLine = lazy(() => import('./GeoMatchLine'))
 import { boundarySetsApi } from '../../services/api'
 import MapPinsEditor from './MapPinsEditor'
 import GraphLayersEditor from './GraphLayersEditor'
@@ -1579,8 +1580,11 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               inheritedName={inheritedBoundaryName} />
           )}
           {BOUNDARY_SET_WIDGETS.has(wt) && roleValues.category && (
-            <GeoMatchLine datasetId={Number(datasetId) || primaryDatasetId || null} column={roleValues.category}
-              setId={boundarySetId ? Number(boundarySetId) : (geography?.[roleValues.category] ?? null)} />
+            <Suspense fallback={(Number(datasetId) || primaryDatasetId)
+              ? <GeoMatchStatus>{`Checking ${roleValues.category} against the map…`}</GeoMatchStatus> : null}>
+              <GeoMatchLine datasetId={Number(datasetId) || primaryDatasetId || null} column={roleValues.category}
+                setId={boundarySetId ? Number(boundarySetId) : (geography?.[roleValues.category] ?? null)} />
+            </Suspense>
           )}
 
           {/* Pins live on the widget's config, so they travel with the report
@@ -2683,21 +2687,6 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
         <InteractionSettings widget={widget}
           pageWidgets={pages?.find(pg => pg.id === widget.page_id)?.widgets ?? []} />
       </ExpandableGroup>
-    </div>
-  )
-}
-
-/** The live match rate under a region map's boundary picker: which of the
- *  dimension's values will not land on a shape, before anyone reads the map. */
-function GeoMatchLine({ datasetId, column, setId }: { datasetId: number | null; column: string; setId: number | null }) {
-  // No dataset, no check -- and no boundary download for a panel that cannot use it.
-  const { report, loading } = useGeoMatch(datasetId, column, datasetId ? setId : null)
-  if (!datasetId) return null
-  return (
-    <div data-testid="geo-match-line" role="status"
-      style={{ fontSize: 10.5, marginTop: 4,
-        color: report && report.unmatched.length > 0 ? 'var(--danger)' : 'var(--muted)' }}>
-      {loading ? `Checking ${column} against the map…` : report ? geoMatchSentence(report) : null}
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeEach, beforeAll } from 'vitest'
 import { render, screen, fireEvent, within, waitFor, act } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import ReportBuilder from './ReportBuilder'
@@ -1720,6 +1720,10 @@ describe('classifying a field as geography', () => {
    * `boundary_set_id`); this is the half that lets an author set it, and the
    * moment it pays off: dropping the column on a map.
    */
+  // The check dialog is lazy (it carries the ~740 kB world atlas). Loading it
+  // once here keeps the first transform of that JSON out of the findBy window.
+  beforeAll(async () => { await import('../components/report/GeoMatchCheck') })
+
   const cols = [
     { id: 1, name: 'governorate', dtype: 'categorical', missing_pct: 0, stats: {} },
     { id: 2, name: 'sales', dtype: 'numeric', missing_pct: 0, stats: {} },

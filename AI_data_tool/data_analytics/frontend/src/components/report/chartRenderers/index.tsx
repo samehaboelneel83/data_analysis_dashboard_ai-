@@ -25,13 +25,13 @@ const GeoLayersRenderer = lazy(() =>
 const GeoDensityRenderer = lazy(() =>
   import('./GeoPieLayerRenderer').then(m => ({ default: m.GeoDensityRenderer })))
 const GeoNetworkRenderer = lazy(() => import('./GeoNetworkRenderer'))
+const GeoContourRenderer = lazy(() => import('./GeoContourRenderer'))
 const DecompositionRenderer = lazy(() => import('./DecompositionRenderer'))
 const SmallMultiplesRenderer = lazy(() => import('./SmallMultiplesRenderer'))
 const GeoBubblesRenderer = lazy(() =>
   import('./GeoPointMapRenderer').then(m => ({ default: m.GeoBubblesRenderer })))
 import type { ChartRendererProps } from './types'
 import ModelRenderer from './ModelRenderer'
-import GeoContourRenderer from './GeoContourRenderer'
 import BarChartRenderer from './BarChartRenderer'
 import LineChartRenderer from './LineChartRenderer'
 import PieChartRenderer from './PieChartRenderer'

@@ -3,8 +3,7 @@ import RelativeDateEditor from '../components/report/RelativeDateEditor'
 import AccessExplainer from '../components/report/AccessExplainer'
 import { DEFAULT_SPEC, PRESETS, describeSpec, parseSpec, specProblem, type RelativeSpec } from '../lib/relativeDates'
 import { closeOpen, markOpen, readOpen, type OpenReport } from '../lib/openReports'
-import GeoMatchCheck from '../components/report/GeoMatchCheck'
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
 import LoadError from '../components/ui/LoadError'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useDirection } from '../contexts/DirectionContext'
@@ -106,6 +105,9 @@ import {
 import { SyncSlicersPaneConnected, BookmarksPaneConnected } from './reportBuilder/BookmarksConnected'
 import { SchedulePanel } from './reportBuilder/SchedulePanel'
 import { PageTemplateMenu } from './reportBuilder/PageTemplateMenu'
+// Lazy: the geography check matches against the bundled world geometry (~740 kB
+// raw), which an author who never maps a column should not download.
+const GeoMatchCheck = lazy(() => import('../components/report/GeoMatchCheck'))
 
 const EMPTY_RULES: DisplayRule[] = []
 
@@ -3616,10 +3618,12 @@ export default function ReportBuilder() {
         )}
 
         {geoCheck && report.dataset_id != null && (
-          <GeoMatchCheck datasetId={report.dataset_id} column={geoCheck.column}
-            setId={geoCheck.setId} setName={geoCheck.setName}
-            onClose={() => setGeoCheck(null)}
-            onCommit={() => { const g = geoCheck; setGeoCheck(null); void classifyGeography(g.column, g.setId) }} />
+          <Suspense fallback={null}>
+            <GeoMatchCheck datasetId={report.dataset_id} column={geoCheck.column}
+              setId={geoCheck.setId} setName={geoCheck.setName}
+              onClose={() => setGeoCheck(null)}
+              onCommit={() => { const g = geoCheck; setGeoCheck(null); void classifyGeography(g.column, g.setId) }} />
+          </Suspense>
         )}
 
         {shortcutsOpen && (
