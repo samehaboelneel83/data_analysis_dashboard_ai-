@@ -16,11 +16,22 @@ This section is newer than everything below it. Where they disagree, this sectio
 3. ✅ **Bundle performance:** the world atlas (~740 kB raw) had slipped back into the eager path. `chartRenderers/index.tsx` imported `GeoContourRenderer` statically; `ReportBuilder` imported `GeoMatchCheck` statically; `WidgetConfigPanel` used `useGeoMatch` directly. All three are lazy now (`GeoMatchLine.tsx` and `GeoMatchStatus.tsx` split out of `WidgetConfigPanel`). Static JS beyond the app shell: builder 1,939 → 1,159 kB raw (557 → 313 kB gzip), shared link 1,470 → 698 kB (434 → 192), embed 1,468 → 696 kB; the `WidgetRenderer` chunk 950 → 179 kB. `src/components/report/geo/atlasLazy.test.ts` walks the static import graph and fails with the import chain if this regresses. The only chunk still over Vite's 500 kB warning is `worldGeometry` (the atlas itself, loaded only with a map).
 - Frontend after these changes: **212 files / 2,698 tests pass**; `tsc` 0 errors; `vite build` OK.
 
-**Pre-existing, found but not fixed:** `src/pages/ReportBuilder.test.tsx` reports 2 unhandled errors on every run, on the old code too: `addSuggestedWidget` reads `.layout` of undefined (`ReportBuilder.tsx` ~line 1085), and jsdom has no `scrollIntoView` (`ReportBuilder.tsx` ~line 1301). The tests pass, but vitest exits 1 because of them.
+**Second round (same session):**
+4. ✅ **The 2 unhandled errors in `ReportBuilder.test.tsx`** are fixed, and the full frontend suite now **exits 0** (212 files, 2,698 tests, 0 errors). One test was stale: with no widget selected, a field click now *builds a new chart*, but the test never mocked `addWidget`'s result, so the undo snapshot read `.layout` of undefined after the test had ended. It now asserts that behaviour. The other: jsdom has no `scrollIntoView`, now polyfilled in `src/test/setup.ts`.
+5. ✅ **More Python advisories:** `pyarrow` 16.1.0 → **23.0.1** (clears CVE-2024-52338, code execution when reading untrusted IPC/Parquet, which matters because uploads are Parquet) and `setuptools` 75.6.0 → **80.10.2** (the newest that still ships `pkg_resources`). Full sweep: **5,309 passed / 5 skipped / 3 failed** (the same LLM tests). `pip-audit`: 13 → **4**.
+6. ✅ **Route-walking tests work on any FastAPI version** (§13 low-priority 3): `backend/tests/_routes.py` flattens `_IncludedRouter`; 58 passed on FastAPI 0.136.3 **and** 0.141.1 (the old tests fail 4 on 0.141.1, and their admin sweep collected nothing). A new guard fails if the admin sweep ever finds no routes. **FastAPI ≥ 0.137 is no longer blocked**; it needs only the usual full sweep (§12's "stay on ≤ 0.136.x" rule is lifted).
+
+**Remaining advisories and why they stay:**
+- `protobuf` 4.25.9: OpenTelemetry 1.27's `opentelemetry-proto` requires `protobuf<5`. Fix = upgrade the OTel line (api/sdk/exporter plus the 0.4x instrumentation line) together, then sweep.
+- `setuptools` PYSEC-2026-3447 (fix ≥ 83): ≥ 81 drops `pkg_resources`, which OTel 1.27's instrumentation imports. It falls with the same OTel upgrade.
+- `ecdsa` 0.19.2: no fix exists. It is pulled in by python-jose, which uses the `cryptography` backend here, not ecdsa.
+- `pytest` 8.2.2 (fix 9.0.3): test-only; pytest 9 is a major version and needs pytest-asyncio 0.23.7 checked with it.
+- npm `pptxgenjs` → `image-size` (high): **not reachable in the app.** pptxgenjs's `browser` field maps `image-size` to `false`; it runs only under Node. The production bundle contains no `image-size` code. npm's "fix" is a downgrade to pptxgenjs 2.2.0; don't take it.
+- npm `vite` 5 / `vitest` 2 / `esbuild` (critical/high, **dev server and test UI only**, not in the production bundle): needs vite 8 + vitest 5, both major. **Waiting on the user's go-ahead** (§15: major upgrades with behaviour risk are the user's call).
 
 **User actions now needed:** rebuild the backend image (`docker compose build backend`) to pick up the new pins, and the frontend image as before. Merge `claude/awesome-keller-qmxzls` when you're happy with it.
 
-**Next pending, in order:** (a) the two unhandled errors above; (b) dev-tooling upgrade (vite 8, vitest 5, esbuild); (c) the remaining Python advisories (pyarrow, protobuf, setuptools, pytest; ecdsa has no fix); (d) the §13 low-priority items. Continue with §13 "Medium priority" from item 2, since item 1 (performance) is done.
+**Next pending, in order:** (a) the OpenTelemetry upgrade that unlocks protobuf ≥ 5 and setuptools ≥ 83; (b) vite 8 / vitest 5 once the user agrees; (c) pytest 9; (d) optionally FastAPI 0.141 (sweep only); (e) the §13 low-priority items: the builder toolbar tap-target decision, and verifying the shared-link view on a real phone.
 
 **Tip for a cloud session:** `node_modules/` and `dist/` are not in `.gitignore`. Add them to `.git/info/exclude` before `npm ci` so they never get committed.
 
