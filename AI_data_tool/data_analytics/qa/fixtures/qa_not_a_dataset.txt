@@ -1,0 +1,1 @@
+This is not a dataset. The upload page should reject it and stay on /upload so the error can be read.

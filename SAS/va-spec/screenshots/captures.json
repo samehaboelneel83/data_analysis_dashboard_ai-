@@ -1,0 +1,263 @@
+{
+  "date": "2026-09-23",
+  "timezone": "EEST (UTC+3)",
+  "note": "hold = the window Claude held the screen still while the operator's timer captured every 3s. 'manual' = captured interactively before the timer workflow started. V30-V32 were captured during the pass but are not on the original shot list; they document surfaces the manifests referenced only in prose.",
+  "shots": [
+    {
+      "id": "V01",
+      "folder": "navigation",
+      "slug": "landing-recommendations",
+      "screen": "Landing page, Recommendations selected",
+      "hold": "manual",
+      "status": "OK"
+    },
+    {
+      "id": "V02",
+      "folder": "dashboards",
+      "slug": "blank-report-empty-canvas",
+      "screen": "Blank report, empty canvas and empty Data pane",
+      "hold": "manual",
+      "status": "OK"
+    },
+    {
+      "id": "V24",
+      "folder": "dialogs",
+      "slug": "template-picker",
+      "screen": "Select a Template dialog",
+      "hold": "manual",
+      "status": "OK"
+    },
+    {
+      "id": "V03",
+      "folder": "data",
+      "slug": "data-pane-table-loaded",
+      "screen": "Data pane, RETAILDEMO_2 loaded, sensitivity shields",
+      "hold": "manual",
+      "status": "OK"
+    },
+    {
+      "id": "V13",
+      "folder": "data",
+      "slug": "expression-editor",
+      "screen": "New Calculated Item expression editor",
+      "hold": "manual",
+      "status": "OK"
+    },
+    {
+      "id": "V04",
+      "folder": "visualizations",
+      "slug": "object-placeholder-synthetic-sample",
+      "screen": "Bar chart placeholder with synthetic sample",
+      "hold": "manual",
+      "status": "OK"
+    },
+    {
+      "id": "V05",
+      "folder": "visualizations",
+      "slug": "rendered-chart-frequency-of-region",
+      "screen": "Frequency of Region, descending bars",
+      "hold": "manual",
+      "status": "OK"
+    },
+    {
+      "id": "V06",
+      "folder": "visualizations",
+      "slug": "grouped-chart-with-legend",
+      "screen": "Grouped bar chart, 6-colour Department legend",
+      "hold": "11:56:56-11:57:07",
+      "status": "OK"
+    },
+    {
+      "id": "V09",
+      "folder": "visualizations",
+      "slug": "crosstab-totals-subtotals",
+      "screen": "Crosstab nested both axes, Totals and Subtotals",
+      "hold": "11:59:58-12:00:09",
+      "status": "OK"
+    },
+    {
+      "id": "V07",
+      "folder": "forms",
+      "slug": "data-roles-eight-groups",
+      "screen": "Data Roles, 8 role groups, greyed +Add on full roles",
+      "hold": "12:00:37-12:00:48",
+      "status": "OK"
+    },
+    {
+      "id": "V08",
+      "folder": "forms",
+      "slug": "options-pane-expanded",
+      "screen": "Options pane, sections expanded",
+      "hold": "12:01:11-12:01:22",
+      "status": "OK"
+    },
+    {
+      "id": "V10",
+      "folder": "forms",
+      "slug": "filters-pane-category",
+      "screen": "Filters pane, category filter with frequency bars",
+      "hold": "12:02:01-12:02:12",
+      "status": "OK"
+    },
+    {
+      "id": "V11",
+      "folder": "forms",
+      "slug": "ranks-pane",
+      "screen": "Ranks pane: Top count, 10, Rank by, Ties, All Other",
+      "hold": "12:02:53-12:03:04",
+      "status": "OK"
+    },
+    {
+      "id": "V12",
+      "folder": "forms",
+      "slug": "actions-pane",
+      "screen": "Actions pane: Object / Page / Report / URL Links",
+      "hold": "12:03:20-12:03:31",
+      "status": "OK"
+    },
+    {
+      "id": "V18",
+      "folder": "navigation",
+      "slug": "outline-pane",
+      "screen": "Outline pane, three-page tree",
+      "hold": "12:03:46-12:03:57",
+      "status": "OK"
+    },
+    {
+      "id": "V19",
+      "folder": "analytics",
+      "slug": "suggestions-pane",
+      "screen": "Suggestions pane, thumbnail cards",
+      "hold": "12:04:13-12:04:24",
+      "status": "OK"
+    },
+    {
+      "id": "V20",
+      "folder": "analytics",
+      "slug": "report-review-pane",
+      "screen": "Report Review, severity counters and a finding",
+      "hold": "12:04:40-12:04:51",
+      "status": "OK"
+    },
+    {
+      "id": "V21",
+      "folder": "analytics",
+      "slug": "ai-copilot-panel",
+      "screen": "SAS Viya Copilot panel: 3 chips, prompt box, disclaimer",
+      "hold": "12:05:22-12:05:33",
+      "status": "OK"
+    },
+    {
+      "id": "V22",
+      "folder": "navigation",
+      "slug": "context-menu-on-mark",
+      "screen": "Context menu on a chart mark",
+      "hold": "12:06:09-12:06:20",
+      "status": "OK"
+    },
+    {
+      "id": "V23",
+      "folder": "navigation",
+      "slug": "page-menu-page-type",
+      "screen": "Page menu with Page type submenu",
+      "hold": "12:06:50-12:07:01",
+      "status": "OK"
+    },
+    {
+      "id": "V28",
+      "folder": "states",
+      "slug": "selected-plus-hover",
+      "screen": "Mark selected plus hover data tip",
+      "hold": "12:07:27-12:07:38",
+      "status": "OK"
+    },
+    {
+      "id": "V17",
+      "folder": "states",
+      "slug": "loading-spinner",
+      "screen": "Loading spinner on object re-query",
+      "hold": null,
+      "status": "BLOCKED"
+    },
+    {
+      "id": "V14",
+      "folder": "states",
+      "slug": "empty-result-no-data-matches",
+      "screen": "No data matches the current filters.",
+      "hold": "12:10:31-12:10:42",
+      "status": "OK"
+    },
+    {
+      "id": "V15",
+      "folder": "states",
+      "slug": "row-cap-3000-rows",
+      "screen": "Only 3,000 rows of the data appear.",
+      "hold": "12:12:41-12:12:52",
+      "status": "OK"
+    },
+    {
+      "id": "V16",
+      "folder": "states",
+      "slug": "tie-cap-notice",
+      "screen": "Too many ties associated with the rank.",
+      "hold": "12:14:35-12:14:46",
+      "status": "OK"
+    },
+    {
+      "id": "V25",
+      "folder": "states",
+      "slug": "view-mode",
+      "screen": "View mode, rails hidden, Basic page tabs only",
+      "hold": "12:15:13-12:15:24",
+      "status": "OK"
+    },
+    {
+      "id": "V26",
+      "folder": "dialogs",
+      "slug": "popup-page-modal",
+      "screen": "Pop-up page modal",
+      "hold": null,
+      "status": "BLOCKED"
+    },
+    {
+      "id": "V27",
+      "folder": "dialogs",
+      "slug": "save-confirmation",
+      "screen": "Save confirmation on close, cancelled",
+      "hold": "12:18:39-12:18:50",
+      "status": "OK"
+    },
+    {
+      "id": "V29",
+      "folder": "analytics",
+      "slug": "gradient-boosting-fitted",
+      "screen": "Fitted Gradient boosting with Data Roles",
+      "hold": "supplied",
+      "status": "OK"
+    },
+    {
+      "id": "V30",
+      "folder": "navigation",
+      "slug": "report-menu-distribution",
+      "screen": "Report menu: Export / Copy link / Copy embeddable markup / Distribute report",
+      "hold": "12:18:2x",
+      "status": "OK"
+    },
+    {
+      "id": "V31",
+      "folder": "data",
+      "slug": "new-data-item-menu",
+      "screen": "+ New data item menu: Hierarchy / Custom category / Calculated item / Geography item / Parameter / Interaction effect / Spline effect / Partition",
+      "hold": "manual",
+      "status": "OK"
+    },
+    {
+      "id": "V32",
+      "folder": "dialogs",
+      "slug": "copilot-language-dialog",
+      "screen": "Copilot language-support dialog",
+      "hold": "12:05:1x",
+      "status": "OK"
+    }
+  ]
+}

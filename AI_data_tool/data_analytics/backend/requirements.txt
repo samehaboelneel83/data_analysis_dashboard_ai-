@@ -1,0 +1,110 @@
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+sqlalchemy[asyncio]==2.0.30
+asyncpg==0.29.0
+pandas==2.2.2
+numpy==1.26.4
+scipy==1.13.0
+# A2: scikit-learn for KMeans segmentation (services/analysis/segment.py).
+# Imported LAZILY inside that module, never at app-import time -- see the
+# lazy-import test in test_segment.py. 1.5.1 requires numpy>=1.19.5 and
+# scipy>=1.6.0, both satisfied by the pins above without bumping either.
+scikit-learn==1.5.1
+openpyxl==3.1.2
+python-multipart==0.0.9
+pydantic-settings==2.2.1
+aiofiles==23.2.1
+psycopg2-binary==2.9.9
+pymssql==2.3.0
+pymysql==1.1.1
+oracledb==2.3.0
+httpx==0.27.0
+pytest==8.2.2
+passlib[bcrypt]==1.7.4
+bcrypt==4.3.0
+python-jose[cryptography]==3.3.0
+aiosqlite==0.20.0
+pytest-asyncio==0.23.7
+# Not used by any test's own logic: it supplies `--timeout`, so a hung test in
+# CI fails with a traceback at the hang instead of being killed by the job
+# timeout with no output. Without it that flag is rejected as an unknown
+# argument and the whole run aborts before collecting anything.
+pytest-timeout==2.3.1
+freezegun==1.5.1
+statsmodels==0.14.6
+pyarrow==16.1.0
+reportlab==4.2.2
+matplotlib==3.9.2
+duckdb-engine==0.13.2
+signxml==5.1.0
+lxml==6.1.2
+# Pinned, not >=: the V1-V3 ladder and policy.py depend on parse-shape
+# facts (SELECT-only detection, external-file-read refusals, CTE/alias
+# node shapes) that are version-dependent across sqlglot releases.
+sqlglot==30.17.0
+alembic==1.13.2
+# T3: python-slim base images ship no /usr/share/zoneinfo -- tzdata is
+# zoneinfo's pure-Python fallback IANA database, needed for ZoneInfo("Asia/Riyadh")
+# etc. to resolve inside the container.
+tzdata==2024.1
+# E3: OpenTelemetry, opt-in (settings.otel_enabled, default False). Pinned to
+# a mutually-compatible release set -- api/sdk/exporter share the 1.27.0 line,
+# the two instrumentation packages the corresponding 0.48b0 line (the +21
+# offset is the project's stable convention between the two lines).
+opentelemetry-api==1.27.0
+opentelemetry-sdk==1.27.0
+opentelemetry-instrumentation-fastapi==0.48b0
+opentelemetry-instrumentation-sqlalchemy==0.48b0
+opentelemetry-exporter-otlp-proto-http==1.27.0
+# opentelemetry-instrumentation's dependency-conflict check still imports
+# pkg_resources at import time; recent setuptools releases (>=81) no longer
+# bundle it, which turns FastAPIInstrumentor's import into a bare
+# ModuleNotFoundError. Pinned here (not just a transitive resolve) so the
+# base image's default setuptools can never silently drop it again.
+setuptools==75.6.0
+# O2: optional shared result-cache backend (services/cache_backend.py). redis
+# is the client used against Valkey (wire-compatible) when settings.valkey_url
+# is set; the platform runs fine without either configured or reachable --
+# see cache_backend.ValkeyCache's connection-failure fallback. fakeredis is
+# test-only, standing in for a real server so the ValkeyCache tests need no
+# network/container.
+redis==5.0.4
+fakeredis==2.23.2
+# A3: StatsForecast (AutoETS forecasting) + PyOD (iforest/ecod anomaly detection).
+# Both imported LAZILY -- see the lazy-import pins in test_forecast.py /
+# test_anomaly.py -- numba's JIT warmup costs real seconds and must never run
+# at app startup. Pins verified via `pip install --dry-run` resolver against
+# this file's EXISTING pins (numpy==1.26.4, pandas==2.2.2, scipy==1.13.0,
+# scikit-learn==1.5.1, statsmodels==0.14.6, pyarrow==16.1.0): the resolver
+# keeps every one of them unchanged -- statsforecast's numba/llvmlite chain
+# (numba==0.67.0, llvmlite==0.49.0) supports numpy 1.26.4 without forcing a
+# bump. Do not upgrade numpy to satisfy a future statsforecast/pyod bump;
+# re-run the dry-run check and escalate if it ever forces one.
+statsforecast==2.1.1
+pyod==3.6.5
+# statsforecast's own numba/llvmlite transitives, pinned explicitly (not left to
+# the resolver) so an air-gapped rebuild reproduces the exact versions verified
+# above rather than whatever the resolver picks that day.
+numba==0.67.0
+llvmlite==0.49.0
+
+# Right-to-left text for server-side PDF export (services/rtl_text.py).
+# reportlab draws glyphs in the order it is given them and does no shaping, so
+# Arabic without these renders as isolated letters in reversed order. Pinned for
+# the same air-gapped-rebuild reason as the numba/llvmlite pins above.
+#
+# No font ships with these: DejaVu Sans already lives in the image via
+# matplotlib and covers Arabic, so the offline guarantee is preserved.
+arabic-reshaper==3.0.1
+python-bidi==0.6.11
+
+# ODBC binding for the `odbc` connector -- the escape hatch for backends with no
+# SQLAlchemy dialect of their own (legacy ERPs, Progress, Informix, older Sybase).
+#
+# The WHEEL alone is not enough and the connector says so: pyodbc is a binding,
+# not a driver. A host also needs a driver manager (unixODBC) and a registered
+# vendor driver, which are per-vendor and often licence-gated, so they stay the
+# operator's choice rather than image weight every deployment pays for. That is
+# exactly what `_odbc_usable` probes, and why it asks pyodbc.drivers() rather
+# than merely importing the module.
+pyodbc==5.2.0

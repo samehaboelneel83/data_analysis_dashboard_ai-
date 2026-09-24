@@ -1,0 +1,46 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Custom visual demo</title>
+  <style>
+    body { margin: 0; font: 12px system-ui, sans-serif; color: #1a2233; background: #fff; }
+    h4 { margin: 8px 10px 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #667; }
+    table { width: 100%; border-collapse: collapse; }
+    td, th { padding: 4px 10px; border-bottom: 1px solid #eee; text-align: left; }
+    th { color: #667; font-weight: 700; }
+    .bar { height: 8px; background: #6c8fff; border-radius: 4px; }
+    .empty { padding: 16px; color: #99a; }
+  </style>
+</head>
+<body>
+  <!--
+    A minimal reference "custom visual". It renders whatever data datalytics sends via
+    postMessage — the contract is { type: "datalytics:data", data: <shaped result> }.
+    A real visual would draw with D3/Chart.js/etc.; this one draws a labelled bar list
+    so the data contract is visible at a glance.
+  -->
+  <div id="root" class="empty">Waiting for data…</div>
+  <script>
+    function render(payload) {
+      var root = document.getElementById('root');
+      var rows = (payload && payload.rows) || [];
+      if (!rows.length) { root.className = 'empty'; root.textContent = 'No data'; return; }
+      var max = Math.max.apply(null, rows.map(function (r) { return Number(r.value) || 0; })) || 1;
+      root.className = '';
+      root.innerHTML =
+        '<h4>Custom visual · ' + rows.length + ' rows</h4>' +
+        '<table><thead><tr><th>Name</th><th>Value</th><th style="width:40%"></th></tr></thead><tbody>' +
+        rows.map(function (r) {
+          var w = Math.round((Number(r.value) || 0) / max * 100);
+          return '<tr><td>' + String(r.name) + '</td><td>' +
+            (Number(r.value) || 0).toLocaleString() + '</td>' +
+            '<td><div class="bar" style="width:' + w + '%"></div></td></tr>';
+        }).join('') + '</tbody></table>';
+    }
+    window.addEventListener('message', function (e) {
+      if (e.data && e.data.type === 'datalytics:data') render(e.data.data);
+    });
+  </script>
+</body>
+</html>

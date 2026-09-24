@@ -1,0 +1,40 @@
+name: sqlite_sessions
+properties:
+  description: Table public.sqlite_sessions
+table_reference:
+  catalog: ''
+  schema: public
+  table: sqlite_sessions
+columns:
+- name: id
+  type: VARCHAR
+  is_calculated: false
+  not_null: true
+  is_primary_key: true
+  properties: {}
+- name: ideal_image_path
+  type: VARCHAR
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+- name: excel_file_path
+  type: VARCHAR
+  is_calculated: false
+  not_null: true
+  is_primary_key: false
+  properties: {}
+- name: symbols_data
+  type: TEXT
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+- name: created_at
+  type: TIMESTAMP
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+primary_key: id
+cached: false

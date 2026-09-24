@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Wren AI Chat</title>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: #151d33;
+      --panel-2: #10182b;
+      --border: #2a3654;
+      --text: #e8edf7;
+      --muted: #8fa0bf;
+      --accent: #4f8cff;
+      --accent-hover: #3b78eb;
+      --user: #1f3b69;
+      --assistant: #182238;
+      --sql: #0d1528;
+      --success: #34d399;
+      --error: #f87171;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .layout {
+      max-width: 980px;
+      margin: 0 auto;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding: 1rem;
+    }
+    header {
+      padding: 0.5rem 0 1rem;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 1rem;
+    }
+    h1 { margin: 0 0 0.25rem; font-size: 1.4rem; }
+    .subtitle { color: var(--muted); font-size: 0.92rem; }
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      padding-bottom: 1rem;
+    }
+    .msg {
+      max-width: 92%;
+      padding: 0.85rem 1rem;
+      border-radius: 12px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .msg.user {
+      align-self: flex-end;
+      background: var(--user);
+      border: 1px solid #315f9e;
+    }
+    .msg.assistant {
+      align-self: flex-start;
+      background: var(--assistant);
+      border: 1px solid var(--border);
+      width: 100%;
+      max-width: 100%;
+    }
+    .label {
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 0.45rem;
+    }
+    pre.sql, pre.error {
+      margin: 0.5rem 0 0;
+      padding: 0.75rem;
+      border-radius: 8px;
+      overflow-x: auto;
+      font-family: Consolas, monospace;
+      font-size: 0.88rem;
+    }
+    pre.sql { background: var(--sql); border: 1px solid var(--border); }
+    pre.error { background: #2a1212; border: 1px solid #7f1d1d; color: #fecaca; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 0.75rem;
+      font-size: 0.85rem;
+    }
+    th, td {
+      border: 1px solid var(--border);
+      padding: 0.45rem 0.55rem;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: var(--panel); color: var(--muted); }
+    .table-wrap { overflow-x: auto; max-height: 360px; overflow-y: auto; }
+    .composer {
+      border-top: 1px solid var(--border);
+      padding-top: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+    }
+    textarea {
+      width: 100%;
+      min-height: 88px;
+      resize: vertical;
+      background: var(--panel-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.75rem;
+      font: inherit;
+    }
+    textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(79, 140, 255, 0.18);
+    }
+    .row {
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    button {
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 0.65rem 1.2rem;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:hover:not(:disabled) { background: var(--accent-hover); }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    .status { color: var(--muted); font-size: 0.9rem; }
+    .status.ok { color: var(--success); }
+    .status.error { color: var(--error); }
+    .empty {
+      color: var(--muted);
+      font-style: italic;
+      text-align: center;
+      padding: 3rem 1rem;
+    }
+    .meta { color: var(--muted); font-size: 0.82rem; margin-top: 0.35rem; }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <header>
+      <h1>Wren AI Chat</h1>
+      <p class="subtitle">Ask in natural language → Qwen generates SQL → Wren runs it on <code>maps_project</code></p>
+    </header>
+
+    <div id="messages" class="messages">
+      <div class="empty">Try: "How many rows in maps_states?" or "Top 5 institutes by student count"</div>
+    </div>
+
+    <div class="composer">
+      <textarea id="input" placeholder="Ask a question about your data…"></textarea>
+      <div class="row">
+        <button id="sendBtn" type="button">Send</button>
+        <span id="status" class="status"></span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const messagesEl = document.getElementById("messages");
+    const inputEl = document.getElementById("input");
+    const sendBtn = document.getElementById("sendBtn");
+    const statusEl = document.getElementById("status");
+
+    function setStatus(text, type = "") {
+      statusEl.textContent = text;
+      statusEl.className = "status" + (type ? " " + type : "");
+    }
+
+    function clearEmpty() {
+      const empty = messagesEl.querySelector(".empty");
+      if (empty) empty.remove();
+    }
+
+    function addUserMessage(text) {
+      clearEmpty();
+      const el = document.createElement("div");
+      el.className = "msg user";
+      el.innerHTML = `<div class="label">You</div>${escapeHtml(text)}`;
+      messagesEl.appendChild(el);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function escapeHtml(text) {
+      return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
+    function renderTable(rows) {
+      if (!rows || rows.length === 0) {
+        return `<div class="meta">No rows returned.</div>`;
+      }
+      const cols = [...new Set(rows.flatMap((r) => Object.keys(r)))];
+      const head = cols.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
+      const body = rows.slice(0, 100).map((row) => {
+        const cells = cols.map((c) => {
+          const val = row[c];
+          const shown = val === null || val === undefined ? "NULL" : String(val);
+          return `<td>${escapeHtml(shown)}</td>`;
+        }).join("");
+        return `<tr>${cells}</tr>`;
+      }).join("");
+      const note = rows.length > 100 ? `<div class="meta">Showing first 100 of ${rows.length} rows.</div>` : `<div class="meta">${rows.length} row(s)</div>`;
+      return `<div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>${note}`;
+    }
+
+    function addAssistantMessage(data) {
+      clearEmpty();
+      const el = document.createElement("div");
+      el.className = "msg assistant";
+
+      let html = `<div class="label">Assistant</div>`;
+      html += `<div>${escapeHtml(data.reply || "")}</div>`;
+
+      if (data.sql) {
+        html += `<div class="label" style="margin-top:0.75rem">Generated SQL</div>`;
+        html += `<pre class="sql">${escapeHtml(data.sql)}</pre>`;
+      }
+
+      if (data.error) {
+        html += `<div class="label" style="margin-top:0.75rem">Error</div>`;
+        html += `<pre class="error">${escapeHtml(data.error)}</pre>`;
+      }
+
+      if (data.rows) {
+        html += `<div class="label" style="margin-top:0.75rem">Results</div>`;
+        html += renderTable(data.rows);
+      }
+
+      el.innerHTML = html;
+      messagesEl.appendChild(el);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    async function sendMessage() {
+      const message = inputEl.value.trim();
+      if (!message) return;
+
+      sendBtn.disabled = true;
+      setStatus("Generating SQL and running query…");
+      addUserMessage(message);
+      inputEl.value = "";
+
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          const err = typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail ?? data, null, 2);
+          addAssistantMessage({ reply: "Request failed.", error: err });
+          setStatus("Failed", "error");
+          return;
+        }
+
+        addAssistantMessage(data);
+        setStatus(data.error ? "Done with errors" : "Done", data.error ? "error" : "ok");
+      } catch (err) {
+        addAssistantMessage({ reply: "Request failed.", error: String(err) });
+        setStatus("Failed", "error");
+      } finally {
+        sendBtn.disabled = false;
+      }
+    }
+
+    sendBtn.addEventListener("click", sendMessage);
+    inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+  </script>
+</body>
+</html>

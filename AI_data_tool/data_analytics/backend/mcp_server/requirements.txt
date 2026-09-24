@@ -1,0 +1,6 @@
+# The datalytics MCP server runs as its own process (stdio), separate from the backend
+# app, so its dependencies live here rather than in the backend image — mcp pulls in a
+# newer pydantic-settings than the API pins. Install into the env you run the server in:
+#     pip install -r backend/mcp_server/requirements.txt
+mcp>=1.4,<2
+httpx>=0.27

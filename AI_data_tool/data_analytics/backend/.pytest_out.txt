@@ -1,0 +1,827 @@
+........................................................................ [  2%]
+........................................................................ [  4%]
+........................................................................ [  7%]
+........................................................................ [  9%]
+........................................................................ [ 11%]
+........................................................................ [ 14%]
+........................................................................ [ 16%]
+........................................................................ [ 18%]
+........................................................................ [ 21%]
+........................................................................ [ 23%]
+........................................................................ [ 25%]
+........................................................................ [ 28%]
+........................................................................ [ 30%]
+........................................................................ [ 32%]
+...................................................sss.................. [ 35%]
+........................................................................ [ 37%]
+........................................................................ [ 39%]
+........................................................................ [ 42%]
+........................................................................ [ 44%]
+........................................................................ [ 46%]
+........................................................................ [ 49%]
+......
+  -- M1.4 foreign-key inference --
+  precision 100.00%   recall 100.00%   F1 100.00%
+  proposed 7 / 7 true
+  overlap queries: 21
+.................................................................. [ 51%]
+........................................................................ [ 54%]
+........................................................................ [ 56%]
+........................................................................ [ 58%]
+........................................................................ [ 61%]
+........................................................................ [ 63%]
+........................................................................ [ 65%]
+........................................................................ [ 68%]
+........................................................................ [ 70%]
+........................................................................ [ 72%]
+........................................................................ [ 75%]
+........................................................................ [ 77%]
+........................................................................ [ 79%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 86%]
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 96%]
+........................................................................ [ 98%]
+........................................                                 [100%]
+=============================== warnings summary ===============================
+../usr/local/lib/python3.12/site-packages/passlib/utils/__init__.py:854
+  /usr/local/lib/python3.12/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13
+    from crypt import crypt as _crypt
+
+../usr/local/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:64
+  /usr/local/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:64: PyparsingDeprecationWarning: 'oneOf' deprecated - use 'one_of'
+    prop = Group((name + Suppress("=") + comma_separated(value)) | oneOf(_CONSTANTS))
+
+../usr/local/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:85
+../usr/local/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:85
+../usr/local/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:85
+../usr/local/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:85
+../usr/local/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:85
+../usr/local/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:85
+  /usr/local/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:85: PyparsingDeprecationWarning: 'parseString' deprecated - use 'parse_string'
+    parse = parser.parseString(pattern)
+
+../usr/local/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:89
+../usr/local/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:89
+../usr/local/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:89
+../usr/local/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:89
+../usr/local/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:89
+../usr/local/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:89
+  /usr/local/lib/python3.12/site-packages/matplotlib/_fontconfig_pattern.py:89: PyparsingDeprecationWarning: 'resetCache' deprecated - use 'reset_cache'
+    parser.resetCache()
+
+../usr/local/lib/python3.12/site-packages/matplotlib/_mathtext.py:45
+  /usr/local/lib/python3.12/site-packages/matplotlib/_mathtext.py:45: PyparsingDeprecationWarning: 'enablePackrat' deprecated - use 'enable_packrat'
+    ParserElement.enablePackrat()
+
+../usr/local/lib/python3.12/site-packages/reportlab/lib/rl_safe_eval.py:12
+  /usr/local/lib/python3.12/site-packages/reportlab/lib/rl_safe_eval.py:12: DeprecationWarning: ast.NameConstant is deprecated and will be removed in Python 3.14; use ast.Constant instead
+    haveNameConstant = hasattr(ast,'NameConstant')
+
+tests/test_admin_audit.py: 67 warnings
+tests/test_admin_endpoints_require_admin.py: 152 warnings
+tests/test_admin_rls_auto_generate.py: 98 warnings
+tests/test_admin_roles.py: 42 warnings
+tests/test_admin_row_security_rules.py: 108 warnings
+tests/test_admin_users.py: 44 warnings
+tests/test_agent_api.py: 161 warnings
+tests/test_agent_context.py: 235 warnings
+tests/test_agent_dataset_context.py: 61 warnings
+tests/test_agent_dataset_mode.py: 95 warnings
+tests/test_agent_feedback.py: 92 warnings
+tests/test_agent_generate.py: 13 warnings
+tests/test_agent_graph.py: 115 warnings
+tests/test_agent_memory.py: 17 warnings
+tests/test_agent_models.py: 19 warnings
+tests/test_analysis_contract.py: 18 warnings
+tests/test_analysis_directquery_router.py: 12 warnings
+tests/test_analysis_rls.py: 32 warnings
+tests/test_api_keys.py: 33 warnings
+tests/test_audit_log.py: 40 warnings
+tests/test_auth_models.py: 10 warnings
+tests/test_auth_provisioning.py: 9 warnings
+tests/test_auth_router.py: 18 warnings
+tests/test_batch_quota.py: 75 warnings
+tests/test_batch_upload.py: 140 warnings
+tests/test_bookmark_model.py: 3 warnings
+tests/test_bookmarks_org_scoping.py: 27 warnings
+tests/test_bulk_users.py: 41 warnings
+tests/test_calculated_column_preview_rls.py: 22 warnings
+tests/test_catalog_sync.py: 415 warnings
+tests/test_column_meta_api.py: 117 warnings
+tests/test_column_security.py: 145 warnings
+tests/test_common_filters.py: 68 warnings
+tests/test_connectors_endpoint.py: 38 warnings
+tests/test_create_directquery_dataset.py: 36 warnings
+tests/test_data_preview_directquery_router.py: 27 warnings
+tests/test_data_preview_rls.py: 22 warnings
+tests/test_data_source_cache_ttl.py: 4 warnings
+tests/test_data_source_secrets.py: 34 warnings
+tests/test_data_sources_org_scoping.py: 110 warnings
+tests/test_data_views.py: 102 warnings
+tests/test_dataflow_permissions.py: 186 warnings
+tests/test_dataflows_api.py: 195 warnings
+tests/test_dataset_materialize.py: 315 warnings
+tests/test_dataset_mode.py: 4 warnings
+tests/test_dataset_rebuild.py: 214 warnings
+tests/test_dataset_refresh_modes.py: 130 warnings
+tests/test_dataset_shares.py: 106 warnings
+tests/test_datasets_org_scoping.py: 52 warnings
+tests/test_declared_fk_seeding.py: 159 warnings
+tests/test_decomposition.py: 27 warnings
+tests/test_delivery_log.py: 173 warnings
+tests/test_demo_action_coverage.py: 4028 warnings
+tests/test_demo_directquery.py: 860 warnings
+tests/test_demo_endpoint.py: 2598 warnings
+tests/test_demo_features.py: 5666 warnings
+tests/test_demo_reports.py: 4054 warnings
+tests/test_demo_seed_datasets.py: 920 warnings
+tests/test_demo_use_cases.py: 2543 warnings
+tests/test_demo_ux_showcase.py: 2980 warnings
+tests/test_dependencies.py: 6 warnings
+tests/test_directquery_unsupported_endpoints.py: 11 warnings
+tests/test_drift_cache_epoch.py: 28 warnings
+tests/test_embed.py: 375 warnings
+tests/test_enc_migration.py: 55 warnings
+tests/test_export_policy_granular.py: 72 warnings
+tests/test_expression_parameters.py: 60 warnings
+tests/test_filter_preview_rls.py: 11 warnings
+tests/test_goal_seek.py: 50 warnings
+tests/test_hierarchy_auto_generate_dates.py: 33 warnings
+tests/test_hierarchy_auto_generate_directquery.py: 24 warnings
+tests/test_hierarchy_editing.py: 60 warnings
+tests/test_hierarchy_widget_analysis_org_scoping.py: 58 warnings
+tests/test_key_influencers.py: 85 warnings
+tests/test_lineage_notifications_comments.py: 341 warnings
+tests/test_mdb.py: 100 warnings
+tests/test_measures_api.py: 128 warnings
+tests/test_metadata_api.py: 1243 warnings
+tests/test_metadata_store.py: 68 warnings
+tests/test_migrate_backfill.py: 39 warnings
+tests/test_outlier_details.py: 72 warnings
+tests/test_page_templates.py: 92 warnings
+tests/test_page_visibility.py: 72 warnings
+tests/test_parquet_sidecar.py: 14 warnings
+tests/test_pdf_export.py: 28 warnings
+tests/test_platform.py: 66 warnings
+tests/test_prep_join.py: 93 warnings
+tests/test_prep_steps_api.py: 141 warnings
+tests/test_query_builder_api.py: 118 warnings
+tests/test_query_runs.py: 20 warnings
+tests/test_quotas.py: 76 warnings
+tests/test_rate_limit.py: 12 warnings
+tests/test_refresh_schedule.py: 82 warnings
+tests/test_registry.py: 18 warnings
+tests/test_relationship_model.py: 6 warnings
+tests/test_relationships_org_scoping.py: 77 warnings
+tests/test_report_capabilities.py: 97 warnings
+tests/test_report_classification.py: 74 warnings
+tests/test_report_display_rules_api.py: 34 warnings
+tests/test_report_page_mobile_layout.py: 6 warnings
+tests/test_report_page_size.py: 6 warnings
+tests/test_report_parameters.py: 157 warnings
+tests/test_report_revision.py: 96 warnings
+tests/test_report_theme.py: 4 warnings
+tests/test_report_translations.py: 26 warnings
+tests/test_reports_org_scoping.py: 122 warnings
+tests/test_require_org_admin.py: 6 warnings
+tests/test_retrieval.py: 608 warnings
+tests/test_rls_fail_closed.py: 11 warnings
+tests/test_rls_user_context.py: 33 warnings
+tests/test_row_security_rule_model.py: 16 warnings
+tests/test_saml.py: 92 warnings
+tests/test_scheduled_delivery.py: 201 warnings
+tests/test_scheduled_materialization.py: 169 warnings
+tests/test_segment.py: 27 warnings
+tests/test_share_link_access_log.py: 22 warnings
+tests/test_share_link_viewer_identity.py: 83 warnings
+tests/test_share_links.py: 213 warnings
+tests/test_small_multiples.py: 11 warnings
+tests/test_source_description.py: 74 warnings
+tests/test_sso.py: 103 warnings
+tests/test_stage_sample.py: 136 warnings
+tests/test_subscriptions.py: 177 warnings
+tests/test_suggest_widgets.py: 24 warnings
+tests/test_sweep_two.py: 99 warnings
+tests/test_sync_background.py: 99 warnings
+tests/test_sync_does_not_block.py: 28 warnings
+tests/test_sync_pipeline.py: 246 warnings
+tests/test_telemetry.py: 8 warnings
+tests/test_upload_path_safety.py: 86 warnings
+tests/test_widget_data_author_tokens.py: 46 warnings
+tests/test_widget_data_directquery_router.py: 119 warnings
+tests/test_widget_data_rls_enforcement.py: 44 warnings
+tests/test_widget_data_thread_offload.py: 26 warnings
+tests/test_widget_export.py: 140 warnings
+tests/test_widget_templates.py: 31 warnings
+tests/test_workspace.py: 325 warnings
+tests/test_xml_extraction.py: 22 warnings
+  /usr/local/lib/python3.12/site-packages/sqlalchemy/sql/schema.py:3585: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    return util.wrap_callable(lambda ctx: fn(), fn)  # type: ignore
+
+tests/test_admin_audit.py: 13 warnings
+tests/test_admin_endpoints_require_admin.py: 19 warnings
+tests/test_admin_rls_auto_generate.py: 11 warnings
+tests/test_admin_roles.py: 6 warnings
+tests/test_admin_row_security_rules.py: 11 warnings
+tests/test_admin_users.py: 8 warnings
+tests/test_agent_api.py: 31 warnings
+tests/test_agent_dataset_mode.py: 5 warnings
+tests/test_agent_feedback.py: 24 warnings
+tests/test_analysis_contract.py: 3 warnings
+tests/test_analysis_directquery_router.py: 1 warning
+tests/test_analysis_rls.py: 5 warnings
+tests/test_api_keys.py: 9 warnings
+tests/test_audit_log.py: 8 warnings
+tests/test_auth_router.py: 1 warning
+tests/test_batch_quota.py: 5 warnings
+tests/test_batch_upload.py: 14 warnings
+tests/test_bookmarks_org_scoping.py: 5 warnings
+tests/test_bulk_users.py: 11 warnings
+tests/test_calculated_column_preview_rls.py: 2 warnings
+tests/test_column_meta_api.py: 13 warnings
+tests/test_column_security.py: 13 warnings
+tests/test_common_filters.py: 18 warnings
+tests/test_connectors_endpoint.py: 6 warnings
+tests/test_create_directquery_dataset.py: 4 warnings
+tests/test_data_preview_directquery_router.py: 2 warnings
+tests/test_data_preview_rls.py: 2 warnings
+tests/test_data_source_secrets.py: 8 warnings
+tests/test_data_sources_org_scoping.py: 12 warnings
+tests/test_data_views.py: 12 warnings
+tests/test_dataflow_permissions.py: 17 warnings
+tests/test_dataflows_api.py: 31 warnings
+tests/test_dataset_materialize.py: 20 warnings
+tests/test_dataset_rebuild.py: 19 warnings
+tests/test_dataset_refresh_modes.py: 11 warnings
+tests/test_dataset_shares.py: 16 warnings
+tests/test_datasets_org_scoping.py: 8 warnings
+tests/test_decomposition.py: 2 warnings
+tests/test_delivery_log.py: 29 warnings
+tests/test_demo_endpoint.py: 13 warnings
+tests/test_demo_features.py: 2 warnings
+tests/test_dependencies.py: 3 warnings
+tests/test_directquery_unsupported_endpoints.py: 1 warning
+tests/test_embed.py: 56 warnings
+tests/test_export_policy_granular.py: 18 warnings
+tests/test_expression_parameters.py: 12 warnings
+tests/test_filter_preview_rls.py: 1 warning
+tests/test_goal_seek.py: 6 warnings
+tests/test_hierarchy_auto_generate_dates.py: 2 warnings
+tests/test_hierarchy_auto_generate_directquery.py: 1 warning
+tests/test_hierarchy_editing.py: 13 warnings
+tests/test_hierarchy_widget_analysis_org_scoping.py: 7 warnings
+tests/test_key_influencers.py: 7 warnings
+tests/test_lineage_notifications_comments.py: 20 warnings
+tests/test_mdb.py: 12 warnings
+tests/test_measures_api.py: 15 warnings
+tests/test_metadata_api.py: 56 warnings
+tests/test_outlier_details.py: 7 warnings
+tests/test_page_templates.py: 27 warnings
+tests/test_page_visibility.py: 22 warnings
+tests/test_parquet_sidecar.py: 2 warnings
+tests/test_pdf_export.py: 2 warnings
+tests/test_platform.py: 22 warnings
+tests/test_prep_join.py: 6 warnings
+tests/test_prep_steps_api.py: 22 warnings
+tests/test_query_builder_api.py: 28 warnings
+tests/test_quotas.py: 10 warnings
+tests/test_rate_limit.py: 12 warnings
+tests/test_refresh_schedule.py: 8 warnings
+tests/test_registry.py: 4 warnings
+tests/test_relationships_org_scoping.py: 6 warnings
+tests/test_report_capabilities.py: 20 warnings
+tests/test_report_classification.py: 19 warnings
+tests/test_report_display_rules_api.py: 6 warnings
+tests/test_report_parameters.py: 34 warnings
+tests/test_report_revision.py: 24 warnings
+tests/test_report_translations.py: 7 warnings
+tests/test_reports_org_scoping.py: 14 warnings
+tests/test_rls_fail_closed.py: 1 warning
+tests/test_rls_user_context.py: 4 warnings
+tests/test_saml.py: 4 warnings
+tests/test_scheduled_delivery.py: 39 warnings
+tests/test_security.py: 1 warning
+tests/test_segment.py: 3 warnings
+tests/test_share_link_access_log.py: 1 warning
+tests/test_share_link_viewer_identity.py: 8 warnings
+tests/test_share_links.py: 15 warnings
+tests/test_small_multiples.py: 1 warning
+tests/test_source_description.py: 5 warnings
+tests/test_sso.py: 28 warnings
+tests/test_subscriptions.py: 20 warnings
+tests/test_suggest_widgets.py: 4 warnings
+tests/test_sweep_two.py: 24 warnings
+tests/test_sync_background.py: 8 warnings
+tests/test_upload_path_safety.py: 13 warnings
+tests/test_widget_data_author_tokens.py: 5 warnings
+tests/test_widget_data_directquery_router.py: 10 warnings
+tests/test_widget_data_rls_enforcement.py: 4 warnings
+tests/test_widget_data_thread_offload.py: 3 warnings
+tests/test_widget_export.py: 12 warnings
+tests/test_widget_templates.py: 9 warnings
+tests/test_workspace.py: 90 warnings
+tests/test_xml_extraction.py: 3 warnings
+  /usr/local/lib/python3.12/site-packages/jose/jwt.py:311: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = timegm(datetime.utcnow().utctimetuple())
+
+tests/test_analysis_contract.py: 7 warnings
+tests/test_analysis_directquery_router.py: 1 warning
+tests/test_analysis_rls.py: 3 warnings
+tests/test_batch_upload.py: 1 warning
+tests/test_boolean_columns.py: 2 warnings
+tests/test_column_security.py: 4 warnings
+tests/test_create_directquery_dataset.py: 3 warnings
+tests/test_data_sources_org_scoping.py: 1 warning
+tests/test_dataflow_permissions.py: 4 warnings
+tests/test_dataflows_api.py: 8 warnings
+tests/test_dataset_materialize.py: 19 warnings
+tests/test_dataset_rebuild.py: 36 warnings
+tests/test_dataset_refresh_modes.py: 2 warnings
+tests/test_datetime_analysis.py: 1 warning
+tests/test_demo_action_coverage.py: 361 warnings
+tests/test_demo_directquery.py: 193 warnings
+tests/test_demo_endpoint.py: 264 warnings
+tests/test_demo_features.py: 741 warnings
+tests/test_demo_reports.py: 570 warnings
+tests/test_demo_seed_datasets.py: 361 warnings
+tests/test_demo_use_cases.py: 589 warnings
+tests/test_demo_ux_showcase.py: 323 warnings
+tests/test_detect_types.py: 3 warnings
+tests/test_frame_cache.py: 2 warnings
+tests/test_hierarchy_auto_generate_dates.py: 3 warnings
+tests/test_hierarchy_editing.py: 3 warnings
+tests/test_lineage_notifications_comments.py: 1 warning
+tests/test_mdb.py: 5 warnings
+tests/test_parquet_sidecar.py: 3 warnings
+tests/test_query_builder_api.py: 8 warnings
+tests/test_scheduled_materialization.py: 8 warnings
+tests/test_suggest_widgets.py: 1 warning
+tests/test_xml_extraction.py: 1 warning
+  /app/app/services/ingest.py:59: UserWarning: The argument 'infer_datetime_format' is deprecated and will be removed in a future version. A strict version of it is now the default, see https://pandas.pydata.org/pdeps/0004-consistent-to-datetime-parsing.html. You can safely remove this argument.
+    parsed = pd.to_datetime(s, infer_datetime_format=True)
+
+tests/test_analysis_contract.py: 5 warnings
+tests/test_analysis_directquery_router.py: 1 warning
+tests/test_analysis_rls.py: 1 warning
+tests/test_boolean_columns.py: 2 warnings
+tests/test_column_security.py: 4 warnings
+tests/test_create_directquery_dataset.py: 3 warnings
+tests/test_data_sources_org_scoping.py: 1 warning
+tests/test_dataflow_permissions.py: 4 warnings
+tests/test_dataflows_api.py: 8 warnings
+tests/test_dataset_materialize.py: 19 warnings
+tests/test_dataset_rebuild.py: 36 warnings
+tests/test_dataset_refresh_modes.py: 2 warnings
+tests/test_demo_action_coverage.py: 304 warnings
+tests/test_demo_directquery.py: 156 warnings
+tests/test_demo_endpoint.py: 220 warnings
+tests/test_demo_features.py: 624 warnings
+tests/test_demo_reports.py: 480 warnings
+tests/test_demo_seed_datasets.py: 304 warnings
+tests/test_demo_use_cases.py: 496 warnings
+tests/test_demo_ux_showcase.py: 272 warnings
+tests/test_detect_types.py: 1 warning
+tests/test_hierarchy_auto_generate_dates.py: 2 warnings
+tests/test_mdb.py: 5 warnings
+tests/test_parquet_sidecar.py: 2 warnings
+tests/test_query_builder_api.py: 8 warnings
+tests/test_scheduled_materialization.py: 8 warnings
+tests/test_suggest_widgets.py: 1 warning
+tests/test_xml_extraction.py: 1 warning
+  /app/app/services/ingest.py:59: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+    parsed = pd.to_datetime(s, infer_datetime_format=True)
+
+tests/test_catalog_sync.py: 280 warnings
+tests/test_declared_fk_seeding.py: 30 warnings
+tests/test_drift_cache_epoch.py: 7 warnings
+tests/test_metadata_store.py: 4 warnings
+tests/test_source_description.py: 3 warnings
+tests/test_stage_sample.py: 30 warnings
+tests/test_sync_does_not_block.py: 8 warnings
+tests/test_sync_pipeline.py: 52 warnings
+  /app/app/services/metadata/store.py:260: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    existing.computed_at = datetime.utcnow()
+
+tests/test_catalog_sync.py: 80 warnings
+tests/test_drift_cache_epoch.py: 3 warnings
+tests/test_sync_does_not_block.py: 4 warnings
+  /app/app/services/metadata/catalog_sync.py:551: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    obj.last_profiled_at = datetime.utcnow()
+
+tests/test_catalog_sync.py: 44 warnings
+tests/test_drift_cache_epoch.py: 3 warnings
+tests/test_sync_does_not_block.py: 4 warnings
+  /app/app/services/metadata/catalog_sync.py:960: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    run.finished_at = datetime.utcnow()
+
+tests/test_catalog_sync.py::TestFailure::test_no_connection_config_fails_the_run_loudly
+  /app/app/services/metadata/catalog_sync.py:939: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    run.finished_at = datetime.utcnow()
+
+tests/test_catalog_sync.py::TestSlowObjectsAreNotPaidForTwice::test_an_object_that_timed_out_is_not_sampled_again
+  /repo/backend/tests/test_catalog_sync.py:595: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/test_catalog_sync.py::TestSlowObjectsAreNotPaidForTwice::test_a_skipped_object_keeps_its_earlier_sample
+  /repo/backend/tests/test_catalog_sync.py:630: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/test_catalog_sync.py::TestSlowObjectsAreNotPaidForTwice::test_a_timeout_is_recorded_rather_than_merely_counted
+tests/test_catalog_sync.py::TestSlowObjectsAreNotPaidForTwice::test_a_timeout_is_recorded_rather_than_merely_counted
+tests/test_catalog_sync.py::TestSlowObjectsAreNotPaidForTwice::test_a_timeout_is_recorded_rather_than_merely_counted
+  /app/app/services/metadata/catalog_sync.py:466: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    obj.sample_timed_out_at = datetime.utcnow()
+
+tests/test_dataflow_permissions.py: 4 warnings
+tests/test_dataflows_api.py: 8 warnings
+  /app/app/routers/dataflows.py:308: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/test_dataset_materialize.py: 7 warnings
+tests/test_dataset_rebuild.py: 8 warnings
+tests/test_lineage_notifications_comments.py: 1 warning
+  /app/app/routers/datasets.py:1687: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    last_refreshed_at=datetime.utcnow(),
+
+tests/test_dataset_materialize.py: 7 warnings
+tests/test_dataset_rebuild.py: 8 warnings
+tests/test_lineage_notifications_comments.py: 1 warning
+  /app/app/routers/datasets.py:1695: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "built_at": datetime.utcnow().isoformat() + "Z",
+
+tests/test_dataset_rebuild.py::TestItRefreshesFromTheSources::test_it_picks_up_changed_source_rows
+tests/test_dataset_rebuild.py::TestItRefreshesFromTheSources::test_the_old_file_and_its_sidecar_are_removed
+tests/test_dataset_rebuild.py::TestItRefreshesFromTheSources::test_it_replays_the_snapshot_not_the_sources_current_pipeline
+tests/test_dataset_rebuild.py::TestItRefreshesFromTheSources::test_it_records_who_rebuilt_it_and_when
+  /app/app/routers/datasets.py:1778: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    ds.last_refreshed_at = datetime.utcnow()
+
+tests/test_dataset_rebuild.py::TestItRefreshesFromTheSources::test_it_picks_up_changed_source_rows
+tests/test_dataset_rebuild.py::TestItRefreshesFromTheSources::test_the_old_file_and_its_sidecar_are_removed
+tests/test_dataset_rebuild.py::TestItRefreshesFromTheSources::test_it_replays_the_snapshot_not_the_sources_current_pipeline
+tests/test_dataset_rebuild.py::TestItRefreshesFromTheSources::test_it_records_who_rebuilt_it_and_when
+  /app/app/routers/datasets.py:1791: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "built_at": datetime.utcnow().isoformat() + "Z",
+
+tests/test_dataset_refresh_modes.py::test_refresh_full_via_endpoint_replaces_rows_and_sets_last_refreshed
+tests/test_dataset_refresh_modes.py::test_refresh_incremental_via_endpoint_advances_the_watermark
+tests/test_dataset_refresh_modes.py::test_refresh_carries_forward_semantic_type_by_column_name
+tests/test_dataset_refresh_modes.py::test_refresh_is_recorded_in_query_runs
+tests/test_dataset_refresh_modes.py::test_refresh_writes_a_materialization_manifest_row_with_pinned_row_count
+tests/test_dataset_refresh_modes.py::test_second_refresh_supersedes_the_manifest_row_and_prunes_the_old_one
+tests/test_dataset_refresh_modes.py::test_second_refresh_supersedes_the_manifest_row_and_prunes_the_old_one
+tests/test_dataset_refresh_modes.py::test_loader_prefers_the_refresh_written_parquet_over_a_csv_reparse
+tests/test_dataset_refresh_modes.py::test_materialization_manifest_is_org_scoped
+  /app/app/routers/datasets.py:2065: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    dataset.last_refreshed_at = _dt.utcnow()
+
+tests/test_dataset_refresh_modes.py::test_second_refresh_supersedes_the_manifest_row_and_prunes_the_old_one
+  /app/app/services/dataset_refresh.py:248: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    row.created_at = datetime.utcnow()
+
+tests/test_datetime_analysis.py::test_unparseable_column_degrades_to_a_note_not_a_crash
+  /app/app/services/analytics.py:121: UserWarning: Could not infer format, so each element will be parsed individually, falling back to `dateutil`. To ensure parsing is consistent and as-expected, please specify a format.
+    s = pd.to_datetime(raw, errors="coerce").dropna().sort_values()
+
+tests/test_declared_fk_seeding.py: 12 warnings
+tests/test_source_description.py: 3 warnings
+tests/test_stage_sample.py: 10 warnings
+tests/test_sync_pipeline.py: 26 warnings
+  /app/app/services/metadata/sync.py:376: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    dataset.last_profiled_at = datetime.utcnow()
+
+tests/test_declared_fk_seeding.py: 6 warnings
+tests/test_drift_cache_epoch.py: 3 warnings
+tests/test_source_description.py: 3 warnings
+tests/test_stage_sample.py: 11 warnings
+tests/test_sync_background.py: 1 warning
+tests/test_sync_pipeline.py: 15 warnings
+  /app/app/services/metadata/sync.py:775: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    run.finished_at = datetime.utcnow()
+
+tests/test_delivery_log.py::TestLogDeliverySyncHelper::test_writes_a_row_with_the_given_fields
+  /repo/backend/tests/test_delivery_log.py:59: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/test_delivery_log.py::TestLogDeliverySyncHelper::test_a_raising_engine_does_not_raise
+  /repo/backend/tests/test_delivery_log.py:81: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/test_delivery_log.py::TestRunScheduleLogsDeliveries::test_a_failed_send_is_logged_as_error
+tests/test_delivery_log.py::TestRunScheduleLogsDeliveries::test_a_successful_send_is_logged_as_ok
+tests/test_delivery_log.py::TestRunScheduleLogsDeliveries::test_no_valid_recipients_is_logged_as_error
+tests/test_delivery_log.py::TestRunScheduleLogsDeliveries::test_a_raising_logger_never_breaks_the_delivery
+tests/test_scheduled_delivery.py::TestRunSchedule::test_unconfigured_smtp_is_recorded_not_raised
+tests/test_scheduled_delivery.py::TestRunSchedule::test_a_deleted_creator_disables_the_schedule
+tests/test_scheduled_delivery.py::TestTeamsDelivery::test_a_webhook_recipient_routes_to_the_webhook
+  /app/app/services/delivery.py:187: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    schedule.last_run_at = datetime.utcnow()
+
+tests/test_delivery_log.py: 3 warnings
+tests/test_scheduled_delivery.py: 8 warnings
+tests/test_widget_export.py: 3 warnings
+  /usr/local/lib/python3.12/site-packages/openpyxl/packaging/core.py:99: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.datetime.utcnow()
+
+tests/test_delivery_log.py::TestRunScheduleLogsDeliveries::test_a_failed_send_is_logged_as_error
+tests/test_delivery_log.py::TestRunScheduleLogsDeliveries::test_a_successful_send_is_logged_as_ok
+tests/test_delivery_log.py::TestRunScheduleLogsDeliveries::test_a_raising_logger_never_breaks_the_delivery
+tests/test_scheduled_delivery.py::TestDigest::test_digest_holds_one_sheet_per_data_widget
+tests/test_scheduled_delivery.py::TestDigest::test_digest_applies_the_creators_row_level_security
+tests/test_scheduled_delivery.py::TestRunSchedule::test_unconfigured_smtp_is_recorded_not_raised
+tests/test_scheduled_delivery.py::TestTeamsDelivery::test_a_webhook_recipient_routes_to_the_webhook
+tests/test_widget_export.py::test_excel_export_is_a_real_workbook_with_the_same_rows
+  /usr/local/lib/python3.12/site-packages/openpyxl/writer/excel.py:292: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    workbook.properties.modified = datetime.datetime.utcnow()
+
+tests/test_delivery_log.py::TestRunScheduleLogsDeliveries::test_a_failed_send_is_logged_as_error
+tests/test_delivery_log.py::TestRunScheduleLogsDeliveries::test_a_successful_send_is_logged_as_ok
+tests/test_delivery_log.py::TestRunScheduleLogsDeliveries::test_no_valid_recipients_is_logged_as_error
+tests/test_delivery_log.py::TestRunScheduleLogsDeliveries::test_a_raising_logger_never_breaks_the_delivery
+tests/test_scheduled_delivery.py::TestRunSchedule::test_unconfigured_smtp_is_recorded_not_raised
+tests/test_scheduled_delivery.py::TestRunSchedule::test_a_deleted_creator_disables_the_schedule
+tests/test_scheduled_delivery.py::TestTeamsDelivery::test_a_webhook_recipient_routes_to_the_webhook
+  /app/app/services/delivery.py:182: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    created_at=datetime.utcnow(),
+
+tests/test_delivery_log.py: 3 warnings
+tests/test_scheduled_delivery.py: 7 warnings
+  /app/app/services/alerts.py:62: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    alert.last_checked_at = datetime.utcnow()
+
+tests/test_delivery_log.py: 3 warnings
+tests/test_scheduled_delivery.py: 7 warnings
+  /app/app/services/alerts.py:57: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    created_at=datetime.utcnow(),
+
+tests/test_delivery_log.py::TestScheduleTimezone::test_unknown_timezone_is_422
+tests/test_delivery_log.py::TestScheduleTimezone::test_a_valid_timezone_is_stored_and_returned
+tests/test_scheduled_delivery.py::TestRunSchedule::test_calendar_schedule_round_trips
+  /app/app/routers/reports.py:777: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    if _last_occurrence(spec, _dt.utcnow()) is None and spec["kind"] not in ("daily", "weekly", "monthly"):
+
+tests/test_demo_action_coverage.py: 19 warnings
+tests/test_demo_endpoint.py: 11 warnings
+tests/test_demo_use_cases.py: 31 warnings
+  /app/app/services/demo_use_cases.py:606: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    expires_at=datetime.utcnow() + DEMO_SHARE_LINK_TTL,
+
+tests/test_demo_action_coverage.py::TestNothingSeededCanFire::test_no_seeded_schedule_or_alert_is_ever_due
+  D:\Omda 2025\projects\data_analysis_dashboard_ai\AI_data_tool\data_analytics\backend\tests\test_demo_action_coverage.py:169: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/test_demo_directquery.py::test_dataset_columns_are_probed_the_way_a_real_directquery_import_probes_them
+tests/test_demo_directquery.py::test_dataset_columns_are_probed_the_way_a_real_directquery_import_probes_them
+  /app/app/services/ingest.py:61: SettingWithCopyWarning: 
+  A value is trying to be set on a copy of a slice from a DataFrame.
+  Try using .loc[row_indexer,col_indexer] = value instead
+  
+  See the caveats in the documentation: https://pandas.pydata.org/pandas-docs/stable/user_guide/indexing.html#returning-a-view-versus-a-copy
+    df[col] = parsed
+
+tests/test_demo_use_cases.py::TestIdentitiesAndGrants::test_the_schedule_and_alert_are_inert
+  D:\Omda 2025\projects\data_analysis_dashboard_ai\AI_data_tool\data_analytics\backend\tests\test_demo_use_cases.py:362: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/test_embed.py: 15 warnings
+  /app/app/routers/embed.py:289: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    cfg.last_used_at = datetime.utcnow()
+
+tests/test_embed.py: 11 warnings
+  /app/app/routers/embed.py:365: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    cfg.last_used_at = datetime.utcnow()
+
+tests/test_eval_schedule.py::TestRunOnce::test_stubbed_gate_writes_an_eval_runs_row
+tests/test_eval_schedule.py::TestRunOnce::test_regression_logs_at_error
+tests/test_eval_schedule.py::TestRunOnce::test_a_crashing_gate_still_writes_a_row_and_never_raises
+  /app/app/services/eval_schedule.py:91: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    started_at = datetime.utcnow()
+
+tests/test_eval_schedule.py::TestRunOnce::test_stubbed_gate_writes_an_eval_runs_row
+tests/test_eval_schedule.py::TestRunOnce::test_regression_logs_at_error
+tests/test_eval_schedule.py::TestRunOnce::test_a_crashing_gate_still_writes_a_row_and_never_raises
+  /app/app/services/eval_schedule.py:98: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    finished_at = datetime.utcnow()
+
+tests/test_eval_schedule.py::TestDueCalculation::test_a_recent_run_is_not_due
+  /repo/backend/tests/test_eval_schedule.py:131: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/test_eval_schedule.py::TestDueCalculation::test_a_recent_run_is_not_due
+  /repo/backend/tests/test_eval_schedule.py:132: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/test_eval_schedule.py::TestDueCalculation::test_a_recent_run_is_not_due
+  /repo/backend/tests/test_eval_schedule.py:137: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/test_eval_schedule.py::TestDueCalculation::test_an_old_run_is_due_again
+  /repo/backend/tests/test_eval_schedule.py:143: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/test_eval_schedule.py::TestDueCalculation::test_an_old_run_is_due_again
+  /repo/backend/tests/test_eval_schedule.py:144: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/test_eval_schedule.py::TestDueCalculation::test_an_old_run_is_due_again
+  /repo/backend/tests/test_eval_schedule.py:148: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/test_inferential_statistics.py::TestLogisticRegression::test_perfect_separation_is_refused_not_reported
+  /usr/local/lib/python3.12/site-packages/statsmodels/genmod/generalized_linear_model.py:1342: PerfectSeparationWarning: Perfect separation or prediction detected, parameter may not be identified
+    warnings.warn(msg, category=PerfectSeparationWarning)
+
+tests/test_lineage_notifications_comments.py::test_bell_lists_own_only_and_mark_read
+  /app/app/routers/notifications.py:39: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    r.read_at = datetime.utcnow()
+
+tests/test_platform.py::test_only_a_super_admin_may_manage_organizations
+tests/test_platform.py::test_create_org_provisions_an_org_and_a_working_admin
+tests/test_platform.py::test_mcp_defaults_enabled_and_can_be_toggled
+tests/test_platform.py::test_mcp_defaults_enabled_and_can_be_toggled
+  /app/app/routers/platform.py:52: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    return datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+
+tests/test_quotas.py::test_null_quota_never_blocks_widget_data
+  D:\Omda 2025\projects\data_analysis_dashboard_ai\AI_data_tool\data_analytics\backend\tests\test_quotas.py:69: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/test_quotas.py::test_query_quota_boundary_n_minus_1_ok_n_blocked
+  D:\Omda 2025\projects\data_analysis_dashboard_ai\AI_data_tool\data_analytics\backend\tests\test_quotas.py:99: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/test_quotas.py::test_query_quota_boundary_n_minus_1_ok_n_blocked
+tests/test_quotas.py::test_query_quota_boundary_n_minus_1_ok_n_blocked
+tests/test_quotas.py::test_query_quota_boundary_n_minus_1_ok_n_blocked
+tests/test_quotas.py::test_query_quota_only_counts_today
+tests/test_quotas.py::test_org_isolation_a_exhausted_b_unaffected
+tests/test_quotas.py::test_org_isolation_a_exhausted_b_unaffected
+tests/test_quotas.py::test_agent_ask_quota_blocks_at_boundary
+tests/test_quotas.py::test_agent_ask_quota_blocks_at_boundary
+  /app/app/services/quotas.py:100: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    return datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+
+tests/test_quotas.py::test_query_quota_boundary_n_minus_1_ok_n_blocked
+tests/test_quotas.py::test_org_isolation_a_exhausted_b_unaffected
+tests/test_quotas.py::test_agent_ask_quota_blocks_at_boundary
+  /app/app/services/quotas.py:105: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    return max(1, int((tomorrow_midnight - datetime.utcnow()).total_seconds()))
+
+tests/test_quotas.py::test_query_quota_only_counts_today
+  D:\Omda 2025\projects\data_analysis_dashboard_ai\AI_data_tool\data_analytics\backend\tests\test_quotas.py:129: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/test_quotas.py::test_org_isolation_a_exhausted_b_unaffected
+  D:\Omda 2025\projects\data_analysis_dashboard_ai\AI_data_tool\data_analytics\backend\tests\test_quotas.py:155: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/test_quotas.py::test_agent_ask_quota_blocks_at_boundary
+  D:\Omda 2025\projects\data_analysis_dashboard_ai\AI_data_tool\data_analytics\backend\tests\test_quotas.py:179: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/test_scheduled_materialization.py: 16 warnings
+  D:\Omda 2025\projects\data_analysis_dashboard_ai\AI_data_tool\data_analytics\backend\tests\test_scheduled_materialization.py:26: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/test_scheduled_materialization.py::TestTheRebuild::test_it_replays_the_recipe_and_picks_up_new_rows
+tests/test_scheduled_materialization.py::TestTheRebuild::test_a_later_change_to_the_source_is_picked_up
+tests/test_scheduled_materialization.py::TestTheRebuild::test_a_later_change_to_the_source_is_picked_up
+tests/test_scheduled_materialization.py::TestTheRebuild::test_it_keeps_the_same_file_path
+tests/test_scheduled_materialization.py::TestTheRebuild::test_the_recipe_survives_the_refresh
+tests/test_scheduled_materialization.py::TestTheRebuild::test_the_timestamp_advances
+  /app/app/services/refresh_scheduler.py:326: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    meta[DERIVED_FROM_KEY] = {**prov, "built_at": datetime.utcnow().isoformat() + "Z",
+
+tests/test_scheduled_materialization.py::TestTheRebuild::test_it_replays_the_recipe_and_picks_up_new_rows
+tests/test_scheduled_materialization.py::TestTheRebuild::test_a_later_change_to_the_source_is_picked_up
+tests/test_scheduled_materialization.py::TestTheRebuild::test_a_later_change_to_the_source_is_picked_up
+tests/test_scheduled_materialization.py::TestTheRebuild::test_it_keeps_the_same_file_path
+tests/test_scheduled_materialization.py::TestTheRebuild::test_the_recipe_survives_the_refresh
+tests/test_scheduled_materialization.py::TestTheRebuild::test_the_timestamp_advances
+  /app/app/services/refresh_scheduler.py:333: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    ds.last_refreshed_at = datetime.utcnow()
+
+tests/test_scheduled_materialization.py::TestItFailsQuietlyAndKeepsGoing::test_a_deleted_source_does_not_stop_the_loop
+  /app/app/services/refresh_scheduler.py:275: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    ds.last_refreshed_at = datetime.utcnow()
+
+tests/test_scheduled_materialization.py::TestItFailsQuietlyAndKeepsGoing::test_a_departed_builder_stops_the_rebuild
+  /app/app/services/refresh_scheduler.py:283: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    ds.last_refreshed_at = datetime.utcnow()
+
+tests/test_scheduled_materialization.py::TestTheDataflowRefreshItself::test_it_refreshes_every_output_it_owns
+tests/test_scheduled_materialization.py::TestTheDataflowRefreshItself::test_a_run_records_success_on_the_dataflow
+tests/test_scheduled_materialization.py::TestTheDataflowRefreshItself::test_a_departed_creator_stops_the_run
+tests/test_scheduled_materialization.py::TestTheDataflowRefreshItself::test_a_dataflow_with_no_outputs_is_skipped_quietly
+tests/test_scheduled_materialization.py::TestTheDataflowRefreshItself::test_a_broken_recipe_never_stops_the_loop
+  /app/app/services/refresh_scheduler.py:372: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/test_share_link_access_log.py: 1 warning
+tests/test_share_link_viewer_identity.py: 4 warnings
+tests/test_share_links.py: 12 warnings
+  /app/app/routers/reports.py:1343: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    expires_at=datetime.utcnow() + timedelta(days=days),
+
+tests/test_share_links.py::test_expired_revoked_and_bogus_tokens_all_404_identically
+  /app/app/routers/reports.py:1400: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    link.revoked_at = datetime.utcnow()
+
+tests/test_share_links.py::test_expired_revoked_and_bogus_tokens_all_404_identically
+  /repo/backend/tests/test_share_links.py:102: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/test_sync_background.py: 10 warnings
+  /app/app/services/metadata/sync.py:794: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    cutoff = datetime.utcnow() - timedelta(minutes=STALE_RUN_MINUTES)
+
+tests/test_sync_background.py::TestConcurrency::test_a_second_sync_while_one_is_running_is_refused
+  /repo/backend/tests/test_sync_background.py:72: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/test_sync_background.py::TestConcurrency::test_a_finished_run_does_not_block_the_next_one
+tests/test_sync_background.py::TestConcurrency::test_a_finished_run_does_not_block_the_next_one
+  /repo/backend/tests/test_sync_background.py:86: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/test_sync_background.py::TestConcurrency::test_a_stale_running_run_is_treated_as_abandoned
+  /repo/backend/tests/test_sync_background.py:103: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/test_sync_background.py::TestConcurrency::test_a_run_on_another_source_does_not_block_this_one
+  /repo/backend/tests/test_sync_background.py:120: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/test_sync_background.py::TestFindActiveRun::test_returns_a_fresh_running_row
+  /repo/backend/tests/test_sync_background.py:137: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/test_sync_background.py::TestFindActiveRun::test_ignores_a_stale_row
+  /repo/backend/tests/test_sync_background.py:146: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/test_sync_pipeline.py::TestStageIsolation::test_a_failed_run_is_still_persisted
+tests/test_sync_pipeline.py::TestStageIsolation::test_discover_failing_stops_the_run
+  /app/app/services/metadata/sync.py:750: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    run.finished_at = datetime.utcnow()
+
+tests/test_telemetry.py::test_enabled_emits_span_for_http_request
+  /usr/local/lib/python3.12/site-packages/opentelemetry/instrumentation/dependencies.py:4: DeprecationWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html
+    from pkg_resources import (
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+3061 passed, 4 skipped, 44694 warnings in 1101.83s (0:18:21)
+--- Logging error ---
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.12/site-packages/opentelemetry/sdk/metrics/_internal/export/__init__.py", line 541, in _receive_metrics
+    self._exporter.export(
+  File "/usr/local/lib/python3.12/site-packages/opentelemetry/sdk/metrics/_internal/export/__init__.py", line 165, in export
+    self.out.write(self.formatter(metrics_data))
+ValueError: I/O operation on closed file.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.12/logging/__init__.py", line 1163, in emit
+    stream.write(msg + self.terminator)
+ValueError: I/O operation on closed file.
+Call stack:
+  File "/usr/local/lib/python3.12/threading.py", line 1032, in _bootstrap
+    self._bootstrap_inner()
+  File "/usr/local/lib/python3.12/threading.py", line 1075, in _bootstrap_inner
+    self.run()
+  File "/usr/local/lib/python3.12/threading.py", line 1012, in run
+    self._target(*self._args, **self._kwargs)
+  File "/usr/local/lib/python3.12/site-packages/opentelemetry/sdk/metrics/_internal/export/__init__.py", line 523, in _ticker
+    self.collect(timeout_millis=self._export_interval_millis)
+  File "/usr/local/lib/python3.12/site-packages/opentelemetry/sdk/metrics/_internal/export/__init__.py", line 337, in collect
+    self._receive_metrics(
+  File "/usr/local/lib/python3.12/site-packages/opentelemetry/sdk/metrics/_internal/export/__init__.py", line 545, in _receive_metrics
+    _logger.exception("Exception while exporting metrics %s", str(e))
+Message: 'Exception while exporting metrics %s'
+Arguments: ('I/O operation on closed file.',)
+--- Logging error ---
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.12/site-packages/opentelemetry/sdk/trace/export/__init__.py", line 367, in _export_batch
+    self.span_exporter.export(self.spans_list[:idx])  # type: ignore
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/site-packages/opentelemetry/sdk/trace/export/__init__.py", line 521, in export
+    self.out.write(self.formatter(span))
+ValueError: I/O operation on closed file.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.12/logging/__init__.py", line 1163, in emit
+    stream.write(msg + self.terminator)
+ValueError: I/O operation on closed file.
+Call stack:
+  File "/usr/local/lib/python3.12/threading.py", line 1032, in _bootstrap
+    self._bootstrap_inner()
+  File "/usr/local/lib/python3.12/threading.py", line 1075, in _bootstrap_inner
+    self.run()
+  File "/usr/local/lib/python3.12/threading.py", line 1012, in run
+    self._target(*self._args, **self._kwargs)
+  File "/usr/local/lib/python3.12/site-packages/opentelemetry/sdk/trace/export/__init__.py", line 291, in worker
+    self._drain_queue()
+  File "/usr/local/lib/python3.12/site-packages/opentelemetry/sdk/trace/export/__init__.py", line 384, in _drain_queue
+    self._export_batch()
+  File "/usr/local/lib/python3.12/site-packages/opentelemetry/sdk/trace/export/__init__.py", line 369, in _export_batch
+    logger.exception("Exception while exporting Span batch.")
+Message: 'Exception while exporting Span batch.'
+Arguments: ()
+/lib/python3.12/threading.py", line 1032, in _bootstrap
+    self._bootstrap_inner()
+  File "/usr/local/lib/python3.12/threading.py", line 1075, in _bootstrap_inner
+    self.run()
+  File "/usr/local/lib/python3.12/threading.py", line 1012, in run
+    self._target(*self._args, **self._kwargs)
+  File "/usr/local/lib/python3.12/site-packages/opentelemetry/sdk/trace/export/__init__.py", line 291, in worker
+    self._drain_queue()
+  File "/usr/local/lib/python3.12/site-packages/opentelemetry/sdk/trace/export/__init__.py", line 384, in _drain_queue
+    self._export_batch()
+  File "/usr/local/lib/python3.12/site-packages/opentelemetry/sdk/trace/export/__init__.py", line 369, in _export_batch
+    logger.exception("Exception while exporting Span batch.")
+Message: 'Exception while exporting Span batch.'
+Arguments: ()
+EXIT=1
+EXIT=0

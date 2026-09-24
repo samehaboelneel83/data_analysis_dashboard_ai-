@@ -1,0 +1,1171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Datalytics Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,400;6..72,600&display=swap">
+<style>
+  :root {
+    --paper:#FCFBF9; --surface:#FFFFFF; --sunken:#F3F2EE; --ink:#15181D;
+    --slate:#5C6573; --faint:#8A929E; --rule:#E2DFD8;
+    --accent:#1F5F53; --accent-soft:#E3EFEB;
+    --l1:#2F6F8F; --l2:#3E7A52; --l3:#8A6A2E; --l4:#8C4A6B;
+    --l5:#6B4E9E; --l6:#A8563A; --l7:#2F7A6E;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:#0F1216; --surface:#161A20; --sunken:#1C2128; --ink:#E8EAEC;
+      --slate:#9AA3AF; --faint:#79828E; --rule:#293038;
+      --accent:#6FBFA8; --accent-soft:#16261F;
+      --l1:#7FB6D4; --l2:#82C39A; --l3:#D4B172; --l4:#D993B4;
+      --l5:#B29AE0; --l6:#E0937A; --l7:#7CC9BC;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:#0F1216; --surface:#161A20; --sunken:#1C2128; --ink:#E8EAEC;
+    --slate:#9AA3AF; --faint:#79828E; --rule:#293038;
+    --accent:#6FBFA8; --accent-soft:#16261F;
+    --l1:#7FB6D4; --l2:#82C39A; --l3:#D4B172; --l4:#D993B4;
+    --l5:#B29AE0; --l6:#E0937A; --l7:#7CC9BC;
+  }
+
+  * { box-sizing:border-box; }
+  html { scroll-behavior:smooth; }
+  body {
+    margin:0; padding:0 clamp(18px,4.5vw,56px) 90px;
+    background:var(--paper); color:var(--ink);
+    font-family:"IBM Plex Sans",ui-sans-serif,system-ui,sans-serif;
+    font-size:16px; line-height:1.65; -webkit-font-smoothing:antialiased;
+  }
+  .wrap { max-width:1080px; margin:0 auto; }
+
+  header.top {
+    padding:clamp(42px,7vw,76px) 0 30px; border-bottom:2px solid var(--ink);
+    display:flex; flex-direction:column; gap:16px;
+  }
+  .kicker {
+    font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:11.5px;
+    letter-spacing:.15em; text-transform:uppercase; color:var(--accent);
+  }
+  h1 {
+    font-family:"Newsreader",Georgia,serif; font-weight:600;
+    font-size:clamp(32px,5vw,50px); line-height:1.1; letter-spacing:-.015em;
+    margin:0; text-wrap:balance; max-width:20ch;
+  }
+  .dek { font-size:clamp(15.5px,1.9vw,18px); color:var(--slate); max-width:68ch; margin:0; }
+
+  .note {
+    display:flex; gap:15px; flex-wrap:wrap; background:var(--accent-soft);
+    border-left:3px solid var(--accent); padding:15px 20px; margin-top:26px;
+    border-radius:0 3px 3px 0;
+  }
+  .note-tag {
+    font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:10.5px;
+    letter-spacing:.12em; text-transform:uppercase; color:var(--accent);
+    padding-top:3px; white-space:nowrap;
+  }
+  .note p { margin:0; font-size:14.5px; max-width:70ch; }
+
+  nav.toc {
+    margin-top:30px; background:var(--surface); border:1px solid var(--rule);
+    border-radius:3px; padding:18px 22px;
+  }
+  nav.toc h2 {
+    font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:10.5px;
+    letter-spacing:.13em; text-transform:uppercase; color:var(--faint);
+    margin:0 0 12px; font-weight:500;
+  }
+  nav.toc ol { margin:0; padding:0; list-style:none; display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:7px 20px; }
+  nav.toc a { color:var(--ink); text-decoration:none; font-size:14px;
+    display:flex; gap:9px; align-items:baseline; border-bottom:1px solid transparent; }
+  nav.toc a:hover, nav.toc a:focus-visible { border-bottom-color:var(--accent); color:var(--accent); }
+  nav.toc .n {
+    font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:11px;
+    color:var(--faint); flex:none;
+  }
+
+  section { margin-top:58px; scroll-margin-top:20px; }
+  h2.sec {
+    font-family:"Newsreader",Georgia,serif; font-weight:600;
+    font-size:clamp(23px,3vw,30px); letter-spacing:-.01em; margin:0 0 8px;
+    text-wrap:balance;
+  }
+  h3 { font-size:16.5px; font-weight:600; margin:30px 0 8px; }
+  h4 { font-size:14.5px; font-weight:600; margin:22px 0 6px; color:var(--slate); }
+  p { max-width:74ch; }
+  .sub { color:var(--slate); font-size:14.8px; margin:0 0 22px; max-width:72ch; }
+
+  /* layer heading */
+  .layer-head { display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; margin-bottom:4px; }
+  .lnum {
+    font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12px;
+    font-weight:600; letter-spacing:.08em; padding:3px 9px; border-radius:2px;
+    color:var(--paper); flex:none;
+  }
+  .owns {
+    font-size:14.5px; color:var(--slate); margin:0 0 20px;
+    padding-left:14px; border-left:2px solid var(--rule); max-width:72ch;
+  }
+  .owns strong { color:var(--ink); font-weight:600; }
+  #l1 .lnum{background:var(--l1)} #l2 .lnum{background:var(--l2)}
+  #l3 .lnum{background:var(--l3)} #l4 .lnum{background:var(--l4)}
+  #l5 .lnum{background:var(--l5)} #l6 .lnum{background:var(--l6)}
+  #l7 .lnum{background:var(--l7)}
+  #l1 .owns{border-left-color:var(--l1)} #l2 .owns{border-left-color:var(--l2)}
+  #l3 .owns{border-left-color:var(--l3)} #l4 .owns{border-left-color:var(--l4)}
+  #l5 .owns{border-left-color:var(--l5)} #l6 .owns{border-left-color:var(--l6)}
+  #l7 .owns{border-left-color:var(--l7)}
+
+  /* stack diagram */
+  .stack { display:flex; flex-direction:column-reverse; gap:5px; margin:8px 0 6px; }
+  .slab {
+    display:grid; grid-template-columns:38px 1fr auto; gap:14px; align-items:center;
+    background:var(--surface); border:1px solid var(--rule);
+    border-left:4px solid var(--rule); border-radius:2px;
+    padding:11px 16px; text-decoration:none; color:var(--ink);
+    transition:transform .12s ease, background .12s ease;
+  }
+  .slab:hover, .slab:focus-visible { background:var(--sunken); transform:translateX(3px); }
+  .slab .sn {
+    font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12.5px;
+    font-weight:600; color:var(--faint);
+  }
+  .slab .st { font-weight:600; font-size:14.5px; }
+  .slab .sd { font-size:12.8px; color:var(--slate); }
+  .slab[data-l="1"]{border-left-color:var(--l1)} .slab[data-l="1"] .sn{color:var(--l1)}
+  .slab[data-l="2"]{border-left-color:var(--l2)} .slab[data-l="2"] .sn{color:var(--l2)}
+  .slab[data-l="3"]{border-left-color:var(--l3)} .slab[data-l="3"] .sn{color:var(--l3)}
+  .slab[data-l="4"]{border-left-color:var(--l4)} .slab[data-l="4"] .sn{color:var(--l4)}
+  .slab[data-l="5"]{border-left-color:var(--l5)} .slab[data-l="5"] .sn{color:var(--l5)}
+  .slab[data-l="6"]{border-left-color:var(--l6)} .slab[data-l="6"] .sn{color:var(--l6)}
+  .slab[data-l="7"]{border-left-color:var(--l7)} .slab[data-l="7"] .sn{color:var(--l7)}
+  @media (max-width:620px){ .slab{grid-template-columns:32px 1fr; } .slab .sd{grid-column:2; } }
+  .flowhint {
+    font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:11px;
+    letter-spacing:.1em; text-transform:uppercase; color:var(--faint);
+    text-align:center; margin:10px 0 0;
+  }
+
+  /* tables */
+  .scroll { overflow-x:auto; border:1px solid var(--rule); border-radius:3px;
+    background:var(--surface); margin:16px 0; }
+  table { border-collapse:collapse; width:100%; min-width:520px; font-size:14px; }
+  thead th {
+    background:var(--sunken); text-align:left; font-weight:600; font-size:12.5px;
+    padding:11px 14px; border-bottom:1px solid var(--rule);
+  }
+  tbody td, tbody th {
+    padding:10px 14px; border-bottom:1px solid var(--rule);
+    vertical-align:top; text-align:left;
+  }
+  tbody th { font-weight:500; width:26%; }
+  tbody td { color:var(--slate); }
+  tbody tr:last-child td, tbody tr:last-child th { border-bottom:none; }
+  td.num, th.num { font-family:"IBM Plex Mono",ui-monospace,monospace;
+    font-variant-numeric:tabular-nums; }
+
+  code {
+    font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.87em;
+    background:var(--sunken); padding:1px 5px; border-radius:2px;
+    overflow-wrap:break-word;
+  }
+  pre {
+    background:var(--sunken); border:1px solid var(--rule); border-radius:3px;
+    padding:16px 18px; overflow-x:auto; margin:16px 0;
+    font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12.8px;
+    line-height:1.55; color:var(--ink);
+  }
+  pre code { background:none; padding:0; font-size:inherit; }
+
+  ul.plain { margin:12px 0; padding:0; list-style:none; display:flex;
+    flex-direction:column; gap:8px; }
+  ul.plain li { font-size:14.5px; padding-left:15px; position:relative;
+    color:var(--slate); max-width:72ch; }
+  ul.plain li::before { content:""; position:absolute; left:0; top:10px;
+    width:6px; height:1px; background:var(--rule); }
+  ul.plain li strong { color:var(--ink); font-weight:600; }
+
+  ol.steps { margin:12px 0; padding-left:20px; }
+  ol.steps li { font-size:14.5px; color:var(--slate); margin-bottom:10px; max-width:72ch; }
+  ol.steps li strong { color:var(--ink); font-weight:600; }
+
+  .callout {
+    background:var(--sunken); border:1px solid var(--rule); border-radius:3px;
+    padding:16px 20px; margin:18px 0;
+  }
+  .callout p { margin:0; font-size:14.3px; max-width:72ch; }
+  .callout p + p { margin-top:9px; }
+  .callout .ct {
+    font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:10.5px;
+    letter-spacing:.12em; text-transform:uppercase; color:var(--accent);
+    display:block; margin-bottom:8px;
+  }
+
+  footer { margin-top:60px; padding-top:20px; border-top:1px solid var(--rule);
+    font-size:12.8px; color:var(--faint); }
+  footer p { margin:0; max-width:76ch; }
+  a { color:var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <div class="kicker">Datalytics · Architecture Reference</div>
+  <h1>Seven layers, from source system to pixel</h1>
+  <p class="dek">Datalytics is a containerised, self-hostable analytics platform: connect a data source, model it, and build multi-page interactive reports with cross-filtering, row-level security, and natural-language querying against a self-hosted model.</p>
+</header>
+
+<div class="note">
+  <div class="note-tag">Scope</div>
+  <p><code>README.md</code> is the quick start and feature tour. This document is the architecture reference, describing the system as seven layers in data-flow order — the path a byte takes from a source system to a pixel on screen. Where the two disagree, this document is authoritative.</p>
+</div>
+
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#glance"><span class="n">—</span> At a glance</a></li>
+    <li><a href="#topology"><span class="n">—</span> Runtime topology</a></li>
+    <li><a href="#l1"><span class="n">01</span> Data Sources &amp; Connectivity</a></li>
+    <li><a href="#l2"><span class="n">02</span> Ingestion &amp; Metadata</a></li>
+    <li><a href="#l3"><span class="n">03</span> Storage &amp; Persistence</a></li>
+    <li><a href="#l4"><span class="n">04</span> Query &amp; Semantic</a></li>
+    <li><a href="#l5"><span class="n">05</span> Analytics &amp; AI</a></li>
+    <li><a href="#l6"><span class="n">06</span> API &amp; Services</a></li>
+    <li><a href="#l7"><span class="n">07</span> Presentation</a></li>
+    <li><a href="#cross"><span class="n">—</span> Cross-cutting concerns</a></li>
+    <li><a href="#lifecycles"><span class="n">—</span> Request lifecycles</a></li>
+    <li><a href="#testing"><span class="n">—</span> Testing</a></li>
+    <li><a href="#extend"><span class="n">—</span> Extension points</a></li>
+  </ol>
+</nav>
+
+<section id="glance">
+  <h2 class="sec">The seven layers at a glance</h2>
+  <p class="sub">Layers depend downward only. Layer 7 never reaches past Layer 6; Layer 6 composes Layers 1–5.</p>
+
+  <div class="stack">
+    <a class="slab" data-l="1" href="#l1"><span class="sn">01</span><span class="st">Data Sources &amp; Connectivity</span><span class="sd">45 connectors · DirectQuery</span></a>
+    <a class="slab" data-l="2" href="#l2"><span class="sn">02</span><span class="st">Ingestion &amp; Metadata</span><span class="sd">profile · introspect · drift</span></a>
+    <a class="slab" data-l="3" href="#l3"><span class="sn">03</span><span class="st">Storage &amp; Persistence</span><span class="sd">81 tables · Valkey cache</span></a>
+    <a class="slab" data-l="4" href="#l4"><span class="sn">04</span><span class="st">Query &amp; Semantic</span><span class="sd">25 aggregations · RLS</span></a>
+    <a class="slab" data-l="5" href="#l5"><span class="sn">05</span><span class="st">Analytics &amp; AI</span><span class="sd">stats · forecast · NL→SQL</span></a>
+    <a class="slab" data-l="6" href="#l6"><span class="sn">06</span><span class="st">API &amp; Services</span><span class="sd">19 routers · auth · delivery</span></a>
+    <a class="slab" data-l="7" href="#l7"><span class="sn">07</span><span class="st">Presentation</span><span class="sd">57 widgets · 16 pages</span></a>
+  </div>
+  <p class="flowhint">↑ data flows upward · dependencies point downward ↓</p>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th class="num">#</th><th>Layer</th><th>Owns</th><th>Principal code</th></tr></thead>
+      <tbody>
+        <tr><td class="num">1</td><th>Data Sources &amp; Connectivity</th><td>Reaching external systems; dialect capability; pooled engines</td><td><code>services/connectors.py</code>, <code>connections.py</code>, <code>engines.py</code>, <code>secrets.py</code>, <code>net_guard.py</code></td></tr>
+        <tr><td class="num">2</td><th>Ingestion &amp; Metadata</th><td>Turning raw sources into described, profiled datasets</td><td><code>services/ingest.py</code>, <code>services/metadata/</code>, <code>routers/datasets.py</code>, <code>pii.py</code></td></tr>
+        <tr><td class="num">3</td><th>Storage &amp; Persistence</th><td>Durable state and cached state</td><td><code>models/models.py</code>, <code>alembic/</code>, <code>cache_backend.py</code></td></tr>
+        <tr><td class="num">4</td><th>Query &amp; Semantic</th><td>Translating widget intent into safe, governed SQL</td><td><code>query_builder.py</code>, <code>widget_data.py</code>, <code>widget_shaping.py</code>, <code>direct_query.py</code>, <code>duck_agg.py</code>, <code>prep.py</code>, <code>core/rls.py</code></td></tr>
+        <tr><td class="num">5</td><th>Analytics &amp; AI</th><td>Statistics, forecasting, anomaly detection, NL→SQL</td><td><code>services/analysis/</code>, <code>services/agent/</code>, <code>analytics.py</code></td></tr>
+        <tr><td class="num">6</td><th>API &amp; Services</th><td>HTTP surface, authn/authz, delivery, sharing</td><td><code>routers/</code> (29 modules), <code>core/security.py</code>, <code>delivery.py</code>, <code>refresh_scheduler.py</code>, <code>services/automation_runner.py</code></td></tr>
+        <tr><td class="num">7</td><th>Presentation</th><td>Report authoring and rendering</td><td><code>frontend/src/pages/</code>, <code>components/report/</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout">
+    <span class="ct">One deliberate exception</span>
+    <p>The AI agent (Layer 5) calls into Layer 4's RLS resolution directly, so generated SQL inherits the same governance as a hand-built widget. A user cannot ask the agent for data their account cannot see.</p>
+  </div>
+
+  <div class="callout">
+    <span class="ct">Enforced, not just described</span>
+    <p><code>backend/tests/test_layer_conformance.py</code> parses every import in <code>app/services/</code> and <code>app/core/</code> and fails on any upward dependency. Three remaining violations sit in a <code>KNOWN_VIOLATIONS</code> allowlist that can only shrink: a new upward import fails the build, and so does an allowlist entry whose violation has since been fixed. The layer map in that test and the tables in this document must be changed together.</p>
+    <p>All three are the same accepted-by-design pattern — <code>dataset_refresh</code>, <code>ingest</code> and <code>metadata/sync</code> reading layer 3’s frame cache. Cache reads and invalidation both flow from whoever touches the data, so these are correct as they stand. <strong>No remaining entry represents a module in the wrong place.</strong></p>
+  </div>
+</section>
+
+<section id="topology">
+  <h2 class="sec">Runtime topology</h2>
+  <p class="sub">Five containers on one Docker network (<code>docker-compose.yml</code>). Volumes: <code>postgres_data</code>, <code>uploaded_files</code>.</p>
+<pre><code>┌──────────────────────────────────────────────────────────────────┐
+│                      datalytics_net                              │
+│                                                                  │
+│   ┌──────────┐   ┌─────────────┐   ┌──────────────┐              │
+│   │ frontend │──▶│   backend   │──▶│   postgres   │              │
+│   │  :3000   │   │    :8000    │   │  16-alpine   │              │
+│   │  (Vite)  │   │  (FastAPI)  │   │    :5432     │              │
+│   └──────────┘   └──────┬──────┘   └──────────────┘              │
+│                         │                                        │
+│                  ┌──────┴───────┐                                │
+│                  ▼              ▼                                │
+│           ┌────────────┐  ┌──────────────┐                       │
+│           │   valkey   │  │  embeddings  │                       │
+│           │  8-alpine  │  │  (local ST)  │                       │
+│           └────────────┘  └──────────────┘                       │
+└──────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼  (optional, external)
+                    ┌──────────────────────┐
+                    │  vLLM model endpoint │   llm_base_url
+                    │   (self-hosted)      │   default: qwen3.5
+                    └──────────────────────┘</code></pre>
+  <p>Nothing in the running stack fetches from the public internet. The model endpoint is self-hosted and configurable; setting <code>llm_enabled=False</code> disables the AI layer entirely and the platform runs fully air-gapped. See <code>docs/OFFLINE_DEPLOYMENT.md</code>.</p>
+</section>
+
+<section id="l1">
+  <div class="layer-head"><span class="lnum">01</span><h2 class="sec">Data Sources &amp; Connectivity</h2></div>
+  <p class="owns"><strong>Owns:</strong> reaching external systems, and knowing what each one can do.</p>
+
+  <h3>Connector registry</h3>
+  <p><code>services/connectors.py</code> declares a <code>ConnectorSpec</code> per source type and exposes them through <code>_REGISTRY</code>. <strong>45 connectors</strong> are registered — the count and the breakdown below are <code>_ALL_SPECS</code> grouped by <code>category</code>, which is the only source of truth.</p>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Category</th><th class="num">Count</th><th>Driver</th><th>DirectQuery</th></tr></thead>
+      <tbody>
+        <tr><th>PostgreSQL-compatible</th><td class="num">16</td><td><code>psycopg2</code> (bundled)</td><td>Yes</td></tr>
+        <tr><th>MySQL-compatible</th><td class="num">11</td><td><code>pymysql</code> (bundled)</td><td>Yes</td></tr>
+        <tr><th>Cloud warehouse</th><td class="num">5</td><td>operator-installed</td><td>ClickHouse only</td></tr>
+        <tr><th>SQL Server-compatible</th><td class="num">4</td><td><code>pymssql</code> (bundled)</td><td>Yes</td></tr>
+        <tr><th>Oracle-compatible</th><td class="num">3</td><td><code>oracledb</code> (bundled)</td><td>Yes</td></tr>
+        <tr><th>File</th><td class="num">3</td><td><code>sqlite</code>, <code>duckdb-engine</code>, <code>mdbtools</code></td><td>Partial</td></tr>
+        <tr><th>API</th><td class="num">1</td><td>Web API</td><td>—</td></tr>
+        <tr><th>Advanced</th><td class="num">2</td><td>SQLAlchemy URL</td><td>—</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>Wire-compatible variants (Aurora, Redshift, TimescaleDB, Supabase, Neon and the rest) are counted inside their family rather than listed separately — each is a registered connector in its own right, sharing its family's driver.</p>
+
+  <p>A spec declares how to <strong>connect</strong> (SQLAlchemy dialect + driver) and what the engine can <strong>compute</strong>. Two capability sets gate push-down:</p>
+<pre><code>PERCENTILE_FAMILIES = {"postgresql", "oracle"}
+STAT_FAMILIES       = {"postgresql"}</code></pre>
+
+  <div class="callout">
+    <span class="ct">Fail closed, not wrong</span>
+    <p>Engines outside these sets raise <code>DirectQueryUnsupported</code> rather than silently returning wrong numbers. A Redshift or CockroachDB connection is PostgreSQL-wire but does not implement <code>WIDTH_BUCKET</code> or <code>CORR</code>, so it is registered with <code>full_stats=False</code>.</p>
+  </div>
+
+  <p>Cloud warehouses (Snowflake, BigQuery, Databricks, Trino) are <strong>discoverable but import-only</strong> — enterprises pin their own driver versions, so the driver module is named in the spec and imported lazily.</p>
+
+  <h3>ClickHouse: the sixth SQL family</h3>
+  <p>Everything above describes a catalog that maps onto five wire-compatible families. ClickHouse is wire-compatible with none of them, so it carries its own <code>sql_family</code> rather than borrowing one. It keeps the warehouse driver gate (<code>clickhouse_sqlalchemy</code> is operator-installed like every other warehouse driver) but resolves DirectQuery, which makes it the one warehouse in that category that is not import-only.</p>
+  <p>The SQL comes from the same builder every other family uses, transpiled once at the end by <code>direct_query._finalize_for_dialect</code> — <code>sqlglot.transpile(read="postgres", write="clickhouse")</code> — which is an <strong>identity function for the other five</strong>. That identity is the safety argument for adding a family to a builder five families already depend on, and it is pinned per-family in <code>tests/test_clickhouse_connector.py</code>.</p>
+  <div class="callout">
+    <span class="ct">Two load-bearing details of the transpile</span>
+    <p><strong>Bound parameters are hidden across it.</strong> sqlglot has no idea <code>:f0</code> is a SQLAlchemy placeholder, and its ClickHouse writer renders it <code>{f0: }</code> — a named placeholder with an <em>empty type</em>, which the server rejects. Each bind is swapped for a sentinel string literal before the transpile and restored after.</p>
+    <p><strong>Percentiles are refused, not transpiled.</strong> ClickHouse spells them <code>quantile(0.5)(col)</code>, and sqlglot parses <code>PERCENTILE_CONT(...) WITHIN GROUP (...)</code> as valid ClickHouse and emits it unchanged — so it cannot act as a safety net here. The refusal comes from the registry instead (<code>percentile_override=False</code>, <code>stat_override=False</code>), the same fail-closed route Redshift takes for <code>WIDTH_BUCKET</code>.</p>
+  </div>
+
+  <h3>Microsoft Access</h3>
+  <p>The one connector with <strong>no SQLAlchemy dialect</strong>. Jet/ACE is wire-compatible with none of the five families, and Microsoft's ACE provider is Windows-only, so on a Linux image Access cannot be reached through an engine at all. <code>services/mdb.py</code> reads <code>.mdb</code>/<code>.accdb</code> by running the bundled <strong>mdbtools</strong> CLIs and parsing their CSV output, and <code>connections.py</code> special-cases <code>access</code> in the same four places it already special-cases <code>api</code>. <code>build_url</code> raises for it, deliberately: there is no URL to build.</p>
+  <p>It is therefore import-only (<code>sql_family=None</code>), read-only, and cannot run custom SQL — mdbtools has no usable query engine. Uploading one Access file produces <strong>one dataset per user table</strong>, with <code>MSys*</code> catalogue tables skipped.</p>
+  <div class="callout">
+    <span class="ct">Two limits worth stating plainly</span>
+    <p><strong>Encrypted files cannot be read.</strong> Access 2007+ uses real AES and no open-source tool decrypts it, so those are refused with an instruction to save an unencrypted copy — not a generic parse error that sends the user hunting.</p>
+    <p><strong><code>ConnectorSpec.probe</code> exists for this connector.</strong> <code>driver_installed</code> normally asks <code>importlib</code> for a Python module, and mdbtools is a <em>binary</em>; without the probe the catalog would advertise Access as available on every host, including those that cannot read it.</p>
+  </div>
+
+  <p>An import-only source is refused DirectQuery <strong>at the request</strong>, in <code>data_sources.py</code>'s import endpoint, not at the first widget. The check is not redundant with <code>sql_family=None</code>: <code>preview_table</code> succeeds for these types (Access reads its file, the API connector fetches its rows), so the schema probe in the DirectQuery branch would otherwise create a dataset in <code>mode="directquery"</code> that cannot render. Found by driving a live stack &mdash; every unit test had passed.</p>
+
+  <h3>Joining datasets, and keeping the result</h3>
+  <p>A prep <code>join</code> step is a <em>view</em>: it re-joins on every read and lives inside one dataset's pipeline. <code>POST /datasets/{id}/materialize</code> runs that pipeline once and writes the result as a new import dataset &mdash; how several joined datasets become one listable dataset reports can be built on &mdash; and <code>POST /datasets/{id}/rebuild</code> re-runs it.</p>
+  <p>The result is a <strong>snapshot</strong>: it does not follow its sources, so editing a source's pipeline cannot silently change a dataset somebody has already built a report on. The recipe is stored verbatim under a third reserved <code>column_meta</code> key, <code>__derived_from__</code>, for the same reason as <code>__prep_steps__</code> &mdash; <code>create_all</code> never ALTERs a deployed table. Rebuild replays that snapshot, never the source's current steps, and fails <strong>hard</strong> (409) where a read fails soft: a missing join frame degrades to a no-op on a read, which here would silently drop every joined column from persisted data.</p>
+  <div class="callout">
+    <span class="ct">Two fail-closed refusals</span>
+    <p><strong>A source with row- or column-security rules cannot be materialized.</strong> Every read applies the <em>caller's</em> RLS, so a snapshot taken by a restricted user would freeze their slice as everyone's data &mdash; the copy carries no rules of its own. Copying the source's rules across was rejected: a join renames colliding columns (<code>region</code> &rarr; <code>region_2</code>) and an <code>aggregate</code> step can remove the rule's column entirely, leaving a control that looks enabled and is not.</p>
+    <p><strong>Materializing is an export.</strong> It writes source rows to a new file, so it goes through the same <code>_exports_disabled</code> check as <code>GET /{id}/export</code> &mdash; otherwise disabling export and then materializing would launder the data into a policy-free copy. The strictest source policy is propagated onto the result.</p>
+  </div>
+  <p>The lineage graph carries <code>derived_from</code> edges for these, distinct from <code>joins</code>: one is a snapshot taken at <code>built_at</code>, the other is live.</p>
+
+  <h3>Suggested join keys</h3>
+  <p><code>metadata/infer_keys.py</code> has always worked out how tables connect &mdash; name candidates, type compatibility, value overlap measured with a DuckDB join, then cardinality &mdash; storing the result as a <code>Relationship</code> with a confidence and an <code>evidence</code> blob. Nothing read it at join time until the prep editor did: choosing a dataset to join now pre-fills both keys from the best known link, ranked <code>confirmed &gt; declared &gt; inferred</code> then by confidence. That is why <code>RelationshipOut</code> carries <code>source</code>, <code>confidence</code> and <code>cardinality</code> &mdash; but not <code>evidence</code>, which is review material for <code>SourceReview</code>.</p>
+  <div class="callout">
+    <span class="ct">A suggestion is a starting point, not a guarantee</span>
+    <p>A relationship records how two tables link, <strong>not</strong> that the match is one-to-one. On the demo data a <code>declared</code> relationship takes 2,000 rows to 35,137, because the key repeats on the other side. A join whose row count grows is called out per step in the editor: a fan-out otherwise makes every total silently wrong, which is the failure <code>infer_keys</code>' own docstring warns about.</p>
+  </div>
+
+  <h3>Composite join keys</h3>
+  <p>One column often does not identify a row &mdash; region + quarter, order + line &mdash; and joining on only one of them multiplies rows instead of adding columns. A step carries either shape: <code>left_on</code>/<code>right_on</code> for a single pair, or <code>left_ons</code>/<code>right_ons</code> for several.</p>
+  <p><code>join_key_pairs()</code> in <code>prep.py</code> is the single reader, and the editor writes back in the narrowest shape that fits, so a one-key step's JSON is unchanged and every pipeline saved before composite keys existed keeps working with <strong>no migration</strong>. Validation refuses ragged key lists (they would pair the wrong columns), and at apply time a join whose keys are not <em>all</em> present is skipped entirely rather than matched on the remainder &mdash; a partial key silently widens the match, which is worse than not joining.</p>
+
+  <h3>Aggregate datasets</h3>
+  <p>A scheduled <code>GROUP BY</code> over a DirectQuery dataset, saved as an import dataset (<code>services/aggregates.py</code>, <code>POST /datasets/{id}/aggregates</code>). The compiled SQL runs where the data lives, through the same refresh path as every import dataset; a dashboard on the aggregate reads thousands of rows instead of scanning millions.</p>
+  <p><strong>Governed, not copied.</strong> The aggregate carries no rules of its own: <code>core/rls.py</code> follows <code>aggregate_of_dataset_id</code> and applies the <em>source's</em> row-level and column rules at read time. That is sound only if the grain carries every column those rules read &mdash; creation refuses otherwise, naming the role and column, and every scheduled refresh re-checks and records a <code>ScheduleFailure</code> if a later rule outgrew the grain (reads for that role fail closed meanwhile). A source column denied to a role denies every measure built on it. Only <code>sum</code>/<code>count</code>/<code>min</code>/<code>max</code>; <code>row_count</code> is always present. Deleting the source cascades to its aggregates.</p>
+
+  <h3>Key influencers</h3>
+  <p><code>services/analysis/influencers.py</code> answers &ldquo;what drives this?&rdquo; &mdash; which factors move a chosen outcome, ranked by how far each group's rate (or mean) sits from the dataset baseline.</p>
+  <p>Deliberately <strong>not</strong> a fitted model. Every number is one a reader can check by hand: the group is a column-value rule, the lift is a ratio of two rates, the support is a row count. A gradient-boosted ensemble would rank more accurately and explain nothing &mdash; and for a self-serve feature a confidently wrong &ldquo;your top driver is X&rdquo; that nobody can audit is worse than no answer. It adds no dependency: pandas computes the lift exactly.</p>
+  <div class="callout">
+    <span class="ct">Three guards against inventing an answer</span>
+    <p>Groups thinner than 2% of the data (or 10 rows) are dropped before ranking, so an anecdote cannot top the list. Columns with more than 50 distinct values are skipped as identifiers, with a warning naming them. Ranking is on <code>|lift - 1|</code>, so a factor that HALVES the outcome ranks alongside one that doubles it.</p>
+    <p>Column security applies to the <em>factors</em>, not only the frame: a denied column is dropped before the analysis, because naming it with a rate attached would leak precisely what the rule hides.</p>
+  </div>
+
+    <h3>Saved models, and scoring with one</h3>
+  <p>Every analysis above refits and discards, which answers &ldquo;what could predict this, and how well&rdquo; and never &ldquo;score these rows&rdquo;. <code>prediction_models</code> is the store that closes that &mdash; the champion from <code>automated_prediction</code>, refit on the whole frame rather than the three quarters the comparison used, kept so it can answer rows whose outcome is not known yet.</p>
+  <p><strong>Feature alignment is the part a naive store gets wrong.</strong> <code>_encode</code> one-hot encodes with <code>pd.get_dummies</code>, so the columns it produces depend on the values present in the frame. A model trained on three regions has three dummy columns; score a frame containing one and get one, in a different position &mdash; sklearn either raises or reads the wrong number as the wrong feature. So the training column order travels with the model (<code>feature_columns</code>) and every scored frame is reindexed onto it. A missing FEATURE is refused instead, because that means the caller is scoring the wrong data.</p>
+  <p><strong>An unseen category is reported, not hidden.</strong> A value the model never met encodes as zero across that column's dummies, which is honest &mdash; the model has no opinion &mdash; but silently returning the prediction lets somebody score a year of new data the model recognises none of and read it as a forecast.</p>
+  <div class="callout">
+    <span class="ct">A saved model carries the columns it was trained on</span>
+    <p>The security property nothing else here has: the estimator's answers are derived from every feature, so a caller denied one of them is refused the MODEL, not just the column. Dropping the column from their request would change nothing, since the influence is already inside the fitted object. Such a model is also omitted from their listing entirely &mdash; naming it would tell them the column exists and is worth predicting from.</p>
+  </div>
+  <p><strong>And the rows it was trained on.</strong> A model is a derivative of its training rows the way a snapshot is: a tree's leaves and a forest's splits are built from them. <code>materialize</code> refuses a governed dataset outright for the neighbouring reason &mdash; a snapshot written under one person's RLS carries no rules of its own. This can afford to be narrower, because the filter is RECORDED (<code>trained_rls</code>) rather than guessed: a model may be used by anyone who sees exactly those rows, and nobody else. Filters are compared verbatim, so two equivalent rules written differently are refused &mdash; the safe direction.</p>
+  <p>The artifact is a joblib pickle, so loading one executes code. Nothing accepts an uploaded model: the only writer is <code>services/analysis/model_store.py</code>, and the artifact never leaves the server &mdash; no endpoint serialises it.</p>
+
+  <h3>Decomposition tree</h3>
+  <p><code>shape_decomposition</code> breaks one number down a level at a time: total revenue, then by region, then within EMEA by product. The reader drills by clicking a child and climbs by clicking a breadcrumb; the server recomputes each level from the path, so the client holds no analytical logic and a drilled tree survives a refresh, a filter change and a cross-filter.</p>
+  <div class="callout">
+    <span class="ct">Children always reconcile to their parent</span>
+    <p>A capped level folds its tail into an &ldquo;Other&rdquo; bucket rather than dropping it: a drill-down whose parts do not sum to the whole is worse than none, because the reader trusts the parts anyway and cannot see what is missing. For a non-additive aggregation the bucket is named but its value withheld &mdash; there is no honest number to put there.</p>
+    <p>With <code>auto_split</code> the server picks the field whose groups vary most, and the response carries <code>auto: true</code> so the UI marks it as <em>suggested</em>. <code>DECOMP_MAX_LEVELS</code> keeps id-like columns out of that ranking &mdash; found live, where splitting demo revenue suggested <code>date</code> (633 distinct values) over <code>category</code>, because maximal variation and zero explanation look identical to a variance score.</p>
+  </div>
+
+  <h3>Paginated output and subscriptions</h3>
+  <p>The report PDF is a <strong>banded document</strong>, not a screenshot of a dashboard: a cover, a table of contents, one section per page, and tables that flow across as many pages as their data needs, repeating the header. <code>PDF_MAX_TABLE_ROWS</code> bounds that at 5,000 rows and the document <em>says</em> when it binds &mdash; a table truncated in silence is a wrong answer that looks like a right one, which is what the previous 40-row cap produced. Page number, report name and the sensitivity label are drawn on every page after the cover, because pages get separated from the documents they came from.</p>
+  <div class="callout">
+    <span class="ct">A subscription is its own schedule</span>
+    <p>A <code>ReportSchedule</code> resolves row-level security as its CREATOR, so appending a subscriber to somebody else's schedule would email them the creator's slice &mdash; silently, and possibly rows they may not see. <code>POST /reports/{id}/subscribe</code> creates a schedule owned by the subscriber; one render per subscriber is the right trade against sending the wrong data cheaply.</p>
+    <p>Subscribing yourself needs only <code>view</code>; adding somebody else to a distribution list still needs <code>edit</code>. Unsubscribing removes only a schedule you created by subscribing, so a subscriber cannot delete an author's distribution list.</p>
+  </div>
+
+  <h3>Small multiples, and transformations that keep themselves current</h3>
+  <p><code>shape_small_multiples</code> draws the same chart once per value of a facet field &mdash; deliberately a <em>wrapper</em> over the existing shapers, so each panel is the ordinary chart over a filtered frame and any later fix to that shaper reaches the panels for free.</p>
+  <div class="callout">
+    <span class="ct">Every panel shares one scale</span>
+    <p><code>max_value</code> spans all panels and is returned once: comparing them to each other is the entire point, and per-panel axes would draw a small category identically to a large one. Panels are capped and the tail is counted in <code>omitted</code> rather than dropped, because a reader cannot see which categories never reached the page.</p>
+  </div>
+  <p><strong>A materialized dataset can refresh itself.</strong> <code>due_datasets</code> now admits derived datasets &mdash; they have no <code>data_source_id</code> at all, which is what used to exclude them &mdash; and <code>_rebuild_derived</code> replays the recipe in <code>__derived_from__</code> on schedule, writing in place so every report picks up the new rows with no rewiring. It runs as the recorded builder, the same stance <code>ReportSchedule</code> takes with its creator: a scheduled run has nobody at the keyboard, and reading with no identity would be an unfiltered read.</p>
+
+  <h3>Dataflows: a transformation as a first-class object</h3>
+  <p>A prep pipeline belongs to one dataset; a materialized result records its recipe in that dataset's <code>column_meta</code>. A <code>Dataflow</code> lifts that ownership: it owns the recipe, produces <em>several</em> outputs, carries its own refresh interval, and has its own authoring permissions instead of inheriting whatever the reports using its output allow.</p>
+  <div class="callout">
+    <span class="ct">The hole this closes</span>
+    <p><code>max_dataset_capability</code> ends with &ldquo;a dataset no report uses is unrestricted&rdquo; &mdash; and a materialized result is used by no report the moment it is created, so every org member could author a freshly built transformation. <code>DELETE /datasets/{id}</code> and <code>PATCH /{id}/refresh-schedule</code> were worse: no capability check at all. Both now call <code>require_dataset_write</code>, which resolves a dataflow's grants first, so operating on what a pipeline produced cannot route around the pipeline's permissions.</p>
+  </div>
+  <p><strong>Authoring is gated; reading is not.</strong> An output is an ordinary dataset, readable org-wide with RLS narrowing rows per identity &mdash; the model <code>DatasetShare</code> already records. A test proves a <code>view</code> user still reads every output row, so the restriction cannot quietly become a read control.</p>
+  <p><strong>Default-open, with one deliberate difference from <code>ReportCapability</code>.</strong> No rows at all means full access for every role, so nothing existing breaks. But once any grant exists the dataflow is governed and an unlisted role falls to <code>view</code> &mdash; otherwise granting one team <code>edit</code> would restrict nobody and mean nothing.</p>
+  <p>The schedule lives on the dataflow, not its outputs, which is why the scheduler needs a second pass: the dataset query filters on <code>Dataset.refresh_interval_minutes</code> and an output's own interval is normally None. <code>refresh_dataflow</code> runs as the dataflow's creator, for the same reason <code>_rebuild_derived</code> runs as the recorded builder. Both materialization refusals carry over and are re-checked on <em>every</em> run &mdash; otherwise &ldquo;make a dataflow instead&rdquo; would be the bypass for two security controls.</p>
+
+  <p><strong>Which datasets can be scheduled.</strong> Three kinds are eligible, and the UI must agree with the endpoint on all three &mdash; a control the server refuses is worse than no control. A source-backed dataset re-reads its connection; a derived dataset replays the recipe in <code>__derived_from__</code>; a plain upload can do neither and is offered nothing. DirectQuery is excluded (nothing is cached to refresh), and so is a dataflow's output &mdash; its schedule lives on the dataflow, which drives every output together, and a second control would let one output drift from its siblings.</p>
+
+  <h3>Right-to-left, app-wide</h3>
+  <p>Direction was a per-widget flag: <code>cfg.rtl</code> mirrored one chart's axes while the shell stayed left-to-right. It is now an app-level setting writing <code>dir</code> on the <strong>document root</strong> &mdash; the single switch the browser acts on, mirroring flexbox, grid, scrollbars and every logical property at once, including portals rendered outside the React tree. Stored per user rather than per org: <code>OrgTheme</code> has no settings blob, a new column would hit the <code>create_all</code> trap, and two readers in one org may genuinely want opposite directions.</p>
+  <div class="callout">
+    <span class="ct">The decision that makes it work</span>
+    <p><code>WidgetConfigPanel</code> writes <code>rtl</code> into every saved config, so essentially every widget carries <code>rtl: false</code> &mdash; meaning &ldquo;never turned on&rdquo;, not &ldquo;force left-to-right&rdquo;. Read as a plain boolean, that stored <code>false</code> would pin every widget to LTR and make the app-wide switch do nothing. <code>widgetIsRtl</code> treats only an explicit <code>true</code> as an override; a test pins this and fails under the natural wrong implementation.</p>
+  </div>
+  <p><strong>What <code>dir</code> cannot fix</strong> are physical CSS properties and direction-coded characters. 78 occurrences across 38 files became logical equivalents &mdash; each identical under LTR, so nothing changed for existing readers. Positioned offsets were reviewed one by one rather than swept: an element pinned to one edge mirrors, one pinned to both is spanning its container and must not. <strong>Still absent, deliberately:</strong> no i18n framework (interface text is English either way), and server-side PDF export remains left-to-right, since mirroring only the preview would make the screen disagree with the file.</p>
+
+  <h3>The shared cache is now wired up</h3>
+  <p><code>VALKEY_URL</code> defaults to the service this compose file already runs. It was previously unset, shipping a 256MB Valkey container with a healthcheck, connected to nothing, while every worker repeated identical widget renders in its own in-process cache &mdash; the audit's sharpest finding in miniature: built, tested, switched off.</p>
+  <div class="callout">
+    <span class="ct">Safe to default on</span>
+    <p>Failure degrades rather than breaks: 2-second socket timeouts, a 300s circuit, and an in-process fallback. Verified live &mdash; with Valkey stopped, the first render paid one ~3.5s timeout and every render after returned in ~0.04s, no 500s. Worst case is one slow request per five minutes, not one per request. No <code>depends_on: valkey</code>, matching <code>embeddings</code>: a cache outage must never become a boot failure.</p>
+  </div>
+  <p>Measured on a real render: 0.25s cold, 0.06s warm &mdash; and warm now means warm for <em>every</em> worker. A deployment with no Valkey sets <code>VALKEY_URL=</code> to restore the old behaviour exactly. <code>tests/test_compose_defaults.py</code> pins it, because the claim lives in a YAML file no other test reads.</p>
+
+  <h3>Subscriptions became reachable</h3>
+  <p><code>POST /reports/{id}/subscribe</code> and its two siblings shipped working and <strong>unreachable</strong> &mdash; three endpoints, zero frontend callers. The same defect class as the refresh-schedule endpoint found earlier: correct in the service layer, invisible to the person it was built for.</p>
+  <div class="callout">
+    <span class="ct">Where the control sits is the decision</span>
+    <p>Subscribing needs only <code>view</code>, and the report toolbar is gated on <code>editMode</code> &mdash; which a view-only user can never enter. Putting it there would have hidden the feature from exactly its audience. It sits beside the PDF button in the always-visible header, because a subscription is the recurring form of that same export.</p>
+  </div>
+  <p>The dialog states whose data the copy contains, because that is not guessable and changes how every figure is read: the schedule is owned by the <em>subscriber</em>, so row-level security resolves as them. Cadence-dependent fields are sent only when they mean something (<code>weekday</code> weekly, <code>monthday</code> monthly, neither daily), and the day-of-month list stops at 28 &mdash; the only day every month has. Both are pinned by tests that fail under the obvious wrong implementation.</p>
+
+  <h3>Right-to-left reaches the PDF</h3>
+  <p>The screen and the downloaded file disagreed. reportlab draws glyphs in the order it is handed them and does no shaping, and its default Helvetica has no Arabic glyphs &mdash; so Arabic rendered as isolated letters in reversed order, or as nothing, <em>without raising</em>. Three problems had to be solved: shaping (<code>arabic_reshaper</code>), ordering (<code>python-bidi</code>), and glyph coverage &mdash; DejaVu Sans, already in the image via matplotlib, so nothing is downloaded and the air-gapped guarantee is untouched.</p>
+  <div class="callout">
+    <span class="ct">Latin never enters that path</span>
+    <p><code>has_rtl</code> gates every call, so a report with no RTL script is byte-identical to before &mdash; which is what makes this safe unconditionally rather than behind a flag, and a flag nobody turns on is how the original gap happened. The test pins that the shaping libraries are never <em>imported</em> for Latin, because the reshape+bidi round-trip on Latin is itself a no-op and a value comparison would pass under either implementation.</p>
+  </div>
+  <p><strong>A pre-existing bug the live check caught.</strong> Exporting a report whose <em>name</em> was Arabic returned a 500 &mdash; one line after the new code. The filename was sanitised with <code>c.isalnum()</code>, true for Arabic, Hebrew and CJK, so those characters reached a <code>Content-Disposition</code> header, and HTTP headers are latin-1. It now emits both RFC 6266 parameters. Broken for any non-Latin report name since the endpoint shipped; the RTL work only made it reachable. <strong>Still not a translation layer:</strong> interface strings stay English, and there is no i18n framework.</p>
+
+  <h3>ODBC: the escape hatch, reported honestly</h3>
+  <p>The 45th connector exists for backends with no SQLAlchemy dialect of their own &mdash; legacy ERPs, Progress, Informix, older Sybase. SQL Server is deliberately <em>not</em> one of them: it connects through <code>pymssql</code>, a self-contained wheel, and keeps full DirectQuery. It carries no SQL family and no dialect on purpose &mdash; what sits behind a DSN is unknown, so claiming a family would push generated SQL at a backend that may not speak it. ODBC is import-only, and the DirectQuery-capable count stays 36.</p>
+  <div class="callout">
+    <span class="ct">Why the probe, not a driver_module</span>
+    <p><code>driver_module="pyodbc"</code> would have been a lie. pyodbc is a <em>binding</em>, not a driver: it imports fine with no driver manager and no vendor driver present, so the card would advertise a connector that fails at connect time everywhere. <code>_odbc_usable</code> asks <code>pyodbc.drivers()</code> &mdash; what is actually registered. It catches <code>Exception</code>, not <code>ImportError</code>, and this image proves why: with the wheel installed but <code>libodbc.so.2</code> absent, the import itself raises, and a narrower catch would have 500'd the entire connector catalog.</p>
+  </div>
+
+  <h3>CALC: filter context, without building a language</h3>
+  <p>The audit's modelling row says &ldquo;no CALCULATE-equivalent <strong>filter-context manipulation</strong>&rdquo; &mdash; not &ldquo;no language&rdquo;. <code>CALC(expr, "filter")</code> closes exactly that, and the filter reuses the grammar <code>apply_filter_expr</code> and every row-security rule already speak: already safety-validated, already familiar, already translatable to SQL by <code>sql_expr</code> for DirectQuery pushdown. A second filter language would have meant a second parser and a second validator to keep in step.</p>
+  <div class="callout">
+    <span class="ct">The alignment rule &mdash; where the obvious implementation is wrong</span>
+    <p>When the filter constrains a <em>grouping</em> column the result is per-group, and excluded groups are genuinely outside the context: NaN, not 0 (0 would assert &ldquo;this group had none&rdquo;, a different and false claim). When the filter does not mention the grain, the context does not vary by group &mdash; it is a fixed comparison base and broadcasts. Reindexing unconditionally, which is what a first pass does, renders that second case as NaN everywhere but one row: it looks like missing data rather than a wrong alignment. Live probing caught it; the tests fail under the reindex-always version.</p>
+  </div>
+  <p>Security comes from where it sits: the frame reaching the shapers is already RLS-filtered, so a CALC filter can only narrow the caller's slice, never widen it. A broken filter <em>raises</em> &mdash; <code>apply_filter_expr</code> defaults to <code>silent=True</code>, which would return an unrestricted total dressed as a filtered one. <strong>What this is not:</strong> no M/Power Query equivalent, no ALL/RELATED, no evaluation-context model. The row moves gap&nbsp;&rarr;&nbsp;partial, not to have.</p>
+
+  <h3>Inferential statistics: is the difference real?</h3>
+  <p>The eight analyses that came before describe, forecast, cluster or flag &mdash; every one can say <em>that</em> two groups differ, none could say whether the difference would survive another sample. Four tests close that: Welch's t-test / ANOVA, chi-square independence, correlation with a p-value, and OLS regression. <strong>scipy and statsmodels were already in the image</strong>, unused for inference, so this exposes capability already paid for rather than buying SAS-scale breadth &mdash; nothing new is downloaded and the air-gap holds.</p>
+  <div class="callout">
+    <span class="ct">The way this would lie, and the rule that stops it</span>
+    <p>With a two-million-row cap, a p-value alone is nearly content-free: at n=100,000 a 0.1% difference in means is &ldquo;highly significant&rdquo; and irrelevant. Every test returns an <strong>effect size</strong> beside p and an interpretation naming both, and a significant-but-negligible result says so in words. Below a row floor a test is <em>refused</em>, not weakened &mdash; a p-value from five rows is not a weak answer, it is a meaningless one.</p>
+  </div>
+  <p><strong>Welch, not Student</strong>, as a non-negotiable default: Student's t assumes equal variances, which business data rarely has, and the wrong assumption yields an overconfident p. The insights engine gained the same discipline &mdash; <code>standout</code> and <code>correlation</code> findings now carry a p-value, and a finding that fails its test is <em>demoted</em> rather than hidden. A measure that can go negative is never chi-square tested for uniformity: it is not a frequency. <strong>What this is not:</strong> no GLM, mixed models, survival analysis or multiple-comparison correction. SAS's breadth remains a different order of investment.</p>
+
+  <h3>Advanced models, and correcting our own findings</h3>
+  <p>Four more capabilities &mdash; logistic regression, mixed models, Cox survival, and pairwise comparisons with correction &mdash; all from statsmodels, which was already in the image. <strong>Logistic, not OLS</strong>, for a binary target: OLS predicts probabilities outside [0,1] and its standard errors are meaningless there. The headline is the <em>odds ratio</em>, because a log-odds means nothing to the person asking the question. Perfect separation is refused rather than reported: statsmodels returns enormous coefficients with enormous standard errors instead of raising, and passing that through would be garbage with a p-value attached.</p>
+  <div class="callout">
+    <span class="ct">The insights engine was itself a multiple-comparison problem</span>
+    <p>It runs a standout test per (category &times; measure) and a correlation test per measure-pair &mdash; easily twenty tests on one dataset, where roughly one reaches p&nbsp;&lt;&nbsp;0.05 by chance. Findings are now corrected across the whole run before ranking, by Benjamini-Hochberg rather than Bonferroni (exploratory scanning, not a confirmatory trial). A finding that does not survive is <em>demoted and annotated</em>, not deleted. Verified: six random measures and three random categories now yield <strong>zero</strong> significant findings, while genuine patterns among the same noise survive.</p>
+  </div>
+  <p><strong>Mixed models</strong> exist because OLS is wrong on panel data &mdash; twelve months from forty stores is 480 rows but nothing like 480 independent observations. <strong>Survival</strong> is about censoring: a customer who has not churned yet is information about &ldquo;at least this long&rdquo;, and its floor is on <em>events</em>, not rows. <strong>Still not:</strong> no GLM families beyond binomial, no random slopes, no time-varying covariates. SAS ships hundreds of procedures; that remains a different order of investment.</p>
+
+  <h3>Reaching an object's settings</h3>
+  <p>An object picker sits above the properties panel, listing every object on the page and the page itself. Selecting on the canvas still works; the picker is for the cases where it does not &mdash; a widget inside a container, a small one, or one sitting under another in a precision layout.</p>
+  <p><strong>A control for a column a list cannot serve.</strong> <code>slicer_mode: 'text'</code> draws a text input instead of a value list, for columns like Customer ID. The point is not the smaller widget: <code>shape_slicer</code> returns before any grouping, because on a column with hundreds of thousands of distinct values BUILDING the list is the cost. An empty box clears the filter rather than filtering on <code>&quot;&quot;</code>, and <code>auto</code> never resolves to text &mdash; a reader who can see their options should be shown them.</p>
+
+  <h3>Generated prose, and why it is never load-bearing</h3>
+  <p><code>narrate_one</code> turns one already-computed finding into one sentence. Two guards make it safe to show: a <strong>digit guard</strong> discards any reply stating a number the evidence does not contain, and a shared <strong>breaker</strong> stops asking a model that just failed for two minutes.</p>
+  <p>The automated explanation now offers such a sentence beside its factors. The rule that keeps it honest is that narration is an ADDITION to an answer, never a precondition for one: the endpoint computes the factors, then tries for a sentence, and swallows every failure. An air-gapped install has no model at all, so the absent case is the normal one &mdash; it returns <code>null</code>, not <code>&quot;&quot;</code>, because a blank string renders as a sentence that failed to load rather than one never offered. A shown sentence is labelled as generated: the numbers beside it are computed, that line is not. Cost when the model is down is one 8s timeout per breaker window, then free &mdash; measured on the running stack at 8.4s, then 0.0s.</p>
+
+  <h3>Composed graphs</h3>
+  <p><code>custom_graph</code> is a chart built from PLOT LAYERS &mdash; what SAS calls Graph Builder. The catalogue already held three fixed combinations (dual-axis bar, line and bar-line); what this adds is that the combination is the author's: how many layers, which mark each draws, which aggregation, which axis.</p>
+  <p>Two rules carried over from <code>shape_dual_series</code> and generalised. <strong>Each layer aggregates in its own right</strong> &mdash; the numbers on a multi-layer chart are not the same kind of number, which is why it has two axes. And <strong>layers are keyed by position</strong> (<code>s0</code>, <code>s1</code>), never by measure name: one column read two ways is a common pair, and keying by name collapses it into a single series.</p>
+  <p>A layer whose column has gone is reported in <code>skipped</code> and named by the renderer rather than silently absent. An unrecognised mark draws as a bar on both sides, and <code>GRAPH_MARKS</code> is mirrored into <code>types/report.ts</code> and pinned, so the panel cannot offer one the shaper will quietly change. Reuse comes free: an object template already stores a configured widget, so a composed graph saved as one is a reusable graph.</p>
+
+  <h3>Hierarchies: six layouts, one shaper</h3>
+  <p>Tree, sunburst, icicle, dendrogram, org chart and circle packing all come from <code>shape_hierarchy</code> &mdash; the rule small multiples follows, since a layout computing its own totals would be a second aggregation path. Two input modes: <strong>level columns</strong> (country &rarr; region &rarr; city) and <strong>parent-child</strong> (id/parent), where the depth is data rather than schema.</p>
+  <div class="callout">
+    <span class="ct">Partition charts refuse non-additive aggregations</span>
+    <p>A sunburst draws value as an <em>angle</em>, an icicle as a <em>width</em>, a circle pack as the <em>area</em> a parent circle must contain: the parent's extent is the sum of its children's. Feed either an average and the geometry states something false &mdash; children that visibly do not fill their parent, with nothing to say the picture is wrong rather than the data. A tree or org chart prints the number instead of encoding it, so any aggregation is fine there.</p>
+  </div>
+  <p><strong>Cycles are refused by name; orphans become roots.</strong> A looping manager chain has no root and hangs the renderer, so the refusal names the looping id. A row whose parent is absent is different &mdash; most often row-level security removed it, so the honest rendering is a <em>forest</em> rooting where the caller's permission begins. <strong>The tree is also the control:</strong> its nodes carry checkboxes and broadcast through the same <code>emitMultiFilter</code> path a slicer uses, so tree view, tree grid and tree list box are one widget rather than three. Children always reconcile: beyond twelve, the remainder folds into an &ldquo;Other&rdquo; node carrying its real total.</p>
+
+  <h3>Slicers offer search sooner</h3>
+  <p>The auto threshold moved from 40 values to 10. Scanning a thirty-item checkbox list for one value means reading all thirty, and the list is only as tall as its widget. Search only <em>adds</em> a filter box, so enabling it early costs a reader nothing while a wall of checkboxes costs them the value. Under five it is still a button bar; five to ten a plain list &mdash; a search box over six items is clutter.</p>
+
+  <h3>The authoring path, not just the render path</h3>
+  <p>Five hierarchy widgets once shipped with renderers, shapers, tests and demo content &mdash; and <strong>no config panel</strong>. Every user-created sunburst failed with <em>"Choose the columns that form the hierarchy"</em>, advice the interface gave no way to follow. Only seed data set those keys, which is exactly why the tests passed: they exercised the shaper, never the authoring path.</p>
+  <div class="callout">
+    <span class="ct">The mode toggle must delete, not just add</span>
+    <p>The shaper branches on <code>id_col &amp;&amp; parent_col</code>, so a config carrying both a <code>levels</code> array and the parent-child pair silently renders as parent-child &mdash; ignoring the levels the user just picked. Switching mode therefore <em>deletes</em> the other mode's keys, and that deletion is what the test pins. Sunburst and icicle also offer only adding-up aggregations: their geometry encodes value as an angle or width, so an average draws children that visibly fail to fill their parent.</p>
+  </div>
+  <p>Small multiples had the same gap with a quieter failure &mdash; without <code>facet_by</code> the shaper degrades to one panel, so the widget silently became an ordinary bar chart. Mirrored constants are pinned by <code>tests/test_frontend_constant_mirrors.py</code>, which reads the TypeScript and asserts each value against Python: a drifted copy is worse than none, because the panel would promise what the shaper then rejects.</p>
+
+  <h3>&ldquo;We could not ask&rdquo; is not &ldquo;there is nothing&rdquo;</h3>
+  <p><code>Lineage</code> caught a failed fetch and set an <em>empty graph</em>, rendering a backend outage as a confident claim that the org owns no data assets. <code>Reports</code> and <code>Connections</code> had no catch at all, so a 500 fell through to &ldquo;No reports yet&rdquo; &mdash; which invites a user to recreate work that already exists. <code>ReportBuilder</code> and <code>DatasetDetail</code> left &ldquo;Loading&hellip;&rdquo; on screen forever.</p>
+  <p>All five now distinguish loading, error and empty, and each test asserts <strong>both</strong> that the error appears and that the empty-state copy is <em>absent</em> &mdash; a test checking only for the error still passes when the empty state renders beside it. <code>PagePropertiesPanel</code> swallowed the save of <strong>page visibility</strong>, a security control: a failed write left the panel showing a page as restricted while the server still had it visible to everyone.</p>
+
+  <h3>The statistics screen is one screen, not eight</h3>
+  <p>Eight inferential analyses shipped with working endpoints and <strong>no frontend entry point at all</strong> &mdash; half the registry was reachable only by the agent, which can mention an analysis but not invoke one. They get one screen because every endpoint takes a flat body of column names and every one returns the same <code>TestResult</code> envelope: a picker, a form built from each spec's <code>params_schema</code>, and one result card cover all eight, and a ninth appears on its own.</p>
+  <div class="callout">
+    <span class="ct">A ninth analysis cannot ship unreachable</span>
+    <p>The registry carries no route &mdash; it is descriptive metadata, and widening it would turn that endpoint into an invocation contract. The name-to-slug map lives in <code>api.ts</code>, guarded from both directions: the build fails when a statistical analysis is registered with no frontend entry, when an entry names an analysis that no longer exists, and when a slug does not match a served route. That is the trap this codebase had hit five times.</p>
+  </div>
+  <p><strong>The result card gives the effect size at least the weight of the p-value.</strong> Not styling: with a two-million-row cap a p-value alone is nearly content-free, so a card leading with the asterisk would manufacture confident trivia. Caveats render as part of the answer rather than a footnote &mdash; &ldquo;correlation is not causation&rdquo; changes what the number means.</p>
+
+  <h3>Connection handling</h3>
+  <ul class="plain">
+    <li><strong><code>connections.py</code></strong> — credential storage and connection lifecycle</li>
+    <li><strong><code>secrets.py</code></strong> — secret material, kept out of API responses</li>
+    <li><strong><code>net_guard.py</code></strong> — egress control, enforcing the air-gap boundary</li>
+  </ul>
+  <h3>Engine registry</h3>
+  <p><code>services/engines.py</code> holds pooled SQLAlchemy engines keyed by connection identity, so a widget render reuses a pooled connection instead of paying <code>create_engine</code> per request. Two data sources sharing a connection string share one engine — the key is the built URL, not the raw config — except for <code>:memory:</code> databases, where every instance is distinct and sharing would merge their data.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Function</th><th>Pool</th></tr></thead>
+    <tbody>
+      <tr><th><code>get_engine()</code></th><td>Interactive renders</td></tr>
+      <tr><th><code>get_metadata_engine()</code></th><td>Background catalogue sampling, <code>max_overflow=0</code></td></tr>
+      <tr><th><code>dispose_engine()</code></th><td>Drop a pool before its source's storage is replaced</td></tr>
+    </tbody>
+  </table></div>
+  <p>The two pools are deliberately separate: sampling a catalogue several objects at a time would otherwise occupy most of the interactive pool and surface as a stall on someone's report. <code>max_overflow=0</code> on the metadata pool makes the sync's connection footprint exactly <code>metadata_sample_concurrency</code> — a number someone chose rather than one that emerged.</p>
+  <p><code>dispose_engine</code> exists because a pool holding a file-backed SQLite source makes unlinking it fail outright on Windows, and on POSIX keeps serving the deleted inode.</p>
+  <p><em>Contract to Layer 2:</em> a validated, capability-described connection handle.</p>
+</section>
+
+<section id="l2">
+  <div class="layer-head"><span class="lnum">02</span><h2 class="sec">Ingestion &amp; Metadata</h2></div>
+  <p class="owns"><strong>Owns:</strong> turning a reachable source into a described, profiled, trustworthy dataset.</p>
+
+  <h3>Upload path</h3>
+  <p><code>routers/datasets.py</code> accepts CSV, XLSX, JSON, and Parquet up to 100 MB (plus XML when <code>lxml</code> is present — <code>SUPPORTED</code> registers a reader only if its parser imports). <code>services/ingest.py</code> owns this layer’s two primitives: <code>load_file()</code>, which reads through the process-local frame memo so the same bytes are parsed once per process rather than once per widget, and <code>detect_types()</code>, which classifies every column as numeric, categorical, datetime, or text.</p>
+
+  <h3>Metadata package</h3>
+  <p><code>services/metadata/</code> is the source-of-truth pipeline for connected sources.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Module</th><th>Responsibility</th></tr></thead>
+      <tbody>
+        <tr><th><code>introspect.py</code></th><td>Read the source's own schema</td></tr>
+        <tr><th><code>sample.py</code></th><td>Pull representative rows without full scans</td></tr>
+        <tr><th><code>profile.py</code></th><td>Column statistics, cardinality, null rates</td></tr>
+        <tr><th><code>infer_keys.py</code></th><td>Primary/foreign key inference</td></tr>
+        <tr><th><code>infer_semantic.py</code></th><td>Semantic typing (identifier, measure, geography…)</td></tr>
+        <tr><th><code>catalog_sync.py</code>, <code>sync.py</code></th><td>Reconcile catalog against the live source</td></tr>
+        <tr><th><code>drift.py</code></th><td>Detect schema change since last sync</td></tr>
+        <tr><th><code>store.py</code>, <code>cache.py</code></th><td>Persist and cache metadata</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Key inference is accuracy-tested, not merely smoke-tested — <code>tests/test_infer_keys_accuracy.py</code> asserts precision/recall floors.</p>
+
+  <h3>PII masking</h3>
+  <p><code>services/pii.py</code> detects personal data in a sample and masks it <strong>before</strong> anything is written to the sample cache or sent to the model. There is no path where a raw personal value reaches either — a self-hosted endpoint is still a disclosure, and a cache is still a copy.</p>
+  <p>The mask carries a hash rather than being shape-preserving (<code>a****@c***.com</code>), because foreign-key inference measures value overlap between columns in the masked sample: shape-only masking would collapse distinct values together and invent relationships that do not exist.</p>
+
+  <h3>Refresh</h3>
+  <p><code>services/dataset_refresh.py</code> re-imports a dataset from its source and invalidates the cached frame. Scheduling lives at Layer 6 (<code>refresh_scheduler.py</code>), which composes this with alerts and delivery.</p>
+  <p><em>Contract to Layers 3/4:</em> a dataset with typed columns, inferred keys, declared relationships, a profile, and no unmasked personal data.</p>
+</section>
+
+<section id="l3">
+  <div class="layer-head"><span class="lnum">03</span><h2 class="sec">Storage &amp; Persistence</h2></div>
+  <p class="owns"><strong>Owns:</strong> durable state, cached state, and schema evolution.</p>
+
+  <h3>Relational store</h3>
+  <p>PostgreSQL 16 Alpine. <strong>81 tables</strong> defined in <code>models/models.py</code> via async SQLAlchemy, grouped by concern.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Group</th><th>Representative tables</th></tr></thead>
+      <tbody>
+        <tr><th>Datasets</th><td><code>datasets</code>, <code>dataset_columns</code>, <code>dataset_shares</code>, <code>analysis_results</code></td></tr>
+        <tr><th>Reports</th><td><code>reports</code>, <code>report_pages</code>, <code>report_widgets</code>, <code>report_parameters</code>, <code>bookmarks</code>, <code>report_user_grants</code>, <code>recent_views</code>, <code>org_units</code>, <code>user_org_units</code></td></tr>
+        <tr><th>Modelling</th><td><code>relationships</code>, <code>hierarchy_nodes</code>, <code>data_views</code>, <code>common_filters</code></td></tr>
+        <tr><th>Sources</th><td><code>data_sources</code>, <code>source_objects</code>, <code>source_columns</code>, <code>source_relationships</code></td></tr>
+        <tr><th>Identity</th><td><code>organizations</code>, <code>users</code>, <code>roles</code>, <code>api_keys</code>, <code>org_idps</code>, <code>org_parents</code></td></tr>
+        <tr><th>Governance</th><td><code>row_security_rules</code>, <code>column_security_rules</code>, <code>object_row_policies</code>, <code>audit_log</code>, <code>admin_audit</code></td></tr>
+        <tr><th>Sharing</th><td><code>share_links</code>, <code>share_link_access</code>, <code>embed_configs</code>, <code>report_classifications</code></td></tr>
+        <tr><th>Delivery</th><td><code>report_schedules</code>, <code>deliveries</code>, <code>data_alerts</code>, <code>notifications</code></td></tr>
+        <tr><th>Agent</th><td><code>conversations</code>, <code>agent_messages</code>, <code>agent_runs</code>, <code>agent_steps</code>, <code>agent_feedback</code></td></tr>
+        <tr><th>Retrieval</th><td><code>retrieval_embeddings</code>, <code>entities</code>, <code>glossary_terms</code>, <code>query_examples</code></td></tr>
+        <tr><th>Authoring</th><td><code>report_versions</code>, <code>report_comments</code>, <code>report_translations</code>, <code>page_templates</code>, <code>page_role_visibility</code>, <code>widget_templates</code>, <code>pinned_tiles</code>, <code>org_review_settings</code>, <code>org_themes</code>, <code>watermarks</code></td></tr>
+        <tr><th>Maps</th><td><code>boundary_sets</code>, <code>org_map_settings</code></td></tr>
+        <tr><th>Models</th><td><code>prediction_models</code></td></tr>
+        <tr><th>Workspace</th><td><code>workspace_nodes</code>, <code>workspace_folder_roles</code>, <code>workspace_folder_grants</code></td></tr>
+        <tr><th>Pipelines</th><td><code>dataflows</code>, <code>dataflow_capabilities</code>, <code>automation_runs</code>, <code>automation_steps</code>, <code>custom_connectors</code>, <code>schedule_failures</code></td></tr>
+        <tr><th>Platform</th><td><code>saml_authn_requests</code>, <code>org_mcp_access</code>, <code>eval_runs</code></td></tr>
+        <tr><th>Ops</th><td><code>sync_runs</code>, <code>schema_versions</code>, <code>column_stats</code>, <code>materializations</code>, <code>quotas</code>, <code>query_runs</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Schema changes go through <strong>Alembic</strong> (<code>backend/alembic/</code>, 37 revisions). <code>postgres/init.sql</code> provides the initial schema and indexes.</p>
+
+  <h3>Cache</h3>
+  <p><code>services/cache_backend.py</code> defines a <code>CacheBackend</code> interface with two implementations — <code>InProcessCache</code> for single-process or test runs, and <code>ValkeyCache</code> for the deployed stack. <code>frame_cache.py</code> caches computed result frames; <code>core/rate_limit.py</code> uses the same backend for throttling.</p>
+  <div class="callout">
+    <span class="ct">Invariant</span>
+    <p>The cache is an optimisation, never a source of truth: every cached value is reproducible from Postgres and the source systems.</p>
+  </div>
+
+  <h3>File storage</h3>
+  <p>Uploads land in the <code>uploaded_files</code> volume, referenced by path from <code>datasets</code>.</p>
+</section>
+
+<section id="l4">
+  <div class="layer-head"><span class="lnum">04</span><h2 class="sec">Query &amp; Semantic</h2></div>
+  <p class="owns"><strong>Owns:</strong> translating widget intent into SQL that is correct, governed, and safe.</p>
+  <p class="sub">This is the layer where a request becomes a query. It has three responsibilities.</p>
+
+  <h3>1 · Aggregation engine</h3>
+  <p><code>services/widget_data.py</code> turns a widget config into a result set. The config contract is:</p>
+<pre><code>{ dimension, measure, aggregation, filters, limit, sort, sort_by, running }</code></pre>
+  <p><strong>25 aggregations</strong> in three groups, plus <code>none</code>:</p>
+  <ul class="plain">
+    <li><strong>Numeric</strong> — <code>sum</code>, <code>avg</code>, <code>median</code>, <code>min</code>, <code>max</code>, <code>std</code>, <code>variance</code>, <code>range</code>, <code>p25</code>, <code>p75</code>, <code>p90</code>, <code>p95</code></li>
+    <li><strong>Count</strong> — <code>count</code>, <code>countd</code>, <code>frequency</code>, <code>pct</code></li>
+    <li><strong>Statistical</strong> — <code>stderr</code>, <code>skewness</code>, <code>kurtosis</code>, <code>cv</code>, <code>uss</code>, <code>css</code>, <code>tstat</code>, <code>pvalue</code></li>
+    <li><strong>None</strong> — <code>none</code> lists the rows unaggregated</li>
+  </ul>
+  <p>Arithmetic is refused on a column that is not a quantity: summing a year, a coordinate or an identifier returns <code>422 semantic_veto</code> naming the aggregation that does mean something (<code>services/semantic_guard.py</code>, enforced in <code>_resolve_widget_data</code> so every surface — builder, share link, embed, export, API — gets the same answer). Marking the column a measure is the override.</p>
+  <p>SAS offers the statistical group on any measure, so an evaluator looks for them by name. Each returns <code>None</code> rather than a number when the sample cannot support it — a t-statistic on one row, a coefficient of variation about a zero mean — because a fabricated statistic is worse than an empty cell.</p>
+  <p>Plus two post-aggregation metrics applied over the ordered result: <code>running_sum</code> and <code>running_avg</code>.</p>
+
+  <h3>2 · SQL construction</h3>
+  <p><code>services/query_builder.py</code> builds dialect-correct SQL from a model definition: <code>build_sql(model, dialect, known, …)</code>, with <code>_quote()</code> handling per-dialect identifier quoting and <code>introspect_tables()</code> validating that referenced tables and columns actually exist before emission.</p>
+  <p><code>sql_expr.py</code> and <code>measure_eval.py</code> evaluate user-authored expressions and calculated measures. <code>parameters.py</code> binds report parameters.</p>
+
+  <h3>3 · Governance</h3>
+  <p><code>core/rls.py</code> is the enforcement point.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Function</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><th><code>apply_user_context()</code></th><td>Bind the acting user to the query context</td></tr>
+        <tr><th><code>resolve_rls_expr()</code></th><td>Resolve the row-filter expression for this user + dataset</td></tr>
+        <tr><th><code>expand_author_expressions()</code></th><td>Expand author-defined rule expressions</td></tr>
+        <tr><th><code>resolve_denied_columns()</code></th><td>Determine columns this user may not see</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="callout">
+    <span class="ct">Enforcement point</span>
+    <p>RLS is applied <strong>during query construction</strong>, not by filtering results afterward. Column denial removes columns from the projection rather than blanking them.</p>
+  </div>
+  <p><code>query_log.py</code> records executed queries; <code>display_rules.py</code> resolves conditional formatting; <code>data_views.py</code> manages the saved Dimensions/Measures/Dates/Text hierarchy.</p>
+  <p><code>services/prep.py</code> belongs to this layer rather than to ingestion: it applies the user's transformation pipeline (authored in <code>PrepPipelinePanel.tsx</code>) <em>and</em> the same RLS machinery — <code>resolve_rls_expr</code>, <code>resolve_denied_columns</code>, <code>apply_rls_filter</code> — so a prepared frame is governed exactly like a widget query.</p>
+
+  <h3>Two execution paths</h3>
+  <p>The same widget config resolves through one of two engines.</p>
+  <div class="scroll"><table>
+    <thead><tr><th></th><th>Import-mode</th><th>Import + DuckDB</th><th>DirectQuery</th></tr></thead>
+    <tbody>
+      <tr><th>Module</th><td><code>widget_data.py</code></td><td><code>duck_agg.py</code></td><td><code>direct_query.py</code></td></tr>
+      <tr><th>Aggregation</th><td>pandas <code>groupby</code></td><td>DuckDB over the file</td><td>pushed into SQL</td></tr>
+      <tr><th>Source rows loaded</th><td>whole frame, capped by <code>import_row_cap</code></td><td>streamed, never materialised</td><td>bounded by <code>row_cap</code></td></tr>
+      <tr><th>RLS</th><td>applied to the frame</td><td>ineligible — falls back</td><td>pushed into the <code>WHERE</code> clause</td></tr>
+    </tbody>
+  </table></div>
+  <p>Both hand their result to the <strong>same shaper</strong>, <code>get_widget_data_from_df</code>, which is why <code>direct_query.py</code> rejects aggregations that are not grain-safe: the shaper re-runs its groupby over an already-aggregated frame, and only <code>sum/avg/min/max/median/percentiles</code> survive that second pass unchanged. <code>count</code>, <code>countd</code>, <code>std</code>, <code>variance</code> and <code>range</code> do not, so they are refused rather than silently computed wrong.</p>
+  <p><strong>The import path materialises the whole frame</strong>, which is the platform's main scale limit. Measured on 2026-08-28: a 406 MB / 2M-row / 30-column CSV costs <strong>~1.8 GB of RSS</strong> to answer a five-row question — roughly 4.5× the file — and every concurrent render holds its own frame.</p>
+  <p><code>settings.import_row_cap</code> bounds it. The cap <strong>refuses</strong> rather than truncating: a truncated frame would produce totals over an arbitrary subset with no way to say so in the result, and a confident wrong number is worse than an error. Over the cap the request returns <strong>413</strong> naming both the dataset size and the limit. It defaults to <strong>2,000,000 rows</strong> - roughly where the measured 1.8 GB-per-render cost stops being survivable on a shared box. An operator with the memory to spare can still set <code>0</code> to disable it.</p>
+
+  <h3>DuckDB pre-aggregation</h3>
+  <p><code>services/duck_agg.py</code>, behind <code>settings.widget_duckdb_pushdown</code> (default <strong>on</strong> since 2026-08-29), aggregates eligible import-mode queries with DuckDB and hands the small result to the same shaper — the pattern <code>run_direct_query</code> already uses.</p>
+  <p>Eligibility is deliberately narrow: a plain dimension + measure + grain-safe aggregation with basic filters, and none of column denial, RLS, prep steps, filter expressions, calculated columns or measure definitions, each of which is a pandas transformation of the full frame. Anything else, and <strong>any</strong> DuckDB failure, falls back to pandas.</p>
+  <div class="callout">
+    <span class="ct">Why the fallback is the design</span>
+    <p>Unlike DirectQuery — which must raise, having no local frame — the worst case here is the path that existed before it. Slower, never wrong. That is what makes the feature safe to enable.</p>
+  </div>
+  <p>Measured on a 422 MB / 2M-row / 30-column CSV: <strong>1545 MB → 60 MB</strong> of query RSS with a parquet sidecar present (8.4× without one, where the CSV is re-parsed).</p>
+  <p>Two semantics required explicit handling. SQL <code>GROUP BY</code> keeps NULL as a group where pandas drops NaN keys, so the plan adds <code>WHERE dim IS NOT NULL</code>. And <code>total</code> means <em>source rows</em>, which the shaper would otherwise derive as the group count from a pre-aggregated frame, so the plan counts separately — after filters, before the null drop.</p>
+  <p>Aggregated values may differ from pandas in the last bits of a float: two engines summing one column in different orders cannot agree bit-for-bit (measured worst relative difference 1.43e-14 over 2M rows). Group names, ordering, row counts and totals match exactly. This is the same property DirectQuery has always had against Postgres and MySQL.</p>
+  <p><em>Contract to Layers 5/6:</em> a governed result frame, with provenance.</p>
+</section>
+
+<section id="l5">
+  <div class="layer-head"><span class="lnum">05</span><h2 class="sec">Analytics &amp; AI</h2></div>
+  <p class="owns"><strong>Owns:</strong> everything that produces an insight rather than a value.</p>
+
+  <h3>Statistical analysis</h3>
+  <p><code>services/analytics.py</code> provides descriptive statistics, outlier detection, correlation, and chi-square testing. The <code>services/analysis/</code> package adds:</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Module</th><th>Capability</th><th>Library</th></tr></thead>
+      <tbody>
+        <tr><th><code>anomaly.py</code></th><td>Isolation Forest, ECOD</td><td>PyOD</td></tr>
+        <tr><th><code>segment.py</code></th><td>KMeans segmentation</td><td>scikit-learn</td></tr>
+        <tr><th><code>registry.py</code></th><td>Analysis registration and dispatch</td><td>—</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Forecasting uses <strong>AutoETS</strong> via <code>statsforecast</code>, surfaced as a forecast widget. <code>insights.py</code> and <code>explain.py</code> generate narrative explanations of results.</p>
+  <h3>Dashboard suggestion</h3>
+  <p>Two paths, answering different questions. <code>suggest_dashboard.py</code>
+  starts from a <strong>connection catalog</strong> &mdash; someone has attached a
+  database and does not know which tables to join &mdash; and returns SQL plus a
+  widget list. <code>suggest_dataset_dashboard.py</code> starts from a
+  <strong>dataset that already exists</strong> and a person&rsquo;s own description of
+  their job, and returns whole dashboards for that person.</p>
+  <p>It is fenced three ways, because a model handed 74 widget types will
+  otherwise propose tiles that render blank:</p>
+  <ol>
+    <li><code>dataset_profile.py</code> builds what the model is told &mdash;
+    per-column role, cardinality, missing data, range and commonest values, plus
+    coordinate pairs, parent-child references, nestings and the date span &mdash;
+    and the widget menu is filtered by what that profile supports.</li>
+    <li><code>widget_roles.py</code> holds <code>REQUIRED_ROLES</code>, the
+    server-side mirror of the frontend <code>ROLE_SPECS</code>, pinned by a parity
+    test. Nothing missing a required field survives validation.</li>
+    <li>Every surviving widget is <strong>executed</strong> through
+    <code>get_widget_data</code> and dropped if the shaper reports nothing to
+    draw.</li>
+  </ol>
+  <p><code>suggest_from_insights.py</code> is the third path, and the one that
+  uses no model at all. An <strong>empty goal</strong> means there is nothing to
+  tailor to, so <code>generate_insights</code> picks the charts and they go
+  through the same three gates: ~4 seconds against ~28, deterministic, and every
+  caption is the finding&rsquo;s own sentence. The response carries
+  <code>source</code> so the UI can say which engine answered.</p>
+  <p>Both paths also return <code>relations</code> &mdash; pairs of widgets
+  sharing a DIMENSION &mdash; which the browser applies as cross-filter actions in
+  a second pass, once the real widget ids exist. Interactions persist in
+  <code>widget.config.interaction</code>; before 2026-09-10 they were React state
+  only and were lost on every reload.</p>
+  <p>Surfaced at <code>POST /datasets/{id}/suggest-dashboards</code>, from the
+  dataset row&rsquo;s &hellip; menu. It proposes only; the browser creates.</p>
+  <div class="callout">
+    <span class="ct">Cold start</span>
+    <p>Heavy libraries are <strong>lazily imported</strong> — several tests assert that PyOD, scikit-learn, and statsforecast are <em>not</em> loaded at application import, keeping startup fast for deployments that never use them.</p>
+  </div>
+
+  <h3>NL→SQL agent</h3>
+  <p><code>services/agent/</code> implements natural-language querying as an explicit graph, not a prompt chain (<code>graph.py</code>):</p>
+<pre><code>classify → (clarify) → context → plan → DAG[ generate → ladder → policy
+                                            → execute → sanity ] → explain</code></pre>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Module</th><th>Role</th></tr></thead>
+      <tbody>
+        <tr><th><code>classify.py</code></th><td>Determine question type</td></tr>
+        <tr><th><code>clarify.py</code></th><td>Ask back when the question is underspecified</td></tr>
+        <tr><th><code>context.py</code></th><td>Assemble schema context for the model</td></tr>
+        <tr><th><code>plan.py</code></th><td>Decompose into ordered steps</td></tr>
+        <tr><th><code>dag.py</code>, <code>executor.py</code></th><td>Run the step graph</td></tr>
+        <tr><th><code>generate.py</code></th><td>Emit candidate SQL</td></tr>
+        <tr><th><code>policy.py</code></th><td>Enforce what the generated SQL may do</td></tr>
+        <tr><th><code>validate.py</code></th><td>Structural and semantic validation</td></tr>
+        <tr><th><code>explain.py</code></th><td>Render the answer</td></tr>
+        <tr><th><code>memory.py</code>, <code>state.py</code></th><td>Conversation state</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Two design decisions are worth stating explicitly:</p>
+  <ol class="steps">
+    <li><strong>The repair loop lives inside a node</strong>, not as a graph edge. At most <code>MAX_ATTEMPTS</code> generations, each retry fed the specific validation rung that rejected the previous attempt. This keeps the graph acyclic and the executor small.</li>
+    <li><strong>The agent inherits RLS.</strong> <code>graph.py</code> imports <code>resolve_rls_expr</code> from <code>core.rls</code> directly, so generated SQL is filtered by the same rules as a hand-built widget.</li>
+  </ol>
+
+  <h3>Model client</h3>
+  <p><code>services/llm.py</code> targets a <strong>self-hosted OpenAI-compatible endpoint</strong> (vLLM), configured in <code>core/config.py</code>:</p>
+<pre><code>llm_base_url = "http://…/v1"     # self-hosted
+llm_model    = "qwen3.5"
+llm_enabled  = True              # False → platform runs with no AI at all
+llm_max_concurrency      = 12
+llm_reserved_interactive = 2</code></pre>
+  <p>The client treats the endpoint as unreliable by design — it may be rebooted, reimaged, or saturated — and degrades to a documented failure rather than propagating an exception. <code>services/retrieval.py</code> handles embedding-based retrieval against the embeddings container, with a circuit breaker.</p>
+</section>
+
+<section id="l6">
+  <div class="layer-head"><span class="lnum">06</span><h2 class="sec">API &amp; Services</h2></div>
+  <p class="owns"><strong>Owns:</strong> the HTTP surface, identity, and everything that leaves the system.</p>
+
+  <h3>Routers</h3>
+  <p><strong>29 router modules</strong>, mounted with 31 <code>include_router</code> calls in <code>main.py</code> — <code>analysis</code> and <code>metadata</code> each expose a second router. All under <code>/api/v1</code> except the agent.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Router</th><th>Surface</th></tr></thead>
+      <tbody>
+        <tr><th><code>datasets</code></th><td>Upload, CRUD</td></tr>
+        <tr><th><code>analysis</code> (+ <code>registry</code>)</th><td>Run and retrieve analyses</td></tr>
+        <tr><th><code>widget_data</code></th><td>Live widget queries</td></tr>
+        <tr><th><code>reports</code></th><td>Reports, pages, widgets</td></tr>
+        <tr><th><code>hierarchy</code></th><td>Data-view tree</td></tr>
+        <tr><th><code>data_sources</code></th><td>Connections</td></tr>
+        <tr><th><code>relationships</code></th><td>Model relationships</td></tr>
+        <tr><th><code>metadata</code> (+ <code>stats</code>)</th><td>Catalog and profiling</td></tr>
+        <tr><th><code>auth</code>, <code>sso</code></th><td>Login, SAML/OIDC, provisioning</td></tr>
+        <tr><th><code>admin</code>, <code>platform</code></th><td>Administration, tenancy</td></tr>
+        <tr><th><code>shared</code>, <code>embed</code></th><td>Public links, embedded reports</td></tr>
+        <tr><th><code>widget_templates</code>, <code>demo</code></th><td>Templates, demo content</td></tr>
+        <tr><th><code>workspace</code></th><td>Report-navigation tree (folders + filed reports)</td></tr>
+        <tr><th><code>notifications</code></th><td>User notifications</td></tr>
+        <tr><th><code>authz</code></th><td>Batched &ldquo;may I, and why not&rdquo; decisions for the UI</td></tr>
+        <tr><th><code>review</code></th><td>Report review, publish gate, performance evaluation</td></tr>
+        <tr><th><code>report_copilot</code></th><td>Copilot edits to a report (versioned, undoable)</td></tr>
+        <tr><th><code>semantic</code></th><td>Governed semantic-layer API (datasets, measures, RLS)</td></tr>
+        <tr><th><code>prediction_models</code></th><td>Train, save and score models</td></tr>
+        <tr><th><code>boundary_sets</code>, <code>map_settings</code></th><td>Region boundaries, starter packs, basemap tiles</td></tr>
+        <tr><th><code>pins</code></th><td>Pinned tiles</td></tr>
+        <tr><th><code>dataflows</code>, <code>custom_connectors</code></th><td>Reusable prep flows, admin-defined connectors</td></tr>
+        <tr><th><code>agent</code></th><td>NL query (mounted at root)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Workspace tree</h3>
+  <p>Reports carry <code>org_id</code> and nothing positional, so <code>workspace_nodes</code> supplies the navigation menu: one row per folder or filed report, ordered by <code>position</code> within a parent. Folders and reports share one sibling sequence, so an author can put an important report above a folder.</p>
+  <p><strong>Pages are not stored.</strong> The tree renders folders → reports → pages, but <code>ReportPage</code> rows already have their own ordering and the tree endpoint joins them at read time — persisting copies would leave the menu stale whenever a page is added in the builder. A report node likewise stores no name, reading through to the report so a rename is a single edit.</p>
+  <div class="callout">
+    <span class="ct">Two contracts that protect user work</span>
+    <p><strong>Deleting a folder never deletes a report.</strong> <code>parent_id</code> is <code>ON DELETE CASCADE</code>, so children are re-parented to the deleted node's parent first — the same fix <code>routers/hierarchy.py::delete_node</code> carries, whose comment records the bug that produced it. Removing a <em>report</em> node unfiles the report; the report reappears at root.</p>
+    <p><strong>A node cannot move into its own subtree.</strong> <code>hierarchy.py</code> has no such guard (small hand-built trees), but a cycle in the org's navigation menu hangs the renderer for everyone. The ancestor walk is bounded by node count, so an already-cyclic tree cannot hang the request trying to fix it.</p>
+    <p>Both were verified by removing the guard and confirming the matching tests fail.</p>
+  </div>
+  <p>Every report is reachable: one with no node is returned under <code>unfiled</code>. The tree is navigation, not an optional tag.</p>
+  <p><strong>Creating is open; changing and removing belong to the author.</strong> Any member may make folders and file reports — gating that would mean nobody but an admin can organise their own reports, which is how a folder tree ends up unused. Editing or deleting a node is limited to whoever created it (<code>created_by</code>) and to org admins, who need a way to tidy up after people who have left.</p>
+  <p><code>created_by</code> is nullable and set to NULL when its user is deleted, so a folder outlives the person who made it. An unowned node is <strong>admin-only</strong>: “nobody owns it” must not read as “anybody may delete it”.</p>
+
+  <h3>Who sees which folders</h3>
+  <p>A folder can be restricted to roles (<code>workspace_folder_roles</code>). <strong>No rows = visible to everyone in the org</strong> — grants restrict, they are not a licence that must first be issued. Any other default would empty every non-admin menu the day it shipped, which is the same reasoning <code>PageRoleVisibility</code> and <code>ReportCapability</code> record in their own docstrings.</p>
+  <p>Restriction is <strong>subtree-effective</strong>: a report filed inside a folder the viewer cannot see is absent from their tree entirely — not relocated to <code>unfiled</code>, which would defeat the restriction by moving the entry rather than hiding it. Admins and the folder's creator always see it: an admin locked out could not administer the lock, and an author who cannot find what they filed would simply make another copy.</p>
+  <p>Filtering happens <strong>server-side</strong>. Sending the whole tree and hiding parts in the client would make the response itself the leak.</p>
+  <div class="callout">
+    <span class="ct">This is menu visibility, not access control</span>
+    <p><code>GET /reports/{id}</code> returns a report to any member of the org regardless of where it is filed, so someone who knows a report id can still open it. Report ACCESS is <code>ReportCapability</code>; row and column access are the RLS rules. Hiding a menu entry is tidiness and least-astonishment.</p>
+    <p><code>TestVisibilityIsNotAccessControl</code> asserts this deliberately, so that turning the menu into an ACL breaks a test rather than quietly making this paragraph wrong.</p>
+  </div>
+
+  <h3>Identity and authorisation</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Module</th><th>Responsibility</th></tr></thead>
+      <tbody>
+        <tr><th><code>core/security.py</code></th><td>Password hashing, JWT issuance/verification</td></tr>
+        <tr><th><code>core/api_keys.py</code></th><td>Programmatic access</td></tr>
+        <tr><th><code>core/capability.py</code></th><td>Capability checks</td></tr>
+        <tr><th><code>core/org_scope.py</code></th><td>Organisation scoping on every query</td></tr>
+        <tr><th><code>services/sso.py</code>, <code>saml.py</code></th><td>SAML and OIDC</td></tr>
+        <tr><th><code>services/auth_provisioning.py</code></th><td>Just-in-time user provisioning</td></tr>
+        <tr><th><code>services/org_access.py</code></th><td>Cross-organisation access rules</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="callout">
+    <span class="ct">Two-stage authorisation</span>
+    <p><strong>Organisation scope</strong> (Layer 6) constrains which rows are reachable at all; <strong>RLS</strong> (Layer 4) constrains which of those the user may see.</p>
+  </div>
+
+  <h3>Outbound</h3>
+  <ul class="plain">
+    <li><strong><code>pdf_export.py</code></strong> — server-side PDF rendering</li>
+    <li><strong><code>delivery.py</code></strong> — scheduled distribution</li>
+    <li><strong><code>alerts.py</code></strong> — data-condition alerts</li>
+    <li><strong><code>notifications.py</code></strong> — in-app notifications</li>
+    <li><strong><code>eval_schedule.py</code></strong> — scheduled evaluation runs</li>
+  </ul>
+
+  <h3>Sharing and embedding</h3>
+  <p><code>routers/embed.py</code> issues token-addressed embed configs with <strong>origin allow-listing</strong> (<code>_origin_allowed</code>) and per-widget visibility resolution (<code>_visible_widget</code>), evaluated against the <em>creator's</em> permissions. There is no per-viewer licence concept.</p>
+  <p>Both public surfaces shape their pages through <strong>one</strong> function, <code>_shape_page</code> in <code>routers/shared.py</code> — the embed reaches it via <code>visible_pages_for_creator</code>. A page publishes a derived <strong><code>interaction_mode</code></strong> string rather than its <code>mobile_layout</code> blob: the mode is the only part of that JSON a viewer needs, and publishing a whole internal blob to an anonymous surface is how fields leak. Unrecognised values collapse to <code>manual</code>, because <code>mobile_layout</code> is author-written and an unknown mode reaching the frontend's union would silently mean <em>no</em> interactions rather than an error anyone sees.</p>
+  <p>This field exists because the viewers previously received no mode at all, so every published page fell back to manual and each widget obeyed its own setting — the exact opposite of what an automatic page mode means. The same omission left saved per-widget interactions unhydrated in both viewers.</p>
+
+  <h3>Middleware</h3>
+  <p>CORS is configured in <code>main.py</code>. The global exception handler is registered <strong>after</strong> <code>CORSMiddleware</code> so it sits inside it — otherwise a 500 would carry no <code>Access-Control-Allow-Origin</code> header and the browser would report a misleading CORS violation instead of the real error.</p>
+
+  <h3>Health probes</h3>
+  <div class="scroll"><table>
+    <thead><tr><th>Endpoint</th><th>Semantics</th><th>Touches dependencies?</th></tr></thead>
+    <tbody>
+      <tr><th><code>/health</code></th><td>Liveness. The original path; compose and external monitors point here</td><td>No</td></tr>
+      <tr><th><code>/health/live</code></th><td>Alias, named for the k8s convention</td><td>No</td></tr>
+      <tr><th><code>/health/ready</code></th><td>Readiness — is this replica servable right now?</td><td>Yes</td></tr>
+    </tbody>
+  </table></div>
+  <p>Liveness is static <strong>by design</strong>: a liveness probe that opens a database connection turns a 30-second Postgres blip into a restart loop across every replica, which is worse than the outage it detects.</p>
+  <p><code>/health/ready</code> grades its dependencies rather than treating them alike. Postgres is required — unreachable returns 503. Valkey is optional and only probed when <code>valkey_url</code> is set; because <code>ValkeyCache</code> fails soft onto an in-process cache behind a circuit breaker, a broken Valkey reports <code>degraded</code> and still returns 200. Migration state is read from a <code>_STARTUP_COMPLETE</code> flag set at the end of lifespan, so a replica still running Alembic reports <code>not_ready</code>.</p>
+  <p>Failure bodies carry the exception <strong>type name only</strong> — connection errors can embed the DSN, and this endpoint is unauthenticated.</p>
+  <p><strong>A dead SOURCE is not a dead server.</strong> A DirectQuery dataset queries the customer's database on every render, and when that is unreachable the failure is not this application's. <code>run_direct_query</code> translates connection-level errors into <code>SourceUnavailable</code>, which the widget path answers with a <strong>502 naming the source</strong> &mdash; previously it escaped to the generic handler and a reader saw &ldquo;Internal server error&rdquo; on their widget. Translated in the SERVICE, not in each of the four routers that call it. Only driver-level failures are caught: a bug in the shaping code still escapes as a 500, because turning every exception into &ldquo;the source is down&rdquo; hides our own faults. The driver's text is dropped rather than reformatted &mdash; a connection error embeds the DSN.</p>
+  <h3>Error contract on the widget path</h3>
+  <p>Every error a widget render can produce carries a <strong>code</strong> beside its text, on both channels a widget receives: <code>{"detail": "&lt;unchanged text&gt;", "code": "row_cap"}</code> and, on the 200 channel, <code>{"type": "error", "code": "measure_error", "message": "..."}</code>. <code>detail</code> is unchanged and still a string; <code>code</code> is additive. The set is closed and lives in <code>services/error_codes.py</code> (pure data — a service may not import FastAPI); the exception is <code>core/widget_errors.py</code>, and its <code>widget_error(status, code, text)</code> is the one way the widget router raises, it refuses a code not in the set, and <code>tests/test_widget_error_codes.py</code> pins structurally that no bare <code>HTTPException(</code> remains in <code>routers/widget_data.py</code>. The one widget-path error that is not an HTTPException — <code>QuotaExceeded</code>, translated by its own handler in <code>main.py</code> — writes its code there, and is pinned at the endpoint.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>code</th><th>status</th><th>means</th><th>retry?</th></tr></thead>
+    <tbody>
+      <tr><th><code>parameter</code></th><td>400</td><td>a report parameter is missing, unknown or the wrong type</td><td>no</td></tr>
+      <tr><th><code>unsupported</code></th><td>400</td><td>the feature does not exist here (a DirectQuery engine, an export format)</td><td>no</td></tr>
+      <tr><th><code>forbidden_column</code></th><td>403</td><td>the widget references a column this role cannot see</td><td>no</td></tr>
+      <tr><th><code>forbidden</code></th><td>403</td><td>this role may not read the dataset</td><td>no</td></tr>
+      <tr><th><code>not_found</code></th><td>404</td><td>the dataset, or its file on disk</td><td>no</td></tr>
+      <tr><th><code>row_cap</code></th><td>413</td><td>the import row cap; names the size and the limit</td><td>no</td></tr>
+      <tr><th><code>source_unavailable</code></th><td>502</td><td>the customer's database could not be reached</td><td><strong>yes</strong></td></tr>
+      <tr><th><code>measure_error</code></th><td>200</td><td>a measure expression could not be evaluated (second channel)</td><td>no</td></tr>
+      <tr><th><code>internal</code></th><td>500</td><td>ours</td><td>no</td></tr>
+      <tr><th><code>quota</code></th><td>429</td><td>the org's daily query quota; <code>Retry-After</code> says when</td><td><strong>yes</strong></td></tr>
+    </tbody>
+  </table></div>
+  <p>The second channel existed before the code did, and nothing on the frontend read it: a measure that failed to evaluate came back as a 200 with empty rows and the widget drew an empty chart, message discarded. <code>WidgetRenderer</code> now renders both channels, and offers <strong>Try again</strong> for <code>source_unavailable</code> only — the one code whose answer can differ a second later.</p>
+</section>
+
+<section id="l7">
+  <div class="layer-head"><span class="lnum">07</span><h2 class="sec">Presentation</h2></div>
+  <p class="owns"><strong>Owns:</strong> authoring and rendering reports. React 18 · TypeScript · Vite · Recharts.</p>
+
+  <h3>Pages</h3>
+  <p><strong>16 pages</strong> in <code>frontend/src/pages/</code>.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Page</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><th><code>ReportBuilder.tsx</code></th><td>The designer — the largest module in the codebase</td></tr>
+        <tr><th><code>DatasetDetail.tsx</code></th><td>Analysis viewer</td></tr>
+        <tr><th><code>Dashboard.tsx</code>, <code>Reports.tsx</code></th><td>Dataset and report lists</td></tr>
+        <tr><th><code>Upload.tsx</code></th><td>Drag-and-drop ingestion</td></tr>
+        <tr><th><code>Connections.tsx</code></th><td>Data source management</td></tr>
+        <tr><th><code>SourceReview.tsx</code></th><td>Metadata review and approval</td></tr>
+        <tr><th><code>Lineage.tsx</code></th><td>Model lineage graph (<code>reactflow</code>)</td></tr>
+        <tr><th><code>SharedReport.tsx</code>, <code>EmbeddedReport.tsx</code></th><td>Public and embedded views</td></tr>
+        <tr><th><code>ReportPrint.tsx</code></th><td>Print/PDF layout</td></tr>
+        <tr><th><code>Home.tsx</code></th><td>Landing page — recents, dashboards, datasets as card sections</td></tr>
+        <tr><th><code>Dashboard.tsx</code></th><td>The dataset list (route <code>/datasets</code>)</td></tr>
+        <tr><th><code>AskAI.tsx</code></th><td>The agent's own page — scope picker over <code>ChatPane</code></td></tr>
+        <tr><th><code>InsightsHub.tsx</code></th><td>One front door to the analysis capabilities (links into <code>DatasetDetail</code> anchors)</td></tr>
+        <tr><th><code>Login.tsx</code>, <code>SsoCallback.tsx</code></th><td>Authentication</td></tr>
+        <tr><th><code>admin/</code></th><td>Administration screens</td></tr>
+        <tr><th><code>monitoring/</code></th><td>Monitoring screens — jobs, deliveries, activity (admin-gated)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Widget system</h3>
+  <p><strong>74 widget types</strong> declared in <code>types/report.ts</code> as <code>WidgetType</code> and catalogued in <code>WIDGET_CATALOG</code> — the source of truth; do not maintain a parallel list.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Category</th><th>Types</th></tr></thead>
+      <tbody>
+        <tr><th>Charts</th><td>bar, line, step, dot plot, needle, histogram, butterfly, area, funnel, ribbon, pie, donut, scatter, treemap, four dual-axis variants, comparative/numeric series, bubble (+change), correlation matrix, heatmap, parallel coordinates, box plot, waterfall, gauge, schedule (Gantt), vector plot, word cloud, forecast, sankey, network</td></tr>
+        <tr><th>Controls</th><td>KPI, card, table, crosstab, matrix, list, text, image, shape, button, slicer, web content, custom visual, container</td></tr>
+        <tr><th>Hierarchies</th><td>tree, sunburst, icicle, dendrogram, org chart, circle pack (one shaper, six layouts), decomposition tree</td></tr>
+        <tr><th>Composed</th><td>small multiples, custom graph, script</td></tr>
+        <tr><th>Models</th><td>linear regression, logistic regression, decision tree, clustering, model comparison (one shared held-out split), saved-model scoring</td></tr>
+        <tr><th>Maps</th><td>choropleth, points, bubbles, lines, clusters, pie, layers, density, contour, network, network map</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Any bar, line, area, scatter, step or dot plot can also be drawn as a lattice (small multiples by one or two fields) or animated over a field.</p>
+  <p>Rendering is dispatched by <code>WidgetBody.tsx</code> (inside <code>WidgetRenderer.tsx</code>) to per-type modules in <code>components/report/chartRenderers/</code>. Maps render through <code>d3-geo</code> and <code>topojson-client</code> against a bundled <code>world-atlas</code> — a deliberate choice that keeps geospatial working without external tile services, and therefore offline.</p>
+
+  <h3>Interaction model</h3>
+  <p><code>CrossFilterContext.tsx</code> holds page-level filter state. Each widget declares an interaction mode.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Mode</th><th>Emits</th><th>Receives</th></tr></thead>
+      <tbody>
+        <tr><th>Two-way ⇄</th><td>yes</td><td>yes</td></tr>
+        <tr><th>Broadcast →</th><td>yes</td><td>no</td></tr>
+        <tr><th>Receive ←</th><td>no</td><td>yes</td></tr>
+        <tr><th>Isolated —</th><td>no</td><td>no</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Active filters surface in <code>FilterBar.tsx</code> with individual clear controls. The strip renders on the builder, on a shared link and inside an embed, and stays visible when nothing is filtering — an empty strip and no strip at all look identical, and only one of them tells the reader the page can be filtered.</p>
+  <p><strong>Edge integrity.</strong> Per-pair actions (<code>config.interaction.actions</code>) address their targets by widget id, so an edge can outlive what it points at. Two things keep the graph honest, because a dead edge neither throws nor logs — the selection is dropped by one of <code>getFiltersFor</code>'s early returns and the author, who tested the path they wired, never sees it:</p>
+  <ul class="plain">
+    <li><code>_prune_actions_targeting</code> in <code>routers/reports.py</code> strips edges aimed at a widget as it is deleted. It runs on the SERVER because the copilot, the composer and the API all delete widgets without touching builder state, and it leaves widgets with no <code>actions</code> untouched — writing an empty list onto one would change its meaning from &ldquo;reaches everything&rdquo; to &ldquo;reaches only the targets listed here, of which there are none&rdquo;.</li>
+    <li><code>reviewReport</code> in <code>ReviewPane.tsx</code> reports the edges that survive anyway: a target that no longer exists, one on another page (page-scoped filters never arrive), one set not to receive, per-pair actions on a page whose automatic mode ignores them, and a page where nothing will react at all.</li>
+  </ul>
+  <p><strong>A column can carry a geography role.</strong> <code>column_meta[col] = {role: 'geography', boundary_set_id}</code> says which boundaries a column draws with, and it belongs on the COLUMN because that is where the fact lives. Resolution order at render time is <code>config.boundary_set_id</code> (a deliberate per-widget override) &rarr; the column's classification &rarr; countries. It is published to shared links and embeds as a derived <code>geography</code> mapping, never as <code>column_meta</code> itself, which also carries <code>__prep_steps__</code>. Resolution is deliberately NOT done inside <code>get_widget_data</code>: that result is cached on its inputs and <code>column_meta</code> is not one of them, so a reclassified column would serve the old shapes until the cache turned over. Dropping a classified column onto the canvas produces a <code>map_choropleth</code> rather than a bar of counts, and deleting a boundary set clears the classifications that referenced it.</p>
+  <p><strong>Map pins are outside all of this, on purpose.</strong> <code>config.pins</code> holds author-placed annotations drawn by <code>GeoPointMapRenderer</code> on the coordinate maps. They are not rows, so the whole pin group is <code>pointerEvents: none</code> and never enters <code>markers</code> — which is what keeps them out of both the click path and <code>markersWithin</code>, the lasso's membership test. A pin that could broadcast would filter the page to a label no row holds, and every other widget would answer &ldquo;no rows&rdquo; with nothing on screen to explain why. Pins join the projection's fit, though: an annotation outside the data's extent would project off-canvas, present in the DOM and invisible.</p>
+
+  <h3>Supporting modules</h3>
+  <p><code>contexts/AuthContext.tsx</code> holds session state. <code>services/api.ts</code> is the Axios client. <code>lib/</code> contains pure helpers — <code>sqlWhere.ts</code>, <code>simpleExpr.ts</code>, <code>displayRules.ts</code>, <code>columnRole.ts</code>, <code>pptExport.ts</code> (client-side PowerPoint export), <code>widgetImage.ts</code> — each with a colocated test.</p>
+</section>
+
+<section id="cross">
+  <h2 class="sec">Cross-cutting concerns</h2>
+  <p class="sub">These deliberately span layers rather than sitting in one.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Concern</th><th>Implementation</th><th class="num">Spans</th></tr></thead>
+      <tbody>
+        <tr><th>Security</th><td><code>core/rls.py</code>, <code>org_scope.py</code>, <code>capability.py</code>, <code>security.py</code>, <code>api_keys.py</code></td><td class="num">3–7</td></tr>
+        <tr><th>Audit</th><td><code>services/audit.py</code>, <code>admin_audit.py</code>, <code>audit_log</code> table</td><td class="num">3–6</td></tr>
+        <tr><th>Observability</th><td><code>core/telemetry.py</code> (OpenTelemetry traces + metrics), <code>query_log.py</code>, health probes</td><td class="num">1–6</td></tr>
+        <tr><th>Rate limiting &amp; quotas</th><td><code>core/rate_limit.py</code>, <code>services/quotas.py</code></td><td class="num">3, 6</td></tr>
+        <tr><th>PII handling</th><td><code>services/pii.py</code> — masking runs at sampling time</td><td class="num">2</td></tr>
+        <tr><th>Caching</th><td><code>cache_backend.py</code>, <code>frame_cache.py</code>, <code>metadata/cache.py</code></td><td class="num">2–4</td></tr>
+        <tr><th>Offline operation</th><td><code>net_guard.py</code>, <code>scripts/build_offline_bundle.ps1</code></td><td class="num">all</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Observability</h3>
+  <p><code>core/telemetry.py</code> exports <strong>traces and metrics</strong> over OTLP, opt-in via <code>otel_enabled</code> (default off). Disabled is a hard no-op: nothing imports <code>opentelemetry</code>, and both the tracer and the metric instruments are pure-Python null objects, so the hot path pays an attribute lookup and a discarded call.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Instrument</th><th>Answers</th><th>Labels</th></tr></thead>
+    <tbody>
+      <tr><th><code>widget.query.duration</code></th><td>is it slow, and where?</td><td>executor, cache_hit</td></tr>
+      <tr><th><code>widget.query.total</code></th><td>how much traffic, how much failing?</td><td>executor, cache_hit</td></tr>
+      <tr><th><code>cache.operations</code></th><td>is the cache working, or are we recomputing?</td><td>result</td></tr>
+      <tr><th><code>quota.rejections</code></th><td>are tenants hitting limits?</td><td>quota</td></tr>
+    </tbody>
+  </table></div>
+  <p>Deliberately few: metrics are cheap to emit and expensive to maintain. Labels are low-cardinality by design — quota rejections are labelled by <em>kind</em>, never by message, since storage-quota text interpolates the limit and would mint a series per value.</p>
+  <p>Two isolation rules, both learned from the tracer. Metrics setup sits in its own <code>try</code>, so a collector that takes traces but rejects metrics degrades to “tracing works” rather than losing both. And instruments are module attributes reassigned at setup, so call sites must write <code>telemetry.widget_query_total</code> — a <code>from</code> import would freeze the disabled no-op forever.</p>
+  <p>Spans additionally pass through a <code>_QuerystringScrubber</code> that strips query strings from every span before export, because the embed surface carries a live host-signed token in its URL.</p>
+
+  <h3>Offline / air-gapped operation</h3>
+  <p>The platform is designed to run with no internet access:</p>
+  <ul class="plain">
+    <li>Frontend assets are bundled, not CDN-loaded — pinned by <code>offlineAssets.test.ts</code></li>
+    <li>Map geography ships with the image (<code>world-atlas</code>)</li>
+    <li>The model endpoint is self-hosted; <code>llm_enabled=False</code> removes the AI layer</li>
+    <li><code>scripts/build_offline_bundle.ps1</code> produces image tarballs plus a <code>MANIFEST.json</code> recording exact image IDs and digests for transfer across the air gap</li>
+  </ul>
+
+  <h3>Durable state</h3>
+  <p>Two volumes must survive; everything else is reconstructible.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Store</th><th>Volume</th><th>Loss means</th></tr></thead>
+    <tbody>
+      <tr><th>PostgreSQL</th><td><code>postgres_data</code></td><td>Total loss — every report, dataset, user, rule</td></tr>
+      <tr><th>Uploaded files</th><td><code>uploaded_files</code></td><td>Import-mode datasets cannot render</td></tr>
+      <tr><th>Valkey cache</th><td>container-local</td><td>Nothing; rebuilt on demand</td></tr>
+      <tr><th>Embeddings model</th><td>baked into the image</td><td>Nothing; redeploy the image</td></tr>
+    </tbody>
+  </table></div>
+  <p>The two durable volumes must be captured <strong>as a pair, files first</strong>. A database restored without <code>uploaded_files</code> looks intact — datasets listed, reports openable — and fails at the first import-mode widget render. <code>scripts/backup.ps1</code> and <code>scripts/restore.ps1</code> implement the procedure, including the ordering rule (files first on backup, database first on restore) that makes a stray file the only possible inconsistency. Backup verifies the dump's <code>PGDMP</code> header before rotating, so a run of failures cannot delete the last good backup. See <code>docs/BACKUP_AND_RECOVERY.md</code> for procedures and the verification drill.</p>
+</section>
+
+<section id="lifecycles">
+  <h2 class="sec">Request lifecycles</h2>
+  <p class="sub">Two paths through the stack, annotated with the layer each step belongs to.</p>
+
+  <h3>A widget renders</h3>
+<pre><code>WidgetRenderer (7)
+  → api.ts POST /api/v1/datasets/{id}/widget-data      (7→6)
+    → routers/widget_data.py: authn, org scope         (6)
+      → services/widget_data.py: parse config          (4)
+        → core/rls.py: row filter + denied columns     (4)
+          → query_builder.py: build dialect SQL        (4)
+            → frame_cache (3) or direct_query (4)
+              → source engine or Postgres
+        ← result frame
+      ← aggregation + running metrics applied          (4)
+    ← JSON
+  ← chartRenderers/&lt;Type&gt;Renderer.tsx                  (7)</code></pre>
+
+  <h3>A natural-language question</h3>
+<pre><code>Agent pane (7)
+  → routers/agent.py                                   (6)
+    → services/agent/graph.py                          (5)
+        classify → clarify? → context (metadata store, 2/3)
+        → plan → DAG:
+            generate SQL (llm.py → self-hosted vLLM)
+            → ladder / policy / validate               (5)
+            → resolve_rls_expr                         (4)  ← governance inherited
+            → execute                                  (4→3, or 1 live)
+            → sanity check                             (5)
+          [bounded repair loop on rejection]
+        → explain                                      (5)
+    ← answer + provenance, persisted to agent_runs     (3)</code></pre>
+</section>
+
+<section id="testing">
+  <h2 class="sec">Testing</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Suite</th><th>Scope</th><th>Count</th></tr></thead>
+      <tbody>
+        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~5,300 tests · 382 modules</td></tr>
+        <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~2,800 tests · 210 files</td></tr>
+        <tr><th>Evals</th><td><code>backend/evals/</code></td><td>Agent quality gates (<code>run_eval_gate.ps1</code>)</td></tr>
+        <tr><th>Conformance</th><td><code>tests/test_layer_conformance.py</code></td><td>Enforces the layer boundaries above</td></tr>
+        <tr><th>Doc audit</th><td><code>tests/test_architecture_doc.py</code></td><td>Enforces the <em>counts</em> in this document</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="callout">
+    <span class="ct">This document is tested</span>
+    <p>Every count above — connectors, tables, widgets, aggregations, pages, router modules, Alembic revisions — is re-derived from the tree and compared against both <code>ARCHITECTURE.md</code> and <code>ARCHITECTURE.html</code>. Change the code without updating the prose and the build fails; change one document without the other and it fails too.</p>
+    <p>That test exists because on 2026-08-28 this document claimed 46 connectors while the registry held 43. The wrong figure came from reading the spec list by eye, and it had already reached a second document and a published comparison before anyone re-derived it. Prose rots silently because nothing reads it.</p>
+    <p>Counts are derived, never hard-coded: the assertion is “whatever the registry holds is what the document says”, so adding a connector fails the test until the document follows — rather than the test needing an edit that nobody reads.</p>
+  </div>
+
+  <p>Backend tests run against <strong>in-memory SQLite</strong> (<code>tests/conftest.py</code>) — no live Postgres required. Both suites are green.</p>
+
+  <h3>Environment notes</h3>
+  <ol class="steps">
+    <li><strong>Console encoding — fixed 2026-08-28.</strong> <code>test_infer_keys_accuracy.py</code> printed box-drawing characters in its report header, which Windows' default <code>cp1252</code> console cannot encode — raising <code>UnicodeEncodeError</code> before the assertions ran. The header is now ASCII; the suite passes on a stock Windows shell with no environment overrides.</li>
+    <li><strong>Run from a virtualenv built from <code>backend/requirements.txt</code>.</strong> A missing <code>pytest_asyncio</code> makes <code>tests/conftest.py</code> fail to import; pytest then exits <strong>4</strong> and collects nothing. The exit code is correct — but a wrapper around pytest may collapse it to 0, as an RTK-proxied invocation did here, reporting “No tests collected” with a zero exit. Trust pytest's own exit code, not a wrapper's. <code>backend/conftest.py</code> (rootdir) additionally asserts a minimum collected-test count, standing down for deliberate subset runs (<code>-k</code>, <code>-m</code>, <code>--lf</code>, explicit paths, or <code>DATALYTICS_ALLOW_PARTIAL_COLLECTION=1</code>).</li>
+  </ol>
+</section>
+
+<section id="extend">
+  <h2 class="sec">Extension points</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>To add…</th><th>Touch</th></tr></thead>
+      <tbody>
+        <tr><th>A data source</th><td>Append a <code>ConnectorSpec</code> to <code>_ALL_SPECS</code> in <code>connectors.py</code></td></tr>
+        <tr><th>A widget type</th><td><code>WidgetType</code> + <code>WIDGET_CATALOG</code> in <code>types/report.ts</code>, a renderer in <code>chartRenderers/</code>, config in <code>WidgetConfigPanel.tsx</code></td></tr>
+        <tr><th>An aggregation</th><td><code>AGGREGATIONS</code> in <code>types/report.ts</code> and the engine in <code>services/widget_data.py</code></td></tr>
+        <tr><th>An analysis</th><td>Register in <code>services/analysis/registry.py</code></td></tr>
+        <tr><th>An agent capability</th><td>A node in <code>services/agent/nodes/</code>, wired in <code>graph.py</code></td></tr>
+        <tr><th>A schema change</th><td>An Alembic revision in <code>backend/alembic/versions/</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<footer>
+  <p>Verified against the working tree on 28 August 2026: connector registry in <code>services/connectors.py</code>, ORM tables in <code>models/models.py</code>, routers in <code>main.py</code>, widget catalog in <code>types/report.ts</code>, agent graph in <code>services/agent/graph.py</code>, and LLM configuration in <code>core/config.py</code>. Counts exclude <code>__init__</code> and test files.</p>
+</footer>
+
+</div>
+</body>
+</html>

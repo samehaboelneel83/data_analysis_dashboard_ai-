@@ -1,0 +1,68 @@
+services:
+
+  # ── 1. PostgreSQL ─────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: datalytics_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB:-datalytics}
+      POSTGRES_USER:     ${POSTGRES_USER:-datalytics}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-datalytics_secret}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-datalytics}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [datalytics_net]
+
+  # ── 2. FastAPI Backend ────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: datalytics_backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL:    postgresql+asyncpg://${POSTGRES_USER:-datalytics}:${POSTGRES_PASSWORD:-datalytics_secret}@postgres:5432/${POSTGRES_DB:-datalytics}
+      SECRET_KEY:      ${SECRET_KEY:-change_me_in_production}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
+      ENV:             ${ENV:-development}
+      UPLOAD_DIR:      /app/uploads
+      MAX_UPLOAD_MB:   ${MAX_UPLOAD_MB:-100}
+    volumes:
+      - ./backend:/app
+      - uploaded_files:/app/uploads
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [datalytics_net]
+
+  # ── 3. React Frontend ─────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: datalytics_frontend
+    restart: unless-stopped
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+    ports:
+      - "3000:3000"
+    depends_on: [backend]
+    networks: [datalytics_net]
+
+volumes:
+  postgres_data:
+  uploaded_files:
+
+networks:
+  datalytics_net:
+    driver: bridge

@@ -1,0 +1,205 @@
+services:
+
+  # ── 1. PostgreSQL ─────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: datalytics_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB:-datalytics}
+      POSTGRES_USER:     ${POSTGRES_USER:-datalytics}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-datalytics_secret}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5433:5432"  # host 5433 — avoid clash with local Postgres on 5432
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-datalytics}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [datalytics_net]
+
+  # ── 2. FastAPI Backend ────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: datalytics_backend
+    restart: unless-stopped
+    # UVICORN_WORKERS >1 runs a multi-process server (no auto-reload): CPU-bound
+    # pandas work stops starving the event loop because requests spread across
+    # processes. Default 0 keeps the single-process --reload dev behavior.
+    # Startup is advisory-lock serialized (app.main lifespan) and the scheduler
+    # is advisory-locked per item, so N workers are safe by construction.
+    command: >
+      sh -c 'if [ "$${UVICORN_WORKERS:-0}" -gt 1 ];
+             then exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers "$${UVICORN_WORKERS}";
+             else exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload; fi'
+    environment:
+      UVICORN_WORKERS: ${UVICORN_WORKERS:-0}
+      DATABASE_URL:    postgresql+asyncpg://${POSTGRES_USER:-datalytics}:${POSTGRES_PASSWORD:-datalytics_secret}@postgres:5432/${POSTGRES_DB:-datalytics}
+      SECRET_KEY:      ${SECRET_KEY:-change_me_in_production}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001}
+      ENV:             ${ENV:-development}
+      UPLOAD_DIR:      /app/uploads
+      MAX_UPLOAD_MB:   ${MAX_UPLOAD_MB:-100}
+      SUPER_ADMIN_EMAILS: ${SUPER_ADMIN_EMAILS:-admin@datalytics.local,admin,admin@admin.com}
+      # O2: shared result-cache backend (services/cache_backend.py).
+      #
+      # Now pointed at the valkey service this compose file already runs. It
+      # was previously unset, which shipped an odd state: a 256MB Valkey
+      # container with a healthcheck, wired to nothing, while every worker
+      # process repeated identical widget renders in its own in-process cache.
+      #
+      # Safe to default ON because a failure degrades rather than breaks:
+      # ValkeyCache logs the error, opens a circuit for `cooldown_s`, and
+      # serves from the in-process fallback -- verified live against both a
+      # dead host (no raise, fallback served the value) and the real service
+      # (exact dict round-trip). A deployment with no Valkey at all sets
+      # VALKEY_URL= to get the old behaviour back.
+      #
+      # Deliberately NO `depends_on: valkey` below, matching the reasoning
+      # already applied to embeddings: the backend must start and keep running
+      # whether or not this optional service exists.
+      VALKEY_URL: ${VALKEY_URL:-redis://valkey:6379/0}
+      # M2: Backend B (services/retrieval.py) wired at the compose service
+      # from Task M1, enabled by default per the plan's spec decision --
+      # the circuit breaker + lexical fallback there make a dead/absent
+      # embeddings service degrade quality, never availability, so there is
+      # no `depends_on: embeddings` below: backend must start (and keep
+      # running) whether or not that service exists, is still building, or
+      # is down. `EMBEDDING_DIM` matches embedding_server's fixed 384-dim
+      # output; a mismatch here is exactly what the dim guard in
+      # retrieval.py's `_verify_embedding_dim_or_block` catches.
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-http://embeddings:8000/v1}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-384}
+    volumes:
+      - ./backend:/app
+      - uploaded_files:/app/uploads
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # /health/ready, not /health: readiness reports 503 until lifespan has
+    # finished running Alembic and the backfills, so `frontend` (which waits
+    # on this) no longer starts against a backend that is up but still
+    # migrating. start_period covers that migration window without counting
+    # those probes as failures.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health/ready', timeout=3).status == 200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    networks: [datalytics_net]
+
+  # ── 2b. Valkey (optional shared result-cache tier, Task O2) ────────────────
+  # Not depended on by `backend` (opt-in via VALKEY_URL above) so a deployment
+  # that never sets that env var is unaffected by this service existing.
+  # No ports published to the host -- reachable only from other compose
+  # services on datalytics_net, matching the "no internet, no unnecessary
+  # exposure" deployment constraint.
+  valkey:
+    image: valkey/valkey:8-alpine
+    container_name: datalytics_valkey
+    restart: unless-stopped
+    command: valkey-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [datalytics_net]
+
+  # ── 2c. Embeddings service (Task M1) ────────────────────────────────────
+  # Self-hosted multilingual embeddings (ONNX, no torch) -- see
+  # ARCHITECTURE.md "The embeddings service -- concrete design" and
+  # docs/superpowers/plans/2026-08-30-embeddings-service.md. Weights are
+  # baked into the image at build time (air-gap compliant); no host ports,
+  # same isolation posture as valkey. Backend B's circuit breaker + lexical
+  # fallback make a dead/slow embeddings service degrade quality, never
+  # availability, so this ships enabled by default (see backend env below).
+  embeddings:
+    build:
+      context: ./embedding_server
+      dockerfile: Dockerfile
+    container_name: datalytics_embeddings
+    restart: unless-stopped
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=3).status == 200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks: [datalytics_net]
+
+  # ── 3. React Frontend ─────────────────────────────────────────────────────
+  # Development: the Vite dev server with HMR and the source bind-mounted.
+  # `target: dev` is REQUIRED -- the Dockerfile is multi-stage now, and no
+  # target would build the last stage (nginx) instead of this one.
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: dev
+    container_name: datalytics_frontend
+    restart: unless-stopped
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+      - ./frontend/package.json:/app/package.json:ro
+      - ./frontend/vite.config.ts:/app/vite.config.ts:ro
+      - ./frontend/tsconfig.json:/app/tsconfig.json:ro
+      - ./frontend/index.html:/app/index.html:ro
+    ports:
+      - "3001:3000"
+    # service_healthy, not bare `[backend]`: the latter waits only for the
+    # container to start, so the frontend could come up while the backend was
+    # still applying migrations and answer its first API calls with errors.
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks: [datalytics_net]
+
+  # Production: the built bundle served by nginx, which also proxies /api so
+  # the app and the API share one origin (no CORS, no hard-coded API host).
+  #
+  # Behind a PROFILE so `docker compose up` keeps starting the dev server the
+  # team works against. A real deployment runs:
+  #     docker compose --profile prod up -d --build web
+  # and publishes 8080 (or maps 80/443 at the host's own TLS terminator).
+  web:
+    profiles: ["prod"]
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: prod
+      args:
+        # Empty on purpose: same-origin. Set only when the API is served from
+        # a different host than the app.
+        VITE_API_URL: ${VITE_API_URL_BUILD:-}
+    container_name: datalytics_web
+    restart: unless-stopped
+    ports:
+      # 8090, not 8080: 8080 is a crowded default and collides with other
+      # stacks on a shared dev box. Override with WEB_PORT.
+      - "${WEB_PORT:-8090}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks: [datalytics_net]
+
+volumes:
+  postgres_data:
+  uploaded_files:
+
+networks:
+  datalytics_net:
+    driver: bridge

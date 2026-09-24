@@ -1,0 +1,40 @@
+name: state_symbols
+properties:
+  description: Table public.state_symbols
+table_reference:
+  catalog: ''
+  schema: public
+  table: state_symbols
+columns:
+- name: id
+  type: INT
+  is_calculated: false
+  not_null: true
+  is_primary_key: true
+  properties: {}
+- name: symbol_code
+  type: INT
+  is_calculated: false
+  not_null: true
+  is_primary_key: false
+  properties: {}
+- name: state_level_code
+  type: INT
+  is_calculated: false
+  not_null: true
+  is_primary_key: false
+  properties: {}
+- name: state_type_code
+  type: INT
+  is_calculated: false
+  not_null: true
+  is_primary_key: false
+  properties: {}
+- name: institute_code
+  type: INT
+  is_calculated: false
+  not_null: true
+  is_primary_key: false
+  properties: {}
+primary_key: id
+cached: false

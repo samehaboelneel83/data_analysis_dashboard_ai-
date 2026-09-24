@@ -1,0 +1,6 @@
+FAILED tests/test_architecture_doc.py::test_documented_count_matches_the_code[ARCHITECTURE.md-frontend test files]
+FAILED tests/test_architecture_doc.py::test_documented_count_matches_the_code[ARCHITECTURE.html-pages]
+FAILED tests/test_architecture_doc.py::test_documented_count_matches_the_code[ARCHITECTURE.html-backend test modules]
+FAILED tests/test_architecture_doc.py::test_documented_count_matches_the_code[ARCHITECTURE.html-frontend test files]
+6 failed, 3179 passed, 4 skipped in 1136.62s (0:18:56)
+EXIT=0

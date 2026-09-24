@@ -1,0 +1,40 @@
+name: spatial_ref_sys
+properties:
+  description: Table public.spatial_ref_sys
+table_reference:
+  catalog: ''
+  schema: public
+  table: spatial_ref_sys
+columns:
+- name: srid
+  type: INT
+  is_calculated: false
+  not_null: true
+  is_primary_key: true
+  properties: {}
+- name: auth_name
+  type: VARCHAR(256)
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+- name: auth_srid
+  type: INT
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+- name: srtext
+  type: VARCHAR(2048)
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+- name: proj4text
+  type: VARCHAR(2048)
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+primary_key: srid
+cached: false

@@ -1,0 +1,2846 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Layer-by-layer comparison of the specified AI Data Analytics Platform architecture against the Datalytics v2 codebase as built.">
+<title>Architecture vs. Implementation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style>
+:root {
+  --ground:#f6f7f9; --surface:#ffffff; --surface-2:#eef1f5;
+  --ink:#101822; --ink-2:#33404e; --muted:#5c6875;
+  --rule:#e1e5ea; --rule-2:#cfd6de;
+  --accent:#2d5ba8; --accent-soft:#e8eef8;
+  --ok:#16785a; --warn:#a86c15; --bad:#b03a32; --none:#616c7a;
+  --ok-bg:#e6f2ed; --warn-bg:#f8efdf; --bad-bg:#f8e9e7; --none-bg:#eceef1;
+  --shadow:0 1px 2px rgba(16,24,34,.05), 0 8px 24px -12px rgba(16,24,34,.18);
+  --sans:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  --serif:"Source Serif 4",Georgia,"Times New Roman",serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Consolas,monospace;
+  --measure:70ch;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:#0f141a; --surface:#161c24; --surface-2:#1d242e;
+    --ink:#e6ebf1; --ink-2:#c2cbd6; --muted:#8e9aa8;
+    --rule:#28313c; --rule-2:#38434f;
+    --accent:#84a9e6; --accent-soft:#1b2634;
+    --ok:#5cc39c; --warn:#dfae5e; --bad:#e58a80; --none:#8e9aa8;
+    --ok-bg:#152720; --warn-bg:#2a2314; --bad-bg:#2b1a18; --none-bg:#1d242e;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+  }
+}
+:root[data-theme="dark"] {
+  --ground:#0f141a; --surface:#161c24; --surface-2:#1d242e;
+  --ink:#e6ebf1; --ink-2:#c2cbd6; --muted:#8e9aa8;
+  --rule:#28313c; --rule-2:#38434f;
+  --accent:#84a9e6; --accent-soft:#1b2634;
+  --ok:#5cc39c; --warn:#dfae5e; --bad:#e58a80; --none:#8e9aa8;
+  --ok-bg:#152720; --warn-bg:#2a2314; --bad-bg:#2b1a18; --none-bg:#1d242e;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.6);
+}
+
+*,*::before,*::after { box-sizing:border-box; }
+body {
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:var(--serif); font-size:17px; line-height:1.65;
+  -webkit-font-smoothing:antialiased;
+}
+:focus-visible { outline:2px solid var(--accent); outline-offset:3px; border-radius:2px; }
+
+/* ── Masthead ─────────────────────────────────────────── */
+.bar-top {
+  position:sticky; top:0; z-index:20;
+  display:flex; align-items:center; gap:.9rem; flex-wrap:wrap;
+  padding:.6rem clamp(1rem,5vw,3rem);
+  background:var(--surface);
+  background:color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--rule);
+  font-family:var(--mono); font-size:.7rem; letter-spacing:.06em;
+  text-transform:uppercase; color:var(--muted);
+}
+.bar-top b { color:var(--ink); font-weight:600; }
+.bar-top .vs { color:var(--accent); }
+.bar-top .spacer { flex:1 1 2rem; }
+
+header.hero {
+  padding:clamp(3rem,9vw,6rem) clamp(1rem,5vw,3rem) 2.5rem;
+  border-bottom:1px solid var(--rule);
+  background:linear-gradient(180deg, var(--surface) 0%, var(--ground) 100%);
+}
+.wrap { max-width:var(--measure); margin-inline:auto; }
+.wrap-wide { max-width:1180px; margin-inline:auto; }
+
+.eyebrow {
+  font-family:var(--mono); font-size:.72rem; font-weight:500;
+  letter-spacing:.16em; text-transform:uppercase; color:var(--accent);
+  margin:0 0 1rem;
+}
+h1.title {
+  font-family:var(--sans); font-weight:700; font-size:clamp(2.1rem,5.5vw,3.4rem);
+  line-height:1.06; letter-spacing:-.025em; text-wrap:balance;
+  margin:0 0 1.2rem; color:var(--ink);
+}
+.standfirst {
+  font-size:1.14rem; color:var(--ink-2); margin:0 0 2rem; max-width:62ch;
+}
+.meta {
+  display:grid; grid-template-columns:repeat(2,1fr);
+  gap:1px; background:var(--rule); border:1px solid var(--rule);
+  border-radius:3px; overflow:hidden; margin-top:2rem;
+}
+.meta div { background:var(--surface); padding:.85rem 1rem; }
+.meta dt {
+  font-family:var(--mono); font-size:.66rem; letter-spacing:.13em;
+  text-transform:uppercase; color:var(--muted); margin:0 0 .3rem;
+}
+.meta dd { margin:0; font-family:var(--sans); font-weight:500; font-size:.92rem; }
+
+/* ── Scorecard ────────────────────────────────────────── */
+.score { padding:clamp(2rem,5vw,3.5rem) clamp(1rem,5vw,3rem); border-bottom:1px solid var(--rule); }
+.score h2 {
+  font-family:var(--mono); font-size:.72rem; font-weight:500; letter-spacing:.16em;
+  text-transform:uppercase; color:var(--muted); margin:0 0 1.4rem;
+}
+.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:.7rem; }
+.card {
+  display:grid; grid-template-columns:auto 1fr auto; grid-template-rows:auto auto auto;
+  gap:.15rem .6rem; align-items:center;
+  padding:.9rem 1rem; text-decoration:none; color:inherit;
+  background:var(--surface); border:1px solid var(--rule);
+  border-left:3px solid var(--none); border-radius:3px;
+  box-shadow:var(--shadow); transition:transform .14s ease, border-color .14s ease;
+}
+.card:hover { transform:translateY(-2px); border-color:var(--rule-2); }
+.card-n {
+  font-family:var(--mono); font-size:.72rem; font-weight:600;
+  letter-spacing:.06em; color:var(--muted);
+}
+.card-name { font-family:var(--sans); font-weight:600; font-size:.9rem; line-height:1.25; }
+.card-pct {
+  grid-row:1; grid-column:3; justify-self:end; align-self:center;
+  font-family:var(--mono); font-weight:600; font-size:1.5rem;
+  font-variant-numeric:tabular-nums; letter-spacing:-.03em;
+}
+.card-pct-u { font-size:.75rem; opacity:.55; margin-left:1px; }
+.bar {
+  grid-column:1/-1; height:3px; border-radius:2px;
+  background:var(--surface-2); overflow:hidden; margin-top:.5rem;
+}
+.bar-fill { display:block; height:100%; border-radius:2px; }
+.card-state {
+  grid-column:1/-1; font-family:var(--mono); font-size:.66rem;
+  letter-spacing:.11em; text-transform:uppercase; margin-top:.35rem;
+}
+.c-ok    { border-left-color:var(--ok); }   .c-ok .card-pct,   .c-ok .card-state   { color:var(--ok); }
+.c-warn  { border-left-color:var(--warn); } .c-warn .card-pct, .c-warn .card-state { color:var(--warn); }
+.c-bad   { border-left-color:var(--bad); }  .c-bad .card-pct,  .c-bad .card-state  { color:var(--bad); }
+.c-none  { border-left-color:var(--none); } .c-none .card-pct, .c-none .card-state { color:var(--none); }
+.c-ok .bar-fill   { background:var(--ok); }
+.c-warn .bar-fill { background:var(--warn); }
+.c-bad .bar-fill  { background:var(--bad); }
+.c-none .bar-fill { background:var(--none); }
+
+/* ── Document body ────────────────────────────────────── */
+main { padding:clamp(2rem,6vw,4.5rem) clamp(1rem,5vw,3rem) 6rem; }
+main > * { max-width:var(--measure); margin-inline:auto; }
+
+h1.layer {
+  display:flex; align-items:baseline; gap:.85rem; flex-wrap:wrap;
+  max-width:var(--measure); margin:4.5rem auto 1.6rem; padding-top:2rem;
+  border-top:2px solid var(--ink);
+  font-family:var(--sans); font-weight:700; font-size:clamp(1.6rem,3.6vw,2.25rem);
+  letter-spacing:-.02em; line-height:1.12; text-wrap:balance;
+}
+h1.layer:first-of-type { margin-top:1rem; }
+.layer-num {
+  font-family:var(--mono); font-size:.8rem; font-weight:600; letter-spacing:.1em;
+  color:var(--surface); background:var(--accent);
+  padding:.2rem .5rem; border-radius:3px; transform:translateY(-.28em);
+}
+main > h1:not(.layer) {
+  font-family:var(--sans); font-weight:700; font-size:clamp(1.6rem,3.6vw,2.25rem);
+  letter-spacing:-.02em; line-height:1.14; text-wrap:balance;
+  margin:4.5rem auto 1.6rem; padding-top:2rem; border-top:2px solid var(--ink);
+}
+main h2 {
+  font-family:var(--sans); font-weight:600; font-size:1.32rem; letter-spacing:-.012em;
+  line-height:1.25; text-wrap:balance; margin:2.8rem auto .9rem;
+}
+main h3 {
+  font-family:var(--mono); font-weight:600; font-size:.78rem;
+  letter-spacing:.13em; text-transform:uppercase; color:var(--muted);
+  margin:2.2rem auto .8rem;
+}
+main p { margin:0 auto 1.15rem; }
+main ul, main ol { margin:0 auto 1.3rem; padding-left:1.35rem; }
+main li { margin-bottom:.42rem; }
+main li::marker { color:var(--muted); }
+strong { font-weight:600; color:var(--ink); }
+a { color:var(--accent); text-decoration:underline; text-decoration-thickness:1px; text-underline-offset:2px; }
+a:hover { text-decoration-thickness:2px; }
+hr {
+  max-width:var(--measure); margin:3rem auto; border:0;
+  border-top:1px solid var(--rule);
+}
+blockquote {
+  margin:1.6rem auto; padding:1rem 1.2rem;
+  background:var(--accent-soft); border-left:3px solid var(--accent);
+  border-radius:0 3px 3px 0; color:var(--ink-2);
+}
+blockquote p:last-child { margin-bottom:0; }
+code {
+  font-family:var(--mono); font-size:.85em;
+  background:var(--surface-2); padding:.12em .38em;
+  border-radius:3px; color:var(--ink);
+}
+pre {
+  max-width:var(--measure); margin:1.5rem auto; padding:1rem 1.15rem;
+  background:var(--surface); border:1px solid var(--rule); border-radius:3px;
+  overflow-x:auto; font-size:.85rem; line-height:1.55;
+}
+pre code { background:none; padding:0; }
+
+/* ── Tables ───────────────────────────────────────────── */
+.tbl {
+  max-width:1180px; margin:1.7rem auto 2.2rem;
+  overflow-x:auto; border:1px solid var(--rule); border-radius:3px;
+  background:var(--surface); box-shadow:var(--shadow);
+}
+table { border-collapse:collapse; width:100%; font-family:var(--sans); font-size:.87rem; }
+thead th {
+  background:var(--surface-2); color:var(--ink);
+  font-family:var(--mono); font-weight:600; font-size:.68rem;
+  letter-spacing:.11em; text-transform:uppercase;
+  text-align:left; padding:.7rem .85rem; white-space:nowrap;
+  border-bottom:1px solid var(--rule-2);
+}
+tbody td {
+  padding:.7rem .85rem; border-bottom:1px solid var(--rule);
+  vertical-align:top; line-height:1.5; color:var(--ink-2);
+  font-variant-numeric:tabular-nums;
+}
+tbody tr:last-child td { border-bottom:0; }
+tbody tr:hover td { background:var(--surface-2); }
+td:first-child { color:var(--ink); }
+td code { font-size:.82em; white-space:nowrap; }
+.s { font-weight:600; }
+.s-ok   { color:var(--ok);   box-shadow:inset 3px 0 0 var(--ok);   background:var(--ok-bg); }
+.s-warn { color:var(--warn); box-shadow:inset 3px 0 0 var(--warn); background:var(--warn-bg); }
+.s-bad  { color:var(--bad);  box-shadow:inset 3px 0 0 var(--bad);  background:var(--bad-bg); }
+.s-none { color:var(--none); box-shadow:inset 3px 0 0 var(--none); background:var(--none-bg); }
+tbody tr:hover .s-ok   { background:var(--ok-bg); }
+tbody tr:hover .s-warn { background:var(--warn-bg); }
+tbody tr:hover .s-bad  { background:var(--bad-bg); }
+tbody tr:hover .s-none { background:var(--none-bg); }
+
+footer {
+  padding:2.5rem clamp(1rem,5vw,3rem) 4rem; border-top:1px solid var(--rule);
+  font-family:var(--mono); font-size:.7rem; letter-spacing:.08em;
+  text-transform:uppercase; color:var(--muted); text-align:center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation:none !important; transition:none !important; }
+}
+@media (max-width:640px) {
+  body { font-size:16px; }
+  .bar-top { font-size:.62rem; gap:.5rem; }
+}
+</style>
+</head>
+<body>
+
+<div class="bar-top">
+  <span><b>ARCHITECTURE.md</b></span>
+  <span class="vs">vs</span>
+  <span><b>data_analytics</b></span>
+  <span class="spacer"></span>
+  <span>Alignment <b>~55%</b></span>
+  <span>2026-08-24</span>
+</div>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">Architecture audit</p>
+    <h1 class="title">Architecture vs. Implementation</h1>
+    <p class="standfirst">A layer-by-layer comparison of the specified AI Data Analytics
+    Platform against the Datalytics v2 codebase as built — what was achieved, what is
+    missing, and what was deliberately done differently. Re-scored after the Layer&nbsp;1
+    build.</p>
+    <dl class="meta">
+      <div><dt>Target document</dt><dd><a href="ARCHITECTURE.md">ARCHITECTURE.md</a> — 8 layers</dd></div>
+      <div><dt>Implementation</dt><dd><a href="data_analytics/">data_analytics/</a> — FastAPI · React · PostgreSQL</dd></div>
+      <div><dt>Overall alignment</dt><dd>~55% — Layer 1 now built</dd></div>
+      <div><dt>Compared on</dt><dd>2026-08-24</dd></div>
+    </dl>
+  </div>
+</header>
+
+<section class="score">
+  <div class="wrap-wide">
+    <h2>Coverage by layer</h2>
+    <div class="grid">
+      <a class="card c-ok" href="#layer-1">
+        <span class="card-n">L1</span>
+        <span class="card-name">Connectors &amp; Ingestion</span>
+        <span class="card-pct">90<span class="card-pct-u">%</span></span>
+        <span class="bar"><span class="bar-fill" style="width:90%"></span></span>
+        <span class="card-state">Built</span>
+      </a>
+      <a class="card c-warn" href="#layer-2">
+        <span class="card-n">L2</span>
+        <span class="card-name">Storage &amp; Query Engine</span>
+        <span class="card-pct">45<span class="card-pct-u">%</span></span>
+        <span class="bar"><span class="bar-fill" style="width:45%"></span></span>
+        <span class="card-state">Partial</span>
+      </a>
+      <a class="card c-bad" href="#layer-3">
+        <span class="card-n">L3</span>
+        <span class="card-name">Metadata &amp; Semantic</span>
+        <span class="card-pct">30<span class="card-pct-u">%</span></span>
+        <span class="bar"><span class="bar-fill" style="width:30%"></span></span>
+        <span class="card-state">Mostly missing</span>
+      </a>
+      <a class="card c-none" href="#layer-4">
+        <span class="card-n">L4</span>
+        <span class="card-name">AI Agent Orchestration</span>
+        <span class="card-pct">5<span class="card-pct-u">%</span></span>
+        <span class="bar"><span class="bar-fill" style="width:5%"></span></span>
+        <span class="card-state">Absent</span>
+      </a>
+      <a class="card c-warn" href="#layer-5">
+        <span class="card-n">L5</span>
+        <span class="card-name">Analysis &amp; Execution</span>
+        <span class="card-pct">50<span class="card-pct-u">%</span></span>
+        <span class="bar"><span class="bar-fill" style="width:50%"></span></span>
+        <span class="card-state">Partial</span>
+      </a>
+      <a class="card c-ok" href="#layer-6">
+        <span class="card-n">L6</span>
+        <span class="card-name">Visualization &amp; Dashboards</span>
+        <span class="card-pct">85<span class="card-pct-u">%</span></span>
+        <span class="bar"><span class="bar-fill" style="width:85%"></span></span>
+        <span class="card-state">Achieved</span>
+      </a>
+      <a class="card c-ok" href="#layer-7">
+        <span class="card-n">L7</span>
+        <span class="card-name">Publishing &amp; Sharing</span>
+        <span class="card-pct">70<span class="card-pct-u">%</span></span>
+        <span class="bar"><span class="bar-fill" style="width:70%"></span></span>
+        <span class="card-state">Largely achieved</span>
+      </a>
+      <a class="card c-warn" href="#layer-8">
+        <span class="card-n">L8</span>
+        <span class="card-name">Platform Core</span>
+        <span class="card-pct">65<span class="card-pct-u">%</span></span>
+        <span class="bar"><span class="bar-fill" style="width:65%"></span></span>
+        <span class="card-state">In-house</span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<main>
+
+<h2>Verdict, in one paragraph</h2>
+<p><strong>These are two different products, and the difference is deliberate rather than accidental.</strong></p>
+<p>ARCHITECTURE.md specifies an <strong>AI-agent NL→SQL platform</strong>: a user asks a question in natural
+language, an LLM agent retrieves semantic context, generates SQL, validates it through a ladder,
+executes it, and picks a chart. Its own text says <em>"Layers 3 and 4 decide whether the product
+works."</em></p>
+<p>Your project is a <strong>self-serve BI tool in the Power BI / SAS Visual Analytics mould</strong>: connect a
+source or upload a file, define measures and hierarchies, drag widgets onto a report canvas,
+cross-filter, secure by row and column, schedule and share. It is mature — 56 tables, 18 routers,
+2448 backend tests (4 skipped), 897 frontend tests, SSO/SAML, DirectQuery pushdown, RLS.
+<em>(These counts were three passes stale — "1769 backend tests, 208 frontend files" — until the sixth
+re-scoring recounted them.)</em></p>
+<p><strong>Layer 4 — the one the architecture calls make-or-break — is now built and measured</strong>
+(2026-08-26, 23 commits, ~60 new tests): the full loop — classify → clarify-when-ambiguous →
+plan → task-parallel step DAG → SQL generation under a grammar-enforced contract → the V1–V5
+validation ladder (V3 admits confirmed/declared joins only; V4 injects row policies into the
+sqlglot AST) → bounded repair → bounded execution → sanity → answer with provenance — behind a
+chat pane in the report builder, over <strong>all three data modes</strong> (DirectQuery, import, multi-file
+uploads via DuckDB). Measured live against <code>maps</code>: <strong>100% conditional accuracy</strong> (every completed
+run matched its golden SQL's results exactly), 16% end-to-end completion gated by a
+deliberately-cautious clarification threshold (72% of questions asked for clarification), median
+2.8s. Spec + measured appendix:
+<a href="data_analytics/docs/superpowers/specs/2026-08-25-layer-4-agent-orchestration-design.md"><code>2026-08-25-layer-4-agent-orchestration-design.md</code></a>.
+Still absent from the architecture's Layer 4 list: Langfuse tracing (agent_steps is the
+stand-in), Spider/BIRD external evals, CI wiring for the eval gate (a feedback table and an
+opt-in scheduled eval-gate run now exist — see below). Layer 3's retrieval half is now
+<strong>substantially built</strong>: entities with grain, lexical TF-IDF ranking, graph expansion and enum
+injection are all wired into the agent's context render. <strong>Embeddings are now closed</strong>
+(eleventh re-scoring): a self-hosted ONNX embedding service is enabled by default in compose
+(circuit-broken, lexical fallback), with vectors persisted in <code>retrieval_embeddings</code> keyed by
+<code>(text_hash, model)</code> — a restart re-embeds nothing. What remains absent is <strong>pgvector itself</strong>
+(cosine similarity runs in-process over the cached vectors, exact and fast at current scale; the
+table is the seam pgvector slots into without rework) and Spider/BIRD/Langfuse.</p>
+<p>An LLM <em>is</em> now called, in one pipeline: Stage 5 writes the database overview, a
+kind-aware description of every table and <strong>view</strong> (a view is described as the question it
+answers, not as storage), and a sentence per column — through
+<a href="data_analytics/backend/app/services/llm.py"><code>services/llm.py</code></a> against your self-hosted Qwen
+endpoint, opt-in per source and degrading to a no-op when unreachable. On the live source that
+is 82/82 objects and 1354/1354 columns described. Nothing on a user's query
+path touches a model. The one thing that still <em>sounds</em> like AI and is not,
+<a href="data_analytics/backend/app/services/insights.py">insights.py</a>, still says so in its own
+docstring: six deterministic detectors producing <em>"template prose rather than an LLM's."</em></p>
+<p><strong>The honest framing:</strong> the architecture doc is dated <strong>today (2026-08-24)</strong>; your project's own
+design specs run <strong>June–August 2026</strong>. This is not a spec you failed to follow — it is a newly
+proposed target, and your project already answered two of its <strong>Open Decisions</strong> the other way:</p>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th>Open decision in ARCHITECTURE.md</th>
+<th>Architecture assumes</th>
+<th>Your project chose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>#1 — Who owns the connection?</strong></td>
+<td>Customer-hosted production databases</td>
+<td><strong>Both</strong> — uploads <em>and</em> live SQL sources (5 families, ~20 named connectors)</td>
+</tr>
+<tr>
+<td><strong>#8 — Is the primary v1 surface chat, or dashboards?</strong></td>
+<td>Leans chat-first (Phase 1: "no dashboards")</td>
+<td><strong>Dashboards.</strong> No chat surface at all</td>
+</tr>
+<tr>
+<td><strong>#4 — May sample data reach the LLM?</strong></td>
+<td>Needs a written policy</td>
+<td><strong>Answered in Layer 1</strong> — <code>allow_llm_sampling</code>, per source, default <strong>off</strong>, and only ever masked samples</td>
+</tr>
+<tr>
+<td><strong>#7 — Arabic as a first-class query language?</strong></td>
+<td>Glossary + embeddings</td>
+<td><strong>Partly</strong> — RTL widgets + <code>report_translations</code>, but no NL query</td>
+</tr>
+</tbody>
+</table></div>
+<blockquote>
+<h2>What changed since the first scoring</h2>
+<p><strong>Layer 1 has been built.</strong> All twelve gaps closed, following
+<a href="data_analytics/docs/superpowers/specs/2026-08-24-layer1-connectors-ingestion-design.md"><code>2026-08-24-layer1-connectors-ingestion-design.md</code></a>.
+The backend suite went from <strong>1297 to 1610 tests</strong> (+313), all passing, with no
+existing test weakened. Layer 1 moved from ~40% to ~90%; Layers 3 and 8 picked
+up partial credit from it. Overall alignment: <strong>~45% → ~55%</strong>.</p>
+<p>The headline is not the percentage. It is that the platform now has a
+<strong>metadata plane</strong> — a cached, masked, provenance-tracked description of every
+connected source — which is the substrate Layers 3 and 4 were always going to
+need.</p>
+<h2>What changed in the second re-scoring (2026-08-25)</h2>
+<p><strong>The metadata plane got fast, complete, and honest about failure.</strong> The
+sync went from ~16 minutes to ~5.5 warm (bounded parallel sampling on a
+dedicated pool, a schema memo that cut inference 239s→35s, chronic-timeout
+views remembered and skipped with a Retry control). Chasing those numbers
+surfaced four silent-degradation bugs — geometry blobs blowing the context
+window, fixed <code>max_tokens</code> truncating wide tables, views described as
+tables, failures recorded without their cause — all fixed, all tested.
+Backend tests: <strong>1610 → 1769</strong>.</p>
+<p><strong>And Layer 4 stopped being hypothetical.</strong> Its design spec is written and
+awaiting review; the endpoint's constrained decoding was verified
+empirically (<code>response_format: json_schema</code> is grammar-enforced;
+<code>guided_json</code> is silently ignored — a finding that changes the
+implementation). Overall alignment: <strong>~55% → ~60%</strong>.</p>
+<h2>What changed in the third re-scoring (2026-08-26, later the same day)</h2>
+<p><strong>The agent was built, then hardened, then measured — twice.</strong> The Layer 4
+plan ran to completion (23 commits) and a hardening pass followed (10 more):
+the V1–V5 ladder closed a CTE blind spot, dataset-mode execution gained an
+interrupt watchdog, row policies gained an admin management API, and the
+answer-synthesis node was structurally grounded in the DAG's <strong>sink steps</strong>
+after a measurement caught it doing its own wrong arithmetic over
+intermediate rows — that exact regressed question now returns all 8 golden
+IDs, live-verified. Measured on the 25-question <code>maps</code> golden set:</p>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th>metric</th>
+<th>baseline</th>
+<th>after hardening</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>end-to-end completion</td>
+<td>16%</td>
+<td><strong>48%</strong></td>
+</tr>
+<tr>
+<td>clarification stops</td>
+<td>72%</td>
+<td><strong>32%</strong></td>
+</tr>
+<tr>
+<td>conditional accuracy (value-verified)</td>
+<td>100% of 4</td>
+<td><strong>75% of 12</strong></td>
+</tr>
+<tr>
+<td>median latency</td>
+<td>2.8s</td>
+<td>2.8s</td>
+</tr>
+</tbody>
+</table></div>
+<p>Two honest residuals, both semantics problems rather than agent bugs: one
+wrong answer persists because its ground truth lives in a curated
+precomputed table the agent has no way to know is canonical, and the
+completion ceiling is set by genuine near-duplicate ambiguity in the
+catalog. Both are the architecture's own claim playing out — <em>"retrieval
+quality caps agent accuracy regardless of model size"</em> — which is why the
+remaining-gap section below now leads with Layer 3. (Caveat: n=25; treat
+the percentages as direction, not precision.) Overall alignment:
+<strong>~60% → ~72%</strong> (the intermediate Layer-4-build scoring was ~70%).</p>
+<h2>What changed in the fourth re-scoring (2026-08-26, the all-layers pass)</h2>
+<p><strong>One targeted gap closed in every layer</strong>, merged as 13 reviewed tasks:
+canonical-source flags, enum-value labels (LLM-drafted, human-confirmed,
+editable), a glossary with Arabic synonyms, join-path resolution,
+<code>query_runs</code> telemetry, the drift→cache-invalidation wire, a forecast
+upgrade with confidence bands, the MCP client fix, an eval report + gate
+script, the popup overlay renderer, share-link layout pinning, and a
+guest-share security fix (hidden pages no longer served to anonymous
+viewers). Suites: <strong>2039 backend + 733 frontend green</strong>.</p>
+<p><strong>Live verification earned its keep twice.</strong> It caught a telemetry
+helper corrupting the shared connection pool (invisible to 2,031 green
+tests — only a long-lived server exhibits it) and then caught the enum
+labels inflating the agent's schema prompt past its budget, silently
+truncating whole tables out of the model's view. Both fixed structurally
+(dedicated sync engine; breadth-before-depth two-pass render that can
+never drop an object).</p>
+<p><strong>Measured (round 6, same 25-question golden set):</strong> completion
+16% → <strong>88%</strong>, clarification stops 72% → 8%, end-to-end correct answers
+<strong>4/25 → 17/25</strong>, value-verified conditional accuracy <strong>77% — above the
+75% benchmark for the first time</strong>, after a six-fix series (parent-facts
+truncation honesty, all-NULL column exclusion, skeleton descriptions,
+three human-confirmed relationships, refused-join degradation, a
+one-query planner rule) plus a ~20% latency recovery (classify on the
+compact render).
+Residuals, named honestly: the golden set itself is inconsistent about
+raw-vs-curated counts on one question pair; the answer-synthesis
+grounding bug recurred twice in new forms; one question regressed on a
+table-name slip; median latency doubled to 6.7s (the bigger prompt).
+Overall alignment: <strong>~72% → ~76%</strong>.</p>
+<h2>What changed in the fifth re-scoring (2026-08-27, the UX + ETL + security pass)</h2>
+<p><strong>33 commits on <code>ux-etl-security</code>, 14 batches, every batch independently
+reviewed</strong> (spec check + quality check, fix rounds where findings
+landed) and checkpointed against full suites four times. Backend
+<strong>2170 → 2198 tests</strong> (0 skipped beyond the pre-existing 4), frontend
+<strong>836 → 864</strong>, both green, plus a same-day follow-up fix commit
+(<code>d41329a</code>) that closed three bugs live review missed: a SQL-identifier
+injection risk in the new incremental-refresh cursor column (now
+allowlisted + quote-escaped), guest rate-limit buckets shared across a
+link's colleagues instead of per-viewer, and <code>ORGNAME()</code> failing closed
+on whitespace the substitution regex already tolerated.</p>
+<p><strong>The named, closable gaps actually closed</strong> (verified against code,
+not the plan's intent): Layer 1's <code>watermarks</code> table — "exists, not yet
+driven" — is now driven end to end
+(<a href="data_analytics/backend/app/services/dataset_refresh.py"><code>services/dataset_refresh.py</code></a>:
+full replace / incremental append-past-cursor, transactional, falls
+back to full on a bad cursor config). Layer 8's rate-limiting gap is
+closed (<a href="data_analytics/backend/app/core/rate_limit.py"><code>core/rate_limit.py</code></a>:
+per-user token bucket + a stricter per-guest-link bucket, LRU-capped,
+429 + <code>Retry-After</code>, <code>/health</code> exempt). The Layer-4-spec caveat about
+the import path's post-hoc RLS filtering turned out to be <strong>stale, not
+open</strong> — S1's own audit found a prior refactor had already moved every
+import-path call site to base-frame filtering; the one real bug it
+found and fixed was <code>alerts.py</code> evaluating filters fail-<em>open</em>
+(<code>apply_filter_expr(silent=True)</code>) instead of fail-closed, now pinned
+by a structural choke-point test
+(<code>backend/tests/test_rls_base_frame_choke_point.py</code>). Layer 7's
+share-link revision-pin, credited done in the fourth pass but never
+updated in the Layer 7 section itself, is corrected here; S3 extends it
+so a pinned snapshot also freezes page role-visibility at pin time.</p>
+<p><strong>New capability, not gap-closure — read honestly:</strong> self-serve system
+parameters (<code>ORGID()</code>/<code>ORGNAME()</code> alongside the existing
+<code>USEREMAIL()</code>/<code>USERID()</code>, expanded for the <em>viewing</em> user in ordinary
+author filters, not just RLS); a codeless RLS rule builder that
+suggests email/org-ish columns and can auto-generate proposals an admin
+reviews before applying (<code>RowPolicy.auto_generated</code>, cleared on manual
+edit so a re-run never clobbers a human's change); in-org viewer
+identity on shared reports (an authenticated in-org viewer now sees
+<em>their own</em> row subset, not the creator's — guests unchanged by
+design); a guest-link access log + export-policy closure on guest
+routes; a persisted, re-editable query model with a Design|SQL toggle
+and PowerBuilder-style column checkboxes on the query canvas; a
+transform-pipeline editor (sort/dedupe added to the existing fail-soft
+step engine, live per-step preview, a disable toggle that does not
+silently delete steps); <code>.xml</code> extraction; ETL fields on the lineage
+graph (extract/transform/load badges, freshness coloring); dataset
+sharing to another org user (<code>DatasetShare</code>, additive — read was
+already org-wide); and an app-wide <code>ActionMenu.tsx</code> popup as an
+alternative to icon clusters. <code>query_runs</code> did gain refresh telemetry
+(<code>source_kind='refresh'</code> rows written by the new refresh endpoint) —
+an extension of the table closed in the fourth pass, not a new table.</p>
+<p><strong>What this pass does <em>not</em> close:</strong> Langfuse, Spider/BIRD evals, CI
+infra, pgvector/embeddings, the glossary, <code>join_paths</code> (all closed or
+still-absent exactly as the fourth pass left them), and Valkey — the
+new rate limiter and the guest access log are explicitly in-process
+and per-worker, the same non-shared-cache caveat as everywhere else in
+Layer 8. <strong>And one honest compounding, not a fix:</strong> <code>DatasetShare</code> is
+a <em>sixth</em> bolt-on to the role-string authorization model (after
+<code>org_parents</code>, <code>page_role_visibility</code>, <code>report_capability</code>,
+<code>column_security_rules</code>, <code>RowPolicy.auto_generated</code>) — the
+architecture's D8.1 prediction keeps getting more evidence, not less.
+Overall alignment: <strong>~76% → ~80%</strong> (the summary table's prior figure
+of ~78% was already inconsistent with this blockquote's own ~76%
+endpoint; ~80% resolves forward from the higher of the two, since both
+Layer 7 and Layer 8 moved up this pass).</p>
+<h2>What changed in the sixth re-scoring (2026-08-28, full recompute)</h2>
+<p><strong>Nothing new was built; everything was re-verified.</strong> Each layer's
+checklist was re-derived from ARCHITECTURE.md itself and checked
+against code at <code>91abe25</code>. Only two commits landed since the fifth
+pass — <code>a647372</code>/<code>91abe25</code>: id-like numeric columns (<code>state_id</code>,
+<code>student_id</code>) now read as categories, not measures, in the widget
+config panel and the bubble shapers — a D6.2 chart-rule-quality fix,
+not a scope change. Suites: backend <strong>2204 passed / 4 skipped</strong>
+(2202 + 2 sort-order pins), frontend <strong>871</strong>. Net corrections, in
+both directions:</p>
+<ul>
+<li><strong>Claimed-missing-but-built:</strong> Layer 4's eval row still said "no
+  <code>report.py</code>, no CI at all" — <code>evals/report.py</code> (per-intent
+  breakdown + threshold exit code) and <code>run_gate.py</code> /
+  <code>run_eval_gate.ps1</code> have existed since the all-layers pass; only
+  CI <em>infrastructure</em> is absent. Layer 4 ~80% → <strong>~82%</strong>.</li>
+<li><strong>Stale-in-place:</strong> Layer 1's "Still open" table still listed
+  <code>watermarks</code> as unused, contradicting its own closed row 11 twenty
+  lines above; the verdict paragraph still said "1769 backend tests,
+  208 frontend files" (three passes stale; now 54 tables, 2204/871);
+  Layer 2's "You do not use sqlglot" is now true only of the BI
+  path — sqlglot 30.17.0 is pinned and load-bearing on the agent path;
+  and the Layer 4 section itself still quoted <strong>round-3</strong> measurements
+  (48% completion, 75% accuracy, 2.8s) two passes after round 6
+  recorded 88% / 77% / 6.7s — the make-or-break layer's own numbers
+  were the stalest thing in the document.</li>
+<li><strong>Recount, not regression:</strong> Layer 1 ~96% → <strong>~92%</strong> — the four
+  genuinely open stage requirements (live <code>Inspector</code> discovery,
+  the <code>pg_stats</code> fast path, declared-FK seeding at stage 4.1, the
+  nightly resync cron — <code>refresh_scheduler.py</code> still drives
+  report/data refresh only, no catalog resync) were under-weighted
+  by a score that effectively graded only the twelve-gap list.</li>
+<li><strong>Re-verified as still absent, none silently closed:</strong> Langfuse,
+  Spider/BIRD, CI infra, pgvector/embeddings/R.1–R.7, <code>entities</code>,
+  the <code>feedback</code> table, embeds (D7.1), a <code>deliveries</code> log, schedule
+  timezones, OpenFGA, OTel/Prometheus, <code>quotas</code>, <code>users.locale</code>,
+  Valkey — each confirmed by grep, not carried forward on trust.</li>
+</ul>
+<p>Overall alignment: <strong>~80%, unchanged</strong> — the Layer 1 trim and the
+Layer 4 bump offset; this pass's product is internal consistency,
+not movement.</p>
+<h2>What changed in the seventh re-scoring 2026-08-28 (Tier 1+2 foundations &amp; retrieval)</h2>
+<p><strong>Two merged passes, both against master.</strong> Tier 1 foundations
+(<code>ea19243..12b9d1d</code>, 7 commits): <strong>Alembic adopted</strong> —
+baseline <code>0001_baseline.py</code> plus revisions 0002–0005, an
+adoption-stamps-head fix (stamping <code>0001</code> while the same boot's
+<code>create_all</code> provisioned later tables pinned <code>alembic_version</code>
+forever and orphaned every future revision), and a VARCHAR(32)
+revision-id pin — found by a <strong>real live-Postgres failure</strong>
+(<code>StringDataRightTruncation</code> on descriptive 37-char ids; SQLite's
+unenforced varchar length let the suite miss it entirely). The
+stack-divergence table's Migrations row — <em>"Missing — and you're
+already paying for it"</em> — is now closed and matched. Declared-FK
+seeding is wired for the per-Dataset DirectQuery sync path
+(<code>metadata/sync.py</code>'s <code>stage_infer_keys</code>, ahead of value-overlap
+inference so declared always wins) — Layer 1's still-open row
+closes. A <code>deliveries</code> log table (one row per schedule/alert
+delivery, fire-and-forget, the same dedicated-sync-engine contract
+as <code>query_runs</code>) and <code>ReportSchedule.timezone</code> close Layer 7 gaps</p>
+<h1>3 and #4. An <code>AgentFeedback</code> table (owner-only 👍/👎, wired into</h1>
+<p><code>ChatPane</code>) plus an opt-in nightly <code>eval_schedule.py</code> run
+(<code>eval_gate_enabled</code>, default off, ERROR-logs on regression) close
+Layer 4's "feedback table absent" row — stated honestly: this is a
+<strong>documented CI stand-in, not CI itself</strong>, which remains absent.</p>
+<p>Tier 2 retrieval (<code>5c593ce..ae227f0</code>, branch <code>tier2-retrieval</code> ==
+master, 5 batches, each independently reviewed): a new
+<a href="data_analytics/backend/app/services/retrieval.py"><code>services/retrieval.py</code></a>
+scores every retrievable thing against the question — <strong>Backend A
+(default): lexical TF-IDF over word tokens plus character
+3–5-grams</strong>, pure numpy, cosine similarity, memoized per catalog
+fingerprint — Arabic and code-ish identifiers (<code>st_cd</code>) score
+correctly because of the char n-grams. <strong>Backend B (opt-in): an
+OpenAI-compatible embeddings endpoint</strong>, circuit-broken with a 3s
+timeout and a once-per-process failure log; verified live that the
+self-hosted vLLM endpoint serves <code>/v1/models</code> but <strong>404s
+<code>/v1/embeddings</code></strong>, so Backend A is what actually runs today. The
+ranking is wired into the agent's context render (relevance-ordered
+enrichment ahead of the static fallback order, 1-hop join-graph
+expansion promoting neighbors of top-ranked objects, the H7
+breadth guarantee pinned byte-identical when no question is given)
+and into query-example recall (<code>agent/memory.py</code> now recalls by
+similarity, not recency alone). A new <code>entities</code> table (name,
+business name, grain, description, <code>source</code> provenance) is drafted
+by the sync's LLM pass, confirmed on the existing metadata review
+surface, survives resync under the same ladder discipline as enum
+labels, and is rendered as a budget-reserved block plus retrieved
+as a document. This closes/partials Layer 3's retrieval-half rows:
+entities (#1 → built), the R.1–R.7 pipeline (#5 → substantially
+built, lexical rather than embedding-based), graph expansion + enum
+injection (#6 → built).</p>
+<p><strong>Measured, honestly — parity, not lift.</strong> Before merge, the round-6
+eval gate (<code>-ValueVerified</code>, 25-question <code>maps</code> golden set) was
+re-run and hand-verified the same way: <strong>strict 12/25 (48%),
+identical to the round-6 baseline; value-verified 16/25 vs 17
+baseline; conditional accuracy 76% vs 77%.</strong> On this 82-object
+catalog — small enough that the H7 two-pass render already gets
+every object name into the prompt — retrieval reorders what gets
+enriched but does not change which objects were already visible, so
+no lift was expected and none appeared. This is exactly what the
+pass's own design spec predicted going in (<em>"retrieval mostly buys
+headroom on larger catalogs"</em>) and is reported as parity, not
+inflated as a win. Full ledger:
+<a href="data_analytics/.superpowers/sdd/2026-08-28-tier2-retrieval/progress.md"><code>.superpowers/sdd/2026-08-28-tier2-retrieval/progress.md</code></a>.</p>
+<p>Suites: backend <strong>2304 passed / 4 skipped</strong> (pre-fix full run; the
+<code>ae227f0</code> fix-round commit — a circuit breaker, a score≤0 static-order
+fallback, and a sync-stage rollback guard — was verified green on
+the focused retrieval/agent suites rather than a second full run).
+Frontend <strong>877</strong>.</p>
+<p><strong>What this pass does <em>not</em> close, stated exactly as before:</strong>
+pgvector (the <code>retrieval_embeddings</code> table stores a JSON vector, no
+pgvector column or extension — Postgres here is stock
+<code>postgres:16-alpine</code>), real embeddings (endpoint absent), Spider/BIRD,
+Langfuse, CI infrastructure, OpenFGA, OTel/Prometheus, <code>quotas</code>,
+<code>users.locale</code>, Valkey.</p>
+<p><strong>Score adjustments, derived from the above, not asserted:</strong> Layer 3
+moves substantially, ~60% → <strong>~72%</strong> — the retrieval half went from
+"whole thing missing" to "built and measured, minus the one
+infra-blocked piece (embeddings/pgvector) and the two evals nobody
+has run (Spider/BIRD)." Layer 1 +2 (declared-FK seeding closes the
+last stage-level gap named in the sixth pass's own four-item list;
+Alembic closes a stack-divergence row): ~92% → <strong>~94%</strong>. Layer 4 +2
+(feedback table + CI stand-in close a named-absent row; the
+retrieval measurement is parity so it does not itself move Layer 4,
+but the gate now has a scheduled non-CI runner): ~82% → <strong>~84%</strong>.
+Layer 7 +3 (two Layer 7 gaps closed outright): ~79% → <strong>~82%</strong>. The
+stack-divergence table's Migrations row moves from Missing to
+Closed; its join-paths/NetworkX row is unaffected (still F1-by-BFS,
+no NetworkX).</p>
+<p>Overall alignment: <strong>~80% → ~82%.</strong> Recomputed the way this document
+always has — not a flat average of the eight layer numbers (that
+arithmetic mean is ~76%, same gap below the stated figure as every
+prior pass, because Layers 2 and 5 are scored against requirements
+the project deliberately declined, not gaps it failed to close) but
+weighted toward the two layers the architecture itself calls
+make-or-break. Layer 3's 12-point move is the one substantial swing
+this pass; Layers 1, 4 and 7 each moved a couple of points on named,
+closed gaps. Net: <strong>+2</strong> overall, smaller than Layer 3's own move,
+because the round-7 measurement is explicit that retrieval bought
+architecture-completeness, not yet accuracy, on this catalog.</p>
+<h2>What changed in the eighth re-scoring 2026-08-29 (Tier 3: embeds, quotas, OTel)</h2>
+<p><strong>A <code>tier3-tenancy</code> branch, three batches (E1/E2/E3), each independently
+spec-reviewed and quality-reviewed, plus a final full-suite review</strong> —
+merged to master at <code>cff27fe</code>. This pass targets exactly the two named
+gaps the seventh re-scoring's own scorecard called out as largest:
+Layer 7's embeds (D7.1, <em>"the largest single missing feature in an
+otherwise strong layer"</em>) and Layer 8's quotas (#5 on its numbered gap
+list), plus opt-in OpenTelemetry (#2 on that same list).</p>
+<p><strong>Layer 7 gap #1 — embeds — closed.</strong>
+<a href="data_analytics/backend/app/routers/embed.py"><code>routers/embed.py</code></a> +
+<code>EmbedConfig</code> (<code>created_by</code>, <code>secret_encrypted</code> shown once, <code>allowed_origins</code>,
+<code>enabled</code>): a host application signs its own HS256 JWT against that secret;
+the router verifies with the algorithm pinned and expiry mandatory
+(<code>options={"require_exp": True}</code>, capped ≤24h at mint time), and injects
+filters <strong>only from the verified JWT claims</strong> — the browser is never
+trusted with scope, D7.1's own framing. This was not free: the first
+review round caught a <strong>High-severity RLS bypass</strong> — the embed path had
+resolved through an admin-branch identity, skipping RLS and column
+security entirely, letting a row-restricted editor mint an embed exposing
+every row. The fix landed creator-base resolution (parity with
+<code>shared.py</code>'s anonymous-guest model, the escalation path pinned dead by
+a value-verified test) plus page role-visibility parity with guest links.
+<code>viewer_email</code>/<code>viewer_org</code> claims expand <code>USEREMAIL()</code>/<code>ORGID()</code> inside
+the creator's own author-filter expressions only, never substituting for
+RLS. A CSP <code>frame-ancestors</code> directive and per-IP + per-token rate
+buckets (narrowed to IP-only in final review after a cfg-enumeration/LRU
+finding) close it out, with an <code>EmbeddedReport</code> page and share-dialog
+Python/Node token samples on the frontend. <strong>Honest gap against D7.1:</strong>
+no revision pinning on <code>embed_configs</code> — an embed always serves the live
+report, the same still-open gap the doc already names for <code>share_links</code>.</p>
+<p><strong>Layer 8 gap #5 — quotas — closed.</strong> <code>Quota</code> (one row per org, four
+nullable limits, unlimited by default) + <code>services/quotas.py</code>: per-org
+daily query and agent-ask caps (429 + <code>Retry-After</code>), a storage cap (413)
+on <code>Dataset.file_size</code>, and a per-worker concurrent-ask slot limiter.
+Enforcement is coherent across app users, guests, and embeds — all three
+charge the <strong>data-owning org</strong>, not the viewer's — plus platform-admin
+CRUD and a usage UI. Honest caveats, ledgered at review rather than
+hidden: concurrency limiting is per-worker, not cluster-wide; the quota
+cache carries up to 30s of cross-worker staleness after a <code>SET</code>;
+re-import-in-place has a known storage-accounting gap (old file size not
+subtracted before the new one is added), ruled low-severity and
+documented, needing a temp-file refactor to close properly.</p>
+<p><strong>Layer 8 gap #2 — OpenTelemetry — closed, opt-in.</strong>
+<a href="data_analytics/backend/app/core/telemetry.py"><code>core/telemetry.py</code></a>:
+default-off, lazy-imported (no cost when disabled), FastAPI + SQLAlchemy
+auto-instrumentation plus manual spans on agent nodes, DirectQuery and
+refresh, exporting OTLP/HTTP. Span attributes are sha256-only, and every
+exported span has its HTTP URL query string scrubbed (<code>_QuerystringScrubber</code>,
+added in final review after finding the embed bearer token itself was
+leaking through <code>http.url</code>'s query string — verified fixed on the pinned
+<code>opentelemetry</code> 1.27.0). Prometheus/Grafana (#3) and GlitchTip (#7)
+remain absent.</p>
+<p><strong>The OpenFGA row's bolt-on count grows again, honestly.</strong> <code>EmbedConfig</code>
+and <code>Quota</code> are access-control tables in their own right — one gates who
+may mint scoped report access, the other gates how much an org may
+consume — so the tally of separate bolt-ons to the role-string
+authorization model moves from six to <strong>eight</strong> (<code>org_parents</code>,
+<code>page_role_visibility</code>, <code>report_capability</code>, <code>column_security_rules</code>,
+<code>RowPolicy.auto_generated</code>, <code>DatasetShare</code>, <code>EmbedConfig</code>, <code>Quota</code>). The
+architecture's D8.1 prediction keeps accumulating evidence, not shrinking.</p>
+<p>Suites: backend <strong>2347 passed / 4 skipped</strong> (the same 4 pre-existing
+skips carried since the fourth re-scoring), frontend <strong>888</strong>.</p>
+<p><strong>Score adjustments, derived from the above:</strong> Layer 7 ~82% → <strong>~87%</strong> —
+its largest named gap (embeds) is closed outright, leaving only the
+Playwright-renderer divergence (#2) and the embed/share-link revision-pin
+gap (#5, now shared by both features rather than unique to share links).
+Layer 8 ~74% → <strong>~78%</strong> — two of its eight numbered gaps close outright
+(quotas, OTel-opt-in), on top of rate limiting already closed the prior
+pass; OpenFGA (#1), Prometheus (#3), GlitchTip (#7) and <code>users.locale</code>
+(#8) remain, and the bolt-on count against #1 grew rather than shrank.</p>
+<p>Overall alignment: <strong>~82% → ~83%.</strong> Neither Layer 7 nor Layer 8 is one
+of the architecture's make-or-break layers (that's still 3 and 4,
+unchanged this pass), so a 5-point and 4-point layer move each translates
+to a small overall step — consistent with how every prior pass in this
+document has weighted the recompute.</p>
+<h2>What changed in the ninth re-scoring 2026-08-29 (Tier 4: offline readiness, Valkey, materializations)</h2>
+<p><strong>A <code>tier4-offline-scale</code> branch, three batches (O1/O2/O3), each independently
+spec-reviewed and quality-reviewed, plus a final full-suite review</strong> — merged
+to master at <code>b093f78</code>. This pass starts from a new, binding fact about the
+deployment target rather than a named architecture gap: <strong>production runs on
+an isolated network with no internet access.</strong> An audit for that constraint
+found exactly one runtime internet dependency in the whole stack — a Google
+Fonts <code>@import</code> in <code>frontend/src/styles/mcait/fonts.css</code> — plus the standing
+question of whether an operator could actually stand the stack up with no
+registry/CDN reachable at all.</p>
+<p><strong>Deployment: air-gapped — closed.</strong> O1 replaced the Google Fonts import
+with the three faces (Syne, Manrope, JetBrains Mono) vendored as genuine
+variable-font woff2 binaries under <code>frontend/src/assets/fonts/</code>, served via
+local <code>@font-face</code> rules
+(<a href="data_analytics/frontend/src/styles/mcait/fonts.css"><code>styles/mcait/fonts.css</code></a>)
+and fingerprinted through the existing Vite build — reviewer-verified via
+<code>fontTools</code> that the <code>fvar</code> variable axes actually survived vendoring, not
+just that a file exists at the path. A regression test pins the build output
+free of <code>fonts.googleapis.com</code>. None of the three faces carry Arabic glyphs,
+so RTL/Arabic rendering is unaffected either way — it already falls through
+to system fonts. On top of that,
+<a href="data_analytics/scripts/build_offline_bundle.ps1"><code>scripts/build_offline_bundle.ps1</code></a>
+(<code>docker save</code> of every image the compose stack needs, real-run verified at
+<strong>~567MB total</strong>) plus
+<a href="data_analytics/docs/OFFLINE_DEPLOYMENT.md"><code>docs/OFFLINE_DEPLOYMENT.md</code></a>
+give an operator a load-and-run path with zero internet touches. Frontend
+image is documented as dev-mode by default, with a prod-nginx alternative
+named honestly rather than silently assumed. <strong>This closes the platform's
+only outstanding runtime internet dependency — everything else (the LLM
+endpoint, OTel export, compose images) was already internal or opt-in.</strong></p>
+<p><strong>Layer 2 gap #10 — Valkey/Redis — closed, opt-in.</strong>
+<a href="data_analytics/backend/app/services/cache_backend.py"><code>services/cache_backend.py</code></a>:
+one <code>CacheBackend</code> interface, two implementations — <code>InProcessCache</code> (the
+pre-existing <code>OrderedDict</code> LRU, unpacked into a reusable class, <strong>byte-identical
+default behavior</strong> when <code>settings.valkey_url</code> is unset, no serialization
+round-trip, existing tests untouched) and <code>ValkeyCache</code> (keys sha256-hashed
+before crossing the wire — the existing cache keys embed RLS expression text
+verbatim, load-bearing for RLS isolation, so hashing at this boundary is what
+keeps that raw text in-process — TTL support, and a circuit breaker that logs
+once and falls back to in-process for a cooldown window on any connection
+failure). <code>docker-compose.yml</code> gains a <code>valkey/valkey:8-alpine</code> service with
+<strong>no host ports published</strong> and <code>maxmemory 256mb --maxmemory-policy
+allkeys-lru</code>, not depended on by <code>backend</code> so a deployment that never sets
+<code>VALKEY_URL</code> is unaffected by the service merely existing. When enabled, the
+widget-result cache and DirectQuery result cache move to a <strong>single shared
+tier</strong> for coherence rather than staying split. The frame-parse memo in
+<code>frame_cache.py</code> stays deliberately process-local — documented, not an
+oversight: it memoizes parsed DataFrames keyed on <code>(path, mtime_ns, size)</code>,
+and sharing that across workers was out of this pass's scope.
+<strong>A real bug, caught by review rather than shipped:</strong> the first cut of
+<code>ValkeyCache</code> stringified <code>Timestamp</code>/<code>date</code> values via <code>json.dumps(...,
+default=str)</code> only on the Valkey path — a genuine type-drift bug where a
+value read back from Valkey differed in type from the same value served by
+<code>InProcessCache</code>. Fixed at the source in <code>_safe</code> (ISO-stringifies datetime
+kinds consistently, correct <code>NaT</code> ordering) and pinned by cell-by-cell
+round-trip equality tests covering Arabic text, <code>NaN</code>, and <code>NaT</code> — not
+patched over at the call site.</p>
+<p><strong>Layer 2 gap #5 — materialization store — substantially closed.</strong> A new
+<code>Materialization</code> manifest table
+(<a href="data_analytics/backend/app/models/models.py"><code>models/models.py</code></a>, one row
+per dataset, unique on <code>dataset_id</code>): <code>kind</code> (full/incremental), <code>row_count</code>,
+<code>columns</code>, and the <code>watermark_value</code> active at write time — queryable
+without touching the filesystem, which is what the lineage graph's
+<code>materialized</code>/<code>row_count</code> fields now read from. Written by <strong>both</strong> refresh
+paths in <code>services/dataset_refresh.py</code>. It deliberately <strong>reuses</strong> the
+existing parquet sidecar file (<code>write_parquet_sidecar</code>/<code>sidecar_path()</code>)
+rather than writing a second copy — no double write per refresh — and the
+loader's preference for a fresh sidecar over a CSV re-parse was already
+wired and tested; this pass adds the manifest, not a new parquet path.
+Superseding is update-in-place per dataset (a new unique index caught an
+insert-then-delete race during review, fixed structurally rather than
+worked around). <strong>Honest, unchanged gap:</strong> the architecture's #6 —
+byte-scanned caps / "refuse before sending" for metered warehouse
+sources — has no counterpart anywhere in the codebase; this pass did not
+touch it, and there is still no code that estimates or caps bytes scanned
+before a query runs against a metered source.</p>
+<p>Suites: backend <strong>2384 passed / 4 skipped</strong> (the same 4 pre-existing skips
+carried since the fourth re-scoring), frontend <strong>890</strong> (one flake, two
+consecutive clean runs), <code>tsc</code> clean. Live deploy verified: image rebuilt
+with the Redis client present, all four compose services (backend, frontend,
+db, valkey) came up healthy on a clean no-op boot, <code>VALKEY_URL</code> left unset in
+the live deployment (in-process cache remains the default; Valkey stays
+documented opt-in). Full ledger:
+<a href="data_analytics/.superpowers/sdd/2026-08-29-tier4-offline-scale/progress.md"><code>.superpowers/sdd/2026-08-29-tier4-offline-scale/progress.md</code></a>.</p>
+<p><strong>Score adjustments, derived from the above:</strong> Layer 2 ~55% → <strong>~65%</strong> —
+two of its ten numbered gaps close (#10 Valkey, opt-in; #5 materialization,
+substantially), on top of drift-invalidation and <code>query_runs</code> already closed
+in earlier passes. Still absent, unchanged: the DuckDB local execution
+engine, Ibis, Arrow streaming, cross-source joins, sqlglot cache-key
+normalization, and byte-scanned caps (#6) — five of the ten gaps stand
+exactly as before, so Layer 2 moves to the mid-60s rather than further.</p>
+<p>Overall alignment: <strong>~83% → ~84%.</strong> Layer 2 is not one of the architecture's
+make-or-break layers (still 3 and 4), so a 10-point layer move translates to
+a small overall step, consistent with how every prior pass in this document
+has weighted the recompute. The more consequential fact this pass adds
+isn't a percentage: it's that the platform can now actually be deployed
+where it is meant to run.</p>
+<h2>What changed in the tenth re-scoring 2026-08-30 (Tier 5: analysis depth)</h2>
+<p><strong>A merged Tier-5 analysis pass</strong>, four batches (A1 contract, A2 segment, A3
+forecast+anomaly, A4 registry), each independently spec-reviewed and
+quality-reviewed, plus a final full-suite review that caught and fixed one
+real bug before merge — closes five of Layer 5's six numbered gaps outright.
+This is the first pass targeting Layer 5 directly since the doc's first
+scoring called it out as the architecture's most under-built area next to
+Layers 3 and 4.</p>
+<p><strong>Gap #1 — <code>forecast</code> via StatsForecast — closed.</strong> <code>shape_forecast</code>'s
+default <code>method</code> is now per-series <strong>StatsForecast <code>AutoETS</code></strong>, with
+additive lo/hi confidence intervals. The hand-rolled <code>simple</code>
+exponential-smoothing path this document previously credited as the only
+forecasting logic in the repo is <strong>kept, not discarded</strong> — it is the tested
+fallback on fit failure or a degenerate series, reached by dedicated tests
+rather than left as dead code. StatsForecast is lazily imported
+(<code>sys.modules</code> pins prove no heavy import happens at startup), and its
+<code>numba</code>/<code>llvmlite</code> transitive chain is pinned explicitly (<code>numba==0.67.0</code>,
+<code>llvmlite==0.49.0</code>) rather than left to the resolver — load-bearing for the
+air-gapped deployment target the ninth re-scoring closed. <strong>Honest cost, not
+hidden:</strong> the first ETS render on a cold process pays numba's JIT warmup in
+real seconds; the fallback covers fit <em>failure</em>, not first-render <em>slowness</em>
+— noted and accepted, not fixed.</p>
+<p><strong>Gap #2 — <code>segment</code>, clustering with automatic k — closed.</strong>
+<a href="data_analytics/backend/app/services/analysis/segment.py"><code>services/analysis/segment.py</code></a>:
+standardized-feature KMeans, silhouette-scored auto-k search over 2..8,
+seeded (<code>RANDOM_STATE</code>), a seeded 10k-row sample on large frames (documented
+deviation, not silent), and an RLS-filtered base frame built as a
+byte-for-byte mirror of <code>run_analysis</code>'s existing row-policy path — the
+segment endpoint cannot see rows a user's row policies would hide. New
+route <code>POST /datasets/{id}/segment</code> plus a Segment panel on DatasetDetail.
+Final review caught the one real bug of this pass: the first cut returned
+<strong>full-frame rows</strong> with segment labels (unsampled compute plus a
+~30MB unread JSON payload at 1M rows) — fixed before merge to sample like
+<code>run_analysis</code> and gate row output behind an opt-in, capped
+<code>include_rows</code> flag.</p>
+<p><strong>Gap #3 — PyOD — closed, opt-in.</strong>
+<a href="data_analytics/backend/app/services/analysis/anomaly.py"><code>services/analysis/anomaly.py</code></a>
+gains a <code>detector</code> param: <code>"iqr"</code> (default, <strong>byte-identical</strong> to the
+pre-existing fence logic when omitted), <code>"iforest"</code> (PyOD IsolationForest,
+seeded), <code>"ecod"</code> (PyOD ECOD, distribution-free). A fixed contamination rate
+turns each PyOD detector's continuous score into the same boolean mask shape
+the <code>"iqr"</code> path already produced, so callers that never pass <code>detector</code> see
+no behavior change at all.</p>
+<p><strong>Gap #5 — <code>registry.py</code>, a tool catalogue exposed to Layer 4 — closed.</strong>
+<a href="data_analytics/backend/app/services/analysis/registry.py"><code>services/analysis/registry.py</code></a>:
+a single-source catalogue registering every analysis tool (describe,
+correlate, forecast, segment, detect-anomalies, compare-periods) with no
+heavy imports at import time, a new authenticated
+<code>GET /analysis/registry</code>, and a budget-capped (1200-character) block folded
+into the agent's prompt in <code>generate.py</code>. Reviewed and accepted as a static
+catalogue rather than <code>context.py</code>'s dynamic-retrieval machinery — the tool
+set is small and fixed, so the added machinery wasn't judged worth it. One
+Low finding from review (forecast bounds hand-copied into the registry
+rather than imported) was fixed inline: constants now live once in
+<code>widget_data</code> and the registry imports them, pinned by a new test.</p>
+<p><strong>Gap #6 — uniform <code>AnalysisResult</code> contract — closed, additively.</strong>
+<a href="data_analytics/backend/app/services/analysis_contract.py"><code>services/analysis_contract.py</code></a>:
+one envelope wrapping every analysis service's return value. All four
+pre-existing wire shapes this document has tracked since the first scoring
+(including <code>run_full_analysis</code>'s dict and the DirectQuery additions) are
+<strong>golden-pinned byte-preserved</strong> — the contract adds an envelope around the
+existing response, it does not reshape it. Noted and accepted, not hidden:
+the envelope is measurably larger on the wire (bounded ~2x) than the raw
+shape it wraps; a lazy-envelope flag is named as a future option, not built.</p>
+<p><strong>Gap #4 — the sandbox — stays N/A by design, unchanged.</strong> It exists in the
+architecture only to run LLM-written code; this product has no
+LLM-written-code path, so nothing in this pass touches it — same reasoning
+this document has given every prior pass.</p>
+<p><strong>Ops hardening riding along:</strong> <code>_run_alembic</code>'s self-heal (from the Tier 1
+foundations pass) gained an explicit precondition — it only stamps the
+Alembic head on the <code>DuplicateTable</code>-class failure <em>and</em> verified presence
+of every managed table, documented in the docstring as unsafe once real
+data migrations exist, rather than a blanket catch. Not new work this pass,
+but re-verified as part of the same full-suite review.</p>
+<p>Suites: backend <strong>2434 passed / 4 skipped</strong> (the same 4 pre-existing skips
+carried since the fourth re-scoring; one full run overlapped an
+environment disk-space incident mid-pass, so the final fix's own files were
+separately re-verified green 17/17 post-fix), frontend <strong>897</strong>, <code>tsc</code>
+clean. All new ML dependencies (<code>scikit-learn==1.5.1</code> already pinned;
+<code>statsforecast==2.1.1</code>, <code>pyod==3.6.5</code>, <code>numba==0.67.0</code>, <code>llvmlite==0.49.0</code>
+newly pinned) hold the existing <code>numpy==1.26.4</code> pin — no forced bump. Full
+ledger:
+<a href="data_analytics/.superpowers/sdd/2026-08-29-tier5-analysis/progress.md"><code>.superpowers/sdd/2026-08-29-tier5-analysis/progress.md</code></a>.</p>
+<p><strong>Score adjustments, derived from the above:</strong> Layer 5 ~55% → <strong>~84%</strong> —
+five of its six numbered gaps close outright, the sixth (sandbox) is
+N/A-by-design and was already excluded from the "real" gap count by this
+document's own 🔀 Different reasoning in every prior pass. What keeps this
+in the mid-80s rather than higher: <code>registry.py</code> is a static catalogue, not
+a dynamic tool-retrieval system; the <code>AnalysisResult</code> envelope is additive
+rather than a full reshape; <code>method</code> (forecast) and <code>forecast_method</code>
+naming overlap is ledgered for a later naming pass rather than fixed here;
+and first-ETS-render JIT cost is accepted, not eliminated.</p>
+<p>Overall alignment: <strong>~84% → ~86%.</strong> Layer 5 is not one of the architecture's
+make-or-break layers (still 3 and 4), so even a 29-point layer move — the
+largest single-layer swing since Layer 1's original build — translates to a
+small overall step, consistent with how every prior pass in this document
+has weighted the recompute. What changes is the shape of what's left: of
+the architecture's eight layers, only Layer 3 (embeddings/pgvector,
+infra-blocked) and Layer 2 (byte-scanned caps, gap #6) now carry numbered
+gaps this document has not closed or explicitly ruled N/A.</p>
+<h2>What changed in the eleventh re-scoring 2026-08-30 (embeddings service)</h2>
+<p><strong>A merged <code>embeddings-service</code> branch closes the EMBEDDINGS half of Layer 3's last remaining
+numbered gap</strong> (row 4, "pgvector + real embeddings"). Two batches, each spec-reviewed and
+quality-reviewed, plus a fix round on two review-caught Lows. Full design in ARCHITECTURE.md's
+new <a href="ARCHITECTURE.md#the-embeddings-service-concrete-design">§ The embeddings service — concrete design</a>,
+ledger:
+<a href="data_analytics/.superpowers/sdd/2026-08-30-embeddings-service/progress.md"><code>.superpowers/sdd/2026-08-30-embeddings-service/progress.md</code></a>.</p>
+<p><strong>M1 — the server.</strong> <a href="data_analytics/embedding_server/"><code>embedding_server/</code></a>: a dedicated
+compose-network-only container serving <code>paraphrase-multilingual-MiniLM-L12-v2</code> as an ONNX
+export — chosen prefix-free (E5-family models want <code>query:</code>/<code>passage:</code> prefixes an
+OpenAI-compatible <code>/v1/embeddings</code> contract can't express) and multilingual for the Arabic ↔
+English glossary. ONNX Runtime + <code>tokenizers</code> + numpy, <strong>no torch</strong> — a CPU image a few hundred
+MB where a torch layer alone runs ~2GB, load-bearing for the docker-save air-gap bundle. Weights
+are downloaded inside a Dockerfile <code>RUN</code> layer at build time, never at runtime, so the container
+never touches the internet once deployed. Built to the client's actual contract
+(<code>retrieval.py</code> Backend B), not the other way round: Spearman 1.0 vs fp32 on an
+Arabic-inclusive fixture, re-verified live by review. Smoke 4/4.</p>
+<p><strong>M2 — wiring and persistence.</strong> Retrieval Backend B is now <strong>enabled by default</strong> in compose
+(<code>EMBEDDING_BASE_URL</code> set, no <code>depends_on</code> coupling) — safe because of the fallback ladder: a
+circuit breaker in the client plus the pre-existing lexical TF-IDF scorer means a dead or slow
+embeddings service degrades ranking quality within one request, never availability. Requests are
+chunked to ≤256 documents per POST (the M1 review's ledgered finding — the server 413s past
+that), with whole-rank fallback on a partial chunk failure. A dim guard rejects a
+model/dimension mismatch rather than silently corrupting cosine math. Vectors persist in the
+pre-existing <code>retrieval_embeddings</code> table, read-through/write-back keyed by <code>(text_hash,
+model)</code> — a restart re-embeds nothing, and a model tag change invalidates naturally. Verified
+live: 136 rows stable across a restart.</p>
+<p><strong>Honest measurement, pre-committed before the branch was built (not gated on it):</strong> a live
+Arabic smoke run — semantic ranking beats lexical on the customers case; the invoices case still
+ranks a semantically-adjacent view first. This is the expected small-catalog headroom this
+document has called out since the seventh re-scoring (retrieval measured parity, not lift, on
+this 82-object catalog), reported honestly rather than gated behind a passing threshold. No
+eval-gate run was added for this pass by design — it closes the infra gap; parity is expected on
+the current small live catalog, with headroom on larger ones.</p>
+<p><strong>What review caught and fixed:</strong> the true full-suite run (2448/4/0) showed the implementer's
+reported "6 failed" was a wrong-container artifact (the compose <code>backend</code> service has no
+<code>/frontend</code> mount and an empty <code>VALKEY_URL</code>), not a real regression — corrected via a process
+note. Two Lows were dispatched and fixed: the restart-persistence test called the real health
+endpoint unmocked; the Arabic smoke gate conflated small-catalog headroom with an actual defect
+(<code>8000f2f</code> splits it into separate gate/headroom modes).</p>
+<p><strong>What stays open.</strong> <strong>pgvector itself is the named absent half</strong> — the retrieval math runs
+in-process (cosine over cached vectors), which is exact and fast at the platform's current
+catalog size; <code>retrieval_embeddings</code> is the seam pgvector slots into without rework, not a
+pgvector column or extension. A separate whole-branch review was waived — the branch has exactly
+one cross-task seam (M1 server ↔ M2 client contract), and the M2 review verified it field-by-
+field plus reran the full standard-harness suite. Suites: backend <strong>2448 passed / 4 skipped</strong>
+(same pre-existing skips), frontend <strong>897</strong>.</p>
+<p><strong>Score adjustments, derived from the above:</strong> Layer 3 ~72% → <strong>~78%</strong> — the retrieval half is
+now embedding-backed by default rather than lexical-only, closing the specific reason this
+document has held Layer 3 back since the seventh re-scoring; what keeps the layer in the
+high-70s rather than higher is pgvector's continued absence and the R-pipeline remnants
+(Spider/BIRD eval, canonical-preference tuning) tracked in Block B below.</p>
+<p>Overall alignment: <strong>~86%, unchanged at the rounded figure.</strong> Layer 3 was this document's
+smallest of the eight layers by score before this pass and remains one of two layers (with
+Layer 2) still carrying a numbered gap this document has not closed or explicitly ruled N/A —
+a real, evidence-based step within Layer 3 that is too small a slice of the eight-layer average
+to move the headline number, consistent with how this document has weighted every prior
+single-layer pass.</p>
+<p><strong>Note:</strong> your repo already contains a gap analysis —
+<a href="data_analytics/docs/superpowers/specs/2026-08-17-three-way-gap-analysis.md"><code>docs/superpowers/specs/2026-08-17-three-way-gap-analysis.md</code></a>
+(117 KB, 13 categories, 277 rows). It benchmarks datalytics against <strong>SAS Visual Analytics and
+Power BI</strong> — a <em>different</em> yardstick. This document is complementary, not a duplicate: it measures
+you against ARCHITECTURE.md only.</p>
+</blockquote>
+<hr>
+<h2>Scorecard by layer</h2>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Architecture's purpose</th>
+<th>Status</th>
+<th>Coverage</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>1 — Connectors &amp; Ingestion</strong></td>
+<td>Connect anything, extract structure</td>
+<td class="s s-ok">🟢 <strong>Built, migrations adopted</strong></td>
+<td>~94%</td>
+</tr>
+<tr>
+<td><strong>2 — Storage &amp; Query Engine</strong></td>
+<td>Decide where a query runs, run it</td>
+<td class="s s-warn">🟡 <strong>Partial / Different — Valkey (opt-in) and materializations closed</strong></td>
+<td>~65%</td>
+</tr>
+<tr>
+<td><strong>3 — Metadata &amp; Semantic</strong></td>
+<td>Structure → business meaning</td>
+<td class="s s-ok">🟢 <strong>Retrieval half embedding-backed by default; entities shipped; pgvector absent</strong></td>
+<td>~78%</td>
+</tr>
+<tr>
+<td><strong>4 — AI Agent Orchestration</strong></td>
+<td>Question in, correct SQL out</td>
+<td class="s s-ok">🟢 <strong>Built, hardened, measured ×7 — retrieval parity, not lift</strong></td>
+<td>~84%</td>
+</tr>
+<tr>
+<td><strong>5 — Analysis &amp; Execution</strong></td>
+<td>Beyond plain SQL</td>
+<td class="s s-ok">🟢 <strong>Five of six numbered gaps closed — sandbox N/A by design</strong></td>
+<td>~84%</td>
+</tr>
+<tr>
+<td><strong>6 — Visualization &amp; Dashboards</strong></td>
+<td>Results → charts → dashboards</td>
+<td class="s s-ok">🟢 <strong>Achieved, differently</strong></td>
+<td>~90%</td>
+</tr>
+<tr>
+<td><strong>7 — Publishing &amp; Sharing</strong></td>
+<td>Get the work outside the product</td>
+<td class="s s-ok">🟢 <strong>Embeds closed — its largest named gap — sharing hardened, ETL gaps closed</strong></td>
+<td>~87%</td>
+</tr>
+<tr>
+<td><strong>8 — Platform Core</strong></td>
+<td>Who can do what; is anything on fire</td>
+<td class="s s-warn">🟡 <strong>Quotas closed, OTel opt-in, RLS gap closed, rate-limited</strong></td>
+<td>~78%</td>
+</tr>
+</tbody>
+</table></div>
+<p>Legend: 🟢 achieved · 🟡 partial or built differently · 🔴 mostly missing · ⚫ absent</p>
+<p><strong>The shape of it:</strong> you were strong exactly where the architecture calls the work
+<em>conventional</em> (6, 7, 8) and empty where it calls the work <em>hard and decisive</em> (3, 4).
+That shape has now inverted on both hard layers, to different degrees: Layer 4's runtime is
+<strong>built, hardened and measured</strong> — the make-or-break layer answers questions with an
+88% completion rate (round 6), 77% value-verified accuracy on what it completes, and a
+refusal posture that never returned a fabricated join. Layer 3's <strong>retrieval half is now
+substantially built</strong> — entities with grain, lexical TF-IDF ranking (word + character
+3–5-gram, Arabic-capable), 1-hop join-graph expansion and enum injection are wired into
+the agent's context render — but a round-7 measurement on this 82-object catalog found
+<strong>parity, not lift</strong>: strict 12/25 (identical to round 6), value-verified 16/25 vs 17
+baseline, conditional accuracy 76% vs 77%. Read exactly as intended, not inflated:
+retrieval buys headroom for catalogs too large to fit in one prompt; it does not lift
+accuracy on one that already fits after the H7 breadth guarantee. What remains hard and
+undone is narrower still: <strong>pgvector</strong> (embeddings themselves are closed as of the eleventh
+re-scoring — a self-hosted ONNX embedding service runs as retrieval Backend B, enabled by
+default, with vectors persisted in <code>retrieval_embeddings</code>; only the pgvector column/extension is
+still absent, a scale-up item rather than a live-endpoint blocker) and Spider/BIRD/Langfuse. The
+architecture said
+<em>"retrieval quality caps agent accuracy regardless of model size"</em>; the round-7 numbers
+say the lexical half of that quality is not, on this catalog, the binding constraint —
+which is itself evidence for the same claim, not against it.</p>
+<hr>
+<h1 class="layer" id="layer-1"><span class="layer-num">L1</span><span class="layer-name">Connectors &amp; Ingestion</span></h1>
+<p><strong>Built.</strong> Specified in
+<a href="data_analytics/docs/superpowers/specs/2026-08-24-layer1-connectors-ingestion-design.md"><code>2026-08-24-layer1-connectors-ingestion-design.md</code></a>,
+implemented additively — no table renamed, no service rewritten, no dependency removed.</p>
+<h3>The twelve gaps, closed</h3>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th>#</th>
+<th>Gap</th>
+<th>Where it lives now</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Two planes — metadata vs data</td>
+<td>Six-stage sync against a local cache; no per-question source traffic</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Persisted <code>column_stats</code></td>
+<td><code>column_stats</code> table + <a href="data_analytics/backend/app/services/metadata/profile.py"><code>metadata/profile.py</code></a></td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong><code>top_k</code> enum extraction</strong></td>
+<td>Computed wherever <code>distinct_count &lt; 100</code>; exposed on the stats API</td>
+</tr>
+<tr>
+<td>4</td>
+<td>DuckDB sample cache</td>
+<td><a href="data_analytics/backend/app/services/metadata/cache.py"><code>metadata/cache.py</code></a> — LRU, byte-budgeted, persists across restarts</td>
+</tr>
+<tr>
+<td>5</td>
+<td>PII masking before samples leave</td>
+<td><a href="data_analytics/backend/app/services/pii.py"><code>services/pii.py</code></a> — classify, mask, <em>then</em> cache</td>
+</tr>
+<tr>
+<td>6</td>
+<td><strong>FK inference with evidence</strong></td>
+<td><a href="data_analytics/backend/app/services/metadata/infer_keys.py"><code>metadata/infer_keys.py</code></a></td>
+</tr>
+<tr>
+<td>7</td>
+<td>Semantic inference</td>
+<td><a href="data_analytics/backend/app/services/metadata/infer_semantic.py"><code>metadata/infer_semantic.py</code></a> — regex, roles, deprecation, LLM descriptions</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Schema drift + fingerprinting</td>
+<td><a href="data_analytics/backend/app/services/metadata/drift.py"><code>metadata/drift.py</code></a> + <code>schema_versions</code></td>
+</tr>
+<tr>
+<td>9</td>
+<td><code>confidence</code> + <code>source</code> provenance</td>
+<td><a href="data_analytics/backend/app/services/metadata/store.py"><code>metadata/store.py</code></a> — one enforcement point</td>
+</tr>
+<tr>
+<td>10</td>
+<td>Human confirmation UI</td>
+<td><a href="data_analytics/frontend/src/pages/SourceReview.tsx"><code>SourceReview.tsx</code></a> + React Flow join graph</td>
+</tr>
+<tr>
+<td>~~11~~</td>
+<td>~~<code>sync_runs</code> + <code>watermarks</code>~~</td>
+<td class="s s-ok">✅ <strong><code>watermarks</code> now driven (UX+ETL+security pass).</strong> <a href="data_analytics/backend/app/services/dataset_refresh.py"><code>services/dataset_refresh.py</code></a>: <code>refresh_dataset(id, mode)</code> — full re-runs the stored query/SQL, incremental appends rows past <code>cursor_value</code> and advances the watermark transactionally; a bad <code>cursor_column</code> falls back to full with a warning (validated against an allowlist of the dataset's real columns after the follow-up fix in <code>d41329a</code> closed a SQL-identifier injection risk in that fallback path). <code>sync_runs</code> per-stage observability unchanged.</td>
+</tr>
+<tr>
+<td>12</td>
+<td>Envelope encryption</td>
+<td><code>enc:v2:</code> inside <a href="data_analytics/backend/app/services/secrets.py"><code>secrets.py</code></a></td>
+</tr>
+</tbody>
+</table></div>
+<h3>The measured result — M1.4</h3>
+<p>The architecture says M1.4 is <em>"where you discover whether the metadata model is rich
+enough, and you want that finding while the schema is still cheap to change."</em> It did
+exactly that. <code>test_infer_keys_accuracy.py</code> runs the real pipeline over an eight-table
+schema built to be hard, and reports:</p>
+<pre><code>precision 100.00%   recall 100.00%   F1 100.00%
+proposed 7 / 7 true          overlap queries: 21
+</code></pre>
+<p><strong>It failed at 50% precision on the first run</strong>, and both defects were real rather than
+cosmetic:</p>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th>Defect</th>
+<th>Why overlap could not catch it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>orders.status_code</code> proposed as a key into <code>categories.id</code></td>
+<td>Status codes hold 1–4; so does the category table. Overlap scored a <strong>genuine 1.0</strong> — the evidence really did point the wrong way</td>
+</tr>
+<tr>
+<td>Every table's <code>id</code> paired with every other table's <code>id</code></td>
+<td>Surrogate keys are small integers from 1, so <code>customers.id</code> (1–100) is <em>wholly contained</em> in <code>orders.id</code> (1–200)</td>
+</tr>
+</tbody>
+</table></div>
+<p>Both are structural, not thresholdable. A wrong join does not fail loudly: it silently
+multiplies rows and quietly corrupts every aggregate built on it. Both are now rejected
+by name rules, and the fix also cut overlap queries from 132 to 21.</p>
+<h3>Provenance — the rule the layer turns on</h3>
+<p><code>confirmed</code> &gt; <code>declared</code> &gt; <code>inferred</code>, enforced in <strong>one function</strong>. Every inference
+stage writes through it, so a resync cannot revert a human's decision. Pre-existing
+relationships migrated to <code>declared</code>/<code>1.0</code> — a person typed them, so they outrank
+anything inference later proposes.</p>
+<h3>Still open in Layer 1</h3>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th>Gap</th>
+<th>Note</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Live schema introspection</strong></td>
+<td><code>stage_discover</code> reads datasets already registered in the catalog. Pointing at a connection and enumerating its tables via SQLAlchemy <code>Inspector</code> is not wired — you still add tables through the existing connection flow</td>
+</tr>
+<tr>
+<td><strong><code>pg_stats</code> fast path</strong></td>
+<td><code>from_pg_stats_row</code> and <code>build_profile_sql</code> are written and tested, but <code>stage_profile</code> computes from the cached sample instead. Correct, and marked <code>exact=False</code>; it just is not yet the millisecond path the doc recommends</td>
+</tr>
+<tr>
+<td>~~<strong>Declared FK seeding</strong>~~</td>
+<td class="s s-ok">✅ <strong>Closed (Tier 1 foundations pass).</strong> <a href="data_analytics/backend/app/services/metadata/sync.py"><code>metadata/sync.py</code></a>'s <code>stage_infer_keys</code> now calls <code>_read_declared_fks</code>/<code>_seed_declared_keys</code> (<code>inspect(engine).get_foreign_keys(...)</code>) ahead of value-overlap inference, so a real catalog foreign key seeds a <code>declared</code> relationship instead of waiting to be guessed at <code>inferred</code> confidence. <code>catalog_sync.py</code> already did this for its own path; this closes the gap in the per-Dataset DirectQuery sync pipeline specifically — <code>test_declared_fk_seeding.py</code>.</td>
+</tr>
+<tr>
+<td>~~<code>watermarks</code>~~</td>
+<td class="s s-ok">✅ Closed (UX+ETL+security pass) — see row 11 above. This row sat here stale through the fifth re-scoring, contradicting the closed row twenty lines up; caught by the sixth-pass recompute</td>
+</tr>
+<tr>
+<td><strong>Scheduled resync</strong></td>
+<td>Sync is manual. The nightly cron the doc specifies is not wired to the existing scheduler</td>
+</tr>
+<tr>
+<td>Composite foreign keys</td>
+<td>Out of scope by design — <code>relationships</code> is single-column and <code>prep.py</code> / <code>query_builder.py</code> assume that</td>
+</tr>
+</tbody>
+</table></div>
+<h3>Still different, deliberately</h3>
+<ul>
+<li><strong>pandas, not Arrow</strong> (Principle 6). A Layer 2 concern; changing it breaks <code>widget_data.py</code>.</li>
+<li><strong>psycopg2, openpyxl</strong> — stack swaps, not missing logic.</li>
+<li><strong>Statistics come from the sample, not the engine</strong> — see <code>pg_stats</code> above.</li>
+</ul>
+<hr>
+<h1 class="layer" id="layer-2"><span class="layer-num">L2</span><span class="layer-name">Storage &amp; Query Engine</span></h1>
+<h3>✅ Achieved</h3>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th>Architecture requirement</th>
+<th>Your implementation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Query router — pushdown vs local</strong></td>
+<td><a href="data_analytics/backend/app/services/direct_query.py"><code>services/direct_query.py</code></a> (998 lines) — <code>plan_query</code> decides push-down vs materialize</td>
+</tr>
+<tr>
+<td><strong>Routing on capability flags</strong></td>
+<td><code>DIRECTQUERY_FAMILIES</code> / <code>PERCENTILE_FAMILIES</code> / <code>STAT_FAMILIES</code> gate what can push down</td>
+</tr>
+<tr>
+<td><strong>Result cache</strong></td>
+<td><a href="data_analytics/backend/app/services/frame_cache.py"><code>services/frame_cache.py</code></a> + widget-data cache (<code>_widget_data_cache_get/set</code>)</td>
+</tr>
+<tr>
+<td><strong>Governor — row caps</strong></td>
+<td><code>test_direct_query_row_capped.py</code>, <code>test_direct_query_row_capped_execution.py</code></td>
+</tr>
+<tr>
+<td><strong>Connection pooling</strong></td>
+<td><code>test_engine_pool.py</code></td>
+</tr>
+<tr>
+<td><strong>Federated vs materialized modes</strong></td>
+<td><code>datasets.mode</code> = <code>import | directquery</code> — the architecture's federated/materialized split, two of its three modes</td>
+</tr>
+<tr>
+<td><strong>Query correctness discipline</strong></td>
+<td>The <strong>grain invariant</strong> in <code>direct_query.py</code> (<code>GRAIN_SAFE_AGGREGATIONS</code>) — rejecting <code>count</code>/<code>countd</code>/<code>std</code>/<code>variance</code>/<code>range</code> rather than silently computing them wrong. Genuinely rigorous engineering the architecture doesn't even anticipate.</td>
+</tr>
+</tbody>
+</table></div>
+<h3>🔴 Missing</h3>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th>#</th>
+<th>What's absent</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>DuckDB as the local execution engine.</strong> Local work is <strong>pandas</strong>, not DuckDB.</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>Cross-source joins.</strong> D2.3 (pull the small side, refuse if both exceed budget) has no counterpart. Joins are within one source: <a href="data_analytics/backend/app/services/prep.py"><code>services/prep.py</code></a></td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>sqlglot normalization for cache keys</strong> (D2.2). Your cache keys are hash-of-config, not normalized-SQL hash — so two semantically identical configs may miss.</td>
+</tr>
+<tr>
+<td>~~4~~</td>
+<td class="s s-ok">~~Cache invalidation on schema drift~~ ✅ <strong>Closed (all-layers pass).</strong> A drift-detected change bumps <code>DataSource.cache_epoch</code> in the same transaction; the epoch is folded into the DirectQuery result-cache key, so stale entries become unreachable and the LRU evicts them. File datasets (no source) unaffected.</td>
+</tr>
+<tr>
+<td>~~5~~</td>
+<td>~~<strong>Materialization store</strong> — Parquet + manifest, incremental refresh via watermarks~~</td>
+</tr>
+<tr>
+<td>6</td>
+<td><strong>Byte-scanned caps / metered-source refusal</strong> — "refuse before sending" for metered warehouses. Unchanged by the Tier 4 pass — no code anywhere estimates or caps bytes scanned before a query runs against a metered source.</td>
+</tr>
+<tr>
+<td>~~7~~</td>
+<td class="s s-ok">~~<code>query_runs</code> telemetry table~~ ✅ <strong>Closed (all-layers pass).</strong> <a href="data_analytics/backend/app/services/query_log.py"><code>services/query_log.py</code></a>: per-query executor/rows/duration/cache-hit, sql-hash only (never SQL text), fire-and-forget on a dedicated sync engine — the first version corrupted the shared async pool by spinning a loop per call, caught only by live verification and fixed structurally. Known gap: two sync-in-loop router paths (<code>analysis.py</code>, <code>datasets.py</code>) log via the same helper now but pre-date the async refactor that would make them first-class. <strong>Extended (UX+ETL+security pass):</strong> the new refresh endpoint writes <code>query_runs</code> rows with <code>source_kind='refresh'</code> (<a href="data_analytics/backend/app/routers/datasets.py#L1334"><code>routers/datasets.py:1334</code></a>) — refresh runs now show up in the same telemetry table as query executions, not a separate log.</td>
+</tr>
+<tr>
+<td>8</td>
+<td><strong>Ibis</strong> — no multi-backend expression layer.</td>
+</tr>
+<tr>
+<td>9</td>
+<td><strong>Arrow RecordBatch streaming</strong> — results are pandas DataFrames → JSON.</td>
+</tr>
+<tr>
+<td>~~10~~</td>
+<td>~~<strong>Valkey / Redis</strong>~~</td>
+</tr>
+</tbody>
+</table></div>
+<h3>🔀 Different — and this is the important one</h3>
+<p><strong>Principle 4: "One exit point for SQL — every outbound query is parsed by <code>sqlglot</code>, checked,
+limited, and re-rendered. Never string concatenation."</strong></p>
+<p>You do <strong>not</strong> use sqlglot <em>on the BI query path</em> — though since the Layer 4 build,
+<code>sqlglot==30.17.0</code> is pinned (deliberately, for parse-shape stability) and load-bearing on the
+agent path (the V1–V5 ladder, policy injection), so adopting it here is now a port, not a new
+dependency. The BI path's own translator:
+<a href="data_analytics/backend/app/services/sql_expr.py"><code>services/sql_expr.py</code></a> —</p>
+<ul>
+<li>Parses the filter expression with Python's <strong><code>ast</code></strong> module</li>
+<li>Gates it through <code>widget_data._validate_expr_safety</code>'s AST allowlist</li>
+<li>Applies a <strong>second, stricter</strong> gate: only the subset with a direct SQL row-predicate equivalent</li>
+<li>Emits a <strong>parameterized</strong> WHERE fragment — values are <strong>bound parameters</strong>, not concatenated</li>
+</ul>
+<p><strong>Assessment:</strong> you meet the <em>security intent</em> of Principle 4 (real AST, allowlisted, parameter
+binding — see <code>test_expression_sandbox_escape.py</code>, <code>test_sql_expr.py</code>), on a <strong>narrower grammar</strong>
+and <strong>without dialect portability</strong>. sqlglot would give you 25+ dialects and cache-key
+normalization for free; your version is hand-maintained per family. This is a defensible trade,
+not a defect — but it is the largest single "different" in the codebase.</p>
+<p><strong>Deployment: air-gapped (Tier 4 offline/scale pass).</strong> The architecture's stack discussion
+above implicitly assumes normal internet reachability for whatever it recommends (Valkey
+images, DuckDB, Ibis, etc.); this project's actual production target is an <strong>isolated
+network with no internet access</strong>, and as of this pass the running stack has no outstanding
+runtime internet dependency — the one that existed (a Google Fonts <code>@import</code>) is now vendored
+locally, and <code>scripts/build_offline_bundle.ps1</code> + <code>docs/OFFLINE_DEPLOYMENT.md</code> give an
+operator a <code>docker save</code>/load path (~567MB) to stand the whole compose stack up with zero
+registry or CDN reachability. See the ninth re-scoring blockquote above for detail.</p>
+<hr>
+<h1 class="layer" id="layer-3"><span class="layer-num">L3</span><span class="layer-name">Metadata &amp; Semantic Layer</span></h1>
+<blockquote>
+<p><em>"This layer and layer 4 decide whether the product works."</em> — ARCHITECTURE.md</p>
+</blockquote>
+<h3>✅ Achieved</h3>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th>Architecture requirement</th>
+<th>Your implementation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Metrics are formulas, validated — not free text</strong> (D3.3)</td>
+<td><a href="data_analytics/backend/app/services/measure_eval.py"><code>services/measure_eval.py</code></a> (313 lines) + <code>test_measures_api.py</code>, <code>test_measure_eval.py</code>, <code>test_measure_bygroup.py</code>. Genuine formula engine with time-intelligence (<code>test_time_intelligence_functions.py</code>, <code>test_time_intelligence_periods.py</code>), text functions, date/stat functions. <strong>This is the single strongest overlap with L3.</strong></td>
+</tr>
+<tr>
+<td><strong><code>entities</code> table with business names, grain, descriptions</strong></td>
+<td class="s s-ok">✅ <strong>Closed (Tier 2 retrieval pass, Task R3).</strong> <code>Entity</code> model + <code>0005_entities</code> migration: name, business name, grain (<em>"one row per…"</em>), description, <code>primary_object</code>, <code>source</code> provenance. Drafted by the sync's LLM pass, confirmed/edited on the existing metadata review surface, survives resync under the same confirm-outranks-inferred ladder as enum labels. Rendered as a budget-reserved "Entities:" block in the agent's schema context and included as a retrieval document.</td>
+</tr>
+<tr>
+<td><strong>Entities / roles</strong> (measure · dimension · date · text)</td>
+<td><code>hierarchy_nodes</code> + <a href="data_analytics/backend/app/routers/hierarchy.py"><code>routers/hierarchy.py</code></a>, auto-generate from detected types</td>
+</tr>
+<tr>
+<td><strong>Row policies attached to entities</strong></td>
+<td><code>row_security_rules</code> + <a href="data_analytics/backend/app/core/rls.py"><code>core/rls.py</code></a> — including <code>USEREMAIL()</code> / <code>USERID()</code> dynamic context, which is exactly the architecture's <code>"tenant_id = :current_tenant"</code> idea generalized. <strong>Extended (UX+ETL+security pass):</strong> <code>ORGID()</code>/<code>ORGNAME()</code> join the same token family, and expansion now runs for the <em>viewing</em> user in ordinary author filter expressions too, not only RLS — a widget filter <code>owner == USEREMAIL()</code> narrows per-viewer without an admin writing per-viewer rules. A codeless RLS builder (<code>AdminRowSecurityRules.tsx</code>) suggests email/org-ish columns and can auto-generate rule proposals (<code>RowPolicy.auto_generated</code>, cleared on manual edit) — D3.1's draft-then-confirm pattern applied to security rules, not just the catalog.</td>
+</tr>
+<tr>
+<td><strong>Join graph</strong></td>
+<td><code>relationships</code> table, <code>test_relationship_model.py</code>, <code>test_prep_join.py</code></td>
+</tr>
+<tr>
+<td><strong>Saved semantic views</strong></td>
+<td><code>data_views</code> + <a href="data_analytics/backend/app/services/data_views.py"><code>services/data_views.py</code></a></td>
+</tr>
+<tr>
+<td><strong>Multilingual</strong></td>
+<td><code>report_translations</code>, RTL widget support — partial answer to the Arabic ↔ English concern</td>
+</tr>
+<tr>
+<td><strong>Semantic types on columns</strong></td>
+<td><em>New in Layer 1.</em> <code>dataset_columns.semantic_type</code> — email, phone, currency, percentage, IBAN, national ID</td>
+</tr>
+<tr>
+<td><strong>Generated descriptions at every level</strong></td>
+<td>Database overview + per-object + per-column via the offline Qwen endpoint, opt-in per source. <strong>Kind-aware since 2026-08-25</strong>: a view is described as the question it answers and what it derives from, never as storage — 48 of the live source's 82 objects are views, so this was the majority of the catalog. Verified complete: 82/82 objects, 1354/1354 columns.</td>
+</tr>
+<tr>
+<td><strong>Draft-generate-then-confirm</strong> (D3.1)</td>
+<td><strong>Closed for the catalog.</strong> The sync auto-drafts relationships, semantic types and descriptions as <code>inferred</code>; <a href="data_analytics/frontend/src/pages/SourceReview.tsx"><code>SourceReview.tsx</code></a> is the confirm surface; confirmed items are never overwritten by resync. Measures and hierarchies remain hand-authored — see Different below.</td>
+</tr>
+<tr>
+<td><strong><code>source = inferred | confirmed</code> provenance</strong></td>
+<td><strong>Closed.</strong> <a href="data_analytics/backend/app/services/metadata/store.py"><code>metadata/store.py</code></a> enforces <code>confirmed &gt; declared &gt; inferred</code> at a single choke point.</td>
+</tr>
+<tr>
+<td><strong><code>top_k</code> enum values</strong></td>
+<td><em>New in Layer 1.</em> <code>column_stats.top_k</code> is the raw material for the enum dictionary — the values exist, the <code>raw_value → label</code> mapping does not</td>
+</tr>
+</tbody>
+</table></div>
+<h3>🔴 Missing — down to pgvector itself</h3>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th>#</th>
+<th>What's absent</th>
+<th>Consequence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>~~1~~</td>
+<td>~~<code>entities</code> table with business names, grain, descriptions~~</td>
+<td class="s s-ok">✅ <strong>Closed (Tier 2 retrieval pass)</strong> — moved to Achieved above.</td>
+</tr>
+<tr>
+<td>~~2~~</td>
+<td>~~<code>enum_values</code> dictionary~~</td>
+<td class="s s-ok">✅ <strong>Closed (all-layers pass).</strong> <code>SourceColumn.enum_labels</code> + <code>enum_labels_source</code> provenance: the sync LLM-drafts labels for low-cardinality columns (320 columns labelled on the live source), humans confirm/edit in the review UI, confirmed labels survive resync, and the agent's schema prompt renders them (<code>st_cd (1=new, 2=paid, 3=cancelled)</code>).</td>
+</tr>
+<tr>
+<td>~~3~~</td>
+<td>~~<code>glossary_terms</code> + synonyms + Arabic aliases~~</td>
+<td class="s s-ok">✅ <strong>Closed (all-layers pass).</strong> <code>glossary_terms</code> table (term, definition, synonyms incl. Arabic, maps-to object/column) + admin CRUD; question-matched terms are injected into the agent's classify/generate prompts. Arabic matching verified by test and live.</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>pgvector + real embeddings</strong></td>
+<td class="s s-warn">🟡 <strong>Split — EMBEDDINGS closed, pgvector still absent (eleventh re-scoring, embeddings-service branch).</strong> <a href="data_analytics/embedding_server/"><code>embedding_server/</code></a> is a self-hosted, compose-network-only ONNX embedding service (<code>paraphrase-multilingual-MiniLM-L12-v2</code>, int8, no torch, weights baked into the image at build time for the air gap). Retrieval Backend B in <code>services/retrieval.py</code> is <strong>enabled by default</strong> in compose — circuit-broken with lexical TF-IDF fallback, requests chunked ≤256 docs, a dim guard against model/dimension mismatch. Vectors persist in <code>retrieval_embeddings</code> keyed by <code>(text_hash, model)</code> — verified live: 136 rows stable across a restart, so nothing re-embeds on redeploy. What remains absent is <strong>pgvector itself</strong>: cosine similarity runs in-process over the cached vectors (exact and fast at the current catalog size), and Postgres here is stock <code>postgres:16-alpine</code> with no pgvector extension — <code>retrieval_embeddings</code> is the seam pgvector slots into without rework, not a <code>vector(N)</code> column. Live Arabic smoke: semantic ranking beats lexical on the customers case; the invoices case still ranks a semantically-adjacent view first — expected small-catalog headroom, reported not gated.</td>
+</tr>
+<tr>
+<td>~~5~~</td>
+<td>~~The whole R.1–R.7 context retrieval pipeline~~</td>
+<td class="s s-ok">🟢 <strong>Substantially built, lexical not embedding-based (Tier 2 retrieval pass).</strong> <code>services/retrieval.py</code>: TF-IDF over word tokens + character 3–5-grams (Arabic-capable), cosine similarity, memoized per catalog fingerprint, wired into <code>SchemaContext.render</code>'s enrichment ordering and into <code>agent/memory.py</code>'s example recall. D3.2's claim — <em>"retrieval quality caps agent accuracy regardless of model size"</em> — was tested directly: on this 82-object catalog, retrieval measured parity (76% vs 77% conditional), not lift, because H7's breadth guarantee already gets every object into the prompt. The embedding-based half of R.1–R.7 (row 4) is now also closed, running alongside this lexical scorer as Backend B's default; only pgvector (row 4's remaining half) is left.</td>
+</tr>
+<tr>
+<td>~~6~~</td>
+<td>~~Graph expansion + enum injection (R.4, R.5)~~</td>
+<td class="s s-ok">✅ <strong>Closed (Tier 2 retrieval pass).</strong> After top-k ranking, any object one confirmed/declared join-hop from a top-3 object is promoted into the enriched render tier — the "orders question pulls order_lines in" behavior the architecture names. Enum labels were already injected (all-layers pass); a question token matching a label now also boosts that object's rank.</td>
+</tr>
+<tr>
+<td>~~7~~</td>
+<td>~~<code>join_paths</code> — shortest confirmed path~~</td>
+<td class="s s-ok">✅ <strong>Closed (all-layers pass).</strong> BFS over the confirmed/declared whitelist in <code>agent/context.py</code> (<code>join_path</code>, <code>suggest_join_route</code>) — no NetworkX needed at this scale; F1 holds by construction; multi-table questions get the route as a prompt hint.</td>
+</tr>
+<tr>
+<td>~~8~~</td>
+<td>~~<code>query_examples</code> — verified question→SQL memory~~</td>
+<td class="s s-ok">✅ <strong>Closed by Layer 4.</strong> <code>query_examples</code> table + <a href="data_analytics/backend/app/services/agent/memory.py"><code>agent/memory.py</code></a> <code>recall</code>/<code>remember</code>, wired into the agent's generate prompt as few-shot and written only on sane single-step successes. The <em>retrieval</em> side (embedding-based recall) is still the R-pipeline's job.</td>
+</tr>
+<tr>
+<td>~~9~~</td>
+<td>~~Draft-generate-then-confirm workflow (D3.1)~~</td>
+<td class="s s-ok">✅ <strong>Closed for relationships, types and descriptions</strong> (moved to Achieved). Still hand-authored: measures and hierarchies.</td>
+</tr>
+<tr>
+<td>~~10~~</td>
+<td>~~<code>source = inferred | confirmed</code> provenance~~</td>
+<td class="s s-ok">✅ <strong>Closed</strong> (moved to Achieved).</td>
+</tr>
+</tbody>
+</table></div>
+<h3>🔀 Different</h3>
+<p>The architecture's target is <strong>"a correct semantic model in under ten minutes"</strong> via auto-draft +
+confirm. For the <em>catalog</em> half — objects, columns, types, relationships, descriptions — that
+target is now essentially met: one sync (~5.5 minutes warm) drafts it and the review page
+confirms it. For the <em>business</em> half — measures and hierarchies — your model remains authored by
+an analyst, with no time claim. Different users, different promise, and the line between the two
+halves is now exactly where D3.1 drew it.</p>
+<h3>Measured — retrieval's effect on agent accuracy (Tier 2 retrieval pass)</h3>
+<p>Before merging the retrieval pass, the round-6 eval gate was re-run against the same 25-question
+<code>maps</code> golden set, hand-verified the same way (<code>-ValueVerified</code>): <strong>strict 12/25 (48%), identical
+to the round-6 baseline; value-verified 16/25 vs 17 baseline; conditional accuracy 76.2% vs 77.3%
+baseline</strong> — parity on this 82-object catalog, not a regression and not a lift. Say exactly what
+that means and no more: retrieval reorders <em>which</em> objects get the enrichment budget, but H7's
+two-pass render already guarantees every object <em>name</em> reaches the prompt regardless of catalog
+size, and at 82 objects the fuller enrichment was already reaching everything that mattered. The
+pass's own design spec called this outcome before building it — <em>"retrieval mostly buys headroom
+on larger catalogs; improvement is hoped for, not promised"</em> — and the measurement confirms that
+framing rather than overselling a null result as a win. The retrieval machinery (ranking, graph
+expansion, entities, the embeddings seam) is real, tested, and load-bearing infrastructure for a
+catalog too large to fit in one prompt; it is not, today, the reason this 82-object catalog's
+accuracy is 77%.</p>
+<hr>
+<h1 class="layer" id="layer-4"><span class="layer-num">L4</span><span class="layer-name">AI Agent Orchestration</span></h1>
+<h3>🟢 Built, hardened, measured (2026-08-26)</h3>
+<p>The runtime exists — ~1,270 lines across <a href="data_analytics/backend/app/services/agent/"><code>app/services/agent/</code></a>,
+141 tests in 15 files, implemented per the
+<a href="data_analytics/docs/superpowers/specs/2026-08-25-layer-4-agent-orchestration-design.md">spec</a>
+(which now carries three appended measurement rounds), behind a chat pane in the report
+builder, over <strong>all three data modes</strong>: DirectQuery, import-from-source, and multi-file
+uploads (frames registered into DuckDB, dialect-correct, RLS applied to base frames
+before registration).</p>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th>Architecture component</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>graph.py</code> — the state machine</td>
+<td class="s s-ok">✅ hand-rolled asyncio step-DAG executor (deliberate S5 divergence from LangGraph — the repo's own gather+semaphore idiom, ~80 lines, one bounded gate per run)</td>
+</tr>
+<tr>
+<td><code>nodes/classify.py</code> — intent + ambiguity (D4.3)</td>
+<td class="s s-ok">✅ enforced <code>json_schema</code> contract; clarify-don't-guess; tuned from a measured 72% → 32% false-clarification rate</td>
+</tr>
+<tr>
+<td><code>nodes/clarify.py</code> / <code>plan.py</code> — question, decomposition</td>
+<td class="s s-ok">✅ plan degrades to single-step on planner failure, never kills a run</td>
+</tr>
+<tr>
+<td><code>nodes/generate.py</code> — SQL gen w/ constrained decoding (D4.2)</td>
+<td class="s s-ok">✅ via <code>response_format: json_schema</code> — the ONE mechanism verified grammar-enforced on this endpoint (<code>guided_json</code> is silently ignored; a startup probe guards the contract, union-typed field included after that exact class of failure shipped once)</td>
+</tr>
+<tr>
+<td><code>validate.py</code> — <strong>the V1–V5 ladder</strong> (D4.1)</td>
+<td class="s s-ok">✅ parse → SELECT-only → schema → <strong>joins on confirmed/declared provenance only</strong> (the F1 rule; inferred edges are proposals) → policy → EXPLAIN dry run. CTE/alias handling closed after live measurement found the gaps</td>
+</tr>
+<tr>
+<td><code>policy.py</code> — row-policy AST injection</td>
+<td class="s s-ok">✅ predicates parsed, injected pre-aggregation, fail-closed; <strong>plus an admin management API</strong> (<code>GET/POST/DELETE /agent/row-policies</code>, dialect-aware validation) — the security-critical flow is no longer configurable only by SQL</td>
+</tr>
+<tr>
+<td>repair (D4.4)</td>
+<td class="s s-ok">✅ bounded at 3 total generations, each retry fed the specific rung+detail; first mid-budget recovery observed in measurement round 3</td>
+</tr>
+<tr>
+<td><code>executor.py</code> + sanity</td>
+<td class="s s-ok">✅ statement timeouts, injected row caps (existing LIMITs floored to the cap), poisoned-connection invalidation, a race-guarded interrupt watchdog for DuckDB, <code>enable_external_access=false</code></td>
+</tr>
+<tr>
+<td><code>nodes/explain.py</code> — NL answer + provenance</td>
+<td class="s s-ok">✅ <strong>grounded in the DAG's sink steps only</strong> — a measured regression (correct SQL, confidently wrong prose synthesized from intermediate rows) forced the structural fix; deterministic fallback when prose fails</td>
+</tr>
+<tr>
+<td><code>memory.py</code> — query_examples</td>
+<td class="s s-ok">✅ recall as few-shot, remember on sane success; skipped in dataset mode (measured cross-mode pollution)</td>
+</tr>
+<tr>
+<td><code>conversations</code> / <code>messages</code> / <code>agent_runs</code> / <code>agent_steps</code> tables</td>
+<td class="s s-ok">✅ per-user scoped (an org-wide read leaked policy-injected SQL until the final review caught it)</td>
+</tr>
+<tr>
+<td><code>evals/</code> — execution-accuracy harness + golden sets</td>
+<td class="s s-warn">🟡 <code>run_eval.py</code> (results-not-strings) + 25 execution-verified <code>maps</code> pairs + a fixture set, <a href="data_analytics/backend/evals/report.py"><code>evals/report.py</code></a> (per-intent table, <code>--min-accuracy</code> non-zero exit) plus <code>run_gate.py</code> / <code>run_eval_gate.ps1</code> (the one-command live gate) — <strong>and, new this pass, <code>services/eval_schedule.py</code></strong>: an opt-in (<code>eval_gate_enabled</code>, default off) nightly run of the gate in a background thread, writing one <code>eval_runs</code> row and ERROR-logging on a regression below <code>eval_gate_min_accuracy</code>. Stated honestly, as the task that added it documents: this is <strong>a CI stand-in, not CI</strong> — it runs the gate on a schedule inside the running app, not on every commit in an isolated environment. What is genuinely still absent is CI infrastructure to run any of this in: no <code>.github/</code>, no pipeline of any kind</td>
+</tr>
+<tr>
+<td>~~<code>feedback</code> table~~ · Langfuse tracing · Spider 2.0 / BIRD</td>
+<td class="s s-ok">✅ <strong><code>feedback</code> table closed (Tier 1 foundations pass).</strong> <code>AgentFeedback</code> (owner-only 👍/👎 per run, upserted on <code>run_id</code>+<code>user</code>) + <code>POST /agent/conversations/{id}/feedback</code>, wired into <code>ChatPane</code>. Langfuse tracing (<code>agent_steps</code> remains the stand-in) and Spider 2.0/BIRD external evals are ⚫ still absent</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>Measured</strong> (25-question golden set, live <code>maps</code>, six rounds — this
+paragraph carried round-3 numbers until the sixth re-scoring caught it):
+completion 16% → <strong>88%</strong>, clarification stops 72% → <strong>8%</strong>, end-to-end
+correct <strong>17/25</strong>, conditional accuracy <strong>77%</strong> value-verified, median
+6.7s (the bigger prompt; n=25, direction not precision) — and the
+failure posture the spec demanded held:
+across every round, <strong>no fabricated join was ever executed</strong> (the one
+provenance refusal observed was correct), and the residual wrong answer is a
+canonical-source semantics gap, not an agent bug. Full per-question detail
+lives in the spec's measurement appendices. <strong>A seventh round (Tier 2 retrieval
+pass)</strong> re-ran this same golden set after wiring lexical retrieval ranking,
+graph expansion and entities into the context render, and measured <strong>parity</strong>:
+strict 12/25 (identical), value-verified 16/25 vs 17, conditional 76% vs 77% —
+see Layer 3's Measured section for the honest reading of why.</p>
+<h3>✅ Also in Layer 4's stack: the MCP tool surface</h3>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Your implementation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>MCP — "expose the platform as tools so external agents can call it"</strong></td>
+<td><a href="data_analytics/backend/mcp_server/"><code>backend/mcp_server/</code></a> — <code>server.py</code>, <code>client.py</code>, <code>mcp&gt;=1.4</code></td>
+</tr>
+<tr>
+<td>Machine/agent auth for it</td>
+<td><code>api_keys</code> table + <a href="data_analytics/backend/app/core/api_keys.py"><code>core/api_keys.py</code></a> — SHA-256 stored, prefix lookup, key shown once, <strong>inherits the issuing user's org, role, RLS and report capabilities</strong></td>
+</tr>
+<tr>
+<td>Per-org MCP gating</td>
+<td><code>org_mcp_access</code> table</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>Both answers to Open Decision #8 now exist.</strong> The platform is a tool server any
+external agent can drive (authorization inherited, not re-implemented) <em>and</em> it now
+carries its own internal agent. The MCP server's long-standing wart — a fresh <code>httpx.Client</code> per tool call — is
+<strong>fixed</strong> (lock-guarded singleton client, atexit-closed; all-layers pass).</p>
+<h3>🔀 Partial credit elsewhere</h3>
+<ul>
+<li><strong><code>query_builder.py</code></strong> (278 lines) gives users structured query construction — the <em>human</em>
+  version of what <code>generate.py</code> does for the model. <strong>Matured (UX+ETL+security pass):</strong> the
+  compiled model now persists (<code>Dataset.query_model</code>, JSON) and is re-editable — the dialog
+  reopens pre-loaded instead of only ever writing SQL once — and the query canvas gained
+  PowerBuilder-style column checkboxes/aggregation badges plus a Design|SQL tab that hands
+  script-mode users an editable-textarea escape hatch (explicitly one-way: reverting to Design
+  regenerates from the model and discards manual SQL edits, never reverse-parses SQL back into
+  the graph).</li>
+<li><strong><code>explain.py</code></strong> (86 lines) — result explanation, but deterministic, not a generated narrative.</li>
+<li><strong><code>insights.py</code></strong> (286 lines) — six deterministic detectors with 0–1 interest scores, plus
+  <code>suggest_widgets_from_findings</code>. This is the architecture's D6.2 ("rules first, model second")
+  taken to its logical end: <em>rules only, no model</em>.</li>
+</ul>
+<hr>
+<h1 class="layer" id="layer-5"><span class="layer-num">L5</span><span class="layer-name">Analysis &amp; Execution</span></h1>
+<h3>✅ Achieved</h3>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th>Architecture tool</th>
+<th>Your implementation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>describe</code> — summary statistics, distributions, missingness</td>
+<td><a href="data_analytics/backend/app/services/analytics.py"><code>services/analytics.py</code></a> — descriptive stats, outliers, correlations, chi-square</td>
+</tr>
+<tr>
+<td><code>correlate</code> — pairwise + significance</td>
+<td class="s s-ok">✅ <code>test_shape_correlation_matrix.py</code>; <code>scipy</code>, <code>statsmodels</code> pinned</td>
+</tr>
+<tr>
+<td><code>detect_anomalies</code></td>
+<td class="s s-ok">✅ IQR-fence outliers (default) plus opt-in PyOD <code>iforest</code>/<code>ecod</code> (Tier 5 analysis pass) — <code>test_outlier_details.py</code>, <code>outlier_impact</code> detector in <code>insights.py</code>, <code>services/analysis/anomaly.py</code></td>
+</tr>
+<tr>
+<td><code>compare_periods</code> — growth + contribution</td>
+<td class="s s-ok">✅ <code>test_yoy_growth_json_safe.py</code>, <code>test_time_intelligence_periods.py</code>, quick-calcs</td>
+</tr>
+<tr>
+<td><strong>Structured facts the agent can narrate</strong> (<code>AnalysisResult</code>)</td>
+<td class="s s-ok">✅ Closest match in the repo: <code>insights.py</code> findings carry <em>"the figures its sentence states, so the UI can show exactly what the words claim"</em></td>
+</tr>
+<tr>
+<td><strong>D5.1 — deterministic tools first, free-form code last</strong></td>
+<td class="s s-ok">✅ <strong>Fully honoured.</strong> Everything is a named deterministic operation.</td>
+</tr>
+<tr>
+<td>Trend/regression</td>
+<td><code>test_compute_fit_line.py</code></td>
+</tr>
+<tr>
+<td>Goal seek</td>
+<td><code>test_goal_seek.py</code> — <em>not in the architecture at all</em></td>
+</tr>
+<tr>
+<td>~~<code>forecast</code> via StatsForecast (gap #1)~~</td>
+<td class="s s-ok">✅ <strong>Closed (Tier 5 analysis pass).</strong> <code>shape_forecast</code>'s default <code>method</code> is now per-series <strong>StatsForecast <code>AutoETS</code></strong> (additive lo/hi confidence intervals), lazily imported (<code>sys.modules</code> pins keep startup cost at zero). The hand-rolled <code>simple</code> exponential-smoothing path is kept, not discarded — it is the tested fallback on fit failure/degenerate series, exercised by dedicated tests rather than left as dead code.</td>
+</tr>
+<tr>
+<td>~~<code>segment</code> — clustering with automatic k (gap #2)~~</td>
+<td class="s s-ok">✅ <strong>Closed.</strong> <a href="data_analytics/backend/app/services/analysis/segment.py"><code>services/analysis/segment.py</code></a>: standardized-feature KMeans, silhouette-scored auto-k over 2..8, seeded (<code>RANDOM_STATE</code>), 10k-row seeded sampling on large frames, RLS-filtered base frame (byte-for-byte mirror of <code>run_analysis</code>'s row policy), <code>POST /datasets/{id}/segment</code> + a DatasetDetail Segment panel.</td>
+</tr>
+<tr>
+<td>~~PyOD (gap #3)~~</td>
+<td class="s s-ok">✅ <strong>Closed.</strong> <a href="data_analytics/backend/app/services/analysis/anomaly.py"><code>services/analysis/anomaly.py</code></a>: a <code>detector</code> param — <code>"iqr"</code> (default, byte-identical to the pre-existing fence logic), <code>"iforest"</code> (PyOD IsolationForest, seeded), <code>"ecod"</code> (PyOD ECOD, distribution-free). Opt-in; nothing changes for a caller that doesn't pass it.</td>
+</tr>
+<tr>
+<td>~~<code>registry.py</code> — a tool catalogue exposed to Layer 4 (gap #5)~~</td>
+<td class="s s-ok">✅ <strong>Closed.</strong> <a href="data_analytics/backend/app/services/analysis/registry.py"><code>services/analysis/registry.py</code></a>: a single-source catalogue of the analysis tools (describe/correlate/forecast/segment/detect-anomalies/compare-periods), <code>GET /analysis/registry</code>, and a budget-capped (1200-char) block folded into the agent's prompt in <code>generate.py</code> — a static catalogue rather than <code>context.py</code>'s dynamic-retrieval machinery, accepted as the right-sized answer for a fixed, small tool set.</td>
+</tr>
+<tr>
+<td>~~Uniform <code>AnalysisResult</code> contract (gap #6)~~</td>
+<td class="s s-ok">✅ <strong>Closed.</strong> <a href="data_analytics/backend/app/services/analysis_contract.py"><code>services/analysis_contract.py</code></a>: a single-source envelope wrapping every analysis service's output, golden-pinned so all four pre-existing wire shapes (including <code>run_full_analysis</code> and the DirectQuery additions) are byte-preserved — additive, not a breaking reshape.</td>
+</tr>
+</tbody>
+</table></div>
+<h3>🔴 Missing</h3>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th>#</th>
+<th>What's absent</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>4</td>
+<td><strong>The entire sandbox</strong> (D5.2) — <code>packages/sandbox/</code>, gVisor/Firecracker, syscall policy, audit of executed code. <strong>Stays N/A by design</strong> (unchanged from every prior pass): it exists in the architecture only to run LLM-written code, and this product has no LLM-written-code path — see 🔀 Different, below. It is now the <em>only</em> one of Layer 5's six numbered gaps still open.</td>
+</tr>
+</tbody>
+</table></div>
+<h3>🔀 Different</h3>
+<p>The sandbox's absence is <strong>not a gap in your product</strong> — it exists in the architecture only to run
+LLM-written code. With no LLM, D5.2 doesn't apply. Your expression evaluator is sandboxed at the
+AST level instead (<code>test_expression_sandbox_escape.py</code>), which is the right control for
+<em>user</em>-written expressions.</p>
+<hr>
+<h1 class="layer" id="layer-6"><span class="layer-num">L6</span><span class="layer-name">Visualization &amp; Dashboards</span></h1>
+<p><strong>Your strongest layer, and the one that most exceeds the architecture in breadth.</strong></p>
+<h3>✅ Achieved</h3>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th>Architecture requirement</th>
+<th>Your implementation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Chart recommendation from data shape</strong> (D6.2)</td>
+<td><code>insights.suggest_widgets_from_findings</code>, <code>test_suggest_widgets.py</code></td>
+</tr>
+<tr>
+<td><strong>Dashboard canvas, widgets, layout persistence</strong></td>
+<td><code>reports</code> → <code>report_pages</code> → <code>report_widgets</code>, 12-column grid, <a href="data_analytics/frontend/src/pages/"><code>ReportBuilder.tsx</code></a></td>
+</tr>
+<tr>
+<td><strong>Global filters</strong></td>
+<td><code>common_filters</code> table, <code>test_common_filters.py</code>, FilterBar</td>
+</tr>
+<tr>
+<td><strong>Cross-filtering</strong></td>
+<td><code>CrossFilterContext.tsx</code> — with <strong>4 interaction modes</strong> (two-way / broadcast / receive / isolated). <em>Richer than the architecture's single "click a bar, filter siblings".</em></td>
+</tr>
+<tr>
+<td><strong>Versioning on save</strong> (D6.3)</td>
+<td><code>test_report_revision.py</code></td>
+</tr>
+<tr>
+<td><strong>Geospatial</strong></td>
+<td><code>components/report/geo/</code>, <code>test_shape_geo.py</code>, <code>test_geo_pies_layers.py</code>, <code>test_geo_network_and_explain.py</code>, <code>d3-geo</code> + <code>topojson</code> + <code>world-atlas</code></td>
+</tr>
+<tr>
+<td><strong>Large grids / tables</strong></td>
+<td><code>test_table_multi_sort.py</code>, <code>test_table_totals.py</code>, crosstab/matrix (<code>test_matrix_widget_type.py</code>)</td>
+</tr>
+<tr>
+<td><strong>Theme</strong></td>
+<td><code>org_themes</code> table, <code>test_report_theme.py</code>, MCAIT design system</td>
+</tr>
+<tr>
+<td><code>query_spec</code> is semantic, not raw SQL</td>
+<td class="s s-ok">✅ <code>report_widgets</code> stores a config object resolved at query time — exactly the architecture's rationale</td>
+</tr>
+</tbody>
+</table></div>
+<h3>🟢 Chart coverage — you <em>exceed</em> the spec</h3>
+<p>The architecture's rule table names ~11 chart shapes. Your shaper test suite covers at least 20:
+<code>box_plot</code>, <code>bubble</code>, <code>bubble_animated</code>, <code>card</code>, <code>correlation_matrix</code>, <code>dual_series</code>, <code>gantt</code>,
+<code>gauge</code>, <code>geo</code>, <code>heatmap</code>, <code>histogram</code>, <code>parallel_coordinates</code>, <code>series_target</code>, <code>vector_plot</code>,
+<code>waterfall</code>, <code>xy_numeric</code>, <code>area/funnel</code>, treemap, pie/donut, matrix. Plus formatting and display
+rules (<code>test_display_rules*.py</code> ×3, <code>test_report_display_rules_api.py</code>) — an area the architecture
+covers in one word ("theme").</p>
+<h3>🔀 Different — the biggest stack divergence in the project</h3>
+<p><strong>D6.1 — "Vega-Lite JSON specs, generated against a schema and validated before render. Not chart
+code. Generated React code is none of those things."</strong></p>
+<p>You use <strong>Recharts</strong> — React chart components. The architecture rejects this approach by name.</p>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th></th>
+<th>Vega-Lite (specified)</th>
+<th>Recharts (yours)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Spec is validatable JSON</td>
+<td class="s s-ok">✅</td>
+<td class="s s-bad">❌ (config object, not a portable grammar)</td>
+</tr>
+<tr>
+<td>Server-side renderable for exports</td>
+<td class="s s-ok">✅</td>
+<td class="s s-warn">⚠️ You solved it separately with <code>playwright</code> (devDependency) + <code>pdf_export.py</code> (reportlab/matplotlib)</td>
+</tr>
+<tr>
+<td>Diffable / versionable</td>
+<td class="s s-ok">✅</td>
+<td class="s s-warn">🟡 your config is versioned, but not a standard grammar</td>
+</tr>
+<tr>
+<td>Machine-generatable by an LLM against a schema</td>
+<td class="s s-ok">✅</td>
+<td class="s s-bad">❌</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>Why it matters beyond taste:</strong> Vega-Lite is chosen in the architecture <em>because an LLM can emit
+it against a JSON Schema and you can validate before render</em>. With no LLM, that justification
+evaporates — and Recharts gives you better React ergonomics. <strong>But</strong> it also means that if you ever
+add Layer 4, chart generation is the piece you'd have to rebuild, and your PDF/PNG export path is
+maintained twice (browser Recharts + server matplotlib/reportlab), which is exactly the divergence
+D7.3 warns about.</p>
+<h3>🔴 Missing — including two facts the UX Showcase demo verified live (2026-08-26)</h3>
+<p>A seeded "UX Showcase" demo report now exercises every interactive facility with real
+data — button actions (navigate/url), hierarchical drill-down over the option tree,
+cross-filter modes, bookmarks, prompt pages — all verified rendering in the browser.
+The same verification pinned down two page-type gaps precisely:</p>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th>#</th>
+<th>Verified gap</th>
+<th>Fourth re-scoring</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A</td>
+<td>Popup pages had no floating-overlay renderer in view mode</td>
+<td class="s s-ok">✅ <strong>Built</strong> (<a href="data_analytics/frontend/src/components/report/PopupOverlay.tsx"><code>PopupOverlay.tsx</code></a>): modal overlay with backdrop/Esc/close, popup pages excluded from view-mode tabs, demo copy updated</td>
+</tr>
+<tr>
+<td>B</td>
+<td>Tooltip and drillthrough "not triggerable"</td>
+<td class="s s-ok">✅ <strong>Fully closed.</strong> Drillthrough was stale documentation (the trigger pre-existed). Tooltip pages are now hover-triggered in view mode (<code>TooltipPageOverlay.tsx</code>, 300ms delay, near-cursor floating panel; the <code>tooltipPageId</code> binding already existed end-to-end — a repeated pattern: page types were half-wired and undocumented). Every page type is now fully triggerable; datapoint-filter carry into tooltips is the noted follow-up.</td>
+</tr>
+</tbody>
+</table></div>
+<h3>🔴 Missing (as before)</h3>
+<ul>
+<li>Vega-Lite / vega-embed / ECharts</li>
+<li><code>react-grid-layout</code> (you built the grid yourself)</li>
+<li>Perspective (WASM pivot grids), uPlot (dense time series), MapLibre / deck.gl, TanStack Table</li>
+<li>JSON-Schema validation of specs before render</li>
+</ul>
+<hr>
+<h1 class="layer" id="layer-7"><span class="layer-num">L7</span><span class="layer-name">Publishing &amp; Sharing</span></h1>
+<h3>✅ Achieved</h3>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th>Architecture requirement</th>
+<th>Your implementation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Signed share links — expiry + revocation</strong> (M7.1)</td>
+<td><code>share_links</code> table (<code>token_hash</code> unique, <code>expires_at</code> NOT NULL, <code>revoked_at</code>), <a href="data_analytics/backend/app/routers/shared.py"><code>routers/shared.py</code></a>, <code>test_share_links.py</code>, <code>SharedReport.tsx</code>. <em>Token is stored hashed — good.</em> No <code>password_hash</code>, no <code>row_filters</code> pinned at share time.</td>
+</tr>
+<tr>
+<td><strong>Schedules + delivery + delivery log</strong> (M7.5)</td>
+<td><code>report_schedules</code> + <code>data_alerts</code>, <a href="data_analytics/backend/app/services/delivery.py"><code>services/delivery.py</code></a>, <a href="data_analytics/backend/app/services/alerts.py"><code>services/alerts.py</code></a>, <code>test_scheduled_delivery.py</code>, <code>test_refresh_schedule.py</code>. <strong>Delivery log + schedule timezone closed (Tier 1 foundations pass):</strong> a <code>Delivery</code> row per attempt (status, error, artifact_kind, duration_ms) and <code>ReportSchedule.timezone</code> (NULL = UTC) — both named gaps in the row below are now satisfied here, not just closed there.</td>
+</tr>
+<tr>
+<td><strong>PDF export</strong></td>
+<td><a href="data_analytics/backend/app/services/pdf_export.py"><code>services/pdf_export.py</code></a>, <code>test_pdf_export.py</code></td>
+</tr>
+<tr>
+<td><strong>CSV / XLSX export</strong></td>
+<td><code>test_widget_export.py</code>, <code>openpyxl</code></td>
+</tr>
+<tr>
+<td><strong>Export policy control</strong></td>
+<td><code>test_export_policy_granular.py</code> — <em>finer than the architecture specifies</em></td>
+</tr>
+<tr>
+<td><strong>Publish a specific version, not "latest"</strong> (D7.2)</td>
+<td class="s s-ok">✅ <strong>Closed (all-layers pass, 2026-08-26)</strong> — credited in the Tier-2 list below but the row here was never updated until now. <code>share_links.snapshot</code> + <code>pinned</code>: a pinned link freezes layout at share time (data stays live, labelled so). <strong>Extended (UX+ETL+security pass, S3):</strong> the snapshot now also freezes the page's role-visibility list <em>at pin time</em>, so deleting the live page after pinning can no longer widen what a role-holding viewer sees — the edge case the S3 task named directly.</td>
+</tr>
+<tr>
+<td><strong>Viewer identity on shared reports</strong> <em>(new this pass)</em></td>
+<td>An authenticated in-org viewer of a shared report now resolves RLS as <strong>themselves</strong>, not the link's creator (<a href="data_analytics/backend/app/routers/reports.py"><code>routers/reports.py</code></a> — <code>resolve_rls_expr(db, current_user, ds.id)</code>, not the creator's id). Guest/anonymous viewers keep creator semantics by design — the share dialog says so plainly ("Guest viewers see data with YOUR data permissions"). A guest-link access log (<code>share_link_id</code>, ts, salted <code>ip_hash</code>, truncated user-agent) is written fire-and-forget on guest render, and export routes on guest paths now go through the same server-side 401 as everywhere else, not just UI-hiding.</td>
+</tr>
+</tbody>
+</table></div>
+<h3>🟡 / 🔴 Gaps</h3>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th>#</th>
+<th>Gap</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>~~1~~</td>
+<td class="s s-ok">~~<strong>Embeds (D7.1)</strong> — no <code>embed_configs</code>, no host-app-signed JWT, no <code>allowed_origins</code>, no filter injection.~~ ✅ <strong>Closed (Tier 3 tenancy pass, E1).</strong> <a href="data_analytics/backend/app/routers/embed.py"><code>routers/embed.py</code></a> + <code>EmbedConfig</code> (<code>embed_configs</code>: <code>created_by</code>, <code>secret_encrypted</code> — enc:v2, shown once — <code>allowed_origins</code>, <code>enabled</code>). A host application signs its own HS256 JWT with that secret; <code>embed.py</code> verifies with <code>jwt.decode(token, secret, algorithms=[ALGORITHM], options={"require_exp": True})</code> — algorithm pinned, expiry mandatory, capped ≤24h at mint time. Filters are injected server-side <strong>only from the verified JWT claims</strong> — the browser is never trusted with scope, exactly the D7.1 mandate — and this was not free: the first review round found a <strong>High-severity RLS-bypass</strong> (the embed path resolved through an admin-branch identity, skipping RLS and column security entirely; a row-restricted editor could mint an embed exposing every row). The fix landed creator-base resolution — an embed can never expose more than its <em>creator's</em> own row/column slice, matching <code>shared.py</code>'s anonymous-guest model exactly — with the escalation path pinned dead by a value-verified test, plus page role-visibility parity with guest links (<code>visible_pages_for_creator</code>, extracted from <code>shared.py</code> and applied to both structure and widget resolution). <code>viewer_email</code>/<code>viewer_org</code> claims expand <code>USEREMAIL()</code>/<code>ORGID()</code> in the creator's own author-filter expressions (narrower than RLS, never a substitute for it); a CSP <code>frame-ancestors</code> directive and per-IP + per-token rate buckets (the per-token bucket was narrowed to IP-only in final review after a cfg-enumeration/LRU-churn finding) round it out. Frontend: an <code>EmbeddedReport</code> page plus a share-dialog Embed section with copy-paste Python/Node token-minting samples. <strong>What D7.1 still lists that this pass does not add:</strong> no revision pinning on <code>embed_configs</code> (an embed always serves the live report, unlike a pinned <code>share_links</code> snapshot) — the same gap #5 below names for share links, just not yet closed for embeds either.</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>Playwright as the one server-side renderer (D7.3)</strong></td>
+</tr>
+<tr>
+<td>~~3~~</td>
+<td>~~<strong><code>deliveries</code> log table</strong>~~</td>
+</tr>
+<tr>
+<td>~~4~~</td>
+<td>~~<strong>Timezone handling on schedules</strong>~~</td>
+</tr>
+<tr>
+<td>5</td>
+<td><strong>Share link pins a revision</strong> (D7.2) — see above. Cheap fix: add <code>revision_id</code> to <code>share_links</code>.</td>
+</tr>
+</tbody>
+</table></div>
+<h3>🟢 Beyond the spec</h3>
+<p><strong>PowerPoint export</strong> — <code>pptxgenjs</code> + <code>lib/pptExport.ts</code>. Not in the architecture at all, and in a
+BI product often the <em>most</em> requested export format.</p>
+<hr>
+<h1 class="layer" id="layer-8"><span class="layer-num">L8</span><span class="layer-name">Platform Core</span></h1>
+<p><strong>Everything the architecture buys off the shelf, you built yourself.</strong></p>
+<p><strong>Deployment: air-gapped.</strong> The operational reality behind every row below is that this
+platform's production target is an isolated network with no internet access. The Tier 4
+offline/scale pass (2026-08-29) audited the whole stack for runtime internet dependencies,
+found exactly one (Google Fonts), and closed it — see the ninth re-scoring blockquote and the
+Layer 2 note above. Everything else in this layer (LLM endpoint, OTel export, SSO/SAML
+metadata) was already internal-only or opt-in, so this pass is what makes that true end to end
+rather than by omission.</p>
+<h3>✅ Achieved (in-house)</h3>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th>Architecture requirement</th>
+<th>Architecture's tool</th>
+<th>Your implementation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Identity / OIDC / SSO</td>
+<td>Keycloak / Zitadel</td>
+<td><a href="data_analytics/backend/app/routers/sso.py"><code>routers/sso.py</code></a>, <a href="data_analytics/backend/app/services/sso.py"><code>services/sso.py</code></a>, <a href="data_analytics/backend/app/services/saml.py"><code>services/saml.py</code></a> + <code>signxml</code>/<code>lxml</code>, <code>org_idps</code>, <code>saml_authn_requests</code>, <code>test_sso.py</code>, <code>test_saml.py</code></td>
+</tr>
+<tr>
+<td>Auto-provisioning from IdP</td>
+<td>SCIM</td>
+<td><a href="data_analytics/backend/app/services/auth_provisioning.py"><code>services/auth_provisioning.py</code></a>, <code>test_auth_provisioning.py</code></td>
+</tr>
+<tr>
+<td>API keys / service accounts</td>
+<td>—</td>
+<td><code>api_keys</code>, <code>test_api_keys.py</code></td>
+</tr>
+<tr>
+<td><strong>Row-level security in the SQL predicate, not post-filter</strong> (D8.2)</td>
+<td>Layer 4 policy injection</td>
+<td class="s s-ok">✅ <strong>Implemented for DirectQuery</strong>, and the import path's base-frame filtering — flagged as still-open work in the fourth re-scoring (line 780 of that pass) — turned out to already be closed by a prior refactor, not this one: the UX+ETL+security pass's own S1 audit (<code>backend/tests/test_rls_base_frame_choke_point.py</code>, allowlist + structural pin) verified all 17 import-path call sites already filter the base frame pre-aggregation. The one real bug S1 found and fixed was narrower but genuine: <code>alerts.py</code> evaluated its filter fail-<em>open</em> (<code>apply_filter_expr(silent=True)</code> — a broken expression let rows through) instead of fail-closed like every other RLS path; now routed through <code>apply_rls_filter</code> like the rest. <a href="data_analytics/backend/app/core/rls.py"><code>core/rls.py</code></a> + <a href="data_analytics/backend/app/services/sql_expr.py"><code>services/sql_expr.py</code></a> push RLS into a <strong>parameterized SQL WHERE fragment</strong> for DirectQuery. Tests: <code>test_rls_fail_closed.py</code>, <code>test_rls_user_context.py</code>, <code>test_widget_data_rls_enforcement.py</code>, <code>test_analysis_rls.py</code>, <code>test_data_preview_rls.py</code>, <code>test_filter_preview_rls.py</code>, <code>test_get_widget_data_rls.py</code>, <code>test_calculated_column_preview_rls.py</code></td>
+</tr>
+<tr>
+<td><strong>Column-level security</strong></td>
+<td><em>not in the architecture</em></td>
+<td><code>column_security_rules</code>, <code>test_column_security.py</code></td>
+</tr>
+<tr>
+<td>Tenancy — scoping on every table</td>
+<td><code>tenant_id</code></td>
+<td><code>org_id</code> + <a href="data_analytics/backend/app/core/org_scope.py"><code>core/org_scope.py</code></a>, <code>org_parents</code> (<strong>hierarchical orgs — beyond the spec</strong>), <code>test_org_scope.py</code> + 5 <code>*_org_scoping.py</code> test files</td>
+</tr>
+<tr>
+<td><strong>Append-only audit log</strong></td>
+<td><code>audit_log</code></td>
+<td class="s s-ok">✅ <code>audit_log</code> table + <a href="data_analytics/backend/app/services/audit.py"><code>services/audit.py</code></a>, <code>test_audit_log.py</code>. <strong>Extended (UX+ETL+security pass):</strong> a dedicated <code>admin_audit</code> table (org, actor, action, target, ts, hash-safe detail) records security-relevant admin mutations specifically — RLS rule changes, row-policy edits, share create/revoke, export-policy changes, API keys — read-only in the admin UI, same append-only principle.</td>
+</tr>
+<tr>
+<td>Roles / permissions</td>
+<td>OpenFGA</td>
+<td><code>roles</code> table + <code>report_capability</code>, <code>page_role_visibility</code>, <code>test_admin_roles.py</code>, <code>test_resolve_roles.py</code>, <code>test_report_capabilities.py</code>, <code>test_page_visibility.py</code></td>
+</tr>
+<tr>
+<td>Capability model</td>
+<td>—</td>
+<td><a href="data_analytics/backend/app/core/capability.py"><code>core/capability.py</code></a></td>
+</tr>
+<tr>
+<td>Secrets</td>
+<td>OpenBao</td>
+<td><a href="data_analytics/backend/app/services/secrets.py"><code>services/secrets.py</code></a>, <code>test_secrets.py</code></td>
+</tr>
+<tr>
+<td><strong>Envelope encryption</strong> (stage 0.3)</td>
+<td>OpenBao</td>
+<td><em>New in Layer 1.</em> <code>enc:v2:</code> — a per-secret data key wrapped by the master, so rotation re-wraps short keys instead of decrypting every secret. <code>enc:v1:</code> still decrypts, so a live database keeps working</td>
+</tr>
+<tr>
+<td>Health checks</td>
+<td><code>health.py</code></td>
+<td><code>main.py</code> lifespan + advisory-lock startup</td>
+</tr>
+</tbody>
+</table></div>
+<h3>🔴 Missing</h3>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th>#</th>
+<th>Gap</th>
+<th>Impact</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>OpenFGA / relationship-based authz (D8.1)</strong></td>
+<td>You use role strings + capability flags — exactly what the architecture predicts <em>"will collapse under that within months"</em> as folders/nesting grow. You've already hit the pressure: <code>org_parents</code>, <code>page_role_visibility</code>, <code>report_capability</code>, <code>column_security_rules</code>, <code>RowPolicy.auto_generated</code>, <code>DatasetShare</code>, and now (Tier 3 tenancy pass) <strong><code>EmbedConfig</code> and <code>Quota</code></strong> — arguably authz-adjacent bolt-ons in their own right (<code>EmbedConfig</code> gates <em>who</em> can mint scoped access to a report; <code>Quota</code> gates <em>how much</em> an org may consume) — bringing the honest tally to <strong>eight</strong> separate bolt-ons to a role enum, up from six. <strong>This is the architecture's sharpest prediction about your codebase, and it keeps getting more evidence, not less.</strong></td>
+</tr>
+<tr>
+<td>~~2~~</td>
+<td>~~<strong>OpenTelemetry</strong> — no traces, no span propagation~~</td>
+<td class="s s-ok">✅ <strong>Closed, opt-in (Tier 3 tenancy pass, E3).</strong> <a href="data_analytics/backend/app/core/telemetry.py"><code>core/telemetry.py</code></a>: default-off (env-gated), lazy-imported so the dependency costs nothing when disabled, FastAPI + SQLAlchemy auto-instrumentation plus manual spans on agent nodes, DirectQuery and refresh, exporting OTLP/HTTP. Span attributes are <strong>sha256-only</strong> — no raw SQL or query strings — and a <code>_QuerystringScrubber</code> strips query strings from every exported HTTP span's URL attribute (added in final review after finding the embed bearer token was leaking through <code>http.url</code>'s query string; verified real on the pinned <code>opentelemetry</code> 1.27.0). D8.4's own case for installing this in layer 1 to avoid a retrofit is exactly what this pass did in reverse — a real retrofit, at real cost, is now paid. Still absent: Prometheus/Grafana (#3), GlitchTip (#7).</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>Prometheus / Grafana</strong> — no metrics endpoint</td>
+<td></td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>Langfuse</strong> — N/A without an LLM</td>
+<td></td>
+</tr>
+<tr>
+<td>~~5~~</td>
+<td>~~<strong><code>quotas</code> table</strong> — no per-tenant limits on queries, tokens, storage, concurrency~~</td>
+<td class="s s-ok">✅ <strong>Closed (Tier 3 tenancy pass, E2).</strong> <code>Quota</code> model (one row per org, all four limits nullable = unlimited by default, byte-preserved for every org with no row) + <a href="data_analytics/backend/app/services/quotas.py"><code>services/quotas.py</code></a>: per-org daily query and agent-ask caps (429 + <code>Retry-After</code>), a storage cap (413) summing <code>Dataset.file_size</code>, and a per-worker concurrent-ask slot limiter. Enforcement is coherent across all three access paths — app users, guests, and embeds all charge the <strong>data-owning org</strong>, not the viewer's — plus platform-super-admin CRUD and a usage UI (<code>PlatformOrgs</code>). Honest caveats, ledgered at review: concurrency is <strong>per-worker</strong>, not cluster-wide (same non-shared-cache caveat as rate limiting); the quota cache has up to <strong>30s cross-worker staleness</strong> after a <code>SET</code>; re-import-in-place has a known storage-accounting gap (old file size isn't subtracted before the new one is added) needing a temp-file refactor, ruled low-severity and documented rather than blocking.</td>
+</tr>
+<tr>
+<td>~~6~~</td>
+<td>~~Rate limiting (<code>ratelimit.py</code>)~~</td>
+<td class="s s-ok">✅ <strong>Closed (UX+ETL+security pass).</strong> <a href="data_analytics/backend/app/core/rate_limit.py"><code>core/rate_limit.py</code></a>: a per-user token-bucket middleware on authenticated routes plus a stricter per-guest-link bucket on guest routes, in-process/per-worker (honest about not being Valkey-backed — see Block C), LRU-capped bucket dict, 429 + <code>Retry-After</code>, <code>/health</code> exempt. Follow-up fix (<code>d41329a</code>) corrected guest buckets from keying on the share token alone (one link's colleagues sharing one ceiling) to keying on (token, viewer identity/IP). <strong>Extended (Tier 3 tenancy pass):</strong> embed paths get their own rate buckets too — per-IP and per-token, the per-token half narrowed to IP-only in final review after a finding that per-token buckets let an attacker enumerate embed configs unthrottled while churning the LRU.</td>
+</tr>
+<tr>
+<td>7</td>
+<td><strong>GlitchTip / error tracking</strong></td>
+<td></td>
+</tr>
+<tr>
+<td>8</td>
+<td><strong><code>locale</code> on users</strong> (<code>en | ar</code>)</td>
+<td>You have report translations, not per-user locale</td>
+</tr>
+</tbody>
+</table></div>
+<h3>🟢 Beyond the spec</h3>
+<p><code>notifications</code>, <code>report_comments</code>, <code>bookmarks</code>, <code>page_templates</code>, <code>widget_templates</code>,
+<code>report_classifications</code> (Public/Internal/Confidential/Restricted sensitivity labels),
+<code>report_parameters</code>, <code>org_themes</code>. <strong>New this pass (Tier 3 tenancy):</strong> <code>EmbedConfig</code> and <code>Quota</code>
+— see the closed gaps above; also counted in the OpenFGA bolt-on tally since both are
+authz-adjacent access-control tables, not pure product features. <strong>From the prior pass:</strong>
+<code>DatasetShare</code> — in-org dataset sharing to another user (additive: dataset read was already
+org-wide, so this is metadata + a "shared with you" surface, not a new access grant — verified by
+the reviewer during S0's batch); a codeless RLS-rule builder with auto-generate proposals; a
+guest-link access log; an admin-mutation audit trail (<code>admin_audit</code>) alongside the pre-existing
+<code>audit_log</code>.</p>
+<hr>
+<h1>Stack divergence — side by side</h1>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th>Concern</th>
+<th>ARCHITECTURE.md specifies</th>
+<th>Your project uses</th>
+<th>Verdict</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Web framework</td>
+<td>FastAPI</td>
+<td class="s s-ok">✅ FastAPI 0.111</td>
+<td><strong>Match</strong></td>
+</tr>
+<tr>
+<td>Validation</td>
+<td>Pydantic v2</td>
+<td class="s s-ok">✅ pydantic-settings 2.2</td>
+<td><strong>Match</strong></td>
+</tr>
+<tr>
+<td>ORM</td>
+<td>SQLAlchemy 2.0</td>
+<td class="s s-ok">✅ SQLAlchemy 2.0.30 async</td>
+<td><strong>Match</strong></td>
+</tr>
+<tr>
+<td>Postgres driver</td>
+<td><strong>psycopg 3</strong></td>
+<td>psycopg2-binary + asyncpg</td>
+<td>Different</td>
+</tr>
+<tr>
+<td><strong>Migrations</strong></td>
+<td><strong>Alembic</strong></td>
+<td class="s s-ok">✅ Adopted (Tier 1 foundations pass) — baseline <code>0001_baseline.py</code> + revisions <code>0002</code>–<code>0005</code>, <code>create_all</code> retained alongside as an adoption-safe fallback</td>
+<td><strong>Closed</strong> — found via a real live-Postgres failure (<code>StringDataRightTruncation</code> on a &gt;32-char revision id; SQLite's unenforced varchar length hid it from the whole suite), plus an adoption-stamps-head fix so a fresh boot's <code>create_all</code> and Alembic's <code>alembic_version</code> no longer race</td>
+</tr>
+<tr>
+<td><strong>SQL parsing / guard</strong></td>
+<td><strong>sqlglot</strong> (25+ dialects)</td>
+<td>Custom <code>ast</code>-based translator</td>
+<td>Different (secure, narrower)</td>
+</tr>
+<tr>
+<td><strong>Local engine</strong></td>
+<td><strong>DuckDB</strong></td>
+<td><strong>pandas</strong> for queries; <strong>DuckDB</strong> for the metadata cache</td>
+<td><strong>Partly closed</strong> — DuckDB is now a real dependency doing real joins, just not on the query path</td>
+</tr>
+<tr>
+<td><strong>Type system</strong></td>
+<td><strong>Arrow end-to-end</strong></td>
+<td><strong>pandas</strong> + pyarrow at the edges</td>
+<td><strong>Different — violates Principle 6</strong></td>
+</tr>
+<tr>
+<td>DB→Arrow</td>
+<td>ConnectorX</td>
+<td>pandas <code>read_sql</code></td>
+<td>Different</td>
+</tr>
+<tr>
+<td>Excel reader</td>
+<td>python-calamine</td>
+<td><strong>openpyxl</strong> (architecture <em>rejects</em> it)</td>
+<td>Different</td>
+</tr>
+<tr>
+<td>Background jobs</td>
+<td>ARQ + Valkey</td>
+<td>In-process <code>refresh_scheduler</code> w/ PG advisory locks</td>
+<td>Different (simpler, no Redis)</td>
+</tr>
+<tr>
+<td>Cache</td>
+<td>Valkey</td>
+<td class="s s-ok">✅ <code>valkey/valkey:8-alpine</code> via <code>cache_backend.py</code>, opt-in (<code>VALKEY_URL</code>); in-process <code>OrderedDict</code> remains the byte-identical default</td>
+<td><strong>Match (opt-in)</strong></td>
+</tr>
+<tr>
+<td>Self-hosted embeddings</td>
+<td>(implied by pgvector + embeddings requirement)</td>
+<td class="s s-ok">✅ <a href="data_analytics/embedding_server/"><code>embedding_server/</code></a> — ONNX MiniLM, int8, no torch, air-gap-buildable, Backend B on by default (eleventh re-scoring)</td>
+<td><strong>Match</strong></td>
+</tr>
+<tr>
+<td>Vectors</td>
+<td>pgvector</td>
+<td class="s s-bad">❌</td>
+<td>Missing (in-process cosine over cached vectors is the seam's current implementation)</td>
+</tr>
+<tr>
+<td><strong>Self-hosted inference</strong></td>
+<td><strong>vLLM</strong></td>
+<td class="s s-ok">✅ <a href="data_analytics/backend/app/services/llm.py"><code>services/llm.py</code></a> → Qwen, verified live</td>
+<td><strong>Match</strong></td>
+</tr>
+<tr>
+<td><strong>Constrained decoding</strong></td>
+<td>XGrammar / Outlines</td>
+<td><code>complete_json</code> — validate-and-retry</td>
+<td>Different (honest stand-in; no token-level grammar on a plain OpenAI-compatible endpoint)</td>
+</tr>
+<tr>
+<td><strong>Join-graph review UI</strong></td>
+<td><strong>React Flow</strong></td>
+<td class="s s-ok">✅ <code>reactflow</code> 11.11.4</td>
+<td><strong>Match</strong></td>
+</tr>
+<tr>
+<td>Join paths</td>
+<td>NetworkX</td>
+<td class="s s-bad">❌</td>
+<td>Missing</td>
+</tr>
+<tr>
+<td>Agent</td>
+<td>LangGraph</td>
+<td class="s s-bad">❌</td>
+<td>Missing</td>
+</tr>
+<tr>
+<td>Inference</td>
+<td>vLLM</td>
+<td class="s s-ok">✅ <em>(see above)</em></td>
+<td><strong>Match</strong></td>
+</tr>
+<tr>
+<td>Constrained decoding</td>
+<td>XGrammar / Outlines</td>
+<td class="s s-warn">🟡 <em>(see above)</em></td>
+<td>Partial</td>
+</tr>
+<tr>
+<td>LLM tracing</td>
+<td>Langfuse</td>
+<td class="s s-bad">❌</td>
+<td>Missing</td>
+</tr>
+<tr>
+<td>Eval</td>
+<td>promptfoo / Ragas / Spider / BIRD</td>
+<td class="s s-bad">❌</td>
+<td>Missing</td>
+</tr>
+<tr>
+<td>Forecasting</td>
+<td>StatsForecast</td>
+<td class="s s-ok">✅ StatsForecast <code>AutoETS</code>, default <code>method</code>, lazy-imported (Tier 5 analysis pass)</td>
+<td><strong>Match</strong></td>
+</tr>
+<tr>
+<td>Anomaly</td>
+<td>PyOD</td>
+<td class="s s-ok">✅ opt-in <code>iforest</code>/<code>ecod</code> alongside the byte-identical default <code>iqr</code> (Tier 5 analysis pass)</td>
+<td><strong>Match (opt-in)</strong></td>
+</tr>
+<tr>
+<td>Clustering</td>
+<td>scikit-learn</td>
+<td class="s s-ok">✅ <code>services/analysis/segment.py</code> — KMeans, silhouette auto-k (Tier 5 analysis pass)</td>
+<td><strong>Match</strong></td>
+</tr>
+<tr>
+<td>Code sandbox</td>
+<td>gVisor</td>
+<td class="s s-bad">❌ (N/A)</td>
+<td>Missing by design</td>
+</tr>
+<tr>
+<td>Web fonts</td>
+<td>—</td>
+<td class="s s-ok">✅ Self-hosted vendored woff2 (Tier 4 offline/scale pass) — was a Google Fonts <code>@import</code>, now zero external font requests</td>
+<td><strong>Closed</strong> — the only runtime internet dependency in the stack</td>
+</tr>
+<tr>
+<td><strong>Charts</strong></td>
+<td><strong>Vega-Lite + vega-embed</strong></td>
+<td><strong>Recharts</strong></td>
+<td><strong>Different — architecture rejects this by name</strong></td>
+</tr>
+<tr>
+<td>Canvas</td>
+<td>react-grid-layout</td>
+<td>Custom 12-col grid</td>
+<td>Different</td>
+</tr>
+<tr>
+<td>Large grids</td>
+<td>Perspective</td>
+<td>Custom table/matrix</td>
+<td>Different</td>
+</tr>
+<tr>
+<td>Geo</td>
+<td>MapLibre / deck.gl</td>
+<td>d3-geo + topojson + world-atlas</td>
+<td>Different</td>
+</tr>
+<tr>
+<td>Join review UI</td>
+<td>React Flow</td>
+<td class="s s-ok">✅ <em>(see above)</em></td>
+<td><strong>Match</strong></td>
+</tr>
+<tr>
+<td>Server render</td>
+<td><strong>Playwright (one renderer)</strong></td>
+<td>reportlab + matplotlib (<strong>second</strong> renderer)</td>
+<td>Different — D7.3 warns against exactly this</td>
+</tr>
+<tr>
+<td>Excel export</td>
+<td>XlsxWriter</td>
+<td>openpyxl</td>
+<td>Equivalent</td>
+</tr>
+<tr>
+<td>Embed tokens</td>
+<td>PyJWT</td>
+<td class="s s-ok">✅ <code>python-jose</code> (HS256, <code>EmbedConfig</code>)</td>
+<td><strong>Closed</strong> — different library, same guarantee</td>
+</tr>
+<tr>
+<td>Identity</td>
+<td>Keycloak / Zitadel</td>
+<td><strong>In-house OIDC + SAML</strong></td>
+<td>Different (built, not bought)</td>
+</tr>
+<tr>
+<td><strong>Authorization</strong></td>
+<td><strong>OpenFGA (Zanzibar)</strong></td>
+<td><strong>Role strings + capabilities</strong></td>
+<td><strong>Different — architecture predicts this collapses</strong></td>
+</tr>
+<tr>
+<td>Tracing</td>
+<td>OpenTelemetry</td>
+<td class="s s-ok">✅ <a href="data_analytics/backend/app/core/telemetry.py"><code>core/telemetry.py</code></a> — opt-in, default off</td>
+<td><strong>Closed (opt-in)</strong></td>
+</tr>
+<tr>
+<td>Metrics</td>
+<td>Prometheus</td>
+<td class="s s-bad">❌</td>
+<td>Missing</td>
+</tr>
+<tr>
+<td>Secrets</td>
+<td>OpenBao</td>
+<td>In-house <code>secrets.py</code></td>
+<td>Different</td>
+</tr>
+<tr>
+<td>Tenant key</td>
+<td><code>tenant_id</code></td>
+<td><code>org_id</code> (+ <code>org_parents</code> hierarchy)</td>
+<td>Equivalent, richer</td>
+</tr>
+<tr>
+<td><strong>PPT export</strong></td>
+<td>—</td>
+<td><strong>pptxgenjs</strong></td>
+<td><strong>Beyond spec</strong></td>
+</tr>
+<tr>
+<td><strong>MCP server</strong></td>
+<td>Listed for L4</td>
+<td class="s s-ok">✅ <strong>Built</strong></td>
+<td><strong>Match</strong></td>
+</tr>
+</tbody>
+</table></div>
+<hr>
+<h1>What your project has that the architecture doesn't</h1>
+<p>The architecture is silent on all of this. Much of it is table stakes for a real BI product:</p>
+<p><strong>Identity &amp; governance</strong>
+- Full <strong>SAML 2.0</strong> IdP integration with signed AuthnRequests (<code>signxml</code>, <code>saml_authn_requests</code>)
+- <strong>Hierarchical organizations</strong> (<code>org_parents</code>) — parent-org visibility
+- <strong>Column-level security</strong> in addition to row-level
+- <strong>Report sensitivity classifications</strong> (Public / Internal / Confidential / Restricted)
+- <strong>Granular export policy</strong> — who may export what, in which format
+- <strong>Per-page role visibility</strong></p>
+<p><strong>Collaboration</strong>
+- <strong>Notifications</strong> + bell UI (<code>notifications</code>, <code>NotificationsBell.tsx</code>)
+- <strong>Report comments</strong> (<code>report_comments</code>, <code>CommentsPane.tsx</code>)
+- <strong>Bookmarks</strong> (saved filter/selection states — a Power BI staple)
+- <strong>Lineage view</strong> (<code>Lineage.tsx</code>)</p>
+<p><strong>Authoring productivity</strong>
+- <strong>Page templates</strong> + <strong>widget templates</strong>
+- <strong>Report parameters</strong> (<code>report_parameters</code>, <code>test_report_parameters.py</code>)
+- <strong>Common filters</strong> across pages
+- <strong>Prep steps</strong> — a transformation pipeline (<code>services/prep.py</code>, <code>PrepStepsPanel.tsx</code>), now with
+  <strong>sort/dedupe step kinds, a card-based pipeline editor with live per-step preview, and a
+  disable toggle that greys a step instead of deleting it</strong> (UX+ETL+security pass, F2)
+- <strong>Query builder dialog</strong> — visual query construction, now <strong>persisted and re-editable</strong>
+  (<code>Dataset.query_model</code>) with a <strong>Design|SQL toggle</strong> and PowerBuilder-style column
+  checkboxes/aggregation badges on the canvas (D1–D3)
+- <strong>Load-mode control</strong> — full vs. incremental refresh driven off <code>watermarks</code>, refresh history in
+  <code>query_runs</code>, org-scoped (F3)
+- <strong><code>.xml</code> extraction</strong> via <code>pd.read_xml</code> (F1), and <strong>ETL visibility on the lineage graph</strong> —
+  extract/transform/load badges, per-dataset transform-step count, freshness coloring (F4)
+- <strong>Command palette</strong> — now indexes connections, not just pages/reports/datasets (A1)
+- <strong>Codeless expression builder</strong>, shared across calculated columns, measures, dataset filters,
+  prep filters and RLS rules — a Simple/Advanced toggle over one component, plus a "System"
+  palette group for <code>USEREMAIL()/USERID()/ORGID()/ORGNAME()</code> (C1/C2/S0)
+- <strong>App-wide <code>ActionMenu.tsx</code></strong> — a "⋯" popup menu alternative to icon clusters, adopted at every
+  major icon-action surface (U1)
+- <strong>Custom category expressions</strong>, <strong>quick calcs</strong>, <strong>rank modes</strong>, <strong>series having</strong>, <strong>custom sort</strong>
+- <strong>Display / formatting rules</strong> engine, vectorized
+- <strong>Mobile layout</strong> per report page (<code>test_report_page_mobile_layout.py</code>)
+- <strong>RTL widgets</strong> + report translations</p>
+<p><strong>Analysis</strong>
+- <strong>Goal seek</strong>
+- <strong>Hierarchy drill-down</strong> with auto-generated date hierarchies
+- <strong>Dimension granularity</strong> control</p>
+<p><strong>Engineering practice the architecture doesn't mention</strong>
+- <strong>~190 backend test files</strong> and a large frontend test suite
+- <strong>Benchmark harness</strong> — <code>bench_http.py</code>, <code>bench_widget_data.py</code>, <code>bench_equivalence.py</code>,
+  <code>bench_common.py</code>. <code>bench_equivalence.py</code> in particular guards the import-vs-DirectQuery
+  equivalence invariant.
+- <strong>Pipeline validation script</strong> — <code>scripts/validate_pipeline.py</code>
+- <strong>Demo content system</strong> — <code>demo_content.py</code> (1893 lines), seeded datasets and reports
+- <strong>Thread offload for CPU-bound work</strong> (<code>test_widget_data_thread_offload.py</code>) and a
+  multi-worker-safe startup path
+- <strong>Cache-below-security invariant</strong>, documented and enforced — <code>frame_cache.py</code> caches only
+  pre-RLS frames keyed on bytes-of-file identity, with mandatory copy-on-hit, precisely so a
+  post-RLS frame can never serve one user's row visibility to another. The architecture never
+  raises this hazard; you found it and wrote the reasoning down.</p>
+<h2>Two stale docstrings worth correcting</h2>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th>File</th>
+<th>Says</th>
+<th>Reality</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="data_analytics/backend/app/services/direct_query.py"><code>direct_query.py</code></a> lines 7–9</td>
+<td><em>"Admin-only in Phase 1: row-level security pushdown (Phase 2) isn't implemented yet"</em></td>
+<td><strong>Phase 2 landed.</strong> <code>translate_filter_expr</code> is imported (line 43) and used (lines 231, 616), backed by 8 RLS test files. The docstring understates your own security posture.</td>
+</tr>
+<tr>
+<td><a href="data_analytics/README.md"><code>README.md</code></a> / <code>README2.md</code></td>
+<td>A ~12-widget uploader</td>
+<td>See below — describes roughly 30% of the product</td>
+</tr>
+</tbody>
+</table></div>
+<hr>
+<h1>Documentation gap</h1>
+<p><a href="data_analytics/README.md"><code>README.md</code></a> and <a href="data_analytics/README2.md"><code>README2.md</code></a> are
+<strong>near-identical and substantially out of date</strong>. They describe:</p>
+<ul>
+<li>12 widget types → you have <strong>20+</strong></li>
+<li>5 routers → you have <strong>15</strong></li>
+<li>5 services → you have <strong>32</strong></li>
+<li>"Datasets · Report Builder · Cross-filtering · Data View Hierarchy"</li>
+</ul>
+<p>They make <strong>no mention</strong> of: DirectQuery, RLS, column security, SSO/SAML, API keys, the MCP server,
+measures &amp; time intelligence, prep steps, alerts, schedules, share links, PDF/PPT export,
+notifications, comments, bookmarks, insights, geo widgets, display rules, org hierarchy, audit log,
+or report classifications.</p>
+<p>Anyone reading your README will badly under-estimate the product. <strong>This is the cheapest
+high-value fix on this entire list.</strong></p>
+<hr>
+<h1>The remaining gap, distilled</h1>
+<p>Everything still open, across all eight layers, collapses into <strong>four blocks</strong> — ordered by how
+much of the architecture's promise each one unlocks, with the evidence for each already in this
+document.</p>
+<h3>Block A — Layer 4's runtime ✅ DONE (2026-08-26)</h3>
+<p>Built, hardened and measured — see the Layer 4 section above and the three
+measurement appendices in the
+<a href="data_analytics/docs/superpowers/specs/2026-08-25-layer-4-agent-orchestration-design.md">spec</a>.
+What Block A left behind for later blocks: the eval harness needs CI wiring
+(Block C), and the accuracy ceiling it measured is Block B's argument.</p>
+<h3>Block B — Layer 3's retrieval half <em>(now measurably the accuracy ceiling)</em></h3>
+<p>The catalog now <em>describes</em> everything; it cannot yet <em>resolve</em> a business question to the right
+columns. The architecture's claim — <em>"retrieval quality caps agent accuracy regardless of model
+size"</em> — is no longer a prediction; it is what the measurements show. The agent's one persistent
+wrong answer chooses a raw table where the ground truth lives in a curated precomputed one — a
+<strong>canonical-source metadata</strong> problem no generation heuristic can solve (a blanket "prefer base
+tables" rule was tried and is provably wrong for exactly this case). And most residual
+clarification stops are genuine near-duplicate ambiguity that enum meanings and a glossary would
+break. Block B is where the next accuracy points live:</p>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th>Piece</th>
+<th>What exists to build on</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>~~<code>enum_values</code> with meanings~~</td>
+<td class="s s-ok">✅ shipped: LLM-drafted + human-confirmed labels, in the agent's prompt</td>
+</tr>
+<tr>
+<td>~~<code>glossary_terms</code> + synonyms + Arabic aliases~~</td>
+<td class="s s-ok">✅ shipped, incl. question-matched prompt injection</td>
+</tr>
+<tr>
+<td>~~<code>entities</code> with grain~~</td>
+<td class="s s-ok">✅ shipped (Tier 2 retrieval pass): LLM-drafted, human-confirmed, survives resync, rendered + retrievable</td>
+</tr>
+<tr>
+<td>~~Lexical retrieval ranking, graph expansion, enum-label boost (R.1–R.5, lexical half)~~</td>
+<td class="s s-ok">✅ shipped (Tier 2 retrieval pass): TF-IDF word + char n-gram scorer wired into the render's enrichment order and 1-hop join promotion; measured parity, not lift, on this catalog</td>
+</tr>
+<tr>
+<td>~~Embeddings (R.1–R.7, embedding half)~~</td>
+<td class="s s-ok">✅ shipped (eleventh re-scoring, embeddings-service branch): self-hosted ONNX embedding service, Backend B enabled by default (circuit-broken, lexical fallback), vectors persisted in <code>retrieval_embeddings</code> by <code>(text_hash, model)</code> — restart-stable</td>
+</tr>
+<tr>
+<td>pgvector</td>
+<td class="s s-bad">🔴 still absent — cosine similarity runs in-process over the cached vectors, exact and fast at the current catalog size; <code>retrieval_embeddings</code> is the seam it slots into without rework</td>
+</tr>
+<tr>
+<td>~~<code>join_paths</code>~~</td>
+<td class="s s-ok">✅ shipped: BFS over the confirmed whitelist + prompt route hints</td>
+</tr>
+<tr>
+<td><code>query_examples</code> memory</td>
+<td class="s s-ok">✅ table + recall/remember shipped with Block A; recall now ranks by <strong>similarity</strong> (Tier 2 retrieval pass), not recency alone</td>
+</tr>
+</tbody>
+</table></div>
+<p>Block B's LEXICAL half is shipped in full — canonical-source flags (they flipped the
+measured wrong answer once rendering was fixed), TF-IDF ranking, graph expansion, enum-label
+boosting, and entities with grain (Tier 2 retrieval pass) all landed and were measured together
+against the round-6 baseline: <strong>parity</strong> (strict 12/25 identical, value-verified 16/25 vs 17,
+conditional 76% vs 77%) — read honestly as headroom-for-scale rather than accuracy-lift on this
+82-object catalog, exactly as the pass's own spec predicted before it was built. The EMBEDDING
+half is now also shipped (eleventh re-scoring): a live Arabic smoke run shows semantic ranking
+beating lexical on the customers case, while the invoices case still ranks a
+semantically-adjacent view first — the same small-catalog headroom this document has predicted
+since the round-6 measurement, reported honestly rather than gated. What remains of Block B:
+<strong>pgvector itself</strong> (infra-blocked no longer applies to embeddings — this is now a pure scale-up
+item, not a live-endpoint blocker), plus two measured quality items: the answer-synthesis
+grounding bug that recurred in new forms, and canonical-preference tuning where a golden set is
+itself ambiguous about raw-vs-curated counts.</p>
+<h3>Block C — engine hygiene the agent will inherit <em>(Layer 2, small and compounding)</em></h3>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th>Piece</th>
+<th>Why it moves up once an agent exists</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>~~<code>query_runs</code> telemetry~~</td>
+<td class="s s-ok">✅ shipped (with a live-caught pool-corruption fix worth reading in the spec appendix); now also carries <code>source_kind='refresh'</code> rows from the new refresh endpoint (UX+ETL+security pass)</td>
+</tr>
+<tr>
+<td>~~Drift → cache invalidation wire~~</td>
+<td class="s s-ok">✅ shipped: per-source cache epoch folded into result-cache keys</td>
+</tr>
+<tr>
+<td>~~<code>watermarks</code> unused~~</td>
+<td class="s s-ok">✅ shipped (UX+ETL+security pass, F3): full/incremental refresh actually drives the table now</td>
+</tr>
+<tr>
+<td>~~Rate limiting~~</td>
+<td class="s s-ok">✅ shipped (UX+ETL+security pass, S5): per-user + per-guest-link token buckets — still in-process, so the next line still matters</td>
+</tr>
+<tr>
+<td>~~Shared cache (Valkey)~~</td>
+<td class="s s-ok">✅ shipped, opt-in (Tier 4 offline/scale pass, O2): <code>cache_backend.py</code>'s <code>ValkeyCache</code>, byte-identical <code>InProcessCache</code> default when unset. The rate limiter and guest access log remain per-worker/in-process — this specific line's scope is closed, that broader caveat is not</td>
+</tr>
+<tr>
+<td>sqlglot for <code>sql_expr.py</code></td>
+<td>sqlglot==30.17.0 is now pinned and in production use (ladder + policies) — consolidation is cheaper than ever</td>
+</tr>
+<tr>
+<td>eval CI gate</td>
+<td><code>run_eval_gate.ps1</code> is now a REAL one-command live gate (restart → 25 asks → per-intent table → threshold exit code, ~20 min, live-proven); <strong>now also runnable on a schedule</strong> (<code>eval_schedule.py</code>, opt-in, nightly, default off — a documented CI stand-in per the Tier 1 foundations pass, not CI); actual CI still awaits any CI infra (no remote exists — the UX+ETL+security pass confirms this was ruled out of scope up front, not forgotten)</td>
+</tr>
+<tr>
+<td>~~Popup overlay renderer; drillthrough; tooltip triggers~~</td>
+<td class="s s-ok">✅ all shipped — every page type triggerable</td>
+</tr>
+</tbody>
+</table></div>
+<h3>Block D — analysis depth <em>(Layer 5, independent, optional)</em> — ✅ shipped (Tier 5 analysis pass)</h3>
+<p><code>forecast</code> now defaults to StatsForecast <code>AutoETS</code> (the hand-rolled exponential smoothing kept as
+tested fallback), <code>segment</code> is real standardized KMeans with silhouette auto-k, anomaly detection
+gained an opt-in PyOD catalogue (<code>iforest</code>/<code>ecod</code>) alongside the byte-identical <code>iqr</code> default, and
+a uniform <code>AnalysisResult</code> envelope (<code>analysis_contract.py</code>) now wraps every analysis service's
+output without reshaping any existing wire response. A tool registry (<code>services/analysis/registry.py</code>)
+exposes the catalogue to Layer 4's agent prompt. The sandbox (D5.2) stays out until Python nodes
+do — by design, not deferral; see Layer 5's 🔴 Missing table above.</p>
+<p><strong>What is deliberately <em>not</em> in any block:</strong> the LLM-written-code sandbox (no Python nodes in
+v1), data parallelism / a distributed engine (pushdown chosen instead), LangGraph (hand-rolled
+executor chosen), and the import path's post-filtering RLS (real, pre-existing, flagged in the
+Layer 4 spec as its own piece of work).</p>
+<hr>
+<h1>Priority recommendations</h1>
+<h2>Tier 1 — Do these regardless of whether you ever build the AI layer</h2>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th>#</th>
+<th>Item</th>
+<th>Why</th>
+<th>Effort</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>Rewrite README.md</strong> from the actual code; delete README2.md</td>
+<td>The README describes maybe 30% of what exists</td>
+<td>1 day</td>
+</tr>
+<tr>
+<td>~~2~~</td>
+<td>~~<strong>Adopt Alembic</strong>~~</td>
+<td class="s s-ok">✅ <strong>Done (Tier 1 foundations pass).</strong> Baseline <code>0001_baseline.py</code> + revisions <code>0002</code>–<code>0005</code>, <code>create_all</code> retained as an adoption-safe fallback; found and fixed a real live-Postgres revision-id length failure the SQLite suite couldn't see.</td>
+<td>—</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong><code>query_runs</code> telemetry table</strong></td>
+<td>Per-query executor / rows / bytes / duration / cache-hit. Free operational insight now, and it is the exact table Layer 4 would later need.</td>
+<td>1–2 days</td>
+</tr>
+<tr>
+<td>~~4~~</td>
+<td>~~<strong>OpenTelemetry</strong>~~</td>
+<td class="s s-ok">✅ <strong>Done, opt-in (Tier 3 tenancy pass).</strong> <code>core/telemetry.py</code>, default off, FastAPI+SQLAlchemy+manual spans, sha256-only attributes, query strings scrubbed.</td>
+<td>—</td>
+</tr>
+<tr>
+<td>~~5~~</td>
+<td>~~<strong>Shared cache (Valkey)</strong>~~</td>
+<td class="s s-ok">✅ <strong>Done, opt-in (Tier 4 offline/scale pass).</strong> <code>services/cache_backend.py</code>'s <code>ValkeyCache</code> + a no-host-ports <code>valkey</code> compose service; <code>InProcessCache</code> stays the byte-identical default when <code>VALKEY_URL</code> is unset, so nothing changes for a deployment that doesn't opt in.</td>
+<td>—</td>
+</tr>
+<tr>
+<td>~~6~~</td>
+<td>~~<strong>Rate limiting + quotas</strong>~~</td>
+<td class="s s-ok">✅ <strong>Both done.</strong> Rate limiting closed UX+ETL+security pass; <code>quotas</code> closed Tier 3 tenancy pass (<code>Quota</code> + <code>services/quotas.py</code>, coherent across app/guest/embed access, charged to the data-owning org).</td>
+<td>—</td>
+</tr>
+<tr>
+<td>~~7~~</td>
+<td>~~<strong>Persist <code>column_stats</code> (incl. <code>top_k</code>)</strong>~~</td>
+<td class="s s-ok">✅ <strong>Done in Layer 1.</strong> <code>GET /datasets/{id}/columns/{name}/stats</code> returns <code>top_k</code>. The filter UI can now offer real enum dropdowns — still worth wiring into the frontend.</td>
+<td>—</td>
+</tr>
+</tbody>
+</table></div>
+<h2>Tier 2 — If you want to close real architectural risk</h2>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th>#</th>
+<th>Item</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>~~7b~~</td>
+<td class="s s-ok">~~Pin share links to a revision (D7.2)~~ ✅ <strong>Closed (all-layers pass);</strong> Layer 7 section corrected to match (UX+ETL+security pass — it had drifted stale). <code>share_links.snapshot</code>+<code>pinned</code> — a pinned link keeps its layout after report edits (data stays live, labelled so). Bonus fix found en route: guest share views were serving hidden/tooltip/drillthrough pages to anonymous viewers — now filtered server-side. <strong>S3 extension:</strong> page role-visibility is now frozen inside the snapshot too.</td>
+<td>A link you sent a customer silently shows whatever the report became. Small schema change, real correctness fix. <strong>Arguably belongs in Tier 1.</strong></td>
+</tr>
+<tr>
+<td>~~8~~</td>
+<td>~~<strong>Embed support (D7.1)</strong>~~</td>
+<td class="s s-ok">✅ <strong>Closed (Tier 3 tenancy pass).</strong> <code>embed_configs</code>, host-signed HS256 JWT, <code>allowed_origins</code>, filters injected server-side only from verified claims, creator-base RLS/column-security parity with guest links — the single biggest missing <em>product</em> feature is now built, after a High-severity RLS-bypass was caught and fixed in review.</td>
+</tr>
+<tr>
+<td>9</td>
+<td><strong>One renderer for exports</strong> — Playwright server-side</td>
+<td>Your PDF (reportlab/matplotlib) does not and will not match the screen (Recharts). This drift compounds with every new chart type.</td>
+</tr>
+<tr>
+<td>10</td>
+<td><strong>Evaluate sqlglot for <code>sql_expr.py</code></strong></td>
+<td>Not because yours is unsafe — it isn't — but for dialect coverage and normalized cache keys, which fixes the L2 cache-miss issue too.</td>
+</tr>
+<tr>
+<td>~~11~~</td>
+<td>~~<strong>Schema drift detection</strong>~~</td>
+<td class="s s-ok">✅ <strong>Done in Layer 1.</strong> SHA-256 fingerprint, structured diff, and orphaned confirmed annotations flagged rather than deleted.</td>
+</tr>
+<tr>
+<td>12</td>
+<td><strong>Revisit authz before it collapses</strong> (D8.1)</td>
+<td>Four bolt-ons to a role enum already. Don't necessarily adopt OpenFGA — but consolidate the model.</td>
+</tr>
+</tbody>
+</table></div>
+<h2>Tier 3 — Only if you decide to become the architecture's product</h2>
+<p>This is a strategic choice, not a backlog item — but it is now a <em>started</em> one: the Layer 4
+design spec is written and awaiting review, and the model endpoint's contract is verified. Layers
+3+4 remain <strong>6–8 weeks minimum</strong> per the architecture's own Phase 1 estimate, and they require an
+eval set and an accuracy gate you could fail (the GPU exists — the Qwen box scales to ~2.3 req/s
+at concurrency 12, measured).</p>
+<p>If you do it, the sequence the architecture prescribes is right, and your assets are:</p>
+<ul>
+<li><code>measure_eval.py</code> → seeds <code>metrics</code> (formulas already validated)</li>
+<li><code>relationships</code> + <code>hierarchy_nodes</code> → seeds <code>entities</code> and the join graph</li>
+<li><code>core/rls.py</code> → is already the policy-injection layer V4 needs</li>
+<li><code>data_views</code> → is already a saved semantic scope</li>
+<li>MCP server → is already the tool surface</li>
+</ul>
+<p><strong>And the honest alternative:</strong> your MCP server means an external agent (Claude, an internal
+assistant) can already query your platform <em>with correct authorization</em>. For many buyers that
+delivers most of Layer 4's value at ~2% of the cost. <strong>Before building Layers 3–4, measure how far
+the MCP path already gets you.</strong></p>
+<hr>
+<h1>Summary table</h1>
+<div class="tbl"><table>
+<thead>
+<tr>
+<th></th>
+<th>Architecture</th>
+<th>Your project</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Product category</strong></td>
+<td>AI agent NL→SQL platform</td>
+<td>Self-serve BI / report builder</td>
+</tr>
+<tr>
+<td><strong>Primary surface</strong></td>
+<td>Chat</td>
+<td>Dashboards</td>
+</tr>
+<tr>
+<td><strong>Primary user</strong></td>
+<td>Business user asking questions</td>
+<td>Analyst authoring reports</td>
+</tr>
+<tr>
+<td><strong>Semantic model</strong></td>
+<td>Auto-drafted, human-confirmed in &lt;10 min</td>
+<td><strong>Auto-drafted and human-confirmed</strong> for relationships, semantic types and descriptions; hand-authored for measures and hierarchies</td>
+</tr>
+<tr>
+<td><strong>Query origin</strong></td>
+<td>LLM-generated, validated</td>
+<td>User-configured widget + measures</td>
+</tr>
+<tr>
+<td><strong>Chart choice</strong></td>
+<td>Rules, model for ties</td>
+<td>Rules + user choice</td>
+</tr>
+<tr>
+<td><strong>Local engine</strong></td>
+<td>DuckDB + Arrow</td>
+<td>pandas</td>
+</tr>
+<tr>
+<td><strong>SQL safety</strong></td>
+<td>sqlglot AST</td>
+<td>custom <code>ast</code> translator + bound params</td>
+</tr>
+<tr>
+<td><strong>Authz</strong></td>
+<td>OpenFGA</td>
+<td>roles + capabilities</td>
+</tr>
+<tr>
+<td><strong>Identity</strong></td>
+<td>Keycloak</td>
+<td>in-house OIDC + SAML</td>
+</tr>
+<tr>
+<td><strong>Maturity</strong></td>
+<td>Design document, Layer 1 build-ready</td>
+<td>Shipping product, <strong>2448 backend (4 skipped) + 897 frontend tests</strong></td>
+</tr>
+<tr>
+<td><strong>Overall alignment</strong></td>
+<td>—</td>
+<td><strong>~86%</strong> (eleventh re-scoring: the embeddings service — a self-hosted, air-gap-buildable ONNX embedding service, retrieval Backend B enabled by default in compose, restart-stable persistence) — Layer 3's retrieval half is now embedding-backed by default rather than lexical-only (~72% → ~78%), closing the EMBEDDINGS half of the architecture's last numbered Layer 3 gap; pgvector itself remains the named absent half — in-process cosine is exact and fast at current scale, and the table is the seam it slots into without rework; live Arabic smoke shows semantic ranking beating lexical on the customers case, expected small-catalog headroom (not gated) on the invoices case; Layers 1, 4, 5, 6, 7 remain substantially there, 8 further along; a single-layer, evidence-based move this size holds the rounded overall figure steady, consistent with how every prior pass in this document has weighted the recompute</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>The bottom line:</strong> you have a competent, well-tested BI product that is stronger than the
+architecture in visualization, governance, collaboration and test discipline — and it now also has
+the architecture's metadata plane underneath it.</p>
+<p>What changed with Layer 1 is not mainly the score. It is that the expensive, unglamorous
+groundwork is done: a source can be sampled, profiled, masked, inferred over, drift-checked and
+confirmed by a human, with provenance that a resync cannot trample. Layers 3 and 4 are still real
+work — entities, enums, embeddings, retrieval, an agent, an eval harness — but they are no longer
+waiting on raw material that did not exist.</p>
+<p>Alignment was never the goal; <strong>choosing knowingly is.</strong> The choice in front of you is unchanged
+and is now cheaper to act on in one direction: build Layer 3 on the catalog you have, or keep the
+MCP path and let someone else's agent use it. Both are now viable. Before Layer 1, only one was.</p>
+</main>
+
+<footer>Generated from ARCHITECTURE_COMPARISON.md · Datalytics v2 architecture audit</footer>
+
+</body>
+</html>

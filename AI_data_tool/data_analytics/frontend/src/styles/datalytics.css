@@ -1,0 +1,245 @@
+/* ============================================================
+   Datalytics — product theme
+   Layers on the MCAIT token files (styles/mcait/*.css). Does NOT
+   touch the universal neutrals or the MCAIT gold; gold stays the
+   brand signature.
+   Scope: [data-product="datalytics"] on <html> (stamped in
+   index.html, beside the data-theme main.tsx writes pre-paint).
+   All colour in oklch, matching the base files' convention.
+   ============================================================ */
+
+[data-product="datalytics"] {
+
+  /* ---- Accent: deep teal (hue 176) ----
+     Reads as an instrument, not a brand shout. Chosen to sit
+     quiet behind chart colour, which is what should pull the
+     eye in an analytics surface. */
+  --mc-accent:       oklch(0.52 0.085 176); /* @kind color */  /* ≈ #1a7f72 */
+  --mc-accent-hover: oklch(0.46 0.085 176); /* @kind color */
+  --mc-accent-soft:  oklch(0.96 0.028 176); /* @kind color */  /* active rail item, chips */
+  --mc-accent-line:  oklch(0.88 0.050 176); /* @kind color */
+  --mc-accent-ink:   oklch(0.40 0.070 176); /* @kind color */  /* text on accent-soft */
+  --mc-accent-fg:    #ffffff;               /* @kind color */  /* text ON accent */
+
+  /* ---- Chart series ----
+     Ordered by first use. Teal leads so a single-series chart
+     agrees with the accent; the rest step away in hue so eight
+     categories stay separable, including for the ~8% of men
+     with red-green colour vision deficiency. */
+  --dl-series-1: oklch(0.52 0.085 176); /* @kind color */
+  --dl-series-2: oklch(0.58 0.110 255); /* @kind color */
+  --dl-series-3: oklch(0.62 0.120 80);  /* @kind color */
+  --dl-series-4: oklch(0.55 0.130 330); /* @kind color */
+  --dl-series-5: oklch(0.48 0.100 145); /* @kind color */
+  --dl-series-6: oklch(0.60 0.140 35);  /* @kind color */
+  --dl-series-7: oklch(0.45 0.080 265); /* @kind color */
+  --dl-series-8: oklch(0.66 0.090 115); /* @kind color */
+  --dl-series-null: var(--mc-faint);    /* @kind color */  /* no value ≠ zero */
+
+  /* ---- Surfaces ----
+     The rail sits on canvas-2, content on canvas, cards white.
+     Three planes, no borders needed between them. */
+  --dl-rail-bg:      var(--mc-canvas-2); /* @kind color */
+  --dl-rail-active:  var(--mc-accent-soft); /* @kind color */
+  --dl-topbar-bg:    var(--mc-surface); /* @kind color */
+
+  /* ---- Radius ----
+     Graded by hierarchy, not one value everywhere: a card is a
+     region, a control is a target, a badge is a token. */
+  --dl-radius-card:    12px;
+  --dl-radius-control: 8px;
+  --dl-radius-badge:   6px;
+
+  /* ---- Elevation: one level, nothing floats twice ---- */
+  --dl-shadow-card:  0 1px 2px oklch(0.24 0.02 265 / 0.04),
+                     0 1px 3px oklch(0.24 0.02 265 / 0.06);
+  --dl-shadow-overlay: 0 8px 24px oklch(0.24 0.02 265 / 0.12);
+
+  /* ---- Density ----
+     Tuned for hundreds of rows, not for four stat cards. Row
+     height is the one number that decides whether an admin
+     table is readable at 1440. */
+  --dl-row-h:        40px;
+  --dl-row-h-compact: 32px;
+  --dl-cell-px:      12px;
+  --dl-card-p:       20px;
+  --dl-rail-w:       248px;
+  --dl-rail-w-collapsed: 56px;
+  --dl-topbar-h:     56px;
+
+  /* ---- Spacing scale (multiples of 4) ---- */
+  --dl-1: 4px;  --dl-2: 8px;  --dl-3: 12px; --dl-4: 16px;
+  --dl-5: 24px; --dl-6: 32px; --dl-7: 48px; --dl-8: 64px;
+
+  /* The shell's content padding, published as a token so a page that must
+     bleed to the window edges can cancel exactly this value instead of
+     hard-coding one that drifts from it. This is the desktop default; the
+     shell narrows it to --dl-4 below the drawer breakpoint, and presenting
+     mode zeroes it (both in index.css). */
+  --dl-shell-pad: var(--dl-6); /* @kind spacing */
+
+  /* ---- Type ----
+     Inter for Latin, IBM Plex Sans Arabic for Arabic: near-equal
+     x-height, so a mixed-direction table does not visibly change
+     weight at the language boundary. Both must be self-hosted —
+     nothing in this product may fetch a font at runtime. The
+     @font-face rules live in styles/datalytics-fonts.css. */
+  --dl-font: "Inter", "IBM Plex Sans Arabic", system-ui, sans-serif;
+  --dl-text-page:    20px;  --dl-weight-page:    600;
+  --dl-text-section: 16px;  --dl-weight-section: 500;
+  --dl-text-body:    14px;
+  --dl-text-data:    13px;  /* table cells, metadata, chart labels */
+  --dl-text-micro:   12px;  /* rail section headings, axis ticks */
+  --dl-leading-tight: 1.35;
+  --dl-leading-body:  1.55;
+}
+
+/* ============================================================
+   State surfaces — loading, empty, error
+   These three must never be mistaken for each other. The
+   analysis records five separate occasions where an error
+   rendered as an empty state; the palette is the first line
+   of defence, so error is the only one of the three that
+   carries colour.
+   ============================================================ */
+
+[data-product="datalytics"] {
+  /* Loading: shaped like the content it replaces, no colour. */
+  --dl-skeleton:      var(--mc-canvas-2); /* @kind color */
+  --dl-skeleton-peak: var(--mc-border-2); /* @kind color */
+
+  /* Empty: quiet, no frame, no alarm. An invitation to act. */
+  --dl-empty-text: var(--mc-muted); /* @kind color */
+  --dl-empty-icon: var(--mc-faint); /* @kind color */
+
+  /* Error: framed and tinted. Visible as an error from a metre away. */
+  --dl-error-bg:   var(--mc-danger-soft); /* @kind color */
+  --dl-error-line: var(--mc-danger-line); /* @kind color */
+  --dl-error-text: var(--mc-danger);      /* @kind color */
+}
+
+/* ============================================================
+   Tables
+   Horizontal rules only. Vertical rules and zebra striping both
+   add ink per row, and these tables run long.
+   ============================================================ */
+
+[data-product="datalytics"] {
+  --dl-table-head-text:   var(--mc-muted);      /* @kind color */
+  --dl-table-head-bg:     transparent;          /* @kind color */
+  --dl-table-rule:        var(--mc-border-2);   /* @kind color */
+  --dl-table-row-hover:   var(--mc-canvas);     /* @kind color */
+  --dl-table-row-selected: var(--mc-accent-soft); /* @kind color */
+}
+
+/* Figures align on the decimal in every column that holds one. */
+[data-product="datalytics"] table,
+[data-product="datalytics"] .dl-num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================
+   Dark mode
+   Not black. The canvas keeps the neutral hue and lands near
+   deep slate, which is easier to sit in front of all day than
+   pure black behind saturated chart colour.
+   ============================================================ */
+
+[data-product="datalytics"][data-theme="dark"] {
+  --mc-canvas:        oklch(0.19 0.012 265); /* @kind color */
+  --mc-canvas-2:      oklch(0.16 0.012 265); /* @kind color */
+  --mc-surface:       oklch(0.23 0.012 265); /* @kind color */
+  --mc-border:        oklch(0.30 0.012 265); /* @kind color */
+  --mc-border-2:      oklch(0.27 0.010 265); /* @kind color */
+  --mc-border-strong: oklch(0.38 0.014 265); /* @kind color */
+
+  --mc-ink:      oklch(0.96 0.004 265); /* @kind color */
+  --mc-ink-soft: oklch(0.88 0.006 265); /* @kind color */
+  --mc-muted:    oklch(0.70 0.010 265); /* @kind color */
+  --mc-faint:    oklch(0.56 0.010 265); /* @kind color */
+
+  /* Accent lifts and desaturates slightly to hold contrast on
+     a dark surface without glowing. */
+  --mc-accent:       oklch(0.68 0.095 176); /* @kind color */
+  --mc-accent-hover: oklch(0.74 0.095 176); /* @kind color */
+  --mc-accent-soft:  oklch(0.28 0.045 176); /* @kind color */
+  --mc-accent-line:  oklch(0.38 0.060 176); /* @kind color */
+  --mc-accent-ink:   oklch(0.82 0.080 176); /* @kind color */
+  --mc-accent-fg:    oklch(0.16 0.020 176); /* @kind color */
+
+  --mc-success-soft: oklch(0.26 0.040 145); /* @kind color */
+  --mc-warning-soft: oklch(0.27 0.045 75);  /* @kind color */
+  --mc-danger-soft:  oklch(0.26 0.050 25);  /* @kind color */
+  --mc-info-soft:    oklch(0.26 0.045 255); /* @kind color */
+  --mc-success-line: oklch(0.36 0.060 145); /* @kind color */
+  --mc-warning-line: oklch(0.38 0.070 75);  /* @kind color */
+  --mc-danger-line:  oklch(0.38 0.080 25);  /* @kind color */
+  --mc-info-line:    oklch(0.36 0.060 255); /* @kind color */
+  /* The status TEXT colours too: the light values (L 0.40-0.55) sat at
+     ~2.4:1 on these surfaces, so every red "Delete", error and warning was
+     unreadable in dark mode. Lifted like the accent, with a dark "fg" for
+     text on a solid danger fill. */
+  --mc-success:      oklch(0.74 0.120 145); /* @kind color */
+  --mc-warning:      oklch(0.80 0.110 75);  /* @kind color */
+  --mc-danger:       oklch(0.72 0.150 25);  /* @kind color */
+  --mc-info:         oklch(0.74 0.110 255); /* @kind color */
+  --mc-danger-fg:    oklch(0.18 0.030 25);  /* @kind color */
+
+  --dl-shadow-card:    0 1px 2px oklch(0 0 0 / 0.30);
+  --dl-shadow-overlay: 0 8px 24px oklch(0 0 0 / 0.45);
+
+  --dl-series-1: oklch(0.70 0.090 176); /* @kind color */
+  --dl-series-2: oklch(0.70 0.110 255); /* @kind color */
+  --dl-series-3: oklch(0.76 0.115 80);  /* @kind color */
+  --dl-series-4: oklch(0.70 0.120 330); /* @kind color */
+  --dl-series-5: oklch(0.66 0.100 145); /* @kind color */
+  --dl-series-6: oklch(0.72 0.130 35);  /* @kind color */
+  --dl-series-7: oklch(0.64 0.080 265); /* @kind color */
+  --dl-series-8: oklch(0.78 0.090 115); /* @kind color */
+}
+
+/* ============================================================
+   Focus
+   One ring, same everywhere, never removed. Keyboard is the
+   primary input for an analyst filling a properties rail.
+   ============================================================ */
+
+[data-product="datalytics"] :focus-visible {
+  outline: 2px solid var(--mc-accent);
+  outline-offset: 2px;
+  border-radius: var(--dl-radius-badge);
+}
+
+/* ============================================================
+   Right-to-left
+   Arabic is a first-class audience here. Logical properties
+   only — no left/right in spacing, no mirrored icon sprites.
+   Chart internals stay LTR; the surrounding layout flips.
+
+   The authoritative, test-pinned copy of the recharts-surface
+   rule lives in index.css (svgDirection.test.ts reads that file
+   by name); this repeats it so the product theme is readable on
+   its own. Change both together.
+   ============================================================ */
+
+[data-product="datalytics"] svg.recharts-surface {
+  direction: ltr;
+}
+
+/* ============================================================
+   Motion
+   Only movement that answers an action. Nothing animates on
+   load, because a dashboard that re-enters on every render
+   reads as unstable.
+   ============================================================ */
+
+[data-product="datalytics"] {
+  --dl-ease: cubic-bezier(0.2, 0, 0.2, 1); /* @kind other */
+  --dl-dur:  140ms; /* @kind other */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-product="datalytics"] {
+    --dl-dur: 0ms; /* @kind other */
+  }
+}

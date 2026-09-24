@@ -1,0 +1,40 @@
+name: maps_state_student_solution_details_predected_top_symbols
+properties:
+  description: Table public.maps_state_student_solution_details_predected_top_symbols
+table_reference:
+  catalog: ''
+  schema: public
+  table: maps_state_student_solution_details_predected_top_symbols
+columns:
+- name: maps_state_id
+  type: INT
+  is_calculated: false
+  not_null: true
+  is_primary_key: false
+  properties: {}
+- name: student_id
+  type: INT
+  is_calculated: false
+  not_null: true
+  is_primary_key: false
+  properties: {}
+- name: symbol_id
+  type: INT
+  is_calculated: false
+  not_null: true
+  is_primary_key: false
+  properties: {}
+- name: symbol_code
+  type: INT
+  is_calculated: false
+  not_null: true
+  is_primary_key: false
+  properties: {}
+- name: val
+  type: DOUBLE
+  is_calculated: false
+  not_null: true
+  is_primary_key: false
+  properties: {}
+primary_key: maps_state_id
+cached: false

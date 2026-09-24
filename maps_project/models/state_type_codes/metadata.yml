@@ -1,0 +1,22 @@
+name: state_type_codes
+properties:
+  description: Table public.state_type_codes
+table_reference:
+  catalog: ''
+  schema: public
+  table: state_type_codes
+columns:
+- name: state_type_code
+  type: INT
+  is_calculated: false
+  not_null: true
+  is_primary_key: true
+  properties: {}
+- name: state_type_name
+  type: VARCHAR(100)
+  is_calculated: false
+  not_null: true
+  is_primary_key: false
+  properties: {}
+primary_key: state_type_code
+cached: false

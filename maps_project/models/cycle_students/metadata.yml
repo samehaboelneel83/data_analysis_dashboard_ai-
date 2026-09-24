@@ -1,0 +1,42 @@
+name: cycle_students
+properties:
+  description: Table public.cycle_students
+table_reference:
+  catalog: ''
+  schema: public
+  table: cycle_students
+columns:
+- name: cycle_id
+  type: BIGINT
+  is_calculated: false
+  not_null: true
+  is_primary_key: true
+  properties: {}
+- name: student_id
+  type: BIGINT
+  is_calculated: false
+  not_null: true
+  is_primary_key: true
+  properties: {}
+- name: student_rank
+  type: VARCHAR
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+- name: student_name
+  type: VARCHAR
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+- name: institute_code
+  type: BIGINT
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+primary_key:
+- cycle_id
+- student_id
+cached: false

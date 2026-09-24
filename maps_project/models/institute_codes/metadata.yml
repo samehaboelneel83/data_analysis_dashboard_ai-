@@ -1,0 +1,34 @@
+name: institute_codes
+properties:
+  description: Table public.institute_codes
+table_reference:
+  catalog: ''
+  schema: public
+  table: institute_codes
+columns:
+- name: institute_code
+  type: INT
+  is_calculated: false
+  not_null: true
+  is_primary_key: true
+  properties: {}
+- name: institute_name
+  type: VARCHAR(100)
+  is_calculated: false
+  not_null: true
+  is_primary_key: false
+  properties: {}
+- name: username
+  type: VARCHAR
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+- name: password
+  type: VARCHAR
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+primary_key: institute_code
+cached: false

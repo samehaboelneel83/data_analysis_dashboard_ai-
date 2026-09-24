@@ -1,0 +1,86 @@
+# ---------------------------------------------------------------
+# Vendored third-party clones — these are other people's projects,
+# each with its own .git. Re-publishing them here would add 1.5GB
+# and record them as broken submodules. Clone them separately:
+#   superset_ref -> https://github.com/apache/superset.git
+#   WrenAI       -> https://github.com/Canner/WrenAI.git
+# ---------------------------------------------------------------
+superset_ref/
+WrenAI/
+
+# ---------------------------------------------------------------
+# Files over GitHub's 100MB hard limit — the push is REJECTED if
+# any of these are tracked. Keep them locally, out of git.
+# ---------------------------------------------------------------
+*.rar
+*.zip
+*.7z
+AI_data_tool/data_analytics.rar
+
+# Sample/demo databases (120MB, 69MB) and uploaded user data
+*.db
+*.sqlite
+*.sqlite3
+*.parquet
+AI_data_tool/data_analytics/backend/sample_data/
+AI_data_tool/data_analytics/backend/uploads/
+
+# ---------------------------------------------------------------
+# Dependencies and virtualenvs — regenerable, never committed
+# ---------------------------------------------------------------
+node_modules/
+.venv/
+venv/
+env/
+*.egg-info/
+
+# ---------------------------------------------------------------
+# Build output and caches
+# ---------------------------------------------------------------
+dist/
+build/
+target/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.cache/
+
+# ---------------------------------------------------------------
+# Agent / tooling scratch state (one diff in here is 138MB)
+# ---------------------------------------------------------------
+.superpowers/
+.worktrees/
+.claude/settings.local.json
+
+# ---------------------------------------------------------------
+# Secrets — commit .env.example instead, never .env
+# ---------------------------------------------------------------
+.env
+*.env
+!.env.example
+
+# ---------------------------------------------------------------
+# Editor and OS cruft
+# ---------------------------------------------------------------
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
+~$*
+
+# ---------------------------------------------------------------
+# Frontend design-sync machine state (the durable set under
+# frontend/.design-sync/ IS committed — only caches are ignored)
+# ---------------------------------------------------------------
+frontend/.ds-sync/
+frontend/ds-bundle/
+frontend/.design-sync/.cache/
+frontend/.design-sync/node_modules/
+frontend/design-screenshots/
+
+# Local scratch output
+_test_*.txt
+_to_delete/

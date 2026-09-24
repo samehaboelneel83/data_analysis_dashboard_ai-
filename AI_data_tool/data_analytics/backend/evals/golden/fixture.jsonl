@@ -1,0 +1,10 @@
+{"question": "total sales", "sql": "SELECT sum(total) FROM orders", "intent": "aggregate"}
+{"question": "sales in the west", "sql": "SELECT sum(total) FROM orders WHERE region = 'west'", "intent": "aggregate"}
+{"question": "how many orders are there", "sql": "SELECT count(*) FROM orders", "intent": "lookup"}
+{"question": "what is the total of order 1", "sql": "SELECT total FROM orders WHERE id = 1", "intent": "lookup"}
+{"question": "sales by region", "sql": "SELECT region, sum(total) FROM orders GROUP BY region", "intent": "compare"}
+{"question": "west versus east sales", "sql": "SELECT region, sum(total) FROM orders WHERE region IN ('west','east') GROUP BY region", "intent": "compare"}
+{"question": "orders from largest to smallest", "sql": "SELECT id, total FROM orders ORDER BY total DESC", "intent": "trend"}
+{"question": "the three biggest orders", "sql": "SELECT id, total FROM orders ORDER BY total DESC LIMIT 3", "intent": "trend"}
+{"question": "which region has the higher sales", "sql": "SELECT region FROM orders GROUP BY region ORDER BY sum(total) DESC LIMIT 1", "intent": "explain"}
+{"question": "average order value", "sql": "SELECT avg(total) FROM orders", "intent": "explain"}

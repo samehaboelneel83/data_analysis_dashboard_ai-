@@ -1,0 +1,1567 @@
+/* ============================================================
+   MCAIT Design System — token bridge
+
+   The app styles every component through its own custom properties
+   (--surface, --border, --accent …). Rather than rewrite forty-six
+   components, those properties are redefined here in terms of MCAIT's
+   tokens, so the whole product adopts the brand at once and any future
+   component keeps working by using the same names.
+
+   MCAIT ships light-mode values only, so light maps straight onto its
+   neutrals. Dark is derived one layer up, in styles/datalytics.css, by
+   redefining the same --mc-* names inside
+   [data-product="datalytics"][data-theme="dark"] — which means this bridge
+   is written once and both themes fall out of it.
+   ============================================================ */
+@import url('./styles/mcait/fonts.css');
+@import url('./styles/mcait/colors.css');
+@import url('./styles/mcait/typography.css');
+@import url('./styles/mcait/spacing.css');
+@import url('./styles/mcait/products.css');
+
+/* The Datalytics product theme and its self-hosted faces. These must come
+   after the MCAIT files: the product block carries the same specificity as
+   MCAIT's :root, so source order is what lets the teal accent win. */
+@import url('./styles/datalytics-fonts.css');
+@import url('./styles/datalytics.css');
+
+/* ---- Bridge: the app's own property names onto the token layer ----
+   Components style themselves through --surface / --border / --accent and
+   friends (--muted alone appears 904 times across src). Rather than rewrite
+   them, they are defined here in terms of the MCAIT neutrals and the
+   Datalytics product tokens, so the theme is decided in one place and any
+   future component keeps working by using the same names.
+
+   No literal colour, radius or font stack appears below. Light values come
+   from the MCAIT neutrals; dark comes from the
+   [data-product="datalytics"][data-theme="dark"] block in datalytics.css,
+   which redefines those same --mc-* names on <html>. That is why this bridge
+   is written once rather than once per theme. */
+:root {
+  --bg:            var(--mc-canvas);
+  --surface:       var(--mc-surface);
+  --surface2:      var(--mc-canvas-2);
+  --border:        var(--mc-border);
+  --text:          var(--mc-ink);
+  --muted:         var(--mc-muted);
+  --accent:        var(--mc-accent);
+  --accent-strong: var(--mc-accent-hover);
+  --accent-soft:   var(--mc-accent-soft);
+  /* The one non-accent hue the app spends, on categorical badges. Pointed at
+     a chart-series token so it is theme-aware and comes from the same
+     palette; the badges themselves are restyled in step 2. */
+  --accent2:       var(--dl-series-4);
+  --success:       var(--mc-success);
+  --warning:       var(--mc-warning);
+  --danger:        var(--mc-danger);
+  --shadow-card:   var(--dl-shadow-card);
+  --radius:   var(--dl-radius-card);
+  --sans:     var(--dl-font);
+  --mono:     var(--font-mono);
+  --display:  var(--dl-font);
+}
+
+/* ---- Icons ----
+   One line family (lucide-react) at one stroke weight, inheriting
+   currentColor. lucide stamps a `lucide` class on every svg it renders and
+   writes size/stroke-width as presentation attributes, which a CSS property
+   outranks — so the weight is set once here instead of per call site. The two
+   size tokens are consumed as files are converted; a blanket width/height
+   rule would shrink the deliberately large icons in the empty states. */
+:root {
+  --dl-icon:        16px;  /* inline, beside a label */
+  --dl-icon-lg:     20px;  /* standalone, carrying its own aria-label */
+  --dl-icon-stroke: 2;
+}
+svg.lucide { stroke-width: var(--dl-icon-stroke); }
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: var(--dl-text-body);
+  line-height: var(--dl-leading-body);
+}
+
+/* Scrollbars */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: var(--radius-pill); }
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 7px 14px; border-radius: var(--radius-sm); border: none;
+  font-family: var(--sans); font-size: 13px; font-weight: 500;
+  cursor: pointer; transition: opacity .15s, background .15s;
+  text-decoration: none;
+}
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn-primary  { background: var(--accent); color: var(--mc-accent-fg, #fff); }
+/* A real pressed/hover color (the dark blue), not an opacity fade -- opacity
+   over a light canvas washes the button toward grey. */
+.btn-primary:hover:not(:disabled) { background: var(--accent-strong); }
+/* A link with no colour of its own used the browser default (#0000ee): 1.8:1
+   on the dark theme. :where() keeps this at zero specificity, so every link
+   that styles itself -- class or inline -- still wins. */
+:where(a) { color: var(--accent); }
+
+.btn-danger   { background: var(--danger); color: var(--mc-danger-fg, #fff); }
+.btn-danger:hover:not(:disabled) { opacity: .85; }
+.btn-ghost    { background: transparent; color: var(--text); border: 1px solid var(--border); }
+.btn-ghost:hover:not(:disabled) { background: var(--surface2); }
+/* 24px floor: WCAG 2.5.8 target size. Measured at phone width, small buttons
+   came out 22px tall (Share, More actions) and the date presets 16px. */
+.btn-sm       { padding: 4px 10px; font-size: var(--text-xs); border-radius: var(--radius-sm);
+                min-height: 24px; min-width: 24px; justify-content: center; }
+
+/* Badges */
+.badge {
+  display: inline-flex; align-items: center;
+  padding: 2px 8px; border-radius: var(--radius-pill); font-size: 11px; font-weight: var(--weight-semibold);
+}
+.badge-numeric     { background: color-mix(in srgb, var(--accent)  15%, transparent); color: var(--accent); }
+/* Text mixed toward --text: the series colour on its own tint measured 4.25:1
+   (under AA); the mix darkens it in light mode and lightens it in dark. */
+.badge-categorical { background: color-mix(in srgb, var(--accent2) 15%, transparent); color: color-mix(in oklab, var(--accent2) 75%, var(--text)); }
+.badge-datetime    { background: color-mix(in srgb, var(--success)  15%, transparent); color: var(--success); }
+.badge-text        { background: color-mix(in srgb, var(--muted)   15%, transparent); color: var(--muted); }
+
+/* Cards -- one quiet elevation step above the canvas. The shadow token is
+   none in dark mode, where borders alone carry the separation. */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  box-shadow: var(--shadow-card, none);
+}
+
+/* Form controls */
+input, select, textarea {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 7px;
+  padding: 6px 10px;
+  font-family: var(--sans);
+  font-size: 13px;
+  outline: none;
+  transition: border-color .15s;
+}
+input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+select option { background: var(--surface2); }
+
+/* Tables */
+table { border-collapse: collapse; width: 100%; }
+th, td {
+  padding: 7px 12px; text-align: left; font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+tr:hover td { background: var(--surface2); }
+
+/* A row's primary link carries its weight, not a permanent underline: a table
+   of underlined names reads as an unstyled document. The underline comes back
+   on hover, where it says "this is the thing you are about to click". */
+.row-name { text-decoration: none; }
+.row-name:hover, .row-name:focus-visible { text-decoration: underline; text-underline-offset: 2px; }
+
+
+/* Charts are drawn in physical coordinates, whatever the page direction.
+
+   SVG `text-anchor` is LOGICAL: under <html dir="rtl"> the chart's <svg>
+   inherits `direction: rtl`, and `text-anchor: start` then puts the RIGHT end
+   of a label at its anchor. Recharts lays its axes out in physical x/y and
+   mirrors nothing itself, so every anchor it emits was flipped -- the value
+   axis on the right printed its ticks leftward across the plot, and a tilted
+   category label trailed up into the bars. Measured in Chrome: every x and y
+   tick label over the plot in RTL, with Arabic and English data alike.
+
+   The app mirrors charts deliberately (axis side, category order, title
+   side -- see chartRenderers/axisOptions.ts), and that mirroring is only
+   correct when anchors are physical too. Pinning the surface to ltr does not
+   change how Arabic text inside a label is shaped or ordered; the bidi
+   algorithm does that per run. The legend and tooltip are HTML siblings of
+   the surface and keep the page direction. Pinned by svgDirection.test.ts. */
+svg.recharts-surface { direction: ltr; }
+
+/* The focus ring now lives in styles/datalytics.css, where it applies to every
+   focusable element rather than a hand-maintained list, and outranks this file's
+   :where() (specificity 0) in the bargain. Keeping a second copy here would mean
+   two rings to change, so there is only the one. */
+
+/* ============================================================
+   The loading animation — three balls bouncing on their shadows.
+
+   Adapted from Uiverse.io by mobinkakei. The original hardcoded white balls
+   and near-black shadows, which is invisible on a light canvas; both read from
+   the theme here. Sizes come from two custom properties so `--sm` is a
+   variable override rather than a second copy of the keyframes.
+
+   Markup order is three balls then three shadows (see ui/Loader.tsx); the
+   nth-child rules below pair each shadow with the ball above it by position
+   and delay, which is why they are not in the order you would guess.
+   ============================================================ */
+
+.dl-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--dl-3, 12px);
+  /* Centred in the content area, because during a navigation there is nothing
+     else on screen to look at. 60vh rather than 100vh: this renders below the
+     top bar, and a full viewport height would push it visibly low. */
+  width: 100%;
+  flex: 1;
+  min-height: 60vh;
+}
+
+.dl-loading__label {
+  color: var(--muted);
+  font-size: var(--dl-text-data, 13px);
+  margin: 0;
+}
+
+.dl-loader {
+  --dl-ball: 20px;
+  --dl-rise: 60px;
+  width: 200px;
+  height: var(--dl-rise);
+  position: relative;
+  z-index: 1;
+}
+
+.dl-loader__ball {
+  width: var(--dl-ball);
+  height: var(--dl-ball);
+  position: absolute;
+  border-radius: 50%;
+  background-color: var(--accent);
+  left: 15%;
+  transform-origin: 50%;
+  animation: dl-loader-ball .5s alternate infinite ease;
+}
+
+@keyframes dl-loader-ball {
+  0% {
+    top: var(--dl-rise);
+    height: calc(var(--dl-ball) / 4);
+    border-radius: 50px 50px 25px 25px;
+    transform: scaleX(1.7);
+  }
+  40% {
+    height: var(--dl-ball);
+    border-radius: 50%;
+    transform: scaleX(1);
+  }
+  100% {
+    top: 0%;
+  }
+}
+
+.dl-loader__ball:nth-child(2) { left: 45%; animation-delay: .2s; }
+.dl-loader__ball:nth-child(3) { left: auto; right: 15%; animation-delay: .3s; }
+
+.dl-loader__shadow {
+  width: var(--dl-ball);
+  height: calc(var(--dl-ball) / 5);
+  border-radius: 50%;
+  /* The original's opaque black. Tied to the text colour so it darkens the
+     canvas in light mode and lightens it in dark, instead of becoming a black
+     smear on a slate background. */
+  background-color: color-mix(in srgb, var(--text) 45%, transparent);
+  position: absolute;
+  top: calc(var(--dl-rise) + 2px);
+  transform-origin: 50%;
+  z-index: -1;
+  left: 15%;
+  filter: blur(1px);
+  animation: dl-loader-shadow .5s alternate infinite ease;
+}
+
+@keyframes dl-loader-shadow {
+  0%   { transform: scaleX(1.5); }
+  40%  { transform: scaleX(1); opacity: .7; }
+  100% { transform: scaleX(.2); opacity: .4; }
+}
+
+.dl-loader__shadow:nth-child(4) { left: 45%; animation-delay: .2s; }
+.dl-loader__shadow:nth-child(5) { left: auto; right: 15%; animation-delay: .3s; }
+
+/* An infinite bounce is the textbook case for this rule: the balls rest on
+   their shadows and the label still says what is happening. */
+@media (prefers-reduced-motion: reduce) {
+  .dl-loader__ball,
+  .dl-loader__shadow {
+    animation: none;
+  }
+  .dl-loader__ball { top: 0; }
+}
+
+/* ============================================================
+   Datasets page — inventory layout
+   Every value here is a token. The reference this was built from uses blue
+   and purple; the accent below is whatever --mc-accent resolves to, which is
+   the product's deep teal.
+   ============================================================ */
+
+.dl-page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--dl-4);
+  flex-wrap: wrap;
+  margin-block-end: var(--dl-5);
+}
+
+.dl-page-head__title {
+  font-size: var(--dl-text-page);
+  font-weight: var(--dl-weight-page);
+  letter-spacing: -.01em;
+  margin-block-end: var(--dl-1);
+}
+
+.dl-page-head__sub {
+  color: var(--muted);
+  font-size: var(--dl-text-data);
+  margin: 0;
+}
+
+/* ---- Summary cards -------------------------------------------------------
+   Three cards, not one strip: each figure is its own object. The icons share
+   ONE neutral treatment on purpose -- three different tints would imply three
+   different kinds of thing, and these are three measures of one shelf. */
+
+.dl-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--dl-4);
+  margin-block-end: var(--dl-5);
+}
+
+.dl-stat {
+  display: flex;
+  align-items: center;
+  gap: var(--dl-3);
+  padding: var(--dl-card-p);
+}
+
+/* A tinted tile per figure.
+   The tint is a --dl-series-* token, not a semantic one: --mc-success would
+   claim these numbers are GOOD, and a stored-bytes total is neither good nor
+   bad. The series palette is the product's non-semantic categorical set and it
+   already carries dark-mode variants, so the tiles lift on a dark canvas
+   instead of turning into murk.
+
+   Each variant sets its colour and its 12% background from the SAME series
+   token, so retuning a tint changes the pair together. Grouped by colour, not
+   by slot: --datasets and --stored share series-5 today, and the shared rule
+   is what keeps them from drifting apart by accident. The base rule is the
+   untinted fallback for a stat with no variant class. */
+.dl-stat__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 40px;
+  block-size: 40px;
+  flex-shrink: 0;
+  border-radius: var(--dl-radius-control);
+  background: color-mix(in srgb, var(--muted) 12%, transparent);
+  color: var(--muted);
+}
+
+.dl-stat__icon--datasets,
+.dl-stat__icon--stored {
+  color: var(--dl-series-5);
+  background: color-mix(in srgb, var(--dl-series-5) 12%, transparent);
+}
+
+.dl-stat__icon--rows {
+  color: var(--dl-series-7);
+  background: color-mix(in srgb, var(--dl-series-7) 12%, transparent);
+}
+
+.dl-stat__label {
+  font-size: var(--dl-text-data);
+  color: var(--muted);
+  margin-block-end: 2px;
+}
+
+.dl-stat__figure {
+  font-size: 22px;
+  font-weight: var(--dl-weight-page);
+  letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Toolbar ------------------------------------------------------------ */
+
+.dl-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--dl-3);
+  margin-block-end: var(--dl-3);
+}
+
+.dl-toolbar__count {
+  font-size: var(--dl-text-micro);
+  color: var(--muted);
+}
+
+/* ---- The table ----------------------------------------------------------
+   Horizontal rules only. A vertical rule per column and a zebra stripe per row
+   both add ink proportional to length, and this table is meant to be long. */
+
+.dl-table-card { padding: 0; overflow: hidden; }
+
+.dl-table { width: 100%; border-collapse: collapse; }
+
+.dl-table th {
+  /* The global `th` rule shouts in caps; a column heading is a label, not a
+     shout. Sentence case, and no letter-spacing to go with it. */
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: var(--dl-text-micro);
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--surface);
+  padding-inline: var(--dl-cell-px);
+  padding-block: var(--dl-2);
+  border-block-end: 1px solid var(--border);
+}
+
+.dl-table td {
+  block-size: var(--dl-row-h);
+  padding-inline: var(--dl-cell-px);
+  padding-block: 0;
+  font-size: var(--dl-text-data);
+  border-block-end: 1px solid var(--dl-table-rule);
+  border-inline: none;
+}
+
+.dl-table tbody tr:last-child td { border-block-end: none; }
+.dl-table tbody tr:hover td { background: var(--dl-table-row-hover); }
+
+/* Digits line up down a column (end-aligned, which is the left in RTL) and
+   across rows (tabular figures). No monospace face: it read as log output. */
+.dl-table__num {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.dl-table__date { color: var(--muted); white-space: nowrap; }
+.dl-table__actions { text-align: end; }
+
+.dl-cell-name {
+  display: flex;
+  align-items: center;
+  gap: var(--dl-2);
+  flex-wrap: wrap;
+}
+
+.dl-cell-name .row-name {
+  font-weight: 600;
+  font-size: var(--dl-text-data);
+  color: var(--text);
+}
+
+/* The second line of a name cell: a description, or where a live dataset is
+   queried from. Truncated rather than wrapped, so a long one cannot push the
+   row past its height and break the scan rhythm. */
+.dl-cell-sub {
+  color: var(--muted);
+  font-size: var(--dl-text-data);
+  margin-block-start: 2px;
+  max-inline-size: 520px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- Chips -------------------------------------------------------------- */
+
+.dl-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--dl-text-micro);
+  border-radius: var(--dl-radius-badge);
+  padding-inline: var(--dl-2);
+  padding-block: 1px;
+  white-space: nowrap;
+}
+
+.dl-chip--live {
+  background: var(--accent-soft);
+  color: var(--mc-accent-ink);
+}
+
+.dl-chip--shared {
+  background: var(--surface2);
+  color: var(--muted);
+}
+
+/* ---- Pagination ---------------------------------------------------------- */
+
+.dl-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dl-3);
+  flex-wrap: wrap;
+  padding: var(--dl-3) var(--dl-cell-px);
+  border-block-start: 1px solid var(--border);
+}
+
+.dl-pager__info { font-size: var(--dl-text-data); color: var(--muted); }
+.dl-pager__controls { display: flex; align-items: center; gap: var(--dl-1); }
+
+.dl-pager__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dl-1);
+  min-inline-size: 34px;
+  block-size: 32px;
+  justify-content: center;
+  padding-inline: var(--dl-2);
+  font-size: var(--dl-text-data);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--dl-radius-control);
+  cursor: pointer;
+  transition: background var(--dl-dur) var(--dl-ease);
+}
+
+.dl-pager__btn:hover:not(:disabled) { background: var(--surface2); }
+
+.dl-pager__btn:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+.dl-pager__btn[aria-current="page"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--mc-accent-fg);
+  font-weight: 600;
+}
+
+/* `dir` cannot fix a glyph: a chevron drawn pointing left keeps pointing left
+   on an RTL page, where "previous" is to the right. Mirrored here rather than
+   by swapping icon components, so the two buttons cannot drift apart. */
+[dir="rtl"] .dl-pager__icon { transform: scaleX(-1); }
+
+/* ---- Empty and no-match states ------------------------------------------- */
+
+.dl-empty { text-align: center; padding: var(--dl-7) var(--dl-5); }
+.dl-empty__icon { color: var(--muted); margin: 0 auto var(--dl-4); display: block; }
+.dl-empty__title { font-weight: 600; margin-block-end: var(--dl-2); }
+.dl-empty__body { color: var(--muted); margin-block-end: var(--dl-5); }
+.dl-empty__actions { display: flex; gap: var(--dl-2); justify-content: center; flex-wrap: wrap; }
+
+.dl-nomatch {
+  color: var(--muted);
+  font-size: var(--dl-text-data);
+  padding: var(--dl-5) var(--dl-1);
+}
+
+/* The page-level "Loading…" line, replacing a repeated inline muted style. */
+.dl-muted-line { color: var(--muted); }
+
+/* ============================================================
+   The rail
+   Three widths, one control: labeled (--dl-rail-w), icons
+   (--dl-rail-w-collapsed), and a drawer under 900px. The width and the
+   display toggle stay INLINE in Layout.tsx -- they are state, and
+   Layout.test.tsx reads `display` off the element.
+   ============================================================ */
+
+.dl-rail {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-inline-end: 1px solid var(--border);
+  padding: var(--dl-3) var(--dl-2);
+  gap: 1px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  transition: width var(--dl-dur) var(--dl-ease);
+}
+
+/* ---- Brand row ---- */
+
+.dl-rail__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--dl-2);
+  inline-size: 100%;
+  padding-inline: var(--dl-2);
+  padding-block-end: var(--dl-3);
+  margin-block-end: var(--dl-2);
+  border-block-end: 1px solid var(--border);
+}
+
+.dl-rail--icons .dl-rail__brand { justify-content: center; padding-inline: 0; }
+
+.dl-rail__mark {
+  inline-size: 26px;
+  block-size: 26px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--dl-radius-badge);
+  background: var(--accent);
+  color: var(--mc-accent-fg);
+  font-weight: 700;
+  font-size: var(--dl-text-data);
+}
+
+.dl-rail__wordmark {
+  font-weight: 600;
+  font-size: var(--dl-text-body);
+  letter-spacing: -.01em;
+}
+
+.dl-rail__iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 26px;
+  block-size: 26px;
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  border-radius: var(--dl-radius-badge);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background var(--dl-dur) var(--dl-ease), color var(--dl-dur) var(--dl-ease);
+}
+
+.dl-rail__iconbtn:hover { background: var(--surface2); color: var(--text); }
+
+/* ---- Section headings ----
+   Caps here and nowhere else in the product: a rail heading labels a GROUP of
+   destinations rather than naming one, and at this size caps read as a divider
+   with a name on it. */
+
+.dl-rail__section {
+  inline-size: 100%;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--mc-muted); /* faint measured 3.65:1 on the rail -- under AA for 10px text */
+  text-transform: uppercase;
+  letter-spacing: .09em;
+  padding-inline: var(--dl-3);
+  padding-block: var(--dl-4) var(--dl-1);
+}
+
+.dl-rail__rule {
+  inline-size: 24px;
+  block-size: 1px;
+  background: var(--border);
+  margin-block: var(--dl-2);
+  align-self: center;
+}
+
+/* ---- Destinations ---- */
+
+.dl-rail__link {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--dl-3);
+  inline-size: 100%;
+  block-size: 36px;
+  border-radius: var(--dl-radius-card);
+  text-decoration: none;
+  padding-inline: var(--dl-3);
+  font-size: var(--dl-text-data);
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  border: none;
+  background: none;
+  cursor: pointer;
+  transition: background var(--dl-dur) var(--dl-ease), color var(--dl-dur) var(--dl-ease);
+}
+
+.dl-rail--icons .dl-rail__link { justify-content: center; padding-inline: 0; }
+
+.dl-rail__link:hover { background: var(--surface2); color: var(--text); }
+
+.dl-rail__link.active {
+  background: var(--accent-soft);
+  color: var(--mc-accent-ink);
+  font-weight: 600;
+}
+
+/* A full-height bar on the leading edge. The tint alone reads as a hover
+   state on a surface this pale; the bar says you are here without spending
+   another colour on saying it.
+
+   Drawn as a pseudo-element rather than a border-inline-start, so turning it
+   on does not change the box and shunt the icon and label sideways by 4px
+   every time the route changes. Rounded at BOTH ends and inset to nothing, so
+   it reads as part of the pill rather than a tab stuck to its edge. */
+.dl-rail__link.active::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: 0;
+  inset-block: 0;
+  inline-size: 4px;
+  border-radius: var(--dl-radius-card);
+  background: var(--accent);
+}
+
+.dl-rail--icons .dl-rail__link.active::before { display: none; }
+
+.dl-rail__icon {
+  inline-size: 20px;
+  flex-shrink: 0;
+  display: inline-flex;
+  justify-content: center;
+}
+
+.dl-rail__spacer { flex: 1; min-block-size: var(--dl-4); }
+
+/* ============================================================
+   The workspace tree
+   Denser than the destinations above it -- it is a list of content, not of
+   places -- but on the same grid, so the two do not read as two products.
+   ============================================================ */
+
+.dl-tree { inline-size: 100%; margin-block-start: var(--dl-2); }
+
+.dl-tree__head {
+  display: flex;
+  align-items: center;
+  gap: var(--dl-1);
+  inline-size: 100%;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--mc-faint);
+  text-transform: uppercase;
+  letter-spacing: .09em;
+  padding-inline: var(--dl-3);
+  padding-block: var(--dl-4) var(--dl-1);
+}
+
+/* The bucket labels sit UNDER the one heading, so they are sentence case and
+   lighter: two stacked uppercase rows of the same weight gave the rail two
+   competing titles and no hierarchy. */
+.dl-tree__group {
+  font-size: var(--dl-text-micro);
+  font-weight: 500;
+  color: var(--muted);
+  text-transform: none;
+  letter-spacing: 0;
+  padding-inline: var(--dl-3);
+  padding-block: var(--dl-3) var(--dl-1);
+}
+
+.dl-tree__row {
+  display: flex;
+  align-items: center;
+  gap: var(--dl-2);
+  /* Compact density, per the page's scale. */
+  block-size: 32px;
+  border-radius: var(--dl-radius-badge);
+  padding-inline-end: var(--dl-1);
+  font-size: var(--dl-text-data);
+  color: var(--text);
+  cursor: pointer;
+  transition: background var(--dl-dur) var(--dl-ease);
+}
+
+.dl-tree__row:hover { background: var(--surface2); }
+.dl-tree__row[data-drop-target='true'] { outline: 1px solid var(--accent); }
+.dl-tree__row[data-dragging='true'] { opacity: .45; }
+
+.dl-tree__caret {
+  inline-size: 14px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--mc-faint);
+}
+
+/* One neutral treatment for every node glyph. Tinting folders and leaving
+   reports grey implied the two were different KINDS of thing; they are the
+   same thing at different depths, and the row state carries the colour. */
+.dl-tree__glyph {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
+.dl-tree__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-inline-size: 0;
+}
+
+.dl-tree__badge {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--mc-faint);
+}
+
+/* Row controls stay in the DOM and in the tab order; they are only hidden
+   from the eye until the row is touched. Three glyphs down every row was the
+   loudest thing in the rail, and it competed with the names -- which are the
+   only part anybody reads. */
+.dl-tree__actions {
+  margin-inline-start: auto;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity var(--dl-dur) var(--dl-ease);
+}
+
+.dl-tree__row:hover .dl-tree__actions,
+.dl-tree__row:focus-within .dl-tree__actions { opacity: 1; }
+
+/* State, not a control: a restriction or a publication nobody can see is one
+   nobody remembers, so these stay visible when they are set. */
+.dl-tree__actions .dl-tree__state { opacity: 1; }
+
+.dl-tree__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 22px;
+  block-size: 22px;
+  border: none;
+  background: none;
+  border-radius: var(--dl-radius-badge);
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.dl-tree__btn:hover { background: var(--border); color: var(--text); }
+.dl-tree__btn:disabled { opacity: .4; cursor: not-allowed; }
+
+.dl-tree__page {
+  display: flex;
+  align-items: center;
+  gap: var(--dl-2);
+  block-size: 26px;
+  border-radius: var(--dl-radius-badge);
+  cursor: pointer;
+  font-size: var(--dl-text-micro);
+  color: var(--muted);
+}
+
+.dl-tree__page:hover { background: var(--surface2); color: var(--text); }
+
+/* ---- Shell ---- */
+
+.dl-shell { display: flex; block-size: 100%; }
+.dl-shell__main { flex: 1; display: flex; flex-direction: column; min-inline-size: 0; }
+.dl-shell__content { flex: 1; overflow: auto; background: var(--bg); }
+
+/* Present / kiosk: the dashboard fills the window. Any-key exit is wired in
+   ReportBuilder; the shell just gets out of the way. */
+html[data-presenting="1"] .dl-rail { display: none !important; }
+html[data-presenting="1"] .dl-shell__main > header { display: none !important; }
+html[data-presenting="1"] { --dl-shell-pad: 0px; }
+html[data-presenting="1"] .dl-shell__content { padding: 0 !important; }
+
+/* Layout.tsx publishes --dl-shell-pad as an INLINE style on .dl-shell__content
+   (its value tracks a JS breakpoint, so it cannot live in a media query). An
+   inline declaration beats the inherited 0px above, so inside the content area
+   the token still reads 32px while the padding is 0 -- and .dl-bleed would
+   cancel a padding that is no longer there, putting the builder's toolbar back
+   off the top of the window. Zero the bleed where it is READ instead. The
+   earlier version forced the token to zero on the content element itself with
+   an important declaration, which worked only because an important author rule
+   outranks a plain inline one -- and that put a custom property on a component
+   selector, which is what the design-system check flags. */
+html[data-presenting="1"] .dl-bleed { margin: 0; block-size: 100%; }
+
+/* A page that owns the whole content area rather than sitting inside its
+   padding. The report builder is the one: its side panels and canvas run to the
+   window edges. It cancels the shell's padding by the SAME custom property the
+   shell applies, so the two can never disagree -- a hard-coded -28px against a
+   32px token left a sliver on the desktop, overhung by 12px at narrow widths,
+   and in present mode (padding 0) pulled the builder's toolbar 28px off the top
+   of the window, which is what clipped the Stop button. */
+.dl-bleed {
+  margin: calc(var(--dl-shell-pad, 0px) * -1);
+  block-size: calc(100% + var(--dl-shell-pad, 0px) * 2);
+}
+.dl-rail__group { inline-size: 100%; }
+
+/* The drawer backdrop. Painted with explicit edges rather than `inset: 0` so
+   it does not read as an unlabelled dialog to overlayCoverage: the DIALOG is
+   the rail, and the role belongs on the panel, never on the backdrop. */
+.dl-scrim {
+  position: fixed;
+  top: 0; bottom: 0; left: 0; right: 0;
+  background: color-mix(in srgb, var(--mc-ink) 45%, transparent);
+  z-index: 1050;
+}
+
+/* ============================================================
+   Connections — the source list
+   Same grammar as the Datasets table: one card, rows inside it, horizontal
+   rules only. Previously each connection was its own bordered card with a
+   gap, which drew three boxes around three lines of text and made a short
+   list look like a long form.
+   ============================================================ */
+
+.dl-conn-list { padding: 0; overflow: hidden; }
+
+.dl-conn {
+  display: flex;
+  align-items: center;
+  gap: var(--dl-4);
+  padding: var(--dl-3) var(--dl-4);
+  border-block-end: 1px solid var(--dl-table-rule);
+  transition: background var(--dl-dur) var(--dl-ease);
+}
+
+.dl-conn:last-child { border-block-end: none; }
+.dl-conn:hover { background: var(--dl-table-row-hover); }
+
+/* One neutral tile for every connector.
+   The catalog ships an `icon` string per connector and it is an EMOJI -- a
+   yellow folder for SQLite, an elephant for Postgres. Platform emoji render in
+   a dozen styles across operating systems and read as toys beside enterprise
+   chrome, so the list draws its own line glyph and leaves the catalog field
+   for places that can only hold text. */
+.dl-conn__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 36px;
+  block-size: 36px;
+  flex-shrink: 0;
+  border-radius: var(--dl-radius-control);
+  background: var(--surface2);
+  color: var(--muted);
+}
+
+.dl-conn__body { flex: 1; min-inline-size: 0; }
+
+.dl-conn__name {
+  font-weight: 600;
+  font-size: var(--dl-text-body);
+  color: var(--text);
+}
+
+.dl-conn__meta {
+  font-size: var(--dl-text-data);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dl-conn__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--dl-1);
+  flex-shrink: 0;
+}
+
+/* The result of the last Test, in the row it belongs to.
+   Both states were hardcoded hexes (#34d399 / #f87171) that ignored the theme
+   and the palette; they are semantic tokens now, which is what success and
+   failure are. */
+.dl-conn__status {
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--dl-text-micro);
+  border-radius: var(--dl-radius-badge);
+  padding-inline: var(--dl-2);
+  padding-block: 2px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.dl-conn__status--ok {
+  background: var(--mc-success-soft);
+  color: var(--mc-success);
+}
+
+.dl-conn__status--fail {
+  background: var(--mc-danger-soft);
+  color: var(--mc-danger);
+}
+
+/* The read-only explanation for a non-admin. A notice, not an error: nothing
+   has gone wrong, the controls simply are not theirs. */
+.dl-conn-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--dl-2);
+  margin-block-end: var(--dl-4);
+  padding: var(--dl-3) var(--dl-4);
+  border: 1px solid var(--border);
+  border-radius: var(--dl-radius-control);
+  background: var(--surface2);
+  color: var(--muted);
+  font-size: var(--dl-text-data);
+}
+
+/* ============================================================
+   Card row controls — quiet until you reach for them
+   Three icon buttons on every card is nine glyphs in a nine-card grid, all
+   competing with the names, which are the only part anybody reads. They stay
+   in the DOM and in the tab order; only the eye is spared.
+   ============================================================ */
+
+.dl-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity var(--dl-dur) var(--dl-ease);
+}
+
+.card:hover .dl-card-actions,
+.card:focus-within .dl-card-actions { opacity: 1; }
+
+/* A touch screen has no hover, so "reveal on hover" would hide these
+   permanently. Any device whose primary pointer is coarse, or that cannot
+   hover at all, gets them outright. */
+@media (hover: none), (pointer: coarse) {
+  .dl-card-actions { opacity: 1; }
+}
+
+/* Reduced motion still gets the reveal -- it is the FADE that goes, not the
+   control. */
+@media (prefers-reduced-motion: reduce) {
+  .dl-card-actions { transition: none; }
+}
+
+/* Provenance, not status: this dashboard was proposed from the data rather
+   than built by hand. Quieter than published, which is a permission. */
+.dl-chip--suggested {
+  background: var(--surface2);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+/* ============================================================
+   Dashboard cards
+   The title and the chips used to share one flex row, with the chips at
+   flex-shrink: 0 and the title at its natural width -- so a SUGGESTED chip
+   squeezed "What stands out in Route planning extract output" into a
+   six-line tower and the grid row grew to fit it. The title owns its row
+   now; the chips moved down to the footer where the dataset chip already was.
+   ============================================================ */
+
+.dl-dash-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dl-2);
+  cursor: pointer;
+  /* Stops a one-word dashboard next to a three-line one from reading as two
+     different components. The grid stretches rows to the tallest anyway; this
+     sets the floor. */
+  min-block-size: 148px;
+  padding: var(--dl-4);
+  transition: border-color var(--dl-dur) var(--dl-ease),
+              box-shadow var(--dl-dur) var(--dl-ease);
+}
+
+/* One hover treatment, and it is a border rather than a lift: a grid of
+   twenty cards that each jump on hover is noise, and the border already says
+   "this is the one you are pointing at". */
+.dl-dash-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--mc-ink) 8%, transparent);
+}
+
+.dl-dash-card:focus-within {
+  border-color: var(--accent);
+}
+
+.dl-dash-card__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--dl-2);
+}
+
+.dl-dash-card__title {
+  flex: 1;
+  min-inline-size: 0;
+  font-weight: 600;
+  font-size: var(--dl-text-section);
+  line-height: 1.35;
+  color: var(--text);
+  text-decoration: none;
+  /* Two lines, then an ellipsis. A dashboard name is a label, and a label
+     that grows to six lines stops being scannable -- the full text is on the
+     title attribute and in the designer. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.dl-dash-card__title:hover { text-decoration: underline; }
+
+.dl-dash-card__blurb {
+  font-size: var(--dl-text-micro);
+  color: var(--muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Pinned to the bottom, so every card in a row lines its metadata up even
+   when the titles above are different heights. The hairline separates the
+   metadata from the prose above it -- without it the dataset chip read as
+   part of the description. */
+.dl-dash-card__foot {
+  margin-block-start: auto;
+  padding-block-start: var(--dl-3);
+  border-block-start: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: var(--dl-2);
+  flex-wrap: wrap;
+  min-block-size: 30px;
+}
+
+.dl-dash-card__date {
+  margin-inline-start: auto;
+  font-size: var(--dl-text-micro);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.dl-dash-card__nodata {
+  font-size: var(--dl-text-micro);
+  color: var(--muted);
+}
+
+/* ---- status chips, all on the footer row ---- */
+
+.dl-chip--published {
+  background: var(--accent-soft);
+  color: var(--mc-accent-ink);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.dl-chip--viewonly {
+  background: var(--surface2);
+  color: var(--muted);
+  font-size: 10px;
+  gap: 3px;
+}
+
+.dl-dash-card__controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.dl-dash-card__controls .btn { flex-shrink: 0; }
+
+/* The page head's right-hand controls: search, then the primary action. */
+.dl-page-head__tools {
+  display: flex;
+  gap: var(--dl-2);
+  align-items: center;
+  flex-wrap: wrap;
+  min-inline-size: 0;
+}
+
+/* ---- tree states ---------------------------------------------------------- */
+
+.dl-tree__row--selected,
+.dl-tree__row--selected:hover {
+  background: var(--accent-soft);
+  color: var(--mc-accent-ink);
+}
+
+/* Only the CLOSED chevron points along the reading direction. The open one
+   points down, which is down in every script. */
+[dir="rtl"] .dl-tree__caret--closed { transform: scaleX(-1); }
+
+.dl-tree__skeleton {
+  block-size: 32px;
+  margin-inline: var(--dl-3);
+  margin-block-end: var(--dl-1);
+  border-radius: var(--dl-radius-badge);
+  background: var(--surface2);
+  opacity: .7;
+  animation: dl-tree-pulse 1.4s var(--dl-ease) infinite;
+}
+
+.dl-tree__skeleton:nth-child(2) { inline-size: 84%; }
+.dl-tree__skeleton:nth-child(3) { inline-size: 72%; }
+.dl-tree__skeleton:nth-child(4) { inline-size: 88%; }
+
+@keyframes dl-tree-pulse {
+  0%, 100% { opacity: .7; }
+  50%      { opacity: .35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dl-tree__skeleton { animation: none; }
+}
+
+/* Quiet, and deliberately unframed: an empty workspace is a normal thing to
+   have. The failed one gets the bordered block instead, and never this copy. */
+.dl-tree__empty {
+  padding-inline: var(--dl-3);
+  padding-block: var(--dl-3);
+  font-size: var(--dl-text-micro);
+  color: var(--muted);
+}
+
+.dl-sr-only {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ============================================================
+   Dashboards page: the share dialog, the create form, the grid
+   Lifted out of inline style objects so the page reads from tokens like every
+   other surface -- the scrim in particular was a hardcoded rgba(0,0,0,.5),
+   which ignored the theme entirely.
+   ============================================================ */
+
+.dl-modal {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* The same scrim .dl-scrim uses, so the two modal treatments match. */
+  background: color-mix(in srgb, var(--mc-ink) 45%, transparent);
+  padding: var(--dl-4);
+}
+
+.dl-modal__panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--dl-radius-card);
+  padding: var(--dl-5);
+  inline-size: 440px;
+  max-inline-size: 90vw;
+  max-block-size: 85vh;
+  overflow-y: auto;
+}
+
+.dl-modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dl-3);
+  margin-block-end: var(--dl-2);
+}
+
+.dl-modal__title {
+  font-size: var(--dl-text-section);
+  font-weight: 700;
+  margin: 0;
+}
+
+.dl-modal__x {
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--muted);
+}
+
+.dl-modal__x:hover { color: var(--text); }
+
+.dl-modal__note {
+  font-size: var(--dl-text-micro);
+  color: var(--muted);
+  margin-block-end: var(--dl-4);
+}
+
+.dl-modal__row {
+  display: flex;
+  gap: var(--dl-1);
+  margin-block-end: var(--dl-4);
+}
+
+.dl-modal__input,
+.dl-modal__control {
+  font-size: var(--dl-text-micro);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--dl-radius-badge);
+  color: var(--text);
+}
+
+.dl-modal__input {
+  flex: 1;
+  min-inline-size: 0;
+  padding: var(--dl-1) var(--dl-2);
+}
+
+/* ---- one shared grant ---- */
+
+.dl-grant {
+  display: flex;
+  align-items: center;
+  gap: var(--dl-2);
+  font-size: var(--dl-text-micro);
+  padding-block: var(--dl-1);
+  border-block-start: 1px solid var(--border);
+}
+
+.dl-grant__email {
+  flex: 1;
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dl-grant__level { color: var(--muted); }
+.dl-grant__remove { color: var(--danger); font-size: var(--dl-text-micro); }
+
+/* ---- create form ---- */
+
+.dl-create {
+  margin-block-end: var(--dl-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--dl-3);
+}
+
+.dl-create__title { font-weight: 600; }
+.dl-create__field { inline-size: 100%; }
+.dl-create__actions { display: flex; gap: var(--dl-2); }
+
+/* ---- the card grid ---- */
+
+.dl-dash-grid {
+  display: grid;
+  /* 300px rather than 280: with the folder column gone the page is wide
+     enough that 280 packed in a column too many and squeezed every title. */
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--dl-4);
+  align-items: stretch;
+}
+
+.dl-group-note {
+  font-size: var(--dl-text-micro);
+  color: var(--muted);
+  margin: 0 0 var(--dl-3);
+}
+
+.dl-danger-item { color: var(--danger); }
+
+/* The caret only takes clicks on a REPORT, where it is the disclosure control
+   for the report's pages; on a folder the whole row toggles. */
+.dl-tree__caret--clickable { cursor: pointer; }
+
+.dl-tree__state--published { color: var(--accent); }
+
+.dl-tree__btn--end { margin-inline-start: auto; }
+
+/* The title is the one thing that should catch the eye on a card, so it is
+   the only element here allowed to be large and full-strength; everything
+   else sits at micro size in --muted. */
+.dl-dash-card__title {
+  font-size: 15px;
+  letter-spacing: -.005em;
+}
+
+/* Reserved so a card with no description keeps its footer on the same line as
+   its neighbours' -- ragged footers across a row read as broken alignment. */
+.dl-dash-card__blurb { min-block-size: 2lh; }
+
+@supports not (min-block-size: 2lh) {
+  .dl-dash-card__blurb { min-block-size: 32px; }
+}
+
+/* ============================================================
+   Folding sections on the Dashboards page
+   Three tiers -- authorship group, folder, subfolder -- and every body sits
+   visibly UNDER its heading: indented past it, with a hairline down the
+   inline-start edge so the eye can follow which heading a card belongs to
+   after that heading has scrolled away. The group heading used to be the
+   lightest of the three and sat level with the folders beneath it, which
+   read as an upside-down hierarchy.
+   ============================================================ */
+
+.dl-fold { margin-block-start: var(--dl-5); }
+.dl-fold .dl-fold { margin-block-start: var(--dl-4); }
+.dl-fold__body > .dl-fold:first-child { margin-block-start: 0; }
+
+.dl-fold__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--dl-2);
+  margin-block-end: var(--dl-3);
+  min-inline-size: 0;
+}
+
+/* The heading owns its row. flex: 1 1 auto rather than the default 0 1 auto:
+   a heading whose width is "whatever the flex algorithm computes from its
+   intrinsic size" was handed ~130px on a 1200px row and printed
+   "My workspa…". Taking the row makes the width a fact, not a computation. */
+.dl-fold__title { flex: 1 1 auto; margin: 0; min-inline-size: 0; }
+
+/* The heading's text is the toggle: a name-sized click target rather than a
+   12px chevron, and a real button so the keyboard and a screen reader get
+   the expanded state for free. */
+.dl-fold__toggle {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: var(--dl-2);
+  max-inline-size: 100%;
+  margin-inline-start: calc(-1 * var(--dl-1));
+  padding: 2px var(--dl-1);
+  border: 0;
+  border-radius: var(--dl-radius-badge);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.dl-fold__toggle:hover { background: var(--surface2); }
+.dl-fold__toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.dl-fold__caret { display: inline-flex; color: var(--muted); flex-shrink: 0; margin-block-start: .2em; }
+.dl-fold__glyph { margin-block-start: .2em; }
+[dir="rtl"] .dl-fold__caret--closed { transform: scaleX(-1); }
+
+.dl-fold__glyph { color: var(--muted); flex-shrink: 0; }
+
+/* A heading name is complete text or it is not a heading. It WRAPS -- the
+   ellipsis treatment belongs to card titles, where the full name is one hover
+   away; a folder heading is the only place its name appears. */
+.dl-fold__name {
+  min-inline-size: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* How many dashboards live under the heading -- the one thing a folded
+   heading still has to say. Tabular so a column of them lines up. */
+.dl-fold__count {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 99px;
+  background: var(--surface2);
+  color: var(--muted);
+  font-size: var(--dl-text-micro);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- the three tiers ---- */
+
+.dl-fold--group > .dl-fold__head .dl-fold__title {
+  font-size: var(--dl-text-section);
+  font-weight: 700;
+  color: var(--text);
+}
+
+.dl-fold--folder > .dl-fold__head .dl-fold__title {
+  font-size: var(--dl-text-data);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.dl-fold--folder .dl-fold--folder > .dl-fold__head .dl-fold__title {
+  font-size: var(--dl-text-micro);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* ---- "under" ---- */
+
+.dl-fold__body {
+  padding-inline-start: var(--dl-4);
+  border-inline-start: 2px solid var(--border);
+}
+
+/* The group's note sits between its heading and its body, at the body's
+   indent, so it reads as the first thing under the heading. */
+.dl-fold > .dl-group-note {
+  margin: 0 0 var(--dl-3);
+  padding-inline-start: calc(var(--dl-4) + 2px);
+}
+
+/* A folder's menu lives at the end of its heading row and shows on hover or
+   keyboard focus, like the card actions: always-on across thirty headings
+   would be thirty "⋯" competing with the names. Touch screens cannot hover,
+   so they get it outright. */
+.dl-fold__actions {
+  display: inline-flex;
+  align-items: center;
+  margin-inline-start: var(--dl-1);
+  opacity: 0;
+  transition: opacity var(--dl-dur) var(--dl-ease);
+}
+
+.dl-fold__head:hover .dl-fold__actions,
+.dl-fold__head:focus-within .dl-fold__actions { opacity: 1; }
+
+@media (hover: none), (pointer: coarse) {
+  .dl-fold__actions { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dl-fold__actions { transition: none; }
+}
+
+/* What a folder with nothing in it says. Quiet: it is the count's zero in
+   words, and the invitation is the heading's menu, not this line. */
+.dl-fold__empty {
+  margin: 0;
+  font-size: var(--dl-text-micro);
+  color: var(--muted);
+}
+
+/* ---- moving a card by drag ------------------------------------------------
+   The card fades while held; the heading it is over lights up. Attribute
+   selectors, as on the tree's rows, so the page sets one attribute and
+   nothing about the look lives in a style prop. */
+.dl-dash-card[draggable="true"] { cursor: grab; }
+.dl-dash-card[data-dragging="true"] { opacity: .45; cursor: grabbing; }
+
+.dl-fold__head[data-drop-target="true"] {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--dl-radius-badge);
+  background: var(--accent-soft);
+}

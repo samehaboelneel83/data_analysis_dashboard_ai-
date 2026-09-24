@@ -1,0 +1,78 @@
+{
+  "format": 1,
+  "packs": [
+    {
+      "id": "egypt-governorates",
+      "name": "Egypt governorates",
+      "country": "EG",
+      "level": "admin-1",
+      "file": "egypt-governorates.geojson",
+      "feature_count": 27,
+      "label_property": "name",
+      "description": "All 27 governorates. Matches English (Cairo), transliterated (Al Qahirah), Arabic (القاهرة, with or without محافظة, with or without hamza), ISO 3166-2 (EG-C) and common spellings (Sharkia, Fayoum, Menoufia...).",
+      "source": "Natural Earth 1:10m Admin 1 – States, Provinces (nvkelso/natural-earth-vector)",
+      "license": "Public domain (Natural Earth terms of use)",
+      "license_url": "https://www.naturalearthdata.com/about/terms-of-use/",
+      "processing": "Simplified to ~20% of vertices (mapshaper, shapes kept), coordinates to 0.001°. Aliases from Natural Earth name_alt plus hand-added common spellings."
+    },
+    {
+      "id": "us-states",
+      "name": "US states",
+      "country": "US",
+      "level": "admin-1",
+      "file": "us-states.geojson",
+      "feature_count": 51,
+      "label_property": "name",
+      "description": "50 states and the District of Columbia. Matches names, USPS postal codes (CA), ISO 3166-2 (US-CA) and FIPS codes.",
+      "source": "Natural Earth 1:10m Admin 1 – States, Provinces (nvkelso/natural-earth-vector)",
+      "license": "Public domain (Natural Earth terms of use)",
+      "license_url": "https://www.naturalearthdata.com/about/terms-of-use/",
+      "processing": "Simplified to ~20% of vertices (mapshaper, shapes kept), coordinates to 0.001°. Aliases from Natural Earth name_alt plus hand-added common spellings."
+    },
+    {
+      "id": "saudi-regions",
+      "name": "Saudi Arabia regions",
+      "country": "SA",
+      "level": "admin-1",
+      "file": "saudi-regions.geojson",
+      "feature_count": 13,
+      "label_property": "name",
+      "description": "All 13 regions. Matches English (Riyadh, Makkah, Eastern Province), Arabic (الرياض) and ISO 3166-2 (SA-01).",
+      "source": "Natural Earth 1:10m Admin 1 – States, Provinces (nvkelso/natural-earth-vector)",
+      "license": "Public domain (Natural Earth terms of use)",
+      "license_url": "https://www.naturalearthdata.com/about/terms-of-use/",
+      "processing": "Simplified to ~20% of vertices (mapshaper, shapes kept), coordinates to 0.001°. Aliases from Natural Earth name_alt plus hand-added common spellings."
+    },
+    {
+      "id": "uae-emirates",
+      "name": "UAE emirates",
+      "country": "AE",
+      "level": "admin-1",
+      "file": "uae-emirates.geojson",
+      "feature_count": 7,
+      "label_property": "name",
+      "description": "All 7 emirates. Matches English (Dubai), Arabic (دبي) and ISO 3166-2 (AE-DU). Natural Earth's neutral zones are left out.",
+      "source": "Natural Earth 1:10m Admin 1 – States, Provinces (nvkelso/natural-earth-vector)",
+      "license": "Public domain (Natural Earth terms of use)",
+      "license_url": "https://www.naturalearthdata.com/about/terms-of-use/",
+      "processing": "Simplified to ~20% of vertices (mapshaper, shapes kept), coordinates to 0.001°. Aliases from Natural Earth name_alt plus hand-added common spellings."
+    },
+    {
+      "id": "eu-nuts1",
+      "name": "EU NUTS-1 regions",
+      "country": "EU",
+      "level": "NUTS-1",
+      "file": "eu-nuts1.geojson",
+      "feature_count": 123,
+      "label_property": "name",
+      "description": "123 NUTS-1 regions (2021 classification) of the EU, EFTA and candidate countries. Matches the region's own-language name (Bayern, Comunidad de Madrid, Île-de-France) and its NUTS code (DE2, ES3, FR1).",
+      "source": "Eurostat GISCO NUTS 2021, 1:20M, via eurostat/Nuts2json",
+      "license": "Eurostat GISCO terms: reuse with attribution; commercial use needs Eurostat's permission",
+      "license_url": "https://ec.europa.eu/eurostat/web/gisco/geodata/statistical-units/territorial-units-statistics",
+      "attribution": "© EuroGeographics for the administrative boundaries",
+      "requires_acceptance": true,
+      "terms": "Eurostat grants a non-exclusive, non-transferable right to use these boundaries on condition that the source is acknowledged — the credit \"© EuroGeographics for the administrative boundaries\" must be visible wherever the map is shown — and that they are not used for commercial purposes without Eurostat's permission. Install only if your use meets these terms.",
+      "processing": "Eurostat's 1:20M generalisation as published; properties reduced to the name and NUTS code."
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+schema_version: 5
+name: maps_project
+version: '1.0'
+catalog: wren
+schema: public
+data_source: postgres
+profile: maps_project

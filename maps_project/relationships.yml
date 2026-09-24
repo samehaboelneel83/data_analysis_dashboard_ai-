@@ -1,0 +1,121 @@
+relationships:
+- name: fk_maps_state
+  models:
+  - maps_state_student_solution
+  - maps_states
+  join_type: MANY_TO_ONE
+  condition: maps_state_student_solution.maps_state_id = maps_states.maps_state_id
+- name: fk_symbol_code2
+  models:
+  - maps_state_student_solution_det_aligned
+  - symbol_codes
+  join_type: MANY_TO_ONE
+  condition: maps_state_student_solution_det_aligned.symbol_code = symbol_codes.symbol_code
+- name: fk_maps_state_student2
+  models:
+  - maps_state_student_solution_det_aligned
+  - maps_state_student_solution
+  join_type: MANY_TO_ONE
+  condition: maps_state_student_solution_det_aligned.maps_state_id = maps_state_student_solution.student_id
+- name: fk_maps_state_student
+  models:
+  - maps_state_student_solution_details
+  - maps_state_student_solution
+  join_type: MANY_TO_ONE
+  condition: maps_state_student_solution_details.maps_state_id = maps_state_student_solution.student_id
+- name: fk_symbol_code
+  models:
+  - maps_state_student_solution_details
+  - symbol_codes
+  join_type: MANY_TO_ONE
+  condition: maps_state_student_solution_details.symbol_code = symbol_codes.symbol_code
+- name: fk_symbol_code_2026
+  models:
+  - maps_state_student_solution_details_15_2026
+  - symbol_codes
+  join_type: MANY_TO_ONE
+  condition: maps_state_student_solution_details_15_2026.symbol_code = symbol_codes.symbol_code
+- name: fk_maps_state_student_2026
+  models:
+  - maps_state_student_solution_details_15_2026
+  - maps_state_student_solution
+  join_type: MANY_TO_ONE
+  condition: maps_state_student_solution_details_15_2026.maps_state_id = maps_state_student_solution.maps_state_id
+- name: fk_extra_solution
+  models:
+  - maps_state_student_solution_details_extra
+  - maps_state_student_solution
+  join_type: MANY_TO_ONE
+  condition: maps_state_student_solution_details_extra.maps_state_id = maps_state_student_solution.maps_state_id
+- name: fk_symbol_codex
+  models:
+  - maps_state_student_solution_details_predected
+  - symbol_codes
+  join_type: MANY_TO_ONE
+  condition: maps_state_student_solution_details_predected.symbol_code = symbol_codes.symbol_code
+- name: fk_symbol_codex2
+  models:
+  - maps_state_student_solution_details_predected_add
+  - symbol_codes
+  join_type: MANY_TO_ONE
+  condition: maps_state_student_solution_details_predected_add.symbol_code = symbol_codes.symbol_code
+- name: fk_institute
+  models:
+  - maps_states
+  - institute_codes
+  join_type: MANY_TO_ONE
+  condition: maps_states.institute_code = institute_codes.institute_code
+- name: fk_state_type
+  models:
+  - maps_states
+  - state_type_codes
+  join_type: MANY_TO_ONE
+  condition: maps_states.state_type_code = state_type_codes.state_type_code
+- name: fk_state_level
+  models:
+  - maps_states
+  - state_level_codes
+  join_type: MANY_TO_ONE
+  condition: maps_states.state_level_code = state_level_codes.state_level_code
+- name: fk_army
+  models:
+  - maps_states
+  - army_codes
+  join_type: MANY_TO_ONE
+  condition: maps_states.army_code = army_codes.army_code
+- name: fk_maps_state_2026
+  models:
+  - maps_states_ideal_solution_15_7_2026
+  - maps_states
+  join_type: MANY_TO_ONE
+  condition: maps_states_ideal_solution_15_7_2026.maps_state_id = maps_states.maps_state_id
+- name: sqlite_attempts_session_id_fkey
+  models:
+  - sqlite_attempts
+  - sqlite_sessions
+  join_type: MANY_TO_ONE
+  condition: sqlite_attempts.session_id = sqlite_sessions.id
+- name: fk_symbol
+  models:
+  - state_symbols
+  - symbol_codes
+  join_type: MANY_TO_ONE
+  condition: state_symbols.symbol_code = symbol_codes.symbol_code
+- name: fk_symbol_code_order
+  models:
+  - symbol_class_order
+  - symbol_codes
+  join_type: MANY_TO_ONE
+  condition: symbol_class_order.symbol_code = symbol_codes.symbol_code
+- name: fk_maps_state_order
+  models:
+  - symbol_class_order
+  - maps_states
+  join_type: MANY_TO_ONE
+  condition: symbol_class_order.maps_state_id = maps_states.maps_state_id
+- name: fk_maps_state_id
+  models:
+  - symbol_state_clusters
+  - maps_states
+  join_type: MANY_TO_ONE
+  condition: symbol_state_clusters.maps_state_id = maps_states.maps_state_id

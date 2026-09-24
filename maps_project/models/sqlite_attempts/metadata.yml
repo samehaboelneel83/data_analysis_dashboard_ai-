@@ -1,0 +1,64 @@
+name: sqlite_attempts
+properties:
+  description: Table public.sqlite_attempts
+table_reference:
+  catalog: ''
+  schema: public
+  table: sqlite_attempts
+columns:
+- name: id
+  type: VARCHAR
+  is_calculated: false
+  not_null: true
+  is_primary_key: true
+  properties: {}
+- name: session_id
+  type: VARCHAR
+  is_calculated: false
+  not_null: true
+  is_primary_key: false
+  properties: {}
+- name: student_name
+  type: VARCHAR
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+- name: military_number
+  type: VARCHAR
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+- name: student_image_path
+  type: VARCHAR
+  is_calculated: false
+  not_null: true
+  is_primary_key: false
+  properties: {}
+- name: score
+  type: FLOAT
+  is_calculated: false
+  not_null: true
+  is_primary_key: false
+  properties: {}
+- name: processing_results
+  type: TEXT
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+- name: created_at
+  type: TIMESTAMP
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+- name: aligned_image_path
+  type: TEXT
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+primary_key: id
+cached: false

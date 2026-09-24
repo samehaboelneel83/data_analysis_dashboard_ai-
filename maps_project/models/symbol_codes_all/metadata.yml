@@ -1,0 +1,52 @@
+name: symbol_codes_all
+properties:
+  description: Table public.symbol_codes_all
+table_reference:
+  catalog: ''
+  schema: public
+  table: symbol_codes_all
+columns:
+- name: symbol_code
+  type: INT
+  is_calculated: false
+  not_null: true
+  is_primary_key: true
+  properties: {}
+- name: symbol_name
+  type: TEXT
+  is_calculated: false
+  not_null: true
+  is_primary_key: false
+  properties: {}
+- name: symbol_color
+  type: VARCHAR(50)
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+- name: symbol_short_name
+  type: TEXT
+  is_calculated: false
+  not_null: true
+  is_primary_key: false
+  properties: {}
+- name: mapping_code
+  type: INT
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+- name: active_old
+  type: BOOLEAN
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+- name: symbol_group_name
+  type: TEXT
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+primary_key: symbol_code
+cached: false

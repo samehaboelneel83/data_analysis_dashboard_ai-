@@ -1,0 +1,22 @@
+name: army_codes
+properties:
+  description: Table public.army_codes
+table_reference:
+  catalog: ''
+  schema: public
+  table: army_codes
+columns:
+- name: army_code
+  type: INT
+  is_calculated: false
+  not_null: true
+  is_primary_key: true
+  properties: {}
+- name: army_name
+  type: VARCHAR(100)
+  is_calculated: false
+  not_null: true
+  is_primary_key: false
+  properties: {}
+primary_key: army_code
+cached: false

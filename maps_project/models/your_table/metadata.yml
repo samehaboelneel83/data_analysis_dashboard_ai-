@@ -1,0 +1,28 @@
+name: your_table
+properties:
+  description: Table public.your_table
+table_reference:
+  catalog: ''
+  schema: public
+  table: your_table
+columns:
+- name: a
+  type: DOUBLE
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+- name: b
+  type: DOUBLE
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+- name: score
+  type: DOUBLE
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+primary_key: a
+cached: false

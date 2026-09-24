@@ -1,0 +1,14 @@
+# Own, minimal requirement set for the self-hosted embeddings container.
+# Deliberately NO torch, NO sentence-transformers -- see docs/superpowers/
+# plans/2026-08-30-embeddings-service.md and ARCHITECTURE.md "The
+# embeddings service -- concrete design": a torch layer is ~2GB of dead
+# weight the offline docker-save bundle would otherwise carry.
+# huggingface-hub is build-time only (weight download inside the
+# Dockerfile RUN layer); it stays in the image but is never used at
+# runtime -- the container never touches the network after build.
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+onnxruntime==1.19.2
+tokenizers==0.20.1
+numpy==1.26.4
+huggingface-hub==0.25.1

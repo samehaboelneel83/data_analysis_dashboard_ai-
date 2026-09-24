@@ -1,0 +1,30 @@
+name: institute_groups
+properties:
+  description: Table public.institute_groups
+table_reference:
+  catalog: ''
+  schema: public
+  table: institute_groups
+columns:
+- name: institute_code
+  type: INT
+  is_calculated: false
+  not_null: true
+  is_primary_key: true
+  properties: {}
+- name: group_name
+  type: VARCHAR(255)
+  is_calculated: false
+  not_null: true
+  is_primary_key: true
+  properties: {}
+- name: group_weight
+  type: DOUBLE
+  is_calculated: false
+  not_null: true
+  is_primary_key: false
+  properties: {}
+primary_key:
+- institute_code
+- group_name
+cached: false

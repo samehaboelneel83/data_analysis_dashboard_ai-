@@ -1,0 +1,28 @@
+name: results_maping
+properties:
+  description: Table public.results_maping
+table_reference:
+  catalog: ''
+  schema: public
+  table: results_maping
+columns:
+- name: from_ratio
+  type: DOUBLE
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+- name: to_ratio
+  type: DOUBLE
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+- name: output_ratio
+  type: DOUBLE
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+primary_key: from_ratio
+cached: false

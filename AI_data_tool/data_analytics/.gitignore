@@ -1,0 +1,42 @@
+
+# Subagent-driven-development scratch (ledger, briefs, review packages)
+.superpowers/
+
+# Local git worktrees created for isolated feature branches
+.worktrees/
+
+# Dependencies — never commit these
+node_modules/
+
+# Secrets
+.env
+*.env
+!.env.example
+docs/datalytics-users-and-privileges.xlsx
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Editor state
+.vscode/
+
+# Offline deployment bundle (large *.tar image exports — build locally, don't commit)
+offline_bundle/
+~$*
+
+# Python virtualenv — the backend test interpreter lives here (929MB)
+.venv/
+
+# /design-sync — staged converter scripts, build output, and machine state.
+# The durable set under frontend/.design-sync/ (config.json, NOTES.md,
+# conventions.md, docs/, previews/, prepare-css.mjs) IS committed.
+frontend/.ds-sync/
+frontend/ds-bundle/
+frontend/.design-sync/.cache/
+frontend/.design-sync/learnings/
+frontend/.design-sync/node_modules/
+frontend/.design-sync/ds-styles.css
+
+# Design redesign reference captures (regenerate with .ds-sync/capture.mjs)
+frontend/design-screenshots/

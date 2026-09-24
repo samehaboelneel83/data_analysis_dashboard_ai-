@@ -1,0 +1,39 @@
+{
+  "pkg": "datalytics-frontend",
+  "projectId": "9ea2d07d-0167-4ef6-b852-cdd0706d8819",
+  "globalName": "Datalytics",
+  "shape": "package",
+  "srcDir": "src",
+  "tsconfig": "tsconfig.json",
+  "cssEntry": ".design-sync/ds-styles.css",
+  "componentSrcMap": {
+    "EmptyState": "src/components/ui/EmptyState.tsx",
+    "IconLabel": "src/components/ui/IconLabel.tsx",
+    "LoadError": "src/components/ui/LoadError.tsx",
+    "Loader": "src/components/ui/Loader.tsx",
+    "LoadingState": "src/components/ui/LoadingState.tsx",
+    "ConfirmProvider": "src/components/ui/ConfirmDialog.tsx",
+    "PromptProvider": "src/components/ui/PromptDialog.tsx"
+  },
+  "overrides": {
+    "ConfirmProvider": {
+      "cardMode": "single",
+      "primaryStory": "DeleteConfirmation"
+    },
+    "PromptProvider": {
+      "cardMode": "single",
+      "primaryStory": "RenameFolder"
+    }
+  },
+  "dtsPropsFor": {
+    "EmptyState": "  /** Lucide icon component, rendered at 40px in --muted. */\n  icon: React.ComponentType<{ size?: number | string; color?: string; strokeWidth?: number | string }>;\n  /** One line, sentence case, states the absence: \"No datasets yet\". */\n  title: string;\n  /** Optional second line explaining what would fill this space. */\n  description?: string;\n  /** Primary button for the next action, when there is one worth naming. */\n  action?: React.ReactNode;",
+    "IconLabel": "  /** Lucide icon component. Rendered aria-hidden at strokeWidth 1.9. */\n  icon: React.ComponentType<{ size?: number | string; color?: string; strokeWidth?: number | string }>;\n  /** The label text. Stays a plain child so screen readers and getByRole read it. */\n  children?: React.ReactNode;\n  /** Icon size in px. Default 13. */\n  size?: number;",
+    "LoadError": "  /** What failed to load, in the user's words: \"reports\", \"the lineage graph\". */\n  what: string;\n  /** The caught error. An axios error's response.data.detail or an Error's message is shown when present. */\n  error?: unknown;\n  /** When given, renders a \"Try again\" button. */\n  onRetry?: () => void;",
+    "Loader": "  /** Rendered as visible text under the animation, not just an aria-label. */\n  label?: string;",
+    "LoadingState": "  /** Defaults to \"Loading…\". */\n  label?: string;",
+    "ConfirmProvider": "  children: React.ReactNode;",
+    "PromptProvider": "  children: React.ReactNode;"
+  },
+  "docsDir": ".design-sync/docs",
+  "readmeHeader": ".design-sync/conventions.md"
+}

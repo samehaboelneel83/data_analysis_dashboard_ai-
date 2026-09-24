@@ -1,0 +1,30 @@
+name: symbol_class_order
+properties:
+  description: Table public.symbol_class_order
+table_reference:
+  catalog: ''
+  schema: public
+  table: symbol_class_order
+columns:
+- name: symbol_code
+  type: INT
+  is_calculated: false
+  not_null: true
+  is_primary_key: true
+  properties: {}
+- name: maps_state_id
+  type: INT
+  is_calculated: false
+  not_null: true
+  is_primary_key: true
+  properties: {}
+- name: class_order
+  type: INT
+  is_calculated: false
+  not_null: true
+  is_primary_key: false
+  properties: {}
+primary_key:
+- symbol_code
+- maps_state_id
+cached: false

@@ -1,0 +1,34 @@
+name: system_configuration
+properties:
+  description: Table public.system_configuration
+table_reference:
+  catalog: ''
+  schema: public
+  table: system_configuration
+columns:
+- name: super_admin_username
+  type: VARCHAR
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+- name: super_admin_password
+  type: VARCHAR
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+- name: apache_ip
+  type: VARCHAR
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+- name: apache_port
+  type: VARCHAR
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+primary_key: super_admin_username
+cached: false

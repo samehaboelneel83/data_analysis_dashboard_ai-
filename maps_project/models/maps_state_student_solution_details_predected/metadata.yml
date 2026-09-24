@@ -1,0 +1,91 @@
+name: maps_state_student_solution_details_predected
+properties:
+  description: Table public.maps_state_student_solution_details_predected
+table_reference:
+  catalog: ''
+  schema: public
+  table: maps_state_student_solution_details_predected
+columns:
+- name: maps_state_id
+  type: INT
+  is_calculated: false
+  not_null: true
+  is_primary_key: true
+  properties: {}
+- name: student_id
+  type: INT
+  is_calculated: false
+  not_null: true
+  is_primary_key: true
+  properties: {}
+- name: symbol_id
+  type: INT
+  is_calculated: false
+  not_null: true
+  is_primary_key: true
+  properties: {}
+- name: symbol_code
+  type: INT
+  is_calculated: false
+  not_null: true
+  is_primary_key: false
+  properties: {}
+- name: x1
+  type: DOUBLE
+  is_calculated: false
+  not_null: true
+  is_primary_key: false
+  properties: {}
+- name: x2
+  type: DOUBLE
+  is_calculated: false
+  not_null: true
+  is_primary_key: false
+  properties: {}
+- name: x3
+  type: DOUBLE
+  is_calculated: false
+  not_null: true
+  is_primary_key: false
+  properties: {}
+- name: x4
+  type: DOUBLE
+  is_calculated: false
+  not_null: true
+  is_primary_key: false
+  properties: {}
+- name: y1
+  type: DOUBLE
+  is_calculated: false
+  not_null: true
+  is_primary_key: false
+  properties: {}
+- name: y2
+  type: DOUBLE
+  is_calculated: false
+  not_null: true
+  is_primary_key: false
+  properties: {}
+- name: y3
+  type: DOUBLE
+  is_calculated: false
+  not_null: true
+  is_primary_key: false
+  properties: {}
+- name: y4
+  type: DOUBLE
+  is_calculated: false
+  not_null: true
+  is_primary_key: false
+  properties: {}
+- name: added_flag
+  type: BIGINT
+  is_calculated: false
+  not_null: false
+  is_primary_key: false
+  properties: {}
+primary_key:
+- maps_state_id
+- student_id
+- symbol_id
+cached: false

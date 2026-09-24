@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Prompt → Qwen Completions</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --border: #2d3a4f;
+      --text: #e7ecf3;
+      --muted: #8b9cb3;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --error: #f87171;
+      --success: #34d399;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+
+    .wrap {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 2rem 1.25rem 3rem;
+    }
+
+    header {
+      margin-bottom: 1.5rem;
+    }
+
+    h1 {
+      margin: 0 0 0.35rem;
+      font-size: 1.6rem;
+      font-weight: 600;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem;
+      margin-bottom: 1rem;
+    }
+
+    label {
+      display: block;
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-bottom: 0.4rem;
+      color: var(--muted);
+    }
+
+    textarea, input, select {
+      width: 100%;
+      background: #0b1017;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.65rem 0.75rem;
+      font: inherit;
+    }
+
+    textarea {
+      min-height: 220px;
+      resize: vertical;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 0.92rem;
+    }
+
+    textarea:focus, input:focus, select:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 0.85rem;
+      margin-top: 1rem;
+    }
+
+    .actions {
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+      margin-top: 1rem;
+      flex-wrap: wrap;
+    }
+
+    button {
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 0.65rem 1.25rem;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    button:hover:not(:disabled) {
+      background: var(--accent-hover);
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .status {
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+
+    .status.error { color: var(--error); }
+    .status.ok { color: var(--success); }
+
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 0.9rem;
+      line-height: 1.55;
+    }
+
+    .meta {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      margin-bottom: 0.75rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+
+    .empty {
+      color: var(--muted);
+      font-style: italic;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Prompt Completions</h1>
+      <p class="subtitle">Send any prompt to <code>qwen3.5</code> via your local proxy (handles multiline JSON safely).</p>
+    </header>
+
+    <section class="card">
+      <label for="prompt">Prompt</label>
+      <textarea id="prompt" placeholder="Write your prompt here — SQL, code, questions, anything..."></textarea>
+
+      <div class="grid">
+        <div>
+          <label for="model">Model</label>
+          <input id="model" type="text" value="qwen3.5" />
+        </div>
+        <div>
+          <label for="max_tokens">Max tokens</label>
+          <input id="max_tokens" type="number" min="1" value="512" />
+        </div>
+        <div>
+          <label for="temperature">Temperature</label>
+          <input id="temperature" type="number" min="0" max="2" step="0.05" value="0.7" />
+        </div>
+        <div>
+          <label for="top_p">Top P</label>
+          <input id="top_p" type="number" min="0" max="1" step="0.05" value="0.95" />
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="sendBtn" type="button">Send to model</button>
+        <span id="status" class="status"></span>
+      </div>
+    </section>
+
+    <section class="card">
+      <label>Response</label>
+      <div id="meta" class="meta"></div>
+      <pre id="output" class="empty">Response will appear here.</pre>
+    </section>
+  </div>
+
+  <script>
+    const promptEl = document.getElementById("prompt");
+    const modelEl = document.getElementById("model");
+    const maxTokensEl = document.getElementById("max_tokens");
+    const temperatureEl = document.getElementById("temperature");
+    const topPEl = document.getElementById("top_p");
+    const sendBtn = document.getElementById("sendBtn");
+    const statusEl = document.getElementById("status");
+    const outputEl = document.getElementById("output");
+    const metaEl = document.getElementById("meta");
+
+    function setStatus(text, type = "") {
+      statusEl.textContent = text;
+      statusEl.className = "status" + (type ? " " + type : "");
+    }
+
+    async function sendPrompt() {
+      const prompt = promptEl.value;
+      if (!prompt.trim()) {
+        setStatus("Please enter a prompt.", "error");
+        return;
+      }
+
+      sendBtn.disabled = true;
+      setStatus("Sending...");
+      outputEl.textContent = "";
+      outputEl.classList.remove("empty");
+      metaEl.textContent = "";
+
+      const payload = {
+        prompt,
+        model: modelEl.value.trim() || "qwen3.5",
+        max_tokens: Number(maxTokensEl.value),
+        temperature: Number(temperatureEl.value),
+        top_p: Number(topPEl.value),
+        stream: false,
+      };
+
+      try {
+        const res = await fetch("/api/completions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          const message =
+            data.detail?.error?.message ||
+            (typeof data.detail === "string" ? data.detail : null) ||
+            data.error?.message ||
+            data.error ||
+            JSON.stringify(data.detail ?? data, null, 2);
+          outputEl.textContent = message;
+          setStatus(`Error (${res.status})`, "error");
+          return;
+        }
+
+        const text =
+          data.choices?.[0]?.text ??
+          data.choices?.[0]?.message?.content ??
+          JSON.stringify(data, null, 2);
+        const usage = data.usage;
+
+        outputEl.textContent = text;
+
+        if (usage) {
+          metaEl.innerHTML = [
+            `<span>Prompt tokens: ${usage.prompt_tokens ?? "-"}</span>`,
+            `<span>Completion tokens: ${usage.completion_tokens ?? "-"}</span>`,
+            `<span>Total: ${usage.total_tokens ?? "-"}</span>`,
+            `<span>Finish: ${data.choices?.[0]?.finish_reason ?? "-"}</span>`,
+          ].join("");
+        }
+
+        setStatus("Done", "ok");
+      } catch (err) {
+        outputEl.textContent = String(err);
+        setStatus("Request failed", "error");
+      } finally {
+        sendBtn.disabled = false;
+      }
+    }
+
+    sendBtn.addEventListener("click", sendPrompt);
+
+    promptEl.addEventListener("keydown", (e) => {
+      if (e.ctrlKey && e.key === "Enter") {
+        e.preventDefault();
+        sendPrompt();
+      }
+    });
+  </script>
+</body>
+</html>
