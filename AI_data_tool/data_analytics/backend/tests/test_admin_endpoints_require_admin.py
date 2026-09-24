@@ -2,6 +2,7 @@ import pytest
 from app.core.security import create_access_token, hash_password
 from app.main import app
 from app.models.models import Role, User
+from tests._routes import served_routes
 
 
 async def _seed_non_admin_user(db_session, org_id):
@@ -17,15 +18,22 @@ async def _seed_non_admin_user(db_session, org_id):
 
 def _admin_routes():
     routes = []
-    for route in app.routes:
-        path = getattr(route, "path", "")
+    for route in served_routes(app):
+        path = route.path
         if not path.startswith("/api/v1/admin"):
             continue
-        for method in (getattr(route, "methods", None) or []):
+        for method in sorted(route.methods):
             if method in ("HEAD", "OPTIONS"):
                 continue
             routes.append((method, path))
     return routes
+
+
+def test_the_sweep_finds_the_admin_routes():
+    # An empty list parametrizes nothing, and the sweep below would then pass
+    # while checking nothing -- which is what FastAPI 0.137's routing change did
+    # to a direct walk of app.routes.
+    assert len(_admin_routes()) >= 10
 
 
 @pytest.mark.parametrize("method,path", _admin_routes())

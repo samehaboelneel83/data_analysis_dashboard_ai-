@@ -1,9 +1,9 @@
 # Security upgrade (24 Sep): clears every starlette, python-multipart and
 # python-jose advisory pip-audit reported on the old pins (DoS, path traversal,
-# Host-header and multipart parsing, JWT algorithm confusion). 0.136.x is the
-# ceiling: from 0.137, app.routes holds _IncludedRouter wrappers instead of
-# flattened APIRoutes, and three route-walking tests (admin-only endpoints,
-# router reachability, frontend constant mirrors) stop checking anything.
+# Host-header and multipart parsing, JWT algorithm confusion). From 0.137,
+# app.routes holds _IncludedRouter wrappers instead of flattened APIRoutes; the
+# route-walking tests read both shapes through tests/_routes.py (verified on
+# 0.141.1), so a later FastAPI needs only the usual full backend sweep.
 fastapi==0.136.3
 # Pinned explicitly (it arrives through fastapi) so an air-gapped rebuild gets
 # the audited version rather than whatever the resolver picks that day.

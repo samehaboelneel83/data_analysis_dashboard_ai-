@@ -196,7 +196,8 @@ class TestEveryRunnableAnalysisIsReachable:
 
     def test_the_dispatch_route_is_served(self):
         from app.main import app
-        served = {getattr(r, "path", "") for r in app.routes}
+        from tests._routes import served_paths
+        served = served_paths(app)
         assert "/api/v1/datasets/{dataset_id}/analysis/run" in served
 
     def test_the_frontend_posts_to_the_dispatch_route(self, ts_api):
@@ -224,7 +225,8 @@ class TestEveryRunnableAnalysisIsReachable:
         field it got wrong, which a dispatcher can never give."""
         from app.main import app
         from app.services.analysis.registry import all_analyses
-        served = {getattr(r, "path", "") for r in app.routes}
+        from tests._routes import served_paths
+        served = served_paths(app)
         registered = {s.name for s in all_analyses()
                       if s.result_kind == "statistical_test"}
         assert registered == set(self.TYPED_SLUGS), (
