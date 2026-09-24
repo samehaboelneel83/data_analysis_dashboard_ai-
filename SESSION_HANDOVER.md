@@ -4,6 +4,28 @@
 
 ---
 
+## 0. Update: continuation session (24 Sep, Claude Code on the web)
+
+This section is newer than everything below it. Where they disagree, this section is right.
+
+**Git state:** the project is now on GitHub (`samehaboelneel83/data_analysis_dashboard_ai-`). `main` is a single "Initial commit" containing the whole workspace; the code is under `AI_data_tool/data_analytics/`. This session's work is on the branch **`claude/awesome-keller-qmxzls`** (pushed, no pull request opened). `masterplan/complete` and the commit hashes in §1 belong to the local Windows repository and do not exist on GitHub.
+
+**Done this session (the three "next tasks" from §16):**
+1. ✅ **ARCHITECTURE docs count:** now **212** frontend test files (211 plus the new `atlasLazy.test.ts`). `tests/test_architecture_doc.py` passes (35/35).
+2. ✅ **Python security upgrade applied** in `backend/requirements.txt`: `fastapi==0.136.3`, `starlette==1.7.0` (now pinned explicitly), `python-multipart==0.0.31`, `python-jose[cryptography]==3.5.0`. Proof: two full backend sweeps on Python 3.12 (the Dockerfile's version), old pins against new, both **5,309 passed / 5 skipped / 3 failed**. The 3 failures are the same LLM-dependent `test_automation_runner.py` tests on both sides (the endpoint can't be reached from the cloud container). `pip-audit`: 46 advisories → 13 (setuptools 4, pyarrow 3, pytest 2, protobuf 2, ecdsa 2).
+3. ✅ **Bundle performance:** the world atlas (~740 kB raw) had slipped back into the eager path. `chartRenderers/index.tsx` imported `GeoContourRenderer` statically; `ReportBuilder` imported `GeoMatchCheck` statically; `WidgetConfigPanel` used `useGeoMatch` directly. All three are lazy now (`GeoMatchLine.tsx` and `GeoMatchStatus.tsx` split out of `WidgetConfigPanel`). Static JS beyond the app shell: builder 1,939 → 1,159 kB raw (557 → 313 kB gzip), shared link 1,470 → 698 kB (434 → 192), embed 1,468 → 696 kB; the `WidgetRenderer` chunk 950 → 179 kB. `src/components/report/geo/atlasLazy.test.ts` walks the static import graph and fails with the import chain if this regresses. The only chunk still over Vite's 500 kB warning is `worldGeometry` (the atlas itself, loaded only with a map).
+- Frontend after these changes: **212 files / 2,698 tests pass**; `tsc` 0 errors; `vite build` OK.
+
+**Pre-existing, found but not fixed:** `src/pages/ReportBuilder.test.tsx` reports 2 unhandled errors on every run, on the old code too: `addSuggestedWidget` reads `.layout` of undefined (`ReportBuilder.tsx` ~line 1085), and jsdom has no `scrollIntoView` (`ReportBuilder.tsx` ~line 1301). The tests pass, but vitest exits 1 because of them.
+
+**User actions now needed:** rebuild the backend image (`docker compose build backend`) to pick up the new pins, and the frontend image as before. Merge `claude/awesome-keller-qmxzls` when you're happy with it.
+
+**Next pending, in order:** (a) the two unhandled errors above; (b) dev-tooling upgrade (vite 8, vitest 5, esbuild); (c) the remaining Python advisories (pyarrow, protobuf, setuptools, pytest; ecdsa has no fix); (d) the §13 low-priority items. Continue with §13 "Medium priority" from item 2, since item 1 (performance) is done.
+
+**Tip for a cloud session:** `node_modules/` and `dist/` are not in `.gitignore`. Add them to `.git/info/exclude` before `npm ci` so they never get committed.
+
+---
+
 ## 1. Project overview
 
 **Name:** Datalytics (`datalytics-frontend` 2.0.0 in `package.json`).
