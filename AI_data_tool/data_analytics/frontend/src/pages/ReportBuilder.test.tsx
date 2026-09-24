@@ -508,14 +508,20 @@ describe('ReportBuilder Fields pane', () => {
     ))
   })
 
-  it('does nothing when a field is clicked with no widget selected', async () => {
+  it('adds a new chart, rather than editing a widget, when a field is clicked with no widget selected', async () => {
     vi.mocked(reportsApi.updateWidget).mockClear()
+    vi.mocked(reportsApi.addWidget).mockClear()
     vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
     vi.mocked(datasetsApi.get).mockResolvedValue(datasetWithColumns() as any)
+    vi.mocked(reportsApi.addWidget).mockResolvedValue({
+      id: 998, page_id: 100, widget_type: 'kpi', title: 'sales', config: {},
+      layout: { x: 0, y: 5, w: 6, h: 5 }, created_at: '2026-01-01',
+    } as any)
     renderBuilder()
     await screen.findByTestId('view-strip')
 
     fireEvent.click(screen.getByRole('button', { name: /^[#ƒx Aa]* ?sales$/ }))
+    await waitFor(() => expect(reportsApi.addWidget).toHaveBeenCalledTimes(1))
     expect(reportsApi.updateWidget).not.toHaveBeenCalled()
   })
 })
