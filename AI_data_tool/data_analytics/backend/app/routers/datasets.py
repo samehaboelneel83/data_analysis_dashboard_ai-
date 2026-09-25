@@ -198,6 +198,57 @@ def _canonical_csv(path: Path) -> None:
             logger.info("upload %s rewritten from %s", Path(path).name, found)
 
 
+EXCEL_SUFFIXES = (".xlsx", ".xls")
+
+
+def _excel_sheets(source) -> tuple[list[str], list[str]]:
+    """(every sheet name, the names of sheets with at least one data row)."""
+    import pandas as pd
+    with pd.ExcelFile(source) as xl:
+        names = list(xl.sheet_names)
+        return names, [n for n in names if len(xl.parse(n, nrows=1)) > 0]
+
+
+def _pick_sheet(path: Path, org_id: int, sheet: str | None, sha: str) -> tuple[Path, str]:
+    """E07: which sheet of a workbook becomes the dataset.
+
+    Every reader here opens a workbook's FIRST sheet, so a workbook with data
+    on three sheets became a dataset of one of them, looking complete. Now:
+    one sheet with data -> unchanged; several and none chosen -> refused,
+    naming them; a chosen sheet -> extracted to CSV, which is then what is
+    stored (so every later reader sees that sheet, not the first).
+
+    The hash becomes the workbook's plus the sheet name: two sheets of one
+    workbook are different data, and must not report each other as copies.
+    """
+    import hashlib
+    try:
+        names, with_data = _excel_sheets(path)
+    except Exception as e:
+        path.unlink(missing_ok=True)
+        raise HTTPException(400, f"Could not read file: {e}")
+    if not sheet:
+        if len(with_data) <= 1:
+            return path, sha
+        path.unlink(missing_ok=True)
+        raise HTTPException(400, {
+            "message": f"The workbook has {len(with_data)} sheets with data: "
+                       + ", ".join(with_data) + ". Choose one, or upload it in a "
+                       "batch to get one dataset per sheet.",
+            "sheets": with_data})
+    if sheet not in names:
+        path.unlink(missing_ok=True)
+        raise HTTPException(400, {"message": f"The workbook has no sheet named '{sheet}'.",
+                                  "sheets": with_data})
+    import pandas as pd
+    from ..services.dataset_refresh import write_csv_atomic
+    df = pd.read_excel(path, sheet_name=sheet)
+    out = upload_store.allocate_path(org_id, "sheet.csv")
+    write_csv_atomic(df, out)
+    path.unlink(missing_ok=True)
+    return out, hashlib.sha256(f"{sha}:{sheet}".encode()).hexdigest()
+
+
 def _frame_problem(df, what: str = "The file") -> str | None:
     """Why a parsed upload cannot become a usable dataset, or None.
 
@@ -225,7 +276,7 @@ def _frame_problem(df, what: str = "The file") -> str | None:
 async def _ingest_upload_file(
     db: AsyncSession, org_id: int, *, source_filename: str | None, stream,
     name: str, description: str, budget: "_SizeBudget | None" = None,
-    owner_id: int | None = None,
+    owner_id: int | None = None, sheet: str | None = None,
 ) -> Dataset:
     """Store one uploaded file and describe it as a Dataset.
 
@@ -271,6 +322,10 @@ async def _ingest_upload_file(
         # upload leave its bytes on disk.
         file_path.unlink(missing_ok=True)
         raise
+
+    if file_path.suffix.lower() in EXCEL_SUFFIXES:
+        file_path, content_sha256 = await asyncio.to_thread(
+            _pick_sheet, file_path, org_id, sheet, content_sha256)
 
     try:
         await asyncio.to_thread(_canonical_csv, file_path)
@@ -348,6 +403,7 @@ async def upload_dataset(
     file: UploadFile = File(...),
     name: str = Form(...),
     description: str = Form(""),
+    sheet: str = Form(""),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -362,7 +418,8 @@ async def upload_dataset(
 
     ds = await _ingest_upload_file(
         db, current_user.org_id, source_filename=file.filename, stream=file.file,
-        name=name, description=description, owner_id=current_user.id)
+        name=name, description=description, owner_id=current_user.id,
+        sheet=sheet.strip() or None)
     await db.commit()
     result = await db.execute(
         select(Dataset).options(selectinload(Dataset.columns)).where(Dataset.id == ds.id)
@@ -644,6 +701,15 @@ async def upload_datasets(
                     owner_id=user_id))
                 continue
 
+            sheets = await _batch_sheets(f) if suffix in EXCEL_SUFFIXES else []
+            if len(sheets) > 1:
+                # E07: a workbook with data on several sheets fans out into one
+                # dataset per sheet, as an Access file does per table. It used
+                # to become a dataset of its first sheet alone.
+                items.extend(await _ingest_sheets(
+                    db, org_id, f, sheets, name=_item_name(name, f.filename, only_one),
+                    description=description, budget=budget, owner_id=user_id))
+                continue
             ds = await _ingest_upload_file(
                 db, org_id, source_filename=f.filename, stream=f.file,
                 name=_item_name(name, f.filename, only_one), description=description,
@@ -683,10 +749,58 @@ async def upload_datasets(
     # A failed file's rollback expired current_user; refresh it (async-safe)
     # before the duplicate lookup reads its org and grants.
     await db.refresh(current_user)
+    await db.refresh(current_user, ["role"])   # relationships are not reloaded by the first
     for item in items:
         if item.dataset is not None:
             item.dataset.duplicate_of = await _duplicate_of(db, current_user, item.dataset.id)
     return _batch_result(items, "separate", quota_hit=quota_hit)
+
+
+async def _batch_sheets(f: UploadFile) -> list[str]:
+    """The sheets with data in an uploaded workbook, or [] when it cannot be
+    read here (too large, or not a workbook): the ordinary ingest then gives
+    that file its usual, specific error."""
+    import io
+    f.file.seek(0, 2)
+    size = f.file.tell()
+    f.file.seek(0)
+    if size > settings.max_upload_mb * 1024 * 1024:
+        return []
+    data = f.file.read()
+    f.file.seek(0)
+    try:
+        return (await asyncio.to_thread(_excel_sheets, io.BytesIO(data)))[1]
+    except Exception:
+        return []
+
+
+async def _ingest_sheets(db: AsyncSession, org_id: int, f: UploadFile, sheets: list[str], *,
+                         name: str, description: str, budget: "_SizeBudget",
+                         owner_id: int | None) -> list[BatchUploadItem]:
+    """One dataset per sheet, each committed on its own (see the per-file
+    commit in upload_datasets) and each with its own outcome."""
+    import io
+    data = f.file.read()
+    items: list[BatchUploadItem] = []
+    for i, sh in enumerate(sheets):
+        label = f"{f.filename or ''} [{sh}]"
+        try:
+            ds = await _ingest_upload_file(
+                db, org_id, source_filename=f.filename, stream=io.BytesIO(data),
+                name=f"{name} — {sh}", description=description,
+                # The workbook is charged to the batch budget once, not per sheet.
+                budget=budget if i == 0 else None, owner_id=owner_id, sheet=sh)
+            await db.commit()
+            items.append(BatchUploadItem(
+                source_filename=label, status="created",
+                dataset=DatasetOut.model_validate(await _load_dataset_out(db, ds.id))))
+        except (HTTPException, quotas.QuotaExceeded) as e:
+            await db.rollback()
+            detail = e.detail.get("message") if isinstance(e.detail, dict) else e.detail
+            items.append(BatchUploadItem(source_filename=label, status="error", error=str(detail)))
+            if e.status_code == 413:
+                break
+    return items
 
 
 def _batch_result(items: list[BatchUploadItem], mode: str, *,
@@ -746,6 +860,16 @@ async def _append_into_one(
         try:
             tmp = upload_store.allocate_path(org_id, f.filename)
             _copy_capped(f.file, tmp)
+            if tmp.suffix.lower() in EXCEL_SUFFIXES:
+                try:
+                    with_data = (await asyncio.to_thread(_excel_sheets, tmp))[1]
+                except Exception:
+                    with_data = []      # load_file below reports the real error
+                if len(with_data) > 1:
+                    # E07: append took the first sheet and said nothing.
+                    raise HTTPException(400, f"The workbook has {len(with_data)} sheets with data "
+                                             f"({', '.join(with_data)}); append takes one table per "
+                                             "file. Upload it separately to get one dataset per sheet.")
 
             size = tmp.stat().st_size
             budget.charge(size)

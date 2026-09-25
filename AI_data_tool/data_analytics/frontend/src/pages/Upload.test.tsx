@@ -292,3 +292,48 @@ describe('an upload that repeats a dataset you already have (E07)', () => {
     expect((toast as any).mock.calls[0][0]).toContain('"B — a" has the same content as "Sales"')
   })
 })
+
+describe('a workbook with data on several sheets (E07)', () => {
+  const refusal = {
+    response: { data: { detail: { message: 'The workbook has 2 sheets with data: Sales, Costs.', sheets: ['Sales', 'Costs'] } } },
+  }
+
+  it('offers the sheets the server named, and sends the chosen one', async () => {
+    ;(datasetsApi.upload as any).mockRejectedValueOnce(refusal)
+    show()
+    fireEvent.change(screen.getByPlaceholderText('My dataset'), { target: { value: 'Book' } })
+    pick([file('book.xlsx')])
+    submit()
+    const select = await screen.findByRole('combobox') as HTMLSelectElement
+    expect(toast.error).toHaveBeenCalledWith('The workbook has 2 sheets with data: Sales, Costs.')
+    expect(Array.from(select.options).map(o => o.textContent)).toEqual(['Sales', 'Costs', 'All sheets — one dataset each'])
+    fireEvent.change(select, { target: { value: 'Costs' } })
+    submit()
+    await waitFor(() => expect(datasetsApi.upload).toHaveBeenLastCalledWith(expect.any(File), 'Book', '', 'Costs'))
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/datasets/7?new=1'))
+  })
+
+  it('"All sheets" sends the one file to the batch path', async () => {
+    ;(datasetsApi.upload as any).mockRejectedValueOnce(refusal)
+    show()
+    fireEvent.change(screen.getByPlaceholderText('My dataset'), { target: { value: 'Book' } })
+    pick([file('book.xlsx')])
+    submit()
+    const select = await screen.findByRole('combobox')
+    fireEvent.change(select, { target: { value: (select as HTMLSelectElement).options[2].value } })
+    submit()
+    await waitFor(() => expect(datasetsApi.uploadBatch).toHaveBeenCalledWith([expect.any(File)], 'Book', '', 'separate'))
+    expect(datasetsApi.upload).toHaveBeenCalledTimes(1)
+  })
+
+  it('forgets the sheets when another file is picked', async () => {
+    ;(datasetsApi.upload as any).mockRejectedValueOnce(refusal)
+    show()
+    fireEvent.change(screen.getByPlaceholderText('My dataset'), { target: { value: 'Book' } })
+    pick([file('book.xlsx')])
+    submit()
+    await screen.findByRole('combobox')
+    pick([file('other.csv')])
+    expect(screen.queryByRole('combobox')).toBeNull()
+  })
+})

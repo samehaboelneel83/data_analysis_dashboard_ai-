@@ -82,3 +82,17 @@ async def test_the_hash_is_of_the_bytes_as_uploaded(client, db_session, two_orgs
     first = await _upload(client, auth_headers["a"], body=body)
     second = await _upload(client, auth_headers["a"], body=body)
     assert second["duplicate_of"]["id"] == first["id"]
+
+
+async def test_a_batch_with_a_failed_file_still_reports_duplicates(client, two_orgs, auth_headers):
+    """The failed file rolls back, which expires the user and its role; the
+    duplicate lookup then read the role lazily and the whole batch was a 500."""
+    first = await _upload(client, auth_headers["a"])
+    r = await client.post("/api/v1/datasets/batch",
+                          files=[("files", ("empty.csv", b"a,b\n", "text/csv")),
+                                 ("files", ("x.csv", BODY, "text/csv"))],
+                          data={"name": "B", "description": "", "mode": "separate"},
+                          headers=auth_headers["a"])
+    assert r.status_code == 200, r.text
+    assert [i["status"] for i in r.json()["items"]] == ["error", "created"]
+    assert r.json()["items"][1]["dataset"]["duplicate_of"]["id"] == first["id"]

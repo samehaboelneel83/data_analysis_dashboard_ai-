@@ -9,6 +9,7 @@ import { FileUp, UploadCloud } from 'lucide-react'
 
 const ACCEPT = '.csv,.xlsx,.xls,.json,.xml,.parquet,.mdb,.accdb'
 const ACCESS_RE = /\.(mdb|accdb)$/i
+const ALL_SHEETS = '\u0000all'
 
 /** E07: the server names an existing dataset holding the same bytes. The
  *  upload still happened; say so, long enough to read, so a dashboard is not
@@ -59,6 +60,11 @@ export default function Upload() {
   const [busy, setBusy]   = useState(false)
   const [drag, setDrag]   = useState(false)
   const [errors, setErrors] = useState<BatchUploadItem[]>([])
+  // E07: a workbook with data on several sheets is refused until one is
+  // chosen; the server names them. ALL_SHEETS sends it to the batch path,
+  // which makes one dataset per sheet.
+  const [sheets, setSheets] = useState<string[]>([])
+  const [sheet, setSheet]   = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
   // A synchronous lock: `busy` is React state and does not change until the
   // next render, so two clicks in the same tick both passed the check and
@@ -82,6 +88,8 @@ export default function Upload() {
     if (!picked.length) return
     setFiles(picked)
     setErrors([])
+    setSheets([])
+    setSheet('')
     // With several files the server appends each file's own stem, so what
     // belongs here is the prefix they share, not the first file's whole name.
     if (!nameTyped.current) setName(batchBaseName(picked))
@@ -98,8 +106,8 @@ export default function Upload() {
       // straight-to-the-dataset flow people already know is untouched. An
       // Access file goes to the batch endpoint even on its own, because it
       // yields one dataset per table.
-      if (files.length === 1 && !isAccess(files[0])) {
-        const ds = await datasetsApi.upload(files[0], name, desc)
+      if (files.length === 1 && !isAccess(files[0]) && sheet !== ALL_SHEETS) {
+        const ds = await datasetsApi.upload(files[0], name, desc, sheet || undefined)
         toast.success(t('upload.done'))
         warnDuplicates([ds])
         navigate(`/datasets/${ds.id}?new=1`)
@@ -128,6 +136,12 @@ export default function Upload() {
       if (detail?.items) {
         setErrors(detail.items.filter((i: BatchUploadItem) => i.status === 'error'))
         toast.error(`Nothing could be uploaded (${detail.failed} failed)`)
+      } else if (Array.isArray(detail?.sheets) && detail.sheets.length) {
+        setSheets(detail.sheets)
+        setSheet(detail.sheets[0])
+        toast.error(detail.message)
+      } else if (typeof detail?.message === 'string') {
+        toast.error(detail.message)
       } else {
         toast.error(typeof detail === 'string' ? detail : t('upload.failed'))
       }
@@ -226,6 +240,15 @@ export default function Upload() {
           <span className="dl-field__label">{t('upload.desc')}</span>
           <input value={desc} onChange={e => setDesc(e.target.value)} placeholder={t('upload.descPh')} className="dl-field__input" />
         </label>
+        {sheets.length > 0 && (
+          <label className="dl-field" style={{ marginBottom: 0 }}>
+            <span className="dl-field__label">Sheet</span>
+            <select value={sheet} onChange={e => setSheet(e.target.value)} className="dl-field__input">
+              {sheets.map(s => <option key={s} value={s}>{s}</option>)}
+              <option value={ALL_SHEETS}>All sheets — one dataset each</option>
+            </select>
+          </label>
+        )}
         <button onClick={submit} disabled={busy} className="btn btn-primary" style={{ alignSelf: 'flex-start' }}>
           {busy ? t('upload.uploading') : t('upload.upload')}
         </button>

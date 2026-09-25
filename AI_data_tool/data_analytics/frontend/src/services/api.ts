@@ -379,11 +379,14 @@ export const datasetsApi = {
   setSchedule: (id: number, interval_minutes: number | null) =>
     api.patch<Dataset>(`/datasets/${id}/refresh-schedule`,
                        { interval_minutes }).then(r => r.data),
-  upload: (file: File, name: string, desc = '') => {
+  // `sheet`: which sheet of a workbook becomes the dataset (E07). Needed only
+  // when the server refused a workbook with data on several sheets.
+  upload: (file: File, name: string, desc = '', sheet?: string) => {
     const fd = new FormData()
     fd.append('file', file)
     fd.append('name', name)
     fd.append('description', desc)
+    if (sheet) fd.append('sheet', sheet)
     return api.post<Dataset>('/datasets', fd).then(r => r.data)
   },
   // Separate endpoint rather than a wider `upload`: the server cannot have one
