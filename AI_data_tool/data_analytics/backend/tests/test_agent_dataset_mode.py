@@ -550,3 +550,52 @@ class TestTheAnswerNamesTheDatasetAsItsAuthorDid:
         assert "rows from qa_chrome_sales" not in prompt
         assert "'total': 2580}" in prompt and "2580.0" not in prompt
         assert prompt.index("'west'") < prompt.index("'east'")
+
+
+class TestTheAgentComputesTheDatasetsOwnMeasures:
+    """E05: 'one metric gives the same result in chart, AI and export'. Charts
+    and exports evaluate a defined measure's formula; the agent never saw it,
+    so 'margin by region' came back from the model's own formula -- often an
+    average of per-row ratios, a different number from the chart's."""
+
+    async def _world(self, db_session, tmp_path, denied=None):
+        from app.models.models import ColumnSecurityRule
+        org = Organization(name="Acme")
+        db_session.add(org)
+        await db_session.flush()
+        role = Role(name="analyst", org_id=org.id)
+        db_session.add(role)
+        await db_session.flush()
+        user = User(email="m@corp.com", password_hash="x", org_id=org.id, role_id=role.id)
+        user.role = role
+        db_session.add(user)
+        path = _write_csv(tmp_path / "s.csv", ["region", "sales", "profit"],
+                          [("west", 100, 10), ("east", 300, 60)])
+        ds = Dataset(name="Sales", org_id=org.id, mode="import", filename=path,
+                     measures=[{"name": "Margin %", "expression": "SUM(profit) / SUM(sales) * 100"}])
+        db_session.add(ds)
+        await db_session.flush()
+        db_session.add_all([DatasetColumn(dataset_id=ds.id, name=c, dtype=t) for c, t in
+                            (("region", "text"), ("sales", "numeric"), ("profit", "numeric"))])
+        if denied:
+            db_session.add(ColumnSecurityRule(role_id=role.id, dataset_id=ds.id, denied_columns=denied))
+        await db_session.commit()
+        return ds, user
+
+    async def _prompt(self, db_session, ds, user):
+        client = ScriptedClient(classify=[NOT_AMBIGUOUS], plan=[ONE_STEP],
+                                generate=[{"sql": "SELECT region FROM sales GROUP BY region"}])
+        await run_agent(db_session, question="margin % by region", datasets=[ds], user=user, client=client)
+        await db_session.commit()
+        return client.generate_calls[0]
+
+    async def test_the_sql_prompt_carries_the_measures_formula(self, db_session, tmp_path):
+        ds, user = await self._world(db_session, tmp_path)
+        prompt = await self._prompt(db_session, ds, user)
+        assert "Defined measures" in prompt
+        assert '"Margin %" on sales = SUM(profit) / SUM(sales) * 100' in prompt
+
+    async def test_a_measure_over_a_denied_column_is_not_disclosed(self, db_session, tmp_path):
+        ds, user = await self._world(db_session, tmp_path, denied=["profit"])
+        prompt = await self._prompt(db_session, ds, user)
+        assert "Margin %" not in prompt and "profit" not in prompt

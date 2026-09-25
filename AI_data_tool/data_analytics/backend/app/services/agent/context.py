@@ -268,6 +268,24 @@ class EntityInfo:
 
 
 @dataclass
+class MeasureInfo:
+    """E05: a measure the dataset's author defined -- "Margin %" =
+    SUM(profit) / SUM(sales) * 100. Charts, exports and the semantic API all
+    evaluate this formula; the agent never saw it, so "margin by region" came
+    back from its OWN formula (often an average of row-level ratios, a
+    different number from the chart's)."""
+    table: str
+    name: str
+    expression: str
+
+
+#: How many measures the block shows before a "(+K more)" tail; like
+#: MAX_RENDERED_ENTITIES, a bound so a measure-heavy dataset cannot crowd
+#: out the object listing.
+MAX_RENDERED_MEASURES = 30
+
+
+@dataclass
 class SchemaContext:
     source_id: int
     family: str
@@ -294,6 +312,9 @@ class SchemaContext:
     # -- the same drop-then-refuse pair the import and DirectQuery widget
     # paths use.
     denied_columns: dict[str, set[str]] = field(default_factory=dict)
+    # E05: the datasets' defined measures (dataset mode). Empty renders as "",
+    # keeping every render without measures byte-identical to before.
+    measures: list[MeasureInfo] = field(default_factory=list)
 
     def has_table(self, name: str) -> bool:
         return name in self.objects
@@ -510,6 +531,28 @@ class SchemaContext:
             lines.append(f"(+{omitted} more)")
         return "\n\nEntities:\n" + "\n".join(lines)
 
+    def _measures_block(self) -> str:
+        """E05: "one metric gives the same result in chart, AI and export".
+        The dataset's own formulas, stated so the model computes THEM rather
+        than its own. A measure whose formula names a column this user may
+        not see is left out -- listing it would disclose the column."""
+        if not self.measures:
+            return ""
+        from ..dependencies import _identifier_in
+        shown = [m for m in self.measures
+                 if not any(_identifier_in(m.expression, c)
+                            for c in self.denied_columns.get(m.table, ()))]
+        if not shown:
+            return ""
+        lines = [f'- "{m.name}" on {m.table} = {m.expression}'
+                 for m in shown[:MAX_RENDERED_MEASURES]]
+        if len(shown) > MAX_RENDERED_MEASURES:
+            lines.append(f"(+{len(shown) - MAX_RENDERED_MEASURES} more)")
+        return ("\n\nDefined measures (the dataset's own formulas; when the question names one, "
+                "compute exactly this formula, aggregated within each group of the query -- "
+                "never a different formula such as an average of per-row ratios):\n"
+                + "\n".join(lines))
+
     def _retrieval_ranking(self, question: str | None) -> list[tuple[str, float]] | None:
         """`retrieval.rank_objects(self, question, RENDER_RETRIEVAL_TOP_K)`,
         wrapped defensively. `rank_objects` is documented never to raise --
@@ -588,6 +631,7 @@ class SchemaContext:
         joins_block = self._joins_block()
         glossary_block = self._glossary_block(question)
         entities_block = self._entities_block(question)
+        measures_block = self._measures_block()
         ranking = self._retrieval_ranking(question)
         ordered = self._ordered_objects(ranking)
 
@@ -596,7 +640,8 @@ class SchemaContext:
         # joins and glossary blocks -- subtracted from the objects budget
         # BEFORE pass 1 runs, so it can shrink pass 1's column verbosity but
         # can never push an object NAME out of it (see _skeleton_lines).
-        reserved = len(joins_block) + len(glossary_block) + len(entities_block)
+        reserved = (len(joins_block) + len(glossary_block) + len(entities_block)
+                    + len(measures_block))
         objects_budget = max(max_chars - len(header) - reserved, 0)
         lines = self._skeleton_lines(ordered, objects_budget)
 
@@ -612,7 +657,7 @@ class SchemaContext:
                 remaining -= delta
 
         return (header + "\n".join(lines) + joins_block + glossary_block
-                + entities_block)
+                + entities_block + measures_block)
 
     @staticmethod
     def _skeleton_lines(ordered: list[ObjectInfo], budget: int) -> list[str]:
@@ -793,6 +838,9 @@ async def load_dataset_context(db, dataset_ids: list[int], org_id: int) -> Schem
         ctx.objects[tname] = ObjectInfo(name=tname, kind="dataset",
                                         description=ds.description)
         name_by_dataset_id[ds.id] = tname
+        for m in ds.measures or []:
+            if isinstance(m, dict) and m.get("name") and m.get("expression"):
+                ctx.measures.append(MeasureInfo(tname, str(m["name"]), str(m["expression"])))
 
     columns = (await db.execute(select(DatasetColumn).where(
         DatasetColumn.dataset_id.in_(list(name_by_dataset_id))))).scalars().all()
