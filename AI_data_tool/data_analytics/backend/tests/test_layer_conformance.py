@@ -67,6 +67,7 @@ LAYER_MAP: dict[str, int] = {
     # columns. Split out in conformance task 2.4.
     "services/ingest": L2_INGESTION,
     "services/upload_store": L2_INGESTION,
+    "services/csv_dialect": L2_INGESTION,
     "services/metadata/introspect": L2_INGESTION,
     "services/metadata/sample": L2_INGESTION,
     "services/metadata/profile": L2_INGESTION,

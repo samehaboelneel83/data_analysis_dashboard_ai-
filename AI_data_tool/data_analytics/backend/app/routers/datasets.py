@@ -163,6 +163,17 @@ def _copy_capped(stream, path: Path) -> None:
         raise HTTPException(400, f"File exceeds {settings.max_upload_mb} MB limit")
 
 
+def _canonical_csv(path: Path) -> None:
+    """E07: a CSV in another dialect (semicolons, tabs, Windows-1256, a BOM)
+    is rewritten as the UTF-8 comma CSV every reader here assumes; it used to
+    become one garbage column, or fail naming a byte. Other formats pass."""
+    if Path(path).suffix.lower() == ".csv":
+        from ..services.csv_dialect import canonicalize_csv
+        found = canonicalize_csv(path)
+        if found:
+            logger.info("upload %s rewritten from %s", Path(path).name, found)
+
+
 def _frame_problem(df, what: str = "The file") -> str | None:
     """Why a parsed upload cannot become a usable dataset, or None.
 
@@ -238,6 +249,7 @@ async def _ingest_upload_file(
         raise
 
     try:
+        await asyncio.to_thread(_canonical_csv, file_path)
         df = await asyncio.to_thread(load_file, str(file_path))
     except Exception as e:
         # F1: an unsupported extension (ValueError from frame_cache) or a
@@ -261,7 +273,7 @@ async def _ingest_upload_file(
 
         ds = Dataset(last_refreshed_at=datetime.utcnow(),  # E06: when the data was loaded
             name=name, description=description or None, filename=str(file_path),
-            row_count=len(df), col_count=len(df.columns), file_size=file_size,
+            row_count=len(df), col_count=len(df.columns), file_size=file_path.stat().st_size,
             org_id=org_id, created_by=owner_id,
         )
         db.add(ds)
@@ -708,6 +720,7 @@ async def _append_into_one(
             total_bytes += size
 
             try:
+                await asyncio.to_thread(_canonical_csv, tmp)
                 frame = await asyncio.to_thread(load_file, str(tmp))
             except Exception as e:
                 # E07: an unreadable file used to escape as a 500 and take the
