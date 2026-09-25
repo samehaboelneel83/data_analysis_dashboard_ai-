@@ -169,6 +169,18 @@ def render_page_context(page_ctx: dict) -> str:
                          "Sum adds the copies, max is the value once, "
                          "none lists each row]")
             lines.append(line)
+    measures = page_ctx.get("measures") or []
+    if measures:
+        # E05: the dataset's own metrics. Named as the widget's `measure`
+        # they give the same number as the chart, the exports and Ask AI;
+        # rebuilding one as a calculated column is a second, different metric.
+        lines.append("Defined measures (use one by its exact name as a widget's "
+                     "\"measure\" -- never as a dimension, and never re-create "
+                     "it as a calculated column):")
+        for m in measures:
+            name, expr = (m.get("name") or "").strip(), (m.get("expression") or "").strip()
+            if name:
+                lines.append(f"- {name} = {expr}" if expr else f"- {name}")
     if page_ctx.get("dataset_mode") == "directquery":
         lines.append("This dataset is DirectQuery (live): calculated "
                      "columns cannot be stored.")

@@ -565,3 +565,34 @@ class TestAccountable:
                            json={"title": "Mine"}, headers=auth_headers["a"])
         v = (await client.get(f"/api/v1/reports/{rid}/versions", headers=auth_headers["a"])).json()[0]
         assert v["via"] is None and v["note"] is None
+
+
+class TestDefinedMeasures:
+    """E05: 'one metric gives the same result in chart, AI and export'. The
+    copilot listed only columns, so a widget on the dataset's own 'Margin %'
+    was refused ('no column named ...') and the model rebuilt the metric as a
+    calculated column -- a second, different definition of the same number."""
+
+    def test_the_measures_reach_the_prompt(self):
+        text = render_page_context({**PAGE_CTX, "measures": [
+            {"name": "Margin %", "expression": "SUM(profit) / SUM(revenue) * 100"}]})
+        assert "Defined measures" in text
+        assert "- Margin % = SUM(profit) / SUM(revenue) * 100" in text
+        assert "never as a dimension" in text
+
+    async def test_a_widget_can_use_a_measure_but_not_as_a_dimension(
+            self, client, auth_headers, world, columns, model, db_session):
+        ds = world["dataset"]
+        ds.measures = [{"name": "Margin %", "expression": "SUM(revenue) / SUM(units)"}]
+        await db_session.commit()
+        model.append({"reply": "Added.", "data_question": None, "actions": [
+            action(op="create", widget_type="bar", title="Margin by region",
+                   config={"dimension": "region", "measure": "Margin %"}),
+            action(op="create", widget_type="bar", title="Grouped by a metric",
+                   config={"dimension": "Margin %", "measure": "revenue"})]})
+        r = await call(client, auth_headers["a"], world, "margin by region")
+        assert r.status_code == 200, r.text
+        made = (await db_session.execute(select(ReportWidget).where(
+            ReportWidget.title == "Margin by region"))).scalar_one()
+        assert made.config["measure"] == "Margin %"
+        assert r.json()["notes"] == ['Skipped an edit: no column named "Margin %".']

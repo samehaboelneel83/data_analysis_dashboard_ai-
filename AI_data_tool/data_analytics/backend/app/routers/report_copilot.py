@@ -105,8 +105,36 @@ def _clamped_layout(patch: dict | None, base: dict) -> dict:
     return out
 
 
+async def _page_measures(db: AsyncSession, report: Report, user: User) -> list[dict]:
+    """E05: the defined measures on the report's import datasets. A widget
+    naming one gets the dataset's own formula -- the same number the chart,
+    the exports and Ask AI give. DirectQuery datasets are left out: the
+    widget route refuses measures there, so offering one would create a
+    widget that cannot render."""
+    ids = [i for i in [report.dataset_id, *(report.additional_dataset_ids or [])]
+           if i is not None]
+    out: list[dict] = []
+    seen: set[str] = set()
+    for did in ids:
+        ds = await db.get(Dataset, did)
+        if ds is None or ds.org_id != user.org_id or ds.mode == "directquery":
+            continue
+        for m in ds.measures or []:
+            name = (m.get("name") or "").strip() if isinstance(m, dict) else ""
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            out.append({"name": name, "expression": (m.get("expression") or "").strip()})
+    return out
+
+
+#: The config keys a MEASURE may fill. Never dimension/dimension2: a measure is
+#: an aggregate, and grouping by one has no meaning.
+MEASURE_SLOTS = ("measure", "measure2")
+
+
 def _clean_config(cfg: dict | None, columns: set[str], notes: list[str], *,
-                  keep_removals: bool = False) -> dict | None:
+                  keep_removals: bool = False, measures: set[str] | None = None) -> dict | None:
     """Scalars only (the schema already enforces that), `dataset_id` dropped
     (a chart must not be silently repointed at other data), and column-naming
     keys checked against the dataset. A bad column fails the whole action --
@@ -131,6 +159,9 @@ def _clean_config(cfg: dict | None, columns: set[str], notes: list[str], *,
         if v is None:
             if keep_removals:
                 out[k] = None
+            continue
+        if k in MEASURE_SLOTS and measures and v in measures:
+            out[k] = v                      # a defined measure, by its exact name
             continue
         if k in COLUMN_KEYS and columns and v not in columns:
             match = next((c for c in columns
@@ -167,6 +198,7 @@ async def page_copilot(report_id: int, page_id: int, body: CopilotIn,
         ReportWidget.page_id == page_id).order_by(ReportWidget.id))).scalars().all()
     columns_by_table = await _page_columns(db, report, user)
     calc_cols, dataset_mode = await _page_calculated_columns(db, report, user)
+    measures = await _page_measures(db, report, user)
     page_ctx = {
         "report_name": report.name, "page_name": page.name,
         "widgets": [{"id": w.id, "widget_type": w.widget_type, "title": w.title,
@@ -174,6 +206,7 @@ async def page_copilot(report_id: int, page_id: int, body: CopilotIn,
                     for w in widgets],
         "columns": columns_by_table,
         "calculated_columns": calc_cols,
+        "measures": measures,
         "dataset_mode": dataset_mode,
         # Only a selection that is really on this page: a stale id from
         # another page must not make "it" point somewhere invisible.
@@ -237,6 +270,7 @@ async def page_copilot(report_id: int, page_id: int, body: CopilotIn,
     physical_names = {c for cols in columns_by_table.values() for c in cols}
     column_names = set(physical_names)
     column_names.update(c["name"] for c in calc_cols if c.get("name"))
+    measure_names = {m["name"] for m in measures}
 
     for action in resolved["actions"]:
         op = action.get("op")
@@ -245,7 +279,7 @@ async def page_copilot(report_id: int, page_id: int, body: CopilotIn,
             if wtype not in CREATABLE_TYPES:
                 notes.append(f'Skipped: "{wtype}" is not a widget type I can create.')
                 continue
-            cfg = _clean_config(action.get("config"), column_names, notes)
+            cfg = _clean_config(action.get("config"), column_names, notes, measures=measure_names)
             if cfg is None:
                 continue
             dw, dh = CREATABLE_TYPES[wtype]
@@ -279,7 +313,7 @@ async def page_copilot(report_id: int, page_id: int, body: CopilotIn,
                     continue
                 widget.widget_type = wtype
                 changed = True
-            patch = _clean_config(action.get("config"), column_names, notes,
+            patch = _clean_config(action.get("config"), column_names, notes, measures=measure_names,
                                   keep_removals=True)
             if patch is None:
                 continue
