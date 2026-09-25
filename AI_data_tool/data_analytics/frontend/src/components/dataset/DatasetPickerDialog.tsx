@@ -65,6 +65,14 @@ export default function DatasetPickerDialog({ datasets, onPick, onClose, title =
   const available = useMemo(() => datasets.filter(d => !excludeIds.includes(d.id)), [datasets, excludeIds])
   const { recent, rest } = useMemo(() => orderDatasets(available, readRecentDatasetIds(), query), [available, query])
 
+  // Two datasets may share a name (BUG-027: a re-upload made two identical
+  // "QA_CHROME_sales" rows). Only then does each carry its id, so the rows
+  // differ and a unique name reads as it always did.
+  const repeated = useMemo(() => {
+    const seen = new Map<string, number>()
+    for (const d of available) seen.set(d.name, (seen.get(d.name) ?? 0) + 1)
+    return new Set([...seen].filter(([, n]) => n > 1).map(([name]) => name))
+  }, [available])
   const pick = (d: Dataset) => { rememberDataset(d.id); onPick(d) }
   const row = (d: Dataset) => (
     <li key={d.id}>
@@ -75,7 +83,10 @@ export default function DatasetPickerDialog({ datasets, onPick, onClose, title =
         onMouseLeave={e => { e.currentTarget.style.background = 'none' }}>
         <Database size={16} style={{ color: 'var(--accent)', flexShrink: 0 }} />
         <span style={{ flex: 1, minWidth: 0 }}>
-          <span style={{ display: 'block', fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</span>
+          <span style={{ display: 'block', fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {d.name}
+            {repeated.has(d.name) && <span style={{ color: 'var(--muted)', fontSize: 11 }}> #{d.id}</span>}
+          </span>
           {d.description && <span style={{ display: 'block', fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.description}</span>}
         </span>
         <span style={{ fontSize: 11, color: 'var(--muted)', flexShrink: 0 }}>{sizeLabel(d)}</span>

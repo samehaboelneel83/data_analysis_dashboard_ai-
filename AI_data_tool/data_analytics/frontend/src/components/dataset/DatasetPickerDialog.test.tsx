@@ -53,3 +53,14 @@ describe('DatasetPickerDialog', () => {
     expect(screen.getByText(/no datasets yet/i)).toBeTruthy()
   })
 })
+
+describe('same-named datasets (BUG-027)', () => {
+  it('tells two datasets with one name apart by id, and leaves a unique name alone', () => {
+    render(<DatasetPickerDialog datasets={[ds(7, 'Sales'), ds(9, 'Sales'), ds(4, 'HR')]}
+      onPick={vi.fn()} onClose={vi.fn()} />)
+    const names = screen.getAllByRole('button').map(b => b.textContent ?? '')
+    expect(names.some(t => t.includes('Sales #7'))).toBe(true)
+    expect(names.some(t => t.includes('Sales #9'))).toBe(true)
+    expect(names.some(t => t.includes('HR #'))).toBe(false)
+  })
+})

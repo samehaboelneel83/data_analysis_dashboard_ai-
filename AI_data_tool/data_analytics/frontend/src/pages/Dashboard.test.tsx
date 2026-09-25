@@ -501,3 +501,20 @@ describe('the pager arrows mirror in Arabic', () => {
     expect(prev.querySelector('.dl-pager__icon')).toBeTruthy()
   })
 })
+
+describe('the Datasets table on a phone (BUG-041)', () => {
+  // jsdom has no layout, so the rule itself is what can be pinned: below the
+  // table's 700px breakpoint the card carries scroll shadows and a
+  // description wraps instead of ending mid-word in an ellipsis.
+  it('index.css gives the narrow table a scroll cue and wrapping descriptions', async () => {
+    const fs = await import('node:fs')
+    const path = await import('node:path')
+    const url = await import('node:url')
+    const here = path.dirname(url.fileURLToPath(import.meta.url))
+    const css = fs.readFileSync(path.resolve(here, '../index.css'), 'utf8')
+    const block = css.match(/@media \(max-width: 699px\) \{\s*\.dl-table-card \{[\s\S]*?\n\}/)
+    expect(block, 'no narrow-screen .dl-table-card block').toBeTruthy()
+    expect(block![0]).toMatch(/no-repeat local[\s\S]*no-repeat scroll/)
+    expect(block![0]).toMatch(/\.dl-cell-sub \{[^}]*white-space: normal[^}]*line-clamp: 2/)
+  })
+})

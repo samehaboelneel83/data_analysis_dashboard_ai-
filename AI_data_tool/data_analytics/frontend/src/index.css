@@ -505,6 +505,29 @@ svg.recharts-surface { direction: ltr; }
    at the card's edge (overflow: hidden clipped the last columns entirely). */
 .dl-table-card > .dl-table { min-inline-size: 560px; }
 @media (min-width: 700px) { .dl-table-card > .dl-table { min-inline-size: 0; } }
+/* BUG-041, below the same breakpoint: nothing said the table scrolled, and a
+   description ended mid-word in an ellipsis. Scroll shadows: the two `local`
+   covers travel with the content and hide the `scroll` shadows beneath them
+   at whichever edge has nothing more to show -- no script, and symmetric, so
+   RTL needs nothing. A description wraps to two lines instead. */
+@media (max-width: 699px) {
+  .dl-table-card {
+    background:
+      linear-gradient(to right, var(--surface) 30%, transparent) left / 28px 100% no-repeat local,
+      linear-gradient(to left, var(--surface) 30%, transparent) right / 28px 100% no-repeat local,
+      radial-gradient(farthest-side at 0 50%, rgba(0, 0, 0, .2), transparent) left / 12px 100% no-repeat scroll,
+      radial-gradient(farthest-side at 100% 50%, rgba(0, 0, 0, .2), transparent) right / 12px 100% no-repeat scroll;
+    background-color: var(--surface);
+  }
+  .dl-table-card .dl-cell-sub {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    min-inline-size: 180px;
+  }
+}
 
 .dl-table { width: 100%; border-collapse: collapse; }
 
