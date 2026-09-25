@@ -68,6 +68,7 @@ LAYER_MAP: dict[str, int] = {
     "services/ingest": L2_INGESTION,
     "services/upload_store": L2_INGESTION,
     "services/csv_dialect": L2_INGESTION,
+    "services/timezones": L2_INGESTION,
     "services/metadata/introspect": L2_INGESTION,
     "services/metadata/sample": L2_INGESTION,
     "services/metadata/profile": L2_INGESTION,

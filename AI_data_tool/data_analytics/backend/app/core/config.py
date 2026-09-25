@@ -174,6 +174,12 @@ class Settings(BaseSettings):
     # because a large import is legitimately slow; 0 turns it off. Postgres
     # enforces it server-side; MySQL and ClickHouse as a socket read timeout.
     source_statement_timeout_s: int = Field(default=900, ge=0)
+
+    # E07: the zone every offset-carrying timestamp is stored in, as plain
+    # wall-clock time (services/timezones.py). An IANA name; UTC unless an
+    # install says otherwise (e.g. Africa/Cairo). Timestamps with no offset
+    # are never touched -- they already are wall-clock time.
+    data_timezone: str = "UTC"
     agent_row_cap: int = Field(default=5000, ge=1)
 
     # Import-mode's source-frame ceiling. DirectQuery has always been bounded

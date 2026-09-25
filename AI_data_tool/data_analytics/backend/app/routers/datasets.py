@@ -254,6 +254,24 @@ def _pick_sheet(path: Path, org_id: int, sheet: str | None, sha: str) -> tuple[P
     return out, hashlib.sha256(f"{sha}:{sheet}".encode()).hexdigest()
 
 
+def _store_normalized_instants(df, path: Path, org_id: int) -> Path:
+    """E07: an upload whose timestamps carry offsets is stored in the reference
+    zone (services/timezones.py). Every reader re-reads the stored file, so the
+    conversion must be ON DISK: a CSV is rewritten in place; another format
+    (JSON, XML, parquet) is stored as the normalised CSV instead."""
+    from ..services.dataset_refresh import write_csv_atomic
+    from ..services.timezones import normalize_instants
+    if not normalize_instants(df):
+        return path
+    if path.suffix.lower() == ".csv":
+        write_csv_atomic(df, path)
+        return path
+    out = upload_store.allocate_path(org_id, "normalized.csv")
+    write_csv_atomic(df, out)
+    path.unlink(missing_ok=True)
+    return out
+
+
 def _frame_problem(df, what: str = "The file") -> str | None:
     """Why a parsed upload cannot become a usable dataset, or None.
 
@@ -346,6 +364,7 @@ async def _ingest_upload_file(
     if problem:
         file_path.unlink(missing_ok=True)
         raise HTTPException(400, problem)
+    file_path = await asyncio.to_thread(_store_normalized_instants, df, file_path, org_id)
     # E07: from here on a failure is unexpected, but it must still leave no
     # bytes behind -- the caller rolls the row back, this removes the file.
     try:

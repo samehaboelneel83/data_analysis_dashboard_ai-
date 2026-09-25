@@ -582,6 +582,10 @@ async def import_dataset(ds_id: int, req: ImportRequest, db: AsyncSession = Depe
         # conversion in a frame that had already been serialised. The dataset was
         # then labelled `datetime` while every widget re-read integers off the
         # CSV, which is a disagreement no unit test on the type can see.
+        # E07: offset-carrying instants to the reference zone, before typing
+        # (a two-offset column is otherwise typed datetime and unusable).
+        from ..services.timezones import normalize_instants
+        normalize_instants(df)
         type_map = detect_types(df)
         # Written aside, then swapped in: a re-import writes over the LIVE file,
         # and a crash or a full disk mid-write left a truncated CSV that the

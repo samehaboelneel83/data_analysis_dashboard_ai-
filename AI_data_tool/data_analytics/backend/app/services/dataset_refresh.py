@@ -18,15 +18,22 @@ from ..core import telemetry
 from .frame_cache import sidecar_path, write_parquet_sidecar
 
 
-def write_csv_atomic(df: pd.DataFrame, path) -> None:
+def write_csv_atomic(df: pd.DataFrame, path) -> list[str]:
     """Write beside the live file, then swap it in (E07). A refresh writes over
     the file a dataset is reading; a crash or a full disk mid-write used to
-    leave a truncated CSV behind a dataset that still looked ready."""
+    leave a truncated CSV behind a dataset that still looked ready.
+
+    Offset-carrying instants are converted IN PLACE to the reference zone
+    first (services/timezones.py), so what is written, and the frame the
+    caller types afterwards, hold one kind of time. Returns those columns."""
     import os
+    from .timezones import normalize_instants
+    converted = normalize_instants(df)
     path = Path(path)
     tmp = path.with_name(path.name + ".tmp")
     df.to_csv(tmp, index=False)
     os.replace(tmp, path)
+    return converted
 
 
 class SchemaBreak(Exception):
@@ -120,7 +127,8 @@ def build_incremental_query(table: str | None, query: str | None,
     return f'SELECT * FROM "{table}" WHERE {quoted_col} > :cursor_val'
 
 
-def _max_cursor(df: pd.DataFrame, cursor_column: str | None, previous):
+def _max_cursor(df: pd.DataFrame, cursor_column: str | None, previous,
+                converted: list[str] | None = None):
     """The new watermark: the highest value seen for cursor_column in `df`, kept
     as text (the column may be a timestamp, an id, or an opaque token — Watermark
     stores it untyped and the column that produced it knows how to compare it).
@@ -134,6 +142,15 @@ def _max_cursor(df: pd.DataFrame, cursor_column: str | None, previous):
         return previous
     if pd.isna(m):
         return previous
+    if converted and cursor_column in converted and isinstance(m, pd.Timestamp):
+        # The stored column is wall-clock time in the reference zone (E07); the
+        # watermark goes back to the SOURCE, which must compare the same instant
+        # rather than read a bare time in its own session zone. In a DST
+        # fall-back hour the earlier instant is taken: re-reading an hour beats
+        # skipping one.
+        from .timezones import reference_zone
+        return m.tz_localize(reference_zone(), ambiguous=True,
+                             nonexistent="shift_forward").isoformat()
     return str(m)
 
 
@@ -243,13 +260,14 @@ def _refresh_dataset_body(
             # like a full load over it would, rather than growing unchecked.
             from .connections import _checked, _import_cap
             _checked(df, _import_cap())
+            converted: list[str] = []
             if path is not None:
                 path.parent.mkdir(parents=True, exist_ok=True)
-                write_csv_atomic(df, path)
+                converted = write_csv_atomic(df, path)
                 write_parquet_sidecar(str(path))
             return {
                 "df": df, "type_map": detect_types(df), "mode": "incremental",
-                "cursor_value": _max_cursor(df, cursor_column, cursor_value),
+                "cursor_value": _max_cursor(df, cursor_column, cursor_value, converted),
                 "warning": warning, "rows_added": len(new_rows),
             }
 
@@ -257,11 +275,13 @@ def _refresh_dataset_body(
     # cursor yet), or any of the fallbacks above.
     df = guard_schema(import_to_dataframe(source_cfg, source_table, source_query),
                       required_columns, column_map)
+    converted: list[str] = []
     if path is not None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        write_csv_atomic(df, path)
+        converted = write_csv_atomic(df, path)
         write_parquet_sidecar(str(path))
-    new_cursor = _max_cursor(df, cursor_column, cursor_value) if cursor_column else cursor_value
+    new_cursor = (_max_cursor(df, cursor_column, cursor_value, converted)
+                  if cursor_column else cursor_value)
     return {
         "df": df, "type_map": detect_types(df), "mode": "full",
         "cursor_value": new_cursor, "warning": warning, "rows_added": len(df),
