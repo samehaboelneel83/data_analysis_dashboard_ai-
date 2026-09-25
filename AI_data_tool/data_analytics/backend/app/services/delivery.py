@@ -117,15 +117,22 @@ async def build_digest(db, report: Report, creator: User,
                     from .sensitivity import redacted_columns
                     drop = sorted(set(await resolve_denied_columns(db, creator, ds.id) or [])
                                   | set(await redacted_columns(db, ds.id, context_label)))
+                    # E05: the author's expressions resolved AS THE SENDER, like
+                    # every other read path -- a filter or measure using
+                    # USEREMAIL()/ORGID() raised here unexpanded and the sheet
+                    # silently vanished from the digest.
+                    from ..core.rls import expand_author_expressions
+                    author_filter, calc_cols, measure_defs = await expand_author_expressions(
+                        db, creator, ds.default_filter_expr, ds.calculated_columns, ds.measures)
                     # Off the scheduler's event loop: a slow parse here would
                     # otherwise delay every later schedule/alert in the tick.
                     result = await asyncio.to_thread(
                         get_widget_data,
                         ds.filename, dict(w.config or {}), widget_type=w.widget_type,
-                        calculated_columns=ds.calculated_columns or None,
-                        filter_expr=ds.default_filter_expr or None,
+                        calculated_columns=calc_cols or None,
+                        filter_expr=author_filter or None,
                         rls_filter_expr=rls, use_cache=False,
-                        measures=ds.measures or None,
+                        measures=measure_defs or None,
                         prep_steps=steps or None, prep_aux_frames=aux or None,
                         custom_functions=ds.custom_functions, drop_columns=drop or None,
                     )

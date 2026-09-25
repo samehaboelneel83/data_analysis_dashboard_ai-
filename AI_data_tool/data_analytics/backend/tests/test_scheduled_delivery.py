@@ -339,3 +339,43 @@ class TestTeamsDelivery:
                                 headers=auth_headers["a"])
         assert "posted to webhook" in run.json()["last_status"]
         assert posted and posted[0][0] == "https://hooks.example.com/abc"
+
+
+class TestExportsComputeWhatTheDashboardShows:
+    """E05: 'one metric gives the same result in chart, AI and export'. The PDF
+    and the Excel digest call the engine directly instead of the widget-data
+    route, and each skipped a step that route takes."""
+
+    @pytest.mark.asyncio
+    async def test_the_pdf_applies_report_parameters_like_the_chart(
+            self, client, auth_headers, db_session, two_orgs, sales_ds):
+        from app.models.models import Report, ReportParameter, ReportWidget
+        from app.routers.reports import _resolve_report_sections
+        ds = await _dataset(db_session, two_orgs["a"]["org"].id, sales_ds)
+        rid = await _report_with_widget(client, auth_headers["a"], ds)
+        db_session.add(ReportParameter(report_id=rid, name="market", param_type="text", default_value="US"))
+        w = (await db_session.execute(select(ReportWidget))).scalars().first()
+        w.config = {**w.config, "filters": [{"column": "region", "op": "eq", "value": "@market"}]}
+        await db_session.commit()
+
+        report = await db_session.get(Report, rid)
+        sections = await _resolve_report_sections(db_session, report, two_orgs["a"]["user"])
+        rows = sections[0]["widgets"][0]["result"]["rows"]
+        # It compared region to the literal text "@market" and found nothing.
+        assert {r["name"]: r["value"] for r in rows} == {"US": 150.0}
+
+    @pytest.mark.asyncio
+    async def test_the_digest_expands_user_functions_as_the_sender(
+            self, client, auth_headers, db_session, two_orgs, sales_ds):
+        from app.models.models import Report
+        ds = await _dataset(db_session, two_orgs["a"]["org"].id, sales_ds)
+        creator = two_orgs["a"]["user"]
+        ds.default_filter_expr = f"region == 'US' or USEREMAIL() == 'someone-else@example.com'"
+        await db_session.commit()
+        rid = await _report_with_widget(client, auth_headers["a"], ds)
+
+        report = await db_session.get(Report, rid)
+        payload, sheets = await build_digest(db_session, report, creator)
+        assert sheets == 1           # an unexpanded USEREMAIL() raised and dropped the sheet
+        book = pd.read_excel(io.BytesIO(payload), sheet_name="By region")
+        assert {r["name"]: r["value"] for _, r in book.iterrows()} == {"US": 150.0}

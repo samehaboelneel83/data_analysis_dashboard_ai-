@@ -1292,9 +1292,19 @@ async def _resolve_report_sections(db, report: Report, user: User,
                 author_filter_expr, calc_cols, measure_defs = await expand_author_expressions(
                     db, user, ds.default_filter_expr, ds.calculated_columns, ds.measures,
                 )
+                # E05: report parameters, as the on-screen chart applies them
+                # (at their defaults -- a PDF has no viewer to pick values).
+                # Skipped here, a filter on "@region" compared the column to
+                # the literal text "@region": the PDF showed an empty or
+                # different number from the dashboard it was made from.
+                from ..schemas.schemas import WidgetDataRequest
+                from .widget_data import _apply_report_parameters
+                config = (await _apply_report_parameters(
+                    WidgetDataRequest(config=dict(w.config or {}), widget_type=w.widget_type,
+                                      report_id=report.id), db, user)).config
                 result = await asyncio.to_thread(
                     get_widget_data,
-                    ds.filename, dict(w.config or {}), widget_type=w.widget_type,
+                    ds.filename, config, widget_type=w.widget_type,
                     calculated_columns=calc_cols or None,
                     filter_expr=author_filter_expr or None,
                     rls_filter_expr=rls, use_cache=False, measures=measure_defs or None,
