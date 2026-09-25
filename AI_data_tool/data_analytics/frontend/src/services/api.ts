@@ -366,6 +366,11 @@ export const datasetsApi = {
    *  are expressions a good row satisfies ("amount >= 0"). */
   quality: (id: number, rules: string[] = []) =>
     api.post<QualityReport>(`/datasets/${id}/quality`, { rules }).then(r => r.data),
+  /** One dataset from tables in several database connections: each is
+   *  imported, then appended (how='append') or joined on `on`. Admin only. */
+  combine: (body: { name: string; how: string; on?: string[];
+                    sources: { data_source_id: number; table: string; label?: string }[] }) =>
+    api.post<Dataset>('/datasets/combine', body).then(r => r.data),
   /** Set the automatic refresh interval, or null to clear it. Minimum 5 minutes;
    *  the server refuses DirectQuery (nothing is cached to refresh). */
   setSchedule: (id: number, interval_minutes: number | null) =>

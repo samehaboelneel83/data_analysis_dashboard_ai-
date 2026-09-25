@@ -422,6 +422,80 @@ async def _load_dataset_out(db: AsyncSession, dataset_id: int) -> Dataset:
     )).scalar_one()
 
 
+class CombineSource(BaseModel):
+    data_source_id: int
+    table: str | None = None
+    query: str | None = None
+    #: How this source is named in the result (the `source` column of an
+    #: append, the suffix of its imported dataset). Defaults to the table.
+    label: str | None = None
+
+
+class CombineRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    sources: list[CombineSource] = Field(min_length=2, max_length=6)
+    #: "append" stacks the sources' rows (the same table in several
+    #: databases); left/inner/full/right joins them on `on`.
+    how: str = "append"
+    #: Join keys, the same column names in every source (composite allowed).
+    on: list[str] = []
+
+
+@router.post("/combine", response_model=DatasetOut)
+async def combine_sources(body: CombineRequest, db: AsyncSession = Depends(get_db),
+                          current_user: User = Depends(require_org_admin)):
+    """One dataset from tables in SEVERAL database connections (requested
+    2026-09-25) -- in one action instead of an import per connection plus a
+    hand-built pipeline. Each source is imported as a dataset of its own (kept:
+    they are what the result is rebuilt from, and each refreshes from its own
+    connection), then a new dataset is materialized from the first with
+    append or join steps over the rest. Admin-only, like any import. If any
+    step fails, the imports made for this request are removed again."""
+    from ..schemas.schemas import ImportRequest
+    from ..services.dataset_cleanup import discard_dataset_artifacts
+    from .data_sources import import_dataset
+    if body.how not in ("append", "left", "inner", "full", "right"):
+        raise HTTPException(400, "how must be append, left, inner, full or right")
+    on = [c for c in body.on if c and c.strip()]
+    if body.how != "append" and not on:
+        raise HTTPException(400, "A join needs the key column(s) the sources share (`on`)")
+    for s in body.sources:
+        if not (s.table or s.query):
+            raise HTTPException(400, "Each source needs a table or a query")
+
+    created: list[int] = []
+    try:
+        labels = []
+        for i, s in enumerate(body.sources):
+            label = (s.label or s.table or f"source {i + 1}").strip()
+            r = await import_dataset(s.data_source_id,
+                                     ImportRequest(dataset_name=f"{body.name} — {label}"[:200],
+                                                   table=s.table, query=s.query),
+                                     db=db, current_user=current_user)
+            created.append(r["id"])
+            labels.append(label)
+        rest = list(zip(created[1:], labels[1:]))
+        if body.how == "append":
+            steps = [{"kind": "append", "dataset_id": did, "source_column": "source",
+                      "base_label": labels[0], "label": lab} for did, lab in rest[:1]]
+            # Later appends label only their own rows; the column already exists.
+            steps += [{"kind": "append", "dataset_id": did} for did, _ in rest[1:]]
+        else:
+            steps = [{"kind": "join", "dataset_id": did, "how": body.how,
+                      "left_ons": on, "right_ons": on} for did, _ in rest]
+        return await materialize_dataset(created[0], MaterializeRequest(name=body.name, steps=steps),
+                                         db=db, current_user=current_user)
+    except Exception:
+        await db.rollback()
+        leftovers = [d for d in [await db.get(Dataset, i) for i in created] if d is not None]
+        if leftovers:
+            await discard_dataset_artifacts(db, leftovers)
+            for d in leftovers:
+                await db.delete(d)
+            await db.commit()
+        raise
+
+
 @router.post("/batch", response_model=BatchUploadOut)
 async def upload_datasets(
     files: list[UploadFile] = File(...),

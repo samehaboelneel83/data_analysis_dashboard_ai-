@@ -18,6 +18,7 @@ import { useT } from '../i18n'
 
 import { TYPE_ICON, TYPE_LABEL } from './connections/typeMaps'
 import { ConnectionModal } from './connections/ConnectionModal'
+import CombineDialog from './connections/CombineDialog'
 import { SchemaBrowser } from './connections/SchemaBrowser'
 export { SchemaBrowser } from './connections/SchemaBrowser'
 
@@ -31,6 +32,7 @@ export default function Connections() {
   const [loading,  setLoading]  = useState(true)
   const [loadError, setLoadError] = useState<unknown>(null)
   const [modal,    setModal]    = useState<'add' | DataSource | null>(null)
+  const [combining, setCombining] = useState(false)
   // Non-throwing: this page is mounted in harnesses without the provider, and
   // no auth means no admin -- failing CLOSED, which shows the read-only view
   // rather than a row of buttons the server would refuse.
@@ -112,11 +114,19 @@ export default function Connections() {
           </p>
         </div>
         {canAdminister && (
-          <button className="btn btn-primary" onClick={() => setModal('add')}>
-            <Plus size={16} /> {t('connections.new')}
-          </button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {sources.length > 0 && (
+              <button className="btn btn-ghost" onClick={() => setCombining(true)}>
+                Combine databases
+              </button>
+            )}
+            <button className="btn btn-primary" onClick={() => setModal('add')}>
+              <Plus size={16} /> {t('connections.new')}
+            </button>
+          </div>
         )}
       </header>
+      {combining && <CombineDialog sources={sources} onClose={() => setCombining(false)} />}
 
       {/* The search box sits with the list it filters, not in the page header
           beside an action that CREATES connections rather than finds them. */}

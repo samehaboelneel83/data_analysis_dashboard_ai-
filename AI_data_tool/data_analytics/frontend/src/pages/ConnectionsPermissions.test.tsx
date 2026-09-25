@@ -17,7 +17,7 @@ import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { renderWithProviders } from '../test/renderWithProviders'
 import Connections from './Connections'
-import { dataSourcesApi } from '../services/api'
+import { dataSourcesApi, datasetsApi } from '../services/api'
 import { AuthContext } from '../contexts/AuthContext'
 
 vi.mock('../services/api', async () => ({
@@ -25,6 +25,9 @@ vi.mock('../services/api', async () => ({
   dataSourcesApi: {
     list: vi.fn(), connectors: vi.fn(), schema: vi.fn(), preview: vi.fn(),
     import: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn(), test: vi.fn(),
+  },
+  datasetsApi: {
+    combine: vi.fn(),
   },
 }))
 
@@ -115,5 +118,38 @@ describe('Connections, as an admin', () => {
     renderAs(true)
     await screen.findByText('Moodle LMS (Egyptian University)')
     expect(screen.queryByText(/administrator/i)).toBeNull()
+  })
+})
+
+describe('combining tables from several databases', () => {
+  const TWO = [...SOURCES, { id: 19, name: 'ERP (Alexandria)', type: 'sqlite', config: {}, created_at: '2026-01-01' }]
+
+  it('is an admin action', async () => {
+    renderAs(false)
+    await screen.findByText('Moodle LMS (Egyptian University)')
+    expect(screen.queryByRole('button', { name: 'Combine databases' })).toBeNull()
+  })
+
+  it('imports a table from each connection and appends them into one dataset', async () => {
+    vi.mocked(dataSourcesApi.list).mockResolvedValue(TWO as never)
+    vi.mocked(dataSourcesApi.schema).mockResolvedValue({ tables: [{ name: 'sales', kind: 'table' }] } as never)
+    vi.mocked(datasetsApi.combine).mockResolvedValue({ id: 77, name: 'All branches' } as never)
+    renderAs(true)
+    fireEvent.click(await screen.findByRole('button', { name: 'Combine databases' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Combine databases' })
+    expect(dialog).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('New dataset name'), { target: { value: 'All branches' } })
+    for (const [i, id] of [[1, '18'], [2, '19']] as const) {
+      fireEvent.change(screen.getByLabelText(`Connection ${i}`), { target: { value: id } })
+      await waitFor(() => expect(screen.getByLabelText(`Table ${i}`)).toHaveTextContent('sales'))
+      fireEvent.change(screen.getByLabelText(`Table ${i}`), { target: { value: 'sales' } })
+    }
+    fireEvent.change(screen.getByLabelText('Label 2'), { target: { value: 'Alex' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create dataset' }))
+    await waitFor(() => expect(datasetsApi.combine).toHaveBeenCalledWith({
+      name: 'All branches', how: 'append', on: [],
+      sources: [{ data_source_id: 18, table: 'sales', label: undefined },
+                { data_source_id: 19, table: 'sales', label: 'Alex' }],
+    }))
   })
 })

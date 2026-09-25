@@ -214,3 +214,72 @@ class TestDataQualityReport:
         assert r.json()["duplicate_rows"] == 1 and r.json()["rules"][0]["failing_rows"] == 1
         assert (await client.post(f"/api/v1/datasets/{ds.id}/quality", json={},
                                   headers=auth_headers["b"])).status_code == 404
+
+
+class TestCombineSeveralDatabases:
+    """One dataset from tables in several database connections, in one action."""
+
+    async def _db(self, db_session, org_id, tmp_path, name, rows, table="sales", cols="region TEXT, amount REAL"):
+        import sqlite3
+        from app.models.models import DataSource
+        path = tmp_path / f"{name}.db"
+        conn = sqlite3.connect(str(path))
+        conn.execute(f"CREATE TABLE {table} ({cols})")
+        conn.executemany(f"INSERT INTO {table} VALUES ({','.join('?' * len(rows[0]))})", rows)
+        conn.commit()
+        conn.close()
+        src = DataSource(name=name, type="sqlite", config={"filepath": str(path)}, org_id=org_id)
+        db_session.add(src)
+        await db_session.commit()
+        await db_session.refresh(src)
+        return src
+
+    @pytest.fixture(autouse=True)
+    def _uploads(self, monkeypatch, tmp_path):
+        from app.core.config import settings as app_settings
+        monkeypatch.setattr(app_settings, "upload_dir", str(tmp_path / "uploads"))
+
+    async def test_append_stacks_the_same_table_from_two_databases(
+            self, client, db_session, two_orgs, auth_headers, tmp_path):
+        org = two_orgs["a"]["org"].id
+        cairo = await self._db(db_session, org, tmp_path, "cairo", [("N", 10.0), ("S", 5.0)])
+        alex = await self._db(db_session, org, tmp_path, "alex", [("N", 7.0)])
+        r = await client.post("/api/v1/datasets/combine", headers=auth_headers["a"], json={
+            "name": "All branches", "how": "append", "sources": [
+                {"data_source_id": cairo.id, "table": "sales", "label": "Cairo"},
+                {"data_source_id": alex.id, "table": "sales", "label": "Alex"}]})
+        assert r.status_code == 200, r.text
+        assert r.json()["row_count"] == 3
+        preview = await client.post(f"/api/v1/datasets/{r.json()['id']}/data-preview",
+                                    json={"page": 0, "page_size": 10}, headers=auth_headers["a"])
+        body = preview.json()
+        src_at = body["columns"].index("source")
+        assert sorted(row[src_at] for row in body["rows"]) == ["Alex", "Cairo", "Cairo"]
+
+    async def test_join_combines_different_tables_on_a_shared_key(
+            self, client, db_session, two_orgs, auth_headers, tmp_path):
+        org = two_orgs["a"]["org"].id
+        sales = await self._db(db_session, org, tmp_path, "erp", [("N", 10.0), ("S", 5.0)])
+        crm = await self._db(db_session, org, tmp_path, "crm", [("N", "Nour"), ("S", "Sami")],
+                             table="managers", cols="region TEXT, manager TEXT")
+        r = await client.post("/api/v1/datasets/combine", headers=auth_headers["a"], json={
+            "name": "Sales with managers", "how": "left", "on": ["region"], "sources": [
+                {"data_source_id": sales.id, "table": "sales"},
+                {"data_source_id": crm.id, "table": "managers"}]})
+        assert r.status_code == 200, r.text
+        assert r.json()["row_count"] == 2
+        assert {"region", "amount", "manager"} <= {c["name"] for c in r.json()["columns"]}
+
+    async def test_a_failure_leaves_no_half_imported_datasets(
+            self, client, db_session, two_orgs, auth_headers, tmp_path):
+        from sqlalchemy import select as _select
+        from app.models.models import Dataset
+        org = two_orgs["a"]["org"].id
+        good = await self._db(db_session, org, tmp_path, "good", [("N", 1.0)])
+        before = len((await db_session.execute(_select(Dataset))).scalars().all())
+        r = await client.post("/api/v1/datasets/combine", headers=auth_headers["a"], json={
+            "name": "Broken", "sources": [{"data_source_id": good.id, "table": "sales"},
+                                          {"data_source_id": good.id, "table": "no_such_table"}]})
+        assert r.status_code >= 400
+        db_session.expire_all()
+        assert len((await db_session.execute(_select(Dataset))).scalars().all()) == before
