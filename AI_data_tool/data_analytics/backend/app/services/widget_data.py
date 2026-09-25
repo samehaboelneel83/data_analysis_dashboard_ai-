@@ -3947,7 +3947,7 @@ def get_widget_data(
     # A pipeline with a join reads OTHER files whose mtimes the cache key cannot
     # see; a stale joined result is a correctness bug, so joined reads skip the
     # result cache entirely rather than serving one.
-    if any(isinstance(x, dict) and x.get("kind") == "join" for x in (prep_steps or [])):
+    if any(isinstance(x, dict) and x.get("kind") in ("join", "append") for x in (prep_steps or [])):
         use_cache = False
     file_stat = None
     from .relative_dates import has_relative

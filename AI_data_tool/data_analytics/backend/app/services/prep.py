@@ -70,7 +70,25 @@ MATERIALIZE_MAX_ROWS = 2_000_000
 _AGGS = {"sum": "sum", "avg": "mean", "mean": "mean", "min": "min", "max": "max",
          "count": "count", "median": "median", "nunique": "nunique"}
 _CASES = {"upper", "lower", "title"}
-_FILL_METHODS = {"value", "zero", "mean", "median", "mode", "ffill"}
+_FILL_METHODS = {"value", "zero", "mean", "median", "mode", "ffill", "bfill", "interpolate"}
+_DEDUPE_KEEP = {"first", "last", "none"}
+# ── Data preparation for analysis and modelling (2026-09-25) ────────────────
+_OUTLIER_METHODS = {"iqr", "zscore"}
+_OUTLIER_ACTIONS = {"flag", "remove", "cap"}
+_NORMALIZE_METHODS = {"minmax", "zscore", "log"}
+_ENCODE_METHODS = {"onehot", "label"}
+_DATE_PARTS = {"year", "quarter", "month", "day", "weekday", "hour", "dayofyear", "week"}
+_BALANCE_METHODS = {"undersample", "oversample"}
+#: One-hot makes one column per category; past this it is a different problem
+#: (an id, a free-text field) and a label code is the honest encoding.
+MAX_ONEHOT_CATEGORIES = 50
+MAX_PCA_COMPONENTS = 10
+PARTITION_TEST = "Test"
+
+
+def encoded_column(column: str, category) -> str:
+    """The one-hot column for `category`: region_North."""
+    return f"{column}_{category}"
 _RETYPES = {"numeric", "text", "datetime"}
 _JOIN_HOW = {"left", "right", "inner", "full"}
 _SORT_DIRS = {"asc", "desc"}
@@ -122,6 +140,10 @@ def _str(v) -> bool:
 
 def _strlist(v) -> bool:
     return isinstance(v, list) and all(_str(x) for x in v)
+
+
+def _num(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
 def validate_prep_steps(steps: list, known_columns: set[str],
@@ -223,17 +245,124 @@ def validate_prep_steps(steps: list, known_columns: set[str],
         elif kind == "dedupe":
             for c in s.get("subset") or []:
                 has(c, i)
+            _require(s.get("keep", "first") in _DEDUPE_KEEP,
+                     f"step {i + 1}: keep must be one of {sorted(_DEDUPE_KEEP)}")
         elif kind == "partition":
             _require(_str(s.get("name")), f"step {i + 1}: partition needs a column name")
             _require(s["name"] not in cols, f"step {i + 1}: '{s['name']}' already exists")
             pct = s.get("train_pct")
             _require(isinstance(pct, (int, float)) and not isinstance(pct, bool) and 1 <= pct <= 99,
                      f"step {i + 1}: train_pct must be between 1 and 99")
+            test = s.get("test_pct", 0) or 0
+            _require(_num(test) and 0 <= test <= 98 and pct + test <= 100,
+                     f"step {i + 1}: test_pct must be 0-98 and leave train_pct + test_pct at most 100")
             seed = s.get("seed", 42)
             _require(isinstance(seed, int) and not isinstance(seed, bool), f"step {i + 1}: seed must be a whole number")
             if s.get("key"):
                 has(s["key"], i)
+            if s.get("stratify"):
+                has(s["stratify"], i)
             cols |= {s["name"]}
+        elif kind == "outliers":
+            cs = s.get("columns")
+            _require(_strlist(cs) and bool(cs), f"step {i + 1}: outliers needs at least one column")
+            for c in cs:
+                has(c, i)
+            _require(s.get("method", "iqr") in _OUTLIER_METHODS,
+                     f"step {i + 1}: method must be one of {sorted(_OUTLIER_METHODS)}")
+            _require(s.get("k") is None or (_num(s["k"]) and s["k"] > 0), f"step {i + 1}: k must be a positive number")
+            act = s.get("action", "flag")
+            _require(act in _OUTLIER_ACTIONS, f"step {i + 1}: action must be one of {sorted(_OUTLIER_ACTIONS)}")
+            if act == "flag":
+                flag = s.get("name") or "_Outlier_"
+                _require(_str(flag) and flag not in cols, f"step {i + 1}: '{flag}' already exists")
+                cols |= {flag}
+        elif kind == "normalize":
+            cs = s.get("columns")
+            _require(_strlist(cs) and bool(cs), f"step {i + 1}: normalize needs at least one column")
+            for c in cs:
+                has(c, i)
+            _require(s.get("method") in _NORMALIZE_METHODS,
+                     f"step {i + 1}: method must be one of {sorted(_NORMALIZE_METHODS)}")
+            suffix = s.get("suffix", "")
+            _require(isinstance(suffix, str), f"step {i + 1}: suffix must be text")
+            if suffix:
+                for c in cs:
+                    _require(c + suffix not in cols, f"step {i + 1}: '{c + suffix}' already exists")
+                    cols.add(c + suffix)
+        elif kind == "encode":
+            _require(_str(s.get("column")), f"step {i + 1}: encode needs a column")
+            has(s["column"], i)
+            m = s.get("method")
+            _require(m in _ENCODE_METHODS, f"step {i + 1}: method must be one of {sorted(_ENCODE_METHODS)}")
+            cats = s.get("categories")
+            _require(cats is None or (isinstance(cats, list) and all(isinstance(x, (str, int, float))
+                                                                     and not isinstance(x, bool) for x in cats)),
+                     f"step {i + 1}: categories must be a list of values")
+            if m == "onehot":
+                # The new columns must be known BEFORE the data is read, so later
+                # steps (and every field picker) can name them -- hence an explicit
+                # list, which also keeps a model's inputs fixed across refreshes.
+                _require(bool(cats) and len(cats) <= MAX_ONEHOT_CATEGORIES,
+                         f"step {i + 1}: one-hot needs 1-{MAX_ONEHOT_CATEGORIES} categories")
+                new = [encoded_column(s["column"], x) for x in cats]
+            else:
+                new = [f"{s['column']}_code"]
+            for n in new:
+                _require(n not in cols, f"step {i + 1}: '{n}' already exists")
+            cols |= set(new)
+            if s.get("drop_original"):
+                cols.discard(s["column"])
+        elif kind == "date_parts":
+            _require(_str(s.get("column")), f"step {i + 1}: date_parts needs a column")
+            has(s["column"], i)
+            parts = s.get("parts")
+            _require(_strlist(parts) and bool(parts) and set(parts) <= _DATE_PARTS,
+                     f"step {i + 1}: parts must be some of {sorted(_DATE_PARTS)}")
+            for p in parts:
+                n = f"{s['column']}_{p}"
+                _require(n not in cols, f"step {i + 1}: '{n}' already exists")
+                cols.add(n)
+        elif kind == "feature_select":
+            for key, lo, hi in (("max_missing_pct", 0, 100), ("min_variance", 0, None), ("max_correlation", 0, 1)):
+                v = s.get(key)
+                _require(v is None or (_num(v) and v >= lo and (hi is None or v <= hi)),
+                         f"step {i + 1}: {key} is out of range")
+            _require(any(s.get(k) is not None for k in ("max_missing_pct", "min_variance", "max_correlation")),
+                     f"step {i + 1}: feature_select needs at least one rule")
+            for c in s.get("keep") or []:
+                has(c, i)
+            # Which columns go is only known once the data is read, so `cols` is
+            # left as is: a later step naming a dropped column degrades softly.
+        elif kind == "pca":
+            cs = s.get("columns")
+            _require(_strlist(cs) and len(cs) >= 2, f"step {i + 1}: pca needs at least two columns")
+            for c in cs:
+                has(c, i)
+            n = s.get("n", 2)
+            _require(isinstance(n, int) and not isinstance(n, bool) and 1 <= n <= min(len(cs), MAX_PCA_COMPONENTS),
+                     f"step {i + 1}: n must be 1-{min(len(cs), MAX_PCA_COMPONENTS)}")
+            prefix = s.get("prefix") or "PC"
+            _require(_str(prefix), f"step {i + 1}: prefix must be text")
+            for j in range(1, n + 1):
+                _require(f"{prefix}{j}" not in cols, f"step {i + 1}: '{prefix}{j}' already exists")
+                cols.add(f"{prefix}{j}")
+        elif kind == "balance":
+            _require(_str(s.get("column")), f"step {i + 1}: balance needs a class column")
+            has(s["column"], i)
+            _require(s.get("method") in _BALANCE_METHODS,
+                     f"step {i + 1}: method must be one of {sorted(_BALANCE_METHODS)}")
+            seed = s.get("seed", 42)
+            _require(isinstance(seed, int) and not isinstance(seed, bool), f"step {i + 1}: seed must be a whole number")
+        elif kind == "append":
+            _require(isinstance(s.get("dataset_id"), int), f"step {i + 1}: append needs a dataset_id")
+            other_cols = (join_columns or {}).get(s["dataset_id"])
+            if other_cols is not None:
+                cols |= set(other_cols)
+            src = s.get("source_column")
+            if src:
+                _require(_str(src) and src not in cols, f"step {i + 1}: '{src}' already exists")
+                cols.add(src)
         elif kind == "edit_cells":
             _require(_str(s.get("key_column")), f"step {i + 1}: edit_cells needs a key_column")
             _require(_str(s.get("column")), f"step {i + 1}: edit_cells needs a column")
@@ -309,6 +438,21 @@ def prep_added_columns(steps: list | None, columns: dict[str, str],
             for a in s.get("aggregations") or []:
                 if isinstance(a, dict):
                     dtype.setdefault(a.get("as") or a.get("column"), "numeric")
+        elif k == "normalize" and s.get("suffix"):
+            for c in s.get("columns") or []:
+                dtype.setdefault(c + s["suffix"], "numeric")
+        elif k == "encode":
+            if s.get("method") == "onehot":
+                for cat in s.get("categories") or []:
+                    dtype.setdefault(encoded_column(s.get("column"), cat), "numeric")
+            else:
+                dtype.setdefault(f"{s.get('column')}_code", "numeric")
+        elif k == "date_parts":
+            for p in s.get("parts") or []:
+                dtype.setdefault(f"{s.get('column')}_{p}", "numeric")
+        elif k == "pca":
+            for j in range(1, int(s.get("n", 2)) + 1):
+                dtype.setdefault(f"{s.get('prefix') or 'PC'}{j}", "numeric")
     return [(n, dtype.get(n, "categorical")) for n in sorted(final - set(columns))]
 
 
@@ -373,14 +517,192 @@ def partition_column(df: pd.DataFrame, s: dict) -> pd.DataFrame:
     base = df[key] if key and key in df.columns else pd.Series(df.index, index=df.index)
     hash_key = f"{int(s.get('seed', 42)):016d}"[-16:]
     h = pd.util.hash_pandas_object(base.astype(str), index=False, hash_key=hash_key)
-    u = h.to_numpy(dtype="uint64") / float(2 ** 64)
-    labels = np.where(u < float(s["train_pct"]) / 100.0, PARTITION_TRAIN, PARTITION_VALIDATION)
+    u = pd.Series(h.to_numpy(dtype="uint64") / float(2 ** 64), index=df.index)
+    strat = s.get("stratify")
+    if strat and strat in df.columns:
+        # Stratified: within each class, rows are placed by the RANK of their
+        # hash, so every class splits in the stated proportions (a rare class
+        # can no longer land wholly in Training) -- still a property of the
+        # rows, not of a random draw.
+        groups = df[strat].astype(str).where(df[strat].notna(), "\0")
+        u = (u.groupby(groups).rank(method="first") - 0.5) / groups.map(groups.value_counts())
+    train = float(s["train_pct"]) / 100.0
+    test = float(s.get("test_pct") or 0) / 100.0
+    # Training keeps the same rows whether or not a Test share is added: Test is
+    # carved from the TOP of the range, Validation is what lies between.
+    labels = np.where(u < train, PARTITION_TRAIN,
+                      np.where(u >= 1.0 - test, PARTITION_TEST, PARTITION_VALIDATION)) if test \
+        else np.where(u < train, PARTITION_TRAIN, PARTITION_VALIDATION)
     return df.assign(**{name: labels})
+
+
+# ── Preparation for analysis and modelling ──────────────────────────────────
+# Each works on the frame it is given, which is already the VIEWER's
+# RLS-filtered rows: a bound, a mean or a sample is computed over what this
+# reader may see, never over rows they may not.
+
+def _outlier_bounds(col: pd.Series, method: str, k) -> tuple[float, float] | None:
+    x = pd.to_numeric(col, errors="coerce").dropna()
+    if x.empty:
+        return None
+    if method == "zscore":
+        k = 3.0 if k is None else float(k)
+        sd = float(x.std(ddof=0))
+        if not sd:
+            return None
+        m = float(x.mean())
+        return m - k * sd, m + k * sd
+    k = 1.5 if k is None else float(k)
+    q1, q3 = float(x.quantile(0.25)), float(x.quantile(0.75))
+    return q1 - k * (q3 - q1), q3 + k * (q3 - q1)
+
+
+def _outliers(df: pd.DataFrame, s: dict) -> pd.DataFrame:
+    method, k, act = s.get("method", "iqr"), s.get("k"), s.get("action", "flag")
+    out = df
+    mask = pd.Series(False, index=df.index)
+    for c in s.get("columns") or []:
+        if c not in out.columns or not pd.api.types.is_numeric_dtype(out[c]) or out[c].dtype == bool:
+            continue
+        b = _outlier_bounds(out[c], method, k)
+        if b is None:
+            continue
+        if act == "cap":
+            out = out.assign(**{c: out[c].clip(lower=b[0], upper=b[1])})
+        else:
+            mask |= (out[c] < b[0]) | (out[c] > b[1])
+    if act == "remove":
+        return out[~mask]
+    if act == "flag":
+        return out.assign(**{s.get("name") or "_Outlier_": mask})
+    return out
+
+
+def _normalize(df: pd.DataFrame, s: dict) -> pd.DataFrame:
+    import numpy as np
+    out, suffix, m = df, s.get("suffix", ""), s["method"]
+    for c in s.get("columns") or []:
+        if c not in out.columns or not pd.api.types.is_numeric_dtype(out[c]) or out[c].dtype == bool:
+            continue
+        x = out[c].astype(float)
+        if m == "minmax":
+            lo, hi = x.min(), x.max()
+            v = (x - lo) / (hi - lo) if pd.notna(lo) and hi != lo else x * 0.0
+        elif m == "zscore":
+            sd = x.std(ddof=0)
+            v = (x - x.mean()) / sd if sd else x * 0.0
+        else:  # log: log(1 + x); x <= -1 has no log and becomes blank, not an error
+            v = np.log1p(x.where(x > -1))
+        out = out.assign(**{c + suffix: v})
+    return out
+
+
+def _encode(df: pd.DataFrame, s: dict) -> pd.DataFrame:
+    c = s["column"]
+    if c not in df.columns:
+        return df
+    text = df[c].map(lambda v: None if pd.isna(v) else str(v))
+    if s["method"] == "onehot":
+        out = df.assign(**{encoded_column(c, cat): (text == str(cat)).astype(int) for cat in s["categories"]})
+    else:
+        order = [str(x) for x in (s.get("categories") or sorted(text.dropna().unique()))]
+        code = {v: i for i, v in enumerate(order)}
+        out = df.assign(**{f"{c}_code": text.map(code).astype("Int64")})
+    return out.drop(columns=[c]) if s.get("drop_original") else out
+
+
+def _date_parts(df: pd.DataFrame, s: dict) -> pd.DataFrame:
+    c = s["column"]
+    if c not in df.columns:
+        return df
+    dt = pd.to_datetime(df[c], errors="coerce")
+    get = {"year": lambda d: d.dt.year, "quarter": lambda d: d.dt.quarter, "month": lambda d: d.dt.month,
+           "day": lambda d: d.dt.day, "weekday": lambda d: d.dt.weekday, "hour": lambda d: d.dt.hour,
+           "dayofyear": lambda d: d.dt.dayofyear, "week": lambda d: d.dt.isocalendar().week}
+    # Int64, not float: a blank date must not turn every year into 2024.0.
+    return df.assign(**{f"{c}_{p}": get[p](dt).astype("Int64") for p in s["parts"]})
+
+
+def _feature_select(df: pd.DataFrame, s: dict) -> pd.DataFrame:
+    keep = set(s.get("keep") or [])
+    drop: list[str] = []
+    candidates = [c for c in df.columns if c not in keep]
+    if s.get("max_missing_pct") is not None:
+        drop += [c for c in candidates if df[c].isna().mean() * 100 > s["max_missing_pct"]]
+    numeric = [c for c in candidates if c not in drop and pd.api.types.is_numeric_dtype(df[c]) and df[c].dtype != bool]
+    if s.get("min_variance") is not None:
+        drop += [c for c in candidates if c not in drop and df[c].nunique(dropna=True) <= 1]
+        drop += [c for c in numeric if c not in drop and float(df[c].var(ddof=0) or 0) <= s["min_variance"]]
+    if s.get("max_correlation") is not None:
+        rest = [c for c in numeric if c not in drop]
+        if len(rest) > 1:
+            corr = df[rest].corr().abs()
+            for j, c in enumerate(rest):          # keep the first of each correlated pair
+                if c not in drop and any(corr.loc[p, c] > s["max_correlation"]
+                                         for p in rest[:j] if p not in drop):
+                    drop.append(c)
+    return df.drop(columns=list(dict.fromkeys(drop)))
+
+
+def _pca(df: pd.DataFrame, s: dict) -> pd.DataFrame:
+    import numpy as np
+    cols = [c for c in s["columns"] if c in df.columns and pd.api.types.is_numeric_dtype(df[c])]
+    prefix, n = s.get("prefix") or "PC", int(s.get("n", 2))
+    if len(cols) < 2:
+        return df
+    x = df[cols].astype(float)
+    ok = x.notna().all(axis=1)
+    sd = x[ok].std(ddof=0).replace(0, 1.0)
+    z = ((x[ok] - x[ok].mean()) / sd).to_numpy()
+    n = min(n, len(cols), int(ok.sum()))
+    if n < 1:
+        return df
+    _u, _s, vt = np.linalg.svd(z, full_matrices=False)
+    # A component's sign is arbitrary in SVD; fix it (largest loading positive)
+    # so the same data always gives the same scores.
+    vt = vt * np.sign(vt[np.arange(vt.shape[0]), np.abs(vt).argmax(axis=1)])[:, None]
+    scores = z @ vt[:n].T
+    out = df.copy()
+    for j in range(n):
+        col = pd.Series(np.nan, index=df.index)
+        col[ok] = scores[:, j]
+        out[f"{prefix}{j + 1}"] = col
+    return out
+
+
+def _balance(df: pd.DataFrame, s: dict) -> pd.DataFrame:
+    import numpy as np
+    c = s["column"]
+    if c not in df.columns:
+        return df
+    known = df[df[c].notna()]
+    counts = known[c].value_counts()
+    if len(counts) < 2:
+        return df
+    rng = np.random.default_rng(int(s.get("seed", 42)))
+    target = int(counts.min() if s["method"] == "undersample" else counts.max())
+    parts = []
+    for cls in sorted(counts.index, key=str):     # a fixed order: same seed, same rows
+        rows = known[known[c] == cls]
+        if s["method"] == "undersample":
+            pick = np.sort(rng.choice(len(rows), size=target, replace=False))
+            parts.append(rows.iloc[pick])
+        else:
+            extra = rng.choice(len(rows), size=target - len(rows), replace=True)
+            parts.append(pd.concat([rows, rows.iloc[extra]]))
+    # Rows with no class are left as they were: balancing cannot place them.
+    return pd.concat(parts + [df[df[c].isna()]], ignore_index=True)
+
+
+#: Step kinds that read ANOTHER dataset: both are loaded and secured as the
+#: caller by resolve_join_frames, and both must pass the read check.
+OTHER_DATASET_KINDS = ("join", "append")
 
 
 def collect_join_dataset_ids(steps: list[dict] | None) -> list[int]:
     return [s["dataset_id"] for s in (steps or [])
-            if isinstance(s, dict) and s.get("kind") == "join" and isinstance(s.get("dataset_id"), int)]
+            if isinstance(s, dict) and s.get("kind") in OTHER_DATASET_KINDS
+            and isinstance(s.get("dataset_id"), int)]
 
 
 def _apply_one(df: pd.DataFrame, s: dict, aux_frames: dict[int, pd.DataFrame] | None = None) -> pd.DataFrame:
@@ -401,6 +723,33 @@ def _apply_one(df: pd.DataFrame, s: dict, aux_frames: dict[int, pd.DataFrame] | 
         how = {"full": "outer"}.get(s["how"], s["how"])
         return df.merge(other, how=how, left_on=[l for l, _ in pairs],
                         right_on=[r for _, r in pairs], suffixes=("", "_2"))
+    if kind == "append":
+        # Rows of another dataset stacked under these, matched by column NAME
+        # (a column only one side has is blank on the other) -- how the same
+        # table from two databases, or two months' files, become one dataset.
+        other = (aux_frames or {}).get(s.get("dataset_id"))
+        if other is None:
+            return df
+        out = pd.concat([df, other], ignore_index=True, sort=False)
+        src = s.get("source_column")
+        if src:
+            out[src] = [s.get("base_label") or "this dataset"] * len(df) + \
+                       [s.get("label") or f"dataset {s['dataset_id']}"] * len(other)
+        return out
+    if kind == "outliers":
+        return _outliers(df, s)
+    if kind == "normalize":
+        return _normalize(df, s)
+    if kind == "encode":
+        return _encode(df, s)
+    if kind == "date_parts":
+        return _date_parts(df, s)
+    if kind == "feature_select":
+        return _feature_select(df, s)
+    if kind == "pca":
+        return _pca(df, s)
+    if kind == "balance":
+        return _balance(df, s)
     if kind == "sort":
         by = [(e.get("column"), e.get("dir", "asc")) for e in (s.get("columns") or [])
               if isinstance(e, dict) and e.get("column") in df.columns]
@@ -411,7 +760,10 @@ def _apply_one(df: pd.DataFrame, s: dict, aux_frames: dict[int, pd.DataFrame] | 
         return df.sort_values(by=cols, ascending=ascending, kind="mergesort", na_position="last")
     if kind == "dedupe":
         subset = [c for c in (s.get("subset") or []) if c in df.columns] or None
-        return df.drop_duplicates(subset=subset, keep="first")
+        keep = s.get("keep", "first")
+        # "none": drop EVERY copy of a duplicated row -- the rows no one can
+        # say which of is right.
+        return df.drop_duplicates(subset=subset, keep=False if keep == "none" else keep)
     if kind == "partition":
         return partition_column(df, s)
     if kind == "drop_duplicates":
@@ -444,6 +796,13 @@ def _apply_one(df: pd.DataFrame, s: dict, aux_frames: dict[int, pd.DataFrame] | 
             if modes.empty:
                 return df
             fill = modes.iloc[0]
+        elif m == "bfill":
+            return df.assign(**{c: col.bfill()})
+        elif m == "interpolate":
+            # Straight line between the known neighbours; numbers only.
+            if not pd.api.types.is_numeric_dtype(col):
+                return df
+            return df.assign(**{c: col.interpolate(limit_direction="both")})
         else:  # ffill
             return df.assign(**{c: col.ffill()})
         return df.assign(**{c: col.fillna(fill)})
@@ -627,7 +986,7 @@ async def resolve_join_frames(db, user, steps: list[dict] | None) -> dict[int, "
         present = [c for c in (denied or []) if c in frame.columns]
         if present:
             frame = frame.drop(columns=present)
-        own = [x for x in prep_steps_of(ds) if x.get("kind") != "join"]
+        own = [x for x in prep_steps_of(ds) if x.get("kind") not in OTHER_DATASET_KINDS]
         frame = await asyncio.to_thread(apply_prep_steps, frame, own)
         out[sid] = frame
     return out

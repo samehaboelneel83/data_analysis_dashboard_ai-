@@ -73,7 +73,7 @@ async def _without_denied_columns(db: AsyncSession, current_user: User, ds: Data
     try:
         from ..services.prep import prep_added_columns, prep_steps_of
         from ..schemas.schemas import DatasetColumnOut
-        steps = [s for s in prep_steps_of(ds) if not (isinstance(s, dict) and s.get("kind") == "join")]
+        steps = [s for s in prep_steps_of(ds) if not (isinstance(s, dict) and s.get("kind") in ("join", "append"))]
         added = prep_added_columns(steps, {c.name: c.dtype for c in ds.columns})
         item.columns = item.columns + [
             DatasetColumnOut(id=-(i + 1), name=n, dtype=t) for i, (n, t) in enumerate(added) if n not in denied]
@@ -2318,7 +2318,7 @@ async def set_prep_steps(dataset_id: int, steps: list[dict], db: AsyncSession = 
     # apply time degrades soft, so save time is where a bad reference is caught.
     join_columns: dict[int, set[str]] = {}
     for st in steps:
-        if isinstance(st, dict) and st.get("kind") == "join" and isinstance(st.get("dataset_id"), int):
+        if isinstance(st, dict) and st.get("kind") in ("join", "append") and isinstance(st.get("dataset_id"), int):
             other = await db.get(Dataset, st["dataset_id"])
             if other is None or other.org_id != current_user.org_id:
                 raise HTTPException(400, f"joined dataset {st['dataset_id']} does not exist")
@@ -2519,7 +2519,7 @@ async def _validated_join_columns(
     """
     join_columns: dict[int, set[str]] = {}
     for st in steps:
-        if not (isinstance(st, dict) and st.get("kind") == "join"
+        if not (isinstance(st, dict) and st.get("kind") in ("join", "append")
                 and isinstance(st.get("dataset_id"), int)):
             continue
         other = await db.get(Dataset, st["dataset_id"])
