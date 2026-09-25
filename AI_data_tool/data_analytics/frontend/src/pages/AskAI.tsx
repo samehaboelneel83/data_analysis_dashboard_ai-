@@ -1,17 +1,25 @@
-import { useEffect, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
-import { Bot, Pencil, Plus, Trash2 } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
+import { Bot, History } from 'lucide-react'
 import EmptyState from '../components/ui/EmptyState'
 import ChatPane from '../components/chat/ChatPane'
+import Composer from '../components/chat/Composer'
 import { agentApi, datasetsApi, dataSourcesApi } from '../services/api'
-import type { AgentConversation } from '../services/api'
+import type { AgentConversation, DatasetColumn } from '../services/api'
 import { useT } from '../i18n'
+import AskIllustration from './ask/AskIllustration'
+import DataPicker, { type PickerItem } from './ask/DataPicker'
+import HistoryPanel from './ask/HistoryPanel'
+import { connectionSuggestions, datasetSuggestions } from './ask/suggestions'
+import './ask/ask.css'
 
 /**
- * The agent's own page: a scope picker (which dataset, or which live
- * connection, to ask about), the threads already held about that scope, and
- * the pane.
+ * The agent's own page. Two states:
+ *
+ *  - No scope yet: a hero that says what this page does, Step 1 (a searchable
+ *    picker of datasets and live connections) and Step 2 (the question box,
+ *    shown but locked, so the order of things is obvious at a glance).
+ *  - A scope: the threads held about it (History) beside the chat.
  *
  * The scope is in the URL (`/ask?dataset=32`, `/ask?source=3`) so a question
  * about a specific dataset can be LINKED to -- DatasetDetail's "Ask about
@@ -20,9 +28,7 @@ import { useT } from '../i18n'
  * The page owns the conversation list. It shows the user's threads for the
  * current scope, newest first, opens the newest by default, and hands the
  * chosen id to the pane (`conversationId`); "New chat" hands it null and the
- * pane reports back the thread its first question creates. Before this the
- * pane silently resumed the newest server thread and could not show it, so
- * every visit looked like a blank slate over a growing history.
+ * pane reports back the thread its first question creates.
  */
 
 function inScope(c: AgentConversation, sourceId: number | null, datasetId: number | null): boolean {
@@ -31,17 +37,14 @@ function inScope(c: AgentConversation, sourceId: number | null, datasetId: numbe
   return false
 }
 
-function when(iso?: string | null): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  return isNaN(d.getTime()) ? '' : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-}
+const FOLD_KEY = 'datalytics.ask.historyFolded'
+const readFold = () => { try { return localStorage.getItem(FOLD_KEY) === '1' } catch { return false } }
 
 export default function AskAI() {
   const t = useT()
   const [params, setParams] = useSearchParams()
-  const [datasets, setDatasets] = useState<{ id: number; name: string }[]>([])
-  const [sources, setSources] = useState<{ id: number; name: string }[]>([])
+  const [items, setItems] = useState<PickerItem[]>([])
+  const [columnsById, setColumnsById] = useState<Record<number, DatasetColumn[]>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -49,6 +52,8 @@ export default function AskAI() {
   // undefined = not decided yet (list still loading); null = a fresh thread.
   const [selected, setSelected] = useState<number | null | undefined>(undefined)
   const [editing, setEditing] = useState<{ id: number; title: string } | null>(null)
+  const [folded, setFolded] = useState(readFold)
+  const [drawer, setDrawer] = useState(false)
 
   const datasetId = params.get('dataset') ? Number(params.get('dataset')) : null
   const sourceId = params.get('source') ? Number(params.get('source')) : null
@@ -64,17 +69,39 @@ export default function AskAI() {
         // DirectQuery datasets keep their rows in the connection, so the
         // agent's dataset mode -- which answers out of a file frame -- has
         // nothing to read and the API refuses them with a 400. The connection
-        // is the live-data path and is already listed below, so leaving these
-        // out removes a dead choice rather than a capability.
-        setDatasets(ds.filter(d => d.mode !== 'directquery' && d.filename)
-                      .map(d => ({ id: d.id, name: d.name })))
-        setSources(srcs.map(s => ({ id: s.id, name: s.name })))
+        // is the live-data path and is already listed, so leaving these out
+        // removes a dead choice rather than a capability.
+        const usable = ds.filter(d => d.mode !== 'directquery' && d.filename)
+        setItems([
+          ...usable.map(d => ({
+            key: `d:${d.id}`, kind: 'dataset' as const, name: d.name,
+            rows: d.row_count ?? null, cols: d.col_count ?? null, updated: d.updated_at ?? null,
+          })),
+          ...srcs.map(s => ({
+            key: `s:${s.id}`, kind: 'source' as const, name: s.name,
+            sourceType: s.type ?? null, updated: s.created_at ?? null,
+          })),
+        ])
+        const cols: Record<number, DatasetColumn[]> = {}
+        for (const d of usable) if (Array.isArray(d.columns) && d.columns.length) cols[d.id] = d.columns
+        setColumnsById(cols)
       })
       // A failed dataset list must not read as "no data yet" -- an error
       // dressed as an empty state is the defect, not a degradation.
       .catch((e: any) => setError(e?.response?.data?.detail ?? t('ask.loadFailed')))
       .finally(() => setLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // The list may carry columns; when it doesn't, one read of the dataset does.
+  useEffect(() => {
+    if (datasetId == null || columnsById[datasetId] || typeof datasetsApi.get !== 'function') return
+    let alive = true
+    datasetsApi.get(datasetId)
+      .then(d => { if (alive && d?.columns) setColumnsById(m => ({ ...m, [datasetId]: d.columns })) })
+      .catch(() => { /* suggestions fall back to generic ones */ })
+    return () => { alive = false }
+  }, [datasetId, columnsById])
 
   // The threads for this scope, newest first; the newest opens by default.
   useEffect(() => {
@@ -94,8 +121,8 @@ export default function AskAI() {
   }, [scopeKey, sourceId, datasetId])
 
   const choose = (value: string) => {
-    // value is "d:32" or "s:3" or "" -- one select, two scope kinds, because
-    // the question "what am I asking about?" has one answer, not two fields.
+    // "d:32" or "s:3" -- one picker, two scope kinds, because the question
+    // "what am I asking about?" has one answer, not two fields.
     if (!value) { setParams({}, { replace: true }); return }
     const [kind, id] = value.split(':')
     setParams(kind === 's' ? { source: id } : { dataset: id }, { replace: true })
@@ -141,124 +168,78 @@ export default function AskAI() {
     if (selected === c.id) setSelected(null)
   }
 
-  const current = scopeKey
-  const scoped = sourceId != null || datasetId != null
+  const toggleFold = () => setFolded(f => {
+    try { localStorage.setItem(FOLD_KEY, f ? '0' : '1') } catch { /* a convenience */ }
+    return !f
+  })
 
-  const iconBtn: React.CSSProperties = {
-    background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)',
-    padding: 2, display: 'inline-flex', borderRadius: 4,
+  const scoped = sourceId != null || datasetId != null
+  const columns = datasetId != null ? columnsById[datasetId] : undefined
+  const suggestions = useMemo(
+    () => (sourceId != null ? connectionSuggestions(t) : datasetSuggestions(columns, t)),
+    [sourceId, columns, t],
+  )
+  const noData = !loading && !error && items.length === 0
+
+  if (!scoped) {
+    return (
+      <div className="dl-ask dl-ask--hero">
+        {error && <div role="alert" className="dl-ask__error">{error}</div>}
+        {noData ? (
+          <EmptyState icon={Bot} title={t('ask.noData')}
+            action={<Link to="/upload" className="btn btn-primary">{t('ask.uploadDataset')}</Link>} />
+        ) : (
+          <section className="dl-ask__hero" aria-labelledby="dl-ask-title">
+            <AskIllustration className="dl-ask__art" />
+            <h1 id="dl-ask-title" className="dl-ask__title">{t('ask.hero.title')}</h1>
+            <p className="dl-ask__sub">{t('ask.hero.sub')}</p>
+            <div className="dl-ask__steps">
+              <div className="dl-ask__step">
+                <span className="dl-ask__step-label"><b aria-hidden>1</b>{t('ask.step1')}</span>
+                <DataPicker items={items} value="" onChoose={choose} size="hero" loading={loading} />
+              </div>
+              <div className="dl-ask__step dl-ask__step--locked">
+                <span className="dl-ask__step-label"><b aria-hidden>2</b>{t('ask.step2')}</span>
+                <Composer value="" onChange={() => {}} onSend={() => {}} locked lockedHint={t('ask.lockedHint')} />
+                <p className="dl-ask__step-hint">{t('ask.pick')}</p>
+              </div>
+            </div>
+          </section>
+        )}
+      </div>
+    )
   }
 
   return (
-    <div style={{ maxWidth: 1200, display: 'flex', flexDirection: 'column',
-      height: '100%', boxSizing: 'border-box' }}>
-      <h1 className="dl-page-title" style={{ marginBottom: 4 }}>{t('nav.askAi')}</h1>
-      <p className="dl-page-head__sub" style={{ marginBottom: 16, maxWidth: 720 }}>
-        {t('ask.subtitle')}
-      </p>
+    <div className="dl-ask dl-ask--work">
+      <HistoryPanel
+        conversations={conversations} selected={selected}
+        onSelect={id => { setSelected(id); setDrawer(false) }}
+        onNew={() => { setSelected(null); setEditing(null); setDrawer(false) }}
+        editing={editing} onEdit={setEditing} onSave={() => void saveTitle()}
+        onCancelEdit={() => setEditing(null)} onDelete={c => void remove(c)}
+        collapsed={folded} onToggleCollapsed={toggleFold}
+        mobileOpen={drawer} onCloseMobile={() => setDrawer(false)} />
 
-      <div style={{ marginBottom: 16 }}>
-        <select value={current} onChange={e => choose(e.target.value)} aria-label={t('ask.scope')}
-          style={{ minWidth: 300, minHeight: 36 }}>
-          <option value="">{t('ask.choose')}</option>
-          {datasets.length > 0 && (
-            <optgroup label={t('nav.datasets')}>
-              {datasets.map(d => <option key={`d${d.id}`} value={`d:${d.id}`}>{d.name}</option>)}
-            </optgroup>
-          )}
-          {sources.length > 0 && (
-            <optgroup label={t('ask.liveConnections')}>
-              {sources.map(s => <option key={`s${s.id}`} value={`s:${s.id}`}>{s.name}</option>)}
-            </optgroup>
-          )}
-        </select>
-      </div>
-
-      {error && (
-        <div role="alert" className="card" style={{ padding: 16, color: 'var(--dl-error-text)',
-          background: 'var(--dl-error-bg)', borderColor: 'var(--dl-error-line)' }}>{error}</div>
-      )}
-
-      {!scoped && !loading && !error && (
-        datasets.length === 0 && sources.length === 0
-          ? <EmptyState icon={Bot} title={t('ask.noData')}
-              action={<Link to="/upload" className="btn btn-primary">{t('ask.uploadDataset')}</Link>} />
-          : <EmptyState icon={Bot} title={t('ask.pick')}
-              description={t('ask.pickHint')} />
-      )}
-
-      {scoped && (
-        <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 16 }}>
-          <aside style={{ width: 240, flexShrink: 0, display: 'flex', flexDirection: 'column',
-            gap: 8, minHeight: 0 }}>
-            <button onClick={() => { setSelected(null); setEditing(null) }}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 600,
-                padding: '7px 10px', borderRadius: 8, border: '1px solid var(--border)',
-                background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer' }}>
-              <Plus size={14} aria-hidden /> {t('ask.newChat')}
-            </button>
-            <ul aria-label={t('ask.conversations')} style={{ listStyle: 'none', margin: 0, padding: 0,
-              overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
-              {conversations.length === 0 && (
-                <li style={{ fontSize: 12, color: 'var(--muted)', padding: '6px 8px' }}>
-                  {t('ask.noConversations')}
-                </li>
-              )}
-              {conversations.map(c => (
-                <li key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 4,
-                  padding: '4px 6px', borderRadius: 6,
-                  background: selected === c.id ? 'var(--accent-soft)' : 'transparent' }}>
-                  {editing?.id === c.id ? (
-                    <input aria-label="Title" autoFocus value={editing.title}
-                      onChange={e => setEditing({ id: c.id, title: e.target.value })}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter') void saveTitle()
-                        if (e.key === 'Escape') setEditing(null)
-                      }}
-                      onBlur={() => void saveTitle()}
-                      style={{ flex: 1, minWidth: 0, fontSize: 12.5, padding: '4px 6px',
-                        border: '1px solid var(--accent)', borderRadius: 4,
-                        background: 'var(--surface)', color: 'var(--text)' }} />
-                  ) : (
-                    <button onClick={() => setSelected(c.id)} title={c.title}
-                      style={{ flex: 1, minWidth: 0, textAlign: 'start', background: 'none',
-                        border: 'none', cursor: 'pointer', padding: '4px 4px', fontSize: 12.5,
-                        color: selected === c.id ? 'var(--accent)' : 'var(--text)',
-                        fontWeight: selected === c.id ? 600 : 400, display: 'flex',
-                        flexDirection: 'column', gap: 1, overflow: 'hidden' }}>
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%' }}>
-                        {c.title}
-                      </span>
-                      {when(c.created_at) && (
-                        <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>{when(c.created_at)}</span>
-                      )}
-                    </button>
-                  )}
-                  <button aria-label={`Rename ${c.title}`} title={t('ask.rename')} style={iconBtn}
-                    onClick={() => setEditing({ id: c.id, title: c.title })}>
-                    <Pencil size={13} aria-hidden />
-                  </button>
-                  <button aria-label={`Delete ${c.title}`} title={t('ask.delete')} style={iconBtn}
-                    onClick={() => void remove(c)}>
-                    <Trash2 size={13} aria-hidden />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </aside>
-
-          <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column',
-            border: '1px solid var(--border)', borderRadius: 10, background: 'var(--surface)' }}>
-            {selected !== undefined && (
-              sourceId != null
-                ? <ChatPane key={scopeKey} dataSourceId={sourceId} conversationId={selected}
-                    onConversationCreated={created} />
-                : <ChatPane key={scopeKey} datasetIds={[datasetId as number]} conversationId={selected}
-                    onConversationCreated={created} />
-            )}
-          </div>
+      <section className="dl-ask__main">
+        <div className="dl-ask__bar">
+          <button type="button" className="dl-ask__hist-btn" onClick={() => setDrawer(true)}
+            aria-label={t('ask.hist.title')} aria-expanded={drawer}>
+            <History size={16} aria-hidden /> <span>{t('ask.hist.title')}</span>
+          </button>
+          <DataPicker items={items} value={scopeKey} onChoose={choose} size="compact" loading={loading} />
         </div>
-      )}
+        <div className="dl-ask__pane">
+          {selected !== undefined && (
+            sourceId != null
+              ? <ChatPane key={scopeKey} dataSourceId={sourceId} conversationId={selected}
+                  onConversationCreated={created} suggestions={suggestions} />
+              : <ChatPane key={scopeKey} datasetIds={[datasetId as number]} conversationId={selected}
+                  onConversationCreated={created} suggestions={suggestions}
+                  datasetColumns={columns?.map(c => c.name)} />
+          )}
+        </div>
+      </section>
     </div>
   )
 }

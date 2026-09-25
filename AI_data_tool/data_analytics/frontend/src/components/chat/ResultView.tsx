@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { useDirection } from '../../contexts/DirectionContext'
+import { useT } from '../../i18n'
+import { localDigits } from '../../lib/arabicFormats'
 import BarChartRenderer from '../report/chartRenderers/BarChartRenderer'
 import LineChartRenderer from '../report/chartRenderers/LineChartRenderer'
 import PieChartRenderer from '../report/chartRenderers/PieChartRenderer'
@@ -178,6 +180,9 @@ function ResultChart({ result, format, x, y }: {
   y?: string | null
 }) {
   const { rtl } = useDirection()
+  // On a phone, value labels over each bar collide; the axis and the rows
+  // under the chart carry the numbers there instead.
+  const narrow = typeof window !== 'undefined' && !!window.matchMedia?.('(max-width: 560px)').matches
   const rows = chartRows(result, x, y)
   const axes = chartColumns(result, x, y)
   const Renderer = format === 'bar' ? BarChartRenderer : format === 'line' ? LineChartRenderer : PieChartRenderer
@@ -189,8 +194,39 @@ function ResultChart({ result, format, x, y }: {
           are `{name, value}` by then -- without this the axes would read
           "name" and "value", which say nothing about this data. */}
       <Renderer rows={rows} data={{ rows }} rtl={rtl} broadcasts={false}
-        cfg={{ x_axis_label: axes.x, y_axis_label: axes.y }}
+        cfg={{ x_axis_label: axes.x, y_axis_label: axes.y, ...(narrow ? { data_labels: false } : {}) }}
         localSelected={null} onClickPoint={() => {}} />
+    </div>
+  )
+}
+
+/** What to draw when the server did not ask for a particular chart.
+ *  Only shapes that read unambiguously get a chart: one number is a KPI;
+ *  a label column with one numeric column and 2-24 rows is a bar chart, or a
+ *  line when the labels are dates. Everything else stays a grid. */
+export function autoChart(result: AgentResult): 'kpi' | 'bar' | 'line' | null {
+  const { columns, rows } = result
+  if (!columns.length || !rows.length) return null
+  // A partial result would chart as if it were the whole answer; show the grid.
+  if (result.truncated || rows.length < (Number(result.total) || 0)) return null
+  if (columns.length === 1 && rows.length === 1 && isNumberish(rows[0][0])) return 'kpi'
+  if (rows.length < 2 || rows.length > 24) return null
+  const numeric = columns.map((_, i) => rows.every(r => r[i] == null || isNumberish(r[i])))
+  const nameIdx = numeric.findIndex(n => !n)
+  const valueIdx = numeric.findIndex((n, i) => n && i !== nameIdx)
+  if (nameIdx < 0 || valueIdx < 0) return null
+  const dated = rows.every(r => typeof r[nameIdx] === 'string' && /^\d{4}-\d{2}/.test(r[nameIdx] as string))
+  return dated ? 'line' : 'bar'
+}
+
+function Kpi({ result }: { result: AgentResult }) {
+  const v = Number(result.rows[0][0])
+  const shown = Number.isInteger(v) ? v.toLocaleString('en-US')
+    : v.toLocaleString('en-US', { maximumFractionDigits: 2 })
+  return (
+    <div className="dl-kpi" data-testid="result-kpi">
+      <span className="dl-kpi__label">{result.columns[0].replace(/_/g, ' ')}</span>
+      <span className="dl-kpi__value" dir="ltr">{localDigits(shown)}</span>
     </div>
   )
 }
@@ -199,29 +235,37 @@ export default function ResultView({ results, presentation }: {
   results: AgentResult[]
   presentation?: AgentPresentation | null
 }) {
+  const t = useT()
   const [rowsOpen, setRowsOpen] = useState(false)
   const format = presentation?.format
   const chartable = (format === 'bar' || format === 'line' || format === 'pie') ? format : null
   return (
-    <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {results.map((r, i) => (
-        <div key={`${r.step}-${i}`}>
-          {chartable && r.total > 0 ? (
-            <>
-              <ResultChart result={r} format={chartable}
-                x={presentation?.x} y={presentation?.y} />
-              <button onClick={() => setRowsOpen(o => !o)}
-                style={{ background: 'none', border: 'none', padding: 0, marginTop: 4,
-                  color: 'var(--accent)', cursor: 'pointer', fontSize: 12 }}>
-                {rowsOpen ? 'Hide rows' : 'Show rows'}
-              </button>
-              {rowsOpen && <ResultGrid result={r} />}
-            </>
-          ) : (
-            <ResultGrid result={r} />
-          )}
-        </div>
-      ))}
+    <div className="dl-result">
+      {results.map((r, i) => {
+        const auto = chartable ? null : autoChart(r)
+        const drawn = chartable ?? (auto === 'bar' || auto === 'line' ? auto : null)
+        const showChart = !!drawn && r.total > 0
+        return (
+          <div key={`${r.step}-${i}`}>
+            {auto === 'kpi' && <Kpi result={r} />}
+            {showChart ? (
+              <>
+                <div className="dl-result__chart">
+                  <ResultChart result={r} format={drawn!}
+                    x={presentation?.x} y={presentation?.y} />
+                </div>
+                <button type="button" className="dl-result__rows-toggle" aria-expanded={rowsOpen}
+                  onClick={() => setRowsOpen(o => !o)}>
+                  {rowsOpen ? t('ask.hideRows') : t('ask.showRows', { n: localDigits(String(r.total)) })}
+                </button>
+                {rowsOpen && <ResultGrid result={r} />}
+              </>
+            ) : auto === 'kpi' ? null : (
+              <ResultGrid result={r} />
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }

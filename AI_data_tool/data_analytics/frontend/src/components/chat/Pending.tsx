@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useT, type MessageKey } from '../../i18n'
 
 /** What the chat shows between pressing Send and the answer arriving.
  *
@@ -30,7 +31,19 @@ function isDashboardRequest(question: string): boolean {
     /suggest|propose|recommend|build|create|make|design|give me|show me|i need|i want/.test(q)
 }
 
+/** The four stages a question goes through, shown as a checklist so the wait
+ *  has a shape. The server does not stream its progress, so the checklist
+ *  advances on typical timings and never claims to be done: the last stage
+ *  stays "in progress" until the answer actually arrives. */
+const STAGES: { key: MessageKey; at: number }[] = [
+  { key: 'ask.stage.understand', at: 0 },
+  { key: 'ask.stage.query', at: 2 },
+  { key: 'ask.stage.run', at: 5 },
+  { key: 'ask.stage.chart', at: 10 },
+]
+
 export default function Pending({ question }: { question: string }) {
+  const t = useT()
   const [seconds, setSeconds] = useState(0)
   const started = useRef(Date.now())
 
@@ -44,6 +57,7 @@ export default function Pending({ question }: { question: string }) {
 
   const unusual = seconds > UNUSUAL_AFTER_S
   const designing = isDashboardRequest(question)
+  const current = STAGES.reduce((acc, s, i) => (seconds >= s.at ? i : acc), 0)
 
   return (
     <div
@@ -51,16 +65,32 @@ export default function Pending({ question }: { question: string }) {
       // polite, not assertive: a counter that interrupts a screen reader every
       // second is worse than no counter at all.
       aria-live="polite"
-      style={{
-        alignSelf: 'flex-start', maxWidth: '80%', padding: '10px 14px',
-        borderRadius: 10, background: 'var(--surface2)', color: 'var(--muted)',
-        fontSize: 13,
-      }}>
-      <span>
-        {designing ? 'Designing dashboards' : 'Thinking'} · {readable(seconds)}
-      </span>
+      className="dl-pending">
+      <div className="dl-pending__head">
+        <span className="dl-pending__pulse" aria-hidden />
+        <span className="dl-pending__title">
+          {designing ? 'Designing dashboards' : t('ask.analyzing')}
+        </span>
+        <span className="dl-pending__time" dir="ltr">
+          {designing ? '' : 'Thinking · '}{readable(seconds)}
+        </span>
+      </div>
+      {!designing && (
+        <ol className="dl-pending__steps">
+          {STAGES.map((s, i) => (
+            <li key={s.key} className={i < current ? 'is-done' : i === current ? 'is-now' : ''}>
+              <span className="dl-pending__dot" aria-hidden />
+              {t(s.key)}
+            </li>
+          ))}
+        </ol>
+      )}
+      <div className="dl-pending__skeleton" aria-hidden>
+        <span style={{ width: '72%' }} /><span style={{ width: '54%' }} />
+        <span className="dl-pending__skeleton-chart" />
+      </div>
       {unusual && (
-        <div style={{ marginTop: 6, fontSize: 12 }}>
+        <div className="dl-pending__note">
           {designing
             ? 'Each dashboard’s query is being checked against your database, and '
               + 'repaired if it does not run. This can take a few minutes.'

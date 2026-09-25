@@ -67,12 +67,34 @@ describe('AskAI', () => {
     expect(await screen.findByTestId('chat-pane')).toHaveTextContent('source:3')
   })
 
-  it('picking a scope in the select mounts the pane for it', async () => {
+  it('picking a scope in the picker mounts the pane for it', async () => {
     renderAt('/ask')
-    const select = await screen.findByLabelText('What to ask about')
-    await waitFor(() => expect(screen.getByText('Orders')).toBeInTheDocument())
-    fireEvent.change(select, { target: { value: 'd:32' } })
+    const trigger = await screen.findByRole('button', { name: 'What to ask about' })
+    await waitFor(() => expect(trigger).not.toBeDisabled())
+    fireEvent.click(trigger)
+    fireEvent.click(await screen.findByRole('option', { name: /Orders/ }))
     expect(await screen.findByTestId('chat-pane')).toHaveTextContent('datasets:32')
+  })
+
+  it('the picker searches, and says what each choice is', async () => {
+    renderAt('/ask')
+    const trigger = await screen.findByRole('button', { name: 'What to ask about' })
+    await waitFor(() => expect(trigger).not.toBeDisabled())
+    fireEvent.click(trigger)
+    const search = await screen.findByRole('combobox', { name: /search/i })
+    expect(screen.getAllByRole('option').map(o => o.textContent)).toEqual(
+      expect.arrayContaining([expect.stringMatching(/Warehouse/)]))
+    fireEvent.change(search, { target: { value: 'ware' } })
+    expect(screen.getAllByRole('option')).toHaveLength(1)
+    fireEvent.keyDown(search, { key: 'Enter' })
+    expect(await screen.findByTestId('chat-pane')).toHaveTextContent('source:3')
+  })
+
+  it('shows the question box before a scope is picked, locked', async () => {
+    renderAt('/ask')
+    expect(await screen.findByRole('heading', { name: 'Ask your data anything' })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Your question' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
   })
 
   it('a failed dataset list is an error, never "no data yet"', async () => {
@@ -87,6 +109,31 @@ describe('AskAI', () => {
     vi.mocked(dataSourcesApi.list).mockResolvedValue([])
     renderAt('/ask')
     expect(await screen.findByText(/No data yet/)).toBeInTheDocument()
+  })
+})
+
+describe('AskAI — the history panel', () => {
+  it('groups today\'s threads apart from earlier ones', async () => {
+    const now = new Date().toISOString()
+    vi.mocked(agentApi.listConversations).mockResolvedValue([
+      { id: 60, title: 'Fresh', data_source_id: null, dataset_ids: [32], created_at: now },
+      { id: 50, title: 'Stale', data_source_id: null, dataset_ids: [32], created_at: '2020-01-01T08:00:00' },
+    ] as any)
+    renderAt('/ask?dataset=32')
+    const list = await screen.findByRole('list', { name: /conversations/i })
+    const text = list.textContent ?? ''
+    expect(text.indexOf('Today')).toBeLessThan(text.indexOf('Fresh'))
+    expect(text.indexOf('Earlier')).toBeGreaterThan(text.indexOf('Fresh'))
+    expect(text.indexOf('Earlier')).toBeLessThan(text.indexOf('Stale'))
+  })
+
+  it('folds to a rail and remembers it', async () => {
+    localStorage.removeItem('datalytics.ask.historyFolded')
+    renderAt('/ask?dataset=32')
+    fireEvent.click(await screen.findByRole('button', { name: 'Collapse history' }))
+    expect(screen.getByRole('button', { name: 'Expand history' })).toBeInTheDocument()
+    expect(localStorage.getItem('datalytics.ask.historyFolded')).toBe('1')
+    localStorage.removeItem('datalytics.ask.historyFolded')
   })
 })
 
@@ -186,7 +233,9 @@ describe('AskAI — the conversation list', () => {
       { id: 167, name: 'Live orders', mode: 'directquery', filename: null } as any,
     ])
     renderAt('/ask')
-    await screen.findByLabelText('What to ask about')
+    const trigger = await screen.findByRole('button', { name: 'What to ask about' })
+    await waitFor(() => expect(trigger).not.toBeDisabled())
+    fireEvent.click(trigger)
     await waitFor(() => expect(screen.getByText('Orders')).toBeInTheDocument(),
                   { timeout: 5000 })
     expect(screen.queryByText('Live orders')).not.toBeInTheDocument()

@@ -5,6 +5,11 @@ import { toCsv, chartRows, chartColumns } from './ResultView'
 import { agentApi, dataSourcesApi } from '../../services/api'
 import { axeViolations } from '../../test/axe'
 
+/** The answer's text, whole: numbers in it are wrapped in <mark> for emphasis,
+ *  so a plain getByText would see the sentence in pieces. */
+const answerText = (text: string) =>
+  screen.getByText((_, el) => el?.getAttribute('data-testid') === 'answer-text' && el.textContent === text)
+
 vi.mock('react-hot-toast', () => ({
   default: { success: vi.fn(), error: vi.fn() },
 }))
@@ -29,7 +34,7 @@ describe('asking a question', () => {
       intent: 'aggregate', error: null })
     await send('total sales')
     await waitFor(() =>
-      expect(screen.getByText('Total sales are 12,400.')).toBeInTheDocument())
+      expect(answerText('Total sales are 12,400.')).toBeInTheDocument())
     expect(screen.getByText('total sales')).toBeInTheDocument()
   })
 
@@ -135,7 +140,7 @@ describe('asking a question', () => {
     const feedback = vi.spyOn(agentApi, 'feedback').mockResolvedValue({
       id: 1, run_id: 11, rating: 'up', comment: null })
     await send('total sales')
-    await waitFor(() => screen.getByText('Total is 30.'))
+    await waitFor(() => answerText('Total is 30.'))
 
     fireEvent.click(screen.getByLabelText('Good answer'))
 
@@ -148,7 +153,7 @@ describe('asking a question', () => {
       run_id: 12, status: 'ok', answer: 'Total is 30.', intent: null, error: null })
     vi.spyOn(agentApi, 'feedback').mockRejectedValue(new Error('down'))
     await send('total sales')
-    await waitFor(() => screen.getByText('Total is 30.'))
+    await waitFor(() => answerText('Total is 30.'))
 
     fireEvent.click(screen.getByLabelText('Bad answer'))
 
@@ -174,12 +179,14 @@ const RESULT = { step: 's1', columns: ['city', 'n'], rows: [['Cairo', 3], ['Giza
 const SQL = 'SELECT city, count(*) AS n FROM orders GROUP BY city'
 
 describe('the result travels with the answer', () => {
-  it('draws the rows as a grid under the answer', async () => {
+  it('charts a small grouped result on its own, with the rows one click away', async () => {
     vi.spyOn(agentApi, 'ask').mockResolvedValue({
       run_id: 20, status: 'ok', answer: 'Cairo leads.', intent: 'aggregate', error: null,
       results: [RESULT], sql: [SQL], presentation: null, context_objects: ['orders'] })
     await send('orders per city')
     await waitFor(() => screen.getByText('Cairo leads.'))
+    expect(screen.getByTestId('result-chart')).toHaveAttribute('data-format', 'bar')
+    fireEvent.click(screen.getByRole('button', { name: /show rows/i }))
     const grid = screen.getByRole('table')
     expect(grid).toHaveTextContent('city')
     expect(grid).toHaveTextContent('Cairo')
@@ -297,6 +304,7 @@ describe('a conversation owned by the page', () => {
     render(<ChatPane dataSourceId={2} conversationId={55} />)
     expect(await screen.findByText('Cairo leads.')).toBeInTheDocument()
     expect(screen.getByText('orders per city')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /show rows/i }))
     expect(screen.getByRole('table')).toHaveTextContent('Cairo')
     expect(messages).toHaveBeenCalledWith(55)
     expect(agentApi.listConversations).not.toHaveBeenCalled()

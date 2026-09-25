@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import { usePrompt } from '../ui/PromptDialog'
-import { ThumbsUp, ThumbsDown, Copy, Download, Database } from 'lucide-react'
+import { AlertTriangle, Code2, Copy, Database, Download, RotateCcw, Sparkles, ThumbsDown, ThumbsUp, User } from 'lucide-react'
 import { agentApi, dataSourcesApi } from '../../services/api'
 import type { AgentAnswer, AgentMessage, AgentPresentation, AgentResult } from '../../services/api'
 import Pending from './Pending'
@@ -11,6 +11,11 @@ import ChoiceOptions, { isChoices } from './ChoiceOptions'
 import DashboardProposals, { type DashboardProposalsPresentation }
   from './DashboardProposals'
 import { useT } from '../../i18n'
+import Composer from './Composer'
+import AnswerText from './AnswerText'
+import AddToDashboard from './AddToDashboard'
+import { answerToWidget } from './answerWidget'
+import '../../pages/ask/ask.css'
 
 /**
  * Ask the data a question in plain language.
@@ -41,6 +46,12 @@ export interface ChatPaneProps {
   datasetIds?: number[]
   conversationId?: number | null
   onConversationCreated?: (conv: { id: number; title: string }) => void
+  /** Starter questions shown on an empty thread, and offered again as
+   *  rephrasings when a question fails. Optional: the builder mount has none. */
+  suggestions?: string[]
+  /** The dataset's column names, when the pane asks about ONE dataset --
+   *  what "Add to dashboard" maps an answer back onto. */
+  datasetColumns?: string[]
 }
 
 type MessageKind = 'answer' | 'clarify' | 'error'
@@ -111,7 +122,8 @@ function isProposals(p: unknown): p is DashboardProposalsPresentation {
   return !!p && (p as { kind?: string }).kind === 'dashboard_proposals'
 }
 
-export default function ChatPane({ dataSourceId, datasetIds, conversationId, onConversationCreated }: ChatPaneProps) {
+export default function ChatPane({ dataSourceId, datasetIds, conversationId, onConversationCreated,
+  suggestions, datasetColumns }: ChatPaneProps) {
   const t = useT()
   const owned = conversationId !== undefined
   const [convId, setConvId] = useState<number | null>(conversationId ?? null)
@@ -184,6 +196,12 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
   }, [owned, conversationId])
 
   const target = dataSourceId != null ? { dataSourceId } : { datasetIds }
+
+  // Keep the newest turn in view as questions and answers arrive.
+  const endRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    endRef.current?.scrollIntoView?.({ block: 'end', behavior: 'smooth' })
+  }, [messages.length, pending])
 
   /** `choice` is an option the agent offered and the person clicked. It is
    *  sent exactly as typed would be -- same endpoint, same history, same
@@ -350,195 +368,245 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
     }
   }
 
-  const bubble: React.CSSProperties = { borderRadius: 10, padding: '8px 12px', fontSize: 13 }
-  const linkBtn: React.CSSProperties = {
-    background: 'none', border: 'none', padding: 0, color: 'var(--accent)',
-    cursor: 'pointer', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4,
+  const copyAnswer = async (msg: ChatMessage) => {
+    try {
+      await navigator.clipboard.writeText(msg.text)
+      toast.success(t('ask.answerCopied'))
+    } catch {
+      toast.error('Could not copy')
+    }
   }
 
+  // Pair each question with the reply that follows it: one card per turn.
+  const turns: { key: number; question?: ChatMessage; answer?: ChatMessage }[] = []
+  for (const m of messages) {
+    if (m.role === 'user') turns.push({ key: m.id, question: m })
+    else {
+      const last = turns[turns.length - 1]
+      if (last && last.question && !last.answer) last.answer = m
+      else turns.push({ key: m.id, answer: m })
+    }
+  }
+  const pendingTurn = pending !== null ? turns[turns.length - 1] : null
+  const rephrase = (suggestions ?? []).slice(0, 3)
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{ flex: 1, overflowY: 'auto', padding: 12, display: 'flex',
-                    flexDirection: 'column', gap: 10 }}>
-        {loading && (
-          <p style={{ fontSize: 13, color: 'var(--muted)', margin: 0 }}>{t('common.loading')}</p>
-        )}
-        {loadError && (
-          <p role="alert" style={{ fontSize: 13, color: 'var(--danger)', margin: 0 }}>{loadError}</p>
-        )}
+    <div className="dl-chat">
+      <div className="dl-chat__scroll">
+        {loading && <p className="dl-chat__note">{t('common.loading')}</p>}
+        {loadError && <p role="alert" className="dl-chat__note dl-chat__note--error">{loadError}</p>}
         {!loading && !loadError && messages.length === 0 && (
-          <p style={{ fontSize: 13, color: 'var(--muted)', margin: 0 }}>
-            {t('ask.empty')}
-          </p>
+          suggestions && suggestions.length > 0 ? (
+            <div className="dl-chat__start">
+              <p className="dl-chat__start-title">{t('ask.tryOne')}</p>
+              <div className="dl-chips" role="group" aria-label={t('ask.suggested')}>
+                {suggestions.map(s => (
+                  <button key={s} type="button" className="dl-chip" disabled={busy}
+                    onClick={() => void send(s)}>
+                    <Sparkles size={13} aria-hidden /> {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p className="dl-chat__note">{t('ask.empty')}</p>
+          )
         )}
-        {messages.map(msg => (
-          <div key={msg.id} style={{
-            alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-            maxWidth: msg.results?.length ? '100%' : '85%',
-            minWidth: msg.results?.length ? '60%' : undefined,
-          }}>
-            {msg.role === 'user' ? (
-              <div style={{ ...bubble, background: 'var(--accent)', color: 'var(--mc-accent-fg)' }}>
-                {msg.text}
-              </div>
-            ) : msg.kind === 'error' ? (
-              <div style={{ ...bubble, background: '#fdecec', border: '1px solid #f0acac', color: '#a4231f' }}>
-                <strong>Could not answer that.</strong>
-                <div style={{ marginTop: 4 }}>{msg.text}</div>
-              </div>
-            ) : msg.kind === 'clarify' ? (
-              <div style={{ ...bubble, background: '#fdf6e7', border: '1px solid #f0dfae', color: '#7a5a12' }}>
-                <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
-                              letterSpacing: '.04em', display: 'block', marginBottom: 4 }}>
-                  Needs more detail
-                </span>
-                {msg.text}
-                {isChoices(msg.presentation) && (
-                  <ChoiceOptions presentation={msg.presentation} disabled={busy}
-                    onChoose={option => void send(option)} />
-                )}
-              </div>
-            ) : (
-              <div style={{ ...bubble, background: 'var(--surface2)', color: 'var(--text)' }}>
-                {msg.text}
-                {/* A dashboard proposal has no rows to show -- it rides the same
-                    `presentation` channel, so it is dispatched by kind here rather
-                    than pushed through ResultView, which exists to draw results. */}
-                {isProposals(msg.presentation) ? (
-                  <DashboardProposals presentation={msg.presentation} />
-                ) : isAnalysisResult(msg.presentation) ? (
-                  /* The agent answered with a statistic rather than SQL, so
-                     there are no rows -- same channel, dispatched by kind. */
-                  <AnalysisResult presentation={msg.presentation} />
-                ) : msg.results && msg.results.length > 0 && (
-                  <ResultView results={msg.results} presentation={msg.presentation} />
-                )}
-                {/* Where this answer came from (Part IV criterion 10). The
-                    words above are the AI's; the numbers are the query's or
-                    the test's -- a reader has to be able to tell which. */}
-                <AnswerSource msg={msg} />
-                {msg.runId != null && (
-                  <div style={{ marginTop: 6 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                      <button
-                        aria-label="Good answer"
-                        aria-pressed={feedbackByRun[msg.runId] === 'up'}
-                        onClick={() => void rate(msg.runId!, 'up')}
-                        style={{ ...linkBtn, color: 'var(--text)',
-                                 opacity: feedbackByRun[msg.runId] === 'down' ? 0.4 : 1 }}
-                      >
-                        <ThumbsUp size={13} />
-                      </button>
-                      <button
-                        aria-label="Bad answer"
-                        aria-pressed={feedbackByRun[msg.runId] === 'down'}
-                        onClick={() => void rate(msg.runId!, 'down')}
-                        style={{ ...linkBtn, color: 'var(--text)',
-                                 opacity: feedbackByRun[msg.runId] === 'up' ? 0.4 : 1 }}
-                      >
-                        <ThumbsDown size={13} />
-                      </button>
-                      {/* A greeting, an analysis and a set of dashboard
-                          proposals are answers with no query behind them, so
-                          "Show SQL" on one is a control that does nothing --
-                          a defect this codebase has shipped before. Judged by
-                          what the run WAS, not by whether SQL rode along with
-                          it: a run stored before answers carried their SQL
-                          has none here and still fetches it on click. */}
-                      {!(msg.intent === 'chat' || isProposals(msg.presentation)
-                         || isAnalysisResult(msg.presentation)) && (
-                        <>
-                          <button onClick={() => void toggleSql(msg)} style={linkBtn}>
-                            {openRun.has(msg.runId) ? 'Hide SQL' : 'Show SQL'}
-                          </button>
-                          <button onClick={() => void copySql(msg)} style={linkBtn} aria-label="Copy SQL">
-                            <Copy size={12} aria-hidden /> Copy SQL
-                          </button>
-                          {/* Connection scope only: a dataset-mode answer runs
-                              over frames in DuckDB and has no source to import
-                              from, so the control is absent rather than
-                              present-and-failing. */}
-                          {dataSourceId != null && (
-                            <button onClick={() => void saveAsDataset(msg)}
-                              style={linkBtn} aria-label="Save as dataset"
-                              disabled={saving !== null}>
-                              <Database size={12} aria-hidden />
-                              {saving === msg.runId ? 'Saving…' : 'Save as dataset'}
-                            </button>
-                          )}
-                        </>
-                      )}
-                      {msg.results && msg.results.some(r => r.total > 0) && (
-                        <>
-                          <button aria-label="Download CSV" style={linkBtn}
-                            onClick={() => downloadCsv(msg.results!, `ask-ai-result-${msg.runId}.csv`)}>
-                            <Download size={12} aria-hidden /> CSV
-                          </button>
-                          {/* Excel and PDF are built server-side from the
-                              same stored snapshot the grid draws. */}
-                          <button aria-label="Download Excel" style={linkBtn}
-                            onClick={() => void downloadFile(msg.runId!, 'xlsx')}>
-                            <Download size={12} aria-hidden /> Excel
-                          </button>
-                          <button aria-label="Download PDF" style={linkBtn}
-                            onClick={() => void downloadFile(msg.runId!, 'pdf')}>
-                            <Download size={12} aria-hidden /> PDF
-                          </button>
-                        </>
-                      )}
-                    </div>
-                    {openRun.has(msg.runId) && (
-                      <div style={{ marginTop: 6 }}>
-                        {sqlLoading.has(msg.runId) ? (
-                          <span style={{ fontSize: 12, color: 'var(--muted)' }}>Loading…</span>
-                        ) : (
-                          ((msg.sql && msg.sql.length ? msg.sql : sqlByRun[msg.runId]) ?? []).map((sql, i) => (
-                            <pre key={i} style={{ margin: '0 0 4px', fontSize: 11, direction: 'ltr',
-                                                   background: '#0f172a', color: '#e2e8f0',
-                                                   padding: 8, borderRadius: 6, overflowX: 'auto' }}>
-                              {sql}
-                            </pre>
-                          ))
+
+        {turns.map(turn => {
+          const msg = turn.answer
+          const isPending = turn === pendingTurn && !msg
+          return (
+            <article key={turn.key} className={`dl-turn${msg?.kind === 'error' ? ' dl-turn--error' : ''}`}
+              aria-label={turn.question?.text}>
+              {turn.question && (
+                <header className="dl-turn__q">
+                  <span className="dl-turn__avatar" aria-hidden><User size={14} /></span>
+                  <p className="dl-turn__q-text" dir="auto">{turn.question.text}</p>
+                </header>
+              )}
+              {isPending && <Pending question={turn.question?.text ?? ''} />}
+              {msg && (
+                <div className="dl-turn__a">
+                  <span className="dl-turn__avatar dl-turn__avatar--ai" aria-hidden><Sparkles size={14} /></span>
+                  <div className="dl-turn__body">
+                    {msg.kind === 'error' ? (
+                      <div className="dl-answer-error">
+                        <p className="dl-answer-error__title">
+                          <AlertTriangle size={16} aria-hidden /> {t('ask.err.title')}
+                        </p>
+                        <p className="dl-answer-error__hint">{t('ask.err.hint')}</p>
+                        {rephrase.length > 0 && (
+                          <div className="dl-chips dl-chips--small" role="group" aria-label={t('ask.err.tryInstead')}>
+                            {rephrase.map(s => (
+                              <button key={s} type="button" className="dl-chip" disabled={busy}
+                                onClick={() => void send(s)}>{s}</button>
+                            ))}
+                          </div>
                         )}
-                        {msg.contextObjects && msg.contextObjects.length > 0 && (
-                          <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                            Tables considered: {msg.contextObjects.join(', ')}
+                        <details className="dl-answer-error__details">
+                          <summary>{t('ask.err.details')}</summary>
+                          <div dir="ltr" className="dl-answer-error__raw">{msg.text}</div>
+                        </details>
+                        {turn.question && (
+                          <div className="dl-actions">
+                            <button type="button" className="dl-act" disabled={busy}
+                              onClick={() => void send(turn.question!.text)}>
+                              <RotateCcw size={14} aria-hidden /> {t('ask.retry')}
+                            </button>
                           </div>
                         )}
                       </div>
+                    ) : msg.kind === 'clarify' ? (
+                      <div className="dl-answer-clarify">
+                        <span className="dl-answer-clarify__tag">{t('ask.needsDetail')}</span>
+                        <p>{msg.text}</p>
+                        {isChoices(msg.presentation) && (
+                          <ChoiceOptions presentation={msg.presentation} disabled={busy}
+                            onChoose={option => void send(option)} />
+                        )}
+                      </div>
+                    ) : (
+                      <>
+                        <AnswerText text={msg.text} />
+                        {/* A dashboard proposal has no rows to show -- it rides the same
+                            `presentation` channel, so it is dispatched by kind here rather
+                            than pushed through ResultView, which exists to draw results. */}
+                        {isProposals(msg.presentation) ? (
+                          <DashboardProposals presentation={msg.presentation} />
+                        ) : isAnalysisResult(msg.presentation) ? (
+                          /* The agent answered with a statistic rather than SQL, so
+                             there are no rows -- same channel, dispatched by kind. */
+                          <AnalysisResult presentation={msg.presentation} />
+                        ) : msg.results && msg.results.length > 0 && (
+                          <ResultView results={msg.results} presentation={msg.presentation} />
+                        )}
+                        {/* Where this answer came from (Part IV criterion 10). The
+                            words above are the AI's; the numbers are the query's or
+                            the test's -- a reader has to be able to tell which. */}
+                        <AnswerSource msg={msg} />
+                        {msg.runId != null && (
+                          <AnswerActions msg={msg} question={turn.question?.text} />
+                        )}
+                      </>
                     )}
                   </div>
-                )}
-              </div>
-            )}
-          </div>
-        ))}
-            {/* Between Send and the answer. Without this the pane showed
-                nothing at all -- see Pending.tsx for the measurements. */}
-            {pending !== null && <Pending question={pending} />}
+                </div>
+              )}
+            </article>
+          )
+        })}
+        <div ref={endRef} />
       </div>
-      <div style={{ display: 'flex', gap: 8, padding: 12, borderTop: '1px solid var(--border)' }}>
-        <input
-          placeholder="Ask a question about this data…"
-          value={input}
-          disabled={busy}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter') void send() }}
-          style={{ flex: 1, padding: '8px 10px', fontSize: 13, border: '1px solid var(--border)',
-                   borderRadius: 6, background: 'var(--surface)', color: 'var(--text)' }}
-        />
-        <button
-          onClick={() => void send()}
-          disabled={busy}
-          style={{ padding: '8px 14px', fontSize: 13, borderRadius: 6, border: 'none',
-                   background: busy ? 'var(--muted)' : 'var(--accent)', color: 'var(--mc-accent-fg)',
-                   cursor: busy ? 'default' : 'pointer' }}
-        >
-          {busy ? 'Asking…' : 'Send'}
-        </button>
+      <div className="dl-chat__composer">
+        <Composer value={input} onChange={setInput} onSend={() => void send()} busy={busy} />
       </div>
     </div>
   )
+
+  function AnswerActions({ msg, question }: { msg: ChatMessage; question?: string }) {
+    const runId = msg.runId!
+    const sqlable = !(msg.intent === 'chat' || isProposals(msg.presentation)
+      || isAnalysisResult(msg.presentation))
+    const draft = datasetColumns && datasetIds?.length === 1
+      ? answerToWidget(msg.results?.[0], msg.sql ?? sqlByRun[runId], datasetColumns,
+          msg.presentation?.x, msg.presentation?.y)
+      : null
+    return (
+      <div className="dl-actions-wrap">
+        <div className="dl-actions">
+          {draft && datasetIds && (
+            <AddToDashboard datasetId={datasetIds[0]} draft={draft} title={question ?? msg.text.slice(0, 80)} />
+          )}
+          <button type="button" className="dl-act" onClick={() => void copyAnswer(msg)} aria-label={t('ask.copyAnswer')}>
+            <Copy size={14} aria-hidden /> <span className="dl-act__text">{t('ask.copy')}</span>
+          </button>
+          {question && (
+            <button type="button" className="dl-act" disabled={busy} onClick={() => void send(question)}>
+              <RotateCcw size={14} aria-hidden /> <span className="dl-act__text">{t('ask.retry')}</span>
+            </button>
+          )}
+          <span className="dl-actions__sep" aria-hidden />
+          {/* A greeting, an analysis and a set of dashboard
+              proposals are answers with no query behind them, so
+              "Show SQL" on one is a control that does nothing --
+              a defect this codebase has shipped before. Judged by
+              what the run WAS, not by whether SQL rode along with
+              it: a run stored before answers carried their SQL
+              has none here and still fetches it on click. */}
+          {sqlable && (
+            <>
+              <button type="button" className="dl-act" aria-expanded={openRun.has(runId)}
+                onClick={() => void toggleSql(msg)}>
+                <Code2 size={14} aria-hidden /> {openRun.has(runId) ? t('ask.hideSql') : t('ask.showSql')}
+              </button>
+              <button type="button" className="dl-act" onClick={() => void copySql(msg)} aria-label="Copy SQL">
+                <Copy size={14} aria-hidden /> <span className="dl-act__text">{t('ask.copySql')}</span>
+              </button>
+              {/* Connection scope only: a dataset-mode answer runs
+                  over frames in DuckDB and has no source to import
+                  from, so the control is absent rather than
+                  present-and-failing. */}
+              {dataSourceId != null && (
+                <button type="button" className="dl-act" onClick={() => void saveAsDataset(msg)}
+                  aria-label="Save as dataset" disabled={saving !== null}>
+                  <Database size={14} aria-hidden />
+                  {saving === runId ? 'Saving…' : t('ask.saveDataset')}
+                </button>
+              )}
+            </>
+          )}
+          {msg.results && msg.results.some(r => r.total > 0) && (
+            <>
+              <button type="button" aria-label="Download CSV" className="dl-act"
+                onClick={() => downloadCsv(msg.results!, `ask-ai-result-${runId}.csv`)}>
+                <Download size={14} aria-hidden /> CSV
+              </button>
+              {/* Excel and PDF are built server-side from the
+                  same stored snapshot the grid draws. */}
+              <button type="button" aria-label="Download Excel" className="dl-act"
+                onClick={() => void downloadFile(runId, 'xlsx')}>
+                <Download size={14} aria-hidden /> Excel
+              </button>
+              <button type="button" aria-label="Download PDF" className="dl-act"
+                onClick={() => void downloadFile(runId, 'pdf')}>
+                <Download size={14} aria-hidden /> PDF
+              </button>
+            </>
+          )}
+          <span className="dl-actions__grow" />
+          <button type="button" className="dl-act dl-act--icon"
+            aria-label="Good answer" title={t('ask.good')}
+            aria-pressed={feedbackByRun[runId] === 'up'}
+            onClick={() => void rate(runId, 'up')}>
+            <ThumbsUp size={14} aria-hidden />
+          </button>
+          <button type="button" className="dl-act dl-act--icon"
+            aria-label="Bad answer" title={t('ask.bad')}
+            aria-pressed={feedbackByRun[runId] === 'down'}
+            onClick={() => void rate(runId, 'down')}>
+            <ThumbsDown size={14} aria-hidden />
+          </button>
+        </div>
+        {openRun.has(runId) && (
+          <div className="dl-sql">
+            {sqlLoading.has(runId) ? (
+              <span className="dl-chat__note">{t('common.loading')}</span>
+            ) : (
+              ((msg.sql && msg.sql.length ? msg.sql : sqlByRun[runId]) ?? []).map((sql, i) => (
+                <pre key={i} dir="ltr" className="dl-sql__code">{sql}</pre>
+              ))
+            )}
+            {msg.contextObjects && msg.contextObjects.length > 0 && (
+              <div className="dl-sql__tables">
+                Tables considered: {msg.contextObjects.join(', ')}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
 }
 
 /** One line naming the engine behind an assistant answer, and its evidence. */

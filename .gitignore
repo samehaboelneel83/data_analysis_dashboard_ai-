@@ -93,3 +93,6 @@ AI_data_tool/data_analytics/frontend/_ui_refresh_backup/
 sas_new_data/
 # Session reports and screenshots handed between Claude sessions
 Claude outputs/
+
+# Demo recordings from frontend/e2e/demo/record_demo.mjs (never commit)
+demo_output/

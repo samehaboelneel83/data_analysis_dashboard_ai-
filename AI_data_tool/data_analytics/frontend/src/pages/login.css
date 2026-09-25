@@ -1,0 +1,401 @@
+/* ============================================================
+   Sign-in
+   Split screen on desktop: the form on the reading-start side, a brand
+   panel with the product illustration on the other. Logical properties
+   throughout, so Arabic mirrors the whole page for free. Tokens only --
+   no literal colour -- so light and dark both fall out of the theme.
+
+   Motion is the exception the rest of the product does not make: the
+   brand picture loops (4-8 s, slow). It is confined to .dl-ill, and
+   prefers-reduced-motion freezes it on its finished frame.
+   ============================================================ */
+
+.dl-auth {
+  min-block-size: 100%;
+  min-block-size: 100dvh;
+  display: grid;
+  grid-template-columns: minmax(440px, 5fr) 6fr;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* ---- Form side ---- */
+
+.dl-auth__main {
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+  padding: var(--dl-5) clamp(20px, 4vw, 48px);
+}
+
+.dl-auth__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--dl-3);
+}
+
+.dl-auth__brand { display: flex; align-items: center; gap: var(--dl-2); }
+.dl-auth__brand .dl-rail__mark { inline-size: 30px; block-size: 30px; font-size: var(--dl-text-body); }
+.dl-auth__brand .dl-rail__wordmark { font-size: var(--dl-text-section); }
+
+.dl-auth__tools { display: flex; align-items: center; gap: var(--dl-1); }
+
+.dl-auth__icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  inline-size: 34px; block-size: 34px;
+  border: 1px solid transparent; border-radius: var(--dl-radius-control);
+  background: none; color: var(--muted); cursor: pointer;
+  transition: background var(--dl-dur) var(--dl-ease), color var(--dl-dur) var(--dl-ease);
+}
+.dl-auth__icon-btn:hover { background: var(--surface2); color: var(--text); }
+
+.dl-auth__center {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-block: var(--dl-6);
+}
+
+.dl-auth__card {
+  inline-size: 100%;
+  max-inline-size: 400px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--dl-shadow-overlay);
+  padding: clamp(24px, 5vw, 36px);
+  animation: dl-auth-in 320ms var(--dl-ease) both;
+}
+
+@keyframes dl-auth-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.dl-auth__title {
+  font-size: 24px;
+  font-weight: 650;
+  letter-spacing: -.02em;
+  line-height: 1.2;
+  margin: 0 0 var(--dl-1);
+}
+
+.dl-auth__sub {
+  color: var(--muted);
+  font-size: var(--dl-text-body);
+  line-height: 1.5;
+  margin: 0 0 var(--dl-5);
+}
+
+.dl-auth__alert {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--dl-2);
+  padding: 10px 12px;
+  margin-block-end: var(--dl-4);
+  border: 1px solid var(--mc-danger-line, var(--danger));
+  border-radius: 10px;
+  background: var(--mc-danger-soft, var(--surface2));
+  color: var(--danger);
+  font-size: var(--dl-text-data);
+  line-height: 1.45;
+}
+.dl-auth__alert svg { flex: none; margin-block-start: 1px; }
+
+.dl-auth__field { margin-block-end: var(--dl-4); }
+
+.dl-auth__label {
+  display: block;
+  margin-block-end: 6px;
+  font-size: var(--dl-text-data);
+  font-weight: 550;
+  color: var(--text);
+}
+
+.dl-auth__input {
+  inline-size: 100%;
+  min-block-size: 44px;
+  padding-inline: 12px;
+  border-radius: 10px;
+  font-size: var(--dl-text-body);
+  transition: border-color var(--dl-dur) var(--dl-ease), box-shadow var(--dl-dur) var(--dl-ease);
+}
+.dl-auth__input:focus { box-shadow: var(--dl-ring); }
+.dl-auth__input[aria-invalid="true"]:focus {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 22%, transparent);
+}
+/* The email box reads LTR (addresses are LTR) but sits flush with the
+   Arabic labels above it. */
+[dir="rtl"] .dl-auth__input[dir="ltr"] { text-align: right; }
+
+.dl-auth__pw { position: relative; }
+.dl-auth__pw .dl-auth__input { padding-inline-end: 46px; }
+
+.dl-auth__reveal {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 4px;
+  margin-block: auto;
+  inline-size: 36px; block-size: 36px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: 8px;
+  background: none; color: var(--muted); cursor: pointer;
+  transition: color var(--dl-dur) var(--dl-ease), background var(--dl-dur) var(--dl-ease);
+}
+.dl-auth__reveal:hover { color: var(--text); background: var(--surface2); }
+
+.dl-auth__error,
+.dl-auth__hint {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+.dl-auth__error { color: var(--danger); }
+.dl-auth__hint  { color: var(--warning); }
+
+.dl-auth__submit,
+.dl-auth__sso {
+  inline-size: 100%;
+  min-block-size: 44px;
+  justify-content: center;
+  gap: var(--dl-2);
+  border-radius: 10px;
+  font-size: var(--dl-text-body);
+  font-weight: 600;
+}
+.dl-auth__submit { margin-block-start: var(--dl-1); }
+.dl-auth__sso { border-color: var(--border); background: var(--surface); }
+.dl-auth__submit:disabled,
+.dl-auth__sso:disabled { opacity: .7; cursor: progress; }
+
+.dl-auth__arrow { transition: translate var(--dl-dur) var(--dl-ease); }
+.dl-auth__submit:hover:not(:disabled) .dl-auth__arrow { translate: 2px 0; }
+[dir="rtl"] .dl-auth__arrow { transform: scaleX(-1); }
+[dir="rtl"] .dl-auth__submit:hover:not(:disabled) .dl-auth__arrow { translate: -2px 0; }
+
+.dl-auth__spin { animation: dl-auth-spin .8s linear infinite; }
+@keyframes dl-auth-spin { to { transform: rotate(360deg); } }
+
+.dl-auth__or {
+  display: flex;
+  align-items: center;
+  gap: var(--dl-3);
+  margin-block: var(--dl-4);
+  color: var(--muted);
+  font-size: var(--dl-text-micro);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+.dl-auth__or::before,
+.dl-auth__or::after { content: ''; flex: 1; block-size: 1px; background: var(--border); }
+
+.dl-auth__help {
+  margin: var(--dl-5) 0 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+/* ---- Brand panel ---- */
+
+.dl-auth__panel {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-inline-start: 1px solid var(--border);
+  background:
+    radial-gradient(70% 55% at 50% 42%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 72%),
+    linear-gradient(160deg,
+      color-mix(in srgb, var(--accent) 7%, var(--surface2)) 0%,
+      var(--surface2) 60%);
+}
+/* A faint dot grid, faded out towards the edges. */
+.dl-auth__panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(color-mix(in srgb, var(--text) 11%, transparent) 1px, transparent 1.3px);
+  background-size: 22px 22px;
+  mask-image: radial-gradient(75% 65% at 50% 45%, #000 30%, transparent 85%);
+  -webkit-mask-image: radial-gradient(75% 65% at 50% 45%, #000 30%, transparent 85%);
+  pointer-events: none;
+}
+
+.dl-auth__panel-inner {
+  position: relative;
+  inline-size: 100%;
+  max-inline-size: 720px;
+  padding: var(--dl-7) clamp(24px, 3vw, 40px);
+  text-align: center;
+}
+
+.dl-auth__name {
+  margin: var(--dl-4) 0 var(--dl-2);
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -.025em;
+  color: var(--text);
+}
+
+.dl-auth__tagline {
+  margin: 0 auto;
+  max-inline-size: 440px;
+  color: var(--muted);
+  font-size: var(--dl-text-section);
+  line-height: 1.55;
+}
+
+.dl-auth__mobile-brand { display: none; }
+
+/* ---- Phones and narrow windows: one column, form only ---- */
+
+@media (max-width: 900px) {
+  .dl-auth { grid-template-columns: 1fr; }
+  .dl-auth__panel { display: none; }
+  .dl-auth__main { padding: var(--dl-4); }
+  .dl-auth__mobile-brand {
+    display: block;
+    margin-block-start: var(--dl-4);
+    text-align: center;
+  }
+  .dl-auth__tagline--compact { font-size: var(--dl-text-data); max-inline-size: 320px; }
+  .dl-auth__center { align-items: flex-start; padding-block: var(--dl-4) var(--dl-6); }
+}
+
+/* ============================================================
+   The illustration (components/auth/BrandIllustration.tsx)
+   ============================================================ */
+
+/* The drawing places every label itself (mirrored by coordinate in RTL), so
+   the SVG's own text direction stays LTR: under an inherited rtl,
+   text-anchor start/end would swap sides and push the KPI off its card. */
+.dl-ill { direction: ltr; unicode-bidi: isolate; }
+.dl-ill { display: block; inline-size: 100%; block-size: auto; max-block-size: 460px; overflow: visible; }
+.dl-ill--compact { max-block-size: 150px; margin-inline: auto; }
+.dl-ill--compact .dl-ill__caption { display: none; }   /* unreadable at strip size */
+
+.dl-ill__rail { fill: none; stroke: color-mix(in srgb, var(--text) 13%, transparent); stroke-width: 1.5; }
+.dl-ill__flow {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-dasharray: 2 11;
+  animation: dl-ill-flow 4s linear infinite;
+}
+@keyframes dl-ill-flow { to { stroke-dashoffset: -52; } }
+
+.dl-ill__tile {
+  fill: var(--surface);
+  stroke: var(--border);
+  filter: drop-shadow(0 2px 6px color-mix(in srgb, var(--text) 8%, transparent));
+}
+.dl-ill__icon { color: var(--accent); stroke-width: 1.75; }
+.dl-ill__icon--1 { color: var(--dl-series-1); }
+.dl-ill__icon--5 { color: var(--dl-series-5); }
+.dl-ill__icon--2 { color: var(--dl-series-2); }
+.dl-ill__caption { font: 500 11px var(--dl-font); fill: var(--muted); }
+.dl-ill__caption--ai { font-weight: 600; fill: var(--mc-accent-ink, var(--accent)); letter-spacing: .02em; }
+
+.dl-ill__glow-stop0 { stop-color: var(--accent); stop-opacity: .34; }
+.dl-ill__glow-stop1 { stop-color: var(--accent); stop-opacity: 0; }
+.dl-ill__glow {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: dl-ill-pulse 6s ease-in-out infinite;
+}
+@keyframes dl-ill-pulse {
+  0%, 100% { transform: scale(.9);  opacity: .75; }
+  50%      { transform: scale(1.08); opacity: 1; }
+}
+.dl-ill__orbit {
+  fill: none;
+  stroke: var(--accent);
+  stroke-opacity: .5;
+  stroke-width: 1.25;
+  stroke-dasharray: 3 7;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: dl-ill-spin 8s linear infinite;
+}
+@keyframes dl-ill-spin { to { transform: rotate(360deg); } }
+.dl-ill__core { fill: var(--accent); filter: drop-shadow(0 0 10px color-mix(in srgb, var(--accent) 55%, transparent)); }
+.dl-ill__spark { color: var(--mc-accent-fg, #fff); stroke-width: 1.75; animation: dl-ill-twinkle 4s ease-in-out infinite; }
+@keyframes dl-ill-twinkle { 0%, 100% { opacity: 1; } 50% { opacity: .7; } }
+
+.dl-ill__card {
+  fill: var(--surface);
+  stroke: var(--border);
+  filter: drop-shadow(0 10px 24px color-mix(in srgb, var(--text) 12%, transparent));
+}
+.dl-ill__panel { fill: var(--surface2); }
+.dl-ill__dot { fill: var(--border); }
+.dl-ill__kpi-label { font: 500 11px var(--dl-font); fill: var(--muted); }
+.dl-ill__kpi {
+  font: 700 22px var(--dl-font);
+  fill: var(--text);
+  letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums;
+}
+.dl-ill__delta-bg { fill: var(--mc-success-soft, var(--surface2)); }
+.dl-ill__delta { font: 600 10.5px var(--dl-font); fill: var(--success); }
+
+.dl-ill__bar {
+  fill: color-mix(in srgb, var(--dl-series-1) 50%, var(--surface));
+  transform-box: fill-box;
+  transform-origin: bottom;
+  animation: dl-ill-grow 6s var(--dl-ease) infinite;
+}
+.dl-ill__bar--hi { fill: var(--dl-series-1); }
+@keyframes dl-ill-grow {
+  0%        { transform: scaleY(.12); }
+  22%, 88%  { transform: scaleY(1); }
+  100%      { transform: scaleY(.12); }
+}
+
+.dl-ill__donut-track { fill: none; stroke: var(--border); stroke-width: 9; }
+.dl-ill__donut { fill: none; stroke-width: 9; animation: dl-ill-donut 6s var(--dl-ease) infinite; }
+.dl-ill__donut--s1 { stroke: var(--dl-series-1); }
+.dl-ill__donut--s2 { stroke: var(--dl-series-2); }
+.dl-ill__donut--s3 { stroke: var(--dl-series-3); }
+@keyframes dl-ill-donut {
+  0%        { stroke-dasharray: 0 100; }
+  30%, 88%  { stroke-dasharray: var(--len) 100; }
+  100%      { stroke-dasharray: 0 100; }
+}
+
+.dl-ill__line {
+  fill: none;
+  stroke: var(--dl-series-2);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+  animation: dl-ill-draw 6s var(--dl-ease) infinite;
+}
+@keyframes dl-ill-draw {
+  0%        { stroke-dashoffset: 1; opacity: 1; }
+  45%, 90%  { stroke-dashoffset: 0; opacity: 1; }
+  97%       { stroke-dashoffset: 0; opacity: 0; }
+  100%      { stroke-dashoffset: 1; opacity: 0; }
+}
+.dl-ill__area { fill: color-mix(in srgb, var(--dl-series-2) 14%, transparent); animation: dl-ill-fade 6s var(--dl-ease) infinite; }
+@keyframes dl-ill-fade {
+  0%        { opacity: 0; }
+  45%, 90%  { opacity: 1; }
+  100%      { opacity: 0; }
+}
+
+/* Reduced motion: every loop stops on its finished frame (the base styles
+   above ARE the finished frame), and the card simply appears. */
+@media (prefers-reduced-motion: reduce) {
+  .dl-ill *,
+  .dl-auth__card,
+  .dl-auth__spin { animation: none !important; }
+}
