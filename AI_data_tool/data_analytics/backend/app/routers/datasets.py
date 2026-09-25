@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import shutil
 from datetime import datetime
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
@@ -147,6 +146,47 @@ async def get_dataset(dataset_id: int, db: AsyncSession = Depends(get_db), curre
     return await _without_denied_columns(db, current_user, ds, with_knowledge=True)
 
 
+def _copy_capped(stream, path: Path) -> None:
+    """Copy an upload to disk, stopping at the per-file limit (E07). The whole
+    stream used to land first and be measured afterwards, so a 20 GB upload
+    wrote 20 GB before being refused."""
+    limit = settings.max_upload_mb * 1024 * 1024
+    written = 0
+    with open(path, "wb") as f:
+        while chunk := stream.read(1024 * 1024):
+            written += len(chunk)
+            if written > limit:
+                break
+            f.write(chunk)
+    if written > limit:
+        path.unlink(missing_ok=True)
+        raise HTTPException(400, f"File exceeds {settings.max_upload_mb} MB limit")
+
+
+def _frame_problem(df, what: str = "The file") -> str | None:
+    """Why a parsed upload cannot become a usable dataset, or None.
+
+    - A header with no rows used to get through: the dataset row was written,
+      then the response (and every later listing) died encoding NaN column
+      stats, so one empty upload broke the Datasets page for the whole org.
+    - E07: a frame over the row cap was accepted, then refused by every widget
+      that read it -- a dataset that looked ready and could never be used.
+    - pandas renames an exact repeat ("unit", "unit.1") but not "Unit" and
+      "unit", which SQL (DuckDB, SQLite) then treats as one column.
+    """
+    if len(df) == 0 or len(df.columns) == 0:
+        return f"{what} has no data rows — only a header. Add at least one row and upload it again."
+    cap = int(settings.import_row_cap or 0)
+    if cap and len(df) > cap:
+        return (f"{what} has {len(df):,} rows, more than the import limit of {cap:,}. "
+                "Split it, or ask an administrator to raise IMPORT_ROW_CAP.")
+    dupes = duplicate_columns(df.columns)
+    if dupes:
+        return (f"{what} has more than one column named %s (names are compared ignoring "
+                "case). Rename one and upload it again." % ", ".join("'%s'" % d for d in dupes))
+    return None
+
+
 async def _ingest_upload_file(
     db: AsyncSession, org_id: int, *, source_filename: str | None, stream,
     name: str, description: str, budget: "_SizeBudget | None" = None,
@@ -171,20 +211,7 @@ async def _ingest_upload_file(
 
     file_path = upload_store.allocate_path(org_id, source_filename)
 
-    # E07: stop at the limit while copying. The whole stream used to land on
-    # disk first and be measured afterwards, so a 20 GB upload wrote 20 GB.
-    limit = settings.max_upload_mb * 1024 * 1024
-    written = 0
-    with open(file_path, "wb") as f:
-        while chunk := stream.read(1024 * 1024):
-            written += len(chunk)
-            if written > limit:
-                break
-            f.write(chunk)
-    if written > limit:
-        file_path.unlink(missing_ok=True)
-        raise HTTPException(400, f"File exceeds {settings.max_upload_mb} MB limit")
-
+    _copy_capped(stream, file_path)
     file_size = file_path.stat().st_size
 
     # A batch also has a ceiling on the REQUEST, not just each file: twenty
@@ -219,49 +246,38 @@ async def _ingest_upload_file(
         # the file is already on disk, so clean it up either way.
         file_path.unlink(missing_ok=True)
         raise HTTPException(400, f"Could not read file: {e}")
-    # A header with no rows used to get through: the dataset row was written,
-    # then the response (and every later listing) died encoding NaN column
-    # stats, so one empty upload broke the Datasets page for the whole org.
-    if len(df) == 0 or len(df.columns) == 0:
+    problem = _frame_problem(df)
+    if problem:
         file_path.unlink(missing_ok=True)
-        raise HTTPException(400, "The file has no data rows — only a header. Add at least one row and upload it again.")
-    # E07: a file over the row cap was accepted here and then refused by every
-    # widget that read it -- a dataset that looked ready and could never be
-    # used. Refuse it at the door instead, with the same limit.
-    cap = int(settings.import_row_cap or 0)
-    if cap and len(df) > cap:
-        file_path.unlink(missing_ok=True)
-        raise HTTPException(400, f"The file has {len(df):,} rows, more than the import limit of "
-                                 f"{cap:,}. Split it, or ask an administrator to raise IMPORT_ROW_CAP.")
-    # pandas renames an exact repeat ("unit", "unit.1") but not "Unit" and
-    # "unit", which SQL (DuckDB, SQLite) then treats as one column.
-    dupes = duplicate_columns(df.columns)
-    if dupes:
-        file_path.unlink(missing_ok=True)
-        raise HTTPException(400, "The file has more than one column named %s (names are compared "
-                                 "ignoring case). Rename one and upload it again."
-                                 % ", ".join("'%s'" % d for d in dupes))
-    type_map = await asyncio.to_thread(detect_types, df)
-    # Best-effort accelerant: a verified parquet sidecar makes every later
-    # load of this CSV a fraction of the parse cost. Failure never fails
-    # the upload (the helper swallows and logs).
-    await asyncio.to_thread(write_parquet_sidecar, str(file_path))
+        raise HTTPException(400, problem)
+    # E07: from here on a failure is unexpected, but it must still leave no
+    # bytes behind -- the caller rolls the row back, this removes the file.
+    try:
+        type_map = await asyncio.to_thread(detect_types, df)
+        # Best-effort accelerant: a verified parquet sidecar makes every later
+        # load of this CSV a fraction of the parse cost. Failure never fails
+        # the upload (the helper swallows and logs).
+        await asyncio.to_thread(write_parquet_sidecar, str(file_path))
 
-    ds = Dataset(last_refreshed_at=datetime.utcnow(),  # E06: when the data was loaded
-        name=name, description=description or None, filename=str(file_path),
-        row_count=len(df), col_count=len(df.columns), file_size=file_size,
-        org_id=org_id, created_by=owner_id,
-    )
-    db.add(ds)
-    await db.flush()
+        ds = Dataset(last_refreshed_at=datetime.utcnow(),  # E06: when the data was loaded
+            name=name, description=description or None, filename=str(file_path),
+            row_count=len(df), col_count=len(df.columns), file_size=file_size,
+            org_id=org_id, created_by=owner_id,
+        )
+        db.add(ds)
+        await db.flush()
 
-    for col_name, dtype in type_map.items():
-        db.add(DatasetColumn(
-            dataset_id=ds.id, name=col_name, dtype=dtype,
-            missing_pct=_missing_pct(df[col_name]), stats={},
-        ))
-    await _apply_default_data_view(db, ds, org_id)
-    return ds
+        for col_name, dtype in type_map.items():
+            db.add(DatasetColumn(
+                dataset_id=ds.id, name=col_name, dtype=dtype,
+                missing_pct=_missing_pct(df[col_name]), stats={},
+            ))
+        await _apply_default_data_view(db, ds, org_id)
+        return ds
+    except Exception:
+        file_path.unlink(missing_ok=True)
+        remove_parquet_sidecar(str(file_path))
+        raise
 
 
 async def _apply_default_data_view(db: AsyncSession, ds: Dataset, org_id: int) -> None:
@@ -350,8 +366,7 @@ async def _ingest_access_file(
         raise HTTPException(400, str(e))
 
     mdb_path = upload_store.allocate_path(org_id, source_filename)
-    with open(mdb_path, "wb") as fh:
-        shutil.copyfileobj(stream, fh)
+    _copy_capped(stream, mdb_path)
 
     try:
         size = mdb_path.stat().st_size
@@ -561,6 +576,9 @@ async def upload_datasets(
                                       name=name, description=description,
                                       budget=budget, owner_id=current_user.id)
 
+    # Read once: a failed file rolls back, which expires current_user, and
+    # reading an expired attribute in async code raises MissingGreenlet.
+    org_id, user_id = current_user.org_id, current_user.id
     items: list[BatchUploadItem] = []
     quota_hit = False
     only_one = len(files) == 1
@@ -582,16 +600,16 @@ async def upload_datasets(
                 # One Access file fans out into one dataset per table, so it
                 # contributes several items rather than one.
                 items.extend(await _ingest_access_file(
-                    db, current_user.org_id, source_filename=f.filename,
+                    db, org_id, source_filename=f.filename,
                     stream=f.file, name=_item_name(name, f.filename, only_one),
                     description=description, budget=budget,
-                    owner_id=current_user.id))
+                    owner_id=user_id))
                 continue
 
             ds = await _ingest_upload_file(
-                db, current_user.org_id, source_filename=f.filename, stream=f.file,
+                db, org_id, source_filename=f.filename, stream=f.file,
                 name=_item_name(name, f.filename, only_one), description=description,
-                budget=budget, owner_id=current_user.id)
+                budget=budget, owner_id=user_id)
             # Committed per file, and this is load-bearing: enforce_storage_quota
             # sums COMMITTED rows, so without it every file in the batch would
             # see the same pre-batch total and the org could overshoot its cap
@@ -615,6 +633,14 @@ async def upload_datasets(
             items.append(BatchUploadItem(
                 source_filename=f.filename or "", status="error",
                 error=str(e.detail)))
+        except Exception as e:
+            # E07: anything else used to escape as a 500 for the whole request,
+            # hiding the files already committed and skipping those after it.
+            await db.rollback()
+            logger.exception("batch upload: %s failed", f.filename)
+            items.append(BatchUploadItem(
+                source_filename=f.filename or "", status="error",
+                error=f"Could not import this file: {e}"))
 
     return _batch_result(items, "separate", quota_hit=quota_hit)
 
@@ -675,18 +701,26 @@ async def _append_into_one(
         tmp = None
         try:
             tmp = upload_store.allocate_path(org_id, f.filename)
-            with open(tmp, "wb") as fh:
-                shutil.copyfileobj(f.file, fh)
+            _copy_capped(f.file, tmp)
 
             size = tmp.stat().st_size
-            if size > settings.max_upload_mb * 1024 * 1024:
-                raise HTTPException(400, f"File exceeds {settings.max_upload_mb} MB limit")
             budget.charge(size)
             total_bytes += size
 
-            frames.append(await asyncio.to_thread(load_file, str(tmp)))
+            try:
+                frame = await asyncio.to_thread(load_file, str(tmp))
+            except Exception as e:
+                # E07: an unreadable file used to escape as a 500 and take the
+                # whole batch with it; it is this file's outcome, like any other.
+                raise HTTPException(400, f"Could not read file: {e}")
+            problem = _frame_problem(frame)
+            if problem:
+                raise HTTPException(400, problem)
+            frames.append(frame)
+            # E07: "created" only once the combined dataset exists. It was set
+            # here, before the merge, the quota check and the write had run.
             items.append(BatchUploadItem(source_filename=f.filename or "",
-                                         status="created"))
+                                         status="pending"))
         except (HTTPException, quotas.QuotaExceeded) as e:
             items.append(BatchUploadItem(source_filename=f.filename or "",
                                          status="error", error=str(e.detail)))
@@ -700,16 +734,30 @@ async def _append_into_one(
     if not frames:
         return _batch_result(items, "append", quota_hit=quota_hit)
 
+    def _none_merged(reason: str, status: int = 400):
+        """The combined dataset was not made: every file waiting on it failed
+        too, for that reason, and the response still says so per file."""
+        for item in items:
+            if item.status == "pending":
+                item.status, item.error = "error", reason
+        return _batch_result(items, "append", quota_hit=quota_hit or status == 413)
+
     combined = await asyncio.to_thread(upload_store.concat_frames, frames)
     frames.clear()          # the merged copy is what matters now; free the parts
+    # Each file passed alone; together they can still exceed the row cap, or
+    # union "Unit" from one file with "unit" from another.
+    problem = _frame_problem(combined, "The combined data")
+    if problem:
+        return _none_merged(problem)
 
     try:
         await quotas.enforce_storage_quota(db, org_id, total_bytes)
-    except quotas.QuotaExceeded as e:
-        raise HTTPException(e.status_code, str(e.detail))
+    except (HTTPException, quotas.QuotaExceeded) as e:
+        return _none_merged(str(e.detail), e.status_code)
 
     final_path = upload_store.allocate_path(org_id, "combined.csv")
-    await asyncio.to_thread(lambda: combined.to_csv(final_path, index=False))
+    from ..services.dataset_refresh import write_csv_atomic
+    await asyncio.to_thread(write_csv_atomic, combined, final_path)
     real_size = final_path.stat().st_size
     try:
         # The written CSV is rarely the same size as the sum of its inputs, so
@@ -717,7 +765,7 @@ async def _append_into_one(
         await quotas.enforce_storage_quota(db, org_id, real_size)
     except (HTTPException, quotas.QuotaExceeded) as e:
         final_path.unlink(missing_ok=True)
-        raise HTTPException(getattr(e, "status_code", 413), str(e.detail))
+        return _none_merged(str(e.detail), getattr(e, "status_code", 413))
 
     type_map = await asyncio.to_thread(detect_types, combined)
     await asyncio.to_thread(write_parquet_sidecar, str(final_path))
@@ -735,8 +783,8 @@ async def _append_into_one(
 
     out = DatasetOut.model_validate(await _load_dataset_out(db, ds.id))
     for item in items:
-        if item.status == "created":
-            item.dataset = out
+        if item.status == "pending":
+            item.status, item.dataset = "created", out
     return _batch_result(items, "append", quota_hit=quota_hit)
 
 
