@@ -88,3 +88,8 @@ _to_delete/
 # Local UI-refresh backup copy of frontend/src (never commit)
 AI_data_tool/data_analytics/frontend/_ui_refresh_backup/
 **/.claude/settings.local.json
+
+# SAS reverse-engineering research (328 MB of reference material, not app code)
+sas_new_data/
+# Session reports and screenshots handed between Claude sessions
+Claude outputs/
