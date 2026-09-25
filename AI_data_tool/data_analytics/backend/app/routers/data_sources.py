@@ -1,6 +1,7 @@
 import asyncio
 import csv
 import io
+from datetime import datetime
 from pathlib import Path
 import pandas as pd
 from sqlalchemy import select
@@ -627,7 +628,7 @@ async def import_dataset(ds_id: int, req: ImportRequest, db: AsyncSession = Depe
         Path(file_path).unlink(missing_ok=True)
         raise
 
-    dataset = Dataset(
+    dataset = Dataset(last_refreshed_at=datetime.utcnow(),  # E06: when the data was loaded
         name=req.dataset_name,
         description=f"Imported from {ds.name} ({ds.type})",
         filename=file_path,

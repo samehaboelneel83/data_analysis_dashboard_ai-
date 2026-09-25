@@ -7,12 +7,29 @@
 import { useEffect, useState } from 'react'
 import { prepApi, type JoinCheck, type PrepStep } from '../../../services/api'
 
-export default function JoinMatchNote({ datasetId, steps, index }: {
+/** A key list the backend will accept: at least one pair with both sides named. */
+function hasKeyPair(step: PrepStep): boolean {
+  if (step.left_on && step.right_on) return true
+  const l = Array.isArray(step.left_ons) ? step.left_ons as unknown[] : []
+  const r = Array.isArray(step.right_ons) ? step.right_ons as unknown[] : []
+  return l.some((v, i) => typeof v === 'string' && v.trim() !== '' && typeof r[i] === 'string' && (r[i] as string).trim() !== '')
+}
+
+function ago(iso: string): string {
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000)
+  return days <= 0 ? 'today' : days === 1 ? 'yesterday' : `${days.toLocaleString()} days ago`
+}
+
+export default function JoinMatchNote({ datasetId, steps, index, joined }: {
   datasetId: number; steps: PrepStep[]; index: number
+  /** The dataset being joined in, for its freshness (E06). */
+  joined?: { name: string; last_refreshed_at?: string | null } | null
 }) {
   const step = steps[index] ?? {}
   const ready = typeof step.dataset_id === 'number' || (typeof step.dataset_id === 'string' && step.dataset_id !== '')
-  const keyed = !!(step.left_on && step.right_on) || (Array.isArray(step.left_ons) && (step.left_ons as unknown[]).length > 0)
+  // `left_ons: ['']` is the editor mid-edit, not a key: checking it answered
+  // with a red "needs a key column" while the author was still choosing.
+  const keyed = hasKeyPair(step)
   const sig = JSON.stringify(steps.slice(0, index + 1))
   const [check, setCheck] = useState<JoinCheck | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -54,6 +71,27 @@ export default function JoinMatchNote({ datasetId, steps, index }: {
       )}
       {check.type_mismatch.length > 0 && (
         <div style={{ color: 'var(--danger)' }}>⚠ A number is joined to text ({check.type_mismatch.join('; ')}): values that look equal will not match. Change one column’s type first.</div>
+      )}
+      {/* E06: fan-out as a plain figure, for every join type -- not only when a
+          duplicate key happens to explain it. */}
+      {check.rows_after != null && (
+        <div data-testid="join-fanout" style={{ color: (check.multiplier ?? 1) > 1 ? 'var(--warning, #d68910)' : 'var(--muted)' }}>
+          Rows after the join: {check.rows_after.toLocaleString()}
+          {check.multiplier != null && check.multiplier !== 1 ? ` (×${check.multiplier.toLocaleString()})` : ' (one row each)'}
+        </div>
+      )}
+      {(check.right_unmatched_rows ?? 0) > 0 && (
+        <div style={{ color: 'var(--muted)' }}>
+          {check.right_unmatched_rows!.toLocaleString()} of {check.right_rows?.toLocaleString()} rows of the joined data find no partner here
+          {step.how === 'right' || step.how === 'full' ? ' and are kept with blank values.' : ' and are left out.'}
+        </div>
+      )}
+      {joined && (
+        <div data-testid="join-freshness" style={{ color: 'var(--muted)' }}>
+          {joined.last_refreshed_at
+            ? `“${joined.name}” was last loaded ${ago(joined.last_refreshed_at)} (${new Date(joined.last_refreshed_at).toLocaleDateString()}).`
+            : `“${joined.name}” has no load time recorded.`}
+        </div>
       )}
     </div>
   )

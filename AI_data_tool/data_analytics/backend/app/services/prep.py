@@ -667,7 +667,18 @@ def join_match_report(left: pd.DataFrame, right: pd.DataFrame, pairs: list[tuple
     unmatched = lk[lk.notna() & ~matched].value_counts()
     dup = rcounts[rcounts > 1]
     fan = lk[matched].map(rcounts).fillna(1)
-    after = {"inner": int(fan.sum()), "left": int(fan.sum()) + (total - matched_rows)}.get(how)
+    pairs_n = int(fan.sum())
+    # E06: the other side too. Rows of the joined dataset whose key finds no
+    # partner here are dropped by a left/inner join (silently) and kept by a
+    # right/full one -- either way the author should see how many.
+    lvalues = set(lk.dropna())
+    r_matched = rk.notna() & rk.isin(lvalues)
+    right_total = int(len(right))
+    right_orphans = right_total - int(r_matched.sum())
+    after = {"inner": pairs_n,
+             "left": pairs_n + (total - matched_rows),
+             "right": pairs_n + right_orphans,
+             "full": pairs_n + (total - matched_rows) + right_orphans}.get(how)
     # Raw-value compatibility: text keys that match only after str() are a
     # silent miss in the real merge.
     type_mismatch = [f"{l} ({left[l].dtype}) vs {r} ({right[r].dtype})" for l, r in pairs
@@ -681,6 +692,10 @@ def join_match_report(left: pd.DataFrame, right: pd.DataFrame, pairs: list[tuple
         "duplicate_right_keys": int(len(dup)),
         "duplicate_examples": [{"key": str(k), "count": int(n)} for k, n in dup.head(5).items()],
         "rows_after": after,
+        # rows_after / rows: 1.17 means the join turns 1,000 rows into 1,170.
+        "multiplier": round(after / total, 2) if after is not None and total else None,
+        "right_rows": right_total,
+        "right_unmatched_rows": right_orphans,
         "type_mismatch": type_mismatch,
     }
 

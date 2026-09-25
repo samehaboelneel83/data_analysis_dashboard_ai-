@@ -571,6 +571,14 @@ export default function DatasetDetail() {
             <IconLabel icon={Plug}>{tr('dataset.live')}</IconLabel>
           </span>
         )}
+        {/* E06 freshness: WHEN this data was loaded, for every imported
+            dataset -- an uploaded file used to show nothing, so a stale
+            upload read exactly like a fresh one. */}
+        {!(ds.data_source_id || canSchedule) && ds.mode !== 'directquery' && ds.last_refreshed_at && (
+          <div data-testid="dataset-freshness" style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'end' }}>
+            {tr('dataset.lastRefreshed', { when: new Date(ds.last_refreshed_at).toLocaleString() })}
+          </div>
+        )}
         {(ds.data_source_id || canSchedule) && ds.mode !== 'directquery' && (
           <div style={{ position: 'relative' }}>
             {ds.last_refreshed_at && (

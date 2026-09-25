@@ -222,7 +222,7 @@ async def _ingest_upload_file(
     # the upload (the helper swallows and logs).
     await asyncio.to_thread(write_parquet_sidecar, str(file_path))
 
-    ds = Dataset(
+    ds = Dataset(last_refreshed_at=datetime.utcnow(),  # E06: when the data was loaded
         name=name, description=description or None, filename=str(file_path),
         row_count=len(df), col_count=len(df.columns), file_size=file_size,
         org_id=org_id, created_by=owner_id,
@@ -362,7 +362,7 @@ async def _ingest_access_file(
                 type_map = await asyncio.to_thread(detect_types, df)
                 await asyncio.to_thread(write_parquet_sidecar, str(csv_path))
 
-                ds = Dataset(name=f"{name} — {table}",
+                ds = Dataset(last_refreshed_at=datetime.utcnow(), name=f"{name} — {table}",
                              description=description or None,
                              filename=str(csv_path), row_count=len(df),
                              col_count=len(df.columns), file_size=csv_size,
@@ -623,7 +623,7 @@ async def _append_into_one(
     type_map = await asyncio.to_thread(detect_types, combined)
     await asyncio.to_thread(write_parquet_sidecar, str(final_path))
 
-    ds = Dataset(name=name, description=description or None, filename=str(final_path),
+    ds = Dataset(last_refreshed_at=datetime.utcnow(), name=name, description=description or None, filename=str(final_path),
                  row_count=len(combined), col_count=len(combined.columns),
                  file_size=real_size, org_id=org_id, created_by=owner_id)
     db.add(ds)

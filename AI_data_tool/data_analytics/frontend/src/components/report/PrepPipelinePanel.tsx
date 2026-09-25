@@ -295,9 +295,9 @@ export default function PrepPipelinePanel({ datasetId, columns }: Props) {
                       tables link, never that the match is one-to-one, so even a
                       suggested key can fan out. Naming it is the only warning
                       the author gets. */}
-                  {s.kind === 'join' && stepPreview.rows_out > stepPreview.rows_in * 1.5 && (
+                  {s.kind === 'join' && stepPreview.rows_out > stepPreview.rows_in && (
                     <span data-testid="prep-join-fanout" style={{ color: 'var(--warning, #b26b00)' }}>
-                      {' '}· this join multiplied rows — check the key is unique on the other side
+                      {' '}· this join multiplied rows (×{(stepPreview.rows_out / Math.max(1, stepPreview.rows_in)).toFixed(2)}) — check the key is unique on the other side
                     </span>
                   )}
                 </div>
@@ -309,7 +309,8 @@ export default function PrepPipelinePanel({ datasetId, columns }: Props) {
                         joinColumns={typeof s.dataset_id === 'number' ? (joinCols[s.dataset_id] ?? []) : []}
                         suggestKeys={(targetId) => suggestJoinKeys(rels, datasetId, targetId)}
                     onChange={patch => updateStep(idx, patch)} />
-                  {s.kind === 'join' && <JoinMatchNote datasetId={datasetId} steps={apiSteps()} index={idx} />}
+                  {s.kind === 'join' && <JoinMatchNote datasetId={datasetId} steps={apiSteps()} index={idx}
+                    joined={otherDatasets.find(d => d.id === Number(s.dataset_id)) ?? null} />}
                 </div>
               )}
             </div>

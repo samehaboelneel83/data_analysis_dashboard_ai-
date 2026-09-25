@@ -351,6 +351,9 @@ class TestUploadsRecordTheirOwner:
         assert r.status_code in (200, 201), r.text
         ds = await db_session.get(Dataset, r.json()["id"])
         assert ds.created_by == world["owner"].id
+        # E06 freshness: an upload records when its data was loaded -- it was
+        # null for every new dataset, so a stale file read like a fresh one.
+        assert r.json()["last_refreshed_at"] is not None
         # ...and a colleague cannot open it.
         assert (await client.get(f"/api/v1/datasets/{ds.id}",
                                  headers=_headers(world["outsider"]))).status_code == 404

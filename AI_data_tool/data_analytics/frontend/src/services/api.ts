@@ -1129,6 +1129,11 @@ export interface JoinCheck {
   duplicate_right_keys: number
   duplicate_examples: { key: string; count: number }[]
   rows_after: number | null
+  /** rows_after / rows (E06 fan-out); null when it cannot be computed. */
+  multiplier?: number | null
+  /** The joined side: its size, and rows whose key finds no partner here. */
+  right_rows?: number
+  right_unmatched_rows?: number
   type_mismatch: string[]
   error?: string
 }

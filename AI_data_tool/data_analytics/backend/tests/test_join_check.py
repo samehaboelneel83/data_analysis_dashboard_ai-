@@ -57,3 +57,24 @@ async def test_a_dataset_from_another_org_cannot_be_checked(client, auth_headers
     r = await client.post(f"/api/v1/datasets/{left.id}/join-check",
                           json={"steps": [_join_step(theirs.id)], "index": 0}, headers=auth_headers["a"])
     assert r.status_code == 404
+
+
+class TestFanOutForEveryJoinType:
+    """E06: 'preview shows fan-out'. rows_after existed for inner and left
+    joins only, so a right or full join showed no figure at all, and the
+    joined side's own orphans were never counted."""
+
+    L = pd.DataFrame({"k": ["a", "a", "b", "c", None]})
+    R = pd.DataFrame({"k": ["a", "b", "b", "d"]})
+
+    def test_rows_after_matches_the_real_merge_for_every_how(self):
+        for how in ("inner", "left", "right", "full"):
+            got = join_match_report(self.L, self.R, [("k", "k")], how=how)
+            real = len(self.L.merge(self.R, on="k", how="outer" if how == "full" else how))
+            assert got["rows_after"] == real, how
+            assert got["multiplier"] == round(real / len(self.L), 2), how
+
+    def test_the_joined_sides_orphans_are_counted(self):
+        got = join_match_report(self.L, self.R, [("k", "k")], how="left")
+        assert got["right_rows"] == 4
+        assert got["right_unmatched_rows"] == 1          # 'd' has no partner
