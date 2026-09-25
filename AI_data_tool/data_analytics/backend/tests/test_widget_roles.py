@@ -303,3 +303,40 @@ class TestATypeSwitchIsJudgedAsTheWidgetItBecomes:
         # ...and the same switch with the config the builder would send passes.
         r = await client.patch(url, json={"widget_type": "pie", "config": {}}, headers=h)
         assert r.status_code == 200, r.text
+
+
+class TestAKpiNeedsOnlyAMeasure:
+    """REQUIRED_ROLES["kpi"] became ("measure",) to mirror ROLE_SPECS. That
+    makes the dimension OPTIONAL, not forbidden: a KPI saved with a dimension
+    before the change must still validate, save and load."""
+
+    def test_the_measure_is_the_only_requirement(self):
+        assert missing_roles("kpi", {"measure": "sales"}) == []
+        assert missing_roles("kpi", {"dimension": "region", "measure": "sales"}) == []
+        assert missing_roles("kpi", {"dimension": "region"}) == ["measure"]
+
+    def test_a_kpi_with_a_dimension_still_validates(self):
+        from app.services.widget_roles import validate_widget_payload
+        validate_widget_payload("kpi", {"dimension": "region", "measure": "sales", "aggregation": "sum"})
+        validate_widget_payload("kpi", {"measure": "sales", "aggregation": "sum"})
+
+    async def test_both_shapes_save_and_load(self, client, auth_headers):
+        h = auth_headers["a"]
+        rep = (await client.post("/api/v1/reports", json={"name": "K"}, headers=h)).json()
+        page = rep["pages"][0]["id"]
+        url = f"/api/v1/reports/{rep['id']}/pages/{page}/widgets"
+        ids = []
+        for cfg in ({"measure": "sales", "aggregation": "sum"},
+                    {"dimension": "region", "measure": "sales", "aggregation": "sum"}):
+            r = await client.post(url, json={"widget_type": "kpi", "config": cfg,
+                                             "layout": {"x": 0, "y": 0, "w": 3, "h": 3}}, headers=h)
+            assert r.status_code == 201, r.text
+            ids.append(r.json()["id"])
+        # ...and an existing one with a dimension can be edited and re-saved.
+        r = await client.patch(f"{url}/{ids[1]}", json={"config": {
+            "dimension": "region", "measure": "sales", "aggregation": "avg"}}, headers=h)
+        assert r.status_code == 200, r.text
+        loaded = (await client.get(f"/api/v1/reports/{rep['id']}", headers=h)).json()
+        kpis = {w["id"]: w["config"] for p in loaded["pages"] for w in p["widgets"]}
+        assert kpis[ids[1]]["dimension"] == "region" and kpis[ids[1]]["aggregation"] == "avg"
+        assert "dimension" not in kpis[ids[0]]
