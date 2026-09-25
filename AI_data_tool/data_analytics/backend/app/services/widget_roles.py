@@ -71,7 +71,10 @@ REQUIRED_ROLES: dict[str, tuple[str, ...]] = {
     "histogram": ("measure",),
     "icicle": (),
     "image": (),
-    "kpi": ("category",),
+    # A measure, never a dimension: a KPI renders rows[0].value, so a
+    # dimension would headline ONE group's number as the overall figure.
+    # Mirrors ROLE_SPECS since 6483a74 made the frontend say the same.
+    "kpi": ("measure",),
     "line": ("category",),
     "list": ("category",),
     "map_bubbles": (),

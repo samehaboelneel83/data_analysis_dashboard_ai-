@@ -1910,7 +1910,7 @@ React 18 · TypeScript · Vite · Recharts.
 
 ### Pages
 
-**16 pages** in `frontend/src/pages/`:
+**17 pages** in `frontend/src/pages/`:
 
 | Page | Purpose |
 |------|---------|
@@ -1928,6 +1928,7 @@ React 18 · TypeScript · Vite · Recharts.
 | `AskAI.tsx` | The agent's own page — scope picker over `ChatPane` |
 | `InsightsHub.tsx` | One front door to the analysis capabilities (links into `DatasetDetail` anchors) |
 | `Login.tsx`, `SsoCallback.tsx` | Authentication |
+| `NotFound.tsx` | The page for an unknown route |
 | `admin/` | Administration screens |
 | `monitoring/` | Monitoring screens — jobs, deliveries, activity (admin-gated) |
 
