@@ -25,6 +25,7 @@ from ..services.frame_cache import remove_parquet_sidecar, write_parquet_sidecar
 from ..services.widget_data import preview_expression, apply_filter_expr
 from ..services.direct_query import DirectQueryUnsupported, run_direct_query
 from ..services import quotas, upload_store
+from ..services.ingest import duplicate_columns
 
 logger = logging.getLogger(__name__)
 
@@ -170,13 +171,21 @@ async def _ingest_upload_file(
 
     file_path = upload_store.allocate_path(org_id, source_filename)
 
+    # E07: stop at the limit while copying. The whole stream used to land on
+    # disk first and be measured afterwards, so a 20 GB upload wrote 20 GB.
+    limit = settings.max_upload_mb * 1024 * 1024
+    written = 0
     with open(file_path, "wb") as f:
-        shutil.copyfileobj(stream, f)
-
-    file_size = file_path.stat().st_size
-    if file_size > settings.max_upload_mb * 1024 * 1024:
+        while chunk := stream.read(1024 * 1024):
+            written += len(chunk)
+            if written > limit:
+                break
+            f.write(chunk)
+    if written > limit:
         file_path.unlink(missing_ok=True)
         raise HTTPException(400, f"File exceeds {settings.max_upload_mb} MB limit")
+
+    file_size = file_path.stat().st_size
 
     # A batch also has a ceiling on the REQUEST, not just each file: twenty
     # files each under the per-file cap can still be far more than one process
@@ -216,6 +225,22 @@ async def _ingest_upload_file(
     if len(df) == 0 or len(df.columns) == 0:
         file_path.unlink(missing_ok=True)
         raise HTTPException(400, "The file has no data rows — only a header. Add at least one row and upload it again.")
+    # E07: a file over the row cap was accepted here and then refused by every
+    # widget that read it -- a dataset that looked ready and could never be
+    # used. Refuse it at the door instead, with the same limit.
+    cap = int(settings.import_row_cap or 0)
+    if cap and len(df) > cap:
+        file_path.unlink(missing_ok=True)
+        raise HTTPException(400, f"The file has {len(df):,} rows, more than the import limit of "
+                                 f"{cap:,}. Split it, or ask an administrator to raise IMPORT_ROW_CAP.")
+    # pandas renames an exact repeat ("unit", "unit.1") but not "Unit" and
+    # "unit", which SQL (DuckDB, SQLite) then treats as one column.
+    dupes = duplicate_columns(df.columns)
+    if dupes:
+        file_path.unlink(missing_ok=True)
+        raise HTTPException(400, "The file has more than one column named %s (names are compared "
+                                 "ignoring case). Rename one and upload it again."
+                                 % ", ".join("'%s'" % d for d in dupes))
     type_map = await asyncio.to_thread(detect_types, df)
     # Best-effort accelerant: a verified parquet sidecar makes every later
     # load of this CSV a fraction of the parse cost. Failure never fails
