@@ -219,3 +219,29 @@ async def test_an_rls_rule_cannot_call_a_defined_custom_function(client, db_sess
     )
 
     assert resp.status_code == 400
+
+
+async def test_a_rule_whose_dataset_is_in_another_org_is_not_this_orgs(client, db_session, two_orgs, auth_headers, tmp_path):
+    """BUG-036. A seeder once bound org a's role to org b's dataset. Scoped by
+    the role alone, org a's admin listed it (as a "Deleted dataset" -- the
+    dataset is invisible to them), and could PATCH it, validating expressions
+    against org b's data, or delete it. Both ends must be in the org."""
+    from app.models.models import ColumnSecurityRule
+    theirs = await _seed_dataset_with_file(
+        db_session, tmp_path, two_orgs["b"]["org"].id, [{"region": "North", "sales": 100}],
+    )
+    row = RowSecurityRule(role_id=two_orgs["a"]["role"].id, dataset_id=theirs.id, filter_expr="region == 'North'")
+    col = ColumnSecurityRule(role_id=two_orgs["a"]["role"].id, dataset_id=theirs.id, denied_columns=["sales"])
+    db_session.add_all([row, col])
+    await db_session.commit()
+
+    h = auth_headers["a"]
+    listed = (await client.get("/api/v1/admin/row-security-rules", headers=h)).json()
+    assert row.id not in [r["id"] for r in listed]
+    listed = (await client.get("/api/v1/admin/column-security-rules", headers=h)).json()
+    assert col.id not in [r["id"] for r in listed]
+    r = await client.patch(f"/api/v1/admin/row-security-rules/{row.id}",
+                           json={"filter_expr": "secret_column > 0"}, headers=h)
+    assert r.status_code == 404
+    assert (await client.delete(f"/api/v1/admin/row-security-rules/{row.id}", headers=h)).status_code == 404
+    assert (await client.delete(f"/api/v1/admin/column-security-rules/{col.id}", headers=h)).status_code == 404

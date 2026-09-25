@@ -372,7 +372,7 @@ export default function AdminRowSecurityRules() {
   useEffect(() => { load().finally(() => setLoading(false)) }, [])
 
   const roleName = (id: number) => roles.find(r => r.id === id)?.name ?? `Role #${id}`
-  const datasetName = (id: number) => datasets.find(d => d.id === id)?.name ?? `Deleted dataset (#${id})`
+  const datasetName = (id: number) => datasets.find(d => d.id === id)?.name ?? `Dataset #${id}`
 
   const handleSaved = (r: RowSecurityRule) => {
     setRules(prev => {

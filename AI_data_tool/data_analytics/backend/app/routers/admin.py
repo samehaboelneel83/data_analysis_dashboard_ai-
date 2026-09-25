@@ -234,9 +234,13 @@ async def _validate_filter_expr(dataset: Dataset, filter_expr: str) -> None:
 
 @router.get("/row-security-rules", response_model=list[RowSecurityRuleOut])
 async def list_rules(db: AsyncSession = Depends(get_db), current_user: User = Depends(require_org_admin)):
+    # Role AND dataset in this org: a rule is this org's only when both ends are.
+    # A seeder once bound org 1's role to org 4's dataset; scoped by role alone,
+    # org 1's admin listed (and could edit) a rule on data it cannot see.
     result = await db.execute(
         select(RowSecurityRule).join(Role, RowSecurityRule.role_id == Role.id)
-        .where(Role.org_id == current_user.org_id)
+        .join(Dataset, RowSecurityRule.dataset_id == Dataset.id)
+        .where(Role.org_id == current_user.org_id, Dataset.org_id == current_user.org_id)
     )
     return result.scalars().all()
 
@@ -420,6 +424,9 @@ async def _get_rule_in_org(db: AsyncSession, rule_id: int, current_user: User) -
     rule = result.scalar_one_or_none()
     if rule is None or rule.role.org_id != current_user.org_id:
         raise HTTPException(404, "Rule not found")
+    ds = await db.get(Dataset, rule.dataset_id)
+    if ds is None or ds.org_id != current_user.org_id:    # see list_rules
+        raise HTTPException(404, "Rule not found")
     return rule
 
 
@@ -479,7 +486,8 @@ async def list_column_rules(db: AsyncSession = Depends(get_db), admin: User = De
     role_ids = [r.id for r in (await db.execute(
         select(Role).where(Role.org_id == admin.org_id))).scalars().all()]
     rows = (await db.execute(
-        select(ColumnSecurityRule).where(ColumnSecurityRule.role_id.in_(role_ids))
+        select(ColumnSecurityRule).join(Dataset, ColumnSecurityRule.dataset_id == Dataset.id)
+        .where(ColumnSecurityRule.role_id.in_(role_ids), Dataset.org_id == admin.org_id)  # see list_rules
     )).scalars().all() if role_ids else []
     return [{"id": r.id, "role_id": r.role_id, "dataset_id": r.dataset_id,
              "denied_columns": r.denied_columns} for r in rows]
@@ -510,6 +518,7 @@ async def delete_column_rule(rule_id: int, db: AsyncSession = Depends(get_db), a
         raise HTTPException(404, "Rule not found")
     role = await db.get(Role, rule.role_id)
     check_org(role, admin, "Rule not found")
+    check_org(await db.get(Dataset, rule.dataset_id), admin, "Rule not found")    # see list_rules
     await admin_audit.record(db, admin, "column_security_rule.delete",
                               f"dataset:{rule.dataset_id}", None)
     await db.delete(rule)

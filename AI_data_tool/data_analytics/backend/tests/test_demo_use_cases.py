@@ -336,6 +336,25 @@ class TestIdentitiesAndGrants:
         assert role.name == DEMO_ROLE_NAMES["emea"]
 
     @pytest.mark.asyncio
+    async def test_a_second_org_gets_rules_on_its_own_role(self, org_id, db_session, seeded):
+        """BUG-036. Demo emails are unique install-wide, so seeding a second org
+        reuses the first org's demo user. The rules used to take that user's
+        role_id, binding org 1's role to org 2's dataset -- org 1's admin then
+        listed a "Deleted dataset" rule and could edit a rule on org 2's data."""
+        from app.models.models import ColumnSecurityRule, Dataset, Role, RowSecurityRule
+        other = Organization(name="Second Demo Co")
+        db_session.add(other)
+        await db_session.flush()
+        await seed_demo_use_cases(db_session, other.id, await seed_demo_datasets(db_session, other.id))
+
+        for model in (RowSecurityRule, ColumnSecurityRule):
+            pairs = (await db_session.execute(
+                select(Role.org_id, Dataset.org_id).select_from(model)
+                .join(Role, Role.id == model.role_id).join(Dataset, Dataset.id == model.dataset_id)
+            )).all()
+            assert sorted(pairs) == [(org_id, org_id), (other.id, other.id)], model.__name__
+
+    @pytest.mark.asyncio
     async def test_the_emea_filter_actually_matches_rows(self, org_id, db_session, seeded):
         """A filter that matches nothing is indistinguishable from a filter that
         works perfectly -- both show zero rows. This shipped once: the rule read

@@ -568,8 +568,18 @@ async def _seed_demo_identities(db: AsyncSession, org_id: int) -> dict[str, User
 
 async def _seed_rls(db: AsyncSession, org_id: int, sales: Dataset,
                     users: dict[str, User]) -> None:
-    """One row rule and one column rule, both on the EMEA role only."""
-    emea_role_id = users["emea"].role_id
+    """One row rule and one column rule, both on the EMEA role only.
+
+    The role is THIS org's EMEA role, looked up by org and name -- never the
+    demo user's role_id. Demo emails are unique across the install, so seeding
+    a second org reuses the first org's user, and binding the rule to that
+    user's role tied org 1's role to org 4's dataset (BUG-036: org 1's admin
+    saw it as a "Deleted dataset", and could edit a rule on org 4's data)."""
+    emea_role_id = (await db.execute(
+        select(Role.id).where(Role.org_id == org_id, Role.name == DEMO_ROLE_NAMES["emea"])
+    )).scalars().first()
+    if emea_role_id is None:      # _seed_demo_identities creates it; never expected
+        return
 
     existing_row = (await db.execute(
         select(RowSecurityRule).where(
