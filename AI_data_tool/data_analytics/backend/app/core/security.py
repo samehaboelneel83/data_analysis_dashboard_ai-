@@ -27,6 +27,31 @@ def create_access_token(user_id: int, org_id: int) -> str:
     return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
 
 
+# ── T6: the browser session rides in an httpOnly cookie ──────────────────────
+# The login JWT used to live in localStorage, where any script injected into
+# the page could read it and carry it off. As an httpOnly cookie no script can
+# read it; SameSite=Lax keeps it off cross-site subrequests, and the dependency
+# additionally demands a custom header on a cookie-authenticated write (CSRF).
+# The Authorization header still works for API keys, embeds and scripts.
+SESSION_COOKIE = "datalytics_session"
+# A header a cross-site <form> cannot send and a cross-origin fetch cannot send
+# without a CORS preflight, which only the configured origins pass.
+CSRF_HEADER = "x-requested-with"
+
+
+def set_session_cookie(response, token: str) -> None:
+    response.set_cookie(
+        SESSION_COOKIE, token,
+        max_age=settings.access_token_expire_hours * 3600,
+        httponly=True, secure=settings.is_production(), samesite="lax", path="/api",
+    )
+
+
+def clear_session_cookie(response) -> None:
+    response.delete_cookie(SESSION_COOKIE, path="/api", httponly=True,
+                           secure=settings.is_production(), samesite="lax")
+
+
 def issued_before_cutoff(payload: dict, cutoff: datetime | None) -> bool:
     """True when this token predates the user's revocation cut-off.
 

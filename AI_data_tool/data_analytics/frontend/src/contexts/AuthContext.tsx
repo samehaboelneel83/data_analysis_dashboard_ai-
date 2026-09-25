@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { authApi, getAuthToken, setAuthToken, setUnauthorizedHandler } from '../services/api'
+import { authApi, setUnauthorizedHandler, takeLegacyToken } from '../services/api'
 import type { User } from '../services/api'
 
 interface AuthContextValue {
@@ -21,7 +21,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate()
 
   const logout = () => {
-    setAuthToken(null)
+    // The cookie is httpOnly: only the server can remove it.
+    authApi.logout().catch(() => {})
     setUser(null)
     navigate('/login', { replace: true })
   }
@@ -35,27 +36,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [navigate])
 
   useEffect(() => {
-    const token = getAuthToken()
-    if (!token) {
-      setLoading(false)
-      return
-    }
-    authApi.me()
+    // T6: the session is an httpOnly cookie, invisible to script, so the only
+    // way to know whether one exists is to ask. A token an older build left in
+    // localStorage is moved into the cookie first, so the upgrade logs nobody out.
+    const legacy = takeLegacyToken()
+    ;(legacy ? authApi.adoptSession(legacy).catch(() => {}) : Promise.resolve())
+      .then(() => authApi.me({ quiet: true }))
       .then(setUser)
-      .catch(() => setAuthToken(null))
+      .catch(() => setUser(null))
       .finally(() => setLoading(false))
   }, [])
 
   const login = async (email: string, password: string) => {
-    const { access_token } = await authApi.login(email, password)
-    setAuthToken(access_token)
+    await authApi.login(email, password)
     try {
       const me = await authApi.me()
       setUser(me)
     } catch (e) {
-      // Roll back the token — a login that can't be confirmed via /auth/me should not
+      // Roll back the session — a login that can't be confirmed via /auth/me should not
       // leave a "logged in but no user" state; the caller's catch will show the error.
-      setAuthToken(null)
+      authApi.logout().catch(() => {})
       throw e
     }
     navigate('/')

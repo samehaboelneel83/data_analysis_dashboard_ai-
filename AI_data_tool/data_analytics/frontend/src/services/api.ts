@@ -18,7 +18,14 @@ import type { DisplayRule } from '../lib/displayRules'
 const CONFIGURED_ORIGIN = (import.meta.env.VITE_API_URL ?? '').trim()
 const API_ORIGIN = CONFIGURED_ORIGIN || (import.meta.env.PROD ? '' : 'http://localhost:8000')
 const BASE = API_ORIGIN + '/api/v1'
-export const api = axios.create({ baseURL: BASE })
+// T6: the session is an httpOnly cookie the server sets at login -- no script
+// can read it, which is the point. `withCredentials` sends it (dev is
+// cross-origin: :3000 -> :8000); X-Requested-With is the CSRF proof the server
+// demands on a cookie-authenticated write, which a cross-site form cannot add.
+export const api = axios.create({
+  baseURL: BASE, withCredentials: true,
+  headers: { 'X-Requested-With': 'XMLHttpRequest' },
+})
 
 /** The API's origin as an ABSOLUTE url, for the few places a human copies one
  *  out of the UI (the SSO callback and SAML ACS urls an admin pastes into
@@ -28,43 +35,37 @@ export function apiOrigin(): string {
   return API_ORIGIN || (typeof window !== 'undefined' ? window.location.origin : '')
 }
 
-const TOKEN_KEY = 'datalytics_token'
-let authToken: string | null = localStorage.getItem(TOKEN_KEY)
+/** Where builds before T6 kept the login JWT -- readable by any script on the
+ *  page. Read once, only to move that session into the cookie, then deleted. */
+const LEGACY_TOKEN_KEY = 'datalytics_token'
 let onUnauthorized: (() => void) | null = null
 
-export function getAuthToken(): string | null {
-  return authToken
-}
-
-export function setAuthToken(token: string | null): void {
-  authToken = token
-  if (token) localStorage.setItem(TOKEN_KEY, token)
-  else localStorage.removeItem(TOKEN_KEY)
+/** Returns and forgets a token an older build left in localStorage. */
+export function takeLegacyToken(): string | null {
+  try {
+    const token = localStorage.getItem(LEGACY_TOKEN_KEY)
+    localStorage.removeItem(LEGACY_TOKEN_KEY)
+    return token
+  } catch { return null }
 }
 
 export function setUnauthorizedHandler(handler: (() => void) | null): void {
   onUnauthorized = handler
 }
 
-export function attachAuthHeader(config: any) {
-  if (authToken) {
-    config.headers = config.headers ?? {}
-    config.headers.Authorization = `Bearer ${authToken}`
-  }
-  return config
-}
-
 export function handleResponseError(error: any) {
   // Driver exceptions become sentences before any page toasts them.
   sanitizeErrorDetail(error)
-  if (error?.response?.status === 401) {
-    setAuthToken(null)
+  // `quiet401`: the start-up "am I logged in?" check. Every visitor makes it
+  // now -- the session is a cookie script cannot see -- and a 401 there just
+  // means "not logged in"; redirecting would bounce a share-link or embed
+  // viewer to the login page.
+  if (error?.response?.status === 401 && !error?.config?.quiet401) {
     onUnauthorized?.()
   }
   return Promise.reject(error)
 }
 
-api.interceptors.request.use(attachAuthHeader)
 api.interceptors.response.use(r => r, handleResponseError)
 
 export interface DatasetColumn {
@@ -1931,9 +1932,18 @@ export interface User {
 }
 
 export const authApi = {
+  // The server sets the session cookie; the token in the body is for API
+  // clients and is deliberately not kept here.
   login: (email: string, password: string) =>
-    api.post<{ access_token: string; token_type: string }>('/auth/login', { email, password }).then(r => r.data),
-  me: () => api.get<User>('/auth/me').then(r => r.data),
+    api.post<{ access_token: string; token_type: string }>('/auth/login', { email, password }).then(() => undefined),
+  /** `quiet`: a 401 means "not logged in", not "session expired". */
+  me: (opts?: { quiet?: boolean }) =>
+    api.get<User>('/auth/me', opts?.quiet ? ({ quiet401: true } as object) : undefined).then(r => r.data),
+  logout: () => api.post('/auth/logout').then(() => undefined),
+  /** Move a pre-T6 localStorage token into the httpOnly cookie, once. */
+  adoptSession: (token: string) =>
+    api.post('/auth/session', null, { headers: { Authorization: `Bearer ${token}` }, quiet401: true } as object)
+      .then(() => undefined),
 }
 
 // ── SSO (OIDC single sign-on) ───────────────────────────────────────────────────

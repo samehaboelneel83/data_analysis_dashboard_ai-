@@ -16,7 +16,17 @@ from cryptography.x509.oid import NameOID
 from lxml import etree
 from signxml import XMLSigner, methods
 
-from app.core.security import decode_access_token
+from app.core.security import SESSION_COOKIE, decode_access_token
+
+
+def session_cookie(r):
+    """The session JWT the response set as its httpOnly cookie (T6), or None."""
+    for h in r.headers.get_list("set-cookie"):
+        if h.startswith(SESSION_COOKIE + "="):
+            value = h.split("=", 1)[1].split(";", 1)[0]
+            assert "HttpOnly" in h and "Path=/api" in h and "SameSite=lax" in h, h
+            return value
+    return None
 from app.models.models import OrgIdp, SamlAuthnRequest
 
 SAMLP = "urn:oasis:names:tc:SAML:2.0:protocol"
@@ -153,8 +163,8 @@ async def test_saml_acs_happy_path_mints_token(client, db_session, two_orgs):
     r = await _post_acs(client, b64)
     assert r.status_code == 303
     loc = r.headers["location"]
-    assert "/sso/callback#token=" in loc
-    payload = decode_access_token(loc.split("#token=", 1)[1])
+    assert loc.endswith("/sso/callback") and "token" not in loc    # T6: cookie, not URL
+    payload = decode_access_token(session_cookie(r))
     assert payload is not None and int(payload["sub"]) == two_orgs["a"]["user"].id
 
 
@@ -215,7 +225,7 @@ async def test_saml_acs_response_is_one_time_use(client, db_session, two_orgs):
     await _pending(db_session, rid, org_id)
     b64 = _response_b64(rid, "admin-a@example.com")
     first = await _post_acs(client, b64)
-    assert "/sso/callback#token=" in first.headers["location"]
+    assert first.headers["location"].endswith("/sso/callback") and session_cookie(first)
     replay = await _post_acs(client, b64)                 # request already consumed
     assert "sso_error=validation_failed" in replay.headers["location"]
 
@@ -240,6 +250,6 @@ async def test_saml_acs_ignores_xsw_injected_unsigned_assertion(client, db_sessi
     b64 = _response_b64(rid, "admin-a@example.com", evil_emails=("attacker@example.com",))
     r = await _post_acs(client, b64)
     # The signed (real) identity wins; the attacker email is never trusted.
-    assert "/sso/callback#token=" in r.headers["location"]
-    payload = decode_access_token(r.headers["location"].split("#token=", 1)[1])
+    assert r.headers["location"].endswith("/sso/callback")
+    payload = decode_access_token(session_cookie(r))
     assert int(payload["sub"]) == two_orgs["a"]["user"].id

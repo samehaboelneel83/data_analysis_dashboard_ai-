@@ -13,7 +13,17 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from app.core.config import settings
-from app.core.security import decode_access_token
+from app.core.security import SESSION_COOKIE, decode_access_token
+
+
+def session_cookie(r):
+    """The session JWT the response set as its httpOnly cookie (T6), or None."""
+    for h in r.headers.get_list("set-cookie"):
+        if h.startswith(SESSION_COOKIE + "="):
+            value = h.split("=", 1)[1].split(";", 1)[0]
+            assert "HttpOnly" in h and "Path=/api" in h and "SameSite=lax" in h, h
+            return value
+    return None
 from app.models.models import OrgIdp
 from app.services import sso
 from app.services.secrets import encrypt_value, is_encrypted, REDACTED
@@ -130,8 +140,9 @@ async def test_callback_happy_path_mints_token_for_existing_user(client, db_sess
                          params={"code": "abc", "state": state}, follow_redirects=False)
     assert r.status_code == 303
     loc = r.headers["location"]
-    assert loc.startswith(settings.public_base_url.rstrip("/") + "/sso/callback#token=")
-    token = loc.split("#token=", 1)[1]
+    # T6: the session is an httpOnly cookie; the token is no longer in the URL.
+    assert loc == settings.public_base_url.rstrip("/") + "/sso/callback"
+    token = session_cookie(r)
     payload = decode_access_token(token)
     assert payload is not None and int(payload["sub"]) == two_orgs["a"]["user"].id
 

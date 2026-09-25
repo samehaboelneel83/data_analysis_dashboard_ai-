@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,7 +6,8 @@ from sqlalchemy.orm import selectinload
 
 from ..core import api_keys
 from ..core.database import get_db
-from ..core.security import create_access_token, hash_password, verify_password
+from ..core.security import (clear_session_cookie, create_access_token, hash_password,
+                             set_session_cookie, verify_password)
 from ..dependencies import get_current_user
 from ..models.models import ApiKey, User
 from ..schemas.schemas import LoginRequest, TokenOut, UserOut
@@ -21,7 +22,7 @@ _DUMMY_HASH = hash_password("timing-attack-mitigation")
 
 
 @router.post("/login", response_model=TokenOut)
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(body: LoginRequest, response: Response, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
     if not user:
@@ -35,7 +36,35 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     if not user.is_active or not password_ok:
         raise HTTPException(401, "Invalid email or password")
     token = create_access_token(user.id, user.org_id)
+    # T6: the browser keeps the session in an httpOnly cookie it cannot read
+    # from script. The body still carries the token for API clients.
+    set_session_cookie(response, token)
     return TokenOut(access_token=token)
+
+
+@router.post("/session", status_code=204)
+async def adopt_session(request: Request, response: Response,
+                        current_user: User = Depends(get_current_user)):
+    """Move a browser session from the old localStorage token into the cookie.
+
+    Before T6 the frontend stored the login JWT in localStorage; on its first
+    load after the change it sends that token here once, as a header, gets the
+    cookie, and deletes its copy -- so nobody is logged out by the upgrade.
+    Only a login JWT is accepted: a machine API key must never become a
+    browser cookie."""
+    auth = request.headers.get("authorization") or ""
+    token = auth[7:] if auth.lower().startswith("bearer ") else ""
+    if not token or api_keys.looks_like_api_key(token):
+        raise HTTPException(400, "Send the login token as a Bearer header")
+    set_session_cookie(response, token)
+
+
+@router.post("/logout", status_code=204)
+async def logout(response: Response):
+    """End the browser session: the cookie is httpOnly, so only the server can
+    remove it. (The JWT itself stays valid until it expires, as before; a
+    password reset still revokes every session at once.)"""
+    clear_session_cookie(response)
 
 
 @router.get("/me", response_model=UserOut)

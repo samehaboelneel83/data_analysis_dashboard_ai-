@@ -122,3 +122,54 @@ async def test_login_with_inactive_user_calls_verify_password_once(client, db_se
 
     assert resp.status_code == 401
     assert len(calls) == 1
+
+
+class TestTheBrowserSessionIsAnHttpOnlyCookie:
+    """T6 (BUG-040): the login JWT lived in localStorage, where any injected
+    script could read it. The browser now holds it as an httpOnly cookie; the
+    Authorization header keeps working for API keys, embeds and scripts."""
+
+    async def _login(self, client, db_session):
+        await _seed_admin(db_session)
+        r = await client.post("/api/v1/auth/login", json={"email": "admin@acme.com", "password": "supersecret"})
+        assert r.status_code == 200
+        return r
+
+    async def test_login_sets_an_httponly_lax_cookie_that_alone_authenticates(self, client, db_session):
+        r = await self._login(client, db_session)
+        cookie = next(h for h in r.headers.get_list("set-cookie") if h.startswith("datalytics_session="))
+        assert "HttpOnly" in cookie and "SameSite=lax" in cookie and "Path=/api" in cookie
+        me = await client.get("/api/v1/auth/me")                  # no Authorization header
+        assert me.status_code == 200 and me.json()["email"] == "admin@acme.com"
+
+    async def test_a_cookie_write_needs_the_csrf_header(self, client, db_session):
+        await self._login(client, db_session)
+        forged = await client.post("/api/v1/reports", json={"name": "From another site"})
+        assert forged.status_code == 401        # a cross-site form cannot add the header
+        ours = await client.post("/api/v1/reports", json={"name": "Mine"},
+                                 headers={"X-Requested-With": "XMLHttpRequest"})
+        assert ours.status_code in (200, 201), ours.text
+
+    async def test_logout_clears_the_cookie(self, client, db_session):
+        await self._login(client, db_session)
+        out = await client.post("/api/v1/auth/logout")
+        assert out.status_code == 204
+        assert (await client.get("/api/v1/auth/me")).status_code == 401
+
+    async def test_an_old_stored_token_is_adopted_into_the_cookie_once(self, client, db_session):
+        token = (await self._login(client, db_session)).json()["access_token"]
+        client.cookies.clear()
+        r = await client.post("/api/v1/auth/session", headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 204
+        assert (await client.get("/api/v1/auth/me")).status_code == 200
+
+    async def test_an_api_key_never_becomes_a_browser_cookie(self, client, db_session):
+        token = (await self._login(client, db_session)).json()["access_token"]
+        key = (await client.post("/api/v1/auth/api-keys", json={"name": "agent"},
+                                 headers={"Authorization": f"Bearer {token}"})).json()
+        raw = key.get("key") or key.get("api_key") or key.get("token")
+        assert raw and raw.startswith("dk_"), key
+        client.cookies.clear()
+        r = await client.post("/api/v1/auth/session", headers={"Authorization": f"Bearer {raw}"})
+        assert r.status_code == 400
+        assert not any(h.startswith("datalytics_session=") for h in r.headers.get_list("set-cookie"))

@@ -114,12 +114,23 @@ def _bucket_for(key: str, capacity: int, window_seconds: int) -> TokenBucket:
     return bucket
 
 
-def _client_key(request: Request) -> str:
+def _session_sub(request: Request) -> str | None:
+    """The logged-in user id, from the bearer header or (T6) the browser's
+    session cookie -- without the cookie, every browser user would fall back
+    to a per-IP bucket and a whole office behind one NAT would share one."""
+    from .security import SESSION_COOKIE
     auth = request.headers.get("authorization", "")
-    if auth.lower().startswith("bearer "):
-        payload = decode_access_token(auth[7:])
-        if payload and payload.get("sub"):
-            return f"user:{payload['sub']}"
+    token = auth[7:] if auth.lower().startswith("bearer ") else request.cookies.get(SESSION_COOKIE)
+    if not token:
+        return None
+    payload = decode_access_token(token)
+    return str(payload["sub"]) if payload and payload.get("sub") else None
+
+
+def _client_key(request: Request) -> str:
+    sub = _session_sub(request)
+    if sub:
+        return f"user:{sub}"
     host = request.client.host if request.client else "unknown"
     return f"ip:{host}"
 
@@ -135,15 +146,8 @@ def _guest_key(path: str, request: Request) -> str:
     IP -- the same signal already used to separate general traffic, just
     scoped inside this token's own bucket instead of across the whole app."""
     token = path[len(GUEST_PREFIX):].split("/", 1)[0]
-    auth = request.headers.get("authorization", "")
-    if auth.lower().startswith("bearer "):
-        payload = decode_access_token(auth[7:])
-        if payload and payload.get("sub"):
-            viewer = f"user:{payload['sub']}"
-        else:
-            viewer = f"ip:{request.client.host if request.client else 'unknown'}"
-    else:
-        viewer = f"ip:{request.client.host if request.client else 'unknown'}"
+    sub = _session_sub(request)
+    viewer = f"user:{sub}" if sub else f"ip:{request.client.host if request.client else 'unknown'}"
     return f"guest:{token or 'unknown'}:{viewer}"
 
 

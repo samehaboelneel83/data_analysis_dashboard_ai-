@@ -1,19 +1,14 @@
 import { useEffect } from 'react'
-import { setAuthToken } from '../services/api'
 
-/** Landing page for the OIDC redirect. The backend hands us a datalytics token in the
- *  URL fragment (#token=…) — fragments are never sent to servers, so it stays out of
- *  access logs. We store it and do a full navigation to '/', which re-bootstraps the app
- *  so AuthProvider picks up the token and loads the user. */
+/** Landing page for the SSO redirect (OIDC and SAML). Since T6 the backend sets
+ *  the session as an httpOnly cookie on that redirect -- the token no longer
+ *  rides in the URL, where it sat in browser history. A full navigation to '/'
+ *  re-bootstraps the app, and AuthProvider finds the session by asking
+ *  /auth/me; if the IdP round-trip set no cookie, that answer sends the person
+ *  to the login page like any other signed-out visit. */
 export default function SsoCallback() {
   useEffect(() => {
-    const m = window.location.hash.match(/token=([^&]+)/)
-    if (m) {
-      setAuthToken(decodeURIComponent(m[1]))
-      window.location.replace('/')
-    } else {
-      window.location.replace('/login?sso_error=missing_token')
-    }
+    window.location.replace('/')
   }, [])
 
   return (

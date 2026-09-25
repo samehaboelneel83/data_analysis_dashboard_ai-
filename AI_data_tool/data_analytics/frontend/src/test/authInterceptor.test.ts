@@ -1,87 +1,72 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
-  getAuthToken, setAuthToken, setUnauthorizedHandler,
-  attachAuthHeader, handleResponseError, api,
+  setUnauthorizedHandler, handleResponseError, takeLegacyToken, api,
 } from '../services/api'
 
+/**
+ * T6 (BUG-040): the session is an httpOnly cookie the server sets. Nothing
+ * here stores, reads or attaches the login token any more -- the client only
+ * sends credentials and the CSRF header, and reacts to a 401.
+ */
 describe('auth-aware API client', () => {
   beforeEach(() => {
     localStorage.clear()
-    setAuthToken(null)
     setUnauthorizedHandler(null)
   })
 
-  it('has no token by default', () => {
-    expect(getAuthToken()).toBeNull()
+  it('sends the session cookie and the CSRF header on every request', () => {
+    expect(api.defaults.withCredentials).toBe(true)
+    expect((api.defaults.headers as any)['X-Requested-With']).toBe('XMLHttpRequest')
   })
 
-  it('persists a set token to localStorage and reflects it via getAuthToken', () => {
-    setAuthToken('abc123')
-    expect(getAuthToken()).toBe('abc123')
-    expect(localStorage.getItem('datalytics_token')).toBe('abc123')
+  it('attaches no Authorization header of its own', () => {
+    expect((api as any).interceptors.request.handlers.filter(Boolean)).toHaveLength(0)
+    expect((api.defaults.headers as any).Authorization).toBeUndefined()
   })
 
-  it('clearing the token removes it from localStorage', () => {
-    setAuthToken('abc123')
-    setAuthToken(null)
-    expect(getAuthToken()).toBeNull()
+  it('never writes the token to localStorage', async () => {
+    const setItem = vi.spyOn(Storage.prototype, 'setItem')
+    await expect(handleResponseError({ response: { status: 401 } })).rejects.toBeTruthy()
+    expect(setItem).not.toHaveBeenCalledWith('datalytics_token', expect.anything())
+    setItem.mockRestore()
+  })
+
+  it('hands over a token an older build stored, exactly once, and deletes it', () => {
+    localStorage.setItem('datalytics_token', 'old-jwt')
+    expect(takeLegacyToken()).toBe('old-jwt')
     expect(localStorage.getItem('datalytics_token')).toBeNull()
+    expect(takeLegacyToken()).toBeNull()
   })
 
-  it('attaches an Authorization header when a token is set', () => {
-    setAuthToken('abc123')
-    const config: any = { headers: {} }
-    const result = attachAuthHeader(config)
-    expect(result.headers.Authorization).toBe('Bearer abc123')
-  })
-
-  it('does not attach an Authorization header when no token is set', () => {
-    const config: any = { headers: {} }
-    const result = attachAuthHeader(config)
-    expect(result.headers.Authorization).toBeUndefined()
-  })
-
-  it('a 401 response clears the token and invokes the unauthorized handler', async () => {
-    setAuthToken('abc123')
+  it('a 401 invokes the unauthorized handler', async () => {
     const handler = vi.fn()
     setUnauthorizedHandler(handler)
-
     await expect(handleResponseError({ response: { status: 401 } })).rejects.toBeTruthy()
-
-    expect(getAuthToken()).toBeNull()
     expect(handler).toHaveBeenCalledTimes(1)
   })
 
-  it('a non-401 error does not clear the token or invoke the handler', async () => {
-    setAuthToken('abc123')
+  it('a quiet 401 -- the start-up "am I logged in?" check -- does not redirect', async () => {
+    // Every visitor makes that check now; a share-link viewer must not be
+    // bounced to the login page because they have no session.
     const handler = vi.fn()
     setUnauthorizedHandler(handler)
-
-    await expect(handleResponseError({ response: { status: 500 } })).rejects.toBeTruthy()
-
-    expect(getAuthToken()).toBe('abc123')
+    await expect(handleResponseError({ response: { status: 401 }, config: { quiet401: true } })).rejects.toBeTruthy()
     expect(handler).not.toHaveBeenCalled()
   })
 
-  it('a 401 with no handler registered still clears the token without throwing', async () => {
-    setAuthToken('abc123')
-    await expect(handleResponseError({ response: { status: 401 } })).rejects.toBeTruthy()
-    expect(getAuthToken()).toBeNull()
+  it('a non-401 error does not invoke the handler', async () => {
+    const handler = vi.fn()
+    setUnauthorizedHandler(handler)
+    await expect(handleResponseError({ response: { status: 500 } })).rejects.toBeTruthy()
+    expect(handler).not.toHaveBeenCalled()
   })
 
-  it('registers attachAuthHeader and handleResponseError as interceptors on the shared axios instance', async () => {
-    setAuthToken('abc123')
-    // Access the registered request interceptor handler directly and confirm it behaves
-    // like attachAuthHeader — this proves the registration line in api.ts actually ran,
-    // not just that attachAuthHeader works in isolation.
-    const requestHandlers = (api as any).interceptors.request.handlers
-    expect(requestHandlers.length).toBeGreaterThan(0)
-    const result = await requestHandlers[0].fulfilled({ headers: {} })
-    expect(result.headers.Authorization).toBe('Bearer abc123')
-
+  it('registers handleResponseError on the shared axios instance', async () => {
+    const handler = vi.fn()
+    setUnauthorizedHandler(handler)
     const responseHandlers = (api as any).interceptors.response.handlers
     expect(responseHandlers.length).toBeGreaterThan(0)
     await expect(responseHandlers[0].rejected({ response: { status: 401 } })).rejects.toBeTruthy()
-    expect(getAuthToken()).toBeNull()
+    expect(handler).toHaveBeenCalledTimes(1)
   })
 })

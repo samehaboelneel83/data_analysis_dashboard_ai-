@@ -1,4 +1,4 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,13 +6,16 @@ from sqlalchemy.orm import selectinload
 
 from .core.api_keys import looks_like_api_key, prefix_of, verify
 from .core.database import get_db
-from .core.security import decode_access_token, issued_before_cutoff
+from .core.security import (CSRF_HEADER, SESSION_COOKIE, decode_access_token,
+                            issued_before_cutoff)
 from .models.models import ApiKey, User
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
-# auto_error=False: a guest/share-link route wants to know WHETHER a valid
-# session rides along without ever failing the request over it -- a missing,
-# stale or foreign-org bearer just falls back to anonymous, it never 401s.
+# auto_error=False on both: the token may instead ride in the session cookie
+# (T6), so a missing header is not yet a failure -- `_request_token` decides.
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
+# A guest/share-link route wants to know WHETHER a valid session rides along
+# without ever failing the request over it -- a missing, stale or foreign-org
+# credential just falls back to anonymous, it never 401s.
 oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
 
 _CREDS_ERROR = HTTPException(
@@ -20,6 +23,28 @@ _CREDS_ERROR = HTTPException(
     "Could not validate credentials",
     headers={"WWW-Authenticate": "Bearer"},
 )
+
+_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+
+def _request_token(request: Request, header_token: str | None) -> str | None:
+    """The Authorization header if present, else the browser session cookie.
+
+    A cookie is sent by the browser on its own, which is what makes CSRF
+    possible, so a cookie-authenticated WRITE must also carry the custom
+    header (CSRF_HEADER): a cross-site form cannot set one, and a cross-origin
+    fetch cannot without a CORS preflight only our origins pass. Missing it,
+    the cookie is simply not used -- the request is anonymous, not an error
+    of its own. A header token needs no such check: nothing attaches it
+    automatically."""
+    if header_token:
+        return header_token
+    cookie = request.cookies.get(SESSION_COOKIE)
+    if not cookie:
+        return None
+    if request.method.upper() not in _SAFE_METHODS and not request.headers.get(CSRF_HEADER):
+        return None
+    return cookie
 
 
 async def _load_active_user(db: AsyncSession, user_id: int, payload: dict | None = None) -> User:
@@ -57,9 +82,13 @@ async def _user_from_api_key(db: AsyncSession, token: str) -> User:
 
 
 async def get_current_user(
-    token: str = Depends(oauth2_scheme),
+    request: Request,
+    token: str | None = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User:
+    token = _request_token(request, token)
+    if not token:
+        raise _CREDS_ERROR
     # A bearer credential is either a machine API key (dk_…) or a login JWT. Machine
     # keys let agents (the MCP server) authenticate durably without a login round-trip.
     if looks_like_api_key(token):
@@ -74,6 +103,7 @@ async def get_current_user(
 
 
 async def get_current_user_optional(
+    request: Request,
     token: str | None = Depends(oauth2_scheme_optional),
     db: AsyncSession = Depends(get_db),
 ) -> User | None:
@@ -83,6 +113,7 @@ async def get_current_user_optional(
     have NO auth requirement of their own and must keep working for a truly
     anonymous caller -- this only upgrades identity when a valid session is
     actually present, it never gates access on one."""
+    token = _request_token(request, token)
     if not token:
         return None
     try:
