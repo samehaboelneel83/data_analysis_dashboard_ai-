@@ -32,7 +32,7 @@ vi.mock('react-hot-toast', () => ({
 }))
 
 vi.mock('../services/api', () => ({
-  datasetsApi: { upload: vi.fn(), uploadBatch: vi.fn() },
+  datasetsApi: { upload: vi.fn(), uploadBatch: vi.fn(), list: vi.fn() },
 }))
 
 const file = (name: string, body = 'a,b\n1,2\n') =>
@@ -53,6 +53,7 @@ const submit = () => fireEvent.click(screen.getByText('Upload', { selector: 'but
 beforeEach(() => {
   vi.clearAllMocks()
   ;(datasetsApi.upload as any).mockResolvedValue({ id: 7, name: 'one' })
+  ;(datasetsApi.list as any).mockResolvedValue([])
   ;(datasetsApi.uploadBatch as any).mockResolvedValue({
     items: [{ source_filename: 'a.csv', status: 'created', dataset: { id: 1 }, error: null }],
     created: 1, failed: 0, mode: 'separate',
@@ -235,5 +236,28 @@ describe('the name a batch suggests', () => {
 
   it('keeps a single file\'s own stem', () => {
     expect(batchBaseName([file('sales.csv')])).toBe('sales')
+  })
+})
+
+describe('a name that is already taken (BUG-027)', () => {
+  it('says so while typing, without blocking the upload', async () => {
+    ;(datasetsApi.list as any).mockResolvedValue([{ id: 3, name: 'Sales 2024' }])
+    show()
+    await waitFor(() => expect(datasetsApi.list).toHaveBeenCalled())
+    const input = screen.getByPlaceholderText('My dataset')
+    fireEvent.change(input, { target: { value: '  sales 2024 ' } })
+    expect(await screen.findByRole('status')).toHaveTextContent('You already have a dataset named "sales 2024"')
+
+    pick([file('x.csv')])
+    submit()
+    await waitFor(() => expect(datasetsApi.upload).toHaveBeenCalled())
+  })
+
+  it('stays quiet for a new name, or when the list cannot be read', async () => {
+    ;(datasetsApi.list as any).mockRejectedValue(new Error('offline'))
+    show()
+    fireEvent.change(screen.getByPlaceholderText('My dataset'), { target: { value: 'Sales 2024' } })
+    await waitFor(() => expect(datasetsApi.list).toHaveBeenCalled())
+    expect(screen.queryByText(/already have a dataset/)).toBeNull()
   })
 })

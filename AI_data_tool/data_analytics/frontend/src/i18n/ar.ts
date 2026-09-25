@@ -291,6 +291,7 @@ export const ar: Record<MessageKey, string> = {
   'upload.append': 'مجموعة بيانات واحدة — تُضم الصفوف معاً',
   'upload.name': 'اسم مجموعة البيانات *',
   'upload.namePh': 'مجموعة بياناتي',
+  'upload.nameTaken': 'لديك بالفعل مجموعة بيانات باسم "{name}". سيضيف الرفع مجموعة ثانية بالاسم نفسه.',
   'upload.desc': 'الوصف (اختياري)',
   'upload.descPh': 'وصف قصير…',
   'upload.uploading': 'جارٍ الرفع…',

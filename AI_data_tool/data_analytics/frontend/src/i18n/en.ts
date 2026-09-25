@@ -289,6 +289,7 @@ export const en = {
   'upload.append': 'A single dataset — rows appended together',
   'upload.name': 'Dataset name *',
   'upload.namePh': 'My dataset',
+  'upload.nameTaken': 'You already have a dataset named "{name}". Uploading adds a second one with the same name.',
   'upload.desc': 'Description (optional)',
   'upload.descPh': 'Short description…',
   'upload.uploading': 'Uploading…',

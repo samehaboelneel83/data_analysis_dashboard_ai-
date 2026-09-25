@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { datasetsApi } from '../services/api'
 import type { BatchUploadItem, BatchUploadMode } from '../services/api'
@@ -55,6 +55,16 @@ export default function Upload() {
   // Whether the person typed the name themselves. An auto-generated name
   // follows the chosen file; a typed one is theirs to keep.
   const nameTyped = useRef(false)
+  // BUG-027: a reused name is allowed (a monthly re-upload is legitimate) but
+  // said out loud, because two identical names are then indistinguishable in
+  // every list that shows only the name. A failed lookup simply means no hint.
+  const [taken, setTaken] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    datasetsApi.list()
+      .then(ds => setTaken(new Set(ds.map(d => d.name.trim().toLowerCase()))))
+      .catch(() => {})
+  }, [])
+  const nameTaken = name.trim() !== '' && taken.has(name.trim().toLowerCase())
 
   const pickFiles = (picked: File[]) => {
     if (!picked.length) return
@@ -184,8 +194,14 @@ export default function Upload() {
         <div>
           <label className="dl-field" style={{ marginBottom: 0 }}>
             <span className="dl-field__label">{t('upload.name')}</span>
-            <input value={name} onChange={e => { nameTyped.current = e.target.value.trim().length > 0; setName(e.target.value) }} maxLength={120} placeholder={t('upload.namePh')} className="dl-field__input" />
+            <input value={name} onChange={e => { nameTyped.current = e.target.value.trim().length > 0; setName(e.target.value) }} maxLength={120} placeholder={t('upload.namePh')} className="dl-field__input"
+              aria-describedby={nameTaken ? 'upload-name-taken' : undefined} />
           </label>
+          {nameTaken && (
+            <p id="upload-name-taken" role="status" style={{ color: 'var(--warning, #b7791f)', fontSize: 11, marginTop: 4 }}>
+              {t('upload.nameTaken', { name: name.trim() })}
+            </p>
+          )}
           {many && mode === 'separate' && (
             <p style={{ color: 'var(--muted)', fontSize: 11, marginTop: 4 }}>
               Each file's own name is added, e.g. “{name || 'My dataset'} — {files[0].name.replace(/\.[^.]+$/, '')}”.
