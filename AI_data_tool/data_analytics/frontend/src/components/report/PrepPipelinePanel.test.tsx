@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import PrepPipelinePanel, { suggestJoinKeys, joinPairs, writeJoinPairs } from './PrepPipelinePanel'
-import { prepApi, datasetsApi, relationshipsApi, widgetDataApi } from '../../services/api'
+import { prepApi, datasetsApi, relationshipsApi, widgetDataApi, reportsApi } from '../../services/api'
 import type { Relationship } from '../../services/api'
 
 vi.mock('../../services/api', () => ({
@@ -9,6 +9,7 @@ vi.mock('../../services/api', () => ({
   datasetsApi: { list: vi.fn(), get: vi.fn() },
   relationshipsApi: { list: vi.fn() },
   widgetDataApi: { query: vi.fn() },
+  reportsApi: { create: vi.fn() },
 }))
 
 const columns = [
@@ -192,6 +193,19 @@ describe('PrepPipelinePanel', () => {
       expect(dsId).toBe(1)
       expect(body.name).toBe('Q3 joined')
       expect(body.steps).toEqual([{ kind: 'trim' }])
+    })
+
+    it('offers to build a dashboard from the new dataset (E06: the next step)', async () => {
+      vi.mocked(reportsApi.create).mockResolvedValue({ id: 88 } as any)
+      const assign = vi.fn()
+      vi.stubGlobal('location', { ...window.location, assign })
+      await openDialog()
+      fireEvent.change(screen.getByLabelText('Dataset name'), { target: { value: 'X' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+      fireEvent.click(await screen.findByRole('button', { name: 'Build a dashboard from it' }))
+      await waitFor(() => expect(reportsApi.create).toHaveBeenCalledWith({ name: 'Joined dataset', dataset_id: 42 }))
+      await waitFor(() => expect(assign).toHaveBeenCalledWith('/reports/88'))
+      vi.unstubAllGlobals()
     })
 
     it('confirms the new dataset and links to it', async () => {

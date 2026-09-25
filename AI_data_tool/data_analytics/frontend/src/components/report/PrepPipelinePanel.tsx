@@ -1,6 +1,6 @@
 import JoinMatchNote from './prepPipeline/JoinMatchNote'
 import { useEffect, useRef, useState } from 'react'
-import { prepApi, datasetsApi, relationshipsApi } from '../../services/api'
+import { prepApi, datasetsApi, relationshipsApi, reportsApi } from '../../services/api'
 import type { PrepStep, DatasetColumn, Dataset, Relationship } from '../../services/api'
 import toast from 'react-hot-toast'
 
@@ -367,8 +367,16 @@ export default function PrepPipelinePanel({ datasetId, columns }: Props) {
           </div>
 
           {saved && (
-            <div style={{ marginBottom: 6, color: 'var(--muted)' }}>
-              Created <a href={`/datasets/${saved.id}`}>{saved.name}</a>.
+            <div style={{ marginBottom: 6, color: 'var(--muted)', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span>Created <a href={`/datasets/${saved.id}`}>{saved.name}</a>.</span>
+              {/* E06: the journey's next step, from where it ends -- the new
+                  dataset used to be a link and a dead end. */}
+              <button type="button" className="btn btn-primary btn-sm"
+                onClick={() => {
+                  reportsApi.create({ name: saved.name, dataset_id: saved.id })
+                    .then(r => window.location.assign(`/reports/${(r as { id: number }).id}`))
+                    .catch(e => toast.error(e?.response?.data?.detail ?? 'Could not create the dashboard'))
+                }}>Build a dashboard from it</button>
             </div>
           )}
 
