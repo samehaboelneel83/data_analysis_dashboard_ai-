@@ -1,5 +1,5 @@
 import { PieChart, Pie, Cell, Label, Tooltip, Legend, ResponsiveContainer, Customized } from 'recharts'
-import { TT, fmtStr, getFillFactory, COLORS, fillPattern, PatternDefs } from '../chartUtils'
+import { TT, sliceLabel, fmtStr, getFillFactory, COLORS, fillPattern, PatternDefs } from '../chartUtils'
 import type { ChartRendererProps } from './types'
 import { legendProps } from './axisOptions'
 import { seriesName } from './axisOptions'
@@ -38,7 +38,7 @@ export default function DonutChartRenderer({ rows, cfg, rtl, broadcasts, localSe
             isAnimationActive={false}
             onClick={broadcasts ? (d: any) => onClickPoint(d.name) : undefined}
             style={{ cursor: broadcasts ? 'pointer' : 'default' }}
-            label={showLabels ? (({ name, percent }: any) => `${name} ${(percent * 100).toFixed(0)}%`) : false}
+            label={showLabels ? sliceLabel : false}
             labelLine={false}
           >
             {showTotal && (

@@ -3,6 +3,8 @@ import type { ReportPage, Widget } from '../../types/report'
 import { CrossFilterProvider } from './CrossFilterContext'
 import { Z_MODAL_TOP } from '../../lib/zIndex'
 import { useModalDialog } from '../ui/useModalDialog'
+import IconLabel from '../ui/IconLabel'
+import { FileDown } from 'lucide-react'
 
 interface Props {
   page: ReportPage
@@ -78,7 +80,7 @@ export default function PopupOverlay({ page, onClose, renderWidget, onExport }: 
           {onExport && (
             <button type="button" className="btn btn-ghost btn-sm" onClick={onExport}
               title="Download this pop-up page as a PDF" style={{ fontSize: 11, marginInlineEnd: 6 }}>
-              📄 PDF
+              <IconLabel icon={FileDown}>PDF</IconLabel>
             </button>
           )}
           {/* No ref needed: the hook focuses the first focusable control,

@@ -13,6 +13,9 @@ import { useListFilter } from '../components/ui/ListFilter'
 import IconLabel from '../components/ui/IconLabel'
 import LoadError from '../components/ui/LoadError'
 import { useT } from '../i18n'
+import BulkBar from '../components/ui/BulkBar'
+import { useBulkSelection } from '../lib/useBulkSelection'
+import { looksLikeTestData } from '../lib/testData'
 
 /**
  * The dataset inventory.
@@ -79,7 +82,7 @@ export default function Dashboard() {
   // than in the row so the panel survives the list re-rendering underneath it.
   const [suggestFor, setSuggestFor] = useState<{ id: number; name: string } | null>(null)
   const dsFilter = useListFilter(datasets,
-    d => [d.name, d.description], 'Search datasets')
+    d => [d.name, d.description], t('search.datasets'))
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<unknown>(null)
   const [page, setPage] = useState(1)
@@ -106,6 +109,15 @@ export default function Dashboard() {
     toast.success('Dataset deleted')
   }
 
+  // Several at once: clearing out a batch of test uploads used to be one
+  // menu, one dialog, one toast per dataset.
+  const bulk = useBulkSelection<DatasetSummary>({
+    remove: id => datasetsApi.delete(id),
+    onRemoved: ids => setDatasets(d => d.filter(x => !ids.includes(x.id))),
+    noun: t('noun.datasets'),
+  })
+  const testLike = datasets.filter(d => looksLikeTestData(d.name))
+
   const rows = dsFilter.filtered
   const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE))
   // Narrowing the search must not strand you on page 5 of a two-page result,
@@ -125,13 +137,13 @@ export default function Dashboard() {
   )
 
   const stats = [
-    { key: 'datasets', icon: Database, label: 'Datasets',
+    { key: 'datasets', icon: Database, label: t('datasets.stat.datasets'),
       value: datasets.length.toLocaleString() },
-    { key: 'rows', icon: Rows, label: 'Total rows',
+    { key: 'rows', icon: Rows, label: t('datasets.stat.rows'),
       value: datasets.reduce((n, d) => n + (d.row_count ?? 0), 0).toLocaleString() },
     // Columns are deliberately not totalled: summing the column counts of two
     // unrelated tables describes no quantity anybody uses.
-    { key: 'stored', icon: HardDrive, label: 'Stored',
+    { key: 'stored', icon: HardDrive, label: t('datasets.stat.stored'),
       value: fmtBytes(datasets.reduce((n, d) => n + (d.file_size ?? 0), 0)) },
   ]
 
@@ -155,7 +167,7 @@ export default function Dashboard() {
           list is empty, where "0 datasets · 0 rows" is noise above an empty
           state that says it better. */}
       {!loading && !loadError && datasets.length > 0 && (
-        <section aria-label="Summary" className="dl-stats">
+        <section aria-label={t('datasets.summary')} className="dl-stats">
           {stats.map(s => (
             <div key={s.key} data-testid={`stat-${s.key}`} className="card dl-stat">
               <span className={`dl-stat__icon dl-stat__icon--${s.key}`} aria-hidden>
@@ -177,13 +189,13 @@ export default function Dashboard() {
       {!loading && loadError == null && datasets.length === 0 && (
         <div className="card dl-empty">
           <Database size={40} className="dl-empty__icon" aria-hidden />
-          <p className="dl-empty__title">No datasets yet</p>
+          <p className="dl-empty__title">{t('datasets.empty.title')}</p>
           <p className="dl-empty__body">
-            Upload a CSV, Excel, JSON or Parquet file, or connect a database, and it appears here.
+            {t('datasets.empty.body')}
           </p>
           <div className="dl-empty__actions">
-            <Link to="/upload" className="btn btn-primary">Upload your first dataset</Link>
-            <Link to="/connections" className="btn btn-ghost">Connect a database</Link>
+            <Link to="/upload" className="btn btn-primary">{t('datasets.empty.upload')}</Link>
+            <Link to="/connections" className="btn btn-ghost">{t('datasets.empty.connect')}</Link>
           </div>
         </div>
       )}
@@ -197,32 +209,50 @@ export default function Dashboard() {
             {dsFilter.input}
             {rows.length !== datasets.length && (
               <span className="dl-toolbar__count">
-                {`${rows.length.toLocaleString()} of ${datasets.length.toLocaleString()}`}
+                {t('common.countOf', { n: rows.length.toLocaleString(), total: datasets.length.toLocaleString() })}
               </span>
             )}
+            {testLike.length > 0 && (
+              <button type="button" className="dl-select-hint" style={{ marginInlineStart: 'auto' }}
+                onClick={() => bulk.setMany(testLike.map(d => d.id), true)}>
+                <Trash2 size={13} aria-hidden /> {t('bulk.selectTest', { n: testLike.length })}
+              </button>
+            )}
           </div>
+          <BulkBar count={bulk.selected.size} busy={bulk.busy} noun={t('noun.datasets')}
+            onClear={bulk.clear} onDelete={() => void bulk.deleteSelected(datasets)} />
 
           {dsFilter.noMatches ? (
-            <p className="dl-nomatch">Nothing matches “{dsFilter.query}”.</p>
+            <p className="dl-nomatch">{t('common.nothingMatches', { q: dsFilter.query })}</p>
           ) : (
             <div className="card dl-table-card">
               <table className="dl-table">
                 <thead>
                   <tr>
-                    <th>Name</th>
+                    <th className="dl-table__check">
+                      <input type="checkbox" aria-label={t('bulk.selectAll')}
+                        checked={visible.length > 0 && visible.every(d => bulk.selected.has(d.id))}
+                        ref={el => { if (el) el.indeterminate = visible.some(d => bulk.selected.has(d.id)) && !visible.every(d => bulk.selected.has(d.id)) }}
+                        onChange={e => bulk.setMany(visible.map(d => d.id), e.target.checked)} />
+                    </th>
+                    <th>{t('datasets.col.name')}</th>
                     {/* Numbers align end-ward so digits line up in a column; the
                         logical property keeps that correct in RTL, where "end" is
                         the left. */}
-                    <th className="dl-table__num">Rows</th>
-                    <th className="dl-table__num">Columns</th>
-                    <th className="dl-table__num">Size</th>
-                    <th>Created</th>
+                    <th className="dl-table__num">{t('datasets.col.rows')}</th>
+                    <th className="dl-table__num">{t('datasets.col.columns')}</th>
+                    <th className="dl-table__num">{t('datasets.col.size')}</th>
+                    <th>{t('datasets.col.created')}</th>
                     <th className="dl-table__actions" aria-label="Actions" />
                   </tr>
                 </thead>
                 <tbody>
                   {visible.map(ds => (
-                    <tr key={ds.id}>
+                    <tr key={ds.id} data-selected={bulk.selected.has(ds.id) || undefined}>
+                      <td className="dl-table__check">
+                        <input type="checkbox" aria-label={t('bulk.selectRow', { name: ds.name })}
+                          checked={bulk.selected.has(ds.id)} onChange={() => bulk.toggle(ds.id)} />
+                      </td>
                       <td>
                         <div className="dl-cell-name">
                           <Link to={`/datasets/${ds.id}`} className="row-name">{ds.name}</Link>
@@ -232,13 +262,13 @@ export default function Dashboard() {
                                those cells say exactly that. */
                             <span className="dl-chip dl-chip--live"
                               title="Queried live from its connection — nothing is stored here">
-                              <IconLabel icon={Plug} size={12}>Live</IconLabel>
+                              <IconLabel icon={Plug} size={12}>{t('datasets.live')}</IconLabel>
                             </span>
                           )}
                           {ds.shared && (
                             <span className="dl-chip dl-chip--shared"
                               title="Shared with you by an org admin">
-                              <IconLabel icon={Link2} size={12}>Shared</IconLabel>
+                              <IconLabel icon={Link2} size={12}>{t('datasets.shared')}</IconLabel>
                             </span>
                           )}
                         </div>
@@ -261,8 +291,8 @@ export default function Dashboard() {
                         <ActionMenu
                           label={`More actions for dataset ${ds.name}`}
                           items={[
-                            { key: 'suggest', label: 'Suggest dashboards', icon: <Sparkles size={16} />, onSelect: () => setSuggestFor({ id: ds.id, name: ds.name }) },
-                            { key: 'delete', label: 'Delete dataset', danger: true, icon: <Trash2 size={16} />, onSelect: () => handleDelete(ds.id, ds.name) },
+                            { key: 'suggest', label: t('datasets.suggest'), icon: <Sparkles size={16} />, onSelect: () => setSuggestFor({ id: ds.id, name: ds.name }) },
+                            { key: 'delete', label: t('datasets.delete'), danger: true, icon: <Trash2 size={16} />, onSelect: () => handleDelete(ds.id, ds.name) },
                           ]}
                         />
                       </td>
@@ -276,29 +306,29 @@ export default function Dashboard() {
                   rather than removed: a control that vanishes moves everything
                   beside it, and the reader has to work out whether they ran
                   out of pages or lost a button. */}
-              <nav className="dl-pager" aria-label="Dataset pages">
+              <nav className="dl-pager" aria-label={t('pager.aria')}>
                 <span className="dl-pager__info">
-                  {`Showing ${(start + 1).toLocaleString()} to `
-                   + `${Math.min(start + PAGE_SIZE, rows.length).toLocaleString()} of `
-                   + `${rows.length.toLocaleString()} datasets`}
+                  {t('pager.showing', { from: (start + 1).toLocaleString(),
+                    to: Math.min(start + PAGE_SIZE, rows.length).toLocaleString(),
+                    total: rows.length.toLocaleString() })}
                 </span>
                 <div className="dl-pager__controls">
                   <button type="button" className="dl-pager__btn"
                     onClick={() => setPage(current - 1)} disabled={current === 1}>
                     <ChevronLeft size={16} className="dl-pager__icon" aria-hidden />
-                    Previous
+                    {t('pager.previous')}
                   </button>
                   {pageNumbers.map(n => (
                     <button key={n} type="button" className="dl-pager__btn"
                       aria-current={n === current ? 'page' : undefined}
-                      aria-label={`Page ${n}`}
+                      aria-label={t('pager.page', { n })}
                       onClick={() => setPage(n)}>
                       {n.toLocaleString()}
                     </button>
                   ))}
                   <button type="button" className="dl-pager__btn"
                     onClick={() => setPage(current + 1)} disabled={current === pageCount}>
-                    Next
+                    {t('pager.next')}
                     <ChevronRight size={16} className="dl-pager__icon" aria-hidden />
                   </button>
                 </div>

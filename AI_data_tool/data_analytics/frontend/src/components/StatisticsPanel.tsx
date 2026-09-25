@@ -3,6 +3,8 @@ import {
   analysisCatalogueApi, type AnalysisSpec, type DatasetColumn,
 } from '../services/api'
 import LoadError from './ui/LoadError'
+import { FlaskConical } from 'lucide-react'
+import { useT } from '../i18n'
 import { ResultFor } from './analysis/analysisResults'
 
 /**
@@ -68,6 +70,7 @@ export default function StatisticsPanel({ datasetId, columns, mode }: {
    *  than refuse after the parameters are filled in. */
   mode?: string
 }) {
+  const t = useT()
   const [specs, setSpecs] = useState<AnalysisSpec[] | null>(null)
   const [specError, setSpecError] = useState<unknown>(null)
   const [chosen, setChosen] = useState<string>('')
@@ -142,11 +145,11 @@ export default function StatisticsPanel({ datasetId, columns, mode }: {
         drawn from a sample is never presented as if it came from everything.
       </p>
     )}
-    <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
+    <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
       {/* ── Picker ─────────────────────────────────────────────────────── */}
-      <div style={{ width: 260, flexShrink: 0 }}>
+      <div style={{ flex: '0 1 260px', minWidth: 220 }}>
         <label htmlFor="stat-analysis" style={{
-          display: 'block', fontSize: 10, fontWeight: 700,
+          display: 'block', fontSize: 12, fontWeight: 600,
           color: 'var(--muted)', marginBottom: 4,
         }}>
           Analysis
@@ -174,7 +177,7 @@ export default function StatisticsPanel({ datasetId, columns, mode }: {
           return (
             <div key={key} style={{ marginTop: 10 }}>
               <label htmlFor={`stat-${key}`} style={{
-                display: 'block', fontSize: 10, color: 'var(--muted)',
+                display: 'block', fontSize: 12, color: 'var(--muted)', marginBottom: 2,
               }}>
                 {label}{isRequired ? '' : ' (optional)'}
               </label>
@@ -238,7 +241,7 @@ export default function StatisticsPanel({ datasetId, columns, mode }: {
               )}
 
               {prop.description && (
-                <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
+                <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 2 }}>
                   {prop.description}
                 </div>
               )}
@@ -255,12 +258,26 @@ export default function StatisticsPanel({ datasetId, columns, mode }: {
       </div>
 
       {/* ── Result ─────────────────────────────────────────────────────── */}
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ flex: '1 1 320px', minWidth: 0 }}>
+        {/* The first thing on the tab, so it has to say what the tab is FOR
+            and offer a way in -- a sentence beside an empty select was a
+            dead end nobody read. The chips are the same list as the select. */}
         {!spec && (
-          <p style={{ color: 'var(--muted)', fontSize: 13 }}>
-            Choose an analysis to ask something of this data that a chart cannot
-            answer on its own.
-          </p>
+          <div className="card dl-analysis-intro">
+            <FlaskConical size={28} color="var(--muted)" aria-hidden />
+            <p className="dl-analysis-intro__title">{t('analysis.introTitle')}</p>
+            <p className="dl-analysis-intro__text">
+              {t('analysis.introBody')}
+            </p>
+            <div className="dl-analysis-intro__chips">
+              {specs.slice(0, 8).map(sp => (
+                <button key={sp.name} type="button" className="btn btn-sm" onClick={() => pick(sp.name)}
+                  title={sp.description}>
+                  {sp.name.replace(/_/g, ' ')}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
         {runError && (
           <div role="alert" className="card" style={{ padding: 16 }}>

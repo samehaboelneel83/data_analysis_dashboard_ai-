@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import SubscribeButton from './SubscribeButton'
 import { subscriptionApi } from '../../services/api'
 
@@ -35,7 +35,7 @@ beforeEach(() => {
 describe('SubscribeButton', () => {
   it('offers to subscribe when the reader is not subscribed', async () => {
     render(<SubscribeButton reportId={7} />)
-    expect(await screen.findByRole('button', { name: '🔔 Subscribe' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Subscribe' })).toBeInTheDocument()
   })
 
   it('shows the subscribed state when they already are', async () => {
@@ -44,7 +44,7 @@ describe('SubscribeButton', () => {
       format: 'pdf',
     } as never)
     render(<SubscribeButton reportId={7} />)
-    const btn = await screen.findByRole('button', { name: '🔔 Subscribed' })
+    const btn = await screen.findByRole('button', { name: 'Subscribed' })
     expect(btn).toHaveAttribute('aria-pressed', 'true')
   })
 
@@ -60,7 +60,7 @@ describe('SubscribeButton', () => {
   it('sends a daily schedule with neither weekday nor monthday', async () => {
     render(<SubscribeButton reportId={7} />)
     await openDialog()
-    fireEvent.click(screen.getByRole('button', { name: 'Subscribe' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Subscribe' }))
 
     await waitFor(() => expect(subscriptionApi.subscribe).toHaveBeenCalled())
     const body = vi.mocked(subscriptionApi.subscribe).mock.calls[0][1]
@@ -74,7 +74,7 @@ describe('SubscribeButton', () => {
     await openDialog()
     fireEvent.change(screen.getByLabelText('How often'), { target: { value: 'weekly' } })
     fireEvent.change(await screen.findByLabelText('Day of week'), { target: { value: '3' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Subscribe' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Subscribe' }))
 
     await waitFor(() => expect(subscriptionApi.subscribe).toHaveBeenCalled())
     const body = vi.mocked(subscriptionApi.subscribe).mock.calls[0][1]
@@ -86,7 +86,7 @@ describe('SubscribeButton', () => {
     render(<SubscribeButton reportId={7} />)
     await openDialog()
     fireEvent.change(screen.getByLabelText('How often'), { target: { value: 'monthly' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Subscribe' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Subscribe' }))
 
     await waitFor(() => expect(subscriptionApi.subscribe).toHaveBeenCalled())
     const body = vi.mocked(subscriptionApi.subscribe).mock.calls[0][1]
@@ -114,7 +114,7 @@ describe('SubscribeButton', () => {
       format: 'pdf',
     } as never)
     render(<SubscribeButton reportId={7} />)
-    fireEvent.click(await screen.findByRole('button', { name: '🔔 Subscribed' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Subscribed' }))
 
     expect(await screen.findByLabelText('How often')).toHaveValue('weekly')
     expect(screen.getByLabelText('Day of week')).toHaveValue('4')
@@ -133,7 +133,7 @@ describe('SubscribeButton', () => {
       subscribed: true, calendar: { kind: 'daily', hour: 8, minute: 0 },
     } as never)
     render(<SubscribeButton reportId={7} />)
-    fireEvent.click(await screen.findByRole('button', { name: '🔔 Subscribed' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Subscribed' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Unsubscribe' }))
 
     await waitFor(() => expect(subscriptionApi.unsubscribe).toHaveBeenCalledWith(7))
@@ -144,6 +144,6 @@ describe('SubscribeButton', () => {
     // actually came to look at.
     vi.mocked(subscriptionApi.get).mockRejectedValue(new Error('down'))
     render(<SubscribeButton reportId={7} />)
-    expect(await screen.findByRole('button', { name: '🔔 Subscribe' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Subscribe' })).toBeInTheDocument()
   })
 })

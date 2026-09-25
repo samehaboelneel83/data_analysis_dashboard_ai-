@@ -3,6 +3,8 @@ import type { HierarchyNode } from '../../types/report'
 import { hierarchyApi } from '../../services/api'
 import toast from 'react-hot-toast'
 import { useConfirm } from '../ui/ConfirmDialog'
+import { Folder, Type, Hash, Calendar, FileText, Square, type LucideIcon } from 'lucide-react'
+import { useT } from '../../i18n'
 
 interface Props {
   nodes: HierarchyNode[]
@@ -10,12 +12,15 @@ interface Props {
   onRefresh: () => void
 }
 
-const TYPE_ICON: Record<string, string> = {
-  folder: '📁', dimension: '🔤', measure: '🔢', date: '📅', text: '📝',
+// Line glyphs in the one stroke family, not emoji: the platform emoji drew
+// a different coloured picture per OS and outshouted the node names.
+const TYPE_ICON: Record<string, LucideIcon> = {
+  folder: Folder, dimension: Type, measure: Hash, date: Calendar, text: FileText,
 }
 
 export default function HierarchyTree({ nodes, datasetId, onRefresh }: Props) {
   const confirm = useConfirm()
+  const t = useT()
   const [editId,   setEditId]   = useState<number | null>(null)
   const [editName, setEditName] = useState('')
 
@@ -95,7 +100,9 @@ export default function HierarchyTree({ nodes, datasetId, onRefresh }: Props) {
           if (actions) actions.style.opacity = '0'
         }}
       >
-        <span style={{ fontSize: 13 }}>{TYPE_ICON[node.node_type] ?? '◻'}</span>
+        <span aria-hidden style={{ display: 'inline-flex', color: node.node_type === 'folder' ? 'var(--accent)' : 'var(--muted)' }}>
+          {(() => { const I = TYPE_ICON[node.node_type] ?? Square; return <I size={14} strokeWidth={1.9} /> })()}
+        </span>
         {editId === node.id ? (
           <input value={editName} onChange={e => setEditName(e.target.value)}
             onBlur={() => saveEdit(node)} onKeyDown={e => e.key === 'Enter' && saveEdit(node)}
@@ -109,7 +116,7 @@ export default function HierarchyTree({ nodes, datasetId, onRefresh }: Props) {
           <select aria-label={`Granularity of ${node.name}`} value={node.format}
             onClick={e => e.stopPropagation()}
             onChange={e => setGranularity(node, e.target.value)}
-            style={{ fontSize: 9, color: 'var(--muted)', background: 'var(--surface2)',
+            style={{ fontSize: 10.5, color: 'var(--muted)', background: 'var(--surface2)',
               border: '1px solid var(--border)', borderRadius: 4 }}>
             {['year', 'quarter', 'month', 'week', 'day'].map(g => <option key={g} value={g}>{g}</option>)}
           </select>
@@ -141,7 +148,7 @@ export default function HierarchyTree({ nodes, datasetId, onRefresh }: Props) {
   )
 
   if (nodes.length === 0)
-    return <p style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center', marginTop: 16 }}>No hierarchy yet. Click ✦ Auto to generate.</p>
+    return <p style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center', marginTop: 16 }}>{t('hier.none')}</p>
 
   return <div>{roots.map(n => renderNode(n))}</div>
 }

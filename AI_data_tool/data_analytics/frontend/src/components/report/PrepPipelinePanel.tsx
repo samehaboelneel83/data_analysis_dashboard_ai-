@@ -218,11 +218,11 @@ export default function PrepPipelinePanel({ datasetId, columns }: Props) {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, position: 'relative' }}>
-        <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
           Pipeline
         </span>
         <div style={{ position: 'relative' }}>
-          <button className="btn btn-ghost btn-sm" style={{ fontSize: 10, padding: '2px 7px' }}
+          <button className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '2px 7px' }}
             onClick={() => setAddMenuOpen(o => !o)}>
             + Add step
           </button>
@@ -264,30 +264,30 @@ export default function PrepPipelinePanel({ datasetId, columns }: Props) {
                 <span style={{ fontSize: 12 }}>{KIND_ICONS[s.kind] ?? '•'}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 11, fontWeight: 600 }}>{KIND_LABELS[s.kind] ?? s.kind}</div>
-                  <div style={{ fontSize: 10, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {summaryOf(s)}
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 2 }} onClick={e => e.stopPropagation()}>
-                  <button aria-label="move up" className="btn btn-ghost btn-sm" style={{ fontSize: 10, padding: '1px 5px' }}
+                  <button aria-label="move up" className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '1px 5px' }}
                     disabled={idx === 0} onClick={() => moveStep(idx, -1)}>↑</button>
-                  <button aria-label="move down" className="btn btn-ghost btn-sm" style={{ fontSize: 10, padding: '1px 5px' }}
+                  <button aria-label="move down" className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '1px 5px' }}
                     disabled={idx === steps.length - 1} onClick={() => moveStep(idx, 1)}>↓</button>
                   <button aria-label={s.disabled ? 'enable' : 'disable'} className="btn btn-ghost btn-sm"
-                    style={{ fontSize: 10, padding: '1px 5px' }} onClick={() => toggleDisabled(idx)}>
+                    style={{ fontSize: 11, padding: '1px 5px' }} onClick={() => toggleDisabled(idx)}>
                     {s.disabled ? '○' : '●'}
                   </button>
                   <button aria-label="delete" className="btn btn-ghost btn-sm"
-                    style={{ fontSize: 10, padding: '1px 5px', color: 'var(--danger)' }} onClick={() => removeStep(idx)}>✕</button>
+                    style={{ fontSize: 11, padding: '1px 5px', color: 'var(--danger)' }} onClick={() => removeStep(idx)}>✕</button>
                 </div>
               </div>
 
               {s.disabled ? (
-                <div data-testid="prep-step-skipped" style={{ fontSize: 10, color: 'var(--muted)', fontStyle: 'italic', marginTop: 4 }}>
+                <div data-testid="prep-step-skipped" style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic', marginTop: 4 }}>
                   skipped (paused)
                 </div>
               ) : stepPreview && (
-                <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
                   {stepPreview.rows_in.toLocaleString()} → {stepPreview.rows_out.toLocaleString()} rows
                   {/* A join on a non-unique key multiplies rows instead of
                       adding columns, and it does so silently -- the numbers are
@@ -385,7 +385,7 @@ export default function PrepPipelinePanel({ datasetId, columns }: Props) {
             </div>
           )}
           <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 6 }}>
-            <table style={{ fontSize: 10, borderCollapse: 'collapse', width: '100%' }}>
+            <table style={{ fontSize: 11, borderCollapse: 'collapse', width: '100%' }}>
               <thead>
                 <tr>{preview.sample.columns.map(c => (
                   <th key={c} style={{ textAlign: 'start', padding: '3px 6px', borderBottom: '1px solid var(--border)' }}>{c}</th>

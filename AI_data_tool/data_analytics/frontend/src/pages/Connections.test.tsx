@@ -19,6 +19,7 @@ vi.mock('../services/api', async () => ({
     update: vi.fn(),
     delete: vi.fn(),
     test: vi.fn(),
+    testSettings: vi.fn(),
   },
 }))
 
@@ -106,9 +107,9 @@ describe('ConnectionModal custom preset resolution', () => {
     const select = await screen.findByLabelText('Type') as HTMLSelectElement
     fireEvent.change(select, { target: { value: 'custom:7' } })
 
-    fireEvent.change(screen.getByLabelText('Connection Name *'), { target: { value: 'My Custom Conn' } })
+    fireEvent.change(screen.getByLabelText('Connection name *'), { target: { value: 'My Custom Conn' } })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create connection' }))
 
     await waitFor(() => expect(dataSourcesApi.create).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'postgresql', custom_connector_id: 7 })
@@ -116,5 +117,20 @@ describe('ConnectionModal custom preset resolution', () => {
     const call = vi.mocked(dataSourcesApi.create).mock.calls[0][0]
     expect(call.type).not.toBe('custom:7')
     expect(call.custom_connector_id).not.toBeUndefined()
+  })
+
+  it('tests the settings in the form before anything is saved', async () => {
+    vi.mocked(dataSourcesApi.create).mockClear()
+    vi.mocked(dataSourcesApi.connectors).mockResolvedValue([BUILTIN, CUSTOM])
+    vi.mocked(dataSourcesApi.list).mockResolvedValue([])
+    vi.mocked(dataSourcesApi.testSettings).mockResolvedValue({ ok: false, error: 'password authentication failed for user "x"' })
+
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: /New Connection/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Test connection' }))
+
+    expect(await screen.findByRole('status')).toBeInTheDocument()
+    expect(dataSourcesApi.testSettings).toHaveBeenCalledWith(expect.objectContaining({ type: 'postgresql', source_id: undefined }))
+    expect(dataSourcesApi.create).not.toHaveBeenCalled()
   })
 })

@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { inlineFieldStyle } from '../../components/ui/fieldStyle'
+import { useT } from '../../i18n'
 import { Building2 } from 'lucide-react'
 import { platformApi } from '../../services/api'
 import type { OrgQuota, PlatformOrg } from '../../services/api'
@@ -11,6 +13,7 @@ const fmtLimit = (n: number | null) => (n == null ? 'unlimited' : n.toLocaleStri
 const fmtMb = (bytes: number) => (bytes / (1024 * 1024)).toFixed(1)
 
 export default function PlatformOrgs() {
+  const t = useT()
   const [orgs, setOrgs] = useState<PlatformOrg[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<unknown>(null)
@@ -89,19 +92,18 @@ export default function PlatformOrgs() {
 
   const nameOf = (id: number | null) => (id == null ? '—' : orgs.find(o => o.id === id)?.name ?? `#${id}`)
 
-  const inp = { style: { fontSize: 12, padding: '5px 8px', background: 'var(--surface2)', border: '1px solid var(--border)',
-    borderRadius: 4, color: 'var(--text)' as const } }
+  const inp = { style: inlineFieldStyle }
 
   return (
     <div>
-      <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 6 }}>Organizations</h1>
-      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 20 }}>
+      <h1 className="dl-page-title" style={{ marginBottom: 6 }}>{t('nav.organizations')}</h1>
+      <div className="dl-page-head__sub" style={{ marginBottom: 20, maxWidth: 720 }}>
         Platform super-admin: create organizations and arrange the hierarchy. Setting a parent is structural —
         it does not grant a parent's users access to a child's data.
       </div>
 
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: 16, marginBottom: 20 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>New organization</div>
+      <div className="card" style={{ padding: 16, marginBottom: 20 }}>
+        <div className="dl-rows__title" style={{ marginBottom: 10 }}>New organization</div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <input aria-label="Organization name" placeholder="Organization name" value={name} onChange={e => setName(e.target.value)} {...inp} />
           <input aria-label="Admin email" placeholder="Admin email" value={adminEmail}
@@ -125,14 +127,13 @@ export default function PlatformOrgs() {
           description="Create the first organization above to get started." />
       )}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div className="dl-rows">
         {orgs.map(o => (
-          <div key={o.id} style={{ display: 'flex', flexDirection: 'column', gap: 10,
-            background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 16px' }}>
+          <div key={o.id} className="dl-rows__row dl-rows__row--stack">
             <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 700, fontSize: 14 }}>{o.name}</div>
-                <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+              <div className="dl-rows__main">
+                <div className="dl-rows__title">{o.name}</div>
+                <div className="dl-rows__meta">
                   {o.user_count} user{o.user_count === 1 ? '' : 's'} · parent: {nameOf(o.parent_org_id)}
                 </div>
               </div>
@@ -153,13 +154,13 @@ export default function PlatformOrgs() {
             </div>
 
             {/* Task E2: usage-vs-quota column */}
-            <div style={{ fontSize: 11, color: 'var(--muted)', borderTop: '1px solid var(--border)', paddingTop: 8,
-              display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+            <div style={{ fontSize: 11.5, color: 'var(--muted)', borderTop: '1px dashed var(--border)', paddingTop: 8,
+              display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', fontVariantNumeric: 'tabular-nums' }}>
               <span>Queries today: {o.usage.queries_today} / {fmtLimit(o.quota.max_queries_per_day)}</span>
               <span>Agent asks today: {o.usage.agent_asks_today} / {fmtLimit(o.quota.max_agent_asks_per_day)}</span>
               <span>Storage: {fmtMb(o.usage.storage_bytes)} MB / {fmtLimit(o.quota.max_storage_mb)}</span>
               <span>Concurrent asks: {fmtLimit(o.quota.max_concurrent_asks)}</span>
-              <button className="btn btn-sm" onClick={() => startEditQuota(o)}>Edit quota</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => startEditQuota(o)} style={{ marginInlineStart: 'auto' }}>Edit quota</button>
             </div>
 
             {editingQuotaId === o.id && (

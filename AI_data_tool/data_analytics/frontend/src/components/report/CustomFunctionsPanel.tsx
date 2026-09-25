@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { customFunctionsApi } from '../../services/api'
 import type { CustomFunction } from '../../services/api'
 import { useConfirm } from '../ui/ConfirmDialog'
+import { useT } from '../../i18n'
 
 /**
  * Management surface for a dataset's custom calculated-column functions --
@@ -17,6 +18,7 @@ export default function CustomFunctionsPanel({ datasetId, onChanged }: {
   onChanged: (fns: CustomFunction[]) => void
 }) {
   const confirm = useConfirm()
+  const tr = useT()
   const [functions, setFunctions] = useState<CustomFunction[]>([])
   const [editing, setEditing] = useState<typeof BLANK | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -82,12 +84,12 @@ export default function CustomFunctionsPanel({ datasetId, onChanged }: {
   return (
     <div>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
-        <span style={{ fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em' }}>
-          Custom functions
+        <span style={{ fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em' }}>
+          {tr('fn.title')}
         </span>
         <button className="btn btn-ghost btn-sm" onClick={openAdd}
-          style={{ fontSize:10, padding:'2px 7px' }}>
-          + New function
+          style={{ fontSize: 11, padding:'2px 7px' }}>
+          {tr('fn.new')}
         </button>
       </div>
 
@@ -96,7 +98,7 @@ export default function CustomFunctionsPanel({ datasetId, onChanged }: {
           background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:5, marginBottom:4 }}>
           <div style={{ flex:1, minWidth:0 }}>
             <div style={{ fontSize:12, fontWeight:600 }}>{`${fn.name}(${fn.params.join(', ')})`}</div>
-            <div style={{ fontSize:10, color:'var(--muted)', fontFamily:'var(--mono)' }}>{fn.expression}</div>
+            <div style={{ fontSize: 11, color:'var(--muted)', fontFamily:'var(--mono)' }}>{fn.expression}</div>
           </div>
           <button style={{ background:'none', border:'none', cursor:'pointer', color:'var(--muted)', fontSize:12, padding:'0 3px' }}
             title="Edit" onClick={() => openEdit(fn)}>✏</button>
@@ -107,27 +109,27 @@ export default function CustomFunctionsPanel({ datasetId, onChanged }: {
 
       {functions.length === 0 && (
         <p style={{ fontSize:11, color:'var(--muted)', textAlign:'center', padding:'8px 0' }}>
-          No custom functions yet
+          {tr('fn.none')}
         </p>
       )}
 
       {editing !== null && (
         <div style={{ border:'1px solid var(--border)', borderRadius:7, padding:10, marginTop:8 }}>
-          <label htmlFor="cf-name" style={{ display:'block', fontSize:10, color:'var(--muted)', marginBottom:3 }}>Function name</label>
+          <label htmlFor="cf-name" style={{ display:'block', fontSize: 11, color:'var(--muted)', marginBottom:3 }}>Function name</label>
           <input id="cf-name" value={editing.name} onChange={e => setEditing({ ...editing, name: e.target.value })}
             style={{ width:'100%', fontSize:12, marginBottom:6 }} />
 
-          <label htmlFor="cf-params" style={{ display:'block', fontSize:10, color:'var(--muted)', marginBottom:3 }}>Parameters (comma-separated)</label>
+          <label htmlFor="cf-params" style={{ display:'block', fontSize: 11, color:'var(--muted)', marginBottom:3 }}>Parameters (comma-separated)</label>
           <input id="cf-params" value={editing.params} onChange={e => setEditing({ ...editing, params: e.target.value })}
             placeholder="revenue, cost" style={{ width:'100%', fontSize:12, marginBottom:6 }} />
 
-          <label htmlFor="cf-expr" style={{ display:'block', fontSize:10, color:'var(--muted)', marginBottom:3 }}>Expression</label>
+          <label htmlFor="cf-expr" style={{ display:'block', fontSize: 11, color:'var(--muted)', marginBottom:3 }}>Expression</label>
           <textarea id="cf-expr" value={editing.expression} onChange={e => setEditing({ ...editing, expression: e.target.value })}
             style={{ width:'100%', fontSize:12, fontFamily:'var(--mono)', marginBottom:6 }} rows={2} />
 
           {params.map(p => (
             <div key={p} style={{ marginBottom: 4 }}>
-              <label htmlFor={`cf-sample-${p}`} style={{ fontSize:10, color:'var(--muted)' }}>Sample value for {p}</label>
+              <label htmlFor={`cf-sample-${p}`} style={{ fontSize: 11, color:'var(--muted)' }}>Sample value for {p}</label>
               <input id={`cf-sample-${p}`} value={sampleValues[p] ?? ''}
                 onChange={e => setSampleValues({ ...sampleValues, [p]: e.target.value })}
                 style={{ width:'100%', fontSize:12 }} />

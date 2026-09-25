@@ -143,12 +143,12 @@ export default function Lineage() {
 
   if (loadError) {
     return (
-      <div style={{ padding: 24 }}>
+      <div>
         <LoadError what="the lineage graph" error={loadError} onRetry={load} />
       </div>
     )
   }
-  if (!graph) return <div style={{ padding: 24 }}><LoadingState /></div>
+  if (!graph) return <div><LoadingState /></div>
 
   const node = (key: string, title: string, subtitle: string, link?: string, badges?: React.ReactNode) => {
     const dimmed = touching ? !touching.has(key) : false
@@ -180,7 +180,7 @@ export default function Lineage() {
           }}
           style={{ cursor: 'pointer', paddingInlineEnd: link ? 22 : 0 }}>
           <div style={{ fontSize: 12, fontWeight: 600 }}>{title}</div>
-          <div style={{ fontSize: 10, color: 'var(--muted)' }}>{subtitle}</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>{subtitle}</div>
           {badges && <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 5 }}>{badges}</div>}
         </div>
         {link && (
@@ -195,7 +195,7 @@ export default function Lineage() {
   }
 
   const badge = (label: string, title: string, color?: string) => (
-    <span key={label + title} title={title} style={{ fontSize: 9, fontWeight: 700, lineHeight: 1,
+    <span key={label + title} title={title} style={{ fontSize: 10.5, fontWeight: 700, lineHeight: 1,
       padding: '2px 5px', borderRadius: 4, border: '1px solid var(--border)',
       color: color ?? 'var(--muted)', background: 'var(--surface2)' }}>
       {label}
@@ -222,15 +222,15 @@ export default function Lineage() {
 
   const col = (title: string, children: React.ReactNode) => (
     <div style={{ flex: 1, minWidth: 200, display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em' }}>{title}</div>
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em' }}>{title}</div>
       {children}
     </div>
   )
 
   return (
-    <div style={{ padding: 24, height: '100%', overflowY: 'auto' }}>
-      <h1 style={{ fontSize: 18, marginBottom: 4 }}>{t('nav.lineage')}</h1>
-      <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 18 }}>
+    <div style={{ height: '100%', overflowY: 'auto' }}>
+      <h1 className="dl-page-title" style={{ marginBottom: 4 }}>{t('nav.lineage')}</h1>
+      <p className="dl-page-head__sub" style={{ marginBottom: 18 }}>
         {t('lineage.subtitle')}
       </p>
       <div ref={containerRef} style={{ position: 'relative', display: 'flex', gap: 80, alignItems: 'flex-start' }}>
@@ -249,19 +249,19 @@ export default function Lineage() {
         </svg>
         {col(t('lineage.sources'), graph.sources.length
           ? graph.sources.map(s => node(`src:${s.id}`, s.name, s.type, '/connections'))
-          : <p style={{ fontSize: 11, color: 'var(--muted)' }}>No connections — uploads only.</p>)}
+          : <p style={{ fontSize: 12, color: 'var(--muted)' }}>{t('lineage.noSources')}</p>)}
         {col(t('lineage.datasets'), graph.datasets.length
           ? graph.datasets.map(d =>
               node(`ds:${d.id}`, d.name,
-                [d.mode === 'directquery' ? 'DirectQuery' : 'Import', d.joins.length ? `joins ${d.joins.length}` : '']
+                [d.mode === 'directquery' ? t('lineage.directquery') : t('lineage.import'), d.joins.length ? t('lineage.joins', { n: d.joins.length }) : '']
                   .filter(Boolean).join(' · '),
                 `/datasets/${d.id}#prep-pipeline`, etlBadges(d)))
-          : <p style={{ fontSize: 11, color: 'var(--muted)' }}>No datasets yet.</p>)}
+          : <p style={{ fontSize: 12, color: 'var(--muted)' }}>{t('lineage.noDatasets')}</p>)}
         {col(t('lineage.reports'), graph.reports.length
           ? graph.reports.map(r =>
-              node(`rep:${r.id}`, r.name, `reads ${r.dataset_ids.length} dataset${r.dataset_ids.length === 1 ? '' : 's'}`,
+              node(`rep:${r.id}`, r.name, (r.dataset_ids.length === 1 ? t('lineage.readsOne') : t('lineage.readsN', { n: r.dataset_ids.length })),
                 `/reports/${r.id}`))
-          : <p style={{ fontSize: 11, color: 'var(--muted)' }}>No reports yet.</p>)}
+          : <p style={{ fontSize: 12, color: 'var(--muted)' }}>{t('lineage.noReports')}</p>)}
       </div>
     </div>
   )

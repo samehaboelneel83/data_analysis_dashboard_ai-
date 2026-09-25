@@ -1144,7 +1144,7 @@ describe('measure dropdown excludes id-like numeric columns', () => {
     render(<CrossFilterProvider><WidgetConfigPanel
       widget={widget({ widget_type: 'kpi', config: {} })}
       columns={cols} onUpdate={vi.fn()} /></CrossFilterProvider>)
-    const options = Array.from((screen.getByLabelText('Measure (numeric column)') as HTMLSelectElement).options)
+    const options = Array.from((screen.getByLabelText(/^Measure \(numeric column\)/) as HTMLSelectElement).options)
       .map(o => o.value)
     expect(options).toContain('all_employee_count')
     expect(options).toContain('employee_count')
@@ -1649,10 +1649,12 @@ describe('the options a SAS-style page needs', () => {
       widget={widget({ widget_type: 'donut', config: { dimension: 'region' } })}
       columns={columns} onUpdate={onUpdate} /></CrossFilterProvider>)
 
+    // On by default; unticking it is what gets stored.
+    expect(screen.getByLabelText(/total in the centre/i)).toBeChecked()
     fireEvent.click(screen.getByLabelText(/total in the centre/i))
     act(() => { vi.advanceTimersByTime(700) })
     const [config] = onUpdate.mock.calls[onUpdate.mock.calls.length - 1]
-    expect(config.donut_total).toBe(true)
+    expect(config.donut_total).toBe(false)
   })
 
   it('offers the donut total only on a donut', () => {

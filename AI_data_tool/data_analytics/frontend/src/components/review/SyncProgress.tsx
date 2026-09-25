@@ -1,4 +1,5 @@
 import type { SyncRun } from '../../services/api'
+import { friendlyMessage } from '../../lib/friendlyError'
 
 /**
  * Per-stage outcome of a metadata sync.
@@ -72,16 +73,34 @@ export default function SyncProgress({ run }: { run: SyncRun | null }) {
               </span>
               <span style={{ minWidth: 170 }}>{STAGE_LABELS[stage.name] ?? stage.name}</span>
               <span style={{ color: '#64748b' }}>
-                {stage.error ? stage.error : detail}
+                {stage.error ? <Friendly text={stage.error} /> : detail}
                 {stage.ms != null && stage.status !== 'skipped' && ` · ${stage.ms}ms`}
               </span>
             </li>
           )
         })}
       </ol>
-      {run.error && (
-        <p style={{ color: '#b03a32', fontSize: 13, marginTop: 8 }}>{run.error}</p>
+      {/* The same run error usually repeats on the failed stage; a driver
+          message is rewritten once, here, and the raw text stays a click away. */}
+      {run.error && !run.stages.some(s => s.error === run.error) && (
+        <p style={{ color: '#b03a32', fontSize: 13, marginTop: 8 }}><Friendly text={run.error} /></p>
       )}
     </div>
   )
 }
+
+/** A driver error in plain words, with the original behind "Technical details". */
+function Friendly({ text }: { text: string }) {
+  const nice = friendlyMessage(text)
+  if (nice === text) return <>{text}</>
+  return (
+    <span>
+      {nice}
+      <details className="dl-conn-test__raw" style={{ display: 'inline-block', marginInlineStart: 8, verticalAlign: 'top' }}>
+        <summary>Technical details</summary>
+        <pre>{text}</pre>
+      </details>
+    </span>
+  )
+}
+

@@ -7,6 +7,7 @@ import { useConfirm } from '../ui/ConfirmDialog'
 
 import { FUNC_CATS, type FuncCat } from './calcColumns/catalog'
 import { BuilderModal } from './calcColumns/BuilderModal'
+import { useT } from '../../i18n'
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 interface Props {
@@ -21,6 +22,7 @@ const BLANK = { name: '', expression: '', format: undefined as CalcColumnFormat 
 
 export default function CalcColumnsPanel({ datasetId, columns, onChanged }: Props) {
   const confirm = useConfirm()
+  const tr = useT()
   const [calcCols, setCalcCols] = useState<CalcColumn[]>([])
   const [editing,  setEditing]  = useState<typeof BLANK | null>(null)  // null = modal closed
   const [customFunctions, setCustomFunctions] = useState<CustomFunction[]>([])
@@ -70,10 +72,10 @@ export default function CalcColumnsPanel({ datasetId, columns, onChanged }: Prop
     <div>
       {/* Header */}
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
-        <span style={{ fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em' }}>
-          ƒx Calculated columns
+        <span style={{ fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em' }}>
+          {tr('calc.title')}
         </span>
-        <button className="btn btn-ghost btn-sm" onClick={openAdd} style={{ fontSize:10, padding:'2px 7px' }}>
+        <button className="btn btn-ghost btn-sm" onClick={openAdd} style={{ fontSize: 11, padding:'2px 7px' }}>
           + Add
         </button>
       </div>
@@ -82,8 +84,8 @@ export default function CalcColumnsPanel({ datasetId, columns, onChanged }: Prop
           original, so it can carry its own default aggregation and format -- SAS's
           standard way of getting two aggregations from one column. */}
       <div style={{ marginBottom: 8 }}>
-        <label htmlFor="dup-col-select" style={{ display:'block', fontSize:9, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:3 }}>
-          Duplicate a column
+        <label htmlFor="dup-col-select" style={{ display:'block', fontSize: 10.5, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:3 }}>
+          {tr('calc.dup')}
         </label>
         <select id="dup-col-select" value="" style={{ width:'100%', fontSize:11 }}
           onChange={async e => {
@@ -109,7 +111,7 @@ export default function CalcColumnsPanel({ datasetId, columns, onChanged }: Prop
           <span style={{ color:'var(--accent)', fontSize:11, flexShrink:0 }}>ƒx</span>
           <div style={{ flex:1, minWidth:0 }}>
             <div style={{ fontSize:12, fontWeight:600, color:'var(--text)' }}>{col.name}</div>
-            <div style={{ fontSize:10, color:'var(--muted)', overflow:'hidden', textOverflow:'ellipsis',
+            <div style={{ fontSize: 11, color:'var(--muted)', overflow:'hidden', textOverflow:'ellipsis',
               whiteSpace:'nowrap', fontFamily:'var(--mono)' }}>{col.expression}</div>
           </div>
           <button style={{ background:'none', border:'none', cursor:'pointer', color:'var(--muted)', fontSize:12, padding:'0 3px' }}
@@ -121,7 +123,7 @@ export default function CalcColumnsPanel({ datasetId, columns, onChanged }: Prop
 
       {calcCols.length === 0 && (
         <p style={{ fontSize:11, color:'var(--muted)', textAlign:'center', padding:'8px 0' }}>
-          No calculated columns yet
+          {tr('calc.none')}
         </p>
       )}
 

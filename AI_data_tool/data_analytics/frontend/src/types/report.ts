@@ -372,8 +372,10 @@ export const ROLE_SPECS: Record<WidgetType, RoleField[]> = {
   ribbon:   [{ role: 'category',  label: 'Rows (Y-axis)',    required: true },
              { role: 'category2', label: 'Columns (X-axis)', required: true },
              { role: 'measure',   label: 'Cell value',       required: true }],
-  kpi:      [{ role: 'category', label: 'Dimension (Group / X-axis)', required: true },
-             { role: 'measure',  label: 'Measure (numeric column)',   required: false }],
+  // A KPI is one number: the measure is what it needs; a dimension is optional
+  // (it turns the card into "the value for the top group").
+  kpi:      [{ role: 'category', label: 'Dimension (Group / X-axis)', required: false },
+             { role: 'measure',  label: 'Measure (numeric column)',   required: true }],
   table:    [{ role: 'category', label: 'Dimension (Group / X-axis)', required: true },
              { role: 'measure',  label: 'Measure (numeric column)',   required: false }],
   crosstab: [{ role: 'category',  label: 'Dimension (Group / X-axis)', required: true },

@@ -33,7 +33,7 @@ export default function CommentsPane({ reportId, activePageId, pageNames }: {
 
   return (
     <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8, height: '100%' }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
         Comments
       </div>
 
@@ -44,11 +44,11 @@ export default function CommentsPane({ reportId, activePageId, pageNames }: {
         {comments.map(c => (
           <div key={c.id} style={{ border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', fontSize: 12 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6, marginBottom: 2 }}>
-              <span style={{ fontSize: 10, color: 'var(--muted)' }}>
+              <span style={{ fontSize: 11, color: 'var(--muted)' }}>
                 {c.author}{c.page_id != null && pageNames[c.page_id] ? ` · ${pageNames[c.page_id]}` : ''}
               </span>
               <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                <span style={{ fontSize: 9, color: 'var(--muted)' }}>{new Date(c.created_at).toLocaleString()}</span>
+                <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>{new Date(c.created_at).toLocaleString()}</span>
                 {c.mine && (
                   <button aria-label={`Delete comment ${c.id}`}
                     onClick={async () => {
@@ -61,7 +61,7 @@ export default function CommentsPane({ reportId, activePageId, pageNames }: {
                       await commentsApi.delete(reportId, c.id)
                       refresh()
                     }}
-                    style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--danger)', fontSize: 10, padding: 0 }}>✕</button>
+                    style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--danger)', fontSize: 11, padding: 0 }}>✕</button>
                 )}
               </span>
             </div>

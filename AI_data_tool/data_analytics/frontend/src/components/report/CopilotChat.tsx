@@ -112,11 +112,16 @@ export default function CopilotChat({ reportId, pageId, selectedWidgetId, onAppl
     }
   }
 
+  // Float over the CANVAS, not over the settings panel: pinned to the window
+  // corner, the button covered that panel's own bottom controls (its Send and
+  // Apply buttons). The panel is resizable and collapsible, so follow its width.
+  const endOffset = useEndPanelWidth('builder-right')
+
   return (
     <>
       {!open && (
         <button onClick={() => setOpen(true)} aria-label="Page copilot" title="Page copilot"
-          style={{ position: 'fixed', insetInlineEnd: 24, bottom: 24, zIndex: 1000,
+          style={{ position: 'fixed', insetInlineEnd: 24 + endOffset, bottom: 24, zIndex: 1000,
             width: 48, height: 48, borderRadius: '50%', border: 'none', cursor: 'pointer',
             background: 'var(--accent)', color: 'var(--mc-accent-fg)', display: 'inline-flex',
             alignItems: 'center', justifyContent: 'center',
@@ -127,7 +132,7 @@ export default function CopilotChat({ reportId, pageId, selectedWidgetId, onAppl
 
       {open && (
         <div role="dialog" aria-label="Page copilot"
-          style={{ position: 'fixed', insetInlineEnd: 24, bottom: 24, zIndex: 1000,
+          style={{ position: 'fixed', insetInlineEnd: 24 + endOffset, bottom: 24, zIndex: 1000,
             width: 360, maxWidth: 'calc(100vw - 48px)', height: 460,
             maxHeight: 'calc(100vh - 96px)', display: 'flex', flexDirection: 'column',
             background: 'var(--surface)', border: '1px solid var(--border)',
@@ -211,4 +216,18 @@ export default function CopilotChat({ reportId, pageId, selectedWidgetId, onAppl
       )}
     </>
   )
+}
+
+function useEndPanelWidth(sideId: string): number {
+  const [w, setW] = useState(0)
+  useEffect(() => {
+    const el = document.querySelector<HTMLElement>(`[data-side="${sideId}"]`)
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const measure = () => setW(Math.round(el.getBoundingClientRect().width))
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [sideId])
+  return w
 }

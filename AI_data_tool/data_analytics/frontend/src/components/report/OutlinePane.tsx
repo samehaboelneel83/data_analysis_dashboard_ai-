@@ -51,7 +51,7 @@ export default function OutlinePane({ report, activePageId, selectedWidgetId, on
           <select aria-label={`Container for ${label(w)}`}
             value={(w.config as { container_id?: number })?.container_id ?? ''}
             onChange={e => onSetContainer(w.id, page.id, e.target.value ? Number(e.target.value) : null)}
-            style={{ fontSize: 9, maxWidth: 70 }}>
+            style={{ fontSize: 10.5, maxWidth: 70 }}>
             <option value="">—</option>
             {containers.map(c => <option key={c.id} value={c.id}>{label(c)}</option>)}
           </select>
@@ -62,7 +62,7 @@ export default function OutlinePane({ report, activePageId, selectedWidgetId, on
 
   return (
     <div style={{ padding: 12, overflowY: 'auto', height: '100%' }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
         Outline
       </div>
       {report.pages.map(page => {

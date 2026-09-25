@@ -196,7 +196,7 @@ export default function GlossaryPanel({ sourceId, canEdit, objectNames }: Glossa
                 <td style={{ padding: '6px 8px', fontWeight: 600 }}>
                   {t.term}
                   {t.data_source_id === null && (
-                    <span style={{ marginInlineStart: 6, fontSize: 10, fontWeight: 400,
+                    <span style={{ marginInlineStart: 6, fontSize: 11, fontWeight: 400,
                       color: 'var(--muted)' }}>
                       organisation-wide
                     </span>

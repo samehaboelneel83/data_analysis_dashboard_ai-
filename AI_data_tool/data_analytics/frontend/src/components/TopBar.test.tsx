@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, act } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import TopBar from './TopBar'
+import { CRUMB_EVENT } from '../lib/crumb'
 
 /**
  * The top bar's three jobs: name the current page, open the ONE search
@@ -28,6 +29,33 @@ describe('TopBar', () => {
   it('titles the current page, longest route prefix winning', () => {
     renderAt('/monitoring/jobs')
     expect(screen.getByRole('heading', { name: 'Refresh & jobs' })).toBeInTheDocument()
+  })
+
+  it('puts the rail section in front of the page, as a breadcrumb', () => {
+    renderAt('/admin/users')
+    const trail = screen.getByRole('navigation', { name: 'Breadcrumb' })
+    expect(trail).toHaveTextContent('Admin')
+    expect(screen.getByRole('heading', { name: 'Users' })).toHaveAttribute('aria-current', 'page')
+  })
+
+  it('an admin page that is not itself in the rail still gets its section', () => {
+    renderAt('/admin/connection-rules')
+    expect(screen.getByRole('navigation', { name: 'Breadcrumb' })).toHaveTextContent('Admin')
+  })
+
+  it('names the record a detail page is showing, with the list as a link back', () => {
+    renderAt('/datasets/170')
+    act(() => { window.dispatchEvent(new CustomEvent(CRUMB_EVENT, { detail: { path: '/datasets/170', title: 'Sales 2024' } })) })
+    expect(screen.getByRole('heading', { name: 'Sales 2024' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('link', { name: 'Datasets' })).toHaveAttribute('href', '/datasets')
+    // A title sent for another path is never shown here.
+    act(() => { window.dispatchEvent(new CustomEvent(CRUMB_EVENT, { detail: { path: '/reports/9', title: 'Other' } })) })
+    expect(screen.queryByRole('heading', { name: 'Other' })).not.toBeInTheDocument()
+  })
+
+  it('Home has no section in front of it', () => {
+    renderAt('/')
+    expect(screen.getByRole('navigation', { name: 'Breadcrumb' }).textContent).toBe('Home')
   })
 
   it('falls back to Home for the root', () => {

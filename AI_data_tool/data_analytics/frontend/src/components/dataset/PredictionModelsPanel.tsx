@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
+import { Brain } from 'lucide-react'
+import EmptyState from '../ui/EmptyState'
+import { useT } from '../../i18n'
 import { predictionModelsApi } from '../../services/api'
 import type { DatasetColumn, PredictionModelSummary, ScoreResult } from '../../services/api'
 
@@ -29,6 +32,7 @@ export default function PredictionModelsPanel({ datasetId, columns, mode }: {
    *  fail on the button. */
   mode?: string
 }) {
+  const t = useT()
   const [models, setModels] = useState<PredictionModelSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [target, setTarget] = useState('')
@@ -128,7 +132,7 @@ export default function PredictionModelsPanel({ datasetId, columns, mode }: {
       ) : (
       <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', flexWrap: 'wrap' }}>
         <div>
-          <label htmlFor="pm-target" style={{ display: 'block', fontSize: 10, fontWeight: 700, color: 'var(--muted)' }}>
+          <label htmlFor="pm-target" style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--muted)' }}>
             Predict
           </label>
           <select id="pm-target" value={target} onChange={e => setTarget(e.target.value)}
@@ -138,7 +142,7 @@ export default function PredictionModelsPanel({ datasetId, columns, mode }: {
           </select>
         </div>
         <div>
-          <label htmlFor="pm-name" style={{ display: 'block', fontSize: 10, fontWeight: 700, color: 'var(--muted)' }}>
+          <label htmlFor="pm-name" style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--muted)' }}>
             Name
           </label>
           <input id="pm-name" value={name} onChange={e => setName(e.target.value)}
@@ -147,7 +151,7 @@ export default function PredictionModelsPanel({ datasetId, columns, mode }: {
         </div>
         {partitionCols.length > 0 && (
           <div>
-            <label htmlFor="pm-partition" style={{ display: 'block', fontSize: 10, fontWeight: 700, color: 'var(--muted)' }}>
+            <label htmlFor="pm-partition" style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--muted)' }}>
               Train on
             </label>
             <select id="pm-partition" value={partition} onChange={e => setPartition(e.target.value)}
@@ -167,11 +171,10 @@ export default function PredictionModelsPanel({ datasetId, columns, mode }: {
       {loading ? (
         <p style={{ fontSize: 12, color: 'var(--muted)' }}>Loading…</p>
       ) : models.length === 0 ? (
-        <p style={{ fontSize: 12, color: 'var(--muted)' }}>
-          {mode === 'directquery'
-            ? 'No saved models on this dataset.'
-            : 'No saved models yet. Choose a column to predict and train one.'}
-        </p>
+        <EmptyState icon={Brain}
+          title={mode === 'directquery' ? t('models.emptyDq') : t('models.empty')}
+          description={mode === 'directquery' ? undefined
+            : t('models.emptyBody')} />
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {models.map(m => (
@@ -186,12 +189,12 @@ export default function PredictionModelsPanel({ datasetId, columns, mode }: {
                 </span>
                 <span style={{ marginInlineStart: 'auto', display: 'flex', gap: 6 }}>
                   <button onClick={() => void score(m)} disabled={scoringId === m.id}
-                    className="btn btn-ghost btn-sm" style={{ fontSize: 10, padding: '3px 8px' }}>
+                    className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '3px 8px' }}>
                     {scoringId === m.id ? 'Scoring…' : 'Score this dataset'}
                   </button>
                   <button onClick={() => void remove(m)}
                     aria-label={`Delete ${m.name}`} title={`Delete ${m.name}`}
-                    className="btn btn-ghost btn-sm" style={{ fontSize: 10, padding: '3px 8px' }}>
+                    className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '3px 8px' }}>
                     Delete
                   </button>
                 </span>

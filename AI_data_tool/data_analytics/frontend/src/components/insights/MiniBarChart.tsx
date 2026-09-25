@@ -150,13 +150,13 @@ export default function MiniBarChart({ rows, ordered = false, caption }: {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 8 }}>
       {caption && (
         <div data-testid="mini-bar-caption"
-          style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 1,
+          style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 1,
                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
           title={caption}>{caption}</div>
       )}
       {top.map((r, i) => (
         <div key={i} data-testid="mini-bar-row"
-          style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10 }}>
+          style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
           <span style={{ flex: '0 0 72px', color: 'var(--muted)', overflow: 'hidden',
             textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
             title={r.name}>{ordered ? label(r) : r.name}</span>

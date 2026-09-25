@@ -14,9 +14,31 @@ export function applyTheme(name: string, customPalettes?: Record<string, string[
   COLORS.push(...next)
 }
 export const SELECTED_STROKE = '#fff'
+
+/**
+ * A pie/donut slice label in the TEXT colour, not the slice's. Recharts' default
+ * paints each label in its slice colour, which is fine on white for a mid-tone
+ * palette and unreadable for a dark one on a dark canvas (Ember's crimson on the
+ * dark theme measured well under 3:1). The slice it belongs to is the one it
+ * sits beside, so the colour carried no information the position did not.
+ */
+export function sliceLabel(p: { x: number; y: number; textAnchor?: string; name?: unknown; percent?: number }) {
+  return (
+    <text x={p.x} y={p.y} textAnchor={p.textAnchor as 'start' | 'middle' | 'end' | undefined} dominantBaseline="central"
+      fill="var(--text)" style={{ fontSize: 12 }}>
+      {`${String(p.name ?? '')} ${((p.percent ?? 0) * 100).toFixed(0)}%`}
+    </text>
+  )
+}
 export const DIM_OPACITY = 0.35
 
-export const TT: React.CSSProperties = { background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }
+// The chart tooltip: a small floating card on the surface colour with the
+// overlay shadow, so it reads as lifted above the plot rather than as a grey
+// patch painted onto it.
+export const TT: React.CSSProperties = {
+  background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12,
+  boxShadow: 'var(--dl-shadow-overlay)', padding: '8px 10px',
+}
 
 /**
  * Keep a number and its unit in reading order inside an RTL page.

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import { sensitivityApi, type DatasetSensitivity as Sens } from '../services/api'
+import { useT, type MessageKey } from '../i18n'
 
 /**
  * A dataset's sensitivity label (Phase 7.3): its own label, the label in
@@ -9,6 +10,9 @@ import { sensitivityApi, type DatasetSensitivity as Sens } from '../services/api
  */
 export default function DatasetSensitivity({ datasetId }: { datasetId: number }) {
   const [s, setS] = useState<Sens | null>(null)
+  const t = useT()
+  // Server labels are English keywords; shown in the reader's language.
+  const label = (o: string) => { const k = `sens.${o}` as MessageKey; const v = t(k); return v && v !== k ? v : o }
   useEffect(() => {
     let live = true
     sensitivityApi.get(datasetId).then(r => { if (live) setS(r) }).catch(() => { if (live) setS(null) })
@@ -33,8 +37,8 @@ export default function DatasetSensitivity({ datasetId }: { datasetId: number })
             toast.error((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Could not label this dataset')
           }
         }}>
-        <option value="">— Unlabelled —</option>
-        {s.options.map(o => <option key={o} value={o}>{o}</option>)}
+        <option value="">{t('sens.none')}</option>
+        {s.options.map(o => <option key={o} value={o}>{label(o)}</option>)}
       </select>
       {inherited && <span style={{ color: 'var(--muted)' }}>in force: <b>{s.effective}</b></span>}
     </span>

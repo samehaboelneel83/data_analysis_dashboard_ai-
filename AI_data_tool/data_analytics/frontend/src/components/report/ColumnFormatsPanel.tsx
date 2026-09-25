@@ -19,8 +19,8 @@ const FMT_TYPES: { value: CalcColumnFormat['type']; label: string }[] = [
   { value: 'bar',      label: '▓ Progress Bar' },
   { value: 'badge',    label: '● Color Badge'  },
   { value: 'trend',    label: '↑ Trend Arrow'  },
-  { value: 'colorscale', label: '🎨 Color Scale' },
-  { value: 'icon',       label: '🔴 Icon Set'    },
+  { value: 'colorscale', label: 'Color Scale' },
+  { value: 'icon',       label: 'Icon Set'    },
 ]
 
 export default function ColumnFormatsPanel({ datasetId, columns, columnFormats: initial, onChanged }: Props) {
@@ -57,7 +57,7 @@ export default function ColumnFormatsPanel({ datasetId, columns, columnFormats: 
 
   return (
     <div>
-      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase',
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase',
         letterSpacing: '.06em', marginBottom: 8 }}>
         Display Formats
       </div>
@@ -77,7 +77,7 @@ export default function ColumnFormatsPanel({ datasetId, columns, columnFormats: 
                 textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {col.name}
               </span>
-              <span style={{ fontSize: 9, color: 'var(--muted)', flexShrink: 0 }}>{col.dtype}</span>
+              <span style={{ fontSize: 10.5, color: 'var(--muted)', flexShrink: 0 }}>{col.dtype}</span>
               <select value={fmt.type}
                 onChange={e => setType(col.name, e.target.value as CalcColumnFormat['type'])}
                 style={{ ...inp, width: 'auto', fontSize: 11, flexShrink: 0 }}>
@@ -93,7 +93,7 @@ export default function ColumnFormatsPanel({ datasetId, columns, columnFormats: 
                 {/* Decimals */}
                 {['number','integer','currency','percent','badge','trend','colorscale','icon'].includes(fmt.type) && (
                   <label style={{ display:'flex', flexDirection:'column', gap:2, width:50 }}>
-                    <span style={{ fontSize:9, color:'var(--muted)' }}>Decimals</span>
+                    <span style={{ fontSize: 10.5, color:'var(--muted)' }}>Decimals</span>
                     <input type="number" min={0} max={8} value={fmt.decimals ?? ''} placeholder="2"
                       style={inp}
                       onChange={e => setField(col.name, 'decimals', e.target.value === '' ? undefined : +e.target.value)}
@@ -104,7 +104,7 @@ export default function ColumnFormatsPanel({ datasetId, columns, columnFormats: 
                 {/* Display units — an axis reading "1.2M" instead of "1,200,000" */}
                 {['number','integer','currency','percent','badge','trend','colorscale','icon'].includes(fmt.type) && (
                   <label style={{ display:'flex', flexDirection:'column', gap:2, width:78 }}>
-                    <span style={{ fontSize:9, color:'var(--muted)' }}>Units</span>
+                    <span style={{ fontSize: 10.5, color:'var(--muted)' }}>Units</span>
                     <select value={fmt.scale ?? 'none'} style={inp}
                       aria-label={`Display units for ${col.name}`}
                       onChange={e => setField(col.name, 'scale',
@@ -121,7 +121,7 @@ export default function ColumnFormatsPanel({ datasetId, columns, columnFormats: 
                 {/* Currency symbol */}
                 {fmt.type === 'currency' && (<>
                   <label style={{ display:'flex', flexDirection:'column', gap:2, width:64 }}>
-                    <span style={{ fontSize:9, color:'var(--muted)' }}>Symbol</span>
+                    <span style={{ fontSize: 10.5, color:'var(--muted)' }}>Symbol</span>
                     {/* Suggests the region's currencies in both scripts (Phase 7.5). */}
                     <input value={fmt.symbol ?? '$'} style={inp} list="mena-currencies" dir="auto"
                       aria-label={`${col.name} currency symbol`}
@@ -135,7 +135,7 @@ export default function ColumnFormatsPanel({ datasetId, columns, columnFormats: 
                     </datalist>
                   </label>
                   <label style={{ display:'flex', flexDirection:'column', gap:2, width:70 }}>
-                    <span style={{ fontSize:9, color:'var(--muted)' }}>Symbol goes</span>
+                    <span style={{ fontSize: 10.5, color:'var(--muted)' }}>Symbol goes</span>
                     <select value={fmt.symbol_position ?? ''} style={inp} aria-label={`${col.name} symbol position`}
                       onChange={e => setField(col.name, 'symbol_position', e.target.value || undefined)}>
                       <option value="">auto</option>
@@ -148,13 +148,13 @@ export default function ColumnFormatsPanel({ datasetId, columns, columnFormats: 
                 {/* Prefix / Suffix */}
                 {['number','integer','currency','percent'].includes(fmt.type) && (<>
                   <label style={{ display:'flex', flexDirection:'column', gap:2, width:52 }}>
-                    <span style={{ fontSize:9, color:'var(--muted)' }}>Prefix</span>
+                    <span style={{ fontSize: 10.5, color:'var(--muted)' }}>Prefix</span>
                     <input value={fmt.prefix ?? ''} placeholder="—" style={inp}
                       onChange={e => setField(col.name, 'prefix', e.target.value || undefined)}
                       onBlur={e => setField(col.name, 'prefix', e.target.value || undefined)} />
                   </label>
                   <label style={{ display:'flex', flexDirection:'column', gap:2, width:52 }}>
-                    <span style={{ fontSize:9, color:'var(--muted)' }}>Suffix</span>
+                    <span style={{ fontSize: 10.5, color:'var(--muted)' }}>Suffix</span>
                     <input value={fmt.suffix ?? ''} placeholder="—" style={inp}
                       onChange={e => setField(col.name, 'suffix', e.target.value || undefined)}
                       onBlur={e => setField(col.name, 'suffix', e.target.value || undefined)} />
@@ -164,17 +164,17 @@ export default function ColumnFormatsPanel({ datasetId, columns, columnFormats: 
                 {/* Bar options */}
                 {fmt.type === 'bar' && (<>
                   <label style={{ display:'flex', flexDirection:'column', gap:2, width:52 }}>
-                    <span style={{ fontSize:9, color:'var(--muted)' }}>Min</span>
+                    <span style={{ fontSize: 10.5, color:'var(--muted)' }}>Min</span>
                     <input type="number" value={fmt.min ?? ''} placeholder="0" style={inp}
                       onChange={e => setField(col.name, 'min', e.target.value === '' ? undefined : +e.target.value)} />
                   </label>
                   <label style={{ display:'flex', flexDirection:'column', gap:2, width:52 }}>
-                    <span style={{ fontSize:9, color:'var(--muted)' }}>Max</span>
+                    <span style={{ fontSize: 10.5, color:'var(--muted)' }}>Max</span>
                     <input type="number" value={fmt.max ?? ''} placeholder="100" style={inp}
                       onChange={e => setField(col.name, 'max', e.target.value === '' ? undefined : +e.target.value)} />
                   </label>
                   <label style={{ display:'flex', flexDirection:'column', gap:2 }}>
-                    <span style={{ fontSize:9, color:'var(--muted)' }}>Color</span>
+                    <span style={{ fontSize: 10.5, color:'var(--muted)' }}>Color</span>
                     <input type="color" value={fmt.color ?? '#6c8fff'}
                       style={{ width:36, height:26, padding:2, border:'1px solid var(--border)', borderRadius:4, cursor:'pointer', background:'var(--surface)' }}
                       onChange={e => setField(col.name, 'color', e.target.value)} />
@@ -184,7 +184,7 @@ export default function ColumnFormatsPanel({ datasetId, columns, columnFormats: 
                 {/* Badge / Icon thresholds */}
                 {(fmt.type === 'badge' || fmt.type === 'icon') && (<>
                   <label style={{ display:'flex', flexDirection:'column', gap:2, width:60 }}>
-                    <span style={{ fontSize:9, color:'#f87171' }}>Low (red)</span>
+                    <span style={{ fontSize: 10.5, color:'#f87171' }}>Low (red)</span>
                     <input type="number" value={fmt.thresholds?.[0] ?? ''} placeholder="33" style={inp}
                       onChange={e => {
                         const lo = e.target.value === '' ? 33 : +e.target.value
@@ -192,7 +192,7 @@ export default function ColumnFormatsPanel({ datasetId, columns, columnFormats: 
                       }} />
                   </label>
                   <label style={{ display:'flex', flexDirection:'column', gap:2, width:60 }}>
-                    <span style={{ fontSize:9, color:'#34d399' }}>High (green)</span>
+                    <span style={{ fontSize: 10.5, color:'#34d399' }}>High (green)</span>
                     <input type="number" value={fmt.thresholds?.[1] ?? ''} placeholder="66" style={inp}
                       onChange={e => {
                         const hi = e.target.value === '' ? 66 : +e.target.value
@@ -204,29 +204,29 @@ export default function ColumnFormatsPanel({ datasetId, columns, columnFormats: 
                 {/* Color scale range + colors */}
                 {fmt.type === 'colorscale' && (<>
                   <label style={{ display:'flex', flexDirection:'column', gap:2, width:52 }}>
-                    <span style={{ fontSize:9, color:'var(--muted)' }}>Min</span>
+                    <span style={{ fontSize: 10.5, color:'var(--muted)' }}>Min</span>
                     <input type="number" value={fmt.min ?? ''} placeholder="0" style={inp}
                       onChange={e => setField(col.name, 'min', e.target.value === '' ? undefined : +e.target.value)} />
                   </label>
                   <label style={{ display:'flex', flexDirection:'column', gap:2, width:52 }}>
-                    <span style={{ fontSize:9, color:'var(--muted)' }}>Max</span>
+                    <span style={{ fontSize: 10.5, color:'var(--muted)' }}>Max</span>
                     <input type="number" value={fmt.max ?? ''} placeholder="100" style={inp}
                       onChange={e => setField(col.name, 'max', e.target.value === '' ? undefined : +e.target.value)} />
                   </label>
                   <label style={{ display:'flex', flexDirection:'column', gap:2 }}>
-                    <span style={{ fontSize:9, color:'#f87171' }}>Low</span>
+                    <span style={{ fontSize: 10.5, color:'#f87171' }}>Low</span>
                     <input type="color" value={fmt.scaleMinColor ?? '#f87171'}
                       style={{ width:36, height:26, padding:2, border:'1px solid var(--border)', borderRadius:4, cursor:'pointer', background:'var(--surface)' }}
                       onChange={e => setField(col.name, 'scaleMinColor', e.target.value)} />
                   </label>
                   <label style={{ display:'flex', flexDirection:'column', gap:2 }}>
-                    <span style={{ fontSize:9, color:'#fbbf24' }}>Mid</span>
+                    <span style={{ fontSize: 10.5, color:'#fbbf24' }}>Mid</span>
                     <input type="color" value={fmt.scaleMidColor ?? '#fbbf24'}
                       style={{ width:36, height:26, padding:2, border:'1px solid var(--border)', borderRadius:4, cursor:'pointer', background:'var(--surface)' }}
                       onChange={e => setField(col.name, 'scaleMidColor', e.target.value)} />
                   </label>
                   <label style={{ display:'flex', flexDirection:'column', gap:2 }}>
-                    <span style={{ fontSize:9, color:'#34d399' }}>High</span>
+                    <span style={{ fontSize: 10.5, color:'#34d399' }}>High</span>
                     <input type="color" value={fmt.scaleMaxColor ?? '#34d399'}
                       style={{ width:36, height:26, padding:2, border:'1px solid var(--border)', borderRadius:4, cursor:'pointer', background:'var(--surface)' }}
                       onChange={e => setField(col.name, 'scaleMaxColor', e.target.value)} />

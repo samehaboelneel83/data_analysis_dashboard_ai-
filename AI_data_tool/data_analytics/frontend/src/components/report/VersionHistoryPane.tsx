@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { History, RotateCcw } from 'lucide-react'
+import { Bot, History, RotateCcw } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { reportsApi } from '../../services/api'
 
@@ -75,7 +75,7 @@ export default function VersionHistoryPane({ reportId, currentRevision, onRestor
     }
   }
 
-  const label: React.CSSProperties = { fontSize: 10, fontWeight: 700,
+  const label: React.CSSProperties = { fontSize: 11, fontWeight: 700,
     color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em' }
 
   return (
@@ -108,7 +108,7 @@ export default function VersionHistoryPane({ reportId, currentRevision, onRestor
                   alignItems: 'center', gap: 6 }}>
                   Revision {v.revision}
                   {isCurrent && (
-                    <span style={{ fontSize: 9.5, fontWeight: 700, padding: '1px 6px',
+                    <span style={{ fontSize: 10.5, fontWeight: 700, padding: '1px 6px',
                       borderRadius: 999, background: 'var(--accent-soft, #e4edfd)',
                       color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
                       current
@@ -119,8 +119,8 @@ export default function VersionHistoryPane({ reportId, currentRevision, onRestor
                   {when(v.created_at)}{v.created_by ? ` · ${v.created_by}` : ''}
                 </div>
                 {v.via === 'copilot' && (
-                  <div data-testid="version-copilot" style={{ fontSize: 10.5, color: 'var(--accent)' }}>
-                    🤖 {v.note || 'Before a copilot change'}{v.created_by ? ` (asked by ${v.created_by})` : ''}
+                  <div data-testid="version-copilot" style={{ fontSize: 10.5, color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Bot size={12} aria-hidden /> {v.note || 'Before a copilot change'}{v.created_by ? ` (asked by ${v.created_by})` : ''}
                   </div>
                 )}
                 <div style={{ fontSize: 10.5, color: 'var(--faint, var(--muted))' }}>

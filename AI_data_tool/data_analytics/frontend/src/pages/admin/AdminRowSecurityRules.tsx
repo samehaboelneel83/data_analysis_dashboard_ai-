@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
+import { fieldStyle } from '../../components/ui/fieldStyle'
+import { useT } from '../../i18n'
 import { adminRlsRulesApi, adminRolesApi, datasetsApi } from '../../services/api'
 import type { RowSecurityRule, RlsRuleProposal, Role, Dataset, DatasetColumn } from '../../services/api'
 import toast from 'react-hot-toast'
@@ -9,6 +11,8 @@ import ActionMenu from '../../components/ActionMenu'
 import { useModalDialog } from '../../components/ui/useModalDialog'
 import LoadError from '../../components/ui/LoadError'
 import LoadingState from '../../components/ui/LoadingState'
+import EmptyState from '../../components/ui/EmptyState'
+import { Lock, Plus, Wand2 } from 'lucide-react'
 
 // S0b: codeless RLS rule builder. A column is "user-ish" when Layer 1 has
 // classified it as an email, or its name reads like one (user/email/owner) —
@@ -91,10 +95,7 @@ function RuleModal({ initial, roles, datasets, onSave, onClose }: {
     [pickedColumn, matchTarget, literalValue],
   )
 
-  const inp = {
-    style: { width: '100%', fontSize: 12, padding: '5px 8px', boxSizing: 'border-box' as const,
-      background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)' },
-  }
+  const inp = { style: fieldStyle }
 
   const handleSave = async () => {
     if (!isEdit && (roleId === '' || datasetId === '')) { toast.error('Role and dataset are required'); return }
@@ -143,7 +144,7 @@ function RuleModal({ initial, roles, datasets, onSave, onClose }: {
         {dsColumns.length > 0 && (
           <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8,
             padding: 10, marginBottom: 12 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase',
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase',
               letterSpacing: '.06em', marginBottom: 8 }}>Quick setup — restrict by current user?</div>
 
             <div style={{ marginBottom: 8 }}>
@@ -162,7 +163,7 @@ function RuleModal({ initial, roles, datasets, onSave, onClose }: {
                 )}
               </select>
               {pickedColumn && suggestedColumns.some(c => c.name === pickedColumn) && (
-                <div style={{ fontSize: 10, color: 'var(--accent)', marginTop: 3 }}>
+                <div style={{ fontSize: 11, color: 'var(--accent)', marginTop: 3 }}>
                   Looks like a user column — restrict rows to the viewer's own?
                 </div>
               )}
@@ -285,10 +286,7 @@ function AutoGenerateModal({ roles, datasets, onApplied, onClose }: {
     }
   }
 
-  const inp = {
-    style: { width: '100%', fontSize: 12, padding: '5px 8px', boxSizing: 'border-box' as const,
-      background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)' },
-  }
+  const inp = { style: fieldStyle }
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', display: 'flex',
@@ -351,6 +349,7 @@ function AutoGenerateModal({ roles, datasets, onApplied, onClose }: {
 }
 
 export default function AdminRowSecurityRules() {
+  const t = useT()
   const [rules, setRules] = useState<RowSecurityRule[]>([])
   const [roles, setRoles] = useState<Role[]>([])
   const [datasets, setDatasets] = useState<Dataset[]>([])
@@ -373,7 +372,7 @@ export default function AdminRowSecurityRules() {
   useEffect(() => { load().finally(() => setLoading(false)) }, [])
 
   const roleName = (id: number) => roles.find(r => r.id === id)?.name ?? `Role #${id}`
-  const datasetName = (id: number) => datasets.find(d => d.id === id)?.name ?? `Dataset #${id}`
+  const datasetName = (id: number) => datasets.find(d => d.id === id)?.name ?? `Deleted dataset (#${id})`
 
   const handleSaved = (r: RowSecurityRule) => {
     setRules(prev => {
@@ -400,12 +399,12 @@ export default function AdminRowSecurityRules() {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: 24 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, flex: 1 }}>Row Security Rules</h1>
-        <button className="btn btn-ghost btn-sm" onClick={() => setShowAutoGenerate(true)} disabled={!canCreate} title={!canCreate ? 'Needs at least one role and one dataset' : undefined} style={{ marginInlineEnd: 8 }}>
-          ⚡ Auto-generate rules
+        <h1 className="dl-page-title" style={{ flex: 1 }}>{t('nav.rowSecurity')}</h1>
+        <button className="btn btn-ghost" onClick={() => setShowAutoGenerate(true)} disabled={!canCreate} title={!canCreate ? 'Needs at least one role and one dataset' : undefined} style={{ marginInlineEnd: 8 }}>
+          <Wand2 size={16} aria-hidden /> {t('admin.autoGenerate')}
         </button>
-        <button className="btn btn-primary btn-sm" onClick={() => setModal('add')} disabled={!canCreate} title={!canCreate ? 'Needs at least one role and one dataset' : undefined}>
-          + New Rule
+        <button className="btn btn-primary" onClick={() => setModal('add')} disabled={!canCreate} title={!canCreate ? 'Needs at least one role and one dataset' : undefined}>
+          <Plus size={16} aria-hidden /> {t('admin.newRule')}
         </button>
       </div>
       {/* The single most important sentence on this page. These rules narrow a
@@ -431,40 +430,34 @@ export default function AdminRowSecurityRules() {
       )}
 
       {!loading && loadError == null && !canCreate && (
-        <div style={{ padding: 16, marginBottom: 16, background: 'var(--surface2)', border: '1px solid var(--border)',
-          borderRadius: 8, fontSize: 12, color: 'var(--muted)' }}>
+        <div className="dl-conn-notice">
           You need at least one role and one dataset before creating a rule.
         </div>
       )}
 
       {!loading && loadError == null && rules.length === 0 && canCreate && (
-        <div className="card" style={{ padding: '56px 24px', textAlign: 'center', color: 'var(--muted)' }}>
-          <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
-          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>No row-security rules yet</div>
-          <div style={{ fontSize: 12 }}>Roles with no rule for a dataset see every row within their org.</div>
-        </div>
+        <EmptyState icon={Lock} title="No row-security rules yet"
+          description="Roles with no rule for a dataset see every row within their org." />
       )}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div className="dl-rows">
         {rules.map(r => (
-          <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
-            background: 'var(--surface)', border: '1px solid var(--border)',
-            borderRadius: 10, padding: '14px 16px' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: 14 }}>
+          <div key={r.id} className="dl-rows__row">
+            <div className="dl-rows__main">
+              <div className="dl-rows__title">
                 {roleName(r.role_id)} <span style={{ color: 'var(--muted)', fontWeight: 400 }}>on</span> {datasetName(r.dataset_id)}
                 {r.auto_generated && (
                   <span title="Generated by Auto-generate rules"
-                    style={{ fontSize: 9, fontWeight: 700, color: 'var(--accent)', marginInlineStart: 8,
+                    style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--accent)', marginInlineStart: 8,
                       background: 'color-mix(in srgb, var(--accent) 15%, transparent)', borderRadius: 99, padding: '2px 7px', textTransform: 'uppercase', letterSpacing: '.04em' }}>
                     auto
                   </span>
                 )}
               </div>
-              <div style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--mono)' }}>{r.filter_expr}</div>
+              <div className="dl-rows__meta dl-rows__meta--mono">{r.filter_expr}</div>
             </div>
-            <button className="btn btn-ghost btn-sm" onClick={() => setModal(r)} style={{ fontSize: 11 }}>Edit</button>
-            <button className="btn btn-ghost btn-sm" onClick={() => handleDelete(r)} style={{ fontSize: 11, color: 'var(--danger)' }}>Delete</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => setModal(r)}>{t('admin.edit')}</button>
+            <button className="btn btn-ghost btn-sm dl-danger-item" onClick={() => handleDelete(r)}>{t('admin.delete')}</button>
             <ActionMenu
               label={`More actions for rule ${roleName(r.role_id)} on ${datasetName(r.dataset_id)}`}
               items={[

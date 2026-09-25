@@ -84,3 +84,7 @@ frontend/design-screenshots/
 # Local scratch output
 _test_*.txt
 _to_delete/
+
+# Local UI-refresh backup copy of frontend/src (never commit)
+AI_data_tool/data_analytics/frontend/_ui_refresh_backup/
+**/.claude/settings.local.json

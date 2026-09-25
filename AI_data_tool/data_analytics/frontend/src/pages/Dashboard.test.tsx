@@ -71,6 +71,31 @@ describe('Dashboard row action menu (U1)', () => {
     await waitFor(() => expect(datasetsApi.delete).toHaveBeenCalledWith(1))
   })
 
+  it('deletes several at once, after naming them, and keeps the rest', async () => {
+    vi.mocked(datasetsApi.list).mockResolvedValue([
+      dataset(), dataset({ id: 2, name: 'qa_sample_1' }), dataset({ id: 3, name: 'test orders' }),
+    ] as never)
+    vi.mocked(datasetsApi.delete).mockResolvedValue(undefined as never)
+    renderDashboard()
+    await waitFor(() => expect(screen.getByText('sales')).toBeInTheDocument())
+
+    // The helper pre-selects only the names that read like test data.
+    fireEvent.click(screen.getByRole('button', { name: /Select 2 that look like test data/ }))
+    expect(screen.getByRole('checkbox', { name: 'Select qa_sample_1' })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Select sales' })).not.toBeChecked()
+
+    fireEvent.click(screen.getByRole('button', { name: /Delete selected/ }))
+    const dlg = await screen.findByRole('alertdialog')
+    expect(dlg).toHaveTextContent('qa_sample_1')
+    expect(dlg).toHaveTextContent('test orders')
+    fireEvent.click(within(dlg).getByRole('button', { name: /Delete selected/ }))
+
+    await waitFor(() => expect(datasetsApi.delete).toHaveBeenCalledTimes(2))
+    expect(datasetsApi.delete).not.toHaveBeenCalledWith(1)
+    await waitFor(() => expect(screen.queryByText('qa_sample_1')).not.toBeInTheDocument())
+    expect(screen.getByText('sales')).toBeInTheDocument()
+  })
+
   it('is the only way in -- no second delete control on the row', async () => {
     // A red trash icon repeated down every row is an alarm the page rings at
     // itself. Delete already lived in the menu; it lives there alone now.
@@ -220,15 +245,15 @@ describe('DirectQuery rows report what they know, not zero', () => {
     renderDashboard()
     const row = (await screen.findByText('live_orders')).closest('tr')!
     const cells = within(row).getAllByRole('cell')
-    expect(cells[1]).toHaveTextContent('—')
-    expect(cells[3]).toHaveTextContent('—')
+    expect(cells[2]).toHaveTextContent('—')
+    expect(cells[4]).toHaveTextContent('—')
   })
 
   it('still counts the columns, which it does know', async () => {
     vi.mocked(datasetsApi.list).mockResolvedValue([live] as never)
     renderDashboard()
     const row = (await screen.findByText('live_orders')).closest('tr')!
-    expect(within(row).getAllByRole('cell')[2]).toHaveTextContent((8).toLocaleString())
+    expect(within(row).getAllByRole('cell')[3]).toHaveTextContent((8).toLocaleString())
   })
 
   it('leaves an import dataset showing its real zero', async () => {
@@ -240,7 +265,7 @@ describe('DirectQuery rows report what they know, not zero', () => {
     ] as never)
     renderDashboard()
     const row = (await screen.findByText('empty_upload')).closest('tr')!
-    expect(within(row).getAllByRole('cell')[1]).toHaveTextContent((0).toLocaleString())
+    expect(within(row).getAllByRole('cell')[2]).toHaveTextContent((0).toLocaleString())
   })
 })
 
@@ -301,7 +326,7 @@ describe('paging through a long inventory', () => {
   const rowNames = () =>
     within(screen.getByRole('table')).getAllByRole('row')
       .slice(1)                                   // drop the header row
-      .map(r => within(r).getAllByRole('cell')[0].textContent)
+      .map(r => within(r).getAllByRole('cell')[1].textContent)
 
   it('shows only the first eight of nineteen', async () => {
     vi.mocked(datasetsApi.list).mockResolvedValue(many(19) as never)

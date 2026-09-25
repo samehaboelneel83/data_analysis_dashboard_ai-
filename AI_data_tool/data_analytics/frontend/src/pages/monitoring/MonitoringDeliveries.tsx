@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useT } from '../../i18n'
 import { Link } from 'react-router-dom'
 import { Send } from 'lucide-react'
 import { monitoringApi } from '../../services/api'
@@ -15,6 +16,7 @@ import LoadingState from '../../components/ui/LoadingState'
  * cross-report question and had no cross-report answer.
  */
 export default function MonitoringDeliveries() {
+  const t = useT()
   const [rows, setRows] = useState<MonitoringDeliveryRow[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<unknown>(null)
@@ -30,17 +32,16 @@ export default function MonitoringDeliveries() {
   useEffect(() => { load() }, [])
 
   const { filtered, input, noMatches } = useListFilter(
-    rows, r => [r.report_name, r.kind, r.status, r.error], 'Search deliveries…')
+    rows, r => [r.report_name, r.kind, r.status, r.error], t('search.deliveries'))
 
   return (
-    <div style={{ padding: 24, maxWidth: 1000 }}>
+    <div style={{ maxWidth: 1200 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 4 }}>
-        <h1 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Deliveries</h1>
+        <h1 className="dl-page-title" style={{ margin: 0 }}>{t('nav.deliveries')}</h1>
         {input}
       </div>
-      <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>
-        Every scheduled send, alert email and export attempt across the organisation —
-        including the ones that failed.
+      <p className="dl-page-head__sub" style={{ marginBottom: 16, marginTop: 4 }}>
+        {t('deliveries.subtitle')}
       </p>
 
       {loading && <LoadingState />}
@@ -50,46 +51,46 @@ export default function MonitoringDeliveries() {
       )}
 
       {!loading && loadError == null && rows.length === 0 && (
-        <EmptyState icon={Send} title="No deliveries yet."
-          description="Once a report schedule or data alert runs, each attempt is logged here." />
+        <EmptyState icon={Send} title={t('deliveries.empty')}
+          description={t('deliveries.emptyBody')} />
       )}
-      {noMatches && <p style={{ color: 'var(--muted)' }}>No deliveries match.</p>}
+      {noMatches && <p style={{ color: 'var(--muted)' }}>{t('deliveries.noMatch')}</p>}
 
       {!loading && loadError == null && filtered.length > 0 && (
-        <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+        <div className="card dl-table-card"><table className="dl-table">
           <thead>
-            <tr style={{ textAlign: 'start', color: 'var(--muted)' }}>
-              <th style={{ padding: '6px 8px' }}>When</th>
-              <th style={{ padding: '6px 8px' }}>Report</th>
-              <th style={{ padding: '6px 8px' }}>Kind</th>
-              <th style={{ padding: '6px 8px' }}>Artifact</th>
-              <th style={{ padding: '6px 8px' }}>Duration</th>
-              <th style={{ padding: '6px 8px' }}>Status</th>
+            <tr>
+              <th>{t('col.when')}</th>
+              <th>{t('col.report')}</th>
+              <th>{t('col.kind')}</th>
+              <th>{t('col.artifact')}</th>
+              <th>{t('col.duration')}</th>
+              <th>{t('col.status')}</th>
             </tr>
           </thead>
           <tbody>
             {filtered.map(r => (
-              <tr key={r.id} style={{ borderTop: '1px solid var(--border)' }}>
-                <td style={{ padding: '6px 8px', whiteSpace: 'nowrap' }}>{new Date(r.created_at).toLocaleString()}</td>
-                <td style={{ padding: '6px 8px', fontWeight: 600 }}>
+              <tr key={r.id}>
+                <td style={{ whiteSpace: 'nowrap' }}>{new Date(r.created_at).toLocaleString()}</td>
+                <td style={{ fontWeight: 600 }}>
                   {r.report_id != null
                     ? <Link to={`/reports/${r.report_id}`} style={{ color: 'var(--text)' }}>{r.report_name ?? `#${r.report_id}`}</Link>
                     : <span style={{ color: 'var(--muted)' }}>—</span>}
                 </td>
-                <td style={{ padding: '6px 8px' }}>{r.kind}</td>
-                <td style={{ padding: '6px 8px' }}>{r.artifact_kind === 'none' ? '—' : r.artifact_kind}</td>
-                <td style={{ padding: '6px 8px', whiteSpace: 'nowrap' }}>
+                <td>{r.kind}</td>
+                <td>{r.artifact_kind === 'none' ? '—' : r.artifact_kind}</td>
+                <td style={{ whiteSpace: 'nowrap' }}>
                   {r.duration_ms != null ? `${r.duration_ms} ms` : '—'}
                 </td>
-                <td style={{ padding: '6px 8px',
-                  color: r.status === 'ok' ? 'var(--positive, #4caf82)' : 'var(--negative, #e2606c)' }}
+                <td style={{
+                  color: r.status === 'ok' ? 'var(--success)' : 'var(--danger)' }}
                   title={r.error ?? undefined}>
                   {r.status === 'ok' ? 'ok' : `failed${r.error ? ` — ${r.error}` : ''}`}
                 </td>
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
     </div>
   )

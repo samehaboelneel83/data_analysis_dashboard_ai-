@@ -148,6 +148,7 @@ export default function CollapsibleSide({ id, side, width, title, style, childre
   return (
     <div
       ref={shellRef}
+      data-side={id}
       style={{
         width: open ? panelW : RAIL_W,
         flexShrink: 0,
@@ -189,7 +190,7 @@ export default function CollapsibleSide({ id, side, width, title, style, childre
           display: 'flex', alignItems: 'center', justifyContent: side === 'right' && open ? 'flex-start' : 'center',
           gap: 4, flexShrink: 0, width: '100%', padding: '5px 4px',
           background: 'none', border: 'none', borderBottom: '1px solid var(--border)',
-          color: 'var(--muted)', cursor: 'pointer', font: 'inherit', fontSize: 10,
+          color: 'var(--muted)', cursor: 'pointer', font: 'inherit', fontSize: 11,
         }}
       >
         {/* Icon-only by design. Both panels already head their own content ("Fields",

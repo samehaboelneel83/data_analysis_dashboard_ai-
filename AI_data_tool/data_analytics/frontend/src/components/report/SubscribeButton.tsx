@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react'
 import { subscriptionApi, type Subscription } from '../../services/api'
 import toast from 'react-hot-toast'
 import { useModalDialog } from '../ui/useModalDialog'
+import IconLabel from '../ui/IconLabel'
+import { Bell, BellRing } from 'lucide-react'
+import { useT } from '../../i18n'
 
 const CADENCES = ['daily', 'weekly', 'monthly'] as const
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -22,6 +25,7 @@ const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'
 export default function SubscribeButton({ reportId }: { reportId: number }) {
   const dialogRef = useModalDialog<HTMLDivElement>(() => setOpen(false))
   const [sub, setSub] = useState<Subscription | null>(null)
+  const t = useT()
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
 
@@ -92,7 +96,7 @@ export default function SubscribeButton({ reportId }: { reportId: number }) {
         title={subscribed ? 'You are subscribed to this report' : 'Get a recurring copy by email'}
         aria-pressed={subscribed}
         onClick={() => setOpen(true)}>
-        {subscribed ? '🔔 Subscribed' : '🔔 Subscribe'}
+        <IconLabel icon={subscribed ? BellRing : Bell}>{subscribed ? t('subscribe.subscribed') : t('subscribe.subscribe')}</IconLabel>
       </button>
 
       {open && (

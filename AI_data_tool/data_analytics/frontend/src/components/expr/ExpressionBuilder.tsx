@@ -159,7 +159,7 @@ export default function ExpressionBuilder({
   }
 
   const panelHd: React.CSSProperties = {
-    fontSize: 10, fontWeight: 700, color: 'var(--muted)',
+    fontSize: 11, fontWeight: 700, color: 'var(--muted)',
     textTransform: 'uppercase', letterSpacing: '.06em',
     padding: '0 0 5px', marginBottom: 4, borderBottom: '1px solid var(--border)',
   }
@@ -170,7 +170,7 @@ export default function ExpressionBuilder({
     fontFamily: 'var(--mono)', background: 'transparent', color: 'var(--text)',
   }
   const flatChip: React.CSSProperties = {
-    fontSize: 9.5, padding: '2px 6px', background: 'var(--surface2)',
+    fontSize: 10.5, padding: '2px 6px', background: 'var(--surface2)',
     border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', color: 'var(--text)',
   }
 
@@ -180,7 +180,7 @@ export default function ExpressionBuilder({
         <button key={col.name} style={layout === 'flat' ? flatChip : chip} title={`${col.name} (${col.dtype})`}
           onClick={() => insertCol(col.name)}>
           <span>{col.name}</span>
-          {layout === 'panels' && <span style={{ color: 'var(--muted)', fontSize: 9, marginInlineStart: 5 }}>{col.dtype}</span>}
+          {layout === 'panels' && <span style={{ color: 'var(--muted)', fontSize: 10.5, marginInlineStart: 5 }}>{col.dtype}</span>}
         </button>
       ))}
       {attributeExtras.map(extra => (
@@ -199,9 +199,9 @@ export default function ExpressionBuilder({
         <button onClick={() => toggleCat(cat.label)}
           style={{ display: 'flex', alignItems: 'center', gap: 5, width: '100%',
             background: 'none', border: 'none', cursor: 'pointer', padding: '3px 0',
-            fontSize: 10, fontWeight: 700, color: cat.color ?? 'var(--muted)',
+            fontSize: 11, fontWeight: 700, color: cat.color ?? 'var(--muted)',
             textTransform: 'uppercase', letterSpacing: '.06em' }}>
-          <span style={{ fontSize: 9 }}>{isOpen(cat.label) ? '▼' : '▶'}</span>
+          <span style={{ fontSize: 10.5 }}>{isOpen(cat.label) ? '▼' : '▶'}</span>
           {cat.label}
         </button>
       ) : (
@@ -232,7 +232,7 @@ export default function ExpressionBuilder({
     )
     : opGroups.map(grp => (
       <div key={grp.label} style={{ marginBottom: 10 }}>
-        <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--muted)',
+        <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)',
           textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 5 }}>{grp.label}</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
           {grp.items.map(op => (
@@ -410,7 +410,7 @@ export default function ExpressionBuilder({
           </button>
           {testResult != null && (
             <div style={{ marginTop: 6 }}>
-              {renderTestResult ? renderTestResult(testResult) : <pre style={{ fontSize: 10 }}>{JSON.stringify(testResult)}</pre>}
+              {renderTestResult ? renderTestResult(testResult) : <pre style={{ fontSize: 11 }}>{JSON.stringify(testResult)}</pre>}
             </div>
           )}
         </div>

@@ -315,7 +315,7 @@ export default function ReviewPane({ report, perfStats, onSelectWidget, mapping,
 
   return (
     <div style={{ padding: 12 }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
         Review
       </div>
       {findings.length === 0 ? (
@@ -333,7 +333,7 @@ export default function ReviewPane({ report, perfStats, onSelectWidget, mapping,
                   textAlign: 'start', background: 'none', border: '1px solid var(--border)',
                   borderRadius: 6, padding: '6px 8px', fontSize: 11, color: 'var(--text)',
                   cursor: f.widgetId != null ? 'pointer' : 'default' }}>
-                <span style={{ color: badgeOf(f).color, fontWeight: 700, fontSize: 9, flexShrink: 0, paddingTop: 1 }}>
+                <span style={{ color: badgeOf(f).color, fontWeight: 700, fontSize: 10.5, flexShrink: 0, paddingTop: 1 }}>
                   {badgeOf(f).label}
                 </span>
                 <span>{f.message}</span>

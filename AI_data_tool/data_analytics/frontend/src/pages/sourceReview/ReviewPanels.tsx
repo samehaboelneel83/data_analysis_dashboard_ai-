@@ -289,12 +289,12 @@ export function DriftPanel({ drift, error }: { drift: DriftVersion[] | null; err
           <div style={{ fontSize: 12, display: 'flex', gap: 10, alignItems: 'center' }}>
             <span style={{ fontWeight: 600 }}>{new Date(v.detected_at).toLocaleString()}</span>
             {v.is_baseline && (
-              <span style={{ fontSize: 10, fontWeight: 700, color: '#2d5ba8', background: '#e5edfb',
+              <span style={{ fontSize: 11, fontWeight: 700, color: '#2d5ba8', background: '#e5edfb',
                 borderRadius: 99, padding: '2px 8px', textTransform: 'uppercase', letterSpacing: '.04em' }}>
                 baseline
               </span>
             )}
-            <span style={{ color: '#94a3b8', fontFamily: 'monospace', fontSize: 10 }}>{v.fingerprint.slice(0, 12)}</span>
+            <span style={{ color: '#94a3b8', fontFamily: 'monospace', fontSize: 11 }}>{v.fingerprint.slice(0, 12)}</span>
           </div>
           {!v.is_baseline && v.added.length === 0 && v.removed.length === 0 && v.changed.length === 0 && (
             <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>No column-level differences recorded.</div>

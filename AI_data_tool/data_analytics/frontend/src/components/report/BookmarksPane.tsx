@@ -23,7 +23,7 @@ export default function BookmarksPane({ reportId, bookmarks, captureState, onCap
 
   return (
     <div style={{ padding: '14px 14px 0' }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
         Bookmarks
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 10 }}>

@@ -146,7 +146,7 @@ export default function Home() {
   const draftChip = (r: { created_by?: number | null; published?: boolean }) =>
     r.created_by != null && !r.published ? (
     <span title={t('home.draftTitle')}
-      style={{ fontSize: 9, fontWeight: 700, color: 'var(--muted)', flexShrink: 0,
+      style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', flexShrink: 0,
         border: '1px solid var(--border)', borderRadius: 99, padding: '1px 7px',
         textTransform: 'uppercase', letterSpacing: '.04em' }}>
       {t('common.draft')}
@@ -156,7 +156,7 @@ export default function Home() {
   if (loadError) {
     return (
       <div>
-        <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 16 }}>{t('nav.home')}</h1>
+        <h1 className="dl-page-title" style={{ marginBottom: 16 }}>{t('nav.home')}</h1>
         <LoadError what={t('home.workspace')} error={loadError} onRetry={load} />
       </div>
     )
@@ -166,7 +166,7 @@ export default function Home() {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 22, flexWrap: 'wrap' }}>
         <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, marginBottom: 3 }}>{t('nav.home')}</h1>
+          <h1 className="dl-page-title" style={{ marginBottom: 3 }}>{t('nav.home')}</h1>
           <p style={{ color: 'var(--muted)', fontSize: 13, margin: 0 }}>
             {t('home.subtitle')}
           </p>
@@ -224,7 +224,7 @@ export default function Home() {
                     testId={`home-dataset-${d.id}`}
                     name={d.name}
                     chip={d.mode === 'directquery' ? (
-                      <span title={t('home.liveTitle')} style={{ fontSize: 9, fontWeight: 700,
+                      <span title={t('home.liveTitle')} style={{ fontSize: 10.5, fontWeight: 700,
                         color: 'var(--accent)', flexShrink: 0, background: 'var(--accent-soft)',
                         borderRadius: 99, padding: '1px 7px', textTransform: 'uppercase' }}>{t('common.live')}</span>
                     ) : undefined}

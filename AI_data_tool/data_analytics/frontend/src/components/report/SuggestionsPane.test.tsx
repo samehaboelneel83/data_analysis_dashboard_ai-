@@ -49,7 +49,7 @@ describe('SuggestionsPane', () => {
   it('adds a suggestion on click', () => {
     const onAdd = vi.fn()
     render(<SuggestionsPane columns={cols} analysis={analysis} onAdd={onAdd} />)
-    fireEvent.click(screen.getAllByRole('button', { name: '+ Add to page' })[0])
+    fireEvent.click(screen.getAllByRole('button', { name: 'Add to page' })[0])
     expect(onAdd).toHaveBeenCalled()
     expect(onAdd.mock.calls[0][0].config).toHaveProperty('aggregation')
   })
@@ -68,7 +68,7 @@ describe('insight-driven suggestions', () => {
     render(<SuggestionsPane columns={cols} analysis={null} onAdd={onAdd} reportId={7} />)
 
     const item = await screen.findByTestId('insight-suggestion-standout')
-    expect(item.textContent).toContain('✦')
+    expect(item.querySelector('[title="Matches the report description"]')).not.toBeNull()
     expect(screen.getByText(/From this data's insights/i)).toBeInTheDocument()
     expect(screen.getByText(/From column shapes/i)).toBeInTheDocument()
 

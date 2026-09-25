@@ -479,7 +479,14 @@ async def lifespan(app: FastAPI):
                 pass
 
 
-app = FastAPI(title="Datalytics API", version="2.0.0", lifespan=lifespan)
+# The interactive docs list every route and schema. Handy in development;
+# in production they are a free map of the API for anyone without a login,
+# so they are switched off there (the same is_production() rule as SSO).
+_docs_on = not settings.is_production()
+app = FastAPI(title="Datalytics API", version="2.0.0", lifespan=lifespan,
+              docs_url="/docs" if _docs_on else None,
+              redoc_url="/redoc" if _docs_on else None,
+              openapi_url="/openapi.json" if _docs_on else None)
 
 app.add_middleware(
     CORSMiddleware,

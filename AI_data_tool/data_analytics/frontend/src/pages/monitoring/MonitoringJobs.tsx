@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useT, type MessageKey } from '../../i18n'
 import { Link } from 'react-router-dom'
 import { monitoringApi } from '../../services/api'
 import type { MonitoringJobRow } from '../../services/api'
@@ -41,6 +42,19 @@ function jobLink(j: MonitoringJobRow): string | null {
   }
 }
 
+const WEEKDAY = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+/** The job's schedule in words -- a calendar spec when there is one. */
+function schedule(j: MonitoringJobRow): string {
+  const c = j.calendar
+  if (c) {
+    const at = `${String(c.hour).padStart(2, '0')}:${String(c.minute).padStart(2, '0')}${j.timezone ? ` ${j.timezone}` : ' UTC'}`
+    if (c.kind === 'weekly') return `weekly (${WEEKDAY[c.weekday ?? 0]}) ${at}`
+    if (c.kind === 'monthly') return `monthly (day ${c.monthday ?? 1}) ${at}`
+    return `daily ${at}`
+  }
+  return interval(j.interval_minutes)
+}
+
 function interval(minutes: number): string {
   // Some seeded rows carry 0 -- "runs on demand", not "every 0 minutes".
   if (minutes <= 0) return '—'
@@ -59,9 +73,16 @@ function statusTone(status: string | null): 'ok' | 'bad' | 'info' | null {
   return 'info'
 }
 
-const TONE_COLOR = { ok: 'var(--positive, #4caf82)', bad: 'var(--negative, #e2606c)', info: '#d9a441' }
+// Mixed with the text colour so the words pass 4.5:1 on the table: the pure
+// amber/green/red failed WCAG contrast (axe: color-contrast, serious).
+const TONE_COLOR = {
+  ok: 'color-mix(in oklab, var(--positive, #4caf82) 65%, var(--text))',
+  bad: 'color-mix(in oklab, var(--negative, #e2606c) 70%, var(--text))',
+  info: 'color-mix(in oklab, #d9a441 55%, var(--text))',
+}
 
 export default function MonitoringJobs() {
+  const t = useT()
   const [jobs, setJobs] = useState<MonitoringJobRow[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<unknown>(null)
@@ -77,17 +98,19 @@ export default function MonitoringJobs() {
   useEffect(() => { load() }, [])
 
   const { filtered, input, noMatches } = useListFilter(
-    jobs, j => [j.name, KIND_LABEL[j.kind], j.status], 'Search jobs…')
+    jobs, j => [j.name, KIND_LABEL[j.kind], t(`jobs.kind.${j.kind}` as MessageKey), j.status], t('search.jobs'))
+  // Known status words in the reader's language; anything else (an error
+  // sentence, a delivery summary) is shown as the server wrote it.
+  const statusText = (st: string) => { const k = `jobs.status.${st.toLowerCase()}` as MessageKey; const v = t(k); return v && v !== k ? v : st }
 
   return (
-    <div style={{ padding: 24, maxWidth: 1000 }}>
+    <div style={{ maxWidth: 1200 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 4 }}>
-        <h1 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Refresh &amp; jobs</h1>
+        <h1 className="dl-page-title" style={{ margin: 0 }}>{t('nav.jobs')}</h1>
         {input}
       </div>
-      <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>
-        Everything that runs on a schedule, and when it last ran. Configure a job where it
-        lives — each row links there.
+      <p className="dl-page-head__sub" style={{ marginBottom: 16, marginTop: 4 }}>
+        {t('jobs.subtitle')}
       </p>
 
       {loading && <LoadingState />}
@@ -97,52 +120,52 @@ export default function MonitoringJobs() {
       )}
 
       {!loading && loadError == null && jobs.length === 0 && (
-        <EmptyState icon={CalendarClock} title="Nothing is scheduled yet."
-          description="Set a refresh interval on a dataset or dataflow, or add a schedule or alert from a report, and it appears here." />
+        <EmptyState icon={CalendarClock} title={t('jobs.empty')}
+          description={t('jobs.emptyBody')} />
       )}
-      {noMatches && <p style={{ color: 'var(--muted)' }}>No jobs match.</p>}
+      {noMatches && <p style={{ color: 'var(--muted)' }}>{t('jobs.noMatch')}</p>}
 
       {!loading && loadError == null && filtered.length > 0 && (
-        <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+        <div className="card dl-table-card"><table className="dl-table">
           <thead>
-            <tr style={{ textAlign: 'start', color: 'var(--muted)' }}>
-              <th style={{ padding: '6px 8px' }}>Kind</th>
-              <th style={{ padding: '6px 8px' }}>Name</th>
-              <th style={{ padding: '6px 8px' }}>Schedule</th>
-              <th style={{ padding: '6px 8px' }}>Last run</th>
-              <th style={{ padding: '6px 8px' }}>Status</th>
+            <tr>
+              <th>{t('col.kind')}</th>
+              <th>{t('col.name')}</th>
+              <th>{t('col.schedule')}</th>
+              <th>{t('col.lastRun')}</th>
+              <th>{t('col.status')}</th>
             </tr>
           </thead>
           <tbody>
             {filtered.map(j => {
               const tone = statusTone(j.status)
               return (
-                <tr key={`${j.kind}-${j.id}`} style={{ borderTop: '1px solid var(--border)' }}>
-                  <td style={{ padding: '6px 8px', whiteSpace: 'nowrap' }}>
+                <tr key={`${j.kind}-${j.id}`}>
+                  <td style={{ whiteSpace: 'nowrap' }}>
                     <span aria-hidden style={{ display: 'inline-flex', verticalAlign: -2,
                       marginInlineEnd: 6, color: 'var(--muted)' }}>
                       {(() => { const I = KIND_ICON[j.kind]; return <I size={13} /> })()}
                     </span>
-                    {KIND_LABEL[j.kind]}
+                    {t(`jobs.kind.${j.kind}` as MessageKey)}
                   </td>
-                  <td style={{ padding: '6px 8px', fontWeight: 600 }}>
+                  <td style={{ fontWeight: 600 }}>
                     {jobLink(j) != null
-                      ? <Link to={jobLink(j)!} style={{ color: 'var(--text)' }}>{j.name}</Link>
+                      ? <Link to={jobLink(j)!} className="row-name" style={{ color: 'var(--text)' }}>{j.name}</Link>
                       : j.name}
                   </td>
-                  <td style={{ padding: '6px 8px', whiteSpace: 'nowrap' }}>{interval(j.interval_minutes)}</td>
-                  <td style={{ padding: '6px 8px', whiteSpace: 'nowrap' }}>
-                    {j.last_run_at ? new Date(j.last_run_at).toLocaleString() : 'never'}
+                  <td style={{ whiteSpace: 'nowrap' }}>{schedule(j)}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
+                    {j.last_run_at ? new Date(j.last_run_at).toLocaleString() : t('jobs.never')}
                   </td>
-                  <td style={{ padding: '6px 8px', color: tone ? TONE_COLOR[tone] : 'var(--muted)' }}
+                  <td style={{ color: tone ? TONE_COLOR[tone] : 'var(--muted)' }}
                     title={j.error ?? undefined}>
-                    {j.status ?? '—'}
+                    {j.status ? statusText(j.status) : '—'}
                   </td>
                 </tr>
               )
             })}
           </tbody>
-        </table>
+        </table></div>
       )}
     </div>
   )

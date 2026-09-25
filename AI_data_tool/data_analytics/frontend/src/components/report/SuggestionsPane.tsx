@@ -4,6 +4,8 @@ import type { DatasetColumn, WidgetSuggestion } from '../../services/api'
 import type { Widget } from '../../types/report'
 import WidgetRenderer from './WidgetRenderer'
 import { CrossFilterProvider } from './CrossFilterContext'
+import { Plus, RefreshCw, Sparkles } from 'lucide-react'
+import { chartIcon, chartLabel } from './ChartGallery'
 
 export interface Suggestion {
   widget_type: string
@@ -108,7 +110,7 @@ function SuggestionPreview({ datasetId, widgetType, config, idx }: {
   }), [widgetType, JSON.stringify(config), idx])
   return (
     <div aria-hidden="true" data-testid="suggestion-preview"
-      style={{ height: 118, pointerEvents: 'none', marginBottom: 6 }}>
+      className="dl-sug__preview" style={{ pointerEvents: 'none' }}>
       <CrossFilterProvider>
         <WidgetRenderer widget={widget} datasetId={datasetId} editMode={false} />
       </CrossFilterProvider>
@@ -136,61 +138,73 @@ export default function SuggestionsPane({ columns, analysis, onAdd, reportId, da
   }, [reportId])
 
   return (
-    <div style={{ padding: 12, overflowY: 'auto', height: '100%' }}>
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
-        <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
-          Suggestions
-        </span>
-        <button className="btn" style={{ fontSize: 10, marginInlineStart: 'auto' }} onClick={() => setSeed(x => x + 1)}>
-          ↻ More
+    <div className="dl-sug">
+      <div className="dl-sug__head">
+        <span className="dl-sug__title">Suggestions</span>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSeed(x => x + 1)}
+          title="Show different suggestions">
+          <RefreshCw size={12} aria-hidden /> More
         </button>
       </div>
 
       {insightSugs && insightSugs.length > 0 && (
         <>
-          <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>
-            From this data's insights
-          </div>
-          <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
+          <div className="dl-sug__group dl-sug__group--accent">From this data's insights</div>
+          <ul className="dl-sug__list">
             {insightSugs.map((s, i) => (
-              <li key={`ins-${i}`} data-testid={`insight-suggestion-${s.kind}`}
-                style={{ border: s.aligned ? '1px solid var(--accent)' : '1px solid var(--border)', borderRadius: 6, padding: '8px 10px' }}>
-                <div style={{ fontSize: 11, fontWeight: 600 }}>
-                  {s.aligned && <span title="Matches the report description" style={{ color: 'var(--accent)' }}>✦ </span>}
-                  {s.title}
-                </div>
-                <div style={{ fontSize: 10, color: 'var(--muted)', margin: '2px 0 6px' }}>{s.widget_type} · {s.reason}</div>
-                {datasetId != null && (
-                  <SuggestionPreview datasetId={datasetId} widgetType={s.widget_type} config={s.config} idx={i} />
-                )}
-                <button className="btn btn-primary" style={{ fontSize: 10 }}
-                  onClick={() => onAdd({ widget_type: s.widget_type, title: s.title, reason: s.reason, config: s.config })}>
-                  + Add to page
-                </button>
-              </li>
+              <SuggestionCard key={`ins-${i}`} testId={`insight-suggestion-${s.kind}`} aligned={s.aligned}
+                widgetType={s.widget_type} title={s.title} reason={s.reason}
+                preview={datasetId != null
+                  ? <SuggestionPreview datasetId={datasetId} widgetType={s.widget_type} config={s.config} idx={i} />
+                  : null}
+                onAdd={() => onAdd({ widget_type: s.widget_type, title: s.title, reason: s.reason, config: s.config })} />
             ))}
           </ul>
-          <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>
-            From column shapes
-          </div>
+          <div className="dl-sug__group">From column shapes</div>
         </>
       )}
       {suggestions.length === 0 && (
-        <p style={{ fontSize: 11, color: 'var(--muted)' }}>Nothing to suggest — the dataset needs at least one numeric column.</p>
+        <p className="dl-sug__none">Nothing to suggest — the dataset needs at least one numeric column.</p>
       )}
-      <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <ul className="dl-sug__list">
         {suggestions.map((s, i) => (
-          <li key={`${s.widget_type}-${s.title}-${i}`}
-            style={{ border: '1px solid var(--border)', borderRadius: 6, padding: '8px 10px' }}>
-            <div style={{ fontSize: 11, fontWeight: 600 }}>{s.title}</div>
-            <div style={{ fontSize: 10, color: 'var(--muted)', margin: '2px 0 6px' }}>{s.widget_type} · {s.reason}</div>
-            {datasetId != null && (
-              <SuggestionPreview datasetId={datasetId} widgetType={s.widget_type} config={s.config} idx={100 + i} />
-            )}
-            <button className="btn btn-primary" style={{ fontSize: 10 }} onClick={() => onAdd(s)}>+ Add to page</button>
-          </li>
+          <SuggestionCard key={`${s.widget_type}-${s.title}-${i}`}
+            widgetType={s.widget_type} title={s.title} reason={s.reason}
+            preview={datasetId != null
+              ? <SuggestionPreview datasetId={datasetId} widgetType={s.widget_type} config={s.config} idx={100 + i} />
+              : null}
+            onAdd={() => onAdd(s)} />
         ))}
       </ul>
     </div>
+  )
+}
+
+/** One candidate: what it is (glyph + type), why, a live thumbnail when there
+ *  is data to draw it from, and a small add action -- the chart is the
+ *  content, so the button no longer outweighs it. */
+function SuggestionCard({ widgetType, title, reason, preview, onAdd, aligned, testId }: {
+  widgetType: string; title: string; reason: string; preview: React.ReactNode
+  onAdd: () => void; aligned?: boolean; testId?: string
+}) {
+  const Icon = chartIcon(widgetType)
+  return (
+    <li data-testid={testId} className={`dl-sug__card${aligned ? ' dl-sug__card--aligned' : ''}`}>
+      <div className="dl-sug__row">
+        <span className="dl-sug__icon" aria-hidden><Icon size={15} strokeWidth={1.9} /></span>
+        <div className="dl-sug__text">
+          <div className="dl-sug__name">
+            {aligned && <span title="Matches the report description" className="dl-sug__star"><Sparkles size={11} aria-hidden /></span>}
+            {title}
+          </div>
+          <div className="dl-sug__why">{chartLabel(widgetType)} · {reason}</div>
+        </div>
+        <button type="button" className="btn btn-sm dl-sug__add" onClick={onAdd} aria-label="Add to page"
+          title="Add to page">
+          <Plus size={12} aria-hidden /> Add
+        </button>
+      </div>
+      {preview}
+    </li>
   )
 }

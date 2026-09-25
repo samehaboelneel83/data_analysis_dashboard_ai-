@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useT } from '../../i18n'
 import { Database } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { datasetsApi, exportPolicyApi } from '../../services/api'
@@ -17,6 +18,7 @@ const FORMATS = ['csv', 'tsv', 'xlsx'] as const
  * no policy revisit.
  */
 export default function AdminExportPolicy() {
+  const t = useT()
   const [datasets, setDatasets] = useState<Dataset[]>([])
   const [policies, setPolicies] = useState<Record<number, { policy: ExportPolicy; hasRules: boolean }>>({})
   const [loading, setLoading] = useState(true)
@@ -54,7 +56,7 @@ export default function AdminExportPolicy() {
         const res = await exportPolicyApi.setGranular(dsId, next.formats, next.auto_private)
         setPolicies(p => ({ ...p, [dsId]: { ...p[dsId], policy: res.export_policy } }))
       }
-      toast.success('Export policy saved')
+      toast.success(t('export.saved'))
     } catch (e: unknown) {
       toast.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Save failed')
     }
@@ -67,12 +69,10 @@ export default function AdminExportPolicy() {
   })
 
   return (
-    <div style={{ padding: 24, maxWidth: 900 }}>
-      <h1 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>Export policy</h1>
-      <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>
-        Governs data downloads per dataset and per destination. “Auto when private” disables every export
-        while the dataset has row- or column-security rules — checked live, so a rule added later closes
-        exports immediately. Display in reports keeps working either way. Changes are audited.
+    <div style={{ maxWidth: 960 }}>
+      <h1 className="dl-page-title" style={{ marginBottom: 4 }}>{t('nav.exportPolicy')}</h1>
+      <p className="dl-page-head__sub" style={{ marginBottom: 16, maxWidth: 760 }}>
+        {t('export.subtitle')}
       </p>
 
       {loading && <LoadingState />}
@@ -82,19 +82,20 @@ export default function AdminExportPolicy() {
       )}
 
       {!loading && loadError == null && datasets.length === 0 && (
-        <EmptyState icon={Database} title="No datasets yet"
-          description="Export policy applies per dataset — upload or connect one first." />
+        <EmptyState icon={Database} title={t('export.noDatasets')}
+          description={t('export.noDatasetsBody')} />
       )}
 
       {!loading && loadError == null && datasets.length > 0 && (
-      <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+      <div className="card dl-table-card">
+      <table className="dl-table dl-table--center-checks">
         <thead>
-          <tr style={{ textAlign: 'start', color: 'var(--muted)' }}>
-            <th style={{ padding: '6px 8px' }}>Dataset</th>
-            <th style={{ padding: '6px 8px' }}>All off</th>
-            {FORMATS.map(f => <th key={f} style={{ padding: '6px 8px' }}>{f} off</th>)}
-            <th style={{ padding: '6px 8px' }}>Auto when private</th>
-            <th style={{ padding: '6px 8px' }}>Security rules</th>
+          <tr>
+            <th>{t('export.col.dataset')}</th>
+            <th>{t('export.col.allOff')}</th>
+            {FORMATS.map(f => <th key={f}>{t('export.col.off', { f })}</th>)}
+            <th>{t('export.col.auto')}</th>
+            <th>{t('export.col.rules')}</th>
           </tr>
         </thead>
         <tbody>
@@ -103,35 +104,38 @@ export default function AdminExportPolicy() {
             if (!entry) return null
             const { all, formats, auto } = parts(entry.policy)
             return (
-              <tr key={ds.id} style={{ borderTop: '1px solid var(--border)' }}>
-                <td style={{ padding: '6px 8px', fontWeight: 600 }}>{ds.name}</td>
-                <td style={{ padding: '6px 8px' }}>
+              <tr key={ds.id}>
+                <td style={{ fontWeight: 600 }}>{ds.name}</td>
+                <td>
                   <input type="checkbox" checked={all} aria-label={`All exports off for ${ds.name}`}
                     onChange={e => e.target.checked
                       ? save(ds.id, { all: true, formats: [], auto_private: false })
                       : save(ds.id, { all: false, formats: [], auto_private: false })} />
                 </td>
                 {FORMATS.map(f => (
-                  <td key={f} style={{ padding: '6px 8px' }}>
+                  <td key={f}>
                     <input type="checkbox" checked={all || formats.includes(f)} disabled={all} title={all ? 'Everything is allowed: untick "All" to choose' : undefined}
                       aria-label={`${f} export off for ${ds.name}`}
                       onChange={e => save(ds.id, { all: false, auto_private: auto,
                         formats: e.target.checked ? [...formats, f] : formats.filter(x => x !== f) })} />
                   </td>
                 ))}
-                <td style={{ padding: '6px 8px' }}>
+                <td>
                   <input type="checkbox" checked={auto} disabled={all} title={all ? 'Everything is allowed: untick "All" to choose' : undefined}
                     aria-label={`Auto-disable when private for ${ds.name}`}
                     onChange={e => save(ds.id, { all: false, formats, auto_private: e.target.checked })} />
                 </td>
-                <td style={{ padding: '6px 8px', color: entry.hasRules ? 'var(--danger)' : 'var(--muted)' }}>
-                  {entry.hasRules ? 'present' : 'none'}
+                <td>
+                  {entry.hasRules
+                    ? <span className="badge" style={{ color: 'var(--danger)', background: 'color-mix(in srgb, var(--danger) 10%, transparent)' }}>{t('export.present')}</span>
+                    : <span style={{ color: 'var(--muted)' }}>{t('export.none')}</span>}
                 </td>
               </tr>
             )
           })}
         </tbody>
       </table>
+      </div>
       )}
     </div>
   )

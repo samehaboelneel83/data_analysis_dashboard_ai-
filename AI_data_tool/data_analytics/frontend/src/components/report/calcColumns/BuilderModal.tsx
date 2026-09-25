@@ -48,7 +48,7 @@ export function BuilderModal({ initial, datasetId, columns, calcCols, functionsC
 
   // Styles
   const panelHd: CSSProperties = {
-    fontSize: 10, fontWeight: 700, color: 'var(--muted)',
+    fontSize: 11, fontWeight: 700, color: 'var(--muted)',
     textTransform: 'uppercase', letterSpacing: '.06em',
     padding: '0 0 5px', marginBottom: 4,
     borderBottom: '1px solid var(--border)',
@@ -106,7 +106,7 @@ export function BuilderModal({ initial, datasetId, columns, calcCols, functionsC
             <div style={{ display:'flex', flexWrap:'wrap', gap:8, alignItems:'flex-end' }}>
               {/* Type selector */}
               <div>
-                <div style={{ fontSize:10, color:'var(--muted)', marginBottom:3 }}>Type</div>
+                <div style={{ fontSize: 11, color:'var(--muted)', marginBottom:3 }}>Type</div>
                 <select value={format.type} onChange={e => setFmt('type', e.target.value as CalcColumnFormat['type'])}
                   style={{ fontSize:12, padding:'4px 7px', background:'var(--surface)', border:'1px solid var(--border)', borderRadius:4, color:'var(--text)' }}>
                   <option value="none">None (raw)</option>
@@ -123,7 +123,7 @@ export function BuilderModal({ initial, datasetId, columns, calcCols, functionsC
               {/* Decimals — shown for number / integer / currency / percent / badge / trend */}
               {['number','integer','currency','percent','badge','trend'].includes(format.type) && (
                 <div>
-                  <div style={{ fontSize:10, color:'var(--muted)', marginBottom:3 }}>Decimals</div>
+                  <div style={{ fontSize: 11, color:'var(--muted)', marginBottom:3 }}>Decimals</div>
                   <input type="number" min={0} max={8} value={format.decimals ?? ''} placeholder="2"
                     onChange={e => setFmt('decimals', e.target.value === '' ? undefined : +e.target.value)}
                     style={{ width:60, fontSize:12, padding:'4px 7px' }} />
@@ -133,7 +133,7 @@ export function BuilderModal({ initial, datasetId, columns, calcCols, functionsC
               {/* Currency symbol */}
               {format.type === 'currency' && (
                 <div>
-                  <div style={{ fontSize:10, color:'var(--muted)', marginBottom:3 }}>Symbol</div>
+                  <div style={{ fontSize: 11, color:'var(--muted)', marginBottom:3 }}>Symbol</div>
                   <input value={format.symbol ?? '$'} onChange={e => setFmt('symbol', e.target.value)}
                     style={{ width:56, fontSize:12, padding:'4px 7px' }} />
                 </div>
@@ -142,13 +142,13 @@ export function BuilderModal({ initial, datasetId, columns, calcCols, functionsC
               {/* Prefix / Suffix — number, integer, currency, percent */}
               {['number','integer','currency','percent'].includes(format.type) && (<>
                 <div>
-                  <div style={{ fontSize:10, color:'var(--muted)', marginBottom:3 }}>Prefix</div>
+                  <div style={{ fontSize: 11, color:'var(--muted)', marginBottom:3 }}>Prefix</div>
                   <input value={format.prefix ?? ''} onChange={e => setFmt('prefix', e.target.value || undefined)}
                     placeholder="e.g. $"
                     style={{ width:60, fontSize:12, padding:'4px 7px' }} />
                 </div>
                 <div>
-                  <div style={{ fontSize:10, color:'var(--muted)', marginBottom:3 }}>Suffix</div>
+                  <div style={{ fontSize: 11, color:'var(--muted)', marginBottom:3 }}>Suffix</div>
                   <input value={format.suffix ?? ''} onChange={e => setFmt('suffix', e.target.value || undefined)}
                     placeholder="e.g. SAR"
                     style={{ width:60, fontSize:12, padding:'4px 7px' }} />
@@ -158,19 +158,19 @@ export function BuilderModal({ initial, datasetId, columns, calcCols, functionsC
               {/* Bar — min, max, color */}
               {format.type === 'bar' && (<>
                 <div>
-                  <div style={{ fontSize:10, color:'var(--muted)', marginBottom:3 }}>Min</div>
+                  <div style={{ fontSize: 11, color:'var(--muted)', marginBottom:3 }}>Min</div>
                   <input type="number" value={format.min ?? ''} placeholder="0"
                     onChange={e => setFmt('min', e.target.value === '' ? undefined : +e.target.value)}
                     style={{ width:70, fontSize:12, padding:'4px 7px' }} />
                 </div>
                 <div>
-                  <div style={{ fontSize:10, color:'var(--muted)', marginBottom:3 }}>Max</div>
+                  <div style={{ fontSize: 11, color:'var(--muted)', marginBottom:3 }}>Max</div>
                   <input type="number" value={format.max ?? ''} placeholder="100"
                     onChange={e => setFmt('max', e.target.value === '' ? undefined : +e.target.value)}
                     style={{ width:70, fontSize:12, padding:'4px 7px' }} />
                 </div>
                 <div>
-                  <div style={{ fontSize:10, color:'var(--muted)', marginBottom:3 }}>Color</div>
+                  <div style={{ fontSize: 11, color:'var(--muted)', marginBottom:3 }}>Color</div>
                   <input type="color" value={format.color ?? '#6c8fff'}
                     onChange={e => setFmt('color', e.target.value)}
                     style={{ width:44, height:28, padding:'2px', border:'1px solid var(--border)', borderRadius:4, cursor:'pointer', background:'var(--surface)' }} />
@@ -180,7 +180,7 @@ export function BuilderModal({ initial, datasetId, columns, calcCols, functionsC
               {/* Badge — low/high thresholds */}
               {format.type === 'badge' && (<>
                 <div>
-                  <div style={{ fontSize:10, color:'var(--muted)', marginBottom:3 }}>Low ↓ (red)</div>
+                  <div style={{ fontSize: 11, color:'var(--muted)', marginBottom:3 }}>Low ↓ (red)</div>
                   <input type="number" value={format.thresholds?.[0] ?? ''} placeholder="33"
                     onChange={e => {
                       const lo = e.target.value === '' ? 33 : +e.target.value
@@ -189,7 +189,7 @@ export function BuilderModal({ initial, datasetId, columns, calcCols, functionsC
                     style={{ width:70, fontSize:12, padding:'4px 7px' }} />
                 </div>
                 <div>
-                  <div style={{ fontSize:10, color:'var(--muted)', marginBottom:3 }}>High ↑ (green)</div>
+                  <div style={{ fontSize: 11, color:'var(--muted)', marginBottom:3 }}>High ↑ (green)</div>
                   <input type="number" value={format.thresholds?.[1] ?? ''} placeholder="66"
                     onChange={e => {
                       const hi = e.target.value === '' ? 66 : +e.target.value

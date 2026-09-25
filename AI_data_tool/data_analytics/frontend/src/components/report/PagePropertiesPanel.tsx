@@ -1,4 +1,6 @@
+import { useT, type MessageKey } from '../../i18n'
 import React, { useState, useEffect, useRef } from 'react'
+import { Check } from 'lucide-react'
 import toast from 'react-hot-toast'
 import type { ReportPage, PageType, Widget, Bookmark } from '../../types/report'
 import type { DatasetColumn } from '../../services/api'
@@ -19,6 +21,12 @@ interface Props {
   pages?: ReportPage[]
   bookmarks?: Bookmark[]
   onSelectWidget?: (widget: Widget) => void
+  /** The report's colour palettes, when the caller lets this panel switch
+   *  them. The palette is REPORT-wide; it lives here because this is the
+   *  panel an author has open when nothing is selected. */
+  palettes?: { key: string; name: string; colors: string[] }[]
+  currentPalette?: string
+  onPalette?: (key: string) => void
 }
 
 const PAGE_TYPES: { value: PageType; label: string; desc: string }[] = [
@@ -55,7 +63,8 @@ function actionSummary(w: Widget, pages: ReportPage[], bookmarks: Bookmark[]): s
   }
 }
 
-export default function PagePropertiesPanel({ reportId, page, columns, onUpdate, pages, bookmarks, onSelectWidget }: Props) {
+export default function PagePropertiesPanel({ reportId, page, columns, onUpdate, pages, bookmarks, onSelectWidget, palettes, currentPalette, onPalette }: Props) {
+  const tr = useT()
   /** Finding a setting by name. The widget panel beside this one has had this
    *  since it grew past a screenful; without it here the search an author just
    *  learned stopped working the moment they selected the page. */
@@ -156,7 +165,7 @@ export default function PagePropertiesPanel({ reportId, page, columns, onUpdate,
     return (
       <div style={{ marginBottom: 12 }}>
         <label htmlFor={single ? id : undefined}
-          style={{ display: 'block', fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>{lbl}</label>
+          style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>{(() => { const k = `fld.${lbl}` as MessageKey; const v = tr(k); return v && v !== k ? v : lbl })()}</label>
         {single ? React.cloneElement(el as React.ReactElement, { id }) : el}
       </div>
     )
@@ -174,13 +183,16 @@ export default function PagePropertiesPanel({ reportId, page, columns, onUpdate,
 
   return (
     <div style={{ padding: '14px 14px 0', fontSize: 13 }}>
-      <div style={{ fontWeight: 700, marginBottom: 14, fontSize: 13, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.05em' }}>
-        Page Properties
+      {/* The panel's title, not a section label: sentence case at the section
+          size, so it sits above the 10px caps labels inside it instead of
+          being the loudest line in the panel. */}
+      <div style={{ fontWeight: 650, marginBottom: 14, fontSize: 14, color: 'var(--text)' }}>
+        {tr('page.props')}
       </div>
 
       <div style={{ marginBottom: 12 }}>
         <input type="search" value={filterText} onChange={e => setFilterText(e.target.value)}
-          placeholder="Filter settings…" aria-label="Filter settings" style={{ width: '100%' }} />
+          placeholder={tr('settings.filterPh')} aria-label={tr('settings.filter')} style={{ width: '100%' }} />
       </div>
 
       {/* Same mechanism the widget panel uses: a matching group is forced open
@@ -189,7 +201,7 @@ export default function PagePropertiesPanel({ reportId, page, columns, onUpdate,
       {(() => {
         const needle = filterText.trim().toLowerCase()
         if (!needle) return null
-        const GROUPS = ['identity', 'layout', 'behaviour', 'prompt']
+        const GROUPS = ['identity', 'layout', 'appearance', 'behaviour', 'prompt']
         return GROUPS.some(g => g.includes(needle)) ? null : (
           <p style={{ fontSize: 11, color: 'var(--muted)' }}>
             No setting matches “{filterText}”.
@@ -203,19 +215,18 @@ export default function PagePropertiesPanel({ reportId, page, columns, onUpdate,
         ))}
 
         {fld('Display title', (
-          <input value={title} onChange={e => setTitle(e.target.value)} style={{ width: '100%' }} placeholder="Shown as heading on page" />
+          <input value={title} onChange={e => setTitle(e.target.value)} style={{ width: '100%' }} placeholder={tr('page.titlePh')} />
         ))}
       </ExpandableGroup>
 
       <ExpandableGroup id="page-layout" title="Layout" defaultOpen {...groupFilter("Layout")}>
         {fld('Page size', (
-          <div style={{ display: 'flex', gap: 4 }}>
+          <div className="dl-seg" style={{ display: 'flex' }}>
             {(['16:9', '4:3', 'custom'] as const).map(size => (
-              <button key={size} onClick={() => setPageSize(size)}
-                style={{ padding: '5px 10px', fontSize: 11, border: '1px solid var(--border)', borderRadius: 6,
-                  background: pageSize === size ? 'var(--accent)' : 'var(--surface2)',
-                  color: pageSize === size ? 'var(--mc-accent-fg)' : 'var(--text)', cursor: 'pointer' }}>
-                {size}
+              <button key={size} type="button" onClick={() => setPageSize(size)} aria-pressed={pageSize === size}
+                aria-label={size} className={`dl-seg__btn${pageSize === size ? ' dl-seg__btn--on' : ''}`}
+                style={{ flex: 1, justifyContent: 'center' }}>
+                {size === 'custom' ? 'Custom' : size}
               </button>
             ))}
           </div>
@@ -226,11 +237,35 @@ export default function PagePropertiesPanel({ reportId, page, columns, onUpdate,
           <input value={backgroundUrl} onChange={e => setBackgroundUrl(e.target.value)}
             placeholder="https://… or /uploads/…" style={{ width: '100%' }} />
         ))}
-        <div style={{ fontSize: 9.5, color: 'var(--muted)', margin: '-6px 0 10px' }}>
+        <div style={{ fontSize: 10.5, color: 'var(--muted)', margin: '-6px 0 10px' }}>
           Objects with a transparent background let it show through. Only http(s)
           URLs and paths on this server are accepted.
         </div>
       </ExpandableGroup>
+
+      {palettes && palettes.length > 0 && onPalette && (
+        <ExpandableGroup id="page-appearance" title="Appearance" defaultOpen {...groupFilter("Appearance")}>
+          <div className="dl-field__label" style={{ marginBottom: 6 }}>{tr('page.palette')}</div>
+          {/* A list rather than a row of dots: each palette shows its first
+              four colours AND its name, so the choice is made by what the
+              charts will look like, not by guessing from one swatch. */}
+          <div className="dl-palettes">
+            {palettes.map(p => {
+              const on = (currentPalette ?? 'default') === p.key
+              return (
+                <button key={p.key} type="button" aria-label={p.name} aria-pressed={on}
+                  className={`dl-palette${on ? ' dl-palette--on' : ''}`} onClick={() => onPalette(p.key)}>
+                  <span aria-hidden className="dl-palette__swatch">
+                    {p.colors.slice(0, 4).map((c, i) => <span key={i} style={{ background: c }} />)}
+                  </span>
+                  <span className="dl-palette__name">{p.name}</span>
+                  {on && <Check size={15} aria-hidden className="dl-palette__check" />}
+                </button>
+              )
+            })}
+          </div>
+        </ExpandableGroup>
+      )}
 
       <ExpandableGroup id="page-behaviour" title="Behaviour" defaultOpen {...groupFilter("Behaviour")}>
         {fld('Interactions', (
@@ -242,7 +277,7 @@ export default function PagePropertiesPanel({ reportId, page, columns, onUpdate,
               <option value="oneway">One-way filter (single source)</option>
               <option value="twoway">Two-way filter (filters accumulate)</option>
             </select>
-            <span style={{ fontSize: 10, color: 'var(--muted)' }}>
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>
               An automatic mode overrides every widget's own interaction settings on this page.
             </span>
           </>
@@ -262,7 +297,7 @@ export default function PagePropertiesPanel({ reportId, page, columns, onUpdate,
                   onChange={() => setPageType(pt.value)} style={{ marginTop: 2, accentColor: 'var(--accent)' }} />
                 <div>
                   <div style={{ fontWeight: 600, fontSize: 12, color: pageType === pt.value ? 'var(--accent)' : 'var(--text)' }}>{pt.label}</div>
-                  <div style={{ fontSize: 10, color: 'var(--muted)' }}>{lastVisible ? 'Not available: this is the only visible page' : pt.desc}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>{lastVisible ? 'Not available: this is the only visible page' : pt.desc}</div>
                 </div>
               </label>
               )

@@ -93,7 +93,7 @@ export function WidgetPlaceholder({ widget, missing, onAssignData }:
       </svg>
       <div style={{ position: 'relative', textAlign: 'center', display: 'flex', flexDirection: 'column',
         alignItems: 'center', gap: 6, padding: 8 }}>
-        <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--muted)' }}>Sample</span>
+        <span style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--muted)' }}>Sample</span>
         <span style={{ fontSize: 12, color: 'var(--text)' }}>
           Needs {missing.join(' · ')}
         </span>

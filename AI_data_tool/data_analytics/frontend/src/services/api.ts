@@ -1,4 +1,5 @@
 ﻿import axios from 'axios'
+import { sanitizeErrorDetail } from '../lib/friendlyError'
 import type { Report, ReportPage, Widget, HierarchyNode, Bookmark, BookmarkState, WorkspaceTree, WorkspaceNode } from '../types/report'
 import type { DisplayRule } from '../lib/displayRules'
 
@@ -54,6 +55,8 @@ export function attachAuthHeader(config: any) {
 }
 
 export function handleResponseError(error: any) {
+  // Driver exceptions become sentences before any page toasts them.
+  sanitizeErrorDetail(error)
   if (error?.response?.status === 401) {
     setAuthToken(null)
     onUnauthorized?.()
@@ -342,7 +345,7 @@ export const datasetsApi = {
     api.patch<ColumnDescriptionResult>(
       `/datasets/${id}/columns/${encodeURIComponent(column)}/description`,
       { description }).then(r => r.data),
-  suggestDashboards: (id: number, body: { goal?: string; count?: number }) =>
+  suggestDashboards: (id: number, body: { goal?: string; count?: number }, signal?: AbortSignal) =>
     api.post<{ proposals: DashboardSuggestion[]; reason: string
                profile: DatasetProfile; source?: 'insights' | 'model'
                /** One short question asked back when nothing could be designed.
@@ -350,7 +353,7 @@ export const datasetsApi = {
                 *  the model is unavailable or declines -- an invented question
                 *  would be worse than the plain refusal it replaced. */
                question?: string | null }>(
-      `/datasets/${id}/suggest-dashboards`, body, { timeout: 300000 }).then(r => r.data),
+      `/datasets/${id}/suggest-dashboards`, body, { timeout: 300000, signal }).then(r => r.data),
   get:     (id: number) => api.get<Dataset>(`/datasets/${id}`).then(r => r.data),
   delete:  (id: number) => api.delete(`/datasets/${id}`),
   refresh: (id: number, body?: { mode?: 'full' | 'incremental'; cursor_column?: string | null }) =>
@@ -1548,6 +1551,9 @@ export interface MonitoringJobRow {
   id: number
   name: string
   interval_minutes: number
+  /** A calendar report schedule ("weekly on Monday at 09:00"). */
+  calendar?: { kind: 'daily' | 'weekly' | 'monthly'; hour: number; minute: number; weekday?: number; monthday?: number } | null
+  timezone?: string | null
   last_run_at: string | null
   status: string | null
   error: string | null
@@ -1828,6 +1834,10 @@ export const dataSourcesApi = {
     api.put<DataSource>(`/data-sources/${id}`, body).then(r => r.data),
   delete:  (id: number)                                   => api.delete(`/data-sources/${id}`),
   test:    (id: number)                                   => api.post<{ ok: boolean; error?: string }>(`/data-sources/${id}/test`).then(r => r.data),
+  /** Try settings BEFORE saving them. `source_id` lets an edit form send a
+   *  secret back redacted and have the stored one used. Nothing is written. */
+  testSettings: (body: { type: string; config: Record<string, unknown>; custom_connector_id?: number | null; source_id?: number }) =>
+    api.post<{ ok: boolean; error?: string }>('/data-sources/test', body).then(r => r.data),
   schema:  (id: number)                                   => api.get<{ tables: { name: string; kind: string }[] }>(`/data-sources/${id}/schema`).then(r => r.data),
   preview: (id: number, table?: string, query?: string, limit = 200) =>
     api.post<{ columns: string[]; rows: unknown[][]; total: number }>(`/data-sources/${id}/preview`, { table, query, limit }).then(r => r.data),

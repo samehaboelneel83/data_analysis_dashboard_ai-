@@ -126,7 +126,7 @@ describe('ReportBuilder page-size presets in Page Properties', () => {
     vi.mocked(reportsApi.updatePage).mockResolvedValue({} as any)
     renderBuilder()
     await screen.findByTestId('view-strip')
-    await screen.findByText('Page Properties')
+    await screen.findByText('Page properties')
 
     fireEvent.click(screen.getByRole('button', { name: '4:3' }))
 
@@ -406,6 +406,30 @@ describe('ReportBuilder Fields pane', () => {
     ))
   })
 
+  it('a second clicked field is ADDED to the config saved by the first, not swapped for it', async () => {
+    // The selection used to be a stale snapshot, so the second click planned
+    // from the pre-save config and sent {dimension} alone, wiping the measure.
+    const first = reportWithWidget(); (first.pages[0].widgets[0] as any).config = {}
+    const second = reportWithWidget(); (second.pages[0].widgets[0] as any).config = { measure: 'sales' }
+    vi.mocked(reportsApi.get).mockResolvedValueOnce(first as any).mockResolvedValue(second as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue(datasetWithColumns() as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    vi.mocked(reportsApi.updateWidget).mockResolvedValue({} as any)
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    fireEvent.click(await screen.findByText('Sales by Region', {}, { timeout: 3000 }))
+    await screen.findByText('Widget: Sales by Region')
+
+    fireEvent.click(screen.getByRole('button', { name: /^[#ƒx Aa]* ?sales$/ }))
+    await waitFor(() => expect(reportsApi.updateWidget).toHaveBeenCalledWith(
+      1, 100, 5, { config: expect.objectContaining({ measure: 'sales' }), title: 'Sales by Region' }))
+    await waitFor(() => expect(vi.mocked(reportsApi.get).mock.calls.length).toBeGreaterThan(1))
+
+    fireEvent.click(screen.getByRole('button', { name: /^[#ƒx Aa]* ?region$/ }))
+    await waitFor(() => expect(reportsApi.updateWidget).toHaveBeenLastCalledWith(
+      1, 100, 5, { config: expect.objectContaining({ measure: 'sales', dimension: 'region' }), title: 'Sales by Region' }))
+  })
+
   it('lists dataset measures under their own heading, separate from numeric columns', async () => {
     vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
     vi.mocked(datasetsApi.get).mockResolvedValue({
@@ -531,7 +555,7 @@ describe('ReportBuilder Selection pane', () => {
 
     expect(screen.getByText('Sales by Region')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: /Edit mode/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'View mode' }))
     expect(screen.queryByText('Sales by Region')).not.toBeInTheDocument()
   })
 
@@ -616,7 +640,7 @@ describe('ReportBuilder mobile layout editor', () => {
 
     renderBuilder()
     await screen.findByTestId('view-strip')
-    fireEvent.click(screen.getByRole('button', { name: /Edit mode/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'View mode' }))
 
     expect(await screen.findByTestId('mobile-stack')).toBeInTheDocument()
     window.matchMedia = realMatchMedia
@@ -669,7 +693,7 @@ describe('ReportBuilder drillthrough navigation', () => {
     // Absent as a tab in edit mode...
     expect(screen.queryByRole('button', { name: 'Details' })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: /Edit mode/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'View mode' }))
     // ...and absent in view mode too.
     expect(screen.queryByRole('button', { name: 'Details' })).not.toBeInTheDocument()
   })
@@ -714,7 +738,7 @@ describe('ReportBuilder popup overlay (view mode)', () => {
   }
 
   function enterViewMode() {
-    fireEvent.click(screen.getByRole('button', { name: /Edit mode/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'View mode' }))
   }
 
   it('renders the popup page as a centred overlay instead of switching the active tab', async () => {
@@ -863,7 +887,7 @@ describe('ReportBuilder tooltip page hover (view mode)', () => {
   }
 
   function enterViewMode() {
-    fireEvent.click(screen.getByRole('button', { name: /Edit mode/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'View mode' }))
   }
 
   async function widgetWrapper() {
@@ -1359,7 +1383,7 @@ describe('ReportBuilder — a view-only viewer gets the dashboard, not the studi
     vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
     renderBuilder()
     await screen.findByText('Sales by Region')
-    expect(screen.getByRole('button', { name: /Edit mode|View mode/i })).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Report mode' })).toBeInTheDocument()
     // The studio's left panel: Fields / Charts / More tabs (was an "Analytics" header).
     expect(screen.getByRole('tablist', { name: 'Builder panel' })).toBeInTheDocument()
   })

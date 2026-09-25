@@ -153,6 +153,54 @@ async def create_data_source(body: DataSourceCreate, db: AsyncSession = Depends(
     return out
 
 
+class ConnectionProbe(BaseModel):
+    """Settings to try BEFORE they are saved (the New/Edit connection form)."""
+    type: str
+    config: dict = {}
+    custom_connector_id: int | None = None
+    # When editing: a secret sent back as the redaction sentinel means "the one
+    # already stored on this connection", exactly as on update.
+    source_id: int | None = None
+
+
+@router.post("/test")
+async def test_unsaved_connection(body: ConnectionProbe, db: AsyncSession = Depends(get_db),
+                                  current_user: User = Depends(require_org_admin)):
+    """Try a connection's settings without saving anything.
+
+    The form could only test a connection that already existed, so the only
+    way to find a typo in a password was to create a broken connection first.
+    Nothing is written: no row, no sync, no audit entry. Org admins only --
+    it is a live probe of an arbitrary host, like the one on a saved source.
+    """
+    preset = None
+    ds_type = body.type
+    if body.custom_connector_id is not None:
+        preset = (await db.execute(
+            select(CustomConnector).where(CustomConnector.id == body.custom_connector_id,
+                                           CustomConnector.org_id == current_user.org_id)
+        )).scalar_one_or_none()
+        if preset is None:
+            raise HTTPException(404, "Custom connector not found")
+        ds_type = preset.base_type
+    _require_known_connector(ds_type)
+    cfg = dict(body.config or {})
+    secret_names = connectors.secret_field_names(ds_type)
+    if body.source_id is not None:
+        ds = await db.get(DataSource, body.source_id)
+        check_org(ds, current_user, "Data source not found")
+        await _administrable_or_404(ds, db, current_user)
+        stored = ds.config or {}
+        for name in secret_names:
+            if cfg.get(name) == secrets.REDACTED:
+                cfg[name] = stored.get(name)
+    if preset is not None:
+        cfg = apply_preset_locks(cfg, preset)
+    cfg = secrets.decrypt_config(cfg, secret_names)
+    cfg['type'] = ds_type
+    return await asyncio.to_thread(test_connection, cfg)
+
+
 async def _start_initial_sync(db: AsyncSession, ds: DataSource,
                               user: User) -> int | None:
     """Read the new connection's catalog, without being asked.

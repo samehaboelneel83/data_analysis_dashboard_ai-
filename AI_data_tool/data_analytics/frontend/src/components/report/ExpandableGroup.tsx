@@ -1,4 +1,33 @@
 import { useState, useCallback } from 'react'
+import { useT, type MessageKey } from '../../i18n'
+
+/** Settings-group titles are written in English at every call site (the panel
+ *  search matches on them); only the DISPLAYED heading is translated, here,
+ *  so no call site has to change. Unknown titles show as written. */
+const TITLE_KEY: Record<string, MessageKey> = {
+  'Actions on this page': 'group.actions_on_this_page',
+  'Actions': 'group.actions',
+  'Animation (play through)': 'group.animation_play_through',
+  'Appearance': 'group.appearance',
+  'Behaviour': 'group.behaviour',
+  'Data & aggregation': 'group.data_aggregation',
+  'Display rules': 'group.display_rules',
+  'Fields': 'group.fields',
+  'Filters': 'group.filters',
+  'Formatting': 'group.formatting',
+  'Group A': 'group.group_a',
+  'Group B': 'group.group_b',
+  'Identity': 'group.identity',
+  'Interactions': 'group.interactions',
+  'Lattice (small multiples)': 'group.lattice_small_multiples',
+  'Layout': 'group.layout',
+  'Prompt': 'group.prompt',
+  'Ranking': 'group.ranking',
+  'Roles': 'group.roles',
+  'Sort & limit': 'group.sort_limit',
+  'Sorting': 'group.sorting',
+  'Visibility': 'group.visibility'
+}
 
 const STORAGE_KEY = 'datalytics.panelGroups'
 
@@ -46,6 +75,7 @@ interface Props {
 
 export default function ExpandableGroup({ id, title, defaultOpen = false, children, forceOpen, hidden }: Props) {
   const [open, setOpen] = useState(() => readState()[id] ?? defaultOpen)
+  const t = useT()
 
   const toggle = useCallback(() => {
     // While forceOpen is in effect (the panel-search filter), the header click is a
@@ -84,9 +114,9 @@ export default function ExpandableGroup({ id, title, defaultOpen = false, childr
           fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.05em',
         }}
       >
-        <span aria-hidden style={{ color: 'var(--muted)', fontSize: 9, transition: 'transform .12s',
+        <span aria-hidden style={{ color: 'var(--muted)', fontSize: 10.5, transition: 'transform .12s',
           transform: effectiveOpen ? 'rotate(90deg)' : 'none', display: 'inline-block' }}>&#9654;</span>
-        <span style={{ color: 'var(--muted)' }}>{title}</span>
+        <span style={{ color: 'var(--muted)' }}>{TITLE_KEY[title] ? t(TITLE_KEY[title]) : title}</span>
       </button>
       {effectiveOpen && <div style={{ paddingBottom: 10 }}>{children}</div>}
     </div>

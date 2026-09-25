@@ -1,6 +1,9 @@
 import { useCallback, useContext, useEffect, useState } from 'react'
 import LoadError from '../components/ui/LoadError'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import BulkBar from '../components/ui/BulkBar'
+import { useBulkSelection } from '../lib/useBulkSelection'
+import { looksLikeTestData } from '../lib/testData'
 import { reportsApi, datasetsApi, workspaceApi } from '../services/api'
 import type { ReportSummary, DatasetSummary } from '../services/api'
 import type { WorkspaceTree } from '../types/report'
@@ -27,7 +30,7 @@ export default function Reports() {
   const t = useT()
   const [reports, setReports]   = useState<ReportSummary[]>([])
   const repFilter = useListFilter(reports,
-    r => [r.name, r.description], 'Search dashboards')
+    r => [r.name, r.description], t('search.dashboards'))
   const [datasets, setDatasets] = useState<DatasetSummary[]>([])
   const [loading, setLoading]   = useState(true)
   const [creating, setCreating] = useState(false)
@@ -89,6 +92,10 @@ export default function Reports() {
     setCreating(true)
     try {
       const r = await reportsApi.create({ name: nextUntitledName(reports.map(x => x.name)) })
+      // Marked as fresh for this tab: if the author leaves without adding a
+      // single thing, the builder removes it again (see ReportBuilder) --
+      // abandoned "Untitled dashboard"s were most of the list's clutter.
+      try { sessionStorage.setItem('datalytics:fresh-report', String(r.id)) } catch { /* private mode */ }
       openReport(`/reports/${r.id}?pick=data`)
     } catch (e: any) {
       toast.error(e?.response?.data?.detail ?? 'Could not create a dashboard')
@@ -98,6 +105,30 @@ export default function Reports() {
   }
 
   const openReport = useNavigate()
+
+  // Select mode: tick several dashboards and delete them together (clearing
+  // out test runs was one menu + one dialog per card). Only dashboards the
+  // viewer may edit -- the ones the server lets them delete -- can be ticked.
+  const [selecting, setSelecting] = useState(false)
+  const bulk = useBulkSelection<ReportSummary>({
+    remove: id => reportsApi.delete(id),
+    onRemoved: ids => setReports(r => r.filter(x => !ids.includes(x.id))),
+    noun: t('noun.dashboards'),
+  })
+  const deletable = (r: ReportSummary) => (r.my_capability ?? 'view') !== 'view'
+  const testLike = reports.filter(r => deletable(r) && looksLikeTestData(r.name))
+  const stopSelecting = () => { setSelecting(false); bulk.clear() }
+
+  // "Create a dashboard" from the command palette lands here as ?new=1.
+  // Waits for the list so the new name does not collide with an existing one.
+  const [params, setParams] = useSearchParams()
+  const wantsNew = params.get('new') === '1'
+  useEffect(() => {
+    if (!wantsNew || loading) return
+    setParams(p => { p.delete('new'); return p }, { replace: true })
+    void handleCreate()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantsNew, loading])
 
   const confirm = useConfirm()
   const prompt = usePrompt()
@@ -231,7 +262,7 @@ export default function Reports() {
   }
 
   return (
-    <div>
+    <div className={`dl-dash-page${selecting ? ' dl-dash-page--selecting' : ''}`}>
       <div className="dl-page-head">
         <div>
           <h1 className="dl-page-head__title">{t('nav.dashboards')}</h1>
@@ -239,8 +270,14 @@ export default function Reports() {
         </div>
         <div className="dl-page-head__tools">
           {repFilter.input}
+          {reports.length > 0 && (
+            <button type="button" className="btn btn-ghost" aria-pressed={selecting}
+              onClick={() => selecting ? stopSelecting() : setSelecting(true)}>
+              {selecting ? t('bulk.done2') : t('bulk.select')}
+            </button>
+          )}
           <button className="btn btn-ghost" onClick={() => void addFolder(null)} disabled={folderBusy}>
-            <FolderPlus size={14} /> New folder
+            <FolderPlus size={14} /> {t('folders.newTop')}
           </button>
           <button className="btn btn-primary" onClick={() => void handleCreate()} disabled={creating}>
             <Plus size={14} /> {t('dashboards.new')}
@@ -248,7 +285,18 @@ export default function Reports() {
         </div>
       </div>
 
-      {loading && <p className="dl-muted-line">Loading…</p>}
+      {selecting && testLike.length > 0 && (
+        <button type="button" className="dl-select-hint" style={{ marginBlockEnd: 8 }}
+          onClick={() => bulk.setMany(testLike.map(r => r.id), true)}>
+          <Trash2 size={13} aria-hidden /> {t('bulk.selectTest', { n: testLike.length })}
+        </button>
+      )}
+      {selecting && (
+        <BulkBar count={bulk.selected.size} busy={bulk.busy} noun={t('noun.dashboards')}
+          onClear={bulk.clear} onDelete={() => void bulk.deleteSelected(reports)} />
+      )}
+
+      {loading && <p className="dl-muted-line">{t('common.loading')}</p>}
 
       {!loading && !!loadError && (
         <LoadError what="reports" error={loadError} onRetry={load} />
@@ -257,15 +305,15 @@ export default function Reports() {
       {!loading && !loadError && reports.length === 0 && (
         <div className="card dl-empty">
           <FileBarChart size={40} className="dl-empty__icon" />
-          <p className="dl-empty__title">No dashboards yet</p>
-          <p className="dl-empty__body">Create a dashboard and design it with charts, tables, KPIs, and more.</p>
-          <button className="btn btn-primary" onClick={() => setCreating(true)}>Create your first dashboard</button>
+          <p className="dl-empty__title">{t('dashboards.empty')}</p>
+          <p className="dl-empty__body">{t('dashboards.emptyBody')}</p>
+          <button className="btn btn-primary" onClick={() => void handleCreate()} disabled={creating}>{t('dashboards.createFirst')}</button>
         </div>
       )}
 
       {repFilter.noMatches && (
         <p className="dl-nomatch">
-          Nothing matches “{repFilter.query}”.
+          {t('common.nothingMatches', { q: repFilter.query })}
         </p>
       )}
       {reports.length > 0 && (() => {
@@ -309,7 +357,8 @@ export default function Reports() {
           const showDataset = !!ds && !flat(r.name).includes(flat(ds.name))
           return (
             <div key={r.id} className="card dl-dash-card"
-              draggable
+              data-selected={selecting && bulk.selected.has(r.id) ? 'true' : undefined}
+              draggable={!selecting}
               data-dragging={dragging?.id === r.id ? 'true' : undefined}
               onDragStart={e => {
                 // Some browsers refuse to start a drag with no payload.
@@ -323,6 +372,13 @@ export default function Reports() {
               // own click, and a control added later is covered without anyone
               // remembering to opt it out.
               onClick={e => {
+                if (selecting) {
+                  // In select mode the whole card is the checkbox, title included.
+                  if ((e.target as HTMLElement).closest('input')) return
+                  e.preventDefault()
+                  if (canEdit) bulk.toggle(r.id)
+                  return
+                }
                 if ((e.target as HTMLElement).closest('a, button')) return
                 openReport(`/reports/${r.id}`)
               }}
@@ -332,13 +388,18 @@ export default function Reports() {
               // second focusable wrapper would put two tab stops and two
               // announcements on one destination.
               >
+              {selecting && (
+                <input type="checkbox" className="dl-dash-card__check" disabled={!canEdit}
+                  aria-label={t('bulk.selectRow', { name: r.name })}
+                  checked={bulk.selected.has(r.id)} onChange={() => bulk.toggle(r.id)} />
+              )}
               <div className="dl-dash-card__head">
                 {/* The title owns the row. It used to share it with the chips
                     at flex-shrink: 0, which left "What stands out in Route
                     planning extract output" about eight characters wide and
                     six lines tall. */}
                 <Link to={`/reports/${r.id}`} className="dl-dash-card__title"
-                  title={r.name}>
+                  title={r.name} onClick={e => { if (selecting) e.preventDefault() }}>
                   {r.name}
                 </Link>
                 <div className="dl-dash-card__controls">
@@ -388,18 +449,18 @@ export default function Reports() {
                 {isSuggested && (
                   <span className="dl-chip dl-chip--suggested"
                     title="Created by Suggest dashboards from this dataset">
-                    Suggested
+                    {t('dashboards.suggested')}
                   </span>
                 )}
                 {owned && r.published && (
                   <span className="dl-chip dl-chip--published"
                     title="Published — everyone in your organisation can open it, view-only">
-                    published
+                    {t('dashboards.published')}
                   </span>
                 )}
                 {!canEdit && (
                   <span className="dl-chip dl-chip--viewonly" title="View only">
-                    <IconLabel icon={Eye} size={11}>view only</IconLabel>
+                    <IconLabel icon={Eye} size={11}>{t('dashboards.viewOnly')}</IconLabel>
                   </span>
                 )}
                 <span className="dl-dash-card__date">
@@ -428,13 +489,13 @@ export default function Reports() {
             // of items it would refuse.
             actions={f.can_manage && (
               <ActionMenu
-                label={`Actions for ${f.name}`}
+                label={t('folders.actions', { name: f.name })}
                 items={[
-                  { key: 'subfolder', label: 'New subfolder', icon: <FolderPlus size={14} />,
+                  { key: 'subfolder', label: t('folders.new'), icon: <FolderPlus size={14} />,
                     onSelect: () => void addFolder(f.id) },
-                  { key: 'rename', label: 'Rename', icon: <Pencil size={14} />,
+                  { key: 'rename', label: t('folders.rename'), icon: <Pencil size={14} />,
                     onSelect: () => void renameFolder(f) },
-                  { key: 'delete', label: 'Delete folder', icon: <Trash2 size={14} />, danger: true,
+                  { key: 'delete', label: t('folders.delete'), icon: <Trash2 size={14} />, danger: true,
                     onSelect: () => void removeFolder(f) },
                 ]}
               />
@@ -442,7 +503,7 @@ export default function Reports() {
             {f.direct.length > 0 && grid(f.direct)}
             {f.children.map(c => renderFolder(c, depth + 1))}
             {f.count === 0 && f.children.length === 0 && (
-              <p className="dl-fold__empty">Empty folder</p>
+              <p className="dl-fold__empty">{t('folders.empty')}</p>
             )}
           </Fold>
         )
@@ -479,15 +540,15 @@ export default function Reports() {
         }
         return (
           <>
-            <Fold name="My workspaces" tier="group" heading="h2" count={mine.length}
+            <Fold name={t('dashboards.mine')} tier="group" heading="h2" count={mine.length}
               collapsed={collapsed.has('group:mine')}
               onToggle={() => toggleFold('group:mine')}
               dropProps={dropTargetProps('root', null, null)}
               dropActive={overTarget === 'root'}>
               {arranged(mine, true)}
             </Fold>
-            <Fold name="Granted to me" tier="group" heading="h2" count={granted.length}
-              note="Published or shared with you by others. View-only dashboards open without design controls."
+            <Fold name={t('dashboards.granted')} tier="group" heading="h2" count={granted.length}
+              note={t('dashboards.grantedNote')}
               collapsed={collapsed.has('group:granted')}
               onToggle={() => toggleFold('group:granted')}>
               {arranged(granted, false)}

@@ -2,11 +2,15 @@ import { useState } from 'react'
 import toast from 'react-hot-toast'
 import { api } from '../services/api'
 import { useModalDialog } from './ui/useModalDialog'
+import IconLabel from './ui/IconLabel'
+import { Code2 } from 'lucide-react'
+import { useT, type MessageKey } from '../i18n'
 
 /** "Use in Python" (Phase 7.6): the governed-frame snippet for this dataset.
  *  The key is never shown here -- it is created once under API keys. */
 export default function NotebookSnippet({ datasetId, datasetName }: { datasetId: number; datasetName: string }) {
   const [open, setOpen] = useState(false)
+  const t = useT()
   const base = String(api.defaults.baseURL ?? '').replace(/\/api\/v1\/?$/, '') || window.location.origin
   const code = `from datalytics_client import Datalytics   # clients/python in the repository
 
@@ -15,7 +19,7 @@ df = dl.frame(${datasetId})                     # ${datasetName}: the rows you m
 summary = dl.query(${datasetId}, dimensions=[...], measures=[{"column": ..., "agg": "sum"}])`
   return (<>
     <button className="btn btn-ghost btn-sm" onClick={() => setOpen(true)}
-      title="Read this dataset from a notebook, under your own security">🐍 Use in Python</button>
+      title={t('misc.useInPythonTitle')}><IconLabel icon={Code2}>{t('misc.useInPython')}</IconLabel></button>
     {open && <Dialog code={code} onClose={() => setOpen(false)} />}
   </>)
 }

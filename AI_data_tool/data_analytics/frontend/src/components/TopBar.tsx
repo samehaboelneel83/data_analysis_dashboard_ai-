@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { useLocation } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
+import { CRUMB_EVENT, type CrumbDetail } from '../lib/crumb'
 import { useAuth } from '../contexts/AuthContext'
 import NotificationsBell from './NotificationsBell'
 import LanguageSwitcher from './LanguageSwitcher'
-import { messageForPath, useT } from '../i18n'
-import { ChevronDown, LogOut, Menu, Moon, Search, Sun } from 'lucide-react'
+import { messageForPath, SECTION_MESSAGE, useT } from '../i18n'
+import { sectionForPath } from './navigation'
+import { ChevronDown, ChevronRight, LogOut, Menu, Moon, Search, Sun } from 'lucide-react'
 import { MOBILE_QUERY, useMediaQuery } from '../hooks/useMediaQuery'
 
 /**
@@ -44,6 +46,20 @@ export default function TopBar({ onOpenNav, theme, onToggleTheme }: {
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const compact = useMediaQuery(MOBILE_QUERY)
+  const section = sectionForPath(pathname)
+  // The record a detail page is showing (see lib/crumb). Kept with the path
+  // it belongs to and only shown while that path is on screen.
+  const [leaf, setLeaf] = useState<CrumbDetail | null>(null)
+  useEffect(() => {
+    const on = (e: Event) => {
+      const d = (e as CustomEvent<CrumbDetail>).detail
+      setLeaf(cur => d.title ? d : (cur && cur.path === d.path ? null : cur))
+    }
+    window.addEventListener(CRUMB_EVENT, on)
+    return () => window.removeEventListener(CRUMB_EVENT, on)
+  }, [])
+  const leafTitle = leaf && leaf.path === pathname ? leaf.title : null
+  const parentPath = pathname.replace(/\/[^/]+\/?$/, '') || '/'
 
   // Outside click / Escape close the user menu -- a menu that only closes by
   // re-clicking its trigger strands keyboard and mouse users alike.
@@ -81,10 +97,34 @@ export default function TopBar({ onOpenNav, theme, onToggleTheme }: {
           <Menu size={18} />
         </button>
       )}
-      <h1 style={{ fontSize: 15, fontWeight: 700, margin: 0, whiteSpace: 'nowrap',
-        overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0, flex: compact ? '1 1 0' : undefined }}>
-        {t(messageForPath(pathname))}
-      </h1>
+      {/* Where you are, as a trail rather than a second title. Every page
+          already opens with its own large heading, so the bar used to print
+          the same word twice a hand's width apart ("Datasets" / "Datasets").
+          The section in front answers the question the page title cannot:
+          which part of the product this is. The current page stays a heading
+          so a screen reader's heading list still starts from it. */}
+      <nav aria-label={t('top.breadcrumb')} className="dl-crumbs"
+        style={{ flex: compact ? '1 1 0' : undefined }}>
+        {section && !compact && (
+          <>
+            <span className="dl-crumbs__section">{t(SECTION_MESSAGE[section] ?? 'nav.home')}</span>
+            <span aria-hidden className="dl-crumbs__sep"><ChevronRight size={14} /></span>
+          </>
+        )}
+        {leafTitle ? (
+          <>
+            {!compact && (
+              <>
+                <Link to={parentPath} className="dl-crumbs__section dl-crumbs__link">{t(messageForPath(pathname))}</Link>
+                <span aria-hidden className="dl-crumbs__sep"><ChevronRight size={14} /></span>
+              </>
+            )}
+            <h1 className="dl-crumbs__page" aria-current="page" title={leafTitle}>{leafTitle}</h1>
+          </>
+        ) : (
+          <h1 className="dl-crumbs__page" aria-current="page">{t(messageForPath(pathname))}</h1>
+        )}
+      </nav>
 
       <div style={{ flex: 1 }} />
 

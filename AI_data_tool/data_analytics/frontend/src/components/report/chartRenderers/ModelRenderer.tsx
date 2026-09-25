@@ -208,9 +208,13 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
   const [tab, setTab] = useState<string | null>(null)
   if (!data || data.type !== 'model') return null
   if (data.status === 'refused') {
+    // A widget that is simply not set up yet (a comparison with no models to
+    // compare) is a next step, not a failure -- headlining it "could not be
+    // fitted" the moment it was dropped on the page read as an error.
+    const notSetUp = /needs at least|choose|pick|select .* first|no models?/i.test(String(data.reason ?? ''))
     return (
       <div role="note" style={{ padding: 12, fontSize: 13, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <b>This model could not be fitted</b>
+        <b>{notSetUp ? 'Not set up yet' : 'This model could not be fitted'}</b>
         <span>{data.reason}</span>
         <Population pop={data.population} />
       </div>

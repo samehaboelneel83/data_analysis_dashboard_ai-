@@ -71,7 +71,7 @@ export default function DataViewsBar({ datasetId, onApplied, isAdmin }: {
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: '1px solid var(--border)', flexWrap: 'wrap' }}>
-      <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
+      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
         Data views
       </span>
       {saving ? (
@@ -98,7 +98,7 @@ export default function DataViewsBar({ datasetId, onApplied, isAdmin }: {
         </label>
       )}
       {isAdmin && chosen && (
-        <span style={{ fontSize: 10, color: 'var(--muted)' }}>
+        <span style={{ fontSize: 11, color: 'var(--muted)' }}>
           (applied to every dataset uploaded into this organisation, as far as its
           columns match)
         </span>

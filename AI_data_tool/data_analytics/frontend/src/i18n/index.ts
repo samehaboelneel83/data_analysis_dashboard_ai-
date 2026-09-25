@@ -61,6 +61,7 @@ export const NAV_ITEM_MESSAGE: Record<string, MessageKey> = {
   '/admin/sso': 'nav.sso',
   '/admin/maps': 'nav.maps',
   '/admin/audit': 'nav.audit',
+  '/admin/custom-connectors': 'nav.customConnectors',
   '/platform/organizations': 'nav.organizations',
 }
 

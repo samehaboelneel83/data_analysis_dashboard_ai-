@@ -83,7 +83,7 @@ export default function DatasetPickerDialog({ datasets, onPick, onClose, title =
     </li>
   )
   const heading = (text: string) => (
-    <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', margin: '10px 10px 4px' }}>{text}</div>
+    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', margin: '10px 10px 4px' }}>{text}</div>
   )
 
   return (

@@ -118,7 +118,7 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
               {opts.title}
             </div>
             {opts.body && (
-              <div id="confirm-dialog-body" style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14, lineHeight: 1.5 }}>
+              <div id="confirm-dialog-body" style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14, lineHeight: 1.5, whiteSpace: 'pre-line', maxHeight: 240, overflowY: 'auto' }}>
                 {opts.body}
               </div>
             )}

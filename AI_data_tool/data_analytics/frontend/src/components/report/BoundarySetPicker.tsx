@@ -96,12 +96,12 @@ export default function BoundarySetPicker({ value, onChange, inheritedName }: {
   return (
     <div style={{ marginTop: 10 }}>
       <label htmlFor="cfg-boundary-set" style={{
-        display: 'block', fontSize: 10, fontWeight: 700,
+        display: 'block', fontSize: 11, fontWeight: 700,
         color: 'var(--muted)', marginBottom: 4,
       }}>Boundaries</label>
 
       {!value && inheritedName && (
-        <p style={{ fontSize: 10, color: 'var(--muted)', margin: '0 0 4px' }}>
+        <p style={{ fontSize: 11, color: 'var(--muted)', margin: '0 0 4px' }}>
           Drawing <strong>{inheritedName}</strong>, from the column's geography
           classification. Choosing here overrides it for this widget only.
         </p>
@@ -132,7 +132,7 @@ export default function BoundarySetPicker({ value, onChange, inheritedName }: {
           widget whether their column will match — rather than after, from an
           empty map. */}
       {chosen && chosen.sample_names.length > 0 && (
-        <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 3 }}>
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>
           Matches on {chosen.key_properties.join(', ')} — e.g.{' '}
           {chosen.sample_names.slice(0, 4).join(', ')}
           {chosen.feature_count > 4 ? '…' : ''}
@@ -141,7 +141,7 @@ export default function BoundarySetPicker({ value, onChange, inheritedName }: {
 
       {installable.length > 0 && (
         <div data-testid="boundary-packs" style={{ marginTop: 6 }}>
-          <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 3 }}>Starter packs:</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 3 }}>Starter packs:</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
             {installable.map(p => (
               <button key={p.id} type="button" className="btn btn-sm" disabled={busy}
@@ -168,7 +168,7 @@ export default function BoundarySetPicker({ value, onChange, inheritedName }: {
       </button>
 
       {error && (
-        <div role="alert" style={{ fontSize: 10, color: 'var(--danger)', marginTop: 4 }}>
+        <div role="alert" style={{ fontSize: 11, color: 'var(--danger)', marginTop: 4 }}>
           {error}
         </div>
       )}

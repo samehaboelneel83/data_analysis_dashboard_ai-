@@ -292,7 +292,7 @@ export default function SourceReview() {
           mean), so it belongs with the title, not stranded after the button. */}
       <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, marginBottom: 4 }}>Review data source</h1>
+          <h1 className="dl-page-title" style={{ margin: 0, marginBottom: 4 }}>Review data source</h1>
           <span style={{ color: '#64748b', fontSize: 13 }}>
             {queue.datasets.length} tables · {queue.columns.length} columns ·{' '}
             {pending.length} awaiting review · {settled.length} settled

@@ -70,14 +70,14 @@ const token = jwt.sign({
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: 10, flexWrap: 'wrap' }}>
         <div>
-          <label htmlFor="embed-name" style={{ display: 'block', fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>
+          <label htmlFor="embed-name" style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>
             Config name
           </label>
           <input id="embed-name" value={name} onChange={e => setName(e.target.value)}
             placeholder="e.g. customer-portal" style={{ width: 160 }} />
         </div>
         <div>
-          <label htmlFor="embed-origins" style={{ display: 'block', fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>
+          <label htmlFor="embed-origins" style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>
             Allowed origins (comma-separated, optional)
           </label>
           <input id="embed-origins" value={origins} onChange={e => setOrigins(e.target.value)}
@@ -88,7 +88,7 @@ const token = jwt.sign({
 
       {minted && (
         <div style={{ border: '1px solid var(--accent)', borderRadius: 6, padding: 8, marginBottom: 12 }}>
-          <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>
             Copy the secret now — it is shown only once and cannot be recovered.
           </div>
           <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
@@ -99,32 +99,32 @@ const token = jwt.sign({
             </button>
           </div>
 
-          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', marginBottom: 4 }}>Iframe snippet</div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', marginBottom: 4 }}>Iframe snippet</div>
           <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
             <textarea readOnly value={iframeSnippet} rows={2}
-              style={{ flex: 1, fontSize: 10, fontFamily: 'monospace', resize: 'vertical' }} />
+              style={{ flex: 1, fontSize: 11, fontFamily: 'monospace', resize: 'vertical' }} />
             <button className="btn" style={{ fontSize: 11 }} onClick={() => copy('iframe', iframeSnippet)}>
               {copied === 'iframe' ? 'Copied ✓' : 'Copy'}
             </button>
           </div>
 
-          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', marginBottom: 4 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', marginBottom: 4 }}>
             Sample server-side token generation — Python
           </div>
           <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
             <textarea readOnly value={pythonSnippet} rows={8}
-              style={{ flex: 1, fontSize: 10, fontFamily: 'monospace', resize: 'vertical' }} />
+              style={{ flex: 1, fontSize: 11, fontFamily: 'monospace', resize: 'vertical' }} />
             <button className="btn" style={{ fontSize: 11 }} onClick={() => copy('python', pythonSnippet)}>
               {copied === 'python' ? 'Copied ✓' : 'Copy'}
             </button>
           </div>
 
-          <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', marginBottom: 4 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', marginBottom: 4 }}>
             Sample server-side token generation — Node
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
             <textarea readOnly value={nodeSnippet} rows={8}
-              style={{ flex: 1, fontSize: 10, fontFamily: 'monospace', resize: 'vertical' }} />
+              style={{ flex: 1, fontSize: 11, fontFamily: 'monospace', resize: 'vertical' }} />
             <button className="btn" style={{ fontSize: 11 }} onClick={() => copy('node', nodeSnippet)}>
               {copied === 'node' ? 'Copied ✓' : 'Copy'}
             </button>
@@ -142,11 +142,11 @@ const token = jwt.sign({
                 {c.allowed_origins.length > 0 && ` · ${c.allowed_origins.length} origin(s)`}
                 {c.last_used_at && ` · last used ${new Date(c.last_used_at).toLocaleDateString()}`}
               </span>
-              <button aria-label={`${c.enabled ? 'Disable' : 'Enable'} embed config ${c.id}`} className="btn" style={{ fontSize: 10 }}
+              <button aria-label={`${c.enabled ? 'Disable' : 'Enable'} embed config ${c.id}`} className="btn" style={{ fontSize: 11 }}
                 onClick={() => embedConfigsApi.setEnabled(reportId, c.id, !c.enabled).then(refresh)}>
                 {c.enabled ? 'Disable' : 'Enable'}
               </button>
-              <button aria-label={`Delete embed config ${c.id}`} className="btn" style={{ fontSize: 10 }}
+              <button aria-label={`Delete embed config ${c.id}`} className="btn" style={{ fontSize: 11 }}
                 onClick={() => embedConfigsApi.delete(reportId, c.id).then(refresh)}>Delete</button>
             </li>
           ))}
@@ -207,7 +207,7 @@ export default function ShareLinksDialog({ reportId, onClose }: {
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: 12 }}>
           <div>
-            <label htmlFor="share-days" style={{ display: 'block', fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>
+            <label htmlFor="share-days" style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>
               Expires after (days)
             </label>
             <input id="share-days" type="number" min={1} max={90} value={days}
@@ -224,7 +224,7 @@ export default function ShareLinksDialog({ reportId, onClose }: {
 
         {minted && (
           <div style={{ border: '1px solid var(--accent)', borderRadius: 6, padding: 8, marginBottom: 12 }}>
-            <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>
               Copy it now — this URL is shown only once.
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
@@ -250,7 +250,7 @@ export default function ShareLinksDialog({ reportId, onClose }: {
                   {l.last_access_at && ` (last ${new Date(l.last_access_at).toLocaleDateString()})`}
                 </span>
                 {l.active && (
-                  <button aria-label={`Revoke link ${l.id}`} className="btn" style={{ fontSize: 10 }}
+                  <button aria-label={`Revoke link ${l.id}`} className="btn" style={{ fontSize: 11 }}
                     onClick={async () => {
                       // The one irreversible action in this dialog, and the only
                       // one whose blast radius sits OUTSIDE the system: the URL

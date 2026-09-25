@@ -24,6 +24,7 @@ function renderLayout(initialPath = '/') {
         <Route path="/" element={<Layout />}>
           <Route index element={<div>Page Content</div>} />
           <Route path="reports/:id" element={<div>Report Builder Page</div>} />
+          <Route path="*" element={<div>Other Page</div>} />
         </Route>
       </Routes>
     </MemoryRouter>
@@ -53,7 +54,49 @@ describe('Layout', () => {
     expect(screen.getByRole('link', { name: /Refresh & jobs/i })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /Deliveries/i })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /Activity/i })).toBeInTheDocument()
+    // Admin starts folded (eleven occasional destinations); its heading is the
+    // control that opens it.
+    fireEvent.click(screen.getByRole('button', { name: /^Admin/ }))
     expect(screen.getByRole('link', { name: /Column security/i })).toBeInTheDocument()
+  })
+
+  it('folds Admin by default, says how many pages it holds, and remembers the choice', () => {
+    localStorage.removeItem('rail-folded')
+    const { unmount } = renderLayout()
+    const admin = screen.getByRole('button', { name: /^Admin/ })
+    expect(admin).toHaveAttribute('aria-expanded', 'false')
+    expect(within(admin).getByText('11 pages')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /^Users$/i })).not.toBeInTheDocument()
+    fireEvent.click(admin)
+    expect(admin).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('link', { name: /^Users$/i })).toBeInTheDocument()
+    unmount()
+    renderLayout()
+    expect(screen.getByRole('button', { name: /^Admin/ })).toHaveAttribute('aria-expanded', 'true')
+    localStorage.removeItem('rail-folded')
+  })
+
+  it('any section folds from its heading', () => {
+    localStorage.removeItem('rail-folded')
+    renderLayout()
+    fireEvent.click(screen.getByRole('button', { name: /^Monitoring/ }))
+    expect(screen.queryByRole('link', { name: /Refresh & jobs/i })).not.toBeInTheDocument()
+    localStorage.removeItem('rail-folded')
+  })
+
+  it('unfolds for a page BENEATH a destination, not only the destination itself', () => {
+    localStorage.setItem('rail-folded', JSON.stringify({ Data: true }))
+    renderLayout('/datasets/170')
+    expect(document.querySelector('[aria-controls="rail-section-data"]')).toHaveAttribute('aria-expanded', 'true')
+    localStorage.removeItem('rail-folded')
+  })
+
+  it('never hides the current page: a folded section unfolds on arrival', () => {
+    localStorage.setItem('rail-folded', JSON.stringify({ Admin: true }))
+    renderLayout('/admin/users')
+    expect(screen.getByRole('button', { name: /^Admin/ })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('link', { name: /^Users$/i })).toBeInTheDocument()
+    localStorage.removeItem('rail-folded')
   })
 
   it('hides Monitoring and Admin entirely from a non-admin', () => {

@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
-import { EyeOff } from 'lucide-react'
+import { fieldStyle } from '../../components/ui/fieldStyle'
+import { useT } from '../../i18n'
+import { EyeOff, Plus } from 'lucide-react'
 import { columnSecurityApi, adminRolesApi, datasetsApi } from '../../services/api'
 import type { ColumnSecurityRuleRow, Role, Dataset } from '../../services/api'
 import toast from 'react-hot-toast'
@@ -48,10 +50,7 @@ function RuleModal({ roles, datasets, onSaved, onClose }: {
     return next
   })
 
-  const inp = {
-    style: { width: '100%', fontSize: 12, padding: '5px 8px', boxSizing: 'border-box' as const,
-      background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)' },
-  }
+  const inp = { style: fieldStyle }
 
   const handleSave = async () => {
     if (roleId === '' || datasetId === '') { toast.error('Role and dataset are required'); return }
@@ -135,6 +134,7 @@ function RuleModal({ roles, datasets, onSaved, onClose }: {
 }
 
 export default function AdminColumnSecurityRules() {
+  const t = useT()
   const [rules, setRules] = useState<ColumnSecurityRuleRow[]>([])
   const [roles, setRoles] = useState<Role[]>([])
   const [datasets, setDatasets] = useState<Dataset[]>([])
@@ -156,7 +156,7 @@ export default function AdminColumnSecurityRules() {
   useEffect(load, [])
 
   const roleName = (id: number) => roles.find(r => r.id === id)?.name ?? `Role #${id}`
-  const datasetName = (id: number) => datasets.find(d => d.id === id)?.name ?? `Dataset #${id}`
+  const datasetName = (id: number) => datasets.find(d => d.id === id)?.name ?? `Deleted dataset (#${id})`
 
   const confirm = useConfirm()
   const handleDelete = async (r: ColumnSecurityRuleRow) => {
@@ -179,9 +179,9 @@ export default function AdminColumnSecurityRules() {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, flex: 1 }}>Column Security Rules</h1>
-        <button className="btn btn-primary btn-sm" onClick={() => setShowModal(true)} disabled={!canCreate} title={!canCreate ? 'Needs at least one role and one dataset' : undefined}>
-          + New Rule
+        <h1 className="dl-page-title" style={{ flex: 1 }}>{t('nav.columnSecurity')}</h1>
+        <button className="btn btn-primary" onClick={() => setShowModal(true)} disabled={!canCreate} title={!canCreate ? 'Needs at least one role and one dataset' : undefined}>
+          <Plus size={16} aria-hidden /> {t('admin.newRule')}
         </button>
       </div>
       <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 24, maxWidth: 640 }}>
@@ -197,8 +197,7 @@ export default function AdminColumnSecurityRules() {
       )}
 
       {!loading && loadError == null && !canCreate && (
-        <div style={{ padding: 16, marginBottom: 16, background: 'var(--surface2)', border: '1px solid var(--border)',
-          borderRadius: 8, fontSize: 12, color: 'var(--muted)' }}>
+        <div className="dl-conn-notice">
           You need at least one role and one dataset before creating a rule.
         </div>
       )}
@@ -208,21 +207,18 @@ export default function AdminColumnSecurityRules() {
           description="Roles with no rule for a dataset see every column within their org." />
       )}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div className="dl-rows">
         {rules.map(r => (
-          <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
-            background: 'var(--surface)', border: '1px solid var(--border)',
-            borderRadius: 10, padding: '14px 16px' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: 14 }}>
+          <div key={r.id} className="dl-rows__row">
+            <div className="dl-rows__main">
+              <div className="dl-rows__title">
                 {roleName(r.role_id)} <span style={{ color: 'var(--muted)', fontWeight: 400 }}>on</span> {datasetName(r.dataset_id)}
               </div>
-              <div style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--mono)' }}>
+              <div className="dl-rows__meta dl-rows__meta--mono">
                 hides: {r.denied_columns.join(', ')}
               </div>
             </div>
-            <button className="btn btn-ghost btn-sm" onClick={() => handleDelete(r)}
-              style={{ fontSize: 11, color: 'var(--danger)' }}>Delete</button>
+            <button className="btn btn-ghost btn-sm dl-danger-item" onClick={() => handleDelete(r)}>{t('admin.delete')}</button>
           </div>
         ))}
       </div>

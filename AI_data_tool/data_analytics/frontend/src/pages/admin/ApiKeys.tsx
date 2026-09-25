@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { inlineFieldStyle } from '../../components/ui/fieldStyle'
+import { useT } from '../../i18n'
 import { Key } from 'lucide-react'
 import { apiKeysApi } from '../../services/api'
 import type { ApiKey } from '../../services/api'
@@ -9,6 +11,7 @@ import LoadError from '../../components/ui/LoadError'
 import LoadingState from '../../components/ui/LoadingState'
 
 export default function ApiKeys() {
+  const t = useT()
   const [keys, setKeys] = useState<ApiKey[]>([])
   const [loading, setLoading] = useState(true)
   const [name, setName] = useState('')
@@ -63,12 +66,11 @@ export default function ApiKeys() {
     toast.success('Revoked')
   }
 
-  const inp = { style: { fontSize: 12, padding: '5px 8px', background: 'var(--surface2)',
-    border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)' as const } }
+  const inp = { style: inlineFieldStyle }
 
   return (
     <div>
-      <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 6 }}>API keys</h1>
+      <h1 className="dl-page-title" style={{ marginBottom: 6 }}>{t('nav.apiKeys')}</h1>
       <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 20 }}>
         Durable bearer tokens for machine access — e.g. the MCP server that exposes datalytics to AI agents.
         A key authenticates as you, so it can see and do exactly what you can. Use it as <code>DATALYTICS_TOKEN</code>.
@@ -102,17 +104,16 @@ export default function ApiKeys() {
         <EmptyState icon={Key} title="No API keys yet"
           description="Create a key above to authenticate machine access, like an MCP agent." />
       )}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div className="dl-rows">
         {keys.map(k => (
-          <div key={k.id} style={{ display: 'flex', alignItems: 'center', gap: 14,
-            background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 16px' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: 14 }}>{k.name}</div>
-              <div style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--mono)' }}>
+          <div key={k.id} className="dl-rows__row">
+            <div className="dl-rows__main">
+              <div className="dl-rows__title">{k.name}</div>
+              <div className="dl-rows__meta dl-rows__meta--mono">
                 {`dk_${k.prefix}…`}{k.last_used_at ? '' : ' · never used'}
               </div>
             </div>
-            <button className="btn btn-ghost btn-sm" onClick={() => revoke(k)} style={{ fontSize: 11, color: 'var(--danger)' }}>Revoke</button>
+            <button className="btn btn-ghost btn-sm dl-danger-item" onClick={() => revoke(k)}>{t('admin.revoke')}</button>
           </div>
         ))}
       </div>

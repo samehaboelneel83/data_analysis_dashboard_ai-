@@ -17,6 +17,8 @@ import Upload from './pages/Upload'
 const DatasetDetail = lazy(() => import('./pages/DatasetDetail'))
 import Reports from './pages/Reports'
 import Loader from './components/ui/Loader'
+import ErrorBoundary from './components/ui/ErrorBoundary'
+import NotFound from './pages/NotFound'
 const ReportBuilder = lazy(() => import('./pages/ReportBuilder'))
 const ReportPrint = lazy(() => import('./pages/ReportPrint'))
 const Connections = lazy(() => import('./pages/Connections'))
@@ -76,6 +78,7 @@ export default function App() {
             are reached by a minority of users -- both load on demand so the login
             screen does not wait on them. */}
         <Suspense fallback={<LoadingFallback />}>
+        <ErrorBoundary>
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/sso/callback" element={<SsoCallback />} />
@@ -131,9 +134,13 @@ export default function App() {
               <Route element={<RequireSuperAdmin />}>
                 <Route path="platform/organizations" element={<PlatformOrgs />} />
               </Route>
+              {/* Anything else: a 404 INSIDE the shell. A blank page for a
+                  mistyped link read as a crash. */}
+              <Route path="*" element={<NotFound />} />
             </Route>
           </Route>
         </Routes>
+        </ErrorBoundary>
         </Suspense>
         </PromptProvider>
         </ConfirmProvider>

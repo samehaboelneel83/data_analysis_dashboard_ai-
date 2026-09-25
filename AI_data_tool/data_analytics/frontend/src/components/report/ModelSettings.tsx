@@ -42,9 +42,9 @@ export function modelOptsConfig(wt: string, o: ModelOpts): Record<string, unknow
   return {}
 }
 
-const lbl: React.CSSProperties = { display: 'block', fontSize: 10, fontWeight: 700, color: 'var(--muted)',
+const lbl: React.CSSProperties = { display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--muted)',
   textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }
-const hint: React.CSSProperties = { fontSize: 9.5, color: 'var(--muted)', marginTop: 3 }
+const hint: React.CSSProperties = { fontSize: 10.5, color: 'var(--muted)', marginTop: 3 }
 
 /** Picks the saved model a scoring widget applies. Lists only models this
  *  viewer may use -- the server already omits any trained on a column they
@@ -162,7 +162,7 @@ export default function ModelSettings({ widget, pages, value, onChange, datasetI
                 <input type="checkbox" checked={on} disabled={!!why} title={why || undefined} onChange={() => toggle(spec)} />
                 <span>
                   <span style={{ color: why ? 'var(--muted)' : 'var(--text)' }}>{spec.title}</span>
-                  <span style={{ display: 'block', fontSize: 10, color: 'var(--muted)' }}>
+                  <span style={{ display: 'block', fontSize: 11, color: 'var(--muted)' }}>
                     {spec.model} · {spec.response ?? 'no response'}{spec.response ? ` ~ ${spec.predictors.join(' + ') || 'all columns'}` : ''}{w.page_id !== widget.page_id ? ` · page ${pageName}` : ''}
                     {why ? ` — ${why}` : ''}
                   </span>

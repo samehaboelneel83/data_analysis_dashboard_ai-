@@ -49,7 +49,7 @@ export default function GraphLayersEditor({ value, columns, onChange }: {
 
   return (
     <div style={{ marginBottom: 12 }}>
-      <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: 'var(--muted)', marginBottom: 4 }}>
+      <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--muted)', marginBottom: 4 }}>
         Layers
       </label>
 
@@ -116,7 +116,7 @@ export default function GraphLayersEditor({ value, columns, onChange }: {
       <button onClick={() => onChange([...layers,
         { measure: '', mark: 'bar', aggregation: 'sum', axis: 'left' }])}
         className="btn btn-ghost btn-sm"
-        style={{ fontSize: 10, padding: '3px 8px', marginTop: 6 }}>
+        style={{ fontSize: 11, padding: '3px 8px', marginTop: 6 }}>
         Add layer
       </button>
     </div>

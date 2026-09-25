@@ -92,30 +92,58 @@ html, body, #root {
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: var(--radius-pill); }
 
 /* Buttons */
+/* A plain `.btn` (no variant) is the neutral secondary action. It used to
+   carry no background at all, so it fell back to the browser's own light-grey
+   button face -- which in dark mode was a pale slab on a slate page. It now
+   sits on the surface-2 fill in both themes.
+
+   The border is transparent rather than absent so every variant has the same
+   box, and a primary beside a ghost lines up to the pixel. Size still comes
+   from padding (7 + 20 + 7 = the 34px --dl-control-h), NOT a min-height:
+   dozens of compact buttons shrink themselves with an inline padding, and a
+   floor here would silently inflate every one of them. */
 .btn {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 7px 14px; border-radius: var(--radius-sm); border: none;
-  font-family: var(--sans); font-size: 13px; font-weight: 500;
-  cursor: pointer; transition: opacity .15s, background .15s;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 14px; border-radius: var(--dl-radius-control, 8px);
+  border: 1px solid transparent;
+  background: var(--surface2); color: var(--text);
+  font-family: var(--sans); font-size: 13px; font-weight: 550;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--dl-dur, .14s) var(--dl-ease, ease),
+              border-color var(--dl-dur, .14s) var(--dl-ease, ease),
+              box-shadow var(--dl-dur, .14s) var(--dl-ease, ease);
   text-decoration: none;
 }
+.btn:hover:not(:disabled) { background: color-mix(in srgb, var(--surface2) 65%, var(--border)); }
+/* Pressed: the same halo a focused field wears. Feedback that answers the
+   click, and nothing moves. */
+.btn:active:not(:disabled) { box-shadow: var(--dl-ring); }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
-.btn-primary  { background: var(--accent); color: var(--mc-accent-fg, #fff); }
-/* A real pressed/hover color (the dark blue), not an opacity fade -- opacity
-   over a light canvas washes the button toward grey. */
+.btn .lucide  { flex-shrink: 0; }
+.btn-primary  { background: var(--accent); color: var(--mc-accent-fg, #fff);
+                box-shadow: 0 1px 2px color-mix(in srgb, var(--mc-ink) 12%, transparent); }
+/* A real pressed/hover color, not an opacity fade -- opacity over a light
+   canvas washes the button toward grey. */
 .btn-primary:hover:not(:disabled) { background: var(--accent-strong); }
+.btn-primary:active:not(:disabled) { box-shadow: var(--dl-ring); }
 /* A link with no colour of its own used the browser default (#0000ee): 1.8:1
    on the dark theme. :where() keeps this at zero specificity, so every link
    that styles itself -- class or inline -- still wins. */
 :where(a) { color: var(--accent); }
 
 .btn-danger   { background: var(--danger); color: var(--mc-danger-fg, #fff); }
-.btn-danger:hover:not(:disabled) { opacity: .85; }
-.btn-ghost    { background: transparent; color: var(--text); border: 1px solid var(--border); }
-.btn-ghost:hover:not(:disabled) { background: var(--surface2); }
+/* Darkened toward ink rather than faded: a fading destructive button looks
+   disabled at exactly the moment the pointer is on it. */
+.btn-danger:hover:not(:disabled) { background: color-mix(in oklab, var(--danger) 85%, var(--mc-ink)); }
+/* Ghost = the outlined secondary. It sits on the surface (not transparent) so
+   it keeps its shape on the grey canvas and inside tinted panels alike. */
+.btn-ghost    { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+.btn-ghost:hover:not(:disabled) { background: var(--surface2); border-color: var(--mc-border-strong); }
 /* 24px floor: WCAG 2.5.8 target size. Measured at phone width, small buttons
    came out 22px tall (Share, More actions) and the date presets 16px. */
-.btn-sm       { padding: 4px 10px; font-size: var(--text-xs); border-radius: var(--radius-sm);
+.btn-sm       { padding: 3px 10px; font-size: var(--text-xs); gap: 4px;
+                border-radius: var(--dl-radius-control, 8px);
                 min-height: 24px; min-width: 24px; justify-content: center; }
 
 /* Badges */
@@ -123,11 +151,15 @@ html, body, #root {
   display: inline-flex; align-items: center;
   padding: 2px 8px; border-radius: var(--radius-pill); font-size: 11px; font-weight: var(--weight-semibold);
 }
-.badge-numeric     { background: color-mix(in srgb, var(--accent)  15%, transparent); color: var(--accent); }
+/* Every badge's text is mixed toward --text: the hue on its own 15% tint
+   measured under 4.5:1 for numeric (teal) and datetime (green), which axe
+   flagged on the dataset overview. The mix darkens it in light mode and
+   lightens it in dark while keeping the hue. */
+.badge-numeric     { background: color-mix(in srgb, var(--accent)  15%, transparent); color: color-mix(in oklab, var(--accent) 70%, var(--text)); }
 /* Text mixed toward --text: the series colour on its own tint measured 4.25:1
    (under AA); the mix darkens it in light mode and lightens it in dark. */
 .badge-categorical { background: color-mix(in srgb, var(--accent2) 15%, transparent); color: color-mix(in oklab, var(--accent2) 75%, var(--text)); }
-.badge-datetime    { background: color-mix(in srgb, var(--success)  15%, transparent); color: var(--success); }
+.badge-datetime    { background: color-mix(in srgb, var(--success)  15%, transparent); color: color-mix(in oklab, var(--success) 70%, var(--text)); }
 .badge-text        { background: color-mix(in srgb, var(--muted)   15%, transparent); color: var(--muted); }
 
 /* Cards -- one quiet elevation step above the canvas. The shadow token is
@@ -140,28 +172,79 @@ html, body, #root {
   box-shadow: var(--shadow-card, none);
 }
 
-/* Form controls */
+/* A card that IS a link (Home's recents, dataset and dashboard tiles) says so
+   on hover with its border, the same treatment the dashboard grid uses -- a
+   lift on every tile of a grid is noise. Without this the only hover cue was
+   the cursor. */
+a.card { transition: border-color var(--dl-dur, .14s) var(--dl-ease, ease),
+                     box-shadow var(--dl-dur, .14s) var(--dl-ease, ease); }
+a.card:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--mc-ink) 8%, transparent);
+}
+
+/* Form controls
+   Filled fields: surface-2 at rest, and the surface once focused, so the field
+   being typed into is the one bright box on the panel. About a hundred call
+   sites set their own inline background/border, which outranks this block --
+   so the FOCUS signal below is drawn with box-shadow, which none of them set,
+   and every field in the product gets the same ring whoever styled it. */
 input, select, textarea {
   background: var(--surface2);
   border: 1px solid var(--border);
   color: var(--text);
-  border-radius: 7px;
+  border-radius: var(--dl-radius-control, 8px);
   padding: 6px 10px;
   font-family: var(--sans);
   font-size: 13px;
   outline: none;
-  transition: border-color .15s;
+  transition: border-color var(--dl-dur, .14s) var(--dl-ease, ease),
+              background var(--dl-dur, .14s) var(--dl-ease, ease),
+              box-shadow var(--dl-dur, .14s) var(--dl-ease, ease);
 }
-input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+input:hover:not(:disabled):not(:focus),
+select:hover:not(:disabled):not(:focus),
+textarea:hover:not(:disabled):not(:focus) { border-color: var(--mc-border-strong); }
+input:focus, select:focus, textarea:focus { border-color: var(--accent); background: var(--surface); }
+input::placeholder, textarea::placeholder { color: var(--mc-faint); opacity: 1; }
+input:disabled, select:disabled, textarea:disabled { opacity: .6; cursor: not-allowed; }
 select option { background: var(--surface2); }
 
-/* Tables */
+/* The field ring. Outranks the product-wide :focus-visible outline in
+   datalytics.css (0,2,1 against 0,2,0) for TEXT fields only: an outline
+   2px outside a field that has also turned its border teal read as two
+   concentric boxes. The 1px accent shadow redraws the border for the fields
+   whose inline border would otherwise hide the colour change; the transparent
+   outline is what Windows high-contrast mode paints, since it drops shadows. */
+[data-product="datalytics"] :is(input, select, textarea):focus-visible {
+  outline: 2px solid transparent;
+  outline-offset: 0;
+  box-shadow: 0 0 0 1px var(--accent), var(--dl-ring);
+}
+
+/* Boxes and radios keep the native control; the text-field padding and fill
+   above only made them lopsided. The accent tints the tick. */
+input[type="checkbox"], input[type="radio"], input[type="range"] {
+  padding: 0; background: none; border: none; box-shadow: none;
+  accent-color: var(--accent);
+}
+[data-product="datalytics"] :is(input[type="checkbox"], input[type="radio"], input[type="range"]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
+/* Tables
+   Column headings in sentence case everywhere. The datasets table already
+   dropped the caps (.dl-table th); every other table still shouted them, so
+   two lists a click apart used two heading styles. */
 table { border-collapse: collapse; width: 100%; }
 th, td {
-  padding: 7px 12px; text-align: left; font-size: 12px;
-  border-bottom: 1px solid var(--border);
+  padding: 8px 12px; text-align: start; font-size: 12px;
+  border-bottom: 1px solid var(--dl-table-rule, var(--border));
 }
-th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+th { color: var(--muted); font-weight: 600; font-size: var(--dl-text-micro, 12px);
+     border-bottom-color: var(--border); }
 tr:hover td { background: var(--surface2); }
 
 /* A row's primary link carries its weight, not a permanent underline: a table
@@ -417,7 +500,11 @@ svg.recharts-surface { direction: ltr; }
    Horizontal rules only. A vertical rule per column and a zebra stripe per row
    both add ink proportional to length, and this table is meant to be long. */
 
-.dl-table-card { padding: 0; overflow: hidden; }
+.dl-table-card { padding: 0; overflow: hidden; overflow-x: auto; }
+/* On a phone a wide table scrolls inside its card instead of being cut off
+   at the card's edge (overflow: hidden clipped the last columns entirely). */
+.dl-table-card > .dl-table { min-inline-size: 560px; }
+@media (min-width: 700px) { .dl-table-card > .dl-table { min-inline-size: 0; } }
 
 .dl-table { width: 100%; border-collapse: collapse; }
 
@@ -438,7 +525,10 @@ svg.recharts-surface { direction: ltr; }
 .dl-table td {
   block-size: var(--dl-row-h);
   padding-inline: var(--dl-cell-px);
-  padding-block: 0;
+  /* The row height is a floor, not a fit: a name with its description under
+     it is two lines, and with no block padding those two lines touched the
+     rules above and below. */
+  padding-block: var(--dl-2);
   font-size: var(--dl-text-data);
   border-block-end: 1px solid var(--dl-table-rule);
   border-inline: none;
@@ -656,14 +746,73 @@ svg.recharts-surface { direction: ltr; }
 
 .dl-rail__section {
   inline-size: 100%;
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--mc-muted); /* faint measured 3.65:1 on the rail -- under AA for 10px text */
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--mc-muted); /* faint measured 3.65:1 on the rail -- under AA for small text */
   text-transform: uppercase;
-  letter-spacing: .09em;
+  letter-spacing: .07em;
   padding-inline: var(--dl-3);
   padding-block: var(--dl-4) var(--dl-1);
 }
+
+/* The labeled heading is also the fold control. It keeps the divider look --
+   caps, micro size -- and only admits to being a button on hover, where the
+   chevron firms up: a row of loud toggles down the rail would outshout the
+   destinations they group. */
+.dl-rail__section--toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--dl-1);
+  border: none;
+  background: none;
+  font-family: inherit;
+  text-align: start;
+  cursor: pointer;
+  border-radius: var(--dl-radius-badge);
+  transition: color var(--dl-dur) var(--dl-ease);
+}
+
+.dl-rail__section--toggle:hover { color: var(--text); }
+
+.dl-rail__section-name { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* Open sections show their chevron only when you reach for the heading; a
+   folded one always shows it, beside its count, because that is the state
+   worth noticing. Touch screens cannot hover, so they get it outright. */
+.dl-rail__chev {
+  display: inline-flex;
+  color: var(--mc-faint);
+  opacity: 0;
+  transition: transform var(--dl-dur) var(--dl-ease), color var(--dl-dur) var(--dl-ease),
+              opacity var(--dl-dur) var(--dl-ease);
+}
+
+.dl-rail__section--toggle:hover .dl-rail__chev,
+.dl-rail__section--toggle:focus-visible .dl-rail__chev { color: var(--text); opacity: 1; }
+.dl-rail__chev--folded { opacity: 1; }
+@media (hover: none), (pointer: coarse) {
+  .dl-rail__chev { opacity: 1; }
+}
+
+/* Folded points along the reading direction, so it flips under RTL. */
+.dl-rail__chev--folded { transform: rotate(-90deg); }
+[dir="rtl"] .dl-rail__chev--folded { transform: rotate(90deg); }
+
+/* How many pages a folded section holds: figures in a quiet pill, so
+   "ADMIN 11" reads as a count, not as part of the name. */
+.dl-rail__count {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  background: var(--surface2);
+  border-radius: var(--radius-pill);
+  padding: 0 6px;
+  line-height: 16px;
+}
+
+.dl-rail__items { display: flex; flex-direction: column; gap: 1px; }
 
 .dl-rail__rule {
   inline-size: 24px;
@@ -681,8 +830,8 @@ svg.recharts-surface { direction: ltr; }
   align-items: center;
   gap: var(--dl-3);
   inline-size: 100%;
-  block-size: 36px;
-  border-radius: var(--dl-radius-card);
+  block-size: var(--dl-rail-item-h, 34px);
+  border-radius: var(--dl-radius-control);
   text-decoration: none;
   padding-inline: var(--dl-3);
   font-size: var(--dl-text-data);
@@ -711,15 +860,17 @@ svg.recharts-surface { direction: ltr; }
 
    Drawn as a pseudo-element rather than a border-inline-start, so turning it
    on does not change the box and shunt the icon and label sideways by 4px
-   every time the route changes. Rounded at BOTH ends and inset to nothing, so
-   it reads as part of the pill rather than a tab stuck to its edge. */
+   every time the route changes. A short, fully rounded tick inset from the
+   pill's top and bottom: a full-height bar with square-ish ends read as a
+   tab glued to the edge once the pill's own radius tightened to 8px. */
 .dl-rail__link.active::before {
   content: '';
   position: absolute;
   inset-inline-start: 0;
   inset-block: 0;
-  inline-size: 4px;
-  border-radius: var(--dl-radius-card);
+  inline-size: 3px;
+  inset-block: 8px;
+  border-radius: var(--radius-pill);
   background: var(--accent);
 }
 
@@ -1189,6 +1340,31 @@ html[data-presenting="1"] .dl-bleed { margin: 0; block-size: 100%; }
 
 .dl-dash-card__controls .btn { flex-shrink: 0; }
 
+/* On a pointer that hovers, the controls float over the card's top corner
+   instead of holding a column of the head row. Invisible until hover, they
+   still took ~120px from every title, so names wrapped at half the card's
+   width for buttons nobody could see. They come in on a surface chip so they
+   read over the end of a long title. Touch keeps them in the row (below). */
+@media (hover: hover) and (pointer: fine) {
+  .dl-dash-card { position: relative; }
+  .dl-dash-card__controls {
+    position: absolute;
+    inset-block-start: 10px;
+    inset-inline-end: 10px;
+    padding: 2px;
+    border-radius: 8px;
+    background: var(--surface);
+    box-shadow: 0 0 0 1px var(--border), 0 2px 8px color-mix(in srgb, var(--mc-ink) 10%, transparent);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--dl-dur) var(--dl-ease);
+  }
+  .dl-dash-card:hover .dl-dash-card__controls,
+  .dl-dash-card:focus-within .dl-dash-card__controls { opacity: 1; pointer-events: auto; }
+  .dl-dash-card__controls:empty { display: none; }
+  .dl-dash-card__controls .dl-card-actions { opacity: 1; }
+}
+
 /* The page head's right-hand controls: search, then the primary action. */
 .dl-page-head__tools {
   display: flex;
@@ -1273,6 +1449,9 @@ html[data-presenting="1"] .dl-bleed { margin: 0; block-size: 100%; }
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--dl-radius-card);
+  /* The one thing on screen that floats, so the one thing with the overlay
+     shadow: without it the panel sat flat on the scrim like a printed card. */
+  box-shadow: var(--dl-shadow-overlay);
   padding: var(--dl-5);
   inline-size: 440px;
   max-inline-size: 90vw;
@@ -1303,7 +1482,16 @@ html[data-presenting="1"] .dl-bleed { margin: 0; block-size: 100%; }
   color: var(--muted);
 }
 
-.dl-modal__x:hover { color: var(--text); }
+.dl-modal__x {
+  inline-size: 28px;
+  block-size: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--dl-radius-control);
+  transition: background var(--dl-dur) var(--dl-ease), color var(--dl-dur) var(--dl-ease);
+}
+.dl-modal__x:hover { color: var(--text); background: var(--surface2); }
 
 .dl-modal__note {
   font-size: var(--dl-text-micro);
@@ -1377,6 +1565,18 @@ html[data-presenting="1"] .dl-bleed { margin: 0; block-size: 100%; }
   gap: var(--dl-4);
   align-items: stretch;
 }
+
+/* One column count for the whole page. Each grid used to auto-fill its own
+   width, so a grid inside an indented folder (or under "Granted to me") fit
+   one column fewer than the grid above it and its cards came out a third
+   wider. The count now comes from the PAGE's width, and every nested grid
+   uses it -- the indent costs a few pixels per card, never a column. */
+.dl-dash-page { container: dashpage / inline-size; --dash-cols: 1; }
+@container dashpage (min-width: 640px)  { .dl-dash-grid { --dash-cols: 2; } }
+@container dashpage (min-width: 960px)  { .dl-dash-grid { --dash-cols: 3; } }
+@container dashpage (min-width: 1300px) { .dl-dash-grid { --dash-cols: 4; } }
+@container dashpage (min-width: 1650px) { .dl-dash-grid { --dash-cols: 5; } }
+.dl-dash-page .dl-dash-grid { grid-template-columns: repeat(var(--dash-cols), minmax(0, 1fr)); }
 
 .dl-group-note {
   font-size: var(--dl-text-micro);
@@ -1564,4 +1764,885 @@ html[data-presenting="1"] .dl-bleed { margin: 0; block-size: 100%; }
   outline-offset: 2px;
   border-radius: var(--dl-radius-badge);
   background: var(--accent-soft);
+}
+
+/* ============================================================
+   Top bar breadcrumb
+   Section, then page. The section is muted and plain; the page is the
+   one full-strength word, at body size -- the page's own heading below
+   is the large one, and the bar should not compete with it.
+   ============================================================ */
+
+.dl-crumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--dl-1);
+  min-inline-size: 0;
+  font-size: var(--dl-text-body);
+}
+
+.dl-crumbs__section {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.dl-crumbs__sep {
+  display: inline-flex;
+  color: var(--mc-faint);
+  flex-shrink: 0;
+}
+
+[dir="rtl"] .dl-crumbs__sep { transform: scaleX(-1); }
+
+.dl-crumbs__link { text-decoration: none; border-radius: 4px; }
+.dl-crumbs__link:hover { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+.dl-crumbs__link:focus-visible { outline: none; box-shadow: var(--dl-ring); }
+
+.dl-crumbs__page {
+  font-size: var(--dl-text-body);
+  font-weight: 600;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-inline-size: 0;
+}
+
+/* ============================================================
+   Page titles
+   The one class every page heading uses. Pages used to set their own
+   size inline (18, 20, 22 or 24px), so the title jumped as you moved
+   between sections; the size and weight now come from the page tokens.
+   Margins stay with each page, which knows what sits under its title.
+   ============================================================ */
+
+.dl-page-title,
+.dl-page-head__title {
+  font-size: var(--dl-text-page);
+  font-weight: var(--dl-weight-page);
+  letter-spacing: -.015em;
+  line-height: var(--dl-leading-tight);
+  color: var(--text);
+}
+
+/* ============================================================
+   Form fields
+   Label above, field below, one rhythm. A class rather than the inline
+   style objects most forms still carry, so a form moved onto it picks up
+   the control height and the theme at once.
+   ============================================================ */
+
+.dl-field { display: flex; flex-direction: column; gap: 6px; margin-block-end: var(--dl-4); }
+
+.dl-field__label {
+  font-size: var(--dl-text-micro);
+  font-weight: 550;
+  color: var(--text);
+}
+
+.dl-field__input {
+  inline-size: 100%;
+  min-block-size: 38px;
+  padding-block: 8px;
+  font-size: var(--dl-text-body);
+}
+
+/* ============================================================
+   Sign-in
+   The first screen anyone sees. The same mark and wordmark as the rail,
+   so the product is recognisably the same one on both sides of the
+   login; a faint accent wash behind the card, so the page is not a
+   blank sheet with a box on it.
+   ============================================================ */
+
+.dl-login {
+  position: relative;
+  min-block-size: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--dl-4);
+  background:
+    radial-gradient(900px 480px at 50% -10%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 70%),
+    var(--bg);
+}
+
+.dl-login__lang {
+  position: absolute;
+  inset-block-start: var(--dl-4);
+  inset-inline-end: var(--dl-4);
+}
+
+.dl-login__card {
+  inline-size: 100%;
+  max-inline-size: 380px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--dl-radius-card);
+  box-shadow: var(--dl-shadow-overlay);
+  padding: clamp(24px, 6vw, 36px);
+}
+
+.dl-login__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--dl-2);
+  margin-block-end: var(--dl-5);
+}
+
+.dl-login__brand .dl-rail__mark { inline-size: 30px; block-size: 30px; font-size: var(--dl-text-body); }
+.dl-login__brand .dl-rail__wordmark { font-size: var(--dl-text-section); }
+
+.dl-login__title {
+  font-size: var(--dl-text-page);
+  font-weight: var(--dl-weight-page);
+  letter-spacing: -.015em;
+  line-height: var(--dl-leading-tight);
+  margin: 0 0 var(--dl-1);
+}
+
+.dl-login__sub {
+  color: var(--muted);
+  font-size: var(--dl-text-data);
+  margin: 0 0 var(--dl-5);
+}
+
+.dl-login__submit {
+  inline-size: 100%;
+  justify-content: center;
+  min-block-size: 38px;
+  margin-block-start: var(--dl-1);
+}
+
+.dl-login__or {
+  display: flex;
+  align-items: center;
+  gap: var(--dl-3);
+  margin-block: var(--dl-4);
+  color: var(--muted);
+  font-size: var(--dl-text-micro);
+}
+
+.dl-login__or::before,
+.dl-login__or::after {
+  content: '';
+  flex: 1;
+  block-size: 1px;
+  background: var(--border);
+}
+
+/* ============================================================
+   Row lists (admin pages)
+   One card, rows inside it, horizontal rules only -- the grammar the
+   Datasets table and the Connections list already use. The admin pages
+   drew every user, role and rule as its own bordered box with a gap,
+   which made a short list look like a long form and gave each page a
+   different rhythm from the rest of the product.
+   ============================================================ */
+
+.dl-rows {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--dl-radius-card);
+  box-shadow: var(--shadow-card, none);
+  overflow: hidden;
+}
+
+/* An empty list draws nothing: the page's EmptyState speaks for it. */
+.dl-rows:empty { display: none; }
+
+.dl-rows__row {
+  display: flex;
+  align-items: center;
+  gap: var(--dl-3);
+  flex-wrap: wrap;
+  min-block-size: 56px;
+  padding: var(--dl-3) var(--dl-4);
+  border-block-end: 1px solid var(--dl-table-rule);
+  transition: background var(--dl-dur) var(--dl-ease);
+}
+
+.dl-rows__row:last-child { border-block-end: none; }
+.dl-rows__row:hover { background: var(--dl-table-row-hover); }
+
+.dl-rows__main { flex: 1; min-inline-size: 0; }
+
+.dl-rows__title {
+  font-weight: 600;
+  font-size: var(--dl-text-body);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.dl-rows__meta {
+  font-size: var(--dl-text-micro);
+  color: var(--muted);
+  margin-block-start: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dl-rows__meta--mono { font-family: var(--mono); font-size: 11.5px; }
+
+/* The page-level notice ("create a role first"): same look as the
+   Connections read-only notice, which is what it is. */
+.dl-conn-notice { line-height: var(--dl-leading-body); }
+
+/* ============================================================
+   Upload
+   ============================================================ */
+
+.dl-upload { max-inline-size: 640px; }
+
+.dl-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--dl-1);
+  text-align: center;
+  padding: var(--dl-6) var(--dl-5);
+  margin-block-end: var(--dl-4);
+  background: var(--surface);
+  border: 1.5px dashed var(--mc-border-strong);
+  border-radius: var(--dl-radius-card);
+  cursor: pointer;
+  transition: border-color var(--dl-dur) var(--dl-ease), background var(--dl-dur) var(--dl-ease);
+}
+
+.dl-dropzone:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+
+/* Dragging over, or files already chosen: the zone takes the accent, so the
+   state is legible from across the room. */
+.dl-dropzone--over,
+.dl-dropzone--has {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+}
+
+.dl-dropzone__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 44px;
+  block-size: 44px;
+  margin-block-end: var(--dl-2);
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--mc-accent-ink);
+}
+
+.dl-dropzone__title { font-weight: 600; margin: 0; }
+.dl-dropzone__title--file { color: var(--mc-accent-ink); overflow-wrap: anywhere; }
+.dl-dropzone__hint { color: var(--muted); font-size: var(--dl-text-micro); margin: 0; }
+
+.dl-upload__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dl-4);
+  padding: var(--dl-5);
+}
+
+.dl-upload__form > .btn { align-self: flex-start; }
+
+.dl-upload__errors {
+  margin-block-start: var(--dl-4);
+  padding: var(--dl-3) var(--dl-4);
+  background: var(--dl-error-bg);
+  border: 1px solid var(--dl-error-line);
+  border-radius: var(--dl-radius-control);
+  color: var(--text);
+}
+
+.dl-upload__errors > p { color: var(--dl-error-text); }
+
+/* ============================================================
+   Report builder: view switch + panel bar
+   ============================================================ */
+
+.dl-panebar {
+  container-type: inline-size;
+  display: flex;
+  align-items: center;
+  gap: var(--dl-3);
+  padding: 6px var(--dl-3);
+  border-block-end: 1px solid var(--border);
+  background: var(--surface);
+  min-inline-size: 0;
+}
+
+/* Report / Data / Model: a segmented control. One is always on, and the
+   track makes the three read as one choice rather than three buttons. */
+.dl-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--dl-radius-control);
+  flex-shrink: 0;
+}
+
+.dl-seg__btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--dl-text-micro);
+  font-weight: 550;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--dl-dur) var(--dl-ease), color var(--dl-dur) var(--dl-ease);
+}
+
+.dl-seg__btn:hover { color: var(--text); }
+
+.dl-seg__btn--on,
+.dl-seg__btn--on:hover {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--mc-ink) 12%, transparent);
+}
+
+.dl-panebar__tools {
+  display: flex;
+  align-items: center;
+  gap: var(--dl-2);
+  margin-inline-start: auto;
+  min-inline-size: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+/* A family of panels. The hairline before each group after the first is
+   what turns eight words into three sets. */
+.dl-panebar__group { display: flex; align-items: center; gap: 2px; }
+
+.dl-panebar__group + .dl-panebar__group,
+.dl-panebar__group + div {
+  padding-inline-start: var(--dl-2);
+  border-inline-start: 1px solid var(--border);
+}
+
+/* A panel toggle. On = the accent's soft tint, not the solid accent: with
+   the view switch AND a panel both lit in solid teal, the strip had two
+   primary buttons and neither read as primary. */
+.dl-panebtn {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 9px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--dl-text-micro);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--dl-dur) var(--dl-ease), color var(--dl-dur) var(--dl-ease);
+}
+
+.dl-panebtn:hover { background: var(--surface2); color: var(--text); }
+
+.dl-panebtn--on,
+.dl-panebtn--on:hover {
+  background: var(--accent-soft);
+  color: var(--mc-accent-ink);
+  font-weight: 600;
+}
+
+/* A small floating menu: the same panel-and-rows look everywhere it is used. */
+.dl-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--dl-radius-control);
+  box-shadow: var(--dl-shadow-overlay);
+}
+
+.dl-menu__item {
+  display: flex;
+  align-items: center;
+  inline-size: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--dl-text-micro);
+  text-align: start;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.dl-menu__item:hover { background: var(--surface2); }
+.dl-menu__item--on, .dl-menu__item--on:hover { background: var(--accent-soft); color: var(--mc-accent-ink); font-weight: 600; }
+
+/* ============================================================
+   Widget header controls
+   Overlaid on the header's end edge, shown on hover, keyboard focus or
+   selection. They stay in the DOM and the tab order the whole time.
+   ============================================================ */
+
+.dl-whead__ctl {
+  position: absolute;
+  inset-inline-end: 6px;
+  inset-block: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-inline-start: 18px;
+  /* Fades the title out under the controls instead of cutting it hard. */
+  background: linear-gradient(to left, var(--surface) 70%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dl-dur) var(--dl-ease);
+}
+
+[dir="rtl"] .dl-whead__ctl { background: linear-gradient(to right, var(--surface) 70%, transparent); }
+
+.dl-whead__ctl:empty { display: none; }
+
+.dl-widget:hover .dl-whead__ctl,
+.dl-whead:focus-within .dl-whead__ctl,
+.dl-widget--selected .dl-whead__ctl {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .dl-whead__ctl { opacity: 1; pointer-events: auto; }
+}
+
+/* Narrow strip (a 1440 screen with the rail and the fields pane open is
+   ~970px): the panel toggles drop to icons, bar the one that is open, so all
+   eight and More fit without a hidden scroll. The word is clipped, not
+   removed -- it is still the button's accessible name, and the title shows
+   it on hover. */
+@container (max-width: 1180px) {
+  .dl-panebtn:not(.dl-panebtn--on) .dl-panebtn__text {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .dl-panebtn:not(.dl-panebtn--on) { padding-inline: 7px; }
+}
+
+/* A stat card with no icon tile (the dataset overview's). Top-aligned, so a
+   card whose body wraps (Types) does not push its label below its row. */
+.dl-stat--plain { align-items: flex-start; }
+.dl-stat__badges { display: flex; flex-wrap: wrap; gap: var(--dl-1); margin-block-start: 6px; }
+
+/* A row that carries more than one line of controls (an organization with
+   its quota strip): stacked, full width. */
+.dl-rows__row--stack { flex-direction: column; align-items: stretch; gap: var(--dl-2); }
+.dl-rows__row--stack > * { min-inline-size: 0; }
+
+/* A widget header's icon button (delete, more): a bare 26px target in the
+   muted ink that firms up on hover. The reference design's chrome -- no
+   bordered mini-buttons competing with the chart title. */
+.dl-wicon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 26px;
+  block-size: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background var(--dl-dur) var(--dl-ease), color var(--dl-dur) var(--dl-ease);
+}
+
+.dl-wicon:hover { background: var(--surface2); color: var(--text); }
+.dl-wicon[aria-expanded="true"] { background: var(--surface2); color: var(--text); }
+
+/* ============================================================
+   Chart gallery (builder "Charts" tab)
+   ============================================================ */
+
+.dl-gallery { display: flex; flex-direction: column; gap: var(--dl-2); }
+
+.dl-gallery__search {
+  display: flex;
+  align-items: center;
+  gap: var(--dl-2);
+  padding: 0 10px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--dl-radius-control);
+  color: var(--muted);
+  margin-block-end: var(--dl-1);
+}
+
+.dl-gallery__search:focus-within { border-color: var(--accent); background: var(--surface); box-shadow: var(--dl-ring); }
+
+/* The field sits inside the styled label, so the label draws the box. */
+.dl-gallery__search input {
+  flex: 1;
+  min-inline-size: 0;
+  border: none;
+  background: transparent;
+  padding: 8px 0;
+  font-size: 12.5px;
+  box-shadow: none;
+}
+
+[data-product="datalytics"] .dl-gallery__search input:focus-visible { box-shadow: none; outline: none; }
+
+.dl-gallery__none { font-size: var(--dl-text-micro); color: var(--muted); margin: 2px 0; }
+
+.dl-gallery__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  inline-size: 100%;
+  padding: 6px 2px;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--muted);
+  cursor: pointer;
+  text-align: start;
+}
+
+.dl-gallery__head:hover { color: var(--text); }
+
+.dl-gallery__chev { display: inline-flex; transition: transform var(--dl-dur) var(--dl-ease); }
+.dl-gallery__chev--closed { transform: rotate(-90deg); }
+[dir="rtl"] .dl-gallery__chev--closed { transform: rotate(90deg); }
+
+.dl-gallery__name { flex: 1; }
+
+.dl-gallery__count {
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--mc-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.dl-gallery__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  padding-block-end: var(--dl-2);
+}
+
+/* One tile per chart type: the glyph in the accent ink, the name under it. */
+.dl-gallery__tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-block-size: 62px;
+  padding: 8px 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--dl-radius-control);
+  color: var(--mc-accent-ink);
+  font: inherit;
+  cursor: pointer;
+  transition: border-color var(--dl-dur) var(--dl-ease), background var(--dl-dur) var(--dl-ease),
+              box-shadow var(--dl-dur) var(--dl-ease);
+}
+
+.dl-gallery__tile:hover {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  background: var(--accent-soft);
+}
+
+.dl-gallery__tile:active { box-shadow: var(--dl-ring); }
+
+.dl-gallery__label {
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--text);
+  text-align: center;
+  overflow-wrap: break-word;
+  hyphens: auto;
+}
+
+/* ============================================================
+   Color palette list (page properties)
+   ============================================================ */
+
+.dl-palettes { display: flex; flex-direction: column; gap: 6px; margin-block-end: var(--dl-3); }
+
+.dl-palette {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  inline-size: 100%;
+  padding: 7px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--dl-radius-control);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: start;
+  cursor: pointer;
+  transition: border-color var(--dl-dur) var(--dl-ease), background var(--dl-dur) var(--dl-ease);
+}
+
+.dl-palette:hover { border-color: var(--mc-border-strong); background: var(--surface2); }
+
+.dl-palette--on,
+.dl-palette--on:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* Four colours as one joined strip, rounded only at its ends. */
+.dl-palette__swatch {
+  display: inline-flex;
+  flex-shrink: 0;
+  block-size: 14px;
+  border-radius: 4px;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--mc-ink) 10%, transparent);
+}
+
+.dl-palette__swatch > span { inline-size: 13px; block-size: 100%; }
+
+.dl-palette__name { flex: 1; min-inline-size: 0; }
+.dl-palette--on .dl-palette__name { font-weight: 600; }
+.dl-palette__check { color: var(--mc-accent-ink); flex-shrink: 0; }
+
+/* ============================================================
+   Builder — Suggestions pane
+   A card per candidate: glyph, name, why, and the live thumbnail. The add
+   action is small and at the row's end; the chart is the content.
+   ============================================================ */
+.dl-sug { padding: 12px; overflow-y: auto; block-size: 100%; }
+.dl-sug__head { display: flex; align-items: center; margin-block-end: 10px; }
+.dl-sug__title { font-size: 13px; font-weight: 650; color: var(--text); }
+.dl-sug__head .btn { margin-inline-start: auto; }
+.dl-sug__group {
+  font-size: 11px; font-weight: 600; color: var(--muted);
+  margin: 4px 0 6px;
+}
+.dl-sug__group--accent { color: var(--accent); }
+.dl-sug__list { list-style: none; display: flex; flex-direction: column; gap: 8px; margin: 0 0 12px; padding: 0; }
+.dl-sug__card {
+  border: 1px solid var(--border); border-radius: 10px; padding: 10px;
+  background: var(--surface);
+  transition: border-color .12s ease, box-shadow .12s ease;
+}
+.dl-sug__card:hover { border-color: var(--border-strong, var(--border)); box-shadow: var(--dl-shadow-sm, 0 1px 2px rgb(15 23 42 / .06)); }
+.dl-sug__card--aligned { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+.dl-sug__row { display: flex; align-items: flex-start; gap: 8px; }
+.dl-sug__icon {
+  flex: none; inline-size: 28px; block-size: 28px; border-radius: 7px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent);
+}
+.dl-sug__text { flex: 1; min-inline-size: 0; }
+.dl-sug__name { font-size: 12.5px; font-weight: 600; line-height: 1.3; display: flex; align-items: center; gap: 4px; }
+.dl-sug__star { color: var(--accent); flex: none; }
+.dl-sug__why { font-size: 11.5px; color: var(--muted); margin-block-start: 2px; line-height: 1.35; }
+.dl-sug__add { flex: none; padding: 3px 8px; font-size: 11.5px; }
+.dl-sug__preview {
+  block-size: 118px; pointer-events: none; margin-block-start: 8px;
+  border-radius: 8px; background: var(--surface2); overflow: hidden;
+}
+.dl-sug__none { font-size: 12px; color: var(--muted); }
+
+/* ============================================================
+   Underline tabs (dataset sections)
+   One row that scrolls sideways on a narrow screen instead of wrapping
+   into a second line of tabs.
+   ============================================================ */
+.dl-tabs {
+  display: flex; gap: 2px; flex-shrink: 0;
+  border-block-end: 1px solid var(--border);
+  margin-block-end: 20px;
+  overflow-x: auto; scrollbar-width: none;
+}
+.dl-tabs::-webkit-scrollbar { display: none; }
+.dl-tabs__tab {
+  flex: none;
+  padding: 8px 14px; border: none; background: none; cursor: pointer;
+  font: inherit; font-size: 13px; font-weight: 500;
+  color: var(--muted);
+  border-block-end: 2px solid transparent; margin-block-end: -1px;
+  border-radius: 6px 6px 0 0;
+  transition: color .12s ease, background-color .12s ease;
+}
+.dl-tabs__tab:hover { color: var(--text); background: var(--surface2); }
+.dl-tabs__tab:focus-visible { outline: none; box-shadow: var(--dl-ring); }
+.dl-tabs__tab--on,
+.dl-tabs__tab--on:hover { color: var(--accent); font-weight: 650; border-block-end-color: var(--accent); background: none; }
+
+/* The Analysis tab before an analysis is chosen: what the tab is for, and
+   the common analyses one click away. */
+.dl-analysis-intro { padding: 28px 24px; text-align: center; display: grid; justify-items: center; gap: 8px; }
+.dl-analysis-intro__title { font-weight: 600; margin: 4px 0 0; }
+.dl-analysis-intro__text { color: var(--muted); font-size: 13px; margin: 0; max-inline-size: 460px; line-height: 1.5; }
+.dl-analysis-intro__chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-block-start: 8px; }
+.dl-analysis-intro__chips .btn { text-transform: capitalize; }
+
+/* Command palette group headings */
+.dl-palette__group {
+  padding: 8px 10px 4px;
+  font-size: 11px; font-weight: 600;
+  color: var(--muted);
+}
+.dl-palette__group:first-child { padding-block-start: 4px; }
+
+/* ============================================================
+   Notifications panel (top bar bell)
+   ============================================================ */
+.dl-bell {
+  position: absolute; inset-inline-end: 0; top: 115%;
+  inline-size: 340px; max-inline-size: calc(100vw - 24px);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--mc-ink) 22%, transparent);
+  z-index: 900; overflow: hidden;
+}
+.dl-bell__head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px; border-block-end: 1px solid var(--border);
+}
+.dl-bell__title { font-size: 13px; font-weight: 650; }
+.dl-bell__count { margin-inline-start: auto; font-size: 11.5px; color: var(--muted); }
+.dl-bell__list { max-block-size: 380px; overflow-y: auto; padding: 4px; }
+.dl-bell__item {
+  display: flex; gap: 10px; align-items: flex-start; inline-size: 100%; text-align: start;
+  background: none; border: none; border-radius: 8px;
+  padding: 9px 10px; font: inherit; font-size: 12.5px; line-height: 1.4; color: var(--text);
+}
+.dl-bell__item + .dl-bell__item { margin-block-start: 1px; }
+.dl-bell__item:hover { background: var(--surface2); }
+.dl-bell__item:focus-visible { outline: none; box-shadow: var(--dl-ring); }
+.dl-bell__item--new { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.dl-bell__icon {
+  flex: none; inline-size: 26px; block-size: 26px; border-radius: 7px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--surface2); color: var(--muted);
+}
+.dl-bell__item--new .dl-bell__icon { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.dl-bell__body { flex: 1; min-inline-size: 0; }
+.dl-bell__time { display: block; font-size: 11px; color: var(--muted); margin-block-start: 2px; }
+.dl-bell__dot { flex: none; inline-size: 7px; block-size: 7px; border-radius: 50%; background: var(--accent); margin-block-start: 6px; }
+.dl-bell__empty { display: grid; justify-items: center; gap: 8px; padding: 24px 16px; color: var(--muted); text-align: center; }
+.dl-bell__empty p { margin: 0; font-size: 12.5px; }
+
+/* ---- Compact summary figures on a phone ----------------------------------
+   Three stat cards stacked one per row cost a third of a phone screen before
+   the first real row of content. Below 600px they sit side by side as small
+   tiles: label over figure, no icon. The Types card (badges) takes a row. */
+@media (max-width: 600px) {
+  .dl-stats { grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)) !important; gap: 8px; margin-block-end: 16px; }
+  .dl-stat { padding: 10px 12px; gap: 0; align-items: flex-start; }
+  .dl-stat__icon { display: none; }
+  .dl-stat__label { font-size: 11.5px; }
+  .dl-stat__figure { font-size: 17px; }
+  .dl-stat:has(.dl-stat__badges) { grid-column: 1 / -1; }
+}
+
+/* A matrix of switches (Export policy): the ticks sit under their headings. */
+.dl-table--center-checks td:has(> input[type="checkbox"]),
+.dl-table--center-checks th:not(:first-child):not(:last-child) { text-align: center; }
+
+/* Connection form: the result of "Test connection", beside the fields. */
+.dl-conn-test {
+  display: flex; gap: 8px; align-items: flex-start;
+  margin-block-start: 14px; padding: 9px 12px; border-radius: 8px;
+  font-size: 12.5px; line-height: 1.45;
+}
+.dl-conn-test svg { flex: none; margin-block-start: 2px; }
+.dl-conn-test--ok { color: var(--success); background: color-mix(in srgb, var(--success) 10%, transparent); }
+.dl-conn-test--fail { color: var(--dl-error-text, var(--danger)); background: var(--dl-error-bg, color-mix(in srgb, var(--danger) 10%, transparent)); }
+
+/* ============================================================
+   Bulk selection (Datasets table, Dashboards grid)
+   ============================================================ */
+.dl-bulkbar {
+  position: sticky; inset-block-end: 12px; z-index: 5;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-block: 12px; padding: 8px 10px 8px 14px;
+  background: var(--surface); border: 1px solid var(--border-strong, var(--border));
+  border-radius: 10px;
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--mc-ink) 14%, transparent);
+}
+.dl-bulkbar__count { font-size: 13px; font-weight: 600; margin-inline-end: auto; }
+.dl-bulkbar__delete { color: var(--danger); }
+.dl-bulkbar__delete:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.dl-table__check { inline-size: 36px; padding-inline-end: 0 !important; }
+.dl-table__check input { inline-size: 15px; block-size: 15px; cursor: pointer; vertical-align: middle; }
+.dl-table tr[data-selected="true"] td { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.dl-select-hint {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; color: var(--muted); background: none; border: none; cursor: pointer; padding: 4px 6px; border-radius: 6px;
+}
+.dl-select-hint:hover { color: var(--text); background: var(--surface2); }
+
+/* Dashboards: a card becomes a checkbox tile in select mode. */
+.dl-dash-card__check {
+  position: absolute; inset-block-start: 12px; inset-inline-start: 12px;
+  inline-size: 16px; block-size: 16px; cursor: pointer; z-index: 1;
+}
+.dl-dash-page--selecting .dl-dash-card { position: relative; padding-inline-start: 40px; }
+.dl-dash-page--selecting .dl-dash-card__controls { display: none; }
+.dl-dash-card[data-selected="true"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+}
+.dl-conn-test__raw { margin-block-start: 6px; color: var(--muted); }
+.dl-conn-test__raw summary { cursor: pointer; font-size: 11.5px; }
+.dl-conn-test__raw pre {
+  margin: 6px 0 0; padding: 8px; max-block-size: 140px; overflow: auto;
+  white-space: pre-wrap; word-break: break-word;
+  font-family: var(--mono); font-size: 11px; background: var(--surface); border-radius: 6px; color: var(--text);
+}
+
+/* Inline field errors (connection form) */
+.dl-field__error { font-size: 11.5px; color: var(--danger); margin-block-start: 3px; }
+input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--danger) !important; }
+
+/* Dashboard name in the builder header: one line, ellipsis, full name on
+   hover. A 277-character name used to push the header off the side. */
+.dl-report-name {
+  max-inline-size: min(44vw, 520px);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  unicode-bidi: plaintext;
+}
+.dl-dash-card__title, .dl-crumbs__page { overflow-wrap: anywhere; unicode-bidi: plaintext; }
+
+/* ============================================================
+   Mixed-direction text in the Arabic UI
+   A cell, label or line that starts in Latin script (a column name, an
+   English engine sentence, "1.04× more") lays out left-to-right INSIDE the
+   RTL page instead of having its punctuation and numbers reordered
+   (".click a field to add it", "more ×1.04"). Each element takes its
+   direction from its own first strong character.
+   ============================================================ */
+[dir="rtl"] td, [dir="rtl"] th,
+[dir="rtl"] p, [dir="rtl"] li, [dir="rtl"] summary,
+[dir="rtl"] .dl-field__label, [dir="rtl"] .dl-cell-sub,
+[dir="rtl"] [data-side="builder-left"] button,
+[dir="rtl"] [data-side="builder-left"] div:not(:has(*)) {
+  unicode-bidi: plaintext;
 }

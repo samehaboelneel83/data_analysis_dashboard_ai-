@@ -12,10 +12,13 @@ import EmptyState from '../components/ui/EmptyState'
 import { findingKey, pinsApi, reportsApi } from '../services/api'
 import { navArrows, useDirection } from '../contexts/DirectionContext'
 import { useParams, Link, useLocation, useSearchParams, useNavigate } from 'react-router-dom'
+import { useCrumbTitle } from '../lib/crumb'
+import NotFound from './NotFound'
+import { useT } from '../i18n'
 import OutlierDetailsDialog from '../components/report/OutlierDetailsDialog'
 import IconLabel from '../components/ui/IconLabel'
 import {
-  Bot, LayoutDashboard as OverviewIcon, Table2, Ruler, RefreshCw, Sparkles,
+  Bot, Plug, FolderOpen, LayoutDashboard as OverviewIcon, Table2, Ruler, RefreshCw, Sparkles,
   Pin, Link2, TriangleAlert, Search, BellRing, Brain, Layers, BookOpen,
 } from 'lucide-react'
 import { insightsApi, datasetsApi, analysisApi, dataPreviewApi, filterExprApi, dataSourcesApi, prepApi } from '../services/api'
@@ -37,8 +40,10 @@ import { type Tab, OPS, FILTER_FUNC_CATS, PAGE_SIZE } from './datasetDetail/cons
 
 export default function DatasetDetail() {
   const arrows = navArrows(useDirection().rtl)
+  const tr = useT()
   const { id } = useParams<{ id: string }>()
   const dsId   = Number(id)
+  const badId = !/^\d+$/.test(id ?? '')
   const navigate = useNavigate()
   // "Chart this data" from the page where a person is looking at it. Without
   // it the dataset page was a dead end: the way to a chart went back out to
@@ -58,6 +63,7 @@ export default function DatasetDetail() {
   }
 
   const [ds,       setDs]       = useState<Dataset | null>(null)
+  useCrumbTitle(ds?.name)
   const [analysis, setAnalysis] = useState<any>(null)
   const [loading,  setLoading]  = useState(true)
   const [running,  setRunning]  = useState(false)
@@ -178,6 +184,7 @@ export default function DatasetDetail() {
   const [loadError, setLoadError] = useState<unknown>(null)
   const loadDataset = useCallback(() => {
     setLoadError(null)
+    if (!Number.isFinite(dsId)) return
     datasetsApi.get(dsId).then(ds => {
       setDs(ds)
       setCalcCols(ds.calculated_columns ?? [])
@@ -507,6 +514,7 @@ export default function DatasetDetail() {
     runInfluencers(target.name)
   }, [ds, runInfluencers])
 
+  if (badId) return <NotFound />
   if (loadError) {
     return <LoadError what="this dataset" error={loadError} onRetry={loadDataset} />
   }
@@ -520,14 +528,14 @@ export default function DatasetDetail() {
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexShrink: 0 }}>
-        <Link to="/" style={{ color: 'var(--muted)', fontSize: 12, textDecoration: 'none' }}>{arrows.back} Datasets</Link>
-        <h1 style={{ fontSize: 22, fontWeight: 700, flex: 1 }}>
+        <Link to="/datasets" style={{ color: 'var(--muted)', fontSize: 12, textDecoration: 'none' }}>{arrows.back} {tr('dataset.back')}</Link>
+        <h1 className="dl-page-title" style={{ flex: 1 }}>
           {ds.name}
           {ds.shared && (
-            <span title="Shared with you by an org admin"
-              style={{ fontSize: 10, fontWeight: 400, color: 'var(--accent)', marginInlineStart: 10,
+            <span title={tr('dataset.sharedTitle')}
+              style={{ fontSize: 11, fontWeight: 400, color: 'var(--accent)', marginInlineStart: 10,
                 background: 'color-mix(in srgb, var(--accent) 15%, transparent)', borderRadius: 99, padding: '2px 8px', verticalAlign: 'middle' }}>
-              <IconLabel icon={Link2}>Shared with you</IconLabel>
+              <IconLabel icon={Link2}>{tr('dataset.sharedWithYou')}</IconLabel>
             </span>
           )}
         </h1>
@@ -535,42 +543,42 @@ export default function DatasetDetail() {
         {ds.mode !== 'directquery' && <NotebookSnippet datasetId={ds.id} datasetName={ds.name} />}
         {isAdmin && (
           <button className="btn btn-ghost btn-sm" onClick={() => setShowShareDialog(true)}>
-            Share
+            {tr('dataset.share')}
           </button>
         )}
         {ds.mode === 'directquery' && (
-          <span title="Always queries the live source — nothing to refresh"
+          <span title={tr('dataset.liveTitle')}
             style={{ fontSize: 11, color: 'var(--muted)', background: 'var(--surface2)',
               border: '1px solid var(--border)', borderRadius: 99, padding: '3px 10px' }}>
-            🔌 Live (DirectQuery)
+            <IconLabel icon={Plug}>{tr('dataset.live')}</IconLabel>
           </span>
         )}
         {(ds.data_source_id || canSchedule) && ds.mode !== 'directquery' && (
           <div style={{ position: 'relative' }}>
             {ds.last_refreshed_at && (
-              <div style={{ fontSize: 10, color: 'var(--muted)', textAlign: 'end', marginBottom: 2 }}>
-                Last refreshed {new Date(ds.last_refreshed_at).toLocaleString()}
+              <div style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'end', marginBottom: 2 }}>
+                {tr('dataset.lastRefreshed', { when: new Date(ds.last_refreshed_at).toLocaleString() })}
               </div>
             )}
             <button onClick={() => setShowRefreshMenu(v => !v)} disabled={refreshing} className="btn btn-ghost btn-sm">
-              {refreshing ? 'Refreshing…'
-                : ds.data_source_id ? '↻ Refresh from source' : '↻ Refresh schedule'}
+              {refreshing ? tr('dataset.refreshing')
+                : <IconLabel icon={RefreshCw}>{ds.data_source_id ? tr('dataset.refreshFromSource') : tr('dataset.refreshSchedule')}</IconLabel>}
             </button>
             {showRefreshMenu && (
               <div style={{ position: 'absolute', top: '100%', insetInlineEnd: 0, zIndex: 20, marginTop: 4,
                 background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8,
                 padding: 12, width: 240, boxShadow: '0 4px 16px rgba(0,0,0,0.15)' }}>
                 {ds.data_source_id ? (<>
-                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Load mode</div>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>{tr('dataset.loadMode')}</div>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginBottom: 6, cursor: 'pointer' }}>
                   <input type="radio" name="refresh-mode" checked={refreshMode === 'full'}
                     onChange={() => setRefreshMode('full')} />
-                  Full reload
+                  {tr('dataset.fullReload')}
                 </label>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginBottom: 8, cursor: 'pointer' }}>
                   <input type="radio" name="refresh-mode" checked={refreshMode === 'incremental'}
                     onChange={() => setRefreshMode('incremental')} />
-                  Incremental (watermark)
+                  {tr('dataset.incremental')}
                 </label>
                 {refreshMode === 'incremental' && (
                   <select value={refreshCursorCol} onChange={e => setRefreshCursorCol(e.target.value)}
@@ -581,11 +589,11 @@ export default function DatasetDetail() {
                   </select>
                 )}
                 <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                  <button className="btn btn-ghost btn-sm" onClick={() => setShowRefreshMenu(false)}>Cancel</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setShowRefreshMenu(false)}>{tr('common.cancel')}</button>
                   <button className="btn btn-primary btn-sm"
                     disabled={refreshMode === 'incremental' && !refreshCursorCol} title={refreshMode === 'incremental' && !refreshCursorCol ? 'An incremental refresh needs a cursor column: choose one first' : undefined}
                     onClick={() => handleRefresh(refreshMode, refreshCursorCol)}>
-                    Run
+                    {tr('dataset.run')}
                   </button>
                 </div>
                 </>) : null}
@@ -596,23 +604,23 @@ export default function DatasetDetail() {
                 <div style={ds.data_source_id
                   ? { borderTop: '1px solid var(--border)', marginTop: 12, paddingTop: 10 }
                   : {}}>
-                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Automatic refresh</div>
+                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>{tr('dataset.autoRefresh')}</div>
                   <select
                     aria-label="Automatic refresh interval"
                     disabled={savingSchedule}
                     value={ds.refresh_interval_minutes ?? ''}
                     onChange={e => handleSchedule(e.target.value ? Number(e.target.value) : null)}
                     className="input" style={{ width: '100%', fontSize: 12 }}>
-                    <option value="">Off — refresh manually</option>
-                    <option value="5">Every 5 minutes</option>
-                    <option value="15">Every 15 minutes</option>
-                    <option value="60">Every hour</option>
-                    <option value="360">Every 6 hours</option>
-                    <option value="1440">Every day</option>
+                    <option value="">{tr('dataset.autoOff')}</option>
+                    <option value="5">{tr('dataset.every5')}</option>
+                    <option value="15">{tr('dataset.every15')}</option>
+                    <option value="60">{tr('dataset.everyHour')}</option>
+                    <option value="360">{tr('dataset.every6h')}</option>
+                    <option value="1440">{tr('dataset.everyDay')}</option>
                   </select>
                   {ds.refresh_interval_minutes ? (
-                    <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
-                      Runs without anyone signed in, using the schedule owner's access.
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                      {tr('dataset.autoNote')}
                     </div>
                   ) : null}
                 </div>
@@ -626,39 +634,42 @@ export default function DatasetDetail() {
           </button>
         )}
         <button type="button" onClick={() => void buildDashboard()} disabled={building}
-          className="btn btn-sm" title="A new dashboard with this dataset attached, ready for charts">
-          {building ? 'Creating…' : '+ Build a dashboard'}
+          className="btn btn-sm" title={tr('dataset.buildTitle')}>
+          {building ? tr('dataset.building') : tr('dataset.build')}
         </button>
         <Link to={`/ask?dataset=${dsId}`} className="btn btn-ghost btn-sm"
-          title="Ask AI about this dataset">
-          <IconLabel icon={Bot}>Ask about this data</IconLabel>
+          title={tr('dataset.askTitle')}>
+          <IconLabel icon={Bot}>{tr('dataset.ask')}</IconLabel>
         </Link>
         {tab === 'overview' && (
           <button onClick={runAnalysis} disabled={running} className="btn btn-primary btn-sm">
-            {running ? 'Running…' : analysis ? 'Re-run analysis' : 'Run analysis'}
+            {running ? tr('dataset.running') : analysis ? tr('dataset.rerun') : tr('dataset.runAnalysis')}
           </button>
         )}
       </div>
 
       {/* Tab bar */}
-      <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--border)', marginBottom: 20, flexShrink: 0 }}>
-        {(['overview', 'data', 'meaning', 'statistics', 'alerts', 'models', 'aggregates'] as Tab[]).map(t => (
-          <button key={t} onClick={() => setTab(t)}
-            style={{ padding: '8px 18px', border: 'none', background: 'none', cursor: 'pointer',
-              fontSize: 13, fontWeight: tab === t ? 700 : 400,
-              color: tab === t ? 'var(--accent)' : 'var(--muted)',
-              borderBottom: tab === t ? '2px solid var(--accent)' : '2px solid transparent',
-              marginBottom: -1, fontFamily: 'var(--sans)', textTransform: 'capitalize' }}>
-            {t === 'overview' ? <IconLabel icon={OverviewIcon}>Overview</IconLabel>
-                      : t === 'data' ? <IconLabel icon={Table2}>Data</IconLabel>
-                      : t === 'meaning' ? <IconLabel icon={BookOpen}>Meaning</IconLabel>
-                      : t === 'statistics' ? <IconLabel icon={Ruler}>Analysis</IconLabel>
-                      : t === 'alerts' ? <IconLabel icon={BellRing}>Alerts</IconLabel>
+      {/* Aggregates is offered only where it can do something: it is a
+          DirectQuery feature, and on an import dataset the tab opened onto a
+          paragraph explaining why it was empty. A bookmarked ?tab=aggregates
+          still lands on that explanation. Scrolls sideways rather than
+          wrapping on a phone. */}
+      <div role="tablist" aria-label={tr('dataset.sections')} className="dl-tabs">
+        {(['overview', 'data', 'meaning', 'statistics', 'alerts', 'models', 'aggregates'] as Tab[])
+          .filter(t => t !== 'aggregates' || ds?.mode === 'directquery' || tab === 'aggregates')
+          .map(t => (
+          <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}
+            className={`dl-tabs__tab${tab === t ? ' dl-tabs__tab--on' : ''}`}>
+            {t === 'overview' ? <IconLabel icon={OverviewIcon}>{tr('dataset.tab.overview')}</IconLabel>
+                      : t === 'data' ? <IconLabel icon={Table2}>{tr('dataset.tab.data')}</IconLabel>
+                      : t === 'meaning' ? <IconLabel icon={BookOpen}>{tr('dataset.tab.meaning')}</IconLabel>
+                      : t === 'statistics' ? <IconLabel icon={Ruler}>{tr('dataset.tab.analysis')}</IconLabel>
+                      : t === 'alerts' ? <IconLabel icon={BellRing}>{tr('dataset.tab.alerts')}</IconLabel>
                       // Named explicitly rather than falling off the end of the
                       // chain: the catch-all labelled every future tab "Alerts",
                       // and two tabs with one name is a tab bar that lies.
-                      : t === 'models' ? <IconLabel icon={Brain}>Models</IconLabel>
-                      : <IconLabel icon={Layers}>Aggregates</IconLabel>}
+                      : t === 'models' ? <IconLabel icon={Brain}>{tr('dataset.tab.models')}</IconLabel>
+                      : <IconLabel icon={Layers}>{tr('dataset.tab.aggregates')}</IconLabel>}
           </button>
         ))}
       </div>
@@ -722,37 +733,56 @@ export default function DatasetDetail() {
             </div>
           )}
           {analysis && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12, marginBottom: 24 }}>
+            // The same stat-card grammar as the Datasets page: label on top in
+            // sentence case, the figure in the body face with tabular digits.
+            // It was caps labels over teal monospace, which read as log output
+            // and made "numeric: 4 · datetime: 1 · categorical: 2" wrap to
+            // three ragged lines. Types are now the column-type badges used
+            // everywhere else a type is shown.
+            <div className="dl-stats" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
               {[
-                { label: 'Rows',    value: analysis.overview?.rows?.toLocaleString() },
-                { label: 'Columns', value: analysis.overview?.cols },
-                { label: 'Missing', value: `${analysis.overview?.missing_pct}%` },
-                { label: 'Types',   value: Object.entries(analysis.overview?.type_counts ?? {}).map(([k,v]) => `${k}: ${v}`).join(' · ') },
+                { label: tr('dataset.stat.rows'), value: analysis.overview?.rows?.toLocaleString() },
+                { label: tr('dataset.stat.columns'), value: analysis.overview?.cols },
+                { label: tr('dataset.stat.missing'), value: `${analysis.overview?.missing_pct}%` },
               ].map(card => (
-                <div key={card.label} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '14px 16px' }}>
-                  <div style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>{card.label}</div>
-                  <div style={{ fontSize: 18, fontWeight: 700, fontFamily: 'var(--mono)', color: 'var(--accent)' }}>{card.value}</div>
+                <div key={card.label} className="card dl-stat dl-stat--plain">
+                  <div>
+                    <div className="dl-stat__label">{card.label}</div>
+                    <div className="dl-stat__figure">{card.value}</div>
+                  </div>
                 </div>
               ))}
+              <div className="card dl-stat dl-stat--plain">
+                <div>
+                  <div className="dl-stat__label">{tr('dataset.stat.types')}</div>
+                  <div className="dl-stat__badges">
+                    {Object.entries(analysis.overview?.type_counts ?? {}).map(([k, v]) => (
+                      <span key={k} className={`badge badge-${['numeric', 'datetime', 'categorical'].includes(k) ? k : 'text'}`}>
+                        {k}: {String(v)}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
             </div>
           )}
           {!analysis && !loading && (
             <div style={{ padding: 40, textAlign: 'center', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', color: 'var(--muted)' }}>
-              Click "Run analysis" to generate statistics for this dataset.
+              {tr('dataset.noAnalysis')}
             </div>
           )}
           {ds.mode !== 'directquery' && (
             <section id="insights" style={{ marginBottom: 24 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                <h2 style={{ fontSize: 15, fontWeight: 700 }}>Insights</h2>
+                <h2 style={{ fontSize: 15, fontWeight: 700 }}>{tr('dataset.insights')}</h2>
                 <button className="btn btn-sm" disabled={insightsBusy}
                   onClick={() => {
                     setInsightsBusy(true)
                     insightsApi.run(ds.id).then(setInsights).finally(() => setInsightsBusy(false))
                   }}>
-                  {insightsBusy ? 'Scanning…'
-                    : insights ? <IconLabel icon={RefreshCw}>Re-scan</IconLabel>
-                    : <IconLabel icon={Sparkles}>Generate insights</IconLabel>}
+                  {insightsBusy ? tr('ov.scanning')
+                    : insights ? <IconLabel icon={RefreshCw}>{tr('ov.rescan')}</IconLabel>
+                    : <IconLabel icon={Sparkles}>{tr('ov.genInsights')}</IconLabel>}
                 </button>
               </div>
               {insights && (
@@ -766,7 +796,7 @@ export default function DatasetDetail() {
                       <div key={i} data-testid={`insight-${f.kind}`}
                         style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12 }}>
                         <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', marginBottom: 4 }}>
-                          <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em',
+                          <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em',
                             color: f.kind === 'data_quality' ? '#e6a03c' : 'var(--accent)' }}>
                             {f.kind.replace('_', ' ')}
                           </span>
@@ -785,8 +815,8 @@ export default function DatasetDetail() {
                                 ? 'Already on your dashboard' : 'Pinned to your dashboard'))
                               .catch(() => toast.error('Could not pin this finding'))}
                             style={{ background: 'none', border: 'none', cursor: 'pointer',
-                              fontSize: 10, padding: 0, marginInlineStart: 'auto' }}><Pin size={12} /></button>
-                          <span style={{ fontSize: 9, color: 'var(--muted)', marginInlineStart: 'auto' }}>{Math.round(f.score * 100)}</span>
+                              fontSize: 11, padding: 0, marginInlineStart: 'auto' }}><Pin size={12} /></button>
+                          <span style={{ fontSize: 10.5, color: 'var(--muted)', marginInlineStart: 'auto' }}>{Math.round(f.score * 100)}</span>
                         </div>
                         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 3 }}>{f.title}</div>
                         <div style={{ fontSize: 11, color: 'var(--muted)' }}>{f.detail}</div>
@@ -801,7 +831,7 @@ export default function DatasetDetail() {
           )}
           <section id="influencers" style={{ marginBottom: 24 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
-              <h2 style={{ fontSize: 15, fontWeight: 700 }}>Key influencers</h2>
+              <h2 style={{ fontSize: 15, fontWeight: 700 }}>{tr('ov.keyInfluencers')}</h2>
               <select value={influencerTarget} aria-label="Outcome to explain"
                 onChange={e => { setInfluencerTarget(e.target.value); setInfluencers(null) }}
                 style={{ fontSize: 12 }}>
@@ -810,9 +840,9 @@ export default function DatasetDetail() {
               </select>
               <button className="btn btn-sm" disabled={influencerBusy || !influencerTarget} title={!influencerTarget ? 'Choose the column to explain first' : undefined}
                 onClick={() => runInfluencers(influencerTarget)}>
-                {influencerBusy ? 'Analysing…'
-                    : influencers ? <IconLabel icon={RefreshCw}>Re-run</IconLabel>
-                    : <IconLabel icon={Sparkles}>What drives this?</IconLabel>}
+                {influencerBusy ? tr('ov.analysing')
+                    : influencers ? <IconLabel icon={RefreshCw}>{tr('ov.rerun')}</IconLabel>
+                    : <IconLabel icon={Sparkles}>{tr('ov.whatDrives')}</IconLabel>}
               </button>
             </div>
             {influencerError && (
@@ -840,7 +870,10 @@ export default function DatasetDetail() {
                   <tbody>
                     {influencers.rows.map((r, i) => (
                       <tr key={i}>
-                        <td><strong>{r.factor}</strong> is {r.group}</td>
+                        {/* The rule can hold an interval, "(64.5, 70.1]": an LTR
+                            isolate keeps its brackets in maths order under RTL,
+                            where they otherwise swapped ends with the text. */}
+                        <td><span dir="ltr" style={{ unicodeBidi: 'isolate' }}><strong>{r.factor}</strong> is {r.group}</span></td>
                         <td style={{ fontFamily: 'var(--mono)' }}>
                           {influencers.meta.measure === 'rate'
                             ? `${((r.rate ?? 0) * 100).toFixed(1)}%`
@@ -871,11 +904,11 @@ export default function DatasetDetail() {
 
           <section id="associations" style={{ marginBottom: 24 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-              <h2 style={{ fontSize: 15, fontWeight: 700 }}>Values that travel together</h2>
+              <h2 style={{ fontSize: 15, fontWeight: 700 }}>{tr('ov.travelTogether')}</h2>
               <button className="btn btn-sm" disabled={rulesBusy} onClick={runPatterns}>
-                {rulesBusy ? 'Mining…'
-                    : rules ? <IconLabel icon={RefreshCw}>Re-run</IconLabel>
-                    : <IconLabel icon={Sparkles}>Find patterns</IconLabel>}
+                {rulesBusy ? tr('ov.mining')
+                    : rules ? <IconLabel icon={RefreshCw}>{tr('ov.rerun')}</IconLabel>
+                    : <IconLabel icon={Sparkles}>{tr('ov.findPatterns')}</IconLabel>}
               </button>
             </div>
             {rulesError && (
@@ -936,11 +969,11 @@ export default function DatasetDetail() {
           {ds.mode !== 'directquery' && (
             <section id="segment" style={{ marginBottom: 24 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                <h2 style={{ fontSize: 15, fontWeight: 700 }}>Segment</h2>
+                <h2 style={{ fontSize: 15, fontWeight: 700 }}>{tr('ov.segment')}</h2>
                 <button className="btn btn-sm" disabled={segmentBusy} onClick={runSegment}>
-                  {segmentBusy ? 'Clustering…'
-                    : segment ? <IconLabel icon={RefreshCw}>Re-run segmentation</IconLabel>
-                    : <IconLabel icon={Sparkles}>Segment rows</IconLabel>}
+                  {segmentBusy ? tr('ov.clustering')
+                    : segment ? <IconLabel icon={RefreshCw}>{tr('ov.rerunSegment')}</IconLabel>
+                    : <IconLabel icon={Sparkles}>{tr('ov.segmentRows')}</IconLabel>}
                 </button>
               </div>
               {segmentError && (
@@ -989,7 +1022,7 @@ export default function DatasetDetail() {
           {ds.mode !== 'directquery' && ds.columns.some(c => c.dtype === 'numeric') && (
             <section id="anomalies" style={{ marginBottom: 24 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                <h2 style={{ fontSize: 15, fontWeight: 700 }}>Anomalies</h2>
+                <h2 style={{ fontSize: 15, fontWeight: 700 }}>{tr('ov.anomalies')}</h2>
                 <select value={outlierColumn} aria-label="Column to inspect for outliers"
                   onChange={e => setOutlierColumn(e.target.value)} style={{ fontSize: 12 }}>
                   <option value="">choose a numeric column…</option>
@@ -999,7 +1032,7 @@ export default function DatasetDetail() {
                 </select>
                 <button className="btn btn-sm" disabled={!outlierColumn} title={!outlierColumn ? 'Choose a numeric column first' : undefined}
                   onClick={() => setOutlierOpen(true)}>
-                  <IconLabel icon={TriangleAlert}>Inspect outliers</IconLabel>
+                  <IconLabel icon={TriangleAlert}>{tr('ov.inspectOutliers')}</IconLabel>
                 </button>
               </div>
               <p style={{ fontSize: 12, color: 'var(--muted)' }}>
@@ -1011,7 +1044,7 @@ export default function DatasetDetail() {
           {numCols.length > 0 && (
             <section style={{ marginBottom: 24 }}>
               <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>
-                Numeric columns <span className="badge badge-numeric" style={{ marginInlineStart: 6 }}>{numCols.length}</span>
+                {tr('ov.numericCols')} <span className="badge badge-numeric" style={{ marginInlineStart: 6 }}>{numCols.length}</span>
               </h2>
               <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
                 <table>
@@ -1037,7 +1070,7 @@ export default function DatasetDetail() {
           {dtCols.length > 0 && (
             <section style={{ marginBottom: 24 }}>
               <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>
-                Date & time columns <span className="badge badge-datetime" style={{ marginInlineStart: 6 }}>{dtCols.length}</span>
+                {tr('ov.dateCols')} <span className="badge badge-datetime" style={{ marginInlineStart: 6 }}>{dtCols.length}</span>
               </h2>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
                 {dtCols.map(([col, s]: [string, any]) => (
@@ -1045,7 +1078,7 @@ export default function DatasetDetail() {
                     <div style={{ fontWeight: 700, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
                       {col}
                       {s.granularity && (
-                        <span style={{ fontSize: 9, fontWeight: 400, color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: 6, padding: '0 5px', textTransform: 'uppercase' }}>
+                        <span style={{ fontSize: 10.5, fontWeight: 400, color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: 6, padding: '0 5px', textTransform: 'uppercase' }}>
                           {s.granularity}
                         </span>
                       )}
@@ -1064,8 +1097,8 @@ export default function DatasetDetail() {
                           const max = Math.max(...s.monthly_counts.map((m: any) => m.count), 1)
                           return (
                             <div style={{ marginBottom: 8 }}>
-                              <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 3 }}>
-                                By month{s.busiest_period ? ` — busiest ${s.busiest_period.period} (${s.busiest_period.count.toLocaleString()})` : ''}
+                              <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 3 }}>
+                                {tr('ov.byMonth')}{s.busiest_period ? ` — busiest ${s.busiest_period.period} (${s.busiest_period.count.toLocaleString()})` : ''}
                               </div>
                               <div style={{ display: 'flex', alignItems: 'flex-end', gap: 1, height: 28 }}>
                                 {s.monthly_counts.map((m: any) => (
@@ -1081,7 +1114,7 @@ export default function DatasetDetail() {
                           const max = Math.max(...s.weekday_counts.map((w: any) => w.count), 1)
                           return (
                             <div>
-                              <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 3 }}>By weekday</div>
+                              <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 3 }}>{tr('ov.byWeekday')}</div>
                               <div style={{ display: 'flex', gap: 3 }}>
                                 {s.weekday_counts.map((w: any) => (
                                   <div key={w.day} style={{ flex: 1, textAlign: 'center' }}>
@@ -1107,7 +1140,7 @@ export default function DatasetDetail() {
           {catCols.length > 0 && (
             <section>
               <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>
-                Categorical columns <span className="badge badge-categorical" style={{ marginInlineStart: 6 }}>{catCols.length}</span>
+                {tr('ov.catCols')} <span className="badge badge-categorical" style={{ marginInlineStart: 6 }}>{catCols.length}</span>
               </h2>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
                 {catCols.map(([col, s]: [string, any]) => (
@@ -1137,10 +1170,10 @@ export default function DatasetDetail() {
             {/* Filters */}
             <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 12 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
                   Filters
                 </span>
-                <button className="btn btn-ghost btn-sm" onClick={addFilter} style={{ fontSize: 10, padding: '2px 7px' }}>
+                <button className="btn btn-ghost btn-sm" onClick={addFilter} style={{ fontSize: 11, padding: '2px 7px' }}>
                   + Add
                 </button>
               </div>
@@ -1183,11 +1216,11 @@ export default function DatasetDetail() {
             {/* Global Filter */}
             <div style={{ background: 'var(--surface)', border: `1px solid ${savedFilter ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 8, padding: 12 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
                   Global Filter
                 </span>
                 {savedFilter && (
-                  <span style={{ fontSize: 10, color: 'var(--accent)', padding: '1px 6px', background: 'color-mix(in srgb, var(--accent) 15%, transparent)', borderRadius: 4 }}>
+                  <span style={{ fontSize: 11, color: 'var(--accent)', padding: '1px 6px', background: 'color-mix(in srgb, var(--accent) 15%, transparent)', borderRadius: 4 }}>
                     active
                   </span>
                 )}
@@ -1391,9 +1424,9 @@ export default function DatasetDetail() {
                                 // onClick is neither.
                                 style={{ background: 'none', border: 'none', padding: 0, font: 'inherit',
                                   color: 'inherit', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}>
-                              {calcColNames.has(c) && <span style={{ color: 'var(--accent)', marginInlineEnd: 4, fontSize: 10 }}>ƒx</span>}
+                              {calcColNames.has(c) && <span style={{ color: 'var(--accent)', marginInlineEnd: 4, fontSize: 11 }}>ƒx</span>}
                               {c}
-                              <span aria-hidden="true" style={{ marginInlineStart: 4, color: isSorted ? 'var(--accent)' : 'var(--border)', fontSize: 10 }}>
+                              <span aria-hidden="true" style={{ marginInlineStart: 4, color: isSorted ? 'var(--accent)' : 'var(--border)', fontSize: 11 }}>
                                 {isSorted ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}
                               </span>
                               </button>
@@ -1468,7 +1501,7 @@ export default function DatasetDetail() {
             )}
             {!pvLoading && pvError && (
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 40 }}>
-                <div style={{ fontSize: 32 }}>📂</div>
+                <FolderOpen size={32} color="var(--muted)" aria-hidden />
                 <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>Dataset file not found</div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center', maxWidth: 360 }}>{pvError}</div>
                 {ds?.data_source_id && (ds?.source_table || ds?.source_query) ? (

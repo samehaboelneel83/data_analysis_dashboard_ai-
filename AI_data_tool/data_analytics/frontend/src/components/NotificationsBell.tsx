@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { notificationsApi, type AppNotification } from '../services/api'
 import { Bell, Clock, MessageSquare, RefreshCw, Zap } from 'lucide-react'
-import { useT } from '../i18n'
+import { formatTimeAgo, useT } from '../i18n'
 
 const KIND_ICON: Record<string, React.ReactNode> = {
   alert: <Zap size={13} />, schedule: <Clock size={13} />,
@@ -23,7 +23,7 @@ export default function NotificationsBell() {
   const rootRef = useRef<HTMLDivElement>(null)
 
   const refresh = () =>
-    notificationsApi.list().then(r => { setUnread(r.unread); setItems(r.notifications) }).catch(() => {})
+    notificationsApi.list().then(r => { setUnread(r?.unread ?? 0); setItems(Array.isArray(r?.notifications) ? r.notifications : []) }).catch(() => {})
 
   useEffect(() => {
     refresh()
@@ -39,6 +39,8 @@ export default function NotificationsBell() {
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
   }, [open])
+
+  const newCount = items.filter(n => !n.read).length
 
   const toggle = () => {
     const next = !open
@@ -67,29 +69,41 @@ export default function NotificationsBell() {
         )}
       </button>
 
+      {/* A panel with a head, not a bare list: what this is, and how many
+          of the items are new. Opening the bell still marks them read on the
+          server, but the items that WERE new keep their marker for as long
+          as the panel is open -- fading read ones to 65% made the old ones
+          hard to read and the new ones no easier to find. */}
       {open && (
-        <div role="menu" aria-label={t('bell.list')}
-          style={{ position: 'absolute', insetInlineEnd: 0, top: '115%', width: 320, maxHeight: 380, overflowY: 'auto',
-            background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10,
-            boxShadow: '0 8px 28px rgba(0,0,0,.25)', zIndex: 900, padding: 6 }}>
-          {items.length === 0 ? (
-            <p style={{ fontSize: 12, color: 'var(--muted)', padding: 10 }}>{t('bell.empty')}</p>
-          ) : items.map(n => (
-            <button key={n.id} role="menuitem"
-              onClick={() => { if (n.link) { navigate(n.link); setOpen(false) } }}
-              style={{ display: 'flex', gap: 8, alignItems: 'flex-start', width: '100%', textAlign: 'start',
-                background: 'none', border: 'none', borderBottom: '1px solid var(--border)',
-                padding: '8px 6px', fontSize: 12, color: 'var(--text)',
-                cursor: n.link ? 'pointer' : 'default', opacity: n.read ? 0.65 : 1 }}>
-              <span aria-hidden style={{ flexShrink: 0, display: 'inline-flex', color: 'var(--muted)', marginTop: 1 }}>{KIND_ICON[n.kind] ?? <Bell size={13} />}</span>
-              <span>
-                {n.text}
-                <span style={{ display: 'block', fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
-                  {new Date(n.created_at).toLocaleString()}
+        <div className="dl-bell">
+          <div className="dl-bell__head">
+            <span className="dl-bell__title">{t('bell.title')}</span>
+            <span className="dl-bell__count">
+              {newCount > 0 ? t('bell.new', { n: newCount }) : items.length > 0 ? t('bell.allRead') : null}
+            </span>
+          </div>
+          <div role="menu" aria-label={t('bell.list')} className="dl-bell__list">
+            {items.length === 0 ? (
+              <div className="dl-bell__empty">
+                <Bell size={22} aria-hidden />
+                <p>{t('bell.empty')}</p>
+              </div>
+            ) : items.map(n => (
+              <button key={n.id} role="menuitem" type="button"
+                className={`dl-bell__item${n.read ? '' : ' dl-bell__item--new'}`}
+                onClick={() => { if (n.link) { navigate(n.link); setOpen(false) } }}
+                style={{ cursor: n.link ? 'pointer' : 'default' }}>
+                <span aria-hidden className="dl-bell__icon">{KIND_ICON[n.kind] ?? <Bell size={13} />}</span>
+                <span className="dl-bell__body">
+                  {n.text}
+                  <span className="dl-bell__time" title={new Date(n.created_at).toLocaleString()}>
+                    {formatTimeAgo(n.created_at, t) ?? new Date(n.created_at).toLocaleString()}
+                  </span>
                 </span>
-              </span>
-            </button>
-          ))}
+                {!n.read && <span className="dl-bell__dot" aria-label="new" />}
+              </button>
+            ))}
+          </div>
         </div>
       )}
     </div>

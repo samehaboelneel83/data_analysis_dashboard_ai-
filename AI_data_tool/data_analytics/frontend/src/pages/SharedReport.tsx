@@ -110,7 +110,7 @@ export default function SharedReport() {
         <strong style={{ fontSize: 14 }}>{report.name}</strong>
         {report.classification && (
           <span title="Sensitivity label" style={{
-            fontSize: 10, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase',
+            fontSize: 11, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase',
             color: '#fff', padding: '2px 7px', borderRadius: 4,
             background: ({ Public: '#2e7d32', Internal: '#1565c0', Confidential: '#e65100', Restricted: '#c62828' } as Record<string, string>)[report.classification] ?? '#666' }}>
             {report.classification}
@@ -119,7 +119,7 @@ export default function SharedReport() {
         <span style={{ fontSize: 11, color: 'var(--muted)' }}>Shared view · read only</span>
         {report.pinned && (
           <span title="This link's pages and widget layout were frozen when it was created; the numbers still update live."
-            style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', border: '1px solid var(--border)',
+            style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', border: '1px solid var(--border)',
               borderRadius: 4, padding: '2px 6px' }}>
             Layout pinned at share time
           </span>

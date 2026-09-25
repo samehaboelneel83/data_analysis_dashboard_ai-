@@ -14,7 +14,7 @@ export default function PdfOptionsDialog({ pages, onDownload, onClose }: {
 }) {
   const ref = useModalDialog<HTMLDivElement>(onClose)
   const [o, setO] = useState<PdfOptions>({ paper: 'A4', orientation: 'landscape', contents: true, pages: pages.map(p => p.id) })
-  const lbl: React.CSSProperties = { display: 'block', fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', margin: '8px 0 4px' }
+  const lbl: React.CSSProperties = { display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', margin: '8px 0 4px' }
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div ref={ref} role="dialog" aria-modal="true" aria-label="Download PDF" onClick={e => e.stopPropagation()}

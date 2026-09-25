@@ -1,3 +1,4 @@
+import { useT } from '../../i18n'
 import { useEffect } from 'react'
 import { useCrossFilter } from './CrossFilterContext'
 
@@ -18,6 +19,7 @@ export default function FilterBar({ keyboard = false }: {
    *  Ctrl+Z is the author's undo). */
   keyboard?: boolean
 } = {}) {
+  const tr = useT()
   const { activeFilters, clearFilter, clearAllFilters, undoSelection, redoSelection, undoLabel, redoLabel } = useCrossFilter()
   useEffect(() => {
     if (!keyboard) return
@@ -34,9 +36,9 @@ export default function FilterBar({ keyboard = false }: {
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 0', marginBottom: 8, flexWrap: 'wrap' }}>
-      <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>Filters:</span>
+      <span style={{ fontSize: 11, color: 'var(--muted)', fontWeight: 600 }}>{tr('filters.label')}</span>
       {activeFilters.length === 0 && (
-        <span style={{ fontSize: 11, color: 'var(--muted)' }}>No selections</span>
+        <span style={{ fontSize: 11, color: 'var(--muted)' }}>{tr('filters.none')}</span>
       )}
       {activeFilters.map(f => (
         <span key={`${f.sourceWidgetId}-${f.column}`} style={{
@@ -56,7 +58,7 @@ export default function FilterBar({ keyboard = false }: {
         </span>
       ))}
       {activeFilters.length > 0 && (
-        <button onClick={clearAllFilters} className="btn btn-ghost btn-sm" style={{ fontSize: 10, padding: '2px 8px' }}>
+        <button onClick={clearAllFilters} className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '2px 8px' }}>
           Clear all
         </button>
       )}

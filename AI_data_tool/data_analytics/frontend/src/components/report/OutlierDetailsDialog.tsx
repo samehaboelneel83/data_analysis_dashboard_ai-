@@ -86,13 +86,13 @@ export default function OutlierDetailsDialog({ datasetId, column, onClose }: {
                 background: 'color-mix(in srgb, var(--accent) 25%, transparent)', border: '1px solid var(--accent)', borderRadius: 3 }} />
               <div style={{ position: 'absolute', top: 2, bottom: 2, left: pct(s.median), width: 2, background: 'var(--accent)' }} />
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--muted)', marginBottom: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--muted)', marginBottom: 12 }}>
               <span>min {fmt(s.min)}</span><span>q1 {fmt(s.q1)}</span><span>median {fmt(s.median)}</span>
               <span>q3 {fmt(s.q3)}</span><span>max {fmt(s.max)}</span>
             </div>
 
             <div style={{ fontSize: 12, borderTop: '1px solid var(--border)', paddingTop: 10, marginBottom: 12 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>
                 Impact
               </div>
               {details.impact.share_of_sum != null && (
@@ -104,7 +104,7 @@ export default function OutlierDetailsDialog({ datasetId, column, onClose }: {
 
             {details.outliers.rows.length > 0 && (
               <div style={{ overflowX: 'auto' }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>
                   Outlier rows{details.outliers.count > details.outliers.rows.length ? ` (first ${details.outliers.rows.length})` : ''}
                 </div>
                 <table style={{ fontSize: 11 }}>

@@ -2,7 +2,7 @@ import { memo, useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import type { PartialPeriod, RelativeNote } from '../../lib/relativeDates'
 import type { BrushRange } from './chartRenderers/axisOptions'
 import { createPortal } from 'react-dom'
-import { Copy, Trash2 } from 'lucide-react'
+import { Copy, Trash2, MoreVertical, Link as LinkIcon } from 'lucide-react'
 import { widgetDataApi } from '../../services/api'
 import { svgToPngDataUrl } from '../../lib/widgetImage'
 import toast from 'react-hot-toast'
@@ -845,6 +845,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
   return (
     <div
       ref={widgetRootRef}
+      className={`dl-widget${selected ? ' dl-widget--selected' : ''}`}
       role="figure"
       aria-label={(cfg.alt_text as string) || widget.title || wt}
       onClick={e => onSelect?.(e)}
@@ -886,9 +887,12 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
           try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* jsdom */ }
           onDragStart(e)
         } : undefined}
+        className="dl-whead"
+        // No rule under the header: title and chart read as one card, the way
+        // the reference design sets them; the space does the separating.
         style={{
-          padding: '7px 10px', borderBottom: '1px solid var(--border)',
-          display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0,
+          padding: '12px 14px 4px',
+          display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, position: 'relative',
           cursor: editMode && onDragStart ? 'grab' : 'default',
           background: isDragging ? 'color-mix(in srgb, var(--accent) 6%, transparent)' : undefined,
         }}
@@ -899,9 +903,20 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
         {/* A real heading, not a styled span: screen-reader users navigate a report by
             its headings, and a page of anonymous spans gives them nothing to jump
             between. Level 3 sits under the report name and page title. */}
-        <span role="heading" aria-level={3} style={{ fontWeight: 600, fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.05em', flex: 1 }}>{title}</span>
-        {broadcasts && <span title="Emits cross-filters" style={{ fontSize: 9, color: 'var(--accent)', opacity: .7 }}>→</span>}
-        {receives && <span title="Receives cross-filters" style={{ fontSize: 9, color: 'var(--accent)', opacity: .7 }}>←</span>}
+        {/* One line, sentence case, ellipsis -- the full title rides on the
+            tooltip. Uppercase with tracking made "Revenue, cost and units"
+            wrap to four lines in a quarter-width tile and pushed the chart
+            below the fold of its own card. */}
+        <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+          <span role="heading" aria-level={3} title={title}
+            style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.3, color: 'var(--text)', minWidth: 0,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span>
+          {typeof cfg.subtitle === 'string' && cfg.subtitle && (
+            <span data-testid="widget-subtitle" title={cfg.subtitle}
+              style={{ fontSize: 12, lineHeight: 1.35, color: 'var(--muted)', whiteSpace: 'nowrap',
+                overflow: 'hidden', textOverflow: 'ellipsis' }}>{cfg.subtitle}</span>
+          )}
+        </span>
         {data?.sampled && (
           <span title={`Showing a sample of ${data.sample_size} out of ${data.total_rows} rows`}
             style={{ fontSize: 9, background: 'rgba(230,160,60,.18)', color: '#e6a03c', padding: '1px 5px', borderRadius: 99 }}>
@@ -953,6 +968,14 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
             the Datasets page. That section is gone, so the button promised a
             destination nothing displays. `pinsApi` and its endpoints survive
             untouched, ready for a surface that actually shows them. */}
+        {/* The header's controls ride on top of its end edge and appear when
+            the pointer, the keyboard focus or the selection is on this widget.
+            Laid out inline they took ~90px of every header, so in a quarter-
+            width tile "Total revenue" printed as "Tot…"; now the title owns the
+            row at rest. Touch screens get them outright (index.css). */}
+        <span className="dl-whead__ctl">
+        {broadcasts && <span title="Emits cross-filters" style={{ fontSize: 9, color: 'var(--accent)', opacity: .7 }}>→</span>}
+        {receives && <span title="Receives cross-filters" style={{ fontSize: 9, color: 'var(--accent)', opacity: .7 }}>←</span>}
         {!editMode && !isPreview && widgetDatasetId != null && !['text', 'button', 'image', 'shape', 'web_content', 'container', 'slicer'].includes(widget.widget_type) && (() => {
           const cfgAny = mergedConfig as Record<string, unknown>
           const cols = datasets?.[widgetDatasetId]?.columns ?? []
@@ -982,16 +1005,18 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
           ]
           return (
             <span onMouseDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
-              <ActionMenu label={`Analyse ${title}`} items={items} />
+              <ActionMenu label={`Analyse ${title}`} items={items}
+                trigger={<MoreVertical size={15} aria-hidden />} triggerClassName="dl-wicon" />
             </span>
           )
         })()}
         {editMode && onDelete && (
           <>
-            <button style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: '0 2px' }}
-              onClick={e => { e.stopPropagation(); onDelete() }}>×</button>
+            <button className="dl-wicon" aria-label={`Delete widget ${title}`} title="Delete"
+              onClick={e => { e.stopPropagation(); onDelete() }}><Trash2 size={15} aria-hidden /></button>
             <span onMouseDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
               <ActionMenu
+                trigger={<MoreVertical size={15} aria-hidden />} triggerClassName="dl-wicon"
                 label={`More actions for widget ${title}`}
                 items={[
                   // Offered only when the caller can act on it: every existing
@@ -1007,6 +1032,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
             </span>
           </>
         )}
+        </span>
         {hierarchyNodeId != null && expandLevels.length > 1 && (
           <span style={{ display: 'flex', gap: 2 }}>
             <button aria-label="Expand hierarchy one level"
@@ -1040,7 +1066,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
 
       {/* Body */}
       <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', position: 'relative',
-        padding: cfg.widget_padding != null ? cfg.widget_padding : (['table','crosstab','list'].includes(wt) ? 0 : '6px') }}
+        padding: cfg.widget_padding != null ? cfg.widget_padding : (['table','crosstab','list'].includes(wt) ? 0 : '4px 10px 10px') }}
         // Double-click a mark to drill (SAS's split: single click selects,
         // double click drills). Only with a drill target, only for readers.
         onDoubleClick={!editMode && drillthroughPageId != null ? () => {
@@ -1261,7 +1287,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
               setShowContextMenu(false)
             }}
             style={menuItemStyle}>
-            🔗 Copy link to this visual
+            <LinkIcon size={12} aria-hidden style={{ marginInlineEnd: 6, verticalAlign: '-2px' }} />Copy link to this visual
           </button>
           {/* Export is offered on every widget with a dataset behind it, drill-through
               or not -- the previous menu rendered only when a drill-through target

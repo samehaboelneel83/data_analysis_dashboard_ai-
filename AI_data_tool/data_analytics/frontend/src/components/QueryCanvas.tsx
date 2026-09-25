@@ -129,12 +129,12 @@ export default function QueryCanvas({ tables, kinds, columnsByTable, joins, onAd
             onClick={() => setPicking(picking === e.i ? null : e.i)}
             aria-haspopup="menu" aria-expanded={picking === e.i}
             title={JOIN_TYPES.find(t => t.how === e.how)?.hint ?? 'Change join type'}
-            style={{ fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 8, cursor: 'pointer',
+            style={{ fontSize: 10.5, fontWeight: 700, padding: '1px 6px', borderRadius: 8, cursor: 'pointer',
               border: '1px solid var(--accent)', background: 'var(--surface)', color: 'var(--accent)' }}>
             {e.how}
           </button>
           <button aria-label={`Remove join ${e.i + 1}`} onClick={() => onRemoveJoin(e.i)}
-            style={{ fontSize: 9, border: 'none', background: 'none', color: 'var(--danger)', cursor: 'pointer', padding: 0 }}>✕</button>
+            style={{ fontSize: 10.5, border: 'none', background: 'none', color: 'var(--danger)', cursor: 'pointer', padding: 0 }}>✕</button>
           {picking === e.i && (
             <div role="menu" aria-label="Join type"
               style={{ position: 'absolute', top: '120%', insetInlineStart: 0, zIndex: 5, minWidth: 190,
@@ -150,7 +150,7 @@ export default function QueryCanvas({ tables, kinds, columnsByTable, joins, onAd
                     color: t.how === e.how ? 'var(--accent)' : 'var(--text)',
                     fontWeight: t.how === e.how ? 700 : 400 }}>
                   {t.label}
-                  <span style={{ display: 'block', fontSize: 9, color: 'var(--muted)', fontWeight: 400 }}>
+                  <span style={{ display: 'block', fontSize: 10.5, color: 'var(--muted)', fontWeight: 400 }}>
                     {t.hint}
                   </span>
                 </button>
@@ -205,7 +205,7 @@ export default function QueryCanvas({ tables, kinds, columnsByTable, joins, onAd
                   <button ref={el => { colRefs.current[key] = el }}
                     onClick={() => clickColumn(t, c)}
                     title={pending && pending.table !== t ? `Join ${pending.table}.${pending.column} = ${t}.${c}` : 'Click, then a column in another table, to join'}
-                    style={{ display: 'block', flex: 1, textAlign: 'start', fontSize: 10, padding: '2px 4px',
+                    style={{ display: 'block', flex: 1, textAlign: 'start', fontSize: 11, padding: '2px 4px',
                       border: 'none', cursor: 'pointer', color: 'var(--text)', background: 'transparent' }}>
                     {c}
                   </button>
@@ -225,7 +225,7 @@ export default function QueryCanvas({ tables, kinds, columnsByTable, joins, onAd
         </div>
       ))}
       {pending && (
-        <div style={{ position: 'absolute', bottom: 6, insetInlineStart: 8, fontSize: 10, color: 'var(--accent)', zIndex: 2 }}>
+        <div style={{ position: 'absolute', bottom: 6, insetInlineStart: 8, fontSize: 11, color: 'var(--accent)', zIndex: 2 }}>
           Joining from {pending.table}.{pending.column} — click a column in another table (Esc to cancel)
         </div>
       )}

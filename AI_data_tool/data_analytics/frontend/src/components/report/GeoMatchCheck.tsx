@@ -139,7 +139,7 @@ export default function GeoMatchCheck({ datasetId, column, setId, setName, onCom
             <PreviewMap features={set.features} matched={report.matchedFeatures} />
             {report.unmatched.length > 0 ? (
               <div>
-                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>
                   Not on the map ({report.unmatched.length})
                 </div>
                 <ul data-testid="geo-check-unmatched" style={{ margin: 0, paddingInlineStart: 18, maxHeight: 140, overflow: 'auto', fontSize: 12 }}>

@@ -40,8 +40,8 @@ beforeEach(() => {
 describe('AdminColumnSecurityRules', () => {
   it('creates a rule from role + dataset + checked columns', async () => {
     renderPage()
-    await waitFor(() => expect(screen.getByRole('button', { name: '+ New Rule' })).not.toBeDisabled())
-    fireEvent.click(screen.getByRole('button', { name: '+ New Rule' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'New rule' })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole('button', { name: 'New rule' }))
 
     // Both columns checked -> exactly those names go to the API.
     fireEvent.click(screen.getByRole('checkbox', { name: /salary/ }))
@@ -59,8 +59,8 @@ describe('AdminColumnSecurityRules', () => {
     // An empty denied set is not a weaker rule, it is no rule -- the backend
     // 400s it, so the button must not fire at all.
     renderPage()
-    await waitFor(() => expect(screen.getByRole('button', { name: '+ New Rule' })).not.toBeDisabled())
-    fireEvent.click(screen.getByRole('button', { name: '+ New Rule' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'New rule' })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole('button', { name: 'New rule' }))
     expect(screen.getByRole('button', { name: 'Create rule' })).toBeDisabled()
     expect(columnSecurityApi.create).not.toHaveBeenCalled()
   })

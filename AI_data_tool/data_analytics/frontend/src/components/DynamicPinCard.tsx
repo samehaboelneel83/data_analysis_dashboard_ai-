@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { TrendingDown, TrendingUp } from 'lucide-react'
 import { findingKey, insightsApi, narrateApi } from '../services/api'
 import type { PinnedTileInfo } from '../services/api'
 
@@ -41,7 +42,7 @@ function Badge({ figures }: { figures?: Record<string, number | string> }) {
       <span data-testid="pin-badge" style={{
         fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums',
         color: up ? 'var(--success, #3fb950)' : 'var(--danger)' }}>
-        {up ? '📈' : '📉'} {figures.delta_pct > 0 ? '+' : ''}{figures.delta_pct}%
+        {up ? <TrendingUp size={16} aria-hidden /> : <TrendingDown size={16} aria-hidden />} {figures.delta_pct > 0 ? '+' : ''}{figures.delta_pct}%
       </span>
     )
   }
@@ -122,14 +123,14 @@ export default function DynamicPinCard({ tile, refreshNonce }: {
         <Badge figures={finding.figures} />
         {(finding.novelty === 'new' || finding.novelty === 'changed') && (
           <span style={{ background: 'var(--accent)', color: 'var(--surface)',
-            borderRadius: 3, padding: '0 5px', fontSize: 9, fontWeight: 700 }}>
+            borderRadius: 3, padding: '0 5px', fontSize: 10.5, fontWeight: 700 }}>
             {finding.novelty === 'new' ? 'NEW' : 'CHANGED'}
           </span>
         )}
         {finding.significant === true && (
           <span title={finding.p_adjusted != null
               ? `adjusted p = ${finding.p_adjusted}` : 'statistically significant'}
-            style={{ fontSize: 9, color: 'var(--muted)', border: '1px solid var(--border)',
+            style={{ fontSize: 10.5, color: 'var(--muted)', border: '1px solid var(--border)',
               borderRadius: 3, padding: '0 4px' }}>
             significant
           </span>
@@ -140,7 +141,7 @@ export default function DynamicPinCard({ tile, refreshNonce }: {
       <p style={{ fontSize: 13, margin: 0, lineHeight: 1.45 }}>
         {polished ?? finding.title}
       </p>
-      <div style={{ fontSize: 10, color: 'var(--muted)' }}>
+      <div style={{ fontSize: 11, color: 'var(--muted)' }}>
         <Link to={`/datasets/${tile.dataset_id}`}
           style={{ color: 'var(--muted)' }}>
           {tile.dataset_name}

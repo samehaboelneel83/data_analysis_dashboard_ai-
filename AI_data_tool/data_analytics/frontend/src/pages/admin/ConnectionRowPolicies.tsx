@@ -81,7 +81,7 @@ export default function ConnectionRowPolicies() {
   }
 
   const label: React.CSSProperties = {
-    display: 'block', fontSize: 10, fontWeight: 700, color: 'var(--muted)',
+    display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--muted)',
     textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4,
   }
   const cell: React.CSSProperties = {
@@ -89,8 +89,8 @@ export default function ConnectionRowPolicies() {
   }
 
   return (
-    <div style={{ padding: 24, maxWidth: 980 }}>
-      <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>
+    <div style={{ maxWidth: 980 }}>
+      <h1 className="dl-page-title" style={{ margin: 0 }}>
         Connection rules — what Ask AI can see
       </h1>
 

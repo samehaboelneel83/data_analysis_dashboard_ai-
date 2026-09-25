@@ -152,10 +152,10 @@ export default function MeasuresPanel({ datasetId, columns, onChanged }: Props) 
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <div style={{ flex: 1, fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
+        <div style={{ flex: 1, fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
           ƒx Measures
         </div>
-        <button className="btn btn-ghost btn-sm" style={{ fontSize: 10 }}
+        <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}
           onClick={() => { setEditing({ ...BLANK }); setPreview(null); setError(null) }}>
           + Add measure
         </button>
@@ -177,7 +177,7 @@ export default function MeasuresPanel({ datasetId, columns, onChanged }: Props) 
           background: 'var(--surface2)', borderRadius: 5, marginBottom: 3, fontSize: 11 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontWeight: 600 }}>{m.name}</div>
-            <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--muted)',
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--muted)',
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {m.expression}
             </div>
@@ -212,7 +212,7 @@ export default function MeasuresPanel({ datasetId, columns, onChanged }: Props) 
           {/* Preview grain + default aggregation */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 120 }}>
-              <span style={{ fontSize: 9, color: 'var(--muted)' }}>Group by (preview only)</span>
+              <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>Group by (preview only)</span>
               <select aria-label="Group by" value={groupBy} onChange={e => setGroupBy(e.target.value)}
                 style={{ fontSize: 11, width: '100%' }}>
                 <option value="">— whole table —</option>
@@ -220,7 +220,7 @@ export default function MeasuresPanel({ datasetId, columns, onChanged }: Props) 
               </select>
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 96 }}>
-              <span style={{ fontSize: 9, color: 'var(--muted)' }}>Default agg</span>
+              <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>Default agg</span>
               <select value={editing.default_aggregation ?? 'sum'}
                 onChange={e => setEditing({ ...editing, default_aggregation: e.target.value })}
                 style={{ fontSize: 11 }}>
@@ -251,13 +251,13 @@ export default function MeasuresPanel({ datasetId, columns, onChanged }: Props) 
           )}
 
           <div style={{ display: 'flex', gap: 6 }}>
-            <button className="btn btn-ghost btn-sm" style={{ fontSize: 10 }} disabled={busy} onClick={runPreview}>
+            <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }} disabled={busy} onClick={runPreview}>
               Test
             </button>
-            <button className="btn btn-primary btn-sm" style={{ fontSize: 10, marginInlineStart: 'auto' }} disabled={busy} onClick={save}>
+            <button className="btn btn-primary btn-sm" style={{ fontSize: 11, marginInlineStart: 'auto' }} disabled={busy} onClick={save}>
               Save
             </button>
-            <button className="btn btn-ghost btn-sm" style={{ fontSize: 10 }}
+            <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}
               onClick={() => { setEditing(null); setPreview(null); setError(null) }}>
               Cancel
             </button>

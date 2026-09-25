@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { fieldStyle } from '../../components/ui/fieldStyle'
+import { useT } from '../../i18n'
 import { adminUsersApi, adminRolesApi } from '../../services/api'
 import type { User, Role } from '../../services/api'
 import toast from 'react-hot-toast'
@@ -7,6 +9,8 @@ import { useConfirm } from '../../components/ui/ConfirmDialog'
 import { useModalDialog } from '../../components/ui/useModalDialog'
 import LoadError from '../../components/ui/LoadError'
 import LoadingState from '../../components/ui/LoadingState'
+import EmptyState from '../../components/ui/EmptyState'
+import { Plus, Users as UsersIcon } from 'lucide-react'
 
 function UserModal({ initial, roles, onSave, onClose }: {
   initial?: User | null
@@ -22,10 +26,7 @@ function UserModal({ initial, roles, onSave, onClose }: {
   const [isActive, setIsActive] = useState(initial?.is_active ?? true)
   const [saving, setSaving] = useState(false)
 
-  const inp = {
-    style: { width: '100%', fontSize: 12, padding: '5px 8px', boxSizing: 'border-box' as const,
-      background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)' },
-  }
+  const inp = { style: fieldStyle }
 
   const handleSave = async () => {
     if (!email.trim()) { toast.error('Email is required'); return }
@@ -170,6 +171,7 @@ function BulkImportModal({ onDone, onClose }: { onDone: () => void; onClose: () 
 }
 
 export default function AdminUsers() {
+  const t = useT()
   const [users, setUsers] = useState<User[]>([])
   const [roles, setRoles] = useState<Role[]>([])
   const [loading, setLoading] = useState(true)
@@ -215,13 +217,13 @@ export default function AdminUsers() {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: 24 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, flex: 1 }}>Users</h1>
-        <button className="btn btn-ghost btn-sm" onClick={() => setBulk(true)} disabled={loading || roles.length === 0} title={loading ? 'Loading roles…' : roles.length === 0 ? 'Create a role first: every user needs one' : undefined}
+        <h1 className="dl-page-title" style={{ flex: 1 }}>{t('nav.users')}</h1>
+        <button className="btn btn-ghost" onClick={() => setBulk(true)} disabled={loading || roles.length === 0} title={loading ? 'Loading roles…' : roles.length === 0 ? 'Create a role first: every user needs one' : undefined}
           style={{ marginInlineEnd: 8 }}>
-          Bulk import
+          {t('admin.bulkImport')}
         </button>
-        <button className="btn btn-primary btn-sm" onClick={() => setModal('add')} disabled={loading || roles.length === 0} title={loading ? 'Loading roles…' : roles.length === 0 ? 'Create a role first: every user needs one' : undefined}>
-          + New User
+        <button className="btn btn-primary" onClick={() => setModal('add')} disabled={loading || roles.length === 0} title={loading ? 'Loading roles…' : roles.length === 0 ? 'Create a role first: every user needs one' : undefined}>
+          <Plus size={16} aria-hidden /> {t('admin.newUser')}
         </button>
       </div>
 
@@ -232,34 +234,28 @@ export default function AdminUsers() {
       )}
 
       {!loading && loadError == null && roles.length === 0 && (
-        <div style={{ padding: 16, marginBottom: 16, background: 'var(--surface2)', border: '1px solid var(--border)',
-          borderRadius: 8, fontSize: 12, color: 'var(--muted)' }}>
+        <div className="dl-conn-notice">
           Create a role first — every user needs one.
         </div>
       )}
 
       {!loading && loadError == null && users.length === 0 && roles.length > 0 && (
-        <div className="card" style={{ padding: '56px 24px', textAlign: 'center', color: 'var(--muted)' }}>
-          <div style={{ fontSize: 40, marginBottom: 12 }}>👤</div>
-          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>No users yet</div>
-          <div style={{ fontSize: 12 }}>Invite teammates and assign them a role to get started.</div>
-        </div>
+        <EmptyState icon={UsersIcon} title="No users yet"
+          description="Invite teammates and assign them a role to get started." />
       )}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div className="dl-rows">
         {users.map(u => (
-          <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
-            background: 'var(--surface)', border: '1px solid var(--border)',
-            borderRadius: 10, padding: '14px 16px' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: 14 }}>
+          <div key={u.id} className="dl-rows__row">
+            <div className="dl-rows__main">
+              <div className="dl-rows__title">
                 {u.email}
                 {!u.is_active && <span style={{ marginInlineStart: 8, fontSize: 11, color: 'var(--danger)' }}>Inactive</span>}
               </div>
-              <div style={{ fontSize: 11, color: 'var(--muted)' }}>{u.role.name}{u.role.is_org_admin ? ' (admin)' : ''}</div>
+              <div className="dl-rows__meta">{u.role.name}{u.role.is_org_admin ? ' (admin)' : ''}</div>
             </div>
-            <button className="btn btn-ghost btn-sm" onClick={() => setModal(u)} style={{ fontSize: 11 }}>Edit</button>
-            <button className="btn btn-ghost btn-sm" onClick={() => handleDelete(u)} style={{ fontSize: 11, color: 'var(--danger)' }}>Delete</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => setModal(u)}>{t('admin.edit')}</button>
+            <button className="btn btn-ghost btn-sm dl-danger-item" onClick={() => handleDelete(u)}>{t('admin.delete')}</button>
           </div>
         ))}
       </div>

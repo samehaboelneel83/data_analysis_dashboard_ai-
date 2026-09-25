@@ -1,9 +1,13 @@
 export const THEMES: Record<string, string[]> = {
-  default: ['#6c8fff','#a78bfa','#34d399','#fbbf24','#f87171','#38bdf8','#fb7185','#4ade80','#c084fc','#e879f9'],
-  ocean:   ['#0ea5e9','#06b6d4','#14b8a6','#22d3ee','#3b82f6','#0891b2','#0284c7','#67e8f9','#38bdf8','#7dd3fc'],
-  sunset:  ['#f97316','#fb923c','#f59e0b','#fbbf24','#ef4444','#f87171','#fb7185','#fda4af','#facc15','#fdba74'],
-  forest:  ['#22c55e','#16a34a','#4ade80','#84cc16','#65a30d','#a3e635','#15803d','#86efac','#bef264','#166534'],
-  mono:    ['#94a3b8','#64748b','#475569','#cbd5e1','#334155','#e2e8f0','#1e293b','#f1f5f9','#0f172a','#f8fafc'],
+  // The first four of each palette are the Claude Design "Dashboard Editor
+  // redesign" values, sampled from its colour-palette panel; the tail keeps
+  // ten entries so a chart with many series still cycles through distinct hues.
+  // Keys are unchanged -- reports store them -- only the colours moved.
+  default: ['#5b7cfa','#a78bfa','#34d399','#fbbf24','#f87171','#38bdf8','#fb7185','#4ade80','#c084fc','#e879f9'],
+  ocean:   ['#0284c7','#06b6d4','#14b8a6','#6366f1','#0ea5e9','#22d3ee','#3b82f6','#0891b2','#67e8f9','#818cf8'],
+  sunset:  ['#ea580c','#e11d48','#f59e0b','#9f1239','#f97316','#fb7185','#fbbf24','#dc2626','#fdba74','#be123c'],
+  forest:  ['#15803d','#65a30d','#0d9488','#a16207','#22c55e','#84cc16','#14b8a6','#ca8a04','#166534','#4d7c0f'],
+  mono:    ['#1f2937','#4b5563','#9ca3af','#cbd5e1','#374151','#6b7280','#d1d5db','#111827','#e5e7eb','#94a3b8'],
   // Every pair in this palette clears a 3:1 contrast ratio against both the light and
   // dark canvas, and adjacent entries are separated by lightness as well as hue, so the
   // series remain distinguishable in greyscale and to the common forms of colour

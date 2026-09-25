@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { fieldStyle } from '../../components/ui/fieldStyle'
+import { useT } from '../../i18n'
 import toast from 'react-hot-toast'
 import { apiOrigin, ssoApi, type SsoConfig } from '../../services/api'
 import { useConfirm } from '../../components/ui/ConfirmDialog'
@@ -15,6 +17,7 @@ const API_ORIGIN = apiOrigin()
  *  or SAML 2.0. SSO authenticates users an admin has already created here; it never
  *  provisions new accounts. Secrets are write-only (stored, never returned). */
 export default function AdminSso() {
+  const t = useT()
   const confirm = useConfirm()
   const [protocol, setProtocol] = useState<'oidc' | 'saml'>('oidc')
   const [enabled, setEnabled] = useState(true)
@@ -98,10 +101,7 @@ export default function AdminSso() {
     } catch { toast.error('Could not remove SSO') }
   }
 
-  const inp: React.CSSProperties = {
-    width: '100%', fontSize: 13, padding: '8px 10px', boxSizing: 'border-box',
-    background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)',
-  }
+  const inp: React.CSSProperties = fieldStyle
   const field = (label: string, node: React.ReactNode, hint?: string) => (
     <label style={{ display: 'block', marginBottom: 16 }}>
       <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 5 }}>{label}</div>
@@ -112,22 +112,24 @@ export default function AdminSso() {
   const acs = `${API_ORIGIN}/api/v1/auth/sso/saml/acs`
   const callback = `${API_ORIGIN}/api/v1/auth/sso/oidc/callback`
 
-  if (loading) return <div style={{ padding: 24 }}><LoadingState /></div>
-  if (loadError != null) return <div style={{ padding: 24, maxWidth: 640 }}><LoadError what="SSO settings" error={loadError} onRetry={load} /></div>
+  if (loading) return <div><LoadingState /></div>
+  if (loadError != null) return <div style={{ maxWidth: 640 }}><LoadError what="SSO settings" error={loadError} onRetry={load} /></div>
 
   return (
-    <div style={{ padding: 24, maxWidth: 640 }}>
-      <h2 style={{ fontSize: 18, fontWeight: 800, marginBottom: 4 }}>Single sign-on</h2>
-      <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 20 }}>
-        Let members sign in through your identity provider. Users must already exist here —
-        SSO authenticates them, it does not create accounts.
+    <div style={{ maxWidth: 640 }}>
+      <h1 className="dl-page-title" style={{ marginBottom: 4 }}>{t('nav.sso')}</h1>
+      <p className="dl-page-head__sub" style={{ marginBottom: 20 }}>
+        {t('sso.subtitle')}
       </p>
 
-      {field('Protocol', (
-        <div style={{ display: 'flex', gap: 8 }}>
+      {field(t('sso.protocol'), (
+        // One of two, always one on: a segmented control, like the other
+        // either/or switches -- two primary-styled buttons read as two actions.
+        <div role="group" aria-label={t('sso.protocol')} className="dl-seg" style={{ display: 'flex' }}>
           {(['oidc', 'saml'] as const).map(p => (
-            <button key={p} type="button" className={protocol === p ? 'btn btn-primary' : 'btn'}
-              onClick={() => setProtocol(p)} style={{ flex: 1 }}>
+            <button key={p} type="button" aria-pressed={protocol === p}
+              className={`dl-seg__btn${protocol === p ? ' dl-seg__btn--on' : ''}`}
+              onClick={() => setProtocol(p)} style={{ flex: 1, justifyContent: 'center' }}>
               {p === 'oidc' ? 'OpenID Connect' : 'SAML 2.0'}
             </button>
           ))}
@@ -136,9 +138,9 @@ export default function AdminSso() {
         ? 'Azure AD / Entra, Okta, Google, Auth0, Keycloak.'
         : 'ADFS, Shibboleth, or any SAML 2.0 IdP.')}
 
-      {field('Email domain', <input style={inp} value={domain}
+      {field(t('sso.emailDomain'), <input style={inp} value={domain}
         onChange={e => setDomain(e.target.value)} placeholder="acme.com" />,
-        'Users whose email ends with this domain are routed to your IdP.')}
+        t('sso.emailDomainHint'))}
 
       {protocol === 'oidc' ? (
         <>
@@ -179,14 +181,14 @@ export default function AdminSso() {
 
       {field('', <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
         <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} />
-        Enabled (users can sign in with SSO)
+        {t('sso.enabled')}
       </label>)}
 
       <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
         <button className="btn btn-primary" onClick={save} disabled={saving}>
-          {saving ? 'Saving…' : 'Save'}
+          {saving ? t('sso.saving') : t('sso.save')}
         </button>
-        {configured && <button className="btn" onClick={remove}>Remove SSO</button>}
+        {configured && <button className="btn" onClick={remove}>{t('sso.remove')}</button>}
       </div>
     </div>
   )

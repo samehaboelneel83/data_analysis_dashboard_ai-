@@ -22,6 +22,7 @@ from ..services.analytics import load_file
 from ..services.sql_expr import ExpressionTranslationError, expression_columns, translate_filter_expr
 from ..services.widget_data import apply_filter_expr
 
+from ..services.refresh_scheduler import calendar_spec
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
@@ -600,6 +601,11 @@ async def list_monitoring_jobs(
         jobs.append({"kind": "report_schedule", "id": s.id,
                      "name": s.subject or report_name,
                      "interval_minutes": s.interval_minutes,
+                     # A calendar schedule ("weekly on Monday at 09:00") keeps
+                     # its spec beside the recipients; without it the jobs page
+                     # printed "—" for a schedule that very much runs.
+                     "calendar": calendar_spec(s.recipients),
+                     "timezone": s.timezone,
                      "last_run_at": s.last_run_at,
                      "status": s.last_status, "error": None,
                      "report_id": s.report_id})

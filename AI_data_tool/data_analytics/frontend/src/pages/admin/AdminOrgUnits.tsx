@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useT } from '../../i18n'
 import toast from 'react-hot-toast'
 import { orgUnitsApi, adminUsersApi, type OrgUnit, type User } from '../../services/api'
 import { useConfirm } from '../../components/ui/ConfirmDialog'
@@ -37,6 +38,7 @@ function nest(units: OrgUnit[]): TreeNode[] {
 }
 
 export default function AdminOrgUnits() {
+  const t = useT()
   const [units, setUnits] = useState<OrgUnit[]>([])
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
@@ -143,25 +145,25 @@ export default function AdminOrgUnits() {
 
           <span style={{ fontSize: 13, fontWeight: 600 }}>{n.name}</span>
           {n.level_name && (
-            <span style={{ fontSize: 9, color: 'var(--muted)', border: '1px solid var(--border)',
+            <span style={{ fontSize: 10.5, color: 'var(--muted)', border: '1px solid var(--border)',
               borderRadius: 99, padding: '1px 7px', textTransform: 'uppercase' }}>
               {n.level_name}
             </span>
           )}
           {n.match_value !== n.name && (
             <span title="The value this unit takes in your data"
-              style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'var(--mono)' }}>
+              style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--mono)' }}>
               = {n.match_value}
             </span>
           )}
 
           <span style={{ marginInlineStart: 'auto', display: 'flex', gap: 4 }}>
             <button className="btn btn-ghost btn-sm" onClick={() => addUnit(n)}
-              aria-label={`Add a unit under ${n.name}`} style={{ fontSize: 10 }}>
+              aria-label={`Add a unit under ${n.name}`} style={{ fontSize: 11 }}>
               <Plus size={11} />
             </button>
             <button className="btn btn-ghost btn-sm" onClick={() => removeUnit(n)}
-              aria-label={`Delete ${n.name}`} style={{ fontSize: 10, color: 'var(--danger)' }}>
+              aria-label={`Delete ${n.name}`} style={{ fontSize: 11, color: 'var(--danger)' }}>
               <Trash2 size={11} />
             </button>
           </span>
@@ -174,9 +176,9 @@ export default function AdminOrgUnits() {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, flex: 1 }}>Organization chart</h1>
-        <button className="btn btn-primary btn-sm" onClick={() => addUnit(null)}>
-          <Plus size={13} /> Add top-level unit
+        <h1 className="dl-page-title" style={{ flex: 1 }}>{t('nav.orgChart')}</h1>
+        <button className="btn btn-primary" onClick={() => addUnit(null)}>
+          <Plus size={16} aria-hidden /> {t('admin.addTopUnit')}
         </button>
       </div>
       <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 20, maxWidth: 680 }}>

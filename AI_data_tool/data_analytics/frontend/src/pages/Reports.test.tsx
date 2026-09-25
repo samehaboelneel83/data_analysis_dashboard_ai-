@@ -72,6 +72,27 @@ describe('deleting a dashboard', () => {
     await waitFor(() => expect(reportsApi.delete).toHaveBeenCalledWith(1))
   })
 
+  it('select mode: clicking cards ticks them instead of opening them, then deletes them together', async () => {
+    vi.mocked(reportsApi.list).mockResolvedValue([
+      report(), report({ id: 2, name: 'Untitled dashboard 3' }), report({ id: 3, name: 'Shared KPIs', my_capability: 'view', is_mine: false }),
+    ] as never)
+    renderReports()
+    await waitFor(() => expect(screen.getByText('Revenue')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select' }))
+    fireEvent.click(screen.getByText('Untitled dashboard 3'))
+    expect(screen.getByTestId('where')).toHaveTextContent('/reports')
+    expect(screen.getByRole('checkbox', { name: 'Select Untitled dashboard 3' })).toBeChecked()
+    // A dashboard the viewer cannot delete cannot be ticked.
+    expect(screen.getByRole('checkbox', { name: 'Select Shared KPIs' })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: /Delete selected/ }))
+    const dlg = await screen.findByRole('alertdialog')
+    fireEvent.click(within(dlg).getByRole('button', { name: /Delete selected/ }))
+    await waitFor(() => expect(reportsApi.delete).toHaveBeenCalledWith(2))
+    expect(reportsApi.delete).toHaveBeenCalledTimes(1)
+  })
+
   it('offers exactly ONE delete control per card', async () => {
     // It used to offer two: this button and a ⋯ menu whose only item was the
     // same action. Two controls for one destructive act is two chances to fire

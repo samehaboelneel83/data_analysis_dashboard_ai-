@@ -26,7 +26,7 @@ export default function Connections() {
   const t = useT()
   const [sources,  setSources]  = useState<DataSource[]>([])
   const srcFilter = useListFilter(sources,
-    d => [d.name, d.type], 'Search connections')
+    d => [d.name, d.type], t('search.connections'))
   const [catalog,  setCatalog]  = useState<ConnectorSpec[]>([])
   const [loading,  setLoading]  = useState(true)
   const [loadError, setLoadError] = useState<unknown>(null)
@@ -108,7 +108,7 @@ export default function Connections() {
         <div>
           <h1 className="dl-page-head__title">{t('nav.connections')}</h1>
           <p className="dl-page-head__sub">
-            Live databases and APIs your datasets and dashboards read from.
+            {t('connections.subtitle')}
           </p>
         </div>
         {canAdminister && (
@@ -122,7 +122,7 @@ export default function Connections() {
           beside an action that CREATES connections rather than finds them. */}
       {srcFilter.input && <div className="dl-toolbar">{srcFilter.input}</div>}
 
-      {loading && <p className="dl-muted-line">Loading…</p>}
+      {loading && <p className="dl-muted-line">{t('common.loading')}</p>}
 
       {!loading && !!loadError && (
         <LoadError what="connections" error={loadError}
@@ -132,9 +132,9 @@ export default function Connections() {
       {!loading && !loadError && sources.length === 0 && (
         <div className="card dl-empty">
           <Cable size={40} className="dl-empty__icon" aria-hidden />
-          <p className="dl-empty__title">No connections yet</p>
+          <p className="dl-empty__title">{t('connections.empty')}</p>
           <p className="dl-empty__body">
-            Connect to PostgreSQL, SQL Server, MySQL, Oracle, SQLite or a Web API
+            {t('connections.emptyBody')}
           </p>
         </div>
       )}
@@ -145,13 +145,12 @@ export default function Connections() {
         <p className="dl-conn-notice">
           <Info size={16} aria-hidden style={{ flexShrink: 0, marginBlockStart: 1 }} />
           <span>
-            You can see the connections your dashboards use. Adding, editing, testing
-            and browsing them is done by an organisation administrator.
+            {t('connections.viewerNote')}
           </span>
         </p>
       )}
       {srcFilter.noMatches && (
-        <p className="dl-nomatch">Nothing matches “{srcFilter.query}”.</p>
+        <p className="dl-nomatch">{t('common.nothingMatches', { q: srcFilter.query })}</p>
       )}
       <div className={sources.length > 0 && !srcFilter.noMatches ? 'card dl-conn-list' : undefined}>
         {srcFilter.filtered.map(ds => {
@@ -174,12 +173,12 @@ export default function Connections() {
 
               {testRes === true && (
                 <span className="dl-conn__status dl-conn__status--ok">
-                  <IconLabel icon={Check} size={12}>Connected</IconLabel>
+                  <IconLabel icon={Check} size={12}>{t('connections.connected')}</IconLabel>
                 </span>
               )}
               {testRes === false && (
                 <span className="dl-conn__status dl-conn__status--fail">
-                  <IconLabel icon={XIcon} size={12}>Failed</IconLabel>
+                  <IconLabel icon={XIcon} size={12}>{t('connections.failed')}</IconLabel>
                 </span>
               )}
 
@@ -203,25 +202,25 @@ export default function Connections() {
                 <div className="dl-conn__actions">
                   <button className="btn btn-ghost btn-sm" onClick={() => handleTest(ds)}
                     disabled={testing === ds.id}>
-                    {testing === ds.id ? 'Testing…' : 'Test'}
+                    {testing === ds.id ? t('connections.testing') : t('connections.test')}
                   </button>
                   <button className="btn btn-ghost btn-sm" onClick={() => setBrowser(ds)}>
-                    Browse
+                    {t('connections.browse')}
                   </button>
                   <button className="btn btn-ghost btn-sm" onClick={() => setBuilding(ds)}
-                    title="Build a query visually: tables, joins, aggregations">
-                    Query builder
+                    title={t('connections.queryBuilderTitle')}>
+                    {t('connections.queryBuilder')}
                   </button>
                   <ActionMenu
-                    label={`More actions for ${ds.name}`}
+                    label={t('connections.more', { name: ds.name })}
                     align="end"
                     items={[
-                      { key: 'metadata', label: 'Metadata',
+                      { key: 'metadata', label: t('connections.metadata'),
                         icon: <ScanSearch size={16} />,
                         onSelect: () => goTo(`/connections/${ds.id}/review`) },
-                      { key: 'edit', label: 'Edit', icon: <Pencil size={16} />,
+                      { key: 'edit', label: t('admin.edit'), icon: <Pencil size={16} />,
                         onSelect: () => setModal(ds) },
-                      { key: 'delete', label: 'Delete', danger: true,
+                      { key: 'delete', label: t('admin.delete'), danger: true,
                         icon: <Trash2 size={16} />,
                         onSelect: () => void handleDelete(ds) },
                     ]}

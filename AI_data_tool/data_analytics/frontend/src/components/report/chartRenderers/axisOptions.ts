@@ -795,9 +795,14 @@ export function gridProps(cfg: FormatConfig) {
   if (cfg.grid === false) {
     return wall ? { stroke: 'transparent', fill: wall } : null
   }
+  // Horizontal rules only, solid and faint: the value lines a reader traces
+  // across to the axis. Vertical rules repeat what the category labels already
+  // say, and a dashed grid at full border strength was the busiest thing on
+  // most charts. Dashed stays one setting away.
   return {
-    strokeDasharray: cfg.grid_style === 'solid' ? undefined : '3 3',
-    stroke: cfg.grid_color ?? 'var(--border)',
+    strokeDasharray: cfg.grid_style === 'dashed' ? '3 3' : undefined,
+    stroke: cfg.grid_color ?? 'var(--dl-table-rule, var(--border))',
+    vertical: false,
     ...(wall ? { fill: wall } : {}),
   }
 }

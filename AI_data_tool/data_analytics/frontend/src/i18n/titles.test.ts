@@ -30,6 +30,7 @@ const routePaths = (): string[] => {
     const [, path, rest] = m
     if (rest.includes('<Navigate')) continue   // a redirect renders no page
     if (path === '/') continue                 // the shell itself; index is Home
+    if (path === '*') continue                 // the 404 page names itself
     const abs = path.startsWith('/') ? path : '/' + path
     if (CHROMELESS.includes(abs)) continue
     out.push(abs)

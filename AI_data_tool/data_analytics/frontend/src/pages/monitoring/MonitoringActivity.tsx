@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useT } from '../../i18n'
 import { Activity as ActivityIcon } from 'lucide-react'
 import { monitoringApi } from '../../services/api'
 import type { ActivityRow } from '../../services/api'
@@ -15,6 +16,7 @@ import LoadingState from '../../components/ui/LoadingState'
  * rules", this one answers "what happened".
  */
 export default function MonitoringActivity() {
+  const t = useT()
   const [rows, setRows] = useState<ActivityRow[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<unknown>(null)
@@ -30,17 +32,16 @@ export default function MonitoringActivity() {
   useEffect(() => { load() }, [])
 
   const { filtered, input, noMatches } = useListFilter(
-    rows, r => [r.user_email, r.action, r.entity, r.detail], 'Search activity…')
+    rows, r => [r.user_email, r.action, r.entity, r.detail], t('search.activity'))
 
   return (
-    <div style={{ padding: 24, maxWidth: 1000 }}>
+    <div style={{ maxWidth: 1200 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 4 }}>
-        <h1 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Activity</h1>
+        <h1 className="dl-page-title" style={{ margin: 0 }}>{t('nav.activity')}</h1>
         {input}
       </div>
-      <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>
-        What happened in this organisation, newest first. Read-only. For admin security
-        changes, see Admin → Audit trail.
+      <p className="dl-page-head__sub" style={{ marginBottom: 16, marginTop: 4 }}>
+        {t('activity.subtitle')}
       </p>
 
       {loading && <LoadingState />}
@@ -50,35 +51,35 @@ export default function MonitoringActivity() {
       )}
 
       {!loading && loadError == null && rows.length === 0 && (
-        <EmptyState icon={ActivityIcon} title="Nothing recorded yet." />
+        <EmptyState icon={ActivityIcon} title={t('activity.empty')} />
       )}
-      {noMatches && <p style={{ color: 'var(--muted)' }}>No activity matches.</p>}
+      {noMatches && <p style={{ color: 'var(--muted)' }}>{t('activity.noMatch')}</p>}
 
       {!loading && loadError == null && filtered.length > 0 && (
-        <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+        <div className="card dl-table-card"><table className="dl-table">
           <thead>
-            <tr style={{ textAlign: 'start', color: 'var(--muted)' }}>
-              <th style={{ padding: '6px 8px' }}>When</th>
-              <th style={{ padding: '6px 8px' }}>Who</th>
-              <th style={{ padding: '6px 8px' }}>Action</th>
-              <th style={{ padding: '6px 8px' }}>Entity</th>
-              <th style={{ padding: '6px 8px' }}>Detail</th>
+            <tr>
+              <th>{t('col.when')}</th>
+              <th>{t('col.who')}</th>
+              <th>{t('col.action')}</th>
+              <th>{t('col.entity')}</th>
+              <th>{t('col.detail')}</th>
             </tr>
           </thead>
           <tbody>
             {filtered.map(r => (
-              <tr key={r.id} style={{ borderTop: '1px solid var(--border)' }}>
-                <td style={{ padding: '6px 8px', whiteSpace: 'nowrap' }}>{new Date(r.created_at).toLocaleString()}</td>
-                <td style={{ padding: '6px 8px' }}>{r.user_email ?? '—'}</td>
-                <td style={{ padding: '6px 8px', fontWeight: 600 }}>{r.action}</td>
-                <td style={{ padding: '6px 8px' }}>
+              <tr key={r.id}>
+                <td style={{ whiteSpace: 'nowrap' }}>{new Date(r.created_at).toLocaleString()}</td>
+                <td>{r.user_email ?? '—'}</td>
+                <td style={{ fontWeight: 600 }}>{r.action}</td>
+                <td>
                   {r.entity ? `${r.entity}${r.entity_id != null ? ` #${r.entity_id}` : ''}` : '—'}
                 </td>
-                <td style={{ padding: '6px 8px', color: 'var(--muted)' }}>{r.detail ?? '—'}</td>
+                <td style={{ color: 'var(--muted)' }}>{r.detail ?? '—'}</td>
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       )}
     </div>
   )

@@ -42,7 +42,7 @@ const coerce = (raw: string, isNumeric: boolean): unknown =>
 const inp: React.CSSProperties = { fontSize: 11, padding: '3px 6px', width: '100%',
   background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)' }
 
-const lbl: React.CSSProperties = { display: 'block', fontSize: 9, color: 'var(--muted)', marginBottom: 2 }
+const lbl: React.CSSProperties = { display: 'block', fontSize: 10.5, color: 'var(--muted)', marginBottom: 2 }
 
 export default function DisplayRulesPanel({ rules: initialRules, columns, numericColumns, onChange, errors }: Props) {
   // Own the working copy locally: the caller's `onChange` reports the new array upward,
@@ -138,7 +138,7 @@ export default function DisplayRulesPanel({ rules: initialRules, columns, numeri
 
   return (
     <div>
-      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase',
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase',
         letterSpacing: '.06em', marginBottom: 8 }}>
         Display Rules
       </div>
@@ -240,17 +240,17 @@ export default function DisplayRulesPanel({ rules: initialRules, columns, numeri
               </div>
 
               {rule.target === 'visibility' && (
-                <p style={{ fontSize: 9, color: 'var(--muted)', margin: '4px 0 0' }}>
+                <p style={{ fontSize: 10.5, color: 'var(--muted)', margin: '4px 0 0' }}>
                   Presentational only — matching rows are still sent to the client, and a
                   broken visibility rule reveals the widget (rules fail open). Not a
                   substitute for row-level security.
                 </p>
               )}
 
-              {error && <div role="alert" style={{ color: '#f87171', fontSize: 10, marginTop: 5 }}>{error.message}</div>}
+              {error && <div role="alert" style={{ color: '#f87171', fontSize: 11, marginTop: 5 }}>{error.message}</div>}
 
               <button type="button" onClick={() => commit(rules.filter((_, j) => j !== i))}
-                style={{ marginTop: 6, background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 10, padding: 0 }}>
+                style={{ marginTop: 6, background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 11, padding: 0 }}>
                 Remove
               </button>
             </div>
@@ -266,7 +266,7 @@ export default function DisplayRulesPanel({ rules: initialRules, columns, numeri
               </div>
 
               {noNumericColumns && (
-                <p role="note" style={{ fontSize: 9, color: '#f87171', margin: '4px 0 0' }}>
+                <p role="note" style={{ fontSize: 10.5, color: '#f87171', margin: '4px 0 0' }}>
                   A Bands rule reads a number, and this widget has no numeric column to
                   read. Pick a different rule kind, or add a numeric field.
                 </p>
@@ -277,17 +277,17 @@ export default function DisplayRulesPanel({ rules: initialRules, columns, numeri
               </div>
 
               {rule.target === 'visibility' && (
-                <p style={{ fontSize: 9, color: 'var(--muted)', margin: '4px 0 0' }}>
+                <p style={{ fontSize: 10.5, color: 'var(--muted)', margin: '4px 0 0' }}>
                   Presentational only — matching rows are still sent to the client, and a
                   broken visibility rule reveals the widget (rules fail open). Not a
                   substitute for row-level security.
                 </p>
               )}
 
-              {error && <div role="alert" style={{ color: '#f87171', fontSize: 10, marginTop: 5 }}>{error.message}</div>}
+              {error && <div role="alert" style={{ color: '#f87171', fontSize: 11, marginTop: 5 }}>{error.message}</div>}
 
               <button type="button" onClick={() => commit(rules.filter((_, j) => j !== i))}
-                style={{ marginTop: 6, background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 10, padding: 0 }}>
+                style={{ marginTop: 6, background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 11, padding: 0 }}>
                 Remove
               </button>
             </div>
@@ -301,7 +301,7 @@ export default function DisplayRulesPanel({ rules: initialRules, columns, numeri
               </div>
 
               {noNumericColumns && (
-                <p role="note" style={{ fontSize: 9, color: '#f87171', margin: '4px 0 0' }}>
+                <p role="note" style={{ fontSize: 10.5, color: '#f87171', margin: '4px 0 0' }}>
                   A Data bar rule reads a number, and this widget has no numeric column
                   to read. Pick a different rule kind, or add a numeric field.
                 </p>
@@ -311,10 +311,10 @@ export default function DisplayRulesPanel({ rules: initialRules, columns, numeri
                 <DataBarEditor rule={rule} onChange={next => update(i, next)} />
               </div>
 
-              {error && <div role="alert" style={{ color: '#f87171', fontSize: 10, marginTop: 5 }}>{error.message}</div>}
+              {error && <div role="alert" style={{ color: '#f87171', fontSize: 11, marginTop: 5 }}>{error.message}</div>}
 
               <button type="button" onClick={() => commit(rules.filter((_, j) => j !== i))}
-                style={{ marginTop: 6, background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 10, padding: 0 }}>
+                style={{ marginTop: 6, background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 11, padding: 0 }}>
                 Remove
               </button>
             </div>
@@ -328,9 +328,9 @@ export default function DisplayRulesPanel({ rules: initialRules, columns, numeri
               </div>
               <label htmlFor={`expr-${rule.id}`} style={lbl}>Expression</label>
               <input id={`expr-${rule.id}`} value={rule.expression ?? ''} readOnly style={inp} />
-              {error && <div role="alert" style={{ color: '#f87171', fontSize: 10, marginTop: 4 }}>{error.message}</div>}
+              {error && <div role="alert" style={{ color: '#f87171', fontSize: 11, marginTop: 4 }}>{error.message}</div>}
               <button type="button" onClick={() => commit(rules.filter((_, j) => j !== i))}
-                style={{ marginTop: 6, background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 10, padding: 0 }}>
+                style={{ marginTop: 6, background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 11, padding: 0 }}>
                 Remove
               </button>
             </div>
@@ -373,17 +373,17 @@ export default function DisplayRulesPanel({ rules: initialRules, columns, numeri
               </div>
 
               {rule.target === 'visibility' && (
-                <p style={{ fontSize: 9, color: 'var(--muted)', margin: '4px 0 0' }}>
+                <p style={{ fontSize: 10.5, color: 'var(--muted)', margin: '4px 0 0' }}>
                   Presentational only — matching rows are still sent to the client, and a
                   broken visibility rule reveals the widget (rules fail open). Not a
                   substitute for row-level security.
                 </p>
               )}
 
-              {error && <div role="alert" style={{ color: '#f87171', fontSize: 10, marginTop: 5 }}>{error.message}</div>}
+              {error && <div role="alert" style={{ color: '#f87171', fontSize: 11, marginTop: 5 }}>{error.message}</div>}
 
               <button type="button" onClick={() => commit(rules.filter((_, j) => j !== i))}
-                style={{ marginTop: 6, background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 10, padding: 0 }}>
+                style={{ marginTop: 6, background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 11, padding: 0 }}>
                 Remove
               </button>
             </div>

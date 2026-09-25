@@ -44,6 +44,19 @@ export const fitFontSize = (text: string, max: number): number => {
   return Math.round(max * 0.4)
 }
 
+/**
+ * The KPI/card figure size, fitted to the WIDGET as well as to the text.
+ * fitFontSize only knows how long the string is, so a nine-character
+ * "$ 8,632,597" was set at 28px whether the tile was 400px wide or 150px --
+ * and in the narrow tile it printed "$ 8,632,…". Container query units let
+ * the browser cap it by the tile's own width (≈0.62em per tabular digit in
+ * Inter), never below a legible 14px. The ellipsis stays as the last resort.
+ */
+export const fitFigureSize = (text: string, max: number): string => {
+  const chars = Math.max(text.length, 1)
+  return `max(14px, min(${fitFontSize(text, max)}px, calc(100cqi / ${(chars * 0.62).toFixed(2)})))`
+}
+
 function SlicerList({ rows, rtl, checked, onToggle, searchable }: {
   rows: { name: unknown; value?: unknown }[]
   rtl: boolean
@@ -407,16 +420,16 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
     const kpiIcon = ruleStyles?.rows?.[0]?.icon
     const kpiText = fmtStr(val, measureFmt)
     return (
-      <div dir={rtl ? 'rtl' : undefined} style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '0 8px', minWidth: 0 }}>
+      <div dir={rtl ? 'rtl' : undefined} style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '0 10px', minWidth: 0, containerType: 'inline-size' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, maxWidth: '100%', minWidth: 0 }}>
           {kpiIcon && <span aria-hidden="true" style={{ fontSize: 28, flex: '0 0 auto' }}>{kpiIcon}</span>}
           <div title={kpiText}
-            style={{ fontSize: fitFontSize(kpiText, 36), fontWeight: 700, fontFamily: 'var(--mono)', color: ruleStyles?.rows?.[0]?.fill ?? 'var(--accent)',
+            style={{ fontSize: fitFigureSize(kpiText, 36), fontWeight: 650, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.02em', color: ruleStyles?.rows?.[0]?.fill ?? 'var(--accent)',
               minWidth: 0, maxWidth: '100%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: 1.15 }}>
             {kpiText}
           </div>
         </div>
-        <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', maxWidth: '100%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        <div style={{ fontSize: 12, color: 'var(--muted)', maxWidth: '100%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {cfg.measure || cfg.dimension || 'Value'}
         </div>
       </div>
@@ -427,15 +440,15 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
   if (wt === 'card') {
     const rows: any[] = data.rows ?? []
     return (
-      <div dir={rtl ? 'rtl' : undefined} style={{ height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 10, padding: 8 }}>
+      <div dir={rtl ? 'rtl' : undefined} style={{ height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 10, padding: 8, containerType: 'inline-size' }}>
         {rows.map((row, i) => (
           <div key={i} style={{ textAlign: 'center', minWidth: 0 }}>
             <div title={fmtStr(row.value, allFormats?.[row.name])}
-              style={{ fontSize: fitFontSize(fmtStr(row.value, allFormats?.[row.name]), 24), fontWeight: 700, fontFamily: 'var(--mono)', color: ruleStyles?.rows?.[i]?.fill ?? 'var(--accent)',
+              style={{ fontSize: fitFigureSize(fmtStr(row.value, allFormats?.[row.name]), 24), fontWeight: 650, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.02em', color: ruleStyles?.rows?.[i]?.fill ?? 'var(--accent)',
                 whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: 1.15 }}>
               {fmtStr(row.value, allFormats?.[row.name])}
             </div>
-            <div style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em' }}>{row.name}</div>
+            <div style={{ fontSize: 11.5, color: 'var(--muted)' }}>{row.name}</div>
           </div>
         ))}
       </div>

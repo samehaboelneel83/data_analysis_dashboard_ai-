@@ -94,8 +94,12 @@ describe('yAxisProps', () => {
 })
 
 describe('gridProps', () => {
-  it('reproduces the current default dashed grid', () => {
-    expect(gridProps({})).toEqual({ strokeDasharray: '3 3', stroke: 'var(--border)' })
+  it('defaults to faint, solid, horizontal-only rules', () => {
+    expect(gridProps({})).toEqual({ strokeDasharray: undefined, stroke: 'var(--dl-table-rule, var(--border))', vertical: false })
+  })
+
+  it('keeps the dashed grid one setting away', () => {
+    expect(gridProps({ grid_style: 'dashed' })).toMatchObject({ strokeDasharray: '3 3' })
   })
 
   it('returns null when grid lines are turned off, so the caller omits the element', () => {
@@ -104,7 +108,7 @@ describe('gridProps', () => {
 
   it('supports a solid grid and a custom colour', () => {
     expect(gridProps({ grid_style: 'solid', grid_color: '#333' }))
-      .toEqual({ strokeDasharray: undefined, stroke: '#333' })
+      .toEqual({ strokeDasharray: undefined, stroke: '#333', vertical: false })
   })
 })
 

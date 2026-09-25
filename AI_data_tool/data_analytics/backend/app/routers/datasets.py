@@ -210,6 +210,12 @@ async def _ingest_upload_file(
         # the file is already on disk, so clean it up either way.
         file_path.unlink(missing_ok=True)
         raise HTTPException(400, f"Could not read file: {e}")
+    # A header with no rows used to get through: the dataset row was written,
+    # then the response (and every later listing) died encoding NaN column
+    # stats, so one empty upload broke the Datasets page for the whole org.
+    if len(df) == 0 or len(df.columns) == 0:
+        file_path.unlink(missing_ok=True)
+        raise HTTPException(400, "The file has no data rows — only a header. Add at least one row and upload it again.")
     type_map = await asyncio.to_thread(detect_types, df)
     # Best-effort accelerant: a verified parquet sidecar makes every later
     # load of this CSV a fraction of the parse cost. Failure never fails
@@ -227,7 +233,7 @@ async def _ingest_upload_file(
     for col_name, dtype in type_map.items():
         db.add(DatasetColumn(
             dataset_id=ds.id, name=col_name, dtype=dtype,
-            missing_pct=round(df[col_name].isnull().mean() * 100, 2), stats={},
+            missing_pct=_missing_pct(df[col_name]), stats={},
         ))
     await _apply_default_data_view(db, ds, org_id)
     return ds
@@ -285,6 +291,15 @@ async def upload_dataset(
         select(Dataset).options(selectinload(Dataset.columns)).where(Dataset.id == ds.id)
     )
     return result.scalar_one()
+
+
+def _missing_pct(series) -> float:
+    """Percent of empty cells, always a finite number (JSON has no NaN)."""
+    try:
+        v = float(series.isnull().mean() * 100)
+    except Exception:
+        return 0.0
+    return round(v, 2) if v == v else 0.0
 
 
 async def _ingest_access_file(
@@ -357,7 +372,7 @@ async def _ingest_access_file(
                 for col_name, dtype in type_map.items():
                     db.add(DatasetColumn(
                         dataset_id=ds.id, name=col_name, dtype=dtype,
-                        missing_pct=round(df[col_name].isnull().mean() * 100, 2),
+                        missing_pct=_missing_pct(df[col_name]),
                         stats={}))
                 await db.commit()
                 items.append(BatchUploadItem(
@@ -616,7 +631,7 @@ async def _append_into_one(
     for col_name, dtype in type_map.items():
         db.add(DatasetColumn(
             dataset_id=ds.id, name=col_name, dtype=dtype,
-            missing_pct=round(combined[col_name].isnull().mean() * 100, 2), stats={}))
+            missing_pct=_missing_pct(combined[col_name]), stats={}))
     await db.commit()
 
     out = DatasetOut.model_validate(await _load_dataset_out(db, ds.id))
@@ -938,6 +953,37 @@ async def dataset_dependents(dataset_id: int, name: str, db: AsyncSession = Depe
     check_org(ds, current_user, "Dataset not found")
     await require_dataset_read(db, current_user, dataset_id)
     return {"name": name, "dependents": await find_dependents(db, ds, name)}
+
+
+class RenameRequest(BaseModel):
+    new_name: str
+
+
+async def _rename(dataset_id: int, kind: str, old: str, body: RenameRequest,
+                  db: AsyncSession, current_user: User) -> dict:
+    """Rename a definition and every reference to it, atomically (E05)."""
+    from ..services.dependencies import RenameRefused, rename_field
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_capability(db, current_user, dataset_id, "data")
+    try:
+        rewritten = await rename_field(db, ds, kind, old, body.new_name)
+    except RenameRefused as e:
+        raise HTTPException(400, str(e))
+    await db.commit()
+    return {"old_name": old, "new_name": body.new_name.strip(), "rewritten": rewritten}
+
+
+@router.post("/{dataset_id}/measures/{measure_name}/rename")
+async def rename_measure(dataset_id: int, measure_name: str, body: RenameRequest,
+                         db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return await _rename(dataset_id, "measure", measure_name, body, db, current_user)
+
+
+@router.post("/{dataset_id}/calculated-columns/{col_name}/rename")
+async def rename_calculated_column(dataset_id: int, col_name: str, body: RenameRequest,
+                                   db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return await _rename(dataset_id, "calculated_column", col_name, body, db, current_user)
 
 
 @router.delete("/{dataset_id}/calculated-columns/{col_name}")
@@ -2556,7 +2602,7 @@ async def materialize_dataset(
     for col_name, dtype in type_map.items():
         db.add(DatasetColumn(
             dataset_id=new.id, name=col_name, dtype=dtype,
-            missing_pct=round(out[col_name].isnull().mean() * 100, 2), stats={}))
+            missing_pct=_missing_pct(out[col_name]), stats={}))
     await audit(db, current_user, "dataset.materialize", "dataset", new.id,
                 f"from {dataset_id}, {len(out)} rows")
     await db.commit()
@@ -2728,7 +2774,7 @@ async def create_aggregate(
     await db.flush()
     for col_name, dtype in type_map.items():
         db.add(DatasetColumn(dataset_id=new.id, name=col_name, dtype=dtype,
-                             missing_pct=round(df[col_name].isnull().mean() * 100, 2), stats={}))
+                             missing_pct=_missing_pct(df[col_name]), stats={}))
     await write_materialization(db, new.id, str(path), "full", len(df), list(df.columns), None)
     await audit(db, current_user, "dataset.aggregate", "dataset", new.id,
                 f"from {dataset_id}, grain {spec['grain']}, {len(df)} rows")
@@ -2802,7 +2848,7 @@ async def update_aggregate(
     await db.flush()
     for col_name, dtype in type_map.items():
         db.add(DatasetColumn(dataset_id=agg.id, name=col_name, dtype=dtype,
-                             missing_pct=round(df[col_name].isnull().mean() * 100, 2), stats={}))
+                             missing_pct=_missing_pct(df[col_name]), stats={}))
     await write_materialization(db, agg.id, str(path), "full", len(df), list(df.columns), None)
     await audit(db, current_user, "dataset.aggregate.update", "dataset", agg.id,
                 f"grain {spec['grain']}, {len(df)} rows")
@@ -2932,7 +2978,7 @@ async def rebuild_dataset(
     for col_name, dtype in type_map.items():
         db.add(DatasetColumn(
             dataset_id=ds.id, name=col_name, dtype=dtype,
-            missing_pct=round(out[col_name].isnull().mean() * 100, 2), stats={}))
+            missing_pct=_missing_pct(out[col_name]), stats={}))
 
     meta = dict(ds.column_meta or {})
     meta[DERIVED_FROM_KEY] = {**prov, "built_by_user_id": current_user.id,
@@ -3252,7 +3298,7 @@ async def refresh_dataset(
     for col_name, dtype in type_map.items():
         db.add(DatasetColumn(
             dataset_id=dataset.id, name=col_name, dtype=dtype,
-            missing_pct=round(df[col_name].isnull().mean() * 100, 2), stats={},
+            missing_pct=_missing_pct(df[col_name]), stats={},
             semantic_type=semantic_types.get(col_name),
         ))
 

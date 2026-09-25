@@ -69,7 +69,7 @@ export function describeStep(s: PrepStep): string {
   }
 }
 
-const label = { display: 'block', fontSize: 10, fontWeight: 700, color: 'var(--muted)',
+const label = { display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--muted)',
   textTransform: 'uppercase' as const, letterSpacing: '.06em', margin: '8px 0 4px' }
 
 export default function PrepStepsPanel({ datasetId, columns, onPipelineChange }: {
@@ -256,7 +256,7 @@ export default function PrepStepsPanel({ datasetId, columns, onPipelineChange }:
 
   return (
     <div style={{ padding: 12, width: 300, flexShrink: 0, borderInlineStart: '1px solid var(--border)', overflowY: 'auto' }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>
         Prep steps
       </div>
       <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>

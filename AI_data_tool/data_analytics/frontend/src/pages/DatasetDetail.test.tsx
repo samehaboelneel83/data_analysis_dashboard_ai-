@@ -371,7 +371,7 @@ describe('DatasetDetail DirectQuery gating', () => {
 
     renderDetail(28)
     await screen.findByText('Live Sales')
-    screen.getByRole('button', { name: 'Data' }).click()
+    screen.getByRole('tab', { name: 'Data' }).click()
 
     await waitFor(() => expect(dataPreviewApi.query).toHaveBeenCalledWith(28, [], [], 100, 0))
     expect(await screen.findByText('north')).toBeInTheDocument()
@@ -383,7 +383,7 @@ describe('DatasetDetail DirectQuery gating', () => {
 
     renderDetail(28)
     await screen.findByText('Live Sales')
-    screen.getByRole('button', { name: 'Data' }).click()
+    screen.getByRole('tab', { name: 'Data' }).click()
 
     await waitFor(() => expect(dataPreviewApi.query).toHaveBeenCalled())
     expect(await screen.findByText(/no rows match/i)).toBeInTheDocument()
@@ -397,7 +397,7 @@ describe('DatasetDetail source-backed re-import link', () => {
 
     renderDetail(29)
     await screen.findByText('CSV Upload')
-    fireEvent.click(screen.getByRole('button', { name: 'Data' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Data' }))
 
     const link = await screen.findByRole('link', { name: /Re-import from this connection/ })
     expect(link).toHaveAttribute('href', '/connections/5/review')
@@ -816,7 +816,7 @@ describe('the alerts tab', () => {
    */
   it('opens from the tab bar', async () => {
     renderDetailAt('/datasets/29')
-    fireEvent.click(await screen.findByRole('button', { name: /alerts/i }))
+    fireEvent.click(await screen.findByRole('tab', { name: /alerts/i }))
     expect(await screen.findByTestId('alerts-panel')).toBeInTheDocument()
   })
 
@@ -825,13 +825,13 @@ describe('the alerts tab', () => {
     // rendered as "Alerts" -- two buttons, one name, and the wrong panel one
     // click away.
     renderDetailAt('/datasets/29')
-    expect(await screen.findByRole('button', { name: /models/i })).toBeInTheDocument()
-    expect(screen.getAllByRole('button', { name: /alerts/i })).toHaveLength(1)
+    expect(await screen.findByRole('tab', { name: /models/i })).toBeInTheDocument()
+    expect(screen.getAllByRole('tab', { name: /alerts/i })).toHaveLength(1)
   })
 
   it('the models tab opens from the tab bar', async () => {
     renderDetailAt('/datasets/29')
-    fireEvent.click(await screen.findByRole('button', { name: /models/i }))
+    fireEvent.click(await screen.findByRole('tab', { name: /models/i }))
     expect(await screen.findByTestId('prediction-models-panel')).toBeInTheDocument()
   })
 

@@ -179,7 +179,7 @@ export default function JoinGraph({ queue, selectedIds, onToggle, filter }: Join
       label: model.visibleEdges.length <= 8
         ? `${r.from_column} → ${r.to_column}`
         : undefined,
-      labelStyle: { fontSize: 10, fill: color },
+      labelStyle: { fontSize: 11, fill: color },
       labelBgStyle: { fill: '#ffffff', fillOpacity: 0.92 },
       style: {
         stroke: color,

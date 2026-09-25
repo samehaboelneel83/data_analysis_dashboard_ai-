@@ -41,7 +41,7 @@ export interface GoalSeekResult {
 export function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <div style={{
-      fontSize: 10, fontWeight: 700, color: 'var(--muted)',
+      fontSize: 11, fontWeight: 700, color: 'var(--muted)',
       textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6,
     }}>{children}</div>
   )
@@ -281,7 +281,7 @@ function GenericResult({ kind, result }: { kind: string; result: unknown }) {
         <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', margin: '14px 0' }}>
           {scalars.map(([k, v]) => (
             <div key={k}>
-              <div style={{ fontSize: 10, color: 'var(--muted)' }}>
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>
                 {k.replace(/_/g, ' ')}
               </div>
               <div style={{
@@ -325,7 +325,7 @@ function RowTable({ rows }: { rows: Record<string, unknown>[] }) {
               <th key={k} style={{
                 textAlign: 'start', padding: '4px 8px',
                 borderBottom: '1px solid var(--border)',
-                fontSize: 10, color: 'var(--muted)', whiteSpace: 'nowrap',
+                fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap',
               }}>{k.replace(/_/g, ' ')}</th>
             ))}
           </tr>
@@ -395,7 +395,7 @@ function Stat({ label, value, suffix }: {
 }) {
   return (
     <div>
-      <div style={{ fontSize: 10, color: 'var(--muted)' }}>{label}</div>
+      <div style={{ fontSize: 11, color: 'var(--muted)' }}>{label}</div>
       <div style={{
         fontFamily: 'var(--mono)', fontSize: 18, fontVariantNumeric: 'tabular-nums',
       }}>
@@ -605,7 +605,7 @@ function AutomatedPrediction({ result }: { result: PredictionResult }) {
             {/* Its training score beside it, so a candidate that memorised is
                 visible as one rather than hidden behind a respectable number. */}
             {c.train_score != null && !c.error && (
-              <span style={{ color: 'var(--muted)', fontSize: 10,
+              <span style={{ color: 'var(--muted)', fontSize: 11,
                              fontFamily: 'var(--mono)' }}>
                 ({pct(c.train_score)} fitted)
               </span>
@@ -809,7 +809,7 @@ function ForecastScenario({ result }: { result: ScenarioResult }) {
               <span style={{ fontFamily: 'var(--mono)', fontVariantNumeric: 'tabular-nums' }}>
                 {f.coefficient.toLocaleString()}
               </span>
-              <span style={{ fontFamily: 'var(--mono)', fontSize: 10,
+              <span style={{ fontFamily: 'var(--mono)', fontSize: 11,
                              color: weak ? 'var(--danger)' : 'var(--muted)' }}>
                 p {f.p_value.toFixed(3)}
               </span>
@@ -904,9 +904,9 @@ function TextSentiment({ result }: { result: TextSentimentResult }) {
         </div>
       )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginBottom: 12 }}>
-        <div><div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', marginBottom: 4 }}>WORDS READ AS POSITIVE</div>
+        <div><div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', marginBottom: 4 }}>WORDS READ AS POSITIVE</div>
           {words(result.top_positive_words, 'var(--success)')}</div>
-        <div><div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', marginBottom: 4 }}>WORDS READ AS NEGATIVE</div>
+        <div><div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', marginBottom: 4 }}>WORDS READ AS NEGATIVE</div>
           {words(result.top_negative_words, 'var(--danger)')}</div>
       </div>
       {result.groups && result.groups.rows.length > 0 && (
@@ -924,7 +924,7 @@ function TextSentiment({ result }: { result: TextSentimentResult }) {
       {[['Most positive', result.most_positive], ['Most negative', result.most_negative]].map(([label, list]) => (
         (list as TextSentimentResult['most_positive']).length > 0 && (
           <div key={label as string} style={{ marginBottom: 8 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)' }}>{(label as string).toUpperCase()}</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)' }}>{(label as string).toUpperCase()}</div>
             {(list as TextSentimentResult['most_positive']).map((e, i) => (
               <div key={i} dir="auto" style={{ fontSize: 11.5, fontStyle: 'italic', color: 'var(--muted)' }}>“{e.text}” ({e.score.toFixed(2)})</div>
             ))}

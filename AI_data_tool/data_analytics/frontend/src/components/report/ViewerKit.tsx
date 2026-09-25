@@ -95,7 +95,7 @@ export function ExplainDialog({ datasetId, measure, filters, onClose }: {
       {res && (
         <>
           {res.narrative && (
-            <p style={{ margin: 0 }}>{res.narrative} {res.narrative_source === 'model' && <span style={{ fontSize: 10, color: 'var(--muted)' }}>(sentence written by the AI from the figures below)</span>}</p>
+            <p style={{ margin: 0 }}>{res.narrative} {res.narrative_source === 'model' && <span style={{ fontSize: 11, color: 'var(--muted)' }}>(sentence written by the AI from the figures below)</span>}</p>
           )}
           {res.note && <p style={{ margin: 0, color: 'var(--muted)' }}>{res.note}</p>}
           <div data-testid="explain-factors" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -176,7 +176,7 @@ export function ScenarioDialog({ datasetId, dateColumn, measure, candidates, onC
   return (
     <Dialog title={`What if… (${measure})`} onClose={onClose}>
       <div style={{ fontSize: 12 }}>
-        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', marginBottom: 4 }}>Factors</div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', marginBottom: 4 }}>Factors</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
           {candidates.map(c => (
             <label key={c} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
@@ -264,7 +264,7 @@ export function WhyDialog({ title, sections, footnote, onClose }: {
       <div data-testid="why-sections" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {sections.map(s => (
           <div key={s.title}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em' }}>{s.title}</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em' }}>{s.title}</div>
             {s.items.length === 0
               ? <div style={{ fontSize: 12, color: 'var(--muted)' }}>{s.empty}</div>
               : <ul style={{ margin: '2px 0 0', paddingInlineStart: 18, fontSize: 12.5 }}>{s.items.map((it, i) => <li key={i}>{it}</li>)}</ul>}

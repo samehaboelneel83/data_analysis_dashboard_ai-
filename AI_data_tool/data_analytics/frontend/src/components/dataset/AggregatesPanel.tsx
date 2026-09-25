@@ -122,7 +122,7 @@ export default function AggregatesPanel({ datasetId, mode }: { datasetId: number
         ?? 'Could not rebuild the aggregate')
     } finally { setBusy(false) }
   }
-  const label: React.CSSProperties = { display: 'block', fontSize: 10, fontWeight: 700, color: 'var(--muted)' }
+  const label: React.CSSProperties = { display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--muted)' }
 
   return (
     <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -179,7 +179,7 @@ export default function AggregatesPanel({ datasetId, mode }: { datasetId: number
         <ul style={{ fontSize: 12, margin: '8px 0 0', paddingLeft: 18 }}>
           {measures.map((m, i) => (
             <li key={i}>{m.agg}({m.column}) → <code>{m.name ?? `${m.column}_${m.agg}`}</code>{' '}
-              <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: 10 }}
+              <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}
                 onClick={() => setMeasures(ms => ms.filter((_, j) => j !== i))}>remove</button>
             </li>
           ))}
@@ -220,12 +220,12 @@ export default function AggregatesPanel({ datasetId, mode }: { datasetId: number
                   {it.dataset.row_count.toLocaleString()} rows ·{' '}
                   {it.dataset.refresh_interval_minutes ? `every ${it.dataset.refresh_interval_minutes} min` : 'not scheduled'}
                 </span>
-                <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: 10 }}
+                <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}
                   onClick={() => editItem(it)} disabled={busy}>
                   Edit
                 </button>
                 {REBUILD_HINT.test(it.last_error ?? '') && (
-                  <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: 10 }}
+                  <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}
                     onClick={() => void rebuild(it)} disabled={busy}>
                     Rebuild
                   </button>

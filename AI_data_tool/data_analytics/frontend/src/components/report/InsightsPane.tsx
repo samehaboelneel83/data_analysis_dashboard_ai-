@@ -84,10 +84,10 @@ export default function InsightsPane({ datasetId, columnTypes, onAdd, reportId, 
   return (
     <div style={{ padding: 12, overflowY: 'auto', height: '100%' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
           Insights
         </span>
-        <button className="btn" style={{ fontSize: 10, marginInlineStart: 'auto' }} disabled={busy || !datasetId} title={!datasetId ? 'Attach a dataset to this report first' : undefined} onClick={run}>
+        <button className="btn" style={{ fontSize: 11, marginInlineStart: 'auto' }} disabled={busy || !datasetId} title={!datasetId ? 'Attach a dataset to this report first' : undefined} onClick={run}>
           {busy ? 'Scanning…'
           : result ? <IconLabel icon={RefreshCw}>Re-scan</IconLabel>
           : <IconLabel icon={Sparkles}>Generate</IconLabel>}
@@ -101,7 +101,7 @@ export default function InsightsPane({ datasetId, columnTypes, onAdd, reportId, 
           {reportId != null && result.findings.length > 0 && (
             <button className="btn btn-primary" disabled={composing}
               onClick={() => void compose()}
-              style={{ fontSize: 10, width: '100%', marginBottom: 10 }}>
+              style={{ fontSize: 11, width: '100%', marginBottom: 10 }}>
               {composing ? 'Building…' : '<IconLabel icon={Sparkles}>Build a report from these</IconLabel>'}
             </button>
           )}
@@ -111,7 +111,7 @@ export default function InsightsPane({ datasetId, columnTypes, onAdd, reportId, 
               return (
                 <li key={i} data-testid={`rb-insight-${f.kind}`}
                   style={{ border: '1px solid var(--border)', borderRadius: 6, padding: '8px 10px' }}>
-                  <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em',
+                  <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em',
                     color: f.kind === 'data_quality' ? '#e6a03c' : 'var(--accent)', marginBottom: 3,
                     display: 'flex', gap: 6, alignItems: 'center' }}>
                     {f.kind.replace('_', ' ')}
@@ -126,11 +126,11 @@ export default function InsightsPane({ datasetId, columnTypes, onAdd, reportId, 
                     )}
                   </div>
                   <div style={{ fontSize: 12, fontWeight: 600 }}>{f.title}</div>
-                  <div style={{ fontSize: 10, color: 'var(--muted)', margin: '2px 0 6px' }}>{f.detail}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', margin: '2px 0 6px' }}>{f.detail}</div>
                   {f.evidence && f.p_value != null && (
                     // The evidence chip: a tested claim carries its test, population
                     // and effect -- and the adjusted p when several were run.
-                    <div data-testid="insight-evidence" style={{ fontSize: 9.5, color: 'var(--muted)', margin: '-2px 0 6px',
+                    <div data-testid="insight-evidence" style={{ fontSize: 10.5, color: 'var(--muted)', margin: '-2px 0 6px',
                       display: 'inline-block', padding: '1px 7px', borderRadius: 99,
                       border: `1px solid ${f.significant ? 'var(--accent)' : 'var(--border)'}` }}>
                       {f.evidence.test} · {f.evidence.effect} · n = {f.evidence.n.toLocaleString()} ·{' '}
@@ -140,13 +140,13 @@ export default function InsightsPane({ datasetId, columnTypes, onAdd, reportId, 
                     </div>
                   )}
                   <div style={{ display: 'flex', gap: 6 }}>
-                    <button className="btn" style={{ fontSize: 10 }}
+                    <button className="btn" style={{ fontSize: 11 }}
                       onClick={() => onAdd({ widget_type: 'text', title: '', reason: '',
                         config: { content: `${f.title}. ${f.detail}` } })}>
                       + Add as text
                     </button>
                     {datasetId != null && (
-                      <button className="btn" style={{ fontSize: 10 }}
+                      <button className="btn" style={{ fontSize: 11 }}
                         aria-label={`Pin finding: ${f.title}`}
                         title="Pin to your dashboard — re-evaluated live on every visit"
                         onClick={() => void pinsApi
@@ -158,7 +158,7 @@ export default function InsightsPane({ datasetId, columnTypes, onAdd, reportId, 
                       </button>
                     )}
                     {chart && (
-                      <button className="btn btn-primary" style={{ fontSize: 10 }} onClick={() => onAdd(chart)}>
+                      <button className="btn btn-primary" style={{ fontSize: 11 }} onClick={() => onAdd(chart)}>
                         + Chart it
                       </button>
                     )}

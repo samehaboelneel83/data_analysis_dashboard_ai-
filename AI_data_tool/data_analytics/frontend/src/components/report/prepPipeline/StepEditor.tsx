@@ -10,7 +10,7 @@ const selStyle: CSSProperties = {
 }
 const inputStyle: CSSProperties = { ...selStyle, width: '100%' }
 const rowStyle: CSSProperties = { display: 'flex', gap: 6, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }
-const labelStyle: CSSProperties = { fontSize: 10, color: 'var(--muted)', minWidth: 60 }
+const labelStyle: CSSProperties = { fontSize: 11, color: 'var(--muted)', minWidth: 60 }
 //: Small square control for the per-key add/remove buttons, matching the
 //: surrounding inputs rather than introducing a new button size.
 const iconBtn: CSSProperties = { ...selStyle, cursor: 'pointer', lineHeight: 1, padding: '3px 6px' }
@@ -34,7 +34,7 @@ export function MultiColCheckboxes({ value, onChange, columns }:
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
       {columns.map(c => (
         <label key={c.name}
-          style={{ fontSize: 10, display: 'flex', alignItems: 'center', gap: 3,
+          style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 3,
             padding: '1px 5px', border: '1px solid var(--border)', borderRadius: 4,
             background: value.includes(c.name) ? 'color-mix(in srgb, var(--accent) 15%, transparent)' : 'var(--surface)' }}>
           <input type="checkbox" checked={value.includes(c.name)} onChange={() => toggle(c.name)}
@@ -42,7 +42,7 @@ export function MultiColCheckboxes({ value, onChange, columns }:
           {c.name}
         </label>
       ))}
-      {columns.length === 0 && <span style={{ fontSize: 10, color: 'var(--muted)' }}>no columns</span>}
+      {columns.length === 0 && <span style={{ fontSize: 11, color: 'var(--muted)' }}>no columns</span>}
     </div>
   )
 }
@@ -83,11 +83,11 @@ export function StepEditor({ step, columns, otherDatasets, joinColumns = [], sug
                 <option value="asc">ascending</option>
                 <option value="desc">descending</option>
               </select>
-              <button className="btn btn-ghost btn-sm" style={{ fontSize: 10 }}
+              <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}
                 onClick={() => onChange({ columns: cols.filter((_, j) => j !== i) })}>✕</button>
             </div>
           ))}
-          <button className="btn btn-ghost btn-sm" style={{ fontSize: 10, marginTop: 4 }}
+          <button className="btn btn-ghost btn-sm" style={{ fontSize: 11, marginTop: 4 }}
             onClick={() => onChange({ columns: [...cols, { column: '', dir: 'asc' }] })}>+ Add column</button>
         </div>
       )
@@ -119,11 +119,11 @@ export function StepEditor({ step, columns, otherDatasets, joinColumns = [], sug
               </select>
               <input value={a.as ?? ''} placeholder="as…" style={{ ...selStyle, width: 80 }}
                 onChange={e => onChange({ aggregations: aggs.map((x, j) => j === i ? { ...x, as: e.target.value } : x) })} />
-              <button className="btn btn-ghost btn-sm" style={{ fontSize: 10 }}
+              <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}
                 onClick={() => onChange({ aggregations: aggs.filter((_, j) => j !== i) })}>✕</button>
             </div>
           ))}
-          <button className="btn btn-ghost btn-sm" style={{ fontSize: 10, marginTop: 4 }}
+          <button className="btn btn-ghost btn-sm" style={{ fontSize: 11, marginTop: 4 }}
             onClick={() => onChange({ aggregations: [...aggs, { column: '', agg: 'sum', as: '' }] })}>+ Add aggregation</button>
         </div>
       )
@@ -227,7 +227,7 @@ export function StepEditor({ step, columns, otherDatasets, joinColumns = [], sug
             <ColSelect value={(step.key as string) || ''} columns={columns} placeholder="each row on its own"
               onChange={v => onChange({ key: v || undefined })} />
           </div>
-          <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
             Labels every row Training or Validation from a seeded hash, so a row stays on its side under
             any filter or security rule. Model widgets take it as their Partition and score on Validation.
           </div>
@@ -303,12 +303,12 @@ export function StepEditor({ step, columns, otherDatasets, joinColumns = [], sug
           {/* Only offered, never imposed: a one-column join -- the common case --
               looks exactly as it did before. A second key is what keeps the
               grain when one column alone matches too many rows. */}
-          <button type="button" style={{ ...iconBtn, width: 'auto', padding: '0 6px', fontSize: 10 }}
+          <button type="button" style={{ ...iconBtn, width: 'auto', padding: '0 6px', fontSize: 11 }}
             onClick={() => onChange(writeJoinPairs([...pairs, { left: '', right: '' }]))}>
             + add key
           </button>
           {matched && (
-            <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
               Keys from {matched.source === 'inferred'
                 ? 'a detected relationship — check them'
                 : `a ${matched.source} relationship`}.

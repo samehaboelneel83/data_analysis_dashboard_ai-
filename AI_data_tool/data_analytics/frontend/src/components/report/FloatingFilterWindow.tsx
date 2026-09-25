@@ -81,7 +81,7 @@ export default function FloatingFilterWindow() {
               padding: '6px 8px 6px 10px', borderBottom: '1px solid var(--border)' }}>
             <strong style={{ fontSize: 11, flex: 1 }}>{label}</strong>
             <button onClick={clearAllFilters} className="btn btn-ghost btn-sm"
-              style={{ fontSize: 10, padding: '2px 6px' }}>Clear all</button>
+              style={{ fontSize: 11, padding: '2px 6px' }}>Clear all</button>
             <button onClick={() => setOpen(false)} aria-label="Collapse filters" title="Collapse"
               style={{ background: 'none', border: 'none', cursor: 'pointer',
                 color: 'var(--muted)', fontSize: 13, lineHeight: 1 }}>–</button>

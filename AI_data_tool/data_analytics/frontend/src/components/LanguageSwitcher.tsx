@@ -70,7 +70,7 @@ export default function LanguageSwitcher() {
                 {l === language && <Check size={13} />}
               </span>
               <span style={{ flex: 1 }}>{LANGUAGE_LABEL[l]}</span>
-              <span style={{ fontSize: 10, color: 'var(--muted)', textTransform: 'uppercase' }}>
+              <span style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase' }}>
                 {LANGUAGE_DIRECTION[l]}
               </span>
             </button>

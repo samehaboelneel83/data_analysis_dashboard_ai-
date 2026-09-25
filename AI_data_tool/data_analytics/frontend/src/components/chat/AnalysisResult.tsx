@@ -38,7 +38,7 @@ export default function AnalysisResult({ presentation }: { presentation: unknown
       {/* Which analysis produced the number. The person asked a question in
           English; that the answer came from a Welch's t-test rather than an
           average is not a detail they should have to ask for. */}
-      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)',
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)',
                     textTransform: 'uppercase', letterSpacing: '.06em',
                     marginBottom: 6 }}>
         {presentation.analysis.replace(/_/g, ' ')}

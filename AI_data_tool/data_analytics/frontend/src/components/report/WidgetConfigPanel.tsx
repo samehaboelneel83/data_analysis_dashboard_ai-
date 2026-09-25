@@ -96,7 +96,7 @@ export default function WidgetConfigPanel({ widget, columns, datasets, primaryDa
   /** The RIGHT axis's title on a dual-axis chart. */
   const [y2AxisLabel, setY2AxisLabel] = useState<string>((cfg.y2_axis_label as string) ?? '')
   /** The total in the middle of a donut. */
-  const [donutTotal, setDonutTotal] = useState<boolean>(cfg.donut_total === true)
+  const [donutTotal, setDonutTotal] = useState<boolean>(cfg.donut_total !== false)
   const [donutTotalLabel, setDonutTotalLabel] = useState<string>((cfg.donut_total_label as string) ?? '')
 
   /** The Python a script tile runs on the server. */
@@ -332,6 +332,7 @@ export default function WidgetConfigPanel({ widget, columns, datasets, primaryDa
   const [widgetPadding,     setWidgetPadding]     = useState<string>(cfg.widget_padding != null ? String(cfg.widget_padding) : '')
   const [widgetSkin,        setWidgetSkin]        = useState<string>((cfg.widget_skin as string) ?? 'none')
   const [altText,           setAltText]           = useState<string>((cfg.alt_text as string) ?? '')
+  const [subtitle,          setSubtitle]          = useState<string>((cfg.subtitle as string) ?? '')
 
   // Read once per mount -- purely to give the two colour swatches below a starting
   // look that matches the widget's real untouched appearance instead of a hardcoded
@@ -472,6 +473,7 @@ export default function WidgetConfigPanel({ widget, columns, datasets, primaryDa
     setWidgetPadding(cfg.widget_padding != null ? String(cfg.widget_padding) : '')
     setWidgetSkin((cfg.widget_skin as string) ?? 'none')
     setAltText((cfg.alt_text as string) ?? '')
+    setSubtitle((cfg.subtitle as string) ?? '')
     setBoundarySetId(cfg.boundary_set_id != null ? String(cfg.boundary_set_id) : '')
     setForecastTarget(cfg.forecast_target != null ? String(cfg.forecast_target) : '')
     setCentralityMetric((cfg.centrality_metric as string) ?? 'degree')
@@ -479,7 +481,7 @@ export default function WidgetConfigPanel({ widget, columns, datasets, primaryDa
     setTransparent(cfg.transparent === true)
     setLegendTitle((cfg.legend_title as string) ?? '')
     setY2AxisLabel((cfg.y2_axis_label as string) ?? '')
-    setDonutTotal(cfg.donut_total === true)
+    setDonutTotal(cfg.donut_total !== false)
     setDonutTotalLabel((cfg.donut_total_label as string) ?? '')
     setContainerBackground((cfg.background_url as string) ?? '')
     setLayer(cfg.z != null ? String(cfg.z) : '')
@@ -558,8 +560,10 @@ export default function WidgetConfigPanel({ widget, columns, datasets, primaryDa
       if (transparent) config.transparent = true
       if (legendTitle.trim()) config.legend_title = legendTitle.trim()
       if (y2AxisLabel.trim()) config.y2_axis_label = y2AxisLabel.trim()
+      // The total is on by default now (the donut's centre is where the reader
+      // looks for "out of how much"), so only turning it OFF is stored.
+      if (wt === 'donut' && !donutTotal) config.donut_total = false
       if (wt === 'donut' && donutTotal) {
-        config.donut_total = true
         if (donutTotalLabel.trim()) config.donut_total_label = donutTotalLabel.trim()
       }
       const customList = sortCustom.split(',').map(x => x.trim()).filter(Boolean)
@@ -742,6 +746,7 @@ export default function WidgetConfigPanel({ widget, columns, datasets, primaryDa
     if (widgetPadding !== '' && !isNaN(Number(widgetPadding))) config.widget_padding = Number(widgetPadding)
     if (widgetSkin && widgetSkin !== 'none') config.widget_skin = widgetSkin
     if (altText) config.alt_text = altText
+    if (subtitle.trim()) config.subtitle = subtitle.trim()
 
     // Journal first, so a tab closed inside the 600 ms window leaves a trace the
     // builder can offer to restore (lib/pendingEdits.ts); cleared once sent.
@@ -750,7 +755,7 @@ export default function WidgetConfigPanel({ widget, columns, datasets, primaryDa
     const timer = setTimeout(() => { onUpdate(config, title); clearPending(pendingId) }, 600)
     return () => clearTimeout(timer)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [title, datasetId, JSON.stringify(roleValues), JSON.stringify(multiRoleValues), JSON.stringify(modelOpts), agg, limit, sort, sortBy, sortCol, sortCustom, agg2, havingOp, havingValue, JSON.stringify(objFilters), rankMode, rankN, rankPercent, rankOther, quickCalc, suppressBelow, suppressComplement, running, content, label, rtl, tableCols.join(','), JSON.stringify(sortKeys), bins, baseline, fitLine, targetValue, gaugeShape, animPos, animOrder, animSize, animStyle, animOpacity, animBox, autoReload, drillthroughPageId, tooltipPageId, hierarchyNodeId, dimensionGranularity, action, actionPageId, carryFilters, actionBookmarkId, actionUrl, actionReportId, actionParamName, actionParamValue, barMode, forecastMethod, imageUrl, imageAlt, imageFit, webUrl, customUrl, shapeKind, shapeFill, shapeStroke, showAverageLine, referenceValue, referenceLabel, referenceColor, JSON.stringify(displayRules), xAxisLabel, yAxisLabel, axisTickSize, axisTickColor, axisLine, tickLine, xAxisAngle, yAxisAngle, yScale, yMin, yMax, showGrid, gridStyle, gridColor, wallColor, showAsTable, overviewAxis, latticeRows, latticeCols, animateBy, animateGran, slicerMode, containerMode, containerId, showLegend, legendPosition, dataLabels, seriesPatterns, showTotals, showSubtotals, totalsPosition, totalsScope, tableRowNumbers, tableRowLines, tableBanding, tableCondensed, tableSparkline, widgetBackground, widgetBorderColor, widgetBorderWidth, widgetRadius, widgetPadding, widgetSkin, altText, boundarySetId, forecastTarget, centralityMetric,
+  }, [title, datasetId, JSON.stringify(roleValues), JSON.stringify(multiRoleValues), JSON.stringify(modelOpts), agg, limit, sort, sortBy, sortCol, sortCustom, agg2, havingOp, havingValue, JSON.stringify(objFilters), rankMode, rankN, rankPercent, rankOther, quickCalc, suppressBelow, suppressComplement, running, content, label, rtl, tableCols.join(','), JSON.stringify(sortKeys), bins, baseline, fitLine, targetValue, gaugeShape, animPos, animOrder, animSize, animStyle, animOpacity, animBox, autoReload, drillthroughPageId, tooltipPageId, hierarchyNodeId, dimensionGranularity, action, actionPageId, carryFilters, actionBookmarkId, actionUrl, actionReportId, actionParamName, actionParamValue, barMode, forecastMethod, imageUrl, imageAlt, imageFit, webUrl, customUrl, shapeKind, shapeFill, shapeStroke, showAverageLine, referenceValue, referenceLabel, referenceColor, JSON.stringify(displayRules), xAxisLabel, yAxisLabel, axisTickSize, axisTickColor, axisLine, tickLine, xAxisAngle, yAxisAngle, yScale, yMin, yMax, showGrid, gridStyle, gridColor, wallColor, showAsTable, overviewAxis, latticeRows, latticeCols, animateBy, animateGran, slicerMode, containerMode, containerId, showLegend, legendPosition, dataLabels, seriesPatterns, showTotals, showSubtotals, totalsPosition, totalsScope, tableRowNumbers, tableRowLines, tableBanding, tableCondensed, tableSparkline, widgetBackground, widgetBorderColor, widgetBorderWidth, widgetRadius, widgetPadding, widgetSkin, altText, subtitle, boundarySetId, forecastTarget, centralityMetric,
       containerBackground, layer, scriptCode, transparent, legendTitle,
       y2AxisLabel, donutTotal, donutTotalLabel,
     // Hierarchy / faceting / forecast state. Omitting these would let the
@@ -795,7 +800,7 @@ export default function WidgetConfigPanel({ widget, columns, datasets, primaryDa
     const id = 'fld-' + lbl.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
     return (
       <div style={{ marginBottom: 12 }}>
-        <label htmlFor={id} style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>{lbl}</label>
+        <label htmlFor={id} style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>{lbl}</label>
         {/* An id already set by the caller wins, so a field that needs a specific id
             for other reasons is not silently renamed. */}
         {cloneElement(el, { id: (el.props as { id?: string }).id ?? id })}
@@ -975,8 +980,8 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
   return (
     <div ref={bodyRef} style={{ fontSize:13 }}>
       <div style={{ padding:'14px 14px 0' }}>
-        <div style={{ fontWeight:700, marginBottom:14, fontSize:13, display:'flex', alignItems:'center', gap:6, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.05em' }}>
-          {widgetIcon(wt)} {wt} settings
+        <div style={{ fontWeight:650, marginBottom:14, fontSize:14, display:'flex', alignItems:'center', gap:6, color:'var(--text)' }}>
+          {widgetIcon(wt)} {wt === 'kpi' ? 'KPI' : wt.charAt(0).toUpperCase() + wt.slice(1).replace(/_/g, ' ')} settings
         </div>
 
         <div style={{ marginBottom: 12 }}>
@@ -989,7 +994,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
             style={{ width:'100%' }}
           />
           {filterActive && settingsTab !== 'all' && (
-            <div style={{ fontSize:10, color:'var(--muted)', marginTop:4 }}>
+            <div style={{ fontSize: 11, color:'var(--muted)', marginTop:4 }}>
               Searching all tabs — clear the box to return to {settingsTab}.
             </div>
           )}
@@ -1006,7 +1011,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               <button key={t} type="button" role="tab" aria-selected={on}
                 onClick={() => setSettingsTab(key)}
                 style={{
-                  font:'inherit', fontSize:10, fontWeight:600, cursor:'pointer',
+                  font:'inherit', fontSize: 11, fontWeight:600, cursor:'pointer',
                   padding:'3px 7px', borderRadius:5,
                   border:'1px solid ' + (on ? 'var(--accent)' : 'var(--border)'),
                   background: on ? 'var(--accent)' : 'transparent',
@@ -1053,6 +1058,9 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
         {/* `title` carries the whole value: the box cannot grow, and reading a
             long title otherwise means selecting the text and scrolling it. */}
         {fld('Title', <input value={title} title={title} onChange={e => setTitle(e.target.value)} style={{ width:'100%' }} placeholder="Widget title" />)}
+        {/* One line under the title saying what the numbers are: the scope
+            ("Share of total · all time") or the unit ("Count of orders"). */}
+        {fld('Subtitle', <input value={subtitle} title={subtitle} onChange={e => setSubtitle(e.target.value)} style={{ width:'100%' }} placeholder="Optional — e.g. Share of total · all time" />)}
 
         <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
           <input
@@ -1061,7 +1069,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
             checked={rtl}
             onChange={e => setRtl(e.target.checked)}
           />
-          <label htmlFor="rtl-toggle" style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', cursor: 'pointer' }}>
+          <label htmlFor="rtl-toggle" style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', cursor: 'pointer' }}>
             RTL (Right to Left)
           </label>
         </div>
@@ -1073,7 +1081,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
         {/* Image */}
         {wt === 'image' && (<>
           <div style={{ marginBottom: 12 }}>
-            <label htmlFor="image-url-input" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+            <label htmlFor="image-url-input" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
               Image URL
             </label>
             <input id="image-url-input" value={imageUrl} onChange={e => setImageUrl(e.target.value)} style={{ width:'100%' }} placeholder="https://…" />
@@ -1083,13 +1091,13 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 this one is the <img> element's own alt attribute (cfg.alt), not the
                 widget's aria-label (cfg.alt_text). Both are visible on an image
                 widget at once, so the labels must say what each actually does. */}
-            <label htmlFor="image-alt-input" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+            <label htmlFor="image-alt-input" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
               Image alt text
             </label>
             <input id="image-alt-input" value={imageAlt} onChange={e => setImageAlt(e.target.value)} style={{ width:'100%' }} />
           </div>
           <div style={{ marginBottom: 12 }}>
-            <label htmlFor="image-fit-select" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+            <label htmlFor="image-fit-select" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
               Fit
             </label>
             <select id="image-fit-select" value={imageFit} onChange={e => setImageFit(e.target.value)} style={{ width:'100%' }}>
@@ -1102,11 +1110,11 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
 
         {wt === 'web_content' && (
           <div style={{ marginBottom: 12 }}>
-            <label htmlFor="web-url-input" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+            <label htmlFor="web-url-input" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
               Web page URL
             </label>
             <input id="web-url-input" value={webUrl} onChange={e => setWebUrl(e.target.value)} style={{ width:'100%' }} placeholder="https://…" />
-            <div style={{ fontSize:10, color:'var(--muted)', marginTop:4 }}>
+            <div style={{ fontSize: 11, color:'var(--muted)', marginTop:4 }}>
               Embedded in a sandboxed frame. Only http(s) URLs load; some sites block being framed.
             </div>
           </div>
@@ -1114,11 +1122,11 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
 
         {wt === 'custom_visual' && (
           <div style={{ marginBottom: 12 }}>
-            <label htmlFor="custom-url-input" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+            <label htmlFor="custom-url-input" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
               Visualisation URL
             </label>
             <input id="custom-url-input" value={customUrl} onChange={e => setCustomUrl(e.target.value)} style={{ width:'100%' }} placeholder="https://…" />
-            <div style={{ fontSize:10, color:'var(--muted)', marginTop:4 }}>
+            <div style={{ fontSize: 11, color:'var(--muted)', marginTop:4 }}>
               A sandboxed page that receives this widget's data via <code>postMessage</code>
               (<code>{'{ type: "datalytics:data", data }'}</code>). Bind a dimension/measure below to choose the data.
             </div>
@@ -1133,7 +1141,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               onChange={e => setTransparent(e.target.checked)} style={{ margin:0 }} />
             Transparent background
           </label>
-          <div style={{ fontSize:9.5, color:'var(--muted)', marginTop:3 }}>
+          <div style={{ fontSize: 10.5, color:'var(--muted)', marginTop:3 }}>
             No panel and no border, so the page's background image shows through.
           </div>
         </div>
@@ -1147,7 +1155,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
             </label>
             {donutTotal && (
               <div style={{ marginTop: 6 }}>
-                <label htmlFor="donut-total-label" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+                <label htmlFor="donut-total-label" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                   Caption under the total
                 </label>
                 <input id="donut-total-label" value={donutTotalLabel}
@@ -1160,7 +1168,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
 
         {wt === 'script' && (
           <div style={{ marginBottom: 12 }}>
-            <label htmlFor="script-code" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+            <label htmlFor="script-code" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
               Python
             </label>
             <textarea id="script-code" value={scriptCode} rows={10}
@@ -1169,14 +1177,14 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               placeholder={"result = df.groupby('region', as_index=False)['revenue'].sum()"}
               style={{ width:'100%', fontFamily:'var(--mono)', fontSize:11.5,
                 boxSizing:'border-box', resize:'vertical' }} />
-            <div style={{ fontSize:10, color:'var(--muted)', marginTop:4 }}>
+            <div style={{ fontSize: 11, color:'var(--muted)', marginTop:4 }}>
               Runs on the server over this widget's own filtered, row- and
               column-secured frame, which arrives as <code>df</code>. Assign what
               the tile should show to <code>result</code> — a DataFrame, a Series
               or a single number. <code>print()</code> output is shown under the
               table.
             </div>
-            <div style={{ fontSize:10, color:'var(--muted)', marginTop:4 }}>
+            <div style={{ fontSize: 11, color:'var(--muted)', marginTop:4 }}>
               Only an organisation admin can save a script tile: this is code
               running on the server, in a separate process with no access to the
               application's credentials, but with whatever access the server
@@ -1187,7 +1195,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
 
         {/* Shape */}
         {wt === 'shape' && (<>
-          <label htmlFor="shape-kind-select" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+          <label htmlFor="shape-kind-select" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
             Shape
           </label>
           <div style={{ marginBottom: 12 }}>
@@ -1200,12 +1208,12 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           </div>
           <div style={{ display:'flex', gap:8, marginBottom:12 }}>
             <label style={{ display:'flex', flexDirection:'column', gap:2 }}>
-              <span style={{ fontSize:9, color:'var(--muted)' }}>Fill</span>
+              <span style={{ fontSize: 10.5, color:'var(--muted)' }}>Fill</span>
               <input type="color" value={shapeFill} onChange={e => setShapeFill(e.target.value)}
                 style={{ width:36, height:26, padding:2, border:'1px solid var(--border)', borderRadius:4, cursor:'pointer', background:'var(--surface)' }} />
             </label>
             <label style={{ display:'flex', flexDirection:'column', gap:2 }}>
-              <span style={{ fontSize:9, color:'var(--muted)' }}>Border</span>
+              <span style={{ fontSize: 10.5, color:'var(--muted)' }}>Border</span>
               <input type="color" value={shapeStroke} onChange={e => setShapeStroke(e.target.value)}
                 style={{ width:36, height:26, padding:2, border:'1px solid var(--border)', borderRadius:4, cursor:'pointer', background:'var(--surface)' }} />
             </label>
@@ -1214,7 +1222,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
 
         {wt === 'container' && (
           <div style={{ marginBottom: 12 }}>
-            <label htmlFor="container-mode-select" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+            <label htmlFor="container-mode-select" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
               Container style
             </label>
             <select id="container-mode-select" value={containerMode} onChange={e => setContainerMode(e.target.value)} style={{ width:'100%' }}>
@@ -1226,14 +1234,14 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
             </select>
             {containerMode === 'precision' && (
               <div style={{ marginTop: 8 }}>
-                <label htmlFor="container-background" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+                <label htmlFor="container-background" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                   Background image
                 </label>
                 <input id="container-background" value={containerBackground}
                   onChange={e => setContainerBackground(e.target.value)}
                   placeholder="https://… floorplan or schematic"
                   style={{ width:'100%' }} />
-                <div style={{ fontSize:9.5, color:'var(--muted)', marginTop:3 }}>
+                <div style={{ fontSize: 10.5, color:'var(--muted)', marginTop:3 }}>
                   Widgets are placed freely over it and may overlap. Use each
                   widget's Layer to decide what sits in front.
                 </div>
@@ -1248,7 +1256,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           if (containers.length === 0) return null
           return (
             <div style={{ marginBottom: 12 }}>
-              <label htmlFor="container-parent-select" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+              <label htmlFor="container-parent-select" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                 Place inside container
               </label>
               <select id="container-parent-select" value={containerId} onChange={e => setContainerId(e.target.value)} style={{ width:'100%' }}>
@@ -1265,13 +1273,13 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 if (!precise) return null
                 return (
                   <div style={{ marginTop: 8 }}>
-                    <label htmlFor="widget-layer" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+                    <label htmlFor="widget-layer" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                       Layer
                     </label>
                     <input id="widget-layer" type="number" value={layer}
                       onChange={e => setLayer(e.target.value)}
                       placeholder="0" style={{ width:'100%' }} />
-                    <div style={{ fontSize:9.5, color:'var(--muted)', marginTop:3 }}>
+                    <div style={{ fontSize: 10.5, color:'var(--muted)', marginTop:3 }}>
                       Higher sits in front. Leave empty for the default.
                     </div>
                   </div>
@@ -1283,7 +1291,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
 
         {wt === 'slicer' && (
           <div style={{ marginBottom: 12 }}>
-            <label htmlFor="slicer-mode-select" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+            <label htmlFor="slicer-mode-select" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
               Control type
             </label>
             <select id="slicer-mode-select" value={slicerMode} onChange={e => setSlicerMode(e.target.value)} style={{ width:'100%' }}>
@@ -1297,7 +1305,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                   for this mode at all, which is the cost being avoided. */}
               <option value="text">Text input (type a value)</option>
             </select>
-            <span style={{ fontSize:10, color:'var(--muted)' }}>Auto picks by cardinality: buttons under 5 values, list to 40, searchable beyond.</span>
+            <span style={{ fontSize: 11, color:'var(--muted)' }}>Auto picks by cardinality: buttons under 5 values, list to 40, searchable beyond.</span>
           </div>
         )}
 
@@ -1311,7 +1319,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           <ExpandableGroup id="actions" title="Actions" defaultOpen
             searchTerms={ACTIONS_SEARCH_TERMS} {...groupFilterProps('Actions', ACTIONS_SEARCH_TERMS)}>
             <div style={{ marginBottom: 12 }}>
-              <label htmlFor="button-action-select" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+              <label htmlFor="button-action-select" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                 Button action
               </label>
               <select id="button-action-select" value={action} onChange={e => setAction(e.target.value)} style={{ width:'100%' }}>
@@ -1326,7 +1334,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
 
             {action === 'navigate' && (
               <div style={{ marginBottom: 12 }}>
-                <label htmlFor="button-action-page-select" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+                <label htmlFor="button-action-page-select" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                   Target page
                 </label>
                 <select id="button-action-page-select" value={actionPageId} onChange={e => setActionPageId(e.target.value)} style={{ width:'100%' }}>
@@ -1345,45 +1353,45 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
 
             {action === 'url' && (
               <div style={{ marginBottom: 12 }}>
-                <label htmlFor="button-action-url-input" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+                <label htmlFor="button-action-url-input" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                   Target URL
                 </label>
                 <input id="button-action-url-input" value={actionUrl} onChange={e => setActionUrl(e.target.value)}
                   placeholder="https://…" style={{ width:'100%' }} />
-                <span style={{ fontSize:10, color:'var(--muted)' }}>Opens in a new tab. Only http(s) links are allowed.</span>
+                <span style={{ fontSize: 11, color:'var(--muted)' }}>Opens in a new tab. Only http(s) links are allowed.</span>
               </div>
             )}
 
             {action === 'report' && (
               <div style={{ marginBottom: 12 }}>
-                <label htmlFor="button-action-report-input" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+                <label htmlFor="button-action-report-input" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                   Target report ID
                 </label>
                 <input id="button-action-report-input" type="number" min={1} value={actionReportId}
                   onChange={e => setActionReportId(e.target.value)} style={{ width:'100%' }} placeholder="e.g. 12" />
-                <span style={{ fontSize:10, color:'var(--muted)' }}>The number in the report's URL: /reports/12. Viewers keep their own permissions on the target.</span>
+                <span style={{ fontSize: 11, color:'var(--muted)' }}>The number in the report's URL: /reports/12. Viewers keep their own permissions on the target.</span>
               </div>
             )}
 
             {action === 'set_param' && (
               <div style={{ marginBottom: 12 }}>
-                <label htmlFor="button-action-param-name" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+                <label htmlFor="button-action-param-name" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                   Parameter name
                 </label>
                 <input id="button-action-param-name" value={actionParamName}
                   onChange={e => setActionParamName(e.target.value)} style={{ width:'100%' }} placeholder="e.g. threshold" />
-                <label htmlFor="button-action-param-value" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', margin:'8px 0 4px' }}>
+                <label htmlFor="button-action-param-value" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', margin:'8px 0 4px' }}>
                   Value to set
                 </label>
                 <input id="button-action-param-value" value={actionParamValue}
                   onChange={e => setActionParamValue(e.target.value)} style={{ width:'100%' }} placeholder="e.g. 100" />
-                <span style={{ fontSize:10, color:'var(--muted)' }}>Clicking the button sets this report parameter for the viewer, refreshing every widget that uses it.</span>
+                <span style={{ fontSize: 11, color:'var(--muted)' }}>Clicking the button sets this report parameter for the viewer, refreshing every widget that uses it.</span>
               </div>
             )}
 
             {action === 'bookmark' && (
               <div style={{ marginBottom: 12 }}>
-                <label htmlFor="button-action-bookmark-select" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+                <label htmlFor="button-action-bookmark-select" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                   Target bookmark
                 </label>
                 <select id="button-action-bookmark-select" value={actionBookmarkId} onChange={e => setActionBookmarkId(e.target.value)} style={{ width:'100%' }}>
@@ -1406,7 +1414,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               const currentValue = hierarchyNodeId ? `h:${hierarchyNodeId}` : (roleValues[rf.role] ?? '')
               return (
                 <div key={rf.role} style={{ marginBottom: 12 }}>
-                  <label htmlFor="dimension-select" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+                  <label htmlFor="dimension-select" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                     {rf.label ?? rf.role}
                   </label>
                   <select id="dimension-select" value={currentValue} onChange={e => {
@@ -1467,7 +1475,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                           <label key={o.value} style={{ display:'flex', alignItems:'center', gap:6, fontSize:12, cursor:'pointer' }}>
                             <input type="checkbox" checked={idx !== -1} onChange={() => toggleMultiRole(rf.role, o.value)} />
                             <span style={{ color: idx !== -1 ? 'var(--text)' : 'var(--muted)' }}>{o.label}</span>
-                            {idx !== -1 && <span style={{ marginInlineStart:'auto', fontSize:9, color:'var(--accent)' }}>#{idx + 1}</span>}
+                            {idx !== -1 && <span style={{ marginInlineStart:'auto', fontSize: 10.5, color:'var(--accent)' }}>#{idx + 1}</span>}
                           </label>
                         )
                       })}
@@ -1510,7 +1518,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                   // (Phase 7.5): tabular Hijri, labelled 1448-03, month
                   // named on the axis in the reader's language.
                   <div style={{ margin:'-6px 0 10px' }}>
-                    <label htmlFor="date-granularity" style={{ fontSize:10, color:'var(--muted)' }}>Group dates by</label>
+                    <label htmlFor="date-granularity" style={{ fontSize: 11, color:'var(--muted)' }}>Group dates by</label>
                     <select id="date-granularity" aria-label="Group dates by" value={dimensionGranularity}
                       onChange={e => setDimensionGranularity(e.target.value)} style={{ width:'100%', fontSize:11 }}>
                       <option value="">each date</option>
@@ -1519,7 +1527,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                       <option value="hijri_year">Hijri year (هجري)</option>
                     </select>
                     {dimensionGranularity.startsWith('hijri') && (
-                      <div style={{ fontSize:10, color:'var(--muted)', marginTop:2 }}>
+                      <div style={{ fontSize: 11, color:'var(--muted)', marginTop:2 }}>
                         Tabular Hijri calendar: may differ by a day from Umm al-Qura at a month's start.
                       </div>
                     )}
@@ -1552,7 +1560,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
             searchTerms={DATA_SEARCH_TERMS} {...groupFilterProps('Data & aggregation', DATA_SEARCH_TERMS)}>
           {wt === 'bar' && (
             <div style={{ marginBottom: 12 }}>
-              <label htmlFor="bar-mode-select" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+              <label htmlFor="bar-mode-select" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                 Bar layout
               </label>
               <select id="bar-mode-select" value={barMode} onChange={e => setBarMode(e.target.value)} style={{ width:'100%' }}>
@@ -1602,7 +1610,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
 
           {HIERARCHY_WIDGETS.includes(wt as typeof HIERARCHY_WIDGETS[number]) && (
             <div style={{ marginBottom: 12 }}>
-              <label style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', marginBottom:4 }}>
+              <label style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', marginBottom:4 }}>
                 Hierarchy source
               </label>
               <div style={{ display:'flex', gap:12, marginBottom:8, fontSize:12 }}>
@@ -1620,7 +1628,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
 
               {hierMode === 'levels' ? (
                 <>
-                  <label style={{ display:'block', fontSize:10, color:'var(--muted)', marginBottom:3 }}>
+                  <label style={{ display:'block', fontSize: 11, color:'var(--muted)', marginBottom:3 }}>
                     Levels — click in order, outer first (max {HIER_MAX_DEPTH})
                   </label>
                   <div style={{ maxHeight:130, overflowY:'auto', display:'flex', flexDirection:'column',
@@ -1640,7 +1648,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                                 : [...prev, c.name])} />
                           <span style={{ color: idx !== -1 ? 'var(--text)' : 'var(--muted)' }}>{c.name}</span>
                           {idx !== -1 && (
-                            <span style={{ marginInlineStart:'auto', fontSize:9, color:'var(--accent)' }}>
+                            <span style={{ marginInlineStart:'auto', fontSize: 10.5, color:'var(--accent)' }}>
                               #{idx + 1}
                             </span>
                           )}
@@ -1652,7 +1660,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               ) : (
                 <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
                   <div>
-                    <label htmlFor="hier-id" style={{ display:'block', fontSize:10, color:'var(--muted)' }}>
+                    <label htmlFor="hier-id" style={{ display:'block', fontSize: 11, color:'var(--muted)' }}>
                       ID column
                     </label>
                     <select id="hier-id" value={hierIdCol} onChange={e => setHierIdCol(e.target.value)}
@@ -1662,7 +1670,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                     </select>
                   </div>
                   <div>
-                    <label htmlFor="hier-parent" style={{ display:'block', fontSize:10, color:'var(--muted)' }}>
+                    <label htmlFor="hier-parent" style={{ display:'block', fontSize: 11, color:'var(--muted)' }}>
                       Parent column
                     </label>
                     <select id="hier-parent" value={hierParentCol}
@@ -1672,7 +1680,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                     </select>
                   </div>
                   <div>
-                    <label htmlFor="hier-label" style={{ display:'block', fontSize:10, color:'var(--muted)' }}>
+                    <label htmlFor="hier-label" style={{ display:'block', fontSize: 11, color:'var(--muted)' }}>
                       Label column (optional)
                     </label>
                     <select id="hier-label" value={hierLabelCol}
@@ -1681,7 +1689,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                       {effectiveCols.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
                     </select>
                   </div>
-                  <div style={{ fontSize:10, color:'var(--muted)' }}>
+                  <div style={{ fontSize: 11, color:'var(--muted)' }}>
                     A row whose parent is missing becomes a root, so a hierarchy you
                     can only partly see still renders.
                   </div>
@@ -1689,7 +1697,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               )}
 
               {PARTITION_WIDGETS.includes(wt) && (
-                <div style={{ fontSize:10, color:'var(--muted)', marginTop:6 }}>
+                <div style={{ fontSize: 11, color:'var(--muted)', marginTop:6 }}>
                   A {wt} draws each value as a share of its parent, so only
                   adding-up aggregations are offered.
                 </div>
@@ -1703,7 +1711,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           {wt === 'small_multiples' && (
             <div style={{ marginBottom: 12, display:'flex', flexDirection:'column', gap:6 }}>
               <div>
-                <label htmlFor="facet-by" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)' }}>
+                <label htmlFor="facet-by" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)' }}>
                   Facet by
                 </label>
                 <select id="facet-by" value={facetBy} onChange={e => setFacetBy(e.target.value)}
@@ -1713,7 +1721,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 </select>
               </div>
               <div>
-                <label htmlFor="facet-inner" style={{ display:'block', fontSize:10, color:'var(--muted)' }}>
+                <label htmlFor="facet-inner" style={{ display:'block', fontSize: 11, color:'var(--muted)' }}>
                   Panel chart type
                 </label>
                 <select id="facet-inner" value={facetInner} onChange={e => setFacetInner(e.target.value)}
@@ -1722,14 +1730,14 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 </select>
               </div>
               <div>
-                <label htmlFor="facet-limit" style={{ display:'block', fontSize:10, color:'var(--muted)' }}>
+                <label htmlFor="facet-limit" style={{ display:'block', fontSize: 11, color:'var(--muted)' }}>
                   Max panels (1–{FACET_MAX_PANELS})
                 </label>
                 <input id="facet-limit" type="number" min={1} max={FACET_MAX_PANELS}
                   value={facetLimit} onChange={e => setFacetLimit(e.target.value)}
                   style={{ width:'100%' }} />
               </div>
-              <div style={{ fontSize:10, color:'var(--muted)' }}>
+              <div style={{ fontSize: 11, color:'var(--muted)' }}>
                 Every panel shares one scale — comparing them is the point.
               </div>
             </div>
@@ -1737,7 +1745,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
 
           {wt === 'forecast' && (
             <div style={{ marginBottom: 12 }}>
-              <label htmlFor="forecast-periods" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)' }}>
+              <label htmlFor="forecast-periods" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)' }}>
                 Periods ahead ({FORECAST_MIN_PERIODS}–{FORECAST_MAX_PERIODS})
               </label>
               <input id="forecast-periods" type="number"
@@ -1751,7 +1759,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               which one the node sizes mean. */}
           {wt === 'network' && (
             <div style={{ marginBottom: 12 }}>
-              <label htmlFor="centrality-metric" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+              <label htmlFor="centrality-metric" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                 Node size
               </label>
               <select id="centrality-metric" value={centralityMetric}
@@ -1766,13 +1774,13 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
 
           {wt === 'forecast' && (
             <div style={{ marginBottom: 12 }}>
-              <label htmlFor="forecast-target" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+              <label htmlFor="forecast-target" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                 Reach target
               </label>
               <input id="forecast-target" type="number" value={forecastTarget}
                 onChange={e => setForecastTarget(e.target.value)}
                 placeholder="e.g. 500000" style={{ width:'100%' }} />
-              <div style={{ fontSize:9.5, color:'var(--muted)', marginTop:3 }}>
+              <div style={{ fontSize: 10.5, color:'var(--muted)', marginTop:3 }}>
                 Answers when the projection reaches this value, with the range
                 its confidence interval allows. Leave empty for no target.
               </div>
@@ -1781,7 +1789,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
 
           {wt === 'forecast' && (
             <div style={{ marginBottom: 12 }}>
-              <label htmlFor="forecast-method-select" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+              <label htmlFor="forecast-method-select" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                 Forecast method
               </label>
               <select id="forecast-method-select" value={forecastMethod} onChange={e => setForecastMethod(e.target.value)} style={{ width:'100%' }}>
@@ -1793,7 +1801,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
 
           {(wt === 'bar' || wt === 'line') && (
             <div style={{ marginBottom: 12, border: '1px solid var(--border)', borderRadius: 6, padding: 8 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
                 Analytics
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
@@ -1802,15 +1810,15 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               </div>
               <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1 }}>
-                  <span style={{ fontSize: 9, color: 'var(--muted)' }}>Reference line value</span>
+                  <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>Reference line value</span>
                   <input id="reference-line-value" type="number" value={referenceValue} onChange={e => setReferenceValue(e.target.value)} style={{ width: '100%' }} placeholder="e.g. 100" aria-label="Reference line value" />
                 </label>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1 }}>
-                  <span style={{ fontSize: 9, color: 'var(--muted)' }}>Reference line label</span>
+                  <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>Reference line label</span>
                   <input id="reference-line-label" value={referenceLabel} onChange={e => setReferenceLabel(e.target.value)} style={{ width: '100%' }} placeholder="Target" aria-label="Reference line label" />
                 </label>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <span style={{ fontSize: 9, color: 'var(--muted)' }}>Color</span>
+                  <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>Color</span>
                   <input type="color" value={referenceColor} onChange={e => setReferenceColor(e.target.value)}
                     style={{ width: 36, height: 26, padding: 2, border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', background: 'var(--surface)' }} />
                 </label>
@@ -1820,7 +1828,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
 
           {/* Aggregation — grouped select */}
           <div style={{ marginBottom:12 }}>
-            <label htmlFor="cfg-aggregation" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+            <label htmlFor="cfg-aggregation" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
               Aggregation
             </label>
             <select id="cfg-aggregation" value={agg} onChange={e => setAgg(e.target.value)} style={{ width:'100%' }}>
@@ -1837,12 +1845,12 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 </optgroup>
               ))}
             </select>
-            <div style={{ fontSize:10, color:'var(--muted)', marginTop:3 }}>
+            <div style={{ fontSize: 11, color:'var(--muted)', marginTop:3 }}>
               {AGGREGATIONS.find(a => a.value === agg)?.label ?? agg}
               {roleValues.measure ? ` of ${roleValues.measure}` : ' (row count)'}
             </div>
             {warning && (
-              <div role="note" style={{ fontSize:10, color:'var(--accent)', marginTop:4 }}>
+              <div role="note" style={{ fontSize: 11, color:'var(--accent)', marginTop:4 }}>
                 {warning}
               </div>
             )}
@@ -1873,7 +1881,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               second measure to aggregate, and blank means "same as above". */}
           {DUAL_MEASURE_WIDGETS.includes(wt) && roleValues.measure2 && (
             <div style={{ marginBottom:12 }}>
-              <label htmlFor="cfg-aggregation2" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+              <label htmlFor="cfg-aggregation2" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                 Aggregation · second measure
               </label>
               <select id="cfg-aggregation2" value={agg2} onChange={e => setAgg2(e.target.value)} style={{ width:'100%' }}>
@@ -1884,7 +1892,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                   </optgroup>
                 ))}
               </select>
-              <div style={{ fontSize:10, color:'var(--muted)', marginTop:3 }}>
+              <div style={{ fontSize: 11, color:'var(--muted)', marginTop:3 }}>
                 {(AGGREGATIONS.find(a => a.value === (agg2 || agg))?.label ?? (agg2 || agg))}
                 {` of ${roleValues.measure2}`}
               </div>
@@ -1902,7 +1910,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               {/* A group of checkboxes, not a single control, so this is a group label
                   rather than a <label> -- a <label> pointing at nothing gives a screen
                   reader no association and is invalid besides. */}
-              <div id="cfg-visible-columns-label" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+              <div id="cfg-visible-columns-label" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                 Visible columns
               </div>
               <div role="group" aria-labelledby="cfg-visible-columns-label" style={{ maxHeight:130, overflowY:'auto', display:'flex', flexDirection:'column', gap:3, background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:6, padding:'6px 8px' }}>
@@ -1911,7 +1919,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                     <input type="checkbox" checked={tableCols.includes(c.name)}
                       onChange={e => setTableCols(p => e.target.checked ? [...p, c.name] : p.filter(x => x !== c.name))} />
                     <span style={{ color: tableCols.includes(c.name) ? 'var(--text)' : 'var(--muted)' }}>{c.name}</span>
-                    <span className={`badge badge-${c.dtype}`} style={{ marginInlineStart:'auto', padding:'1px 5px', fontSize:9 }}>{c.dtype}</span>
+                    <span className={`badge badge-${c.dtype}`} style={{ marginInlineStart:'auto', padding:'1px 5px', fontSize: 10.5 }}>{c.dtype}</span>
                   </label>
                 ))}
               </div>
@@ -1923,17 +1931,17 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           {(LATTICE_WIDGETS as readonly string[]).includes(wt) && (
           <ExpandableGroup id="lattice" title="Lattice (small multiples)"
             searchTerms={LATTICE_SEARCH_TERMS} {...groupFilterProps('Lattice (small multiples)', LATTICE_SEARCH_TERMS)}>
-            <p style={{ fontSize:10, color:'var(--muted)', marginBottom:8 }}>
+            <p style={{ fontSize: 11, color:'var(--muted)', marginBottom:8 }}>
               Repeat this chart once per value — a grid of panels on one shared axis, so panels compare honestly.
             </p>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:8 }}>
-              <label style={{ fontSize:10, color:'var(--muted)' }}>Rows
+              <label style={{ fontSize: 11, color:'var(--muted)' }}>Rows
                 <select aria-label="Lattice rows" value={latticeRows} onChange={e => setLatticeRows(e.target.value)} style={{ width:'100%' }}>
                   <option value="">— none —</option>
                   {colOptions.filter(o => o.value !== latticeCols).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
               </label>
-              <label style={{ fontSize:10, color:'var(--muted)' }}>Columns
+              <label style={{ fontSize: 11, color:'var(--muted)' }}>Columns
                 <select aria-label="Lattice columns" value={latticeCols} onChange={e => setLatticeCols(e.target.value)} style={{ width:'100%' }}>
                   <option value="">— none —</option>
                   {colOptions.filter(o => o.value !== latticeRows).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -1941,7 +1949,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               </label>
             </div>
             {(latticeRows || latticeCols) && (
-              <div style={{ fontSize:10, color:'var(--muted)', marginBottom:6 }}>
+              <div style={{ fontSize: 11, color:'var(--muted)', marginBottom:6 }}>
                 Up to 8 rows × 8 columns (60 panels), the values with the most rows first; anything cut is named under the chart.
               </div>
             )}
@@ -1951,18 +1959,18 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           {(ANIMATION_WIDGETS as readonly string[]).includes(wt) && (
           <ExpandableGroup id="animation" title="Animation (play through)"
             searchTerms={ANIMATION_SEARCH_TERMS} {...groupFilterProps('Animation (play through)', ANIMATION_SEARCH_TERMS)}>
-            <p style={{ fontSize:10, color:'var(--muted)', marginBottom:8 }}>
+            <p style={{ fontSize: 11, color:'var(--muted)', marginBottom:8 }}>
               Play this chart through an ordered field — a date, a year — one frame per value, on one fixed axis.
             </p>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:8 }}>
-              <label style={{ fontSize:10, color:'var(--muted)' }}>Play through
+              <label style={{ fontSize: 11, color:'var(--muted)' }}>Play through
                 <select aria-label="Animate by" value={animateBy} onChange={e => setAnimateBy(e.target.value)} style={{ width:'100%' }}>
                   <option value="">— off —</option>
                   {colOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
               </label>
               {animateBy && effectiveCols.find(c => c.name === animateBy)?.dtype === 'datetime' && (
-                <label style={{ fontSize:10, color:'var(--muted)' }}>One frame per
+                <label style={{ fontSize: 11, color:'var(--muted)' }}>One frame per
                   <select aria-label="Animation step" value={animateGran} onChange={e => setAnimateGran(e.target.value)} style={{ width:'100%' }}>
                     <option value="">date</option>
                     {['week', 'month', 'quarter', 'year'].map(g => <option key={g} value={g}>{g}</option>)}
@@ -1975,7 +1983,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
 
           <ExpandableGroup id="objfilters" title="Filters"
             searchTerms={FILTERS_SEARCH_TERMS} {...groupFilterProps('Filters', FILTERS_SEARCH_TERMS)}>
-          <p style={{ fontSize:10, color:'var(--muted)', marginBottom:8 }}>
+          <p style={{ fontSize: 11, color:'var(--muted)', marginBottom:8 }}>
             This object's own row filters — applied before aggregation, on top of dataset filters and cross-filters.
           </p>
           {objFilters.map((f, i) => (
@@ -2011,7 +2019,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 style={{ border:'none', background:'none', color:'var(--danger)', cursor:'pointer' }}>✕</button>
             </div>
           ))}
-          <button className="btn" style={{ fontSize:10, marginBottom:8 }}
+          <button className="btn" style={{ fontSize: 11, marginBottom:8 }}
             onClick={() => setObjFilters(p => [...p, { column: '', op: 'eq', value: '' }])}>+ Add filter</button>
           </ExpandableGroup>
 
@@ -2021,21 +2029,21 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           {/* Sort */}
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:8 }}>
             <div>
-              <label htmlFor="cfg-sort-order" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>Sort order</label>
+              <label htmlFor="cfg-sort-order" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>Sort order</label>
               <select id="cfg-sort-order" value={sort} onChange={e => setSort(e.target.value)} style={{ width:'100%' }}>
                 <option value="desc">Descending</option>
                 <option value="asc">Ascending</option>
               </select>
             </div>
             <div>
-              <label htmlFor="cfg-sort-by" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>Sort by</label>
+              <label htmlFor="cfg-sort-by" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>Sort by</label>
               <select id="cfg-sort-by" value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ width:'100%' }}>
                 <option value="">Automatic</option>
                 <option value="value">By Value</option>
                 <option value="name">By Name</option>
               </select>
               {!sortBy && (
-                <div style={{ fontSize:10, color:'var(--muted)', marginTop:3 }}>
+                <div style={{ fontSize: 11, color:'var(--muted)', marginTop:3 }}>
                   Dates in time order, everything else by value
                 </div>
               )}
@@ -2050,7 +2058,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
 
           {(wt === 'table' || wt === 'list') && (
             <div style={{ marginBottom: 12 }}>
-              <label style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+              <label style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                 Multi-column sort (priority order)
               </label>
               {sortKeys.map((k, i) => (
@@ -2072,10 +2080,10 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                     style={{ border:'none', background:'none', color:'var(--danger)', cursor:'pointer' }}>✕</button>
                 </div>
               ))}
-              <button className="btn" style={{ fontSize:10 }}
+              <button className="btn" style={{ fontSize: 11 }}
                 onClick={() => setSortKeys(p => [...p, { col: '', dir: 'asc' }])}>+ Add sort column</button>
               {sortKeys.filter(k => k.col).length > 0 && (
-                <div style={{ fontSize:10, color:'var(--muted)', marginTop:6 }}>
+                <div style={{ fontSize: 11, color:'var(--muted)', marginTop:6 }}>
                   Rows sort by the first column, ties broken by the next. Supersedes the single sort column above.
                 </div>
               )}
@@ -2091,7 +2099,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               <input type="number" value={autoReload} min={5} placeholder="off"
                 onChange={e => setAutoReload(e.target.value)}
                 aria-label="Auto-reload seconds" style={{ width:'100%' }} />
-              <span style={{ fontSize:10, color:'var(--muted)' }}>Refetches this widget's data on the interval. Minimum 5s; blank turns it off.</span>
+              <span style={{ fontSize: 11, color:'var(--muted)' }}>Refetches this widget's data on the interval. Minimum 5s; blank turns it off.</span>
             </>
           )}
 
@@ -2100,13 +2108,13 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               placeholder="e.g. Low, Medium, High" aria-label="Custom category order" />
           )}
           {sortCustom.trim() !== '' && (
-            <div style={{ fontSize:10, color:'var(--muted)', marginTop:-8, marginBottom:12 }}>
+            <div style={{ fontSize: 11, color:'var(--muted)', marginTop:-8, marginBottom:12 }}>
               Categories listed here come first, in this order; the rest follow. Overrides the sort above.
             </div>
           )}
 
           <div style={{ marginBottom: 12 }}>
-            <label htmlFor="cfg-having-op" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+            <label htmlFor="cfg-having-op" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
               Filter aggregated values
             </label>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
@@ -2121,7 +2129,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               <input type="number" value={havingValue} onChange={e => setHavingValue(e.target.value)}
                 aria-label="Aggregate filter value" style={{ width:'100%' }} placeholder="value" disabled={!havingOp} title={!havingOp ? 'Choose a condition first' : undefined} />
             </div>
-            <span style={{ fontSize:10, color:'var(--muted)' }}>Applies to the aggregated value of each category — e.g. keep regions whose total exceeds 1000.</span>
+            <span style={{ fontSize: 11, color:'var(--muted)' }}>Applies to the aggregated value of each category — e.g. keep regions whose total exceeds 1000.</span>
           </div>
 
           {fld('Quick calculation',
@@ -2135,7 +2143,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           )}
 
           <div style={{ marginBottom: 12 }}>
-            <label htmlFor="cfg-suppress" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+            <label htmlFor="cfg-suppress" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
               Suppress small groups
             </label>
             <input id="cfg-suppress" type="number" min={0} value={suppressBelow}
@@ -2145,7 +2153,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 disabled={suppressBelow === '' || Number(suppressBelow) <= 0} title={suppressBelow === '' || Number(suppressBelow) <= 0 ? 'Set a minimum group size above first' : undefined} />
               Also hide the smallest surviving group (blocks back-computation)
             </label>
-            <span style={{ fontSize:10, color:'var(--muted)' }}>Hides any category aggregated from fewer rows than this — confidentiality suppression for small cells.</span>
+            <span style={{ fontSize: 11, color:'var(--muted)' }}>Hides any category aggregated from fewer rows than this — confidentiality suppression for small cells.</span>
           </div>
 
           {wt === 'histogram' && fld('Bins',
@@ -2225,7 +2233,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               searchTerms={RANKING_SEARCH_TERMS} {...groupFilterProps('Ranking', RANKING_SEARCH_TERMS)}>
 
           <div style={{ marginBottom: 12 }}>
-            <label htmlFor="cfg-rank-mode" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+            <label htmlFor="cfg-rank-mode" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
               Rank
             </label>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
@@ -2247,7 +2255,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 Bucket the rest as “All Other”
               </label>
             </div>
-            <span style={{ fontSize:10, color:'var(--muted)' }}>Selected by aggregated value, shown in the sort order above. Ties at the boundary are kept. “All Other” aggregates the excluded categories’ raw rows.</span>
+            <span style={{ fontSize: 11, color:'var(--muted)' }}>Selected by aggregated value, shown in the sort order above. Ties at the boundary are kept. “All Other” aggregates the excluded categories’ raw rows.</span>
           </div>
           </ExpandableGroup>
           )}
@@ -2261,13 +2269,13 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               searchTerms={FORMATTING_SEARCH_TERMS} {...groupFilterProps('Formatting', FORMATTING_SEARCH_TERMS)}>
               {formatCaps.includes('axes') && (<>
                 <div style={{ marginBottom: 12 }}>
-                  <label htmlFor="format-x-axis-label" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+                  <label htmlFor="format-x-axis-label" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                     X axis label
                   </label>
                   <input id="format-x-axis-label" value={xAxisLabel} onChange={e => setXAxisLabel(e.target.value)} style={{ width:'100%' }} placeholder="(none)" />
                 </div>
                 <div style={{ marginBottom: 12 }}>
-                  <label htmlFor="format-y-axis-label" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+                  <label htmlFor="format-y-axis-label" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                     Y axis label
                   </label>
                   <input id="format-y-axis-label" value={yAxisLabel} onChange={e => setYAxisLabel(e.target.value)} style={{ width:'100%' }} placeholder="(none)" />
@@ -2277,7 +2285,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 {['dual_axis_bar', 'dual_axis_line', 'dual_axis_bar_line',
                   'dual_axis_time_series', 'comparative_time_series'].includes(wt) && (
                   <div style={{ marginBottom: 12 }}>
-                    <label htmlFor="format-y2-axis-label" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+                    <label htmlFor="format-y2-axis-label" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                       Right axis label
                     </label>
                     <input id="format-y2-axis-label" value={y2AxisLabel}
@@ -2287,14 +2295,14 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 )}
                 <div style={{ display:'flex', gap:8, marginBottom:12 }}>
                   <div style={{ flex:1 }}>
-                    <label htmlFor="format-tick-size" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+                    <label htmlFor="format-tick-size" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                       Tick size
                     </label>
                     <input id="format-tick-size" type="number" min={6} max={24} value={axisTickSize}
                       onChange={e => setAxisTickSize(e.target.value)} style={{ width:'100%' }} placeholder="10" />
                   </div>
                   <div>
-                    <label htmlFor="format-tick-color" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+                    <label htmlFor="format-tick-color" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                       Tick colour
                     </label>
                     <input id="format-tick-color" type="color" value={axisTickColor || '#94a3b8'} onChange={e => setAxisTickColor(e.target.value)}
@@ -2303,7 +2311,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 </div>
                 {formatCaps.includes('xCategoryAxis') && (
                 <div style={{ marginBottom: 12 }}>
-                  <label htmlFor="format-x-axis-angle" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+                  <label htmlFor="format-x-axis-angle" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                     Category label angle
                   </label>
                   {/* Automatic is the default and the right answer nearly always:
@@ -2325,7 +2333,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 </div>
                 )}
                 <div style={{ marginBottom: 12 }}>
-                  <label htmlFor="format-y-axis-angle" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+                  <label htmlFor="format-y-axis-angle" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                     Value label angle
                   </label>
                   {/* Automatic leaves value labels upright, which is almost always
@@ -2355,14 +2363,14 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
 
               {formatCaps.includes('yScale') && (
                 <div style={{ marginBottom: 12 }}>
-                  <label htmlFor="format-y-scale" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+                  <label htmlFor="format-y-scale" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                     Y axis scale
                   </label>
                   <select id="format-y-scale" value={yScale ?? 'linear'} onChange={e => setYScale(e.target.value as 'linear' | 'log')} style={{ width:'100%' }}>
                     <option value="linear">Linear</option>
                     <option value="log">Logarithmic</option>
                   </select>
-                  <div style={{ fontSize:10, color:'var(--muted)', marginTop:3 }}>
+                  <div style={{ fontSize: 11, color:'var(--muted)', marginTop:3 }}>
                     A log axis cannot show zero or negative values; the axis falls back to linear when the data contains one.
                   </div>
                 </div>
@@ -2371,13 +2379,13 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               {formatCaps.includes('yDomain') && (
                 <div style={{ display:'flex', gap:8, marginBottom:12 }}>
                   <div style={{ flex:1 }}>
-                    <label htmlFor="format-y-min" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+                    <label htmlFor="format-y-min" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                       Y axis min
                     </label>
                     <input id="format-y-min" type="number" value={yMin} onChange={e => setYMin(e.target.value)} style={{ width:'100%' }} placeholder="auto" />
                   </div>
                   <div style={{ flex:1 }}>
-                    <label htmlFor="format-y-max" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+                    <label htmlFor="format-y-max" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                       Y axis max
                     </label>
                     <input id="format-y-max" type="number" value={yMax} onChange={e => setYMax(e.target.value)} style={{ width:'100%' }} placeholder="auto" />
@@ -2392,23 +2400,23 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 </div>
                 {(showGrid ?? true) && (<>
                   <div style={{ marginBottom: 12 }}>
-                    <label htmlFor="format-grid-style" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+                    <label htmlFor="format-grid-style" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                       Gridline style
                     </label>
-                    <select id="format-grid-style" value={gridStyle ?? 'dashed'} onChange={e => setGridStyle(e.target.value as 'dashed' | 'solid')} style={{ width:'100%' }}>
+                    <select id="format-grid-style" value={gridStyle ?? 'solid'} onChange={e => setGridStyle(e.target.value as 'dashed' | 'solid')} style={{ width:'100%' }}>
                       <option value="dashed">Dashed</option>
                       <option value="solid">Solid</option>
                     </select>
                   </div>
                   <div style={{ marginBottom: 12 }}>
-                    <label htmlFor="format-grid-color" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+                    <label htmlFor="format-grid-color" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                       Gridline colour
                     </label>
                     <input id="format-grid-color" type="color" value={gridColor || '#e2e8f0'} onChange={e => setGridColor(e.target.value)}
                       style={{ width:36, height:26, padding:2, border:'1px solid var(--border)', borderRadius:4, cursor:'pointer', background:'var(--surface)' }} />
                   </div>
                   <div>
-                    <label htmlFor="format-wall-color" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+                    <label htmlFor="format-wall-color" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                       Wall colour
                     </label>
                     <input id="format-wall-color" type="color" value={wallColor || '#f8fafc'} onChange={e => setWallColor(e.target.value)}
@@ -2424,7 +2432,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 </div>
                 {(showLegend ?? true) && (
                   <div style={{ marginBottom: 12 }}>
-                    <label htmlFor="format-legend-position" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+                    <label htmlFor="format-legend-position" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                       Legend position
                     </label>
                     <select id="format-legend-position" value={legendPosition ?? 'bottom'}
@@ -2438,13 +2446,13 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 )}
                 {(showLegend ?? true) && (
                   <div style={{ marginBottom: 12 }}>
-                    <label htmlFor="format-legend-title" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+                    <label htmlFor="format-legend-title" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                       Legend title
                     </label>
                     <input id="format-legend-title" value={legendTitle}
                       onChange={e => setLegendTitle(e.target.value)}
                       style={{ width:'100%' }} placeholder="e.g. Customer Age Group" />
-                    <div style={{ fontSize:9.5, color:'var(--muted)', marginTop:3 }}>
+                    <div style={{ fontSize: 10.5, color:'var(--muted)', marginTop:3 }}>
                       Names the FIELD the entries are values of — the swatches
                       already say which value each colour is.
                     </div>
@@ -2513,7 +2521,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                     read-time defaults ('after', 'all'), never written until touched. */}
                 {((showTotals ?? false) || (dimension2 && (showSubtotals ?? true))) && (
                   <div style={{ marginBottom: 12 }}>
-                    <label htmlFor="format-totals-position" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+                    <label htmlFor="format-totals-position" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                       Totals placement
                     </label>
                     <select id="format-totals-position" value={totalsPosition ?? 'after'}
@@ -2525,7 +2533,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 )}
                 {(showTotals ?? false) && (
                   <div style={{ marginBottom: 12 }}>
-                    <label htmlFor="format-totals-scope" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+                    <label htmlFor="format-totals-scope" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                       Total covers
                     </label>
                     <select id="format-totals-scope" value={totalsScope ?? 'all'}
@@ -2571,14 +2579,14 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           searchTerms={APPEARANCE_SEARCH_TERMS} {...groupFilterProps('Appearance', APPEARANCE_SEARCH_TERMS)}>
           <div style={{ display:'flex', gap:8, marginBottom:12 }}>
             <div>
-              <label htmlFor="appearance-background" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+              <label htmlFor="appearance-background" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                 Background
               </label>
               <input id="appearance-background" type="color" value={widgetBackground || defaultSurfaceColor} onChange={e => setWidgetBackground(e.target.value)}
                 style={{ width:36, height:26, padding:2, border:'1px solid var(--border)', borderRadius:4, cursor:'pointer', background:'var(--surface)' }} />
             </div>
             <div>
-              <label htmlFor="appearance-border-color" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+              <label htmlFor="appearance-border-color" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                 Border colour
               </label>
               <input id="appearance-border-color" type="color" value={widgetBorderColor || defaultBorderColor} onChange={e => setWidgetBorderColor(e.target.value)}
@@ -2587,14 +2595,14 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           </div>
           <div style={{ display:'flex', gap:8, marginBottom:12 }}>
             <div style={{ flex:1 }}>
-              <label htmlFor="appearance-border-width" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+              <label htmlFor="appearance-border-width" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                 Border width
               </label>
               <input id="appearance-border-width" type="number" min={0} max={20} value={widgetBorderWidth}
                 onChange={e => setWidgetBorderWidth(e.target.value)} style={{ width:'100%' }} placeholder="1" />
             </div>
             <div style={{ flex:1 }}>
-              <label htmlFor="appearance-radius" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+              <label htmlFor="appearance-radius" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                 Corner radius
               </label>
               <input id="appearance-radius" type="number" min={0} max={40} value={widgetRadius}
@@ -2602,14 +2610,14 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
             </div>
           </div>
           <div style={{ marginBottom: 12 }}>
-            <label htmlFor="appearance-padding" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+            <label htmlFor="appearance-padding" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
               Padding
             </label>
             <input id="appearance-padding" type="number" min={0} max={60} value={widgetPadding}
               onChange={e => setWidgetPadding(e.target.value)} style={{ width:'100%' }} placeholder="auto" />
           </div>
           <div style={{ marginBottom: 12 }}>
-            <label htmlFor="appearance-skin" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+            <label htmlFor="appearance-skin" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
               Skin
             </label>
             <select id="appearance-skin" value={widgetSkin} onChange={e => setWidgetSkin(e.target.value)} style={{ width:'100%' }}>
@@ -2628,7 +2636,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 consumed by WidgetRenderer.tsx as the aria-label on its role="figure"
                 container (cfg.alt_text), not an <img> alt attribute. An image widget
                 shows both controls at once, so the labels must not read the same. */}
-            <label htmlFor="appearance-alt-text" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+            <label htmlFor="appearance-alt-text" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
               Widget description (screen readers)
             </label>
             <input id="appearance-alt-text" value={altText} onChange={e => setAltText(e.target.value)} style={{ width:'100%' }} placeholder="Describes this widget for screen readers" />
@@ -2637,7 +2645,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
 
         {pages?.some(p => p.page_type === 'drillthrough') && (
           <div style={{ marginBottom: 12 }}>
-            <label htmlFor="drillthrough-page-select" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+            <label htmlFor="drillthrough-page-select" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
               Drillthrough page
             </label>
             <select id="drillthrough-page-select" value={drillthroughPageId} onChange={e => setDrillthroughPageId(e.target.value)} style={{ width:'100%' }}>
@@ -2649,7 +2657,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
 
         {pages?.some(p => p.page_type === 'tooltip') && (
           <div style={{ marginBottom: 12 }}>
-            <label htmlFor="tooltip-page-select" style={{ display:'block', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+            <label htmlFor="tooltip-page-select" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
               Tooltip page
             </label>
             <select id="tooltip-page-select" value={tooltipPageId} onChange={e => setTooltipPageId(e.target.value)} style={{ width:'100%' }}>

@@ -36,7 +36,7 @@ export default function MobileLayoutEditor({ page, widgets, onUpdate }: Props) {
 
   return (
     <div style={{ padding: '14px 14px 0' }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
         Mobile layout
       </div>
       <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>

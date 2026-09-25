@@ -1,3 +1,4 @@
+import { useT } from '../../i18n'
 const ZOOM_MIN = 50
 const ZOOM_MAX = 150
 const ZOOM_STEP = 10
@@ -9,6 +10,7 @@ export default function StatusBar({ pageIndex, pageCount, saveState, zoom, onZoo
   zoom?: number
   onZoomChange?: (zoom: number) => void
 }) {
+  const tr = useT()
   const clamp = (z: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z))
 
   return (
@@ -17,7 +19,7 @@ export default function StatusBar({ pageIndex, pageCount, saveState, zoom, onZoo
       padding: '4px 12px', borderTop: '1px solid var(--border)', background: 'var(--surface)',
       fontSize: 11, color: 'var(--muted)', flexShrink: 0,
     }}>
-      <span>Page {pageIndex + 1} of {pageCount}</span>
+      <span>{tr('status.page', { n: pageIndex + 1, total: pageCount })}</span>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         {zoom !== undefined && onZoomChange && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -32,7 +34,7 @@ export default function StatusBar({ pageIndex, pageCount, saveState, zoom, onZoo
             </button>
           </div>
         )}
-        <span>{saveState === 'saving' ? 'Saving…' : 'Saved'}</span>
+        <span>{saveState === 'saving' ? tr('status.saving') : tr('status.saved')}</span>
       </div>
     </div>
   )

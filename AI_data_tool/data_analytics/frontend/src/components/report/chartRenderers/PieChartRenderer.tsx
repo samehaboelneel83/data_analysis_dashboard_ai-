@@ -1,5 +1,5 @@
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Customized } from 'recharts'
-import { TT, fmtStr, SELECTED_STROKE, getFillFactory, COLORS, fillPattern, PatternDefs } from '../chartUtils'
+import { TT, sliceLabel, fmtStr, SELECTED_STROKE, getFillFactory, COLORS, fillPattern, PatternDefs } from '../chartUtils'
 import type { ChartRendererProps } from './types'
 import { seriesName } from './axisOptions'
 
@@ -21,7 +21,7 @@ export default function PieChartRenderer({ rows, cfg, rtl, broadcasts, localSele
             isAnimationActive={false}
             onClick={broadcasts ? (d: any) => onClickPoint(d.name) : undefined}
             style={{ cursor: broadcasts ? 'pointer' : 'default' }}
-            label={showLabels ? (({ name, percent }: any) => `${name} ${(percent * 100).toFixed(0)}%`) : false}
+            label={showLabels ? sliceLabel : false}
             labelLine={false}
           >
             {rows.map((r: any, i: number) => {

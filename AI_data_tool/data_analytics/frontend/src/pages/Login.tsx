@@ -38,12 +38,6 @@ export default function Login() {
     return null
   }
 
-  const inp = {
-    style: {
-      width: '100%', fontSize: 13, padding: '8px 10px', boxSizing: 'border-box' as const,
-      background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)',
-    },
-  }
 
   const handleSso = async () => {
     if (!email.trim()) {
@@ -81,40 +75,37 @@ export default function Login() {
     }
   }
 
-  // The card was a fixed 360px wide with no gutter of its own: on a 390px phone
-  // it touched both edges, and on anything narrower it ran off the screen with
-  // no sideways scroll to reach it. It now takes the width it is given, up to
-  // the same 360.
+  // The card takes the width it is given, up to 380px, so it keeps a gutter on
+  // a 390px phone instead of touching both edges. Every value is a class in
+  // index.css (.dl-login*), so the page follows the theme like the shell does.
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)', padding: 16, boxSizing: 'border-box' }}>
-      <form onSubmit={handleSubmit} style={{
-        background: 'var(--surface)', border: '1px solid var(--border)',
-        borderRadius: 12, padding: 'clamp(20px, 6vw, 32px)', width: '100%', maxWidth: 360,
-        boxSizing: 'border-box',
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-          <LanguageSwitcher />
+    <div className="dl-login">
+      <div className="dl-login__lang"><LanguageSwitcher /></div>
+      <form onSubmit={handleSubmit} className="dl-login__card">
+        <div className="dl-login__brand">
+          <span className="dl-rail__mark" aria-hidden>D</span>
+          <span className="dl-rail__wordmark">datalytics</span>
         </div>
-        <div style={{ fontWeight: 800, fontSize: 20, color: 'var(--accent)', marginBottom: 24, textAlign: 'center' }}>
-          Datalytics
-        </div>
-        <label style={{ display: 'block', marginBottom: 14 }}>
-          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 5 }}>{t('login.email')}</div>
-          <input type="email" value={email} onChange={e => setEmail(e.target.value)} autoFocus {...inp} />
+        <h1 className="dl-login__title">{t('login.title')}</h1>
+        <p className="dl-login__sub">{t('login.subtitle')}</p>
+
+        <label className="dl-field">
+          <span className="dl-field__label">{t('login.email')}</span>
+          <input type="email" value={email} onChange={e => setEmail(e.target.value)}
+            autoFocus autoComplete="username" className="dl-field__input" />
         </label>
-        <label style={{ display: 'block', marginBottom: 20 }}>
-          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 5 }}>{t('login.password')}</div>
-          <input type="password" value={password} onChange={e => setPassword(e.target.value)} {...inp} />
+        <label className="dl-field">
+          <span className="dl-field__label">{t('login.password')}</span>
+          <input type="password" value={password} onChange={e => setPassword(e.target.value)}
+            autoComplete="current-password" className="dl-field__input" />
         </label>
-        <button type="submit" className="btn btn-primary" disabled={submitting} style={{ width: '100%' }}>
+        <button type="submit" className="btn btn-primary dl-login__submit" disabled={submitting}>
           {submitting ? t('login.signingIn') : t('login.signIn')}
         </button>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '16px 0 12px', color: 'var(--muted)', fontSize: 11 }}>
-          <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-          {t('login.or')}
-          <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+        <div className="dl-login__or" role="separator">
+          <span>{t('login.or')}</span>
         </div>
-        <button type="button" className="btn" onClick={handleSso} disabled={ssoBusy} style={{ width: '100%' }}>
+        <button type="button" className="btn btn-ghost dl-login__submit" onClick={handleSso} disabled={ssoBusy}>
           {ssoBusy ? t('login.redirecting') : t('login.sso')}
         </button>
       </form>

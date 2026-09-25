@@ -47,7 +47,7 @@ export default function TranslationsPane({ report, onSaved }: {
 
   return (
     <div style={{ padding: 12, overflowY: 'auto', height: '100%' }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>
         Translations
       </div>
       <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>
@@ -57,7 +57,7 @@ export default function TranslationsPane({ report, onSaved }: {
         <input aria-label="Locale" value={locale} onChange={e => pick(e.target.value.trim())}
           placeholder="locale, e.g. ar or fr" style={{ fontSize: 12, width: 110 }} />
         {Object.keys(all).map(loc => (
-          <button key={loc} className="btn" style={{ fontSize: 10 }} onClick={() => pick(loc)}>{loc}</button>
+          <button key={loc} className="btn" style={{ fontSize: 11 }} onClick={() => pick(loc)}>{loc}</button>
         ))}
       </div>
 
@@ -65,7 +65,7 @@ export default function TranslationsPane({ report, onSaved }: {
         <>
           {titled.map(({ w, page }) => (
             <div key={w.id} style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 2 }}>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>
                 {page} · {w.title || w.widget_type}
               </div>
               {w.title && (

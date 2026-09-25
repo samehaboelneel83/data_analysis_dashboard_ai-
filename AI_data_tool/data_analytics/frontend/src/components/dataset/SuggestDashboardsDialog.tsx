@@ -120,6 +120,9 @@ export default function SuggestDashboardsDialog(
   const [source, setSource] = useState<'insights' | 'model' | null>(null)
   const [seconds, setSeconds] = useState(0)
   const alive = useRef(true)
+  // Cancel: this can take 20-30s, and the only way out used to be closing
+  // the whole dialog and losing the description typed into it.
+  const abortRef = useRef<AbortController | null>(null)
 
   // Set true on EVERY mount, not just the first. React StrictMode mounts,
   // unmounts and re-mounts every component in development; without the
@@ -145,16 +148,19 @@ export default function SuggestDashboardsDialog(
     setBusy(true); setError(''); setReason(''); setProposals(null); setSource(null)
     setQuestion('')
     try {
-      const got = await datasetsApi.suggestDashboards(datasetId, { goal, count: 3 })
+      abortRef.current = new AbortController()
+      const got = await datasetsApi.suggestDashboards(datasetId, { goal, count: 3 }, abortRef.current.signal)
       if (!alive.current) return
       setProposals(got.proposals)
       setProfile(got.profile)
       setSource(got.source ?? got.proposals?.[0]?.source ?? null)
       setReason(got.reason)
       setQuestion(got.question ?? '')
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.code === 'ERR_CANCELED' || e?.name === 'CanceledError') return
       if (alive.current) setError(reasonFrom(e, 'the request failed'))
     } finally {
+      abortRef.current = null
       if (alive.current) setBusy(false)
     }
   }
@@ -267,6 +273,9 @@ export default function SuggestDashboardsDialog(
               Still going. Large datasets take longer, because each proposed
               widget is executed before it is offered.
             </div>}
+            <div style={{ marginTop: 8 }}>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => abortRef.current?.abort()}>Cancel</button>
+            </div>
           </div>
         )}
 

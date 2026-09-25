@@ -1,12 +1,12 @@
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { datasetsApi, reportsApi, dataSourcesApi } from '../services/api'
 import { useModalDialog } from './ui/useModalDialog'
 import { AuthContext } from '../contexts/AuthContext'
-import { ArrowRight, Cable, Database, LayoutDashboard } from 'lucide-react'
+import { ArrowRight, Cable, Database, LayoutDashboard, Zap } from 'lucide-react'
 import { useT, type MessageKey } from '../i18n'
 
-interface Entry { kind: 'report' | 'dataset' | 'connection' | 'page'; label: string; hint: string; to: string; labelKey?: MessageKey; hintKey?: MessageKey }
+interface Entry { kind: 'report' | 'dataset' | 'connection' | 'page' | 'command'; label: string; hint: string; to: string; labelKey?: MessageKey; hintKey?: MessageKey }
 
 const STATIC_PAGES: Entry[] = [
   { kind: 'page', label: 'Home', hint: 'page', to: '/', labelKey: 'nav.home', hintKey: 'palette.page' },
@@ -30,9 +30,49 @@ const ADMIN_PAGES: Entry[] = [
   { kind: 'page', label: 'Connection rules (Ask AI)', hint: 'admin', to: '/admin/connection-rules', hintKey: 'palette.admin' },
 ]
 
+/** Things to DO rather than places to go. `to` is either a route or a
+ *  `cmd:` id the palette runs itself. */
+const COMMANDS: Entry[] = [
+  { kind: 'command', label: 'Create a dashboard', hint: 'command', to: '/reports?new=1', labelKey: 'palette.cmd.newDashboard', hintKey: 'palette.command' },
+  { kind: 'command', label: 'Upload a file', hint: 'command', to: '/upload', labelKey: 'palette.cmd.upload', hintKey: 'palette.command' },
+  { kind: 'command', label: 'Ask a question about your data', hint: 'command', to: '/ask', labelKey: 'palette.cmd.ask', hintKey: 'palette.command' },
+  { kind: 'command', label: 'Connect a data source', hint: 'command', to: '/connections', labelKey: 'palette.cmd.connect', hintKey: 'palette.command' },
+  { kind: 'command', label: 'Switch light / dark theme', hint: 'command', to: 'cmd:theme', labelKey: 'palette.cmd.theme', hintKey: 'palette.command' },
+]
+
 const KIND_ICON: Record<Entry['kind'], React.ReactNode> = {
   report: <LayoutDashboard size={13} />, dataset: <Database size={13} />,
-  connection: <Cable size={13} />, page: <ArrowRight size={13} />,
+  connection: <Cable size={13} />, page: <ArrowRight size={13} />, command: <Zap size={13} />,
+}
+
+/** Result groups, in the order they are listed. */
+const GROUP_ORDER: Entry['kind'][] = ['command', 'page', 'report', 'dataset', 'connection']
+const GROUP_LABEL: Record<Entry['kind'], MessageKey> = {
+  command: 'palette.group.commands', page: 'palette.group.pages', report: 'palette.group.dashboards',
+  dataset: 'palette.group.datasets', connection: 'palette.group.connections',
+}
+
+/**
+ * How well `q` names `hay`, lower is better, -1 for no match.
+ *   0 the label starts with it, 1 a WORD in it does, 2 it appears inside,
+ *   3 its letters appear in order, starting at a word and close together.
+ * The last used to be any in-order subsequence anywhere, so "sales" matched
+ * half the index ("S...a...l...e...s" across a long dataset name) and the
+ * useful hits were buried.
+ */
+export function matchScore(hay: string, q: string): number {
+  if (!q) return 0
+  if (hay.startsWith(q)) return 0
+  if (hay.split(/[\s_\-·/()]+/).some(w => w.startsWith(q))) return 1
+  if (hay.includes(q)) return 2
+  if (q.length < 3) return -1
+  for (let start = 0; start < hay.length; start++) {
+    if (hay[start] !== q[0] || (start > 0 && /[a-z0-9\u0600-\u06ff]/i.test(hay[start - 1]))) continue
+    let i = 1, j = start + 1
+    for (; j < hay.length && i < q.length; j++) if (hay[j] === q[i]) i++
+    if (i === q.length && j - start <= q.length * 3) return 3
+  }
+  return -1
 }
 
 /**
@@ -86,6 +126,7 @@ export default function CommandPalette() {
         dataSourcesApi.list().catch(() => []),  // non-admins may lack access; degrade quietly
       ])
       setIndex([
+        ...COMMANDS,
         ...STATIC_PAGES,
         ...(isAdmin ? ADMIN_PAGES : []),
         ...reports.map(r => ({ kind: 'report' as const, label: r.name, hint: 'dashboard', hintKey: 'palette.dashboard' as const, to: `/reports/${r.id}` })),
@@ -96,7 +137,7 @@ export default function CommandPalette() {
         ...connections.map(c => ({ kind: 'connection' as const, label: c.name,
           hint: 'connection', hintKey: 'palette.connection' as const, to: `/connections/${c.id}/review` })),
       ])
-    } catch { setIndex(isAdmin ? [...STATIC_PAGES, ...ADMIN_PAGES] : STATIC_PAGES) }
+    } catch { setIndex([...COMMANDS, ...STATIC_PAGES, ...(isAdmin ? ADMIN_PAGES : [])]) }
   }, [index, isAdmin])
 
   useEffect(() => { if (open) { void load(); setTimeout(() => inputRef.current?.focus(), 30) } }, [open, load])
@@ -114,24 +155,41 @@ export default function CommandPalette() {
       const recentTos = new Set(recents.map(r => r.to))
       return [...recents, ...all.filter(e => !recentTos.has(e.to))].slice(0, 10)
     }
-    const q = query.toLowerCase()
-    // rank: prefix beats substring beats fuzzy-subsequence
+    const q = query.trim().toLowerCase()
     const scored = all.map(e => {
-      const l = displayLabel(e).toLowerCase()
-      const en = e.label.toLowerCase()
-      let score = -1
-      for (const hay of [l, en]) {
-        if (hay.startsWith(q)) { score = 0; break }
-        if (hay.includes(q)) { score = 1; break }
-        let i = 0
-        for (const ch of hay) if (ch === q[i]) i++
-        if (i === q.length) { score = 2; break }
-      }
-      return { e, score }
+      const scores = [displayLabel(e).toLowerCase(), e.label.toLowerCase()]
+        .map(h => matchScore(h, q)).filter(x => x >= 0)
+      return { e, score: scores.length ? Math.min(...scores) : -1 }
     }).filter(x => x.score >= 0)
     scored.sort((a, b) => a.score - b.score || displayLabel(a.e).localeCompare(displayLabel(b.e)))
-    return scored.slice(0, 10).map(x => x.e)
+    // Grouped by kind, groups in a fixed order, at most five per group: a
+    // search for "sales" should show the dashboards AND the dataset, not ten
+    // dashboards and a dataset scrolled out of sight.
+    const perKind = new Map<Entry['kind'], Entry[]>()
+    for (const { e } of scored) {
+      const list = perKind.get(e.kind) ?? []
+      if (list.length < 5) list.push(e)
+      perKind.set(e.kind, list)
+    }
+    return GROUP_ORDER.flatMap(k => perKind.get(k) ?? []).slice(0, 14)
   }, [index, query, t])
+
+  // Where each group heading goes: before the first result of its kind. With
+  // an empty query the recents lead, under their own heading.
+  const recentCount = useMemo(() => {
+    if (query.trim()) return 0
+    try { return Math.min((JSON.parse(localStorage.getItem('palette-recents') ?? '[]') as Entry[]).length, 10) }
+    catch { return 0 }
+  }, [query, open])
+  const headingAt = (i: number): MessageKey | null => {
+    if (!query.trim()) {
+      if (i === 0 && recentCount > 0) return 'palette.group.recent'
+      if (i < recentCount) return null
+    }
+    const k = matches[i].kind
+    const prev = i > 0 && !(i === recentCount && !query.trim()) ? matches[i - 1].kind : null
+    return prev === k ? null : GROUP_LABEL[k]
+  }
 
   const go = (entry: Entry) => {
     try {
@@ -140,6 +198,7 @@ export default function CommandPalette() {
       localStorage.setItem('palette-recents', JSON.stringify(recents))
     } catch { /* recents are a convenience, never a blocker */ }
     setOpen(false)
+    if (entry.to === 'cmd:theme') { window.dispatchEvent(new CustomEvent('datalytics:toggle-theme')); return }
     navigate(entry.to)
   }
 
@@ -162,24 +221,30 @@ export default function CommandPalette() {
           }}
           style={{ width: '100%', border: 'none', outline: 'none', background: 'transparent',
             padding: '14px 16px', fontSize: 14, color: 'var(--text)', borderBottom: '1px solid var(--border)' }} />
-        <ul role="listbox" aria-label={t('palette.results')} style={{ listStyle: 'none', maxHeight: 320, overflowY: 'auto', padding: 6 }}>
+        <ul role="listbox" aria-label={t('palette.results')} style={{ listStyle: 'none', maxHeight: 380, overflowY: 'auto', padding: 6, margin: 0 }}>
           {matches.length === 0 && (
             <li style={{ padding: '10px 12px', fontSize: 12, color: 'var(--muted)' }}>{t('palette.empty')}</li>
           )}
-          {matches.map((m, i) => (
-            <li key={m.to} role="option" aria-selected={i === selected}>
+          {matches.map((m, i) => {
+            const heading = headingAt(i)
+            return (<Fragment key={`${m.kind}:${m.to}`}>
+            {heading && (
+              <li role="presentation" className="dl-palette__group">{t(heading)}</li>
+            )}
+            <li role="option" aria-selected={i === selected}>
               <button onClick={() => go(m)} onMouseEnter={() => setSelected(i)}
                 style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'start',
                   padding: '8px 10px', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13,
                   background: i === selected ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : 'transparent', color: 'var(--text)' }}>
                 <span aria-hidden style={{ width: 18, display: 'inline-flex', justifyContent: 'center', color: 'var(--muted)' }}>{KIND_ICON[m.kind]}</span>
                 <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayLabel(m)}</span>
-                <span style={{ fontSize: 10, color: 'var(--muted)' }}>{displayHint(m)}</span>
+                <span style={{ fontSize: 11, color: 'var(--muted)' }}>{displayHint(m)}</span>
               </button>
             </li>
-          ))}
+            </Fragment>)
+          })}
         </ul>
-        <div style={{ padding: '6px 12px', borderTop: '1px solid var(--border)', fontSize: 10, color: 'var(--muted)' }}>
+        <div style={{ padding: '7px 12px', borderTop: '1px solid var(--border)', fontSize: 11, color: 'var(--muted)' }}>
           {t('palette.hint')}
         </div>
       </div>

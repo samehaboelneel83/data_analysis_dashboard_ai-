@@ -67,6 +67,21 @@
   --dl-rail-w-collapsed: 56px;
   --dl-topbar-h:     56px;
 
+  /* ---- Controls ----
+     One height per size, so a button, an input and a select placed side by
+     side line up without per-page padding tweaks. 34px is what .btn already
+     measured (13px text at the body leading plus its padding); publishing it
+     makes it a rule rather than an accident. The small size keeps the 24px
+     WCAG 2.5.8 floor with room to spare. */
+  --dl-control-h:    34px; /* @kind spacing */
+  --dl-control-h-sm: 26px; /* @kind spacing */
+  --dl-rail-item-h:  34px; /* @kind spacing */
+
+  /* The focus halo drawn around text fields and pressed buttons: the accent
+     at low strength, so it reads as "this one" without a second hard line
+     beside the field's own border. */
+  --dl-ring: 0 0 0 3px color-mix(in srgb, var(--mc-accent) 26%, transparent); /* @kind shadow */
+
   /* ---- Spacing scale (multiples of 4) ---- */
   --dl-1: 4px;  --dl-2: 8px;  --dl-3: 12px; --dl-4: 16px;
   --dl-5: 24px; --dl-6: 32px; --dl-7: 48px; --dl-8: 64px;
@@ -85,7 +100,11 @@
      nothing in this product may fetch a font at runtime. The
      @font-face rules live in styles/datalytics-fonts.css. */
   --dl-font: "Inter", "IBM Plex Sans Arabic", system-ui, sans-serif;
-  --dl-text-page:    20px;  --dl-weight-page:    600;
+  /* One page-title size for every page. Before, titles were set inline at
+     18, 20, 22 and 24px depending on who wrote the page, so moving between
+     sections made the heading jump. 22px at 650 (Inter is variable) holds
+     the page above its 16px section headings without shouting. */
+  --dl-text-page:    22px;  --dl-weight-page:    650;
   --dl-text-section: 16px;  --dl-weight-section: 500;
   --dl-text-body:    14px;
   --dl-text-data:    13px;  /* table cells, metadata, chart labels */

@@ -1,6 +1,13 @@
 ﻿import React from 'react'
 import ReactDOM from 'react-dom/client'
-import { Toaster } from 'react-hot-toast'
+import toast, { Toaster } from 'react-hot-toast'
+
+// One toast per message. Two requests failing for the same reason (a schema
+// browse and its first preview, say) used to stack the identical error twice;
+// react-hot-toast replaces a toast that shares an id instead of adding one.
+const showError = toast.error
+toast.error = ((message, opts) =>
+  showError(message, { id: typeof message === 'string' ? `err:${message}` : undefined, ...opts })) as typeof toast.error
 import App from './App'
 import './index.css'
 
@@ -17,7 +24,10 @@ try {
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <App />
-    <Toaster position="bottom-right" toastOptions={{ style: { background: 'var(--surface2)', color: 'var(--text)', border: '1px solid var(--border)' } }} />
+    <Toaster position="bottom-right" toastOptions={{ style: {
+      background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)',
+      borderRadius: 'var(--dl-radius-card)', boxShadow: 'var(--dl-shadow-overlay)',
+      fontSize: 'var(--dl-text-data)', padding: '10px 14px' } }} />
   </React.StrictMode>,
 )
 

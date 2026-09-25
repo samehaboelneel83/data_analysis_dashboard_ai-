@@ -78,7 +78,7 @@ describe('asking', () => {
       { target: { value: 'I am an instructor' } })
     fireEvent.click(screen.getByRole('button', { name: /suggest/i }))
     await waitFor(() => expect(datasetsApi.suggestDashboards).toHaveBeenCalledWith(
-      7, expect.objectContaining({ goal: 'I am an instructor' })))
+      7, expect.objectContaining({ goal: 'I am an instructor' }), expect.anything()))
   })
 
   it('works without any words at all', async () => {

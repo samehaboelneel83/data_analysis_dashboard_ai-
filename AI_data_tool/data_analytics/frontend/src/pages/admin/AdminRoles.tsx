@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Shield } from 'lucide-react'
+import { fieldStyle } from '../../components/ui/fieldStyle'
+import { useT } from '../../i18n'
+import { Plus, Shield } from 'lucide-react'
 import { adminRolesApi } from '../../services/api'
 import type { Role } from '../../services/api'
 import toast from 'react-hot-toast'
@@ -21,10 +23,7 @@ function RoleModal({ initial, onSave, onClose }: {
   const [isOrgAdmin, setIsOrgAdmin] = useState(initial?.is_org_admin ?? false)
   const [saving, setSaving] = useState(false)
 
-  const inp = {
-    style: { width: '100%', fontSize: 12, padding: '5px 8px', boxSizing: 'border-box' as const,
-      background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)' },
-  }
+  const inp = { style: fieldStyle }
 
   const handleSave = async () => {
     if (!name.trim()) { toast.error('Name is required'); return }
@@ -74,6 +73,7 @@ function RoleModal({ initial, onSave, onClose }: {
 }
 
 export default function AdminRoles() {
+  const t = useT()
   const [roles, setRoles] = useState<Role[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<unknown>(null)
@@ -111,8 +111,8 @@ export default function AdminRoles() {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: 24 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, flex: 1 }}>Roles</h1>
-        <button className="btn btn-primary btn-sm" onClick={() => setModal('add')}>+ New Role</button>
+        <h1 className="dl-page-title" style={{ flex: 1 }}>{t('nav.roles')}</h1>
+        <button className="btn btn-primary" onClick={() => setModal('add')}><Plus size={16} aria-hidden /> {t('admin.newRole')}</button>
       </div>
 
       {loading && <LoadingState />}
@@ -126,17 +126,15 @@ export default function AdminRoles() {
           description="Create a role to control what users in your organization can do." />
       )}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div className="dl-rows">
         {roles.map(r => (
-          <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
-            background: 'var(--surface)', border: '1px solid var(--border)',
-            borderRadius: 10, padding: '14px 16px' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: 14 }}>{r.name}</div>
+          <div key={r.id} className="dl-rows__row">
+            <div className="dl-rows__main">
+              <div className="dl-rows__title">{r.name}</div>
               {r.is_org_admin && <div style={{ fontSize: 11, color: 'var(--accent)' }}>Org admin</div>}
             </div>
-            <button className="btn btn-ghost btn-sm" onClick={() => setModal(r)} style={{ fontSize: 11 }}>Edit</button>
-            <button className="btn btn-ghost btn-sm" onClick={() => handleDelete(r)} style={{ fontSize: 11, color: 'var(--danger)' }}>Delete</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => setModal(r)}>{t('admin.edit')}</button>
+            <button className="btn btn-ghost btn-sm dl-danger-item" onClick={() => handleDelete(r)}>{t('admin.delete')}</button>
           </div>
         ))}
       </div>

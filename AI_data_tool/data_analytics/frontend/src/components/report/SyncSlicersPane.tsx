@@ -12,7 +12,7 @@ export default function SyncSlicersPane({ pages, interactions, onToggleSync }: {
 
   return (
     <div style={{ padding: '14px 14px 0' }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
         Sync slicers
       </div>
       {pagesWithSlicers.length === 0 && <span style={{ fontSize: 12, color: 'var(--muted)' }}>No slicers in this report yet.</span>}
@@ -25,7 +25,7 @@ export default function SyncSlicersPane({ pages, interactions, onToggleSync }: {
               <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 7px', fontSize: 12 }}>
                 <span style={{ flex: 1 }}>{s.title}</span>
                 <button onClick={() => onToggleSync(s.id, !synced)}
-                  style={{ fontSize: 10, padding: '3px 8px', borderRadius: 99, border: '1px solid var(--border)',
+                  style={{ fontSize: 11, padding: '3px 8px', borderRadius: 99, border: '1px solid var(--border)',
                     background: synced ? 'var(--accent)' : 'var(--surface2)', color: synced ? 'var(--mc-accent-fg)' : 'var(--muted)', cursor: 'pointer' }}>
                   {synced ? 'All pages' : 'This page only'}
                 </button>

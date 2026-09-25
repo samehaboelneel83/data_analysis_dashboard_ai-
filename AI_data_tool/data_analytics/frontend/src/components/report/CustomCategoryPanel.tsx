@@ -135,11 +135,11 @@ export default function CustomCategoryPanel({ datasetId, columns, onSaved }: Pro
     }
   }
 
-  const lbl: React.CSSProperties = { fontSize: 9, color: 'var(--muted)', display: 'block', marginBottom: 2 }
+  const lbl: React.CSSProperties = { fontSize: 10.5, color: 'var(--muted)', display: 'block', marginBottom: 2 }
 
   return (
     <div>
-      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase',
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase',
         letterSpacing: '.06em', marginBottom: 8 }}>
         ⊞ Group &amp; Bin
       </div>
@@ -175,7 +175,7 @@ export default function CustomCategoryPanel({ datasetId, columns, onSaved }: Pro
           <input id="cc-bins" type="number" min={1} max={20} value={bins}
             onChange={e => setBins(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
             style={{ width: '100%', fontSize: 11 }} />
-          <div style={{ fontSize: 9.5, color: 'var(--muted)', marginTop: 3, fontFamily: 'var(--mono)' }}>
+          <div style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 3, fontFamily: 'var(--mono)' }}>
             {rangeState === 'loading' ? 'reading the range…'
               : rangeState === 'failed' ? 'could not read this column’s range'
               : range && range.min === range.max
@@ -222,7 +222,7 @@ export default function CustomCategoryPanel({ datasetId, columns, onSaved }: Pro
               <input aria-label={`Group for ${v}`} value={assignments[v] ?? ''}
                 onChange={e => setAssignments(a => ({ ...a, [v]: e.target.value }))}
                 placeholder={OTHER} list="cc-group-names"
-                style={{ width: 96, fontSize: 10 }} />
+                style={{ width: 96, fontSize: 11 }} />
             </div>
           ))}
           {/* Typing a group name once makes it offered for every other value. */}
@@ -233,7 +233,7 @@ export default function CustomCategoryPanel({ datasetId, columns, onSaved }: Pro
       )}
 
       {expression && (
-        <div style={{ marginBottom: 6, fontSize: 9.5, fontFamily: 'var(--mono)', color: 'var(--muted)',
+        <div style={{ marginBottom: 6, fontSize: 10.5, fontFamily: 'var(--mono)', color: 'var(--muted)',
           background: 'var(--surface2)', borderRadius: 4, padding: '5px 7px', wordBreak: 'break-all' }}>
           {expression}
         </div>
@@ -242,7 +242,7 @@ export default function CustomCategoryPanel({ datasetId, columns, onSaved }: Pro
       {error && <div style={{ marginBottom: 6, fontSize: 10.5, color: '#f87171' }}>{error}</div>}
 
       {source && (
-        <button className="btn btn-primary btn-sm" style={{ fontSize: 10, width: '100%' }}
+        <button className="btn btn-primary btn-sm" style={{ fontSize: 11, width: '100%' }}
           disabled={busy} onClick={create}>
           Create
         </button>

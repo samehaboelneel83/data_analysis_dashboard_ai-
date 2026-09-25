@@ -2,6 +2,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { alertsApi, type DataAlert, type DatasetColumn } from '../../services/api'
 import ExpressionBuilder from '../expr/ExpressionBuilder'
 import LoadError from '../ui/LoadError'
+import EmptyState from '../ui/EmptyState'
+import { useT } from '../../i18n'
+import { BellRing } from 'lucide-react'
 import { useConfirm } from '../ui/ConfirmDialog'
 
 /**
@@ -42,7 +45,7 @@ const ALERT_FUNCS = [
   },
 ]
 
-const label = { display: 'block', fontSize: 10, fontWeight: 700,
+const label = { display: 'block', fontSize: 11, fontWeight: 700,
                 color: 'var(--muted)', marginBottom: 4 } as const
 
 /** Split on commas, drop the blanks a trailing comma leaves behind. */
@@ -80,6 +83,7 @@ export default function AlertsPanel({ datasetId, columns }: {
   columns: DatasetColumn[]
 }) {
   const confirm = useConfirm()
+  const t = useT()
   const [alerts, setAlerts] = useState<DataAlert[] | null>(null)
   const [loadError, setLoadError] = useState<unknown>(null)
   const [adding, setAdding] = useState(false)
@@ -141,16 +145,14 @@ export default function AlertsPanel({ datasetId, columns }: {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                     marginBottom: 12 }}>
         <div>
-          <div style={{ fontSize: 13, fontWeight: 600 }}>Alerts</div>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>{t('alerts.title')}</div>
           <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-            An email goes out when the condition <strong>becomes true</strong> — not
-            every time it is true. It is checked as the person who created it, so
-            it sees exactly the rows they can.
+            {t('alerts.desc')}
           </div>
         </div>
         {!adding && (
           <button className="btn btn-primary btn-sm" onClick={() => setAdding(true)}>
-            New alert
+            {t('alerts.new')}
           </button>
         )}
       </div>
@@ -158,14 +160,14 @@ export default function AlertsPanel({ datasetId, columns }: {
       {adding && (
         <div className="card" style={{ padding: 16, marginBottom: 16 }}>
           <div style={{ marginBottom: 10 }}>
-            <label htmlFor="alert-name" style={label}>Name</label>
+            <label htmlFor="alert-name" style={label}>{t('alerts.name')}</label>
             <input id="alert-name" value={name} style={{ width: '100%' }}
               onChange={e => setName(e.target.value)}
               placeholder="Revenue fell below target" />
           </div>
 
           <div style={{ marginBottom: 10 }}>
-            <label htmlFor="alert-expr" style={label}>Condition</label>
+            <label htmlFor="alert-expr" style={label}>{t('alerts.condition')}</label>
             <ExpressionBuilder
               columns={columns} functionsCatalog={ALERT_FUNCS}
               value={expression} onChange={setExpression}
@@ -175,16 +177,16 @@ export default function AlertsPanel({ datasetId, columns }: {
 
           <div style={{ display: 'flex', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
             <div style={{ flex: '1 1 260px' }}>
-              <label htmlFor="alert-emails" style={label}>Email</label>
+              <label htmlFor="alert-emails" style={label}>{t('alerts.email')}</label>
               <input id="alert-emails" value={emails} style={{ width: '100%' }}
                 onChange={e => setEmails(e.target.value)}
                 placeholder="ops@example.com, lead@example.com" />
-              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
-                Comma-separated.
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+                {t('alerts.comma')}
               </div>
             </div>
             <div style={{ width: 150 }}>
-              <label htmlFor="alert-interval" style={label}>Check every</label>
+              <label htmlFor="alert-interval" style={label}>{t('alerts.every')}</label>
               <select id="alert-interval" value={interval} style={{ width: '100%' }}
                 onChange={e => setInterval(Number(e.target.value))}>
                 {/* 15 is the floor the endpoint clamps to; offering 5 here would
@@ -204,7 +206,7 @@ export default function AlertsPanel({ datasetId, columns }: {
           )}
 
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn btn-primary btn-sm" disabled={!complete || saving} title={!complete ? 'Fill in the column, the condition and the value first' : undefined}
+            <button className="btn btn-primary btn-sm" disabled={!complete || saving} title={!complete ? 'Give the alert a name, a condition and an email first' : undefined}
               onClick={() => void create()}>
               {saving ? 'Creating…' : 'Create'}
             </button>
@@ -216,9 +218,9 @@ export default function AlertsPanel({ datasetId, columns }: {
       )}
 
       {alerts.length === 0 && !adding && (
-        <p style={{ fontSize: 13, color: 'var(--muted)' }}>
-          No alerts on this dataset yet.
-        </p>
+        <EmptyState icon={BellRing} title={t('alerts.empty')}
+          description={t('alerts.emptyBody')}
+          action={<button className="btn btn-primary btn-sm" onClick={() => setAdding(true)}>{t('alerts.create')}</button>} />
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

@@ -7,7 +7,10 @@ import GeoMatchCheck from '../components/report/GeoMatchCheck'
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import LoadError from '../components/ui/LoadError'
 import { useParams, Link, useNavigate } from 'react-router-dom'
+import { useCrumbTitle } from '../lib/crumb'
+import NotFound from './NotFound'
 import { useDirection } from '../contexts/DirectionContext'
+import { useT, type MessageKey } from '../i18n'
 import { authzApi, type AuthzDecision, measuresApi, relationshipsApi, translationsApi, columnMetaApi, parametersApi, themesApi, reportsApi, datasetsApi, hierarchyApi, analysisApi, widgetTemplatesApi, dataSourcesApi } from '../services/api'
 import type { Dataset, DatasetColumn, CalcColumn, CalcColumnFormat, MeasureDef, ColumnMeta, WidgetTemplate } from '../services/api'
 import CalcColumnsPanel from '../components/report/CalcColumnsPanel'
@@ -43,6 +46,7 @@ import TabOrderPane from '../components/report/TabOrderPane'
 import ChatPane from '../components/chat/ChatPane'
 import CopilotChat from '../components/report/CopilotChat'
 import IconLabel from '../components/ui/IconLabel'
+import ChartGallery from '../components/report/ChartGallery'
 import {
   LayoutDashboard as ViewReport, Table2 as ViewData, Waypoints as ViewModel,
   PanelLeft, Lightbulb, CheckCheck, MessageSquare, AtSign, Clock, Bot, Sparkles,
@@ -68,7 +72,7 @@ import CollapsibleSide from '../components/report/CollapsibleSide'
 import ReviewPane from '../components/report/ReviewPane'
 import PopupOverlay from '../components/report/PopupOverlay'
 import TooltipPageOverlay from '../components/report/TooltipPageOverlay'
-import { ArrowLeft, Plus, Settings, Eye, Undo2, Redo2 } from 'lucide-react'
+import { ArrowLeft, Plus, Settings, Eye, Undo2, Redo2, KeyRound, ShieldCheck, Pause, Play, FileDown, Printer, FileText, Package } from 'lucide-react'
 import { useUndoStack, IdAliases, describeConfigChange, changedKeys } from './reportBuilder/undo'
 import { ASSIGN_DATA_EVENT, ADD_DATASET_EVENT, missingRequiredRoles } from '../components/report/WidgetPlaceholder'
 import { PATCH_WIDGET_EVENT } from '../components/report/TruncationNote'
@@ -109,12 +113,45 @@ import { PageTemplateMenu } from './reportBuilder/PageTemplateMenu'
 
 const EMPTY_RULES: DisplayRule[] = []
 
+/** Display names for the built-in palettes. The keys stay what reports have
+ *  stored all along; only the label a person picks from changes. */
+const PALETTE_NAME: Record<string, string> = {
+  default: 'Datalytics', ocean: 'Ocean', sunset: 'Ember', forest: 'Forest',
+  mono: 'Graphite', contrast: 'High contrast',
+}
+
+/** The top-most, then left-most, grid position where a w×h box fits without
+ *  overlapping any existing layout. Null if nothing fits above the last row. */
+function firstFreeSlot(layouts: { x: number; y: number; w: number; h: number }[], w: number, h: number, cols: number) {
+  const bottom = layouts.reduce((m, l) => Math.max(m, l.y + l.h), 0)
+  const overlaps = (x: number, y: number) => layouts.some(l =>
+    x < l.x + l.w && x + w > l.x && y < l.y + l.h && y + h > l.y)
+  for (let y = 0; y <= bottom; y++) {
+    for (let x = 0; x + w <= cols; x++) {
+      if (!overlaps(x, y)) return { x, y }
+    }
+  }
+  return null
+}
+
+/** Drop ?pick=data from the address without a navigation. */
+function stripPickParam() {
+  const params = new URLSearchParams(window.location.search)
+  if (!params.has('pick')) return
+  params.delete('pick')
+  const qs = params.toString()
+  window.history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : ''))
+}
+
 export default function ReportBuilder() {
   const { language } = useDirection()
+  const tr = useT()
   const { id } = useParams<{ id: string }>()
   const reportId = Number(id)
+  const badId = !/^\d+$/.test(id ?? '')
 
   const [report,     setReport]     = useState<Report | null>(null)
+  useCrumbTitle(report?.name)
   const [activePage, setActivePage] = useState<ReportPage | null>(null)
   const [selectedW,  setSelectedW]  = useState<Widget | null>(null)
   const [templates,  setTemplates]  = useState<WidgetTemplate[]>([])
@@ -162,7 +199,10 @@ export default function ReportBuilder() {
   const [analysis,      setAnalysis]      = useState<any>(null)
   const [columnFormats, setColumnFormats] = useState<Record<string, CalcColumnFormat>>({})
   const [activeView, setActiveView] = useState<'report' | 'data' | 'model'>('report')
-  const [editModeWanted, setEditMode] = useState(true)
+  // A phone opens a dashboard to READ it: the studio's two side panels left
+  // no room for the canvas at 390px. It starts in View there (Edit remains a
+  // tap away for someone who needs it).
+  const [editModeWanted, setEditMode] = useState(() => !window.matchMedia(MOBILE_QUERY).matches)
   // Capability mirror (server enforces; this hides what it would refuse):
   // 'view' can't edit, only 'data' can reach the Data/Model authoring tabs.
   const myCapability = report?.my_capability ?? 'view'
@@ -302,6 +342,7 @@ export default function ReportBuilder() {
   const [loadError, setLoadError] = useState<unknown>(null)
   const loadReport = useCallback(async () => {
     setLoadError(null)
+    if (!Number.isFinite(reportId)) return
     const r = await reportsApi.get(reportId)
     // A shared link can name the page to open (?page=<id>). Honoured once per load;
     // an unknown id falls back to the first page rather than erroring.
@@ -318,6 +359,14 @@ export default function ReportBuilder() {
       ?? r.pages.find(p => p.id === wanted)
       ?? r.pages[0]
       ?? null)
+    // The selection is a snapshot of a widget; refresh it from the reloaded
+    // page so every consumer (field click, template save, hierarchy assign)
+    // sees the config that was just saved rather than the one before it.
+    setSelectedW(prev => {
+      if (!prev) return prev
+      for (const p of r.pages) { const fresh = p.widgets.find(w => w.id === prev.id); if (fresh) return fresh }
+      return prev
+    })
     // orgThemes in the deps: a report saved with a custom theme needs the palette map
     // at apply time. The one extra reload when themes arrive is the cost of the
     // colours being right.
@@ -697,11 +746,15 @@ export default function ReportBuilder() {
     setSaving(true)
     savingRef.current = true
     try {
+      // The first gap that fits, scanning top-to-bottom, left-to-right --
+      // not always a new row at x=0, which stacked every new widget in one
+      // half-width column and grew a 74-widget page to 25,000px.
+      const slot = firstFreeSlot(ws.map(x => x.layout), w, h, COLS) ?? { x: 0, y: maxY }
       const widget = await reportsApi.addWidget(reportId, activePage.id, {
         widget_type: type,
         title: title ?? cat?.label ?? type,
         config,
-        layout: { x: 0, y: maxY, w, h },
+        layout: { x: slot.x, y: slot.y, w, h },
       })
       {
         const pageId = activePage.id
@@ -724,6 +777,10 @@ export default function ReportBuilder() {
       // revision poll look like another session had edited the report.
       await loadReport()
       setSelectedW(widget)
+      // Bring the new widget into view: added below the fold, it looked as if
+      // the click had done nothing.
+      setTimeout(() => document.querySelector(`[data-widget-id="${widget.id}"]`)
+        ?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }), 60)
       // A freshly inserted widget that still needs data opens its Data roles --
       // after a tick, so the settings panel for it has mounted to hear it.
       if (missingRequiredRoles(widget).length) {
@@ -1363,17 +1420,39 @@ export default function ReportBuilder() {
   // A dashboard just created from "New dashboard" arrives with ?pick=data: ask
   // for its data first, in the picker, instead of a blank canvas. Once only --
   // the parameter is removed so a reload does not ask again.
+  // A dashboard created a moment ago by "New dashboard" and left without any
+  // content (no data, no widgets, default name) is removed on the way out,
+  // so trying the button leaves nothing behind. Only the one this tab just
+  // made -- never an existing dashboard, and never one with anything in it.
+  const reportRef = useRef<Report | null>(null)
+  reportRef.current = report
+  useEffect(() => () => {
+    let fresh: string | null = null
+    try { fresh = sessionStorage.getItem('datalytics:fresh-report') } catch { /* */ }
+    if (fresh !== String(reportId)) return
+    const r = reportRef.current
+    if (!r) return
+    const empty = !r.dataset_id && r.pages.every(p => p.widgets.length === 0) && /^Untitled dashboard( \d+)?$/.test(r.name)
+    try { sessionStorage.removeItem('datalytics:fresh-report') } catch { /* */ }
+    if (empty) reportsApi.delete(r.id).catch(() => { /* best effort */ })
+  }, [reportId])
+
+  // The parameter is removed when the picker CLOSES, not when it opens: React
+  // StrictMode mounts twice in development, and stripping it on open meant
+  // the second mount found no parameter and the picker never appeared.
+  const pickerOpenedForNew = useRef(false)
   useEffect(() => {
     if (!report || !canEdit) return
     const params = new URLSearchParams(window.location.search)
     if (params.get('pick') !== 'data') return
-    params.delete('pick')
-    const qs = params.toString()
-    window.history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : ''))
-    if (report.dataset_id) return
+    if (report.dataset_id) { stripPickParam(); return }
     datasetsApi.list().then(setAllDatasets)
     setShowDsMenu(true)
+    pickerOpenedForNew.current = true
   }, [report, canEdit])
+  useEffect(() => {
+    if (!showDsMenu && pickerOpenedForNew.current) { pickerOpenedForNew.current = false; stripPickParam() }
+  }, [showDsMenu])
   // Rename in place: a new dashboard is "Untitled dashboard" until its author
   // knows what it is -- the name is edited where it is read, and undoable.
   const [renaming, setRenaming] = useState(false)
@@ -1390,7 +1469,18 @@ export default function ReportBuilder() {
     if (!report || !next || next === report.name) return
     const before = report.name
     const write = (name: string) => reportsApi.update(report.id, { name }).then(() => {})
-    await write(next)
+    // Shown at once, not after the reload: saving on blur used to leave the
+    // OLD name in the header (a reload raced it) while the server, the tab
+    // strip and the Dashboards list already had the new one.
+    setReport(r => r ? { ...r, name: next } : r)
+    try {
+      await write(next)
+    } catch (e: any) {
+      setReport(r => r ? { ...r, name: before } : r)
+      toast.error(e?.response?.data?.detail ?? 'Could not rename the dashboard')
+      return
+    }
+    toast.success('Renamed')
     pushUndo({ label: `Rename dashboard "${before}" to "${next}"`, undo: () => write(before), redo: () => write(next) })
     await loadReport()
   }
@@ -1679,23 +1769,32 @@ export default function ReportBuilder() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [columnMeta])
 
+  // `selectedW` is a SNAPSHOT taken at selection time; after a save the
+  // page reloads but the snapshot keeps the old config. Planning from the
+  // snapshot sent `{dimension}` alone and wiped the measure set a click
+  // earlier (and vice versa), so a chart could never be built by clicking.
+  // Always plan from the live widget on the page.
+  const liveSelected = useCallback(() =>
+    (selectedW && activePage?.widgets.find(x => x.id === selectedW.id)) ?? selectedW, [selectedW, activePage])
   const assignFieldToWidget = useCallback((columnName: string, isNumericField: boolean) => {
-    if (!selectedW) return
-    const plan = planFieldOnWidget(selectedW, columnName, isNumericField)
+    const w = liveSelected()
+    if (!w) return
+    const plan = planFieldOnWidget(w, columnName, isNumericField)
     if (!plan) {
-      toast(`"${selectedW.title || selectedW.widget_type}" has no empty field left for ${columnName}`)
+      toast(`"${w.title || w.widget_type}" has no empty field left for ${columnName}`)
       return
     }
-    updateWidgetConfig(plan.config, selectedW.title)
-  }, [selectedW, updateWidgetConfig, planFieldOnWidget])
+    updateWidgetConfig(plan.config, w.title)
+  }, [liveSelected, updateWidgetConfig, planFieldOnWidget])
 
   // A measure always goes to the measure role — it is already an aggregate, so it has
   // no meaning as a dimension, and the widget's own aggregation setting is bypassed.
   const assignMeasureToWidget = useCallback((measureName: string) => {
-    if (!selectedW) return
-    const cfg = selectedW.config as Record<string, unknown>
-    updateWidgetConfig({ ...cfg, measure: measureName }, selectedW.title)
-  }, [selectedW, updateWidgetConfig])
+    const w = liveSelected()
+    if (!w) return
+    const cfg = w.config as Record<string, unknown>
+    updateWidgetConfig({ ...cfg, measure: measureName }, w.title)
+  }, [liveSelected, updateWidgetConfig])
 
   // â”€â”€ Pages â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const addPage = async () => {
@@ -1938,6 +2037,7 @@ export default function ReportBuilder() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [activePage?.id, activePage?.prompt_column, promptValues])
 
+  if (badId) return <NotFound />
   if (loadError) {
     return (
       <div style={{ padding: 32 }}>
@@ -1982,7 +2082,9 @@ export default function ReportBuilder() {
           inside are dataset-scoped, so unlike the rest of the builder they
           would not be refused by the report's own capability check. A viewer
           gets the dashboard and its filters -- nothing that changes it. */}
-      {canEdit && !kiosk && (
+      {/* View mode is for reading the report: the studio's field list beside
+          it only took width from the charts. */}
+      {canEdit && editMode && !kiosk && (
       <CollapsibleSide
         id="builder-left"
         side="left"
@@ -1994,21 +2096,21 @@ export default function ReportBuilder() {
         {/* Analytics section */}
         <div style={{ margin:'12px 0 0', flexShrink:0 }} />
         {editMode && activeView === 'report' ? (
-          <div role="tablist" aria-label="Builder panel" style={{ display:'flex', gap:2, padding:'6px 10px 4px', flexShrink:0, borderBottom:'1px solid var(--border)' }}>
-            {([['fields', 'Fields'], ['charts', 'Charts'], ['more', 'More']] as const).map(([k, l]) => (
-              <button key={k} type="button" role="tab" aria-selected={leftTab === k} onClick={() => setLeftTab(k)}
-                style={{ flex:1, font:'inherit', fontSize:12, fontWeight:600, padding:'5px 6px', cursor:'pointer', borderRadius:5,
-                  border:'1px solid ' + (leftTab === k ? 'var(--accent)' : 'transparent'),
-                  background: leftTab === k ? 'color-mix(in srgb, var(--accent) 12%, transparent)' : 'transparent',
-                  // Accent text on its own 12% tint measured 4.47:1 -- a hair under
-                  // AA; a touch of the text colour lifts it clear in both themes.
-                  color: leftTab === k ? 'color-mix(in oklab, var(--accent) 80%, var(--text))' : 'var(--muted)' }}>
-                {l}
-              </button>
-            ))}
+          // A segmented control, like Report / Data / Model: one of three is
+          // always on, and the track says so.
+          <div style={{ padding:'4px 10px 8px', flexShrink:0 }}>
+            <div role="tablist" aria-label={tr('builder.panel')} className="dl-seg" style={{ display:'flex' }}>
+              {([['charts', tr('builder.tab.charts')], ['fields', tr('builder.tab.fields')], ['more', tr('builder.tab.more')]] as const).map(([k, l]) => (
+                <button key={k} type="button" role="tab" aria-selected={leftTab === k} onClick={() => setLeftTab(k)}
+                  className={`dl-seg__btn${leftTab === k ? ' dl-seg__btn--on' : ''}`}
+                  style={{ flex: 1, justifyContent: 'center' }}>
+                  {l}
+                </button>
+              ))}
+            </div>
           </div>
         ) : (
-          <div style={{ padding:'9px 16px 5px', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.08em', flexShrink:0 }}>
+          <div style={{ padding:'9px 16px 5px', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.08em', flexShrink:0 }}>
             Analytics
           </div>
         )}
@@ -2019,49 +2121,9 @@ export default function ReportBuilder() {
           <>
               {/* Widget catalog — add-widget buttons, edit mode only */}
               {editMode && activeView === 'report' && leftTab === 'charts' && (
-                <div style={{ marginBottom:12, paddingBottom:12, borderBottom:'1px solid var(--border)' }}>
-                  <div style={{ fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:6 }}>Insert</div>
-                  {/* Derived from the catalog, not hardcoded: a hardcoded list made the
-                      entire Maps category invisible -- the widgets existed, rendered and
-                      passed every test, and could not be added from the UI. Found by
-                      driving the app, the only place this class of bug is visible. */}
-                  <input value={paletteQuery} onChange={e => setPaletteQuery(e.target.value)}
-                    aria-label="Find a chart" placeholder="Find a chart…"
-                    style={{ width: '100%', fontSize: 11, padding: '4px 7px', marginBottom: 6,
-                      border: '1px solid var(--border)', borderRadius: 6,
-                      background: 'var(--surface)', color: 'var(--text)' }} />
-                  {/* The CATEGORY is searched too: somebody hunting for a map
-                      does not necessarily know it is called a choropleth. */}
-                  {(() => {
-                    const q = paletteQuery.trim().toLowerCase()
-                    const hit = (w: typeof WIDGET_CATALOG[number]) => !q
-                      || w.label.toLowerCase().includes(q)
-                      || w.category.toLowerCase().includes(q)
-                      || w.type.toLowerCase().includes(q)
-                    if (q && !WIDGET_CATALOG.some(hit)) {
-                      return (
-                        <p style={{ fontSize: 11, color: 'var(--muted)', margin: '2px 0 6px' }}>
-                          No chart matches “{paletteQuery}”.
-                        </p>
-                      )
-                    }
-                    return [...new Set(WIDGET_CATALOG.filter(hit).map(w => w.category))].map(cat => (
-                    <div key={cat} style={{ marginBottom: 6 }}>
-                      <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>{cat}</div>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                        {WIDGET_CATALOG.filter(w => w.category === cat && hit(w)).map(w => (
-                          <button key={w.type} onClick={() => addWidget(w.type)} title={w.label}
-                            style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '4px 7px',
-                              background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6,
-                              cursor: 'pointer', fontSize: 10, color: 'var(--text)', fontFamily: 'var(--sans)', whiteSpace: 'nowrap' }}>
-                            <span style={{ fontSize: 13 }}>{w.icon}</span>{w.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ))
-                  })()}
-                </div>
+                // The chart-type gallery lives in its own component; the
+                // catalog stays the single source of what can be inserted.
+                <ChartGallery query={paletteQuery} onQuery={setPaletteQuery} onAdd={addWidget} />
               )}
 
               {/* Object templates — save the selected widget's whole configuration by
@@ -2069,29 +2131,29 @@ export default function ReportBuilder() {
                   DataView; apply is a plain insert carrying the saved config. */}
               {editMode && activeView === 'report' && leftTab === 'more' && (
                 <div style={{ marginBottom:12, paddingBottom:12, borderBottom:'1px solid var(--border)' }}>
-                  <div style={{ fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:6 }}>Templates</div>
+                  <div style={{ fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:6 }}>Templates</div>
                   <div style={{ display:'flex', gap:4, marginBottom:6 }}>
                     <input value={tplName} onChange={e => setTplName(e.target.value)}
                       placeholder={selectedW ? 'Template name' : 'Select a widget first'}
                       aria-label="Template name" disabled={!selectedW} title={!selectedW ? 'Select a widget first' : undefined}
-                      style={{ flex:1, minWidth:0, fontSize:10 }} />
+                      style={{ flex:1, minWidth:0, fontSize: 11 }} />
                     <button onClick={saveAsTemplate} disabled={!selectedW || !tplName.trim()}
                       title="Save the selected widget as a reusable template"
                       style={{ padding:'4px 7px', background:'var(--surface2)', border:'1px solid var(--border)',
-                        borderRadius:6, cursor:'pointer', fontSize:10, color:'var(--text)', whiteSpace:'nowrap' }}>
+                        borderRadius:6, cursor:'pointer', fontSize: 11, color:'var(--text)', whiteSpace:'nowrap' }}>
                       Save
                     </button>
                   </div>
                   {templates.length === 0 && (
-                    <div style={{ fontSize:10, color:'var(--muted)' }}>No saved templates yet</div>
+                    <div style={{ fontSize: 11, color:'var(--muted)' }}>No saved templates yet</div>
                   )}
                   <div style={{ display:'flex', flexWrap:'wrap', gap:4 }}>
                     {templates.map(t => (
                       <span key={t.id} style={{ display:'inline-flex', alignItems:'center', gap:3,
-                        background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:6, fontSize:10 }}>
+                        background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:6, fontSize: 11 }}>
                         <button onClick={() => insertFromTemplate(t)} title={`Insert ${t.widget_type} from template`}
                           style={{ padding:'4px 6px', background:'none', border:'none', cursor:'pointer',
-                            color:'var(--text)', fontSize:10, fontFamily:'var(--sans)' }}>
+                            color:'var(--text)', fontSize: 11, fontFamily:'var(--sans)' }}>
                           {t.name}
                         </button>
                         <button onClick={() => deleteTemplate(t)} aria-label={`Delete template ${t.name}`}
@@ -2107,14 +2169,14 @@ export default function ReportBuilder() {
                   dataset lacks the column is simply unaffected. */}
               {editMode && activeView === 'report' && leftTab === 'more' && (
                 <div style={{ marginBottom:12, paddingBottom:12, borderBottom:'1px solid var(--border)' }}>
-                  <div style={{ fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:6 }}>Report filters</div>
+                  <div style={{ fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:6 }}>Report filters</div>
                   {dateColumnOf() && (
                     <div role="group" aria-label={`Quick date filters on ${dateColumnOf()}`} data-testid="date-presets"
                       style={{ display:'flex', flexWrap:'wrap', gap:4, marginBottom:6 }}>
                       {['l7d', 'l30d', 'mtd', 'ytd', 'pm'].map(id => {
                         const p = PRESETS.find(x => x.id === id)!
                         return (
-                          <button key={id} type="button" className="btn btn-ghost btn-sm" style={{ fontSize:10, padding:'1px 6px' }}
+                          <button key={id} type="button" className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding:'1px 6px' }}
                             title={`Show only ${p.label.toLowerCase()} of ${dateColumnOf()}, counted back from the latest date in the data`}
                             onClick={() => void applyDatePreset(id)}>{p.label}</button>
                         )
@@ -2123,11 +2185,11 @@ export default function ReportBuilder() {
                   )}
                   <div style={{ display:'flex', flexWrap:'wrap', gap:4, marginBottom:6 }}>
                     <select aria-label="Report filter column" value={cfCol} onChange={e => setCfCol(e.target.value)}
-                      style={{ fontSize:10, flex:1, minWidth:80 }}>
+                      style={{ fontSize: 11, flex:1, minWidth:80 }}>
                       <option value="">— column —</option>
                       {visibleColumns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
                     </select>
-                    <select aria-label="Report filter operator" value={cfOp} onChange={e => setCfOp(e.target.value)} style={{ fontSize:10 }}>
+                    <select aria-label="Report filter operator" value={cfOp} onChange={e => setCfOp(e.target.value)} style={{ fontSize: 11 }}>
                       {['eq','neq','gt','gte','lt','lte','in','like'].map(o => <option key={o} value={o}>{o}</option>)}
                       <option value="relative">relative date</option>
                     </select>
@@ -2136,16 +2198,16 @@ export default function ReportBuilder() {
                     {cfOp === 'relative'
                       ? <RelativeDateEditor label="Report filter" value={cfSpec} onChange={setCfSpec} compact />
                       : <input aria-label="Report filter value" value={cfVal} onChange={e => setCfVal(e.target.value)}
-                      placeholder={cfOp === 'in' ? 'a, b, c' : 'value'} style={{ fontSize:10, flex:1, minWidth:0 }} />}
-                    <button className="btn" style={{ fontSize:10, whiteSpace:'nowrap' }} onClick={addReportFilter}>+ Add report filter</button>
+                      placeholder={cfOp === 'in' ? 'a, b, c' : 'value'} style={{ fontSize: 11, flex:1, minWidth:0 }} />}
+                    <button className="btn" style={{ fontSize: 11, whiteSpace:'nowrap' }} onClick={addReportFilter}>+ Add report filter</button>
                   </div>
                   {(report.common_filters ?? []).length === 0 && (
-                    <div style={{ fontSize:10, color:'var(--muted)' }}>No report filters</div>
+                    <div style={{ fontSize: 11, color:'var(--muted)' }}>No report filters</div>
                   )}
                   <div style={{ display:'flex', flexWrap:'wrap', gap:4 }}>
                     {(report.common_filters ?? []).map(f => (
                       <span key={f.id} title="Applies to every widget" style={{ display:'inline-flex', alignItems:'center', gap:3,
-                        background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:6, fontSize:10, padding:'2px 4px 2px 7px' }}>
+                        background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:6, fontSize: 11, padding:'2px 4px 2px 7px' }}>
                         {f.op === 'relative' ? `${f.column}: ${describeSpec(parseSpec(f.value))}`
                           : <>{f.column} {f.op} {Array.isArray(f.value) ? (f.value as unknown[]).join(', ') : String(f.value)}</>}
                         <button onClick={() => removeReportFilter(f.id)} aria-label={`Remove report filter ${f.column}`}
@@ -2161,7 +2223,7 @@ export default function ReportBuilder() {
               {editMode && activeView === 'report' && leftTab === 'fields' && (
                 <div style={{ marginBottom:12, paddingBottom:12, borderBottom:'1px solid var(--border)' }}>
                   {!selectedW && (
-                    <div style={{ fontSize:10, color:'var(--muted)', marginBottom:6 }}>Drag a field onto the page to make a chart — or select a widget, then click a field to add it.</div>
+                    <div style={{ fontSize: 11, color:'var(--muted)', marginBottom:6 }}>{tr('fields.hint')}</div>
                   )}
                   <input aria-label="Filter fields" value={fieldFilter}
                     onChange={e => setFieldFilter(e.target.value)}
@@ -2174,7 +2236,7 @@ export default function ReportBuilder() {
                       they compute at the widget's grain rather than being aggregated. */}
                   {measures.length > 0 && (
                     <div style={{ marginBottom: 6 }}>
-                      <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>Measures</div>
+                      <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>{tr('fields.Measures')}</div>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                         {measures.filter(m => !fieldFilter.trim()
                           || m.name.toLowerCase().includes(fieldFilter.trim().toLowerCase())).map(m => (
@@ -2184,7 +2246,7 @@ export default function ReportBuilder() {
                             style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '4px 7px',
                               background: 'var(--surface2)', border: '1px solid var(--accent)', borderRadius: 6,
                               cursor: selectedW ? 'pointer' : 'not-allowed', opacity: selectedW ? 1 : .5,
-                              fontSize: 10, color: 'var(--text)', fontFamily: 'var(--sans)', whiteSpace: 'nowrap' }}>
+                              fontSize: 11, color: 'var(--text)', fontFamily: 'var(--sans)', whiteSpace: 'nowrap' }}>
                             <span style={{ fontSize: 11, color: 'var(--accent)' }}>ƒx</span>{m.name}
                           </button>
                         ))}
@@ -2193,13 +2255,13 @@ export default function ReportBuilder() {
                   )}
                   {gatheredFields.length > 0 && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6,
-                      padding: '4px 6px', borderRadius: 6, fontSize: 10,
+                      padding: '4px 6px', borderRadius: 6, fontSize: 11,
                       background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
                       border: '1px solid var(--accent)' }}>
                       <span>{gatheredFields.length} field{gatheredFields.length === 1 ? '' : 's'} selected — drag onto the canvas to chart them together</span>
                       <button onClick={() => setGatheredFields([])}
                         style={{ marginInlineStart: 'auto', background: 'none', border: 'none',
-                          color: 'var(--muted)', cursor: 'pointer', fontSize: 10 }}>Clear</button>
+                          color: 'var(--muted)', cursor: 'pointer', fontSize: 11 }}>Clear</button>
                     </div>
                   )}
                   {(['Columns', 'Dimensions'] as const).map(group => {
@@ -2215,7 +2277,7 @@ export default function ReportBuilder() {
                     if (cols.length === 0) return null
                     return (
                       <div key={group} style={{ marginBottom: 6 }}>
-                        <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>{group}</div>
+                        <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>{tr(`fields.${group}` as MessageKey)}</div>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                           {cols.map(c => (
                             <span key={c.name} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
@@ -2257,7 +2319,7 @@ export default function ReportBuilder() {
                                 border: `1px solid ${gatheredFields.includes(c.name) ? 'var(--accent)' : 'var(--border)'}`,
                                 borderRadius: 6,
                                 cursor: 'pointer',
-                                fontSize: 10, color: 'var(--text)', fontFamily: 'var(--sans)', whiteSpace: 'nowrap' }}>
+                                fontSize: 11, color: 'var(--text)', fontFamily: 'var(--sans)', whiteSpace: 'nowrap' }}>
                               <span style={{ fontSize: 11 }}>{c.dtype === 'calculated' ? 'ƒx' : isNumericField(c) ? '#' : 'Aa'}</span>
                               {columnMeta[c.name]?.label || c.name}
                               {/* "Country - 47": how many distinct values this
@@ -2269,7 +2331,7 @@ export default function ReportBuilder() {
                                 </span>
                               )}
                               {hints[c.name]?.related && (
-                                <span title={hintTitle(hints[c.name])} style={{ color: 'var(--accent)', fontSize: 10 }}>≈</span>
+                                <span title={hintTitle(hints[c.name])} style={{ color: 'var(--accent)', fontSize: 11 }}>≈</span>
                               )}
                             </button>
                             {/* Classification, the way SAS's data pane offers it:
@@ -2306,7 +2368,7 @@ export default function ReportBuilder() {
                                     insetInlineStart: 0, minWidth: 170, padding: 4,
                                     background: 'var(--surface)', border: '1px solid var(--border)',
                                     borderRadius: 6, boxShadow: '0 6px 20px rgba(0,0,0,.25)' }}>
-                                    <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--muted)',
+                                    <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)',
                                       textTransform: 'uppercase', padding: '4px 6px' }}>Classification</div>
                                     <button role="menuitem"
                                       onClick={() => void classifyGeography(c.name, null)}
@@ -2342,7 +2404,7 @@ export default function ReportBuilder() {
                                       </div>
                                     )}
                                     {boundarySets.length === 0 && boundaryPacks.length === 0 && (
-                                      <div style={{ fontSize: 9.5, color: 'var(--muted)', padding: '4px 6px' }}>
+                                      <div style={{ fontSize: 10.5, color: 'var(--muted)', padding: '4px 6px' }}>
                                         No boundary sets uploaded yet.
                                       </div>
                                     )}
@@ -2380,7 +2442,7 @@ export default function ReportBuilder() {
                                         {qc.label}
                                       </button>
                                     ))}
-                                    <div style={{ fontSize: 9, color: 'var(--muted)', padding: '2px 6px' }}>
+                                    <div style={{ fontSize: 10.5, color: 'var(--muted)', padding: '2px 6px' }}>
                                       Saved as a measure, computed at each widget's grain
                                     </div>
                                   </div>
@@ -2399,14 +2461,14 @@ export default function ReportBuilder() {
                                   : `Treat ${c.name} as a measure again`}
                                 onClick={e => { e.stopPropagation(); void flipFieldRole(c) }}
                                 onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); void flipFieldRole(c) } }}
-                                style={{ color: 'var(--muted)', fontSize: 10, cursor: 'pointer' }}>⇄</span>
+                                style={{ color: 'var(--muted)', fontSize: 11, cursor: 'pointer' }}>⇄</span>
                             )}
                             {isNumericField(c) && (
                               <span role="button" tabIndex={0} aria-label={`Explain ${c.name}`}
                                 title={`What moves ${c.name}? Ranked factor importance`}
                                 onClick={e => { e.stopPropagation(); setExplainColumn(c.name) }}
                                 onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); setExplainColumn(c.name) } }}
-                                style={{ color: 'var(--accent)', fontSize: 10, cursor: 'pointer' }}>?</span>
+                                style={{ color: 'var(--accent)', fontSize: 11, cursor: 'pointer' }}>?</span>
                             )}
                             {hints[c.name]?.outliers && (
                               <span role="button" tabIndex={0} aria-label={`Show outlier details for ${c.name}`}
@@ -2424,13 +2486,13 @@ export default function ReportBuilder() {
                   {fieldFilter.trim() && visibleColumns.every(c =>
                     !(columnMeta[c.name]?.label || c.name).toLowerCase()
                       .includes(fieldFilter.trim().toLowerCase())) && (
-                    <div style={{ fontSize: 10, color: 'var(--muted)', padding: '6px 2px' }}>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', padding: '6px 2px' }}>
                       No fields match “{fieldFilter.trim()}”
                     </div>
                   )}
                   {hierarchy.filter(n => n.parent_id == null).length > 0 && (
                     <div style={{ marginBottom: 6 }}>
-                      <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>Hierarchies</div>
+                      <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>Hierarchies</div>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                         {hierarchy.filter(n => n.parent_id == null).map(root => (
                           <button key={root.id}
@@ -2440,7 +2502,7 @@ export default function ReportBuilder() {
                             title={selectedW ? `Bind the ${root.name} hierarchy to ${selectedW.title}` : 'Drag onto the canvas to chart the first level, or select a widget first'}
                             style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '4px 7px',
                               background: 'var(--surface2)', border: '1px solid var(--accent)', borderRadius: 6,
-                              cursor: 'pointer', fontSize: 10, color: 'var(--text)', fontFamily: 'var(--sans)', whiteSpace: 'nowrap' }}>
+                              cursor: 'pointer', fontSize: 11, color: 'var(--text)', fontFamily: 'var(--sans)', whiteSpace: 'nowrap' }}>
                             <span aria-hidden style={{ fontSize: 11 }}>⛓</span>
                             {root.name}
                           </button>
@@ -2454,18 +2516,18 @@ export default function ReportBuilder() {
               {(!editMode || activeView !== 'report' || leftTab === 'fields') && (<>
               {/* Datasets section */}
               <div style={{ marginBottom:12, paddingBottom:12, borderBottom:'1px solid var(--border)' }}>
-                <div style={{ fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:6 }}>Datasets</div>
+                <div style={{ fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:6 }}>{tr('builder.datasets')}</div>
 
                 {report.dataset_id && datasets[report.dataset_id] && (
                   <div style={{ display:'flex', alignItems:'center', gap:5, padding:'4px 7px', background:'var(--surface2)', borderRadius:5, marginBottom:3, fontSize:11 }}>
                     <span style={{ color:'var(--accent)' }}>★</span>
                     <span style={{ flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{datasets[report.dataset_id].name}</span>
                     {datasets[report.dataset_id].aggregate_of_dataset_id && (
-                      <span title={PRE_AGGREGATED_HINT} style={{ fontSize:9, color:'var(--accent)', background:'color-mix(in srgb, var(--accent) 15%, transparent)', borderRadius:3, padding:'1px 4px', flexShrink:0 }}>Σ pre-aggregated</span>
+                      <span title={PRE_AGGREGATED_HINT} style={{ fontSize: 10.5, color:'var(--accent)', background:'color-mix(in srgb, var(--accent) 15%, transparent)', borderRadius:3, padding:'1px 4px', flexShrink:0 }}>Σ pre-aggregated</span>
                     )}
                     {datasets[report.dataset_id].default_filter_expr
-                      ? <span title={datasets[report.dataset_id].default_filter_expr!} style={{ fontSize:9, color:'var(--accent)', background:'color-mix(in srgb, var(--accent) 15%, transparent)', borderRadius:3, padding:'1px 4px', flexShrink:0 }}>⊙ filtered</span>
-                      : <span style={{ fontSize:9, color:'var(--muted)', flexShrink:0 }}>primary</span>
+                      ? <span title={datasets[report.dataset_id].default_filter_expr!} style={{ fontSize: 10.5, color:'var(--accent)', background:'color-mix(in srgb, var(--accent) 15%, transparent)', borderRadius:3, padding:'1px 4px', flexShrink:0 }}>⊙ filtered</span>
+                      : <span style={{ fontSize: 10.5, color:'var(--muted)', flexShrink:0 }}>primary</span>
                     }
                   </div>
                 )}
@@ -2473,12 +2535,12 @@ export default function ReportBuilder() {
                 {(report.additional_dataset_ids ?? []).map(dsId => (
                   <div key={dsId} style={{ display:'flex', alignItems:'center', gap:5, padding:'4px 7px', background:'var(--surface2)', borderRadius:5, marginBottom:3, fontSize:11 }}>
                     <span style={{ color:'var(--muted)' }}>◉</span>
-                    <span style={{ flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{datasets[dsId]?.name ?? `Dataset #${dsId}`}</span>
+                    <span style={{ flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{datasets[dsId]?.name ?? `Unavailable dataset (#${dsId})`}</span>
                     {datasets[dsId]?.aggregate_of_dataset_id && (
-                      <span title={PRE_AGGREGATED_HINT} style={{ fontSize:9, color:'var(--accent)', background:'color-mix(in srgb, var(--accent) 15%, transparent)', borderRadius:3, padding:'1px 4px', flexShrink:0 }}>Σ pre-aggregated</span>
+                      <span title={PRE_AGGREGATED_HINT} style={{ fontSize: 10.5, color:'var(--accent)', background:'color-mix(in srgb, var(--accent) 15%, transparent)', borderRadius:3, padding:'1px 4px', flexShrink:0 }}>Σ pre-aggregated</span>
                     )}
                     {datasets[dsId]?.default_filter_expr && (
-                      <span title={datasets[dsId].default_filter_expr!} style={{ fontSize:9, color:'var(--accent)', background:'color-mix(in srgb, var(--accent) 15%, transparent)', borderRadius:3, padding:'1px 4px', flexShrink:0 }}>⊙ filtered</span>
+                      <span title={datasets[dsId].default_filter_expr!} style={{ fontSize: 10.5, color:'var(--accent)', background:'color-mix(in srgb, var(--accent) 15%, transparent)', borderRadius:3, padding:'1px 4px', flexShrink:0 }}>⊙ filtered</span>
                     )}
                     <button onClick={() => detachDataset(dsId)} title="Remove"
                       style={{ background:'none', border:'none', color:'var(--muted)', cursor:'pointer', fontSize:14, lineHeight:1, padding:'0 2px', flexShrink:0 }}>×</button>
@@ -2486,7 +2548,7 @@ export default function ReportBuilder() {
                 ))}
 
                 <div style={{ position:'relative', marginTop:5 }}>
-                  <button id="add-dataset-button" className="btn btn-ghost btn-sm" style={{ width:'100%', fontSize:10 }}
+                  <button id="add-dataset-button" className="btn btn-ghost btn-sm" style={{ width:'100%', fontSize: 11 }}
                     onClick={() => { setShowDsMenu(m => !m); if (!showDsMenu) datasetsApi.list().then(setAllDatasets) }}>
                     + Add Dataset
                   </button>
@@ -2502,9 +2564,9 @@ export default function ReportBuilder() {
               </div>
 
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
-                <span style={{ fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em' }}>Hierarchy</span>
+                <span style={{ fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em' }}>{tr('builder.hierarchy')}</span>
                 {dataset && (
-                  <button className="btn btn-ghost btn-sm" onClick={autoGenHierarchy} style={{ fontSize:10, padding:'2px 6px' }}>
+                  <button className="btn btn-ghost btn-sm" onClick={autoGenHierarchy} style={{ fontSize: 11, padding:'2px 6px' }}>
                     Auto
                   </button>
                 )}
@@ -2549,7 +2611,7 @@ export default function ReportBuilder() {
           </Link>
           <span style={{ color:'var(--border)' }}>|</span>
           {editMode && renaming ? (
-            <input autoFocus aria-label="Dashboard name" defaultValue={report.name}
+            <input autoFocus aria-label="Dashboard name" defaultValue={report.name} maxLength={120}
               style={{ fontWeight:700, fontSize:16, padding:'1px 6px', minWidth:220 }}
               onBlur={e => void commitRename(e.currentTarget.value)}
               onKeyDown={e => {
@@ -2557,7 +2619,8 @@ export default function ReportBuilder() {
                 if (e.key === 'Escape') { e.stopPropagation(); setRenaming(false) }
               }} />
           ) : editMode ? (
-            <button type="button" title="Rename this dashboard" onClick={() => setRenaming(true)}
+            <button type="button" title={report.name} aria-label="Rename this dashboard" onClick={() => setRenaming(true)}
+              className="dl-report-name"
               style={{ fontWeight:700, fontSize:16, background:'none', border:'1px dashed transparent', borderRadius:4,
                 padding:'1px 4px', cursor:'text', color:'var(--text)', font:'inherit' }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--border)' }}
@@ -2596,7 +2659,7 @@ export default function ReportBuilder() {
                   ? `Sensitivity in force: ${shown}, inherited from its data — ${sens?.effective_reasons?.[0] ?? ''}`
                   : 'Sensitivity label'}
                 style={{
-                fontSize: 10, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase',
+                fontSize: 11, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase',
                 color: '#fff', padding: '2px 7px', borderRadius: 4,
                 background: CLASSIFICATION_COLORS[shown] ?? '#666' }}>
                 {shown}{inherited ? ' ⤴' : ''}
@@ -2661,7 +2724,7 @@ export default function ReportBuilder() {
               header wrapped onto a second line on a laptop. Each item keeps its
               own gate -- a viewer sees no Share menu at all (every item in it is
               edit/admin-only), and keeps Export and Subscribe. */}
-          <ToolbarMenu label={<IconLabel icon={Globe}>Share</IconLabel>} title="Links, guest access and permissions"
+          <ToolbarMenu label={<IconLabel icon={Globe}>{tr('builder.share')}</IconLabel>} title="Links, guest access and permissions"
             items={[
               ...(canEdit ? [{ key: 'link', label: <IconLabel icon={Copy}>Copy link to this page</IconLabel>,
                 onSelect: () => {
@@ -2677,28 +2740,28 @@ export default function ReportBuilder() {
                 title: access.share_link && !access.share_link.allowed ? access.share_link.reason : 'Read-only access without a login',
                 disabled: access.share_link ? !access.share_link.allowed : false,
                 onSelect: () => setShareOpen(true) }] : []),
-              ...(Object.keys(access).length ? [{ key: 'why', label: <>🔑 Your access, and why…</>,
+              ...(Object.keys(access).length ? [{ key: 'why', label: <IconLabel icon={KeyRound}>Your access, and why…</IconLabel>,
                 title: 'What you can do here, and the rule behind each', onSelect: () => setAccessOpen2(true) }] : []),
-              ...(isAdmin ? [{ key: 'access', label: <>🔐 Access by role…</>,
+              ...(isAdmin ? [{ key: 'access', label: <IconLabel icon={ShieldCheck}>Access by role…</IconLabel>,
                 title: 'Set per-role capability levels for this report', onSelect: () => setAccessOpen(true) }] : []),
             ]} />
           {canEdit && (
           <button className="btn btn-ghost btn-sm" title="Kiosk playback: pages advance every 8s; any key exits"
             aria-pressed={kiosk}
             onClick={() => { setEditMode(false); setKiosk(k => !k) }}>
-            {kiosk ? '⏸ Stop' : '▶ Present'}
+            {kiosk ? <IconLabel icon={Pause}>{tr('builder.stop')}</IconLabel> : <IconLabel icon={Play}>{tr('builder.present')}</IconLabel>}
           </button>
           )}
-          <ToolbarMenu label={<>📄 Export</>} title="Print or download this dashboard"
+          <ToolbarMenu label={<IconLabel icon={FileDown}>{tr('builder.export')}</IconLabel>} title="Print or download this dashboard"
             items={[
-              { key: 'print', label: <>🖨 Print…</>, title: 'Print or save as PDF from the browser',
+              { key: 'print', label: <IconLabel icon={Printer}>Print…</IconLabel>, title: 'Print or save as PDF from the browser',
                 onSelect: () => navigate(`/reports/${reportId}/print`) },
-              { key: 'pdf', label: <>📄 Download PDF…</>,
+              { key: 'pdf', label: <IconLabel icon={FileText}>Download PDF…</IconLabel>,
                 title: access.download && !access.download.allowed ? access.download.reason
                   : "Server-rendered PDF: cover, contents, every page's visuals — choose paper, orientation and pages",
                 disabled: access.download ? !access.download.allowed : false,
                 onSelect: () => setPdfDialog(true) },
-              { key: 'package', label: <>📦 Offline package</>,
+              { key: 'package', label: <IconLabel icon={Package}>Offline package</IconLabel>,
                 disabled: access.download ? !access.download.allowed : false,
                 title: access.download && !access.download.allowed ? access.download.reason
                   : 'One HTML file that opens without the platform: every visible page, frozen as you see it now',
@@ -2711,28 +2774,22 @@ export default function ReportBuilder() {
               the editMode-gated toolbar, which a viewer never sees. */}
           <SubscribeButton reportId={reportId} />
           <div style={{ marginInlineStart:'auto', display:'flex', alignItems:'center', gap:8 }}>
-            {editMode && (
-              <div style={{ display:'flex', gap:4 }}>
-                {Object.keys(THEMES).map(name => (
-                  <button key={name} onClick={() => setThemeUndoable(name)}
-                    title={name} aria-label={name[0].toUpperCase() + name.slice(1)}
-                    style={{ width: 18, height: 18, borderRadius: '50%', border: report?.theme === name ? '2px solid var(--text)' : '1px solid var(--border)',
-                      background: THEMES[name][0], cursor: 'pointer' }} />
-                ))}
-                {Object.entries(orgThemes).map(([key, t]) => (
-                  <button key={key}
-                    onClick={() => setThemeUndoable(key)}
-                    title={t.name} aria-label={t.name}
-                    style={{ width: 18, height: 18, borderRadius: 4, border: report?.theme === key ? '2px solid var(--text)' : '1px solid var(--border)',
-                      background: t.colors[0], cursor: 'pointer' }} />
-                ))}
-              </div>
-            )}
             {canEdit ? (
-              <button className="btn btn-ghost btn-sm" onClick={() => setEditMode(m => !m)}
-                style={{ color: editMode ? 'var(--accent)' : 'var(--muted)' }}>
-                {editMode ? <><Settings size={12}/> Edit mode</> : <><Eye size={12}/> View mode</>}
-              </button>
+              // A two-way segmented switch, not a button labelled with the
+              // CURRENT state: "Edit mode" on a button read as the action it
+              // would take, so people clicked it to start editing and left.
+              <div role="group" aria-label={tr('builder.mode')} className="dl-seg">
+                <button type="button" aria-label="View mode" aria-pressed={!editMode}
+                  className={`dl-seg__btn${!editMode ? ' dl-seg__btn--on' : ''}`}
+                  onClick={() => setEditMode(false)}>
+                  <Eye size={12} aria-hidden /> {tr('builder.view')}
+                </button>
+                <button type="button" aria-label="Edit mode" aria-pressed={editMode}
+                  className={`dl-seg__btn${editMode ? ' dl-seg__btn--on' : ''}`}
+                  onClick={() => setEditMode(true)}>
+                  <Settings size={12} aria-hidden /> {tr('builder.edit')}
+                </button>
+              </div>
             ) : (
               <button type="button" className="btn btn-ghost btn-sm" data-testid="view-only-why"
                 title={access.edit?.reason ? `View only — ${access.edit.reason}` : 'You have view-only access to this report'}
@@ -2785,75 +2842,80 @@ export default function ReportBuilder() {
         {/* Report / Data / Model view strip — authors only. A viewer has one
             surface (the dashboard); these tabs are the studio. */}
         {canEdit && !kiosk && (
-        <div style={{ display: 'flex', gap: 4, padding: '6px 12px', borderBottom: '1px solid var(--border)' }}>
+        <div className="dl-panebar">
           {/* Scoped to just these three: other tests use `within(view-strip)` to look
               for a button named /Report/i, and "Report rules" below would otherwise
-              also match that regex if it shared this container. */}
-          <div data-testid="view-strip" style={{ display: 'flex', gap: 4 }}>
+              also match that regex if it shared this container.
+              Drawn as a segmented control: these three are WHERE you are (one
+              is always on), which is a different kind of thing from the panel
+              toggles to the right, and they used to look identical to them. */}
+          <div data-testid="view-strip" className="dl-seg">
             {(['report', 'data', 'model'] as const).filter(v => v === 'report' || canData).map(v => (
-              <button key={v} onClick={() => setActiveView(v)}
-                style={{ padding: '5px 12px', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12,
-                  background: activeView === v ? 'var(--accent)' : 'transparent',
-                  color: activeView === v ? 'var(--mc-accent-fg)' : 'var(--muted)' }}>
-                {v === 'report' ? <IconLabel icon={ViewReport}>Report</IconLabel>
-                  : v === 'data' ? <IconLabel icon={ViewData}>Data</IconLabel>
-                  : <IconLabel icon={ViewModel}>Model</IconLabel>}
+              <button key={v} onClick={() => setActiveView(v)} aria-pressed={activeView === v}
+                className={`dl-seg__btn${activeView === v ? ' dl-seg__btn--on' : ''}`}>
+                {v === 'report' ? <IconLabel icon={ViewReport}>{tr('builder.viewReport')}</IconLabel>
+                  : v === 'data' ? <IconLabel icon={ViewData}>{tr('builder.viewData')}</IconLabel>
+                  : <IconLabel icon={ViewModel}>{tr('builder.viewModel')}</IconLabel>}
               </button>
             ))}
           </div>
           {activeView === 'report' && editMode && (() => {
-            // Toolbar architecture: the six most-used panels stay as buttons;
-            // the rest live behind ⋯ More. Thirteen co-equal toggles overflowed
-            // the strip and made every panel equally hard to find.
-            const PRIMARY: [RightPanelMode, string, LucideIcon][] = [
-              ['outline', 'Outline', PanelLeft], ['suggestions', 'Suggest', Lightbulb],
-              ['review', 'Review', CheckCheck], ['comments', 'Comments', MessageSquare],
-              ['parameters', 'Parameters', AtSign], ['schedule', 'Schedule', Clock],
+            // Toolbar architecture: the most-used panels stay as buttons; the
+            // rest live behind ⋯ More. Thirteen co-equal toggles overflowed the
+            // strip and made every panel equally hard to find. The primaries
+            // are further split into three families with a hairline between
+            // them -- build, AI, collaborate -- so eight buttons read as three
+            // small groups rather than one long run of words.
+            const pl = (m: RightPanelMode) => tr(`builder.pane.${m}` as MessageKey)
+            const GROUPS: [RightPanelMode, string, LucideIcon][][] = [
+              [['outline', pl('outline'), PanelLeft], ['parameters', pl('parameters'), AtSign]],
               // Ask and Insights sit side by side as primaries: same AI
               // family, same discoverability. Insights was in the overflow,
               // which left the engine's builder surface effectively hidden
               // while its lesser sibling had a top-level button.
-              ['ask', 'Ask', Bot], ['insights', 'Insights', Sparkles],
+              [['suggestions', pl('suggestions'), Lightbulb], ['ask', pl('ask'), Bot], ['insights', pl('insights'), Sparkles]],
+              [['review', pl('review'), CheckCheck], ['comments', pl('comments'), MessageSquare], ['schedule', pl('schedule'), Clock]],
             ]
             const OVERFLOW: [RightPanelMode, string, LucideIcon][] = [
-              ['mobile', 'Mobile layout', Smartphone], ['selection', 'Selection', MousePointerClick],
-              ['sync', 'Sync slicers', Link2], ['bookmarks', 'Bookmarks', BookmarkIcon],
-              ['taborder', 'Tab order', ArrowRightLeft], ['performance', 'Performance', PerfGauge],
-              ['reportrules', 'Report rules', Palette], ['translations', 'Translations', Languages],
-              ['history', 'Version history', History],
+              ['mobile', pl('mobile'), Smartphone], ['selection', pl('selection'), MousePointerClick],
+              ['sync', pl('sync'), Link2], ['bookmarks', pl('bookmarks'), BookmarkIcon],
+              ['taborder', pl('taborder'), ArrowRightLeft], ['performance', pl('performance'), PerfGauge],
+              ['reportrules', pl('reportrules'), Palette], ['translations', pl('translations'), Languages],
+              ['history', pl('history'), History],
             ]
             const overflowActive = OVERFLOW.find(([m]) => m === rightPanelMode)
             const toggleMode = (m: RightPanelMode) => setRightPanelMode(cur => cur === m ? 'default' : m)
-            const btnStyle = (active: boolean): React.CSSProperties => ({
-              padding: '5px 12px', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12,
-              background: active ? 'var(--accent)' : 'transparent',
-              color: active ? 'var(--mc-accent-fg)' : 'var(--muted)', whiteSpace: 'nowrap' })
+            const paneClass = (active: boolean) => `dl-panebtn${active ? ' dl-panebtn--on' : ''}`
             return (
-              <div style={{ display: 'flex', gap: 4, marginInlineStart: 'auto', alignItems: 'center' }}>
-                {PRIMARY.map(([m, label, Icon]) => (
-                  <button key={m} onClick={() => toggleMode(m)} style={btnStyle(rightPanelMode === m)}>
-                    <IconLabel icon={Icon}>{label}</IconLabel>
-                  </button>
+              <div className="dl-panebar__tools">
+                {GROUPS.map((group, gi) => (
+                  <div key={gi} className="dl-panebar__group">
+                    {group.map(([m, label, Icon]) => (
+                      <button key={m} onClick={() => toggleMode(m)} aria-pressed={rightPanelMode === m}
+                        className={paneClass(rightPanelMode === m)} title={label}>
+                        {/* The word collapses to the icon when the strip is narrow
+                            (a container query in index.css), except on the open
+                            panel; it stays in the accessible name either way. */}
+                        <IconLabel icon={Icon}><span className="dl-panebtn__text">{label}</span></IconLabel>
+                      </button>
+                    ))}
+                  </div>
                 ))}
                 <div style={{ position: 'relative' }}>
                   <button onClick={() => setToolbarMoreOpen(o => !o)}
-                    aria-label="More panels" aria-expanded={toolbarMoreOpen}
-                    style={btnStyle(!!overflowActive || toolbarMoreOpen)}>
+                    aria-label={tr('builder.morePanels')} aria-expanded={toolbarMoreOpen}
+                    className={paneClass(!!overflowActive || toolbarMoreOpen)}>
                     {overflowActive
                       ? <IconLabel icon={overflowActive[2]}>{overflowActive[1]}</IconLabel>
-                      : <IconLabel icon={MoreHorizontal}>More</IconLabel>}
+                      : <IconLabel icon={MoreHorizontal}>{tr('builder.more')}</IconLabel>}
                   </button>
                   {toolbarMoreOpen && (
-                    <div role="menu" aria-label="More panels"
-                      style={{ position: 'absolute', insetInlineEnd: 0, top: '110%', zIndex: 700, minWidth: 160,
-                        background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8,
-                        boxShadow: '0 8px 24px rgba(0,0,0,.25)', padding: 4,
-                        display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <div role="menu" aria-label={tr('builder.morePanels')} className="dl-menu"
+                      style={{ position: 'absolute', insetInlineEnd: 0, top: '110%', zIndex: 700, minWidth: 180 }}>
                       {OVERFLOW.map(([m, label, Icon]) => (
                         <button key={m} role="menuitem"
                           onClick={() => { toggleMode(m); setToolbarMoreOpen(false) }}
-                          style={{ ...btnStyle(rightPanelMode === m), textAlign: 'start', width: '100%',
-                            color: rightPanelMode === m ? 'var(--mc-accent-fg)' : 'var(--text)' }}>
+                          className={`dl-menu__item${rightPanelMode === m ? ' dl-menu__item--on' : ''}`}>
                           <IconLabel icon={Icon}>{label}</IconLabel>
                         </button>
                       ))}
@@ -2987,7 +3049,7 @@ export default function ReportBuilder() {
           {editMode && (
             <div style={{ position: 'relative', display: 'inline-flex', gap: 2 }}>
               <button className="btn btn-ghost btn-sm" onClick={addPage} style={{ marginBottom:3, fontSize:11 }}>
-                <Plus size={11}/> Page
+                <Plus size={11}/> {tr('builder.page')}
               </button>
               <button className="btn btn-ghost btn-sm" aria-label="Add page from a template"
                 aria-expanded={pageMenuOpen}
@@ -3010,7 +3072,7 @@ export default function ReportBuilder() {
                 aria-expanded={layoutMenuOpen}
                 onClick={() => setLayoutMenuOpen(o => !o)}
                 style={{ fontSize: 11 }}>
-                <IconLabel icon={LayoutTemplate}>Layout</IconLabel>
+                <IconLabel icon={LayoutTemplate}>{tr('builder.layout')}</IconLabel>
               </button>
               {layoutMenuOpen && (
                 <div role="menu" aria-label="Page layout"
@@ -3026,7 +3088,7 @@ export default function ReportBuilder() {
                           background: on ? 'var(--accent)' : 'transparent', color: on ? 'var(--mc-accent-fg)' : 'var(--text)',
                           cursor: 'pointer', fontSize: 12 }}>
                         <div style={{ fontWeight: 600 }}>{r.label}{r.id === DEFAULT_RECIPE ? ' (default)' : ''}</div>
-                        <div style={{ fontSize: 10, opacity: 0.8 }}>{r.hint}</div>
+                        <div style={{ fontSize: 11, opacity: 0.8 }}>{r.hint}</div>
                       </button>
                     )
                   })}
@@ -3037,7 +3099,7 @@ export default function ReportBuilder() {
                       color: activePage?.layout_mode === 'free' ? 'var(--mc-accent-fg)' : 'var(--text)',
                       cursor: 'pointer', fontSize: 12 }}>
                     <div style={{ fontWeight: 600 }}>Free layout</div>
-                    <div style={{ fontSize: 10, opacity: 0.8 }}>Place tiles by hand; still no overlap or tiny charts</div>
+                    <div style={{ fontSize: 11, opacity: 0.8 }}>Place tiles by hand; still no overlap or tiny charts</div>
                   </button>
                 </div>
               )}
@@ -3047,13 +3109,13 @@ export default function ReportBuilder() {
 
         {editMode && multiSelectedIds.size >= 2 && (
           <div style={{ display: 'flex', gap: 4, alignItems: 'center', padding: '6px 16px', borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
-            <span style={{ fontSize: 10, color: 'var(--muted)', marginInlineEnd: 4 }}>Align/Distribute:</span>
+            <span style={{ fontSize: 11, color: 'var(--muted)', marginInlineEnd: 4 }}>Align/Distribute:</span>
             {([
               ['Align Left', () => applyAlign('left')], ['Align Center', () => applyAlign('center')], ['Align Right', () => applyAlign('right')],
               ['Align Top', () => applyAlign('top')], ['Align Middle', () => applyAlign('middle')], ['Align Bottom', () => applyAlign('bottom')],
               ['Distribute Horizontally', () => applyDistribute('horizontal')], ['Distribute Vertically', () => applyDistribute('vertical')],
             ] as const).map(([label, fn]) => (
-              <button key={label} onClick={fn} style={{ fontSize: 10, padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface2)', color: 'var(--text)', cursor: 'pointer' }}>{label}</button>
+              <button key={label} onClick={fn} style={{ fontSize: 11, padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface2)', color: 'var(--text)', cursor: 'pointer' }}>{label}</button>
             ))}
           </div>
         )}
@@ -3076,8 +3138,8 @@ export default function ReportBuilder() {
                   Changes to {recoverable.length === 1 ? 'one widget' : `${recoverable.length} widgets`} from your last session were not saved
                   {' '}({recoverable.map(e => `"${e.title || 'untitled'}"`).join(', ')}).
                 </span>
-                <button className="btn btn-primary btn-sm" onClick={() => void restorePending()}>Restore</button>
-                <button className="btn btn-ghost btn-sm" onClick={discardPending}>Discard</button>
+                <button className="btn btn-primary btn-sm" onClick={() => void restorePending()}>{tr('builder.restore')}</button>
+                <button className="btn btn-ghost btn-sm" onClick={discardPending}>{tr('builder.discard')}</button>
               </div>
             )}
             <FilterBar />
@@ -3099,11 +3161,17 @@ export default function ReportBuilder() {
                 )}
               </div>
             )}
-            {!editMode && isNarrowViewport && activePage?.mobile_layout ? (
+            {/* On a phone the page is always a single column: the free/packed
+                desktop layout clipped widgets off the side. A saved mobile
+                layout decides the order; without one, top-to-bottom,
+                left-to-right, the order a reader scans the desktop page. */}
+            {!editMode && isNarrowViewport && activePage ? (
               <div data-testid="mobile-stack" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {(() => {
                   if (!datasetsReady) return null
-                  const knownIds = pageWidgets.map(w => w.id)
+                  const byPosition = [...pageWidgets].sort((a, b) =>
+                    ((a.layout as any)?.y ?? 0) - ((b.layout as any)?.y ?? 0) || ((a.layout as any)?.x ?? 0) - ((b.layout as any)?.x ?? 0))
+                  const knownIds = byPosition.map(w => w.id)
                   const savedOrder = (activePage.mobile_layout?.order ?? []).filter(id => knownIds.includes(id))
                   const missing = knownIds.filter(id => !savedOrder.includes(id))
                   const hidden = activePage.mobile_layout?.hidden ?? []
@@ -3202,24 +3270,24 @@ export default function ReportBuilder() {
                   // becomes the right chart -- and nothing used to mention it.
                   <div data-testid="empty-page" style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', flexDirection:'column', gap:10, color:'var(--muted)', pointerEvents:'none', textAlign:'center', padding:16 }}>
                     <span style={{ fontSize:36, opacity:.2 }}>⊞</span>
-                    {!editMode && <span style={{ fontSize:13 }}>This page has no widgets yet</span>}
+                    {!editMode && <span style={{ fontSize:13 }}>{tr('builder.noWidgets')}</span>}
                     {editMode && (<>
-                      <span style={{ fontSize:15, fontWeight:600, color:'var(--text)' }}>Design this page</span>
+                      <span style={{ fontSize:15, fontWeight:600, color:'var(--text)' }}>{tr('builder.designPage')}</span>
                       <span style={{ fontSize:13, maxWidth:440 }}>
                         {report.dataset_id
                           ? <>Drag a <b>field</b> from the left panel onto the page and it becomes the right chart — or pick a chart type and assign data to it.</>
-                          : <>Start by choosing the data this dashboard is about.</>}
+                          : <>{tr('builder.startData')}</>}
                       </span>
                       <span style={{ display:'flex', gap:8, flexWrap:'wrap', justifyContent:'center', pointerEvents:'auto' }}>
                         {!report.dataset_id && (
                           <button type="button" className="btn btn-primary btn-sm"
                             onClick={openDatasetPicker}>
-                            Add data
+                            {tr('builder.addData')}
                           </button>
                         )}
                         <button type="button" className="btn btn-ghost btn-sm"
                           onClick={() => { window.scrollTo({ top: 0 }); setPageMenuOpen(true) }}>
-                          Add a page from a template
+                          {tr('builder.addFromTemplate')}
                         </button>
                       </span>
                     </>)}
@@ -3315,7 +3383,7 @@ export default function ReportBuilder() {
               )}
               {rightPanelMode === 'performance' && (
                 <div style={{ padding: '14px 14px 0' }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
                     Performance
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 11 }}>
@@ -3329,7 +3397,7 @@ export default function ReportBuilder() {
                             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                               <span style={{ flex: 1, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.title || w.widget_type}</span>
                               {stat?.sampled && (
-                                <span style={{ fontSize: 9, background: 'rgba(230,160,60,.18)', color: '#e6a03c', padding: '1px 5px', borderRadius: 99 }}>sampled</span>
+                                <span style={{ fontSize: 10.5, background: 'rgba(230,160,60,.18)', color: '#e6a03c', padding: '1px 5px', borderRadius: 99 }}>sampled</span>
                               )}
                             </div>
                             <div style={{ display: 'flex', gap: 10, color: 'var(--muted)' }}>
@@ -3403,10 +3471,10 @@ export default function ReportBuilder() {
               )}
               {rightPanelMode === 'parameters' && (
                 <div style={{ padding: 12 }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
                     Report parameters
                   </div>
-                  <p style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 10 }}>
+                  <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>
                     Reference a parameter as @name in a filter value or a calculated expression.
                     Viewers set values in the bar above the canvas.
                   </p>
@@ -3415,10 +3483,10 @@ export default function ReportBuilder() {
                       server-side (apply_user_context) wherever an author expression is
                       evaluated: dataset filters, calculated columns, measures, RLS rules. */}
                   <div style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 8, marginBottom: 10 }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>
                       System parameters
                     </div>
-                    <p style={{ fontSize: 9.5, color: 'var(--muted)', margin: '0 0 6px' }}>
+                    <p style={{ fontSize: 10.5, color: 'var(--muted)', margin: '0 0 6px' }}>
                       Always available in any expression -- no setup needed. Resolve to the
                       viewing user, so e.g. <code>owner == USEREMAIL()</code> scopes a filter
                       to "my data" for everyone who opens the report.
@@ -3454,7 +3522,7 @@ export default function ReportBuilder() {
                         onChange={e => setParamDefs(defs => defs.map((x, j) => j === i ? { ...x, default_value: e.target.value } : x))}
                         style={{ fontSize: 11 }} />
                       {d.param_type === 'expression' && (
-                        <span style={{ fontSize: 9, color: 'var(--muted)' }}>Computed over the whole source (immune to filters); viewers cannot change it. Import datasets only.</span>
+                        <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>Computed over the whole source (immune to filters); viewers cannot change it. Import datasets only.</span>
                       )}
                       {d.param_type === 'number' && (
                         <div style={{ display: 'flex', gap: 4 }}>
@@ -3474,14 +3542,14 @@ export default function ReportBuilder() {
                         </div>
                       )}
                       {d.param_type === 'number' && (
-                        <span style={{ fontSize: 9, color: 'var(--muted)' }}>min/max/step turn this into a what-if slider</span>
+                        <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>min/max/step turn this into a what-if slider</span>
                       )}
                       {d.param_type === 'text' && (
                         <input aria-label={`Parameter ${i + 1} options`} value={(d.options ?? []).join(', ')} placeholder="options, comma separated (optional)"
                           onChange={e => setParamDefs(defs => defs.map((x, j) => j === i ? { ...x, options: e.target.value.split(',').map(o => o.trim()).filter(Boolean) } : x))}
                           style={{ fontSize: 11 }} />
                       )}
-                      <button className="btn btn-ghost btn-sm" style={{ alignSelf: 'flex-end', fontSize: 10 }}
+                      <button className="btn btn-ghost btn-sm" style={{ alignSelf: 'flex-end', fontSize: 11 }}
                         onClick={() => setParamDefs(defs => defs.filter((_, j) => j !== i))}>
                         Remove
                       </button>
@@ -3548,7 +3616,7 @@ export default function ReportBuilder() {
                     <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
                       <button style={{ background:'none', border:'none', color:'var(--accent)', cursor:'pointer', fontSize:11, padding:0 }}
                         onClick={() => setRightPanelMode('parameters')}>
-                        Report settings
+                        {tr('builder.reportSettings')}
                       </button>
                       {selectedW && (
                         <button aria-label="Deselect widget" title="Deselect widget"
@@ -3568,9 +3636,9 @@ export default function ReportBuilder() {
                       are settings too. */}
                   {activePage && (pageWidgets.length > 0) && (
                     <div style={{ padding: '0 14px 8px' }}>
-                      <label htmlFor="object-picker" style={{ display: 'block', fontSize: 10,
+                      <label htmlFor="object-picker" style={{ display: 'block', fontSize: 11,
                         fontWeight: 700, color: 'var(--muted)', marginBottom: 4 }}>
-                        Object to edit
+                        {tr('builder.objectToEdit')}
                       </label>
                       <select id="object-picker" style={{ width: '100%', fontSize: 12 }}
                         value={selectedW ? String(selectedW.id) : 'page'}
@@ -3593,7 +3661,16 @@ export default function ReportBuilder() {
                     ? <WidgetConfigPanel geography={geography} widget={selectedW} columns={columns} datasets={datasets} primaryDatasetId={report.dataset_id} pages={report.pages} hierarchy={hierarchy} onHierarchyRefresh={refreshHierarchy} bookmarks={bookmarks} onUpdate={updateWidgetConfig} ruleErrors={perfStats[selectedW.id]?.ruleErrors}
                       distinctCounts={Object.fromEntries(Object.entries(hints).flatMap(([k, h]) => typeof (h as { distinct?: unknown })?.distinct === 'number' ? [[k, (h as { distinct: number }).distinct]] : []))} />
                     : activePage && <PagePropertiesPanel reportId={reportId} page={activePage} columns={columns} onUpdate={updatePageProps}
-                        pages={report.pages} bookmarks={bookmarks} onSelectWidget={setSelectedW} />
+                        pages={report.pages} bookmarks={bookmarks} onSelectWidget={setSelectedW}
+                        // The palette picker moved here from a row of unlabeled
+                        // dots in the header, where each theme was one colour
+                        // and no name.
+                        palettes={[
+                          ...Object.keys(THEMES).map(key => ({ key, name: PALETTE_NAME[key] ?? key[0].toUpperCase() + key.slice(1), colors: THEMES[key] })),
+                          ...Object.entries(orgThemes).map(([key, t]) => ({ key, name: t.name, colors: t.colors })),
+                        ]}
+                        currentPalette={report.theme ?? 'default'}
+                        onPalette={setThemeUndoable} />
                   }
                 </>
               )}

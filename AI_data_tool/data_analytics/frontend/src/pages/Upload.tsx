@@ -5,6 +5,7 @@ import type { BatchUploadItem, BatchUploadMode } from '../services/api'
 import toast from 'react-hot-toast'
 import { useT } from '../i18n'
 import LoadingState from '../components/ui/LoadingState'
+import { FileUp, UploadCloud } from 'lucide-react'
 
 const ACCEPT = '.csv,.xlsx,.xls,.json,.xml,.parquet,.mdb,.accdb'
 const ACCESS_RE = /\.(mdb|accdb)$/i
@@ -47,6 +48,13 @@ export default function Upload() {
   const [drag, setDrag]   = useState(false)
   const [errors, setErrors] = useState<BatchUploadItem[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
+  // A synchronous lock: `busy` is React state and does not change until the
+  // next render, so two clicks in the same tick both passed the check and
+  // uploaded the file twice.
+  const inFlight = useRef(false)
+  // Whether the person typed the name themselves. An auto-generated name
+  // follows the chosen file; a typed one is theirs to keep.
+  const nameTyped = useRef(false)
 
   const pickFiles = (picked: File[]) => {
     if (!picked.length) return
@@ -54,11 +62,13 @@ export default function Upload() {
     setErrors([])
     // With several files the server appends each file's own stem, so what
     // belongs here is the prefix they share, not the first file's whole name.
-    if (!name) setName(batchBaseName(picked))
+    if (!nameTyped.current) setName(batchBaseName(picked))
   }
 
   const submit = async () => {
-    if (!files.length || !name) return toast.error('Please select a file and enter a name')
+    if (inFlight.current) return
+    if (!files.length || !name) return toast.error(t('upload.needFile'))
+    inFlight.current = true
     setBusy(true)
     setErrors([])
     try {
@@ -68,7 +78,7 @@ export default function Upload() {
       // yields one dataset per table.
       if (files.length === 1 && !isAccess(files[0])) {
         const ds = await datasetsApi.upload(files[0], name, desc)
-        toast.success('Uploaded!')
+        toast.success(t('upload.done'))
         navigate(`/datasets/${ds.id}`)
         return
       }
@@ -95,9 +105,11 @@ export default function Upload() {
         setErrors(detail.items.filter((i: BatchUploadItem) => i.status === 'error'))
         toast.error(`Nothing could be uploaded (${detail.failed} failed)`)
       } else {
-        toast.error(typeof detail === 'string' ? detail : 'Upload failed')
+        toast.error(typeof detail === 'string' ? detail : t('upload.failed'))
       }
       setBusy(false)
+    } finally {
+      inFlight.current = false
     }
   }
 
@@ -105,35 +117,41 @@ export default function Upload() {
 
   return (
     <div>
-      <div style={{ maxWidth: 600 }}>
-      <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 24 }}>{t('upload.title')}</h1>
+      <div className="dl-upload">
+      <h1 className="dl-page-title" style={{ marginBottom: 4 }}>{t('upload.title')}</h1>
+      <p className="dl-page-head__sub" style={{ marginBottom: 24 }}>
+        {t('upload.subtitle')}
+      </p>
 
       {/* Drop zone */}
+      {/* A real button to the keyboard and to a screen reader: it was a bare
+          div with a click handler, so the only way to pick a file without a
+          mouse was not to have one. */}
       <div
+        role="button" tabIndex={0}
+        aria-label={t('upload.choose')}
+        className={`dl-dropzone${drag ? ' dl-dropzone--over' : ''}${files.length ? ' dl-dropzone--has' : ''}`}
         onClick={() => inputRef.current?.click()}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); inputRef.current?.click() } }}
         onDragOver={e => { e.preventDefault(); setDrag(true) }}
         onDragLeave={() => setDrag(false)}
         onDrop={e => { e.preventDefault(); setDrag(false); pickFiles(Array.from(e.dataTransfer.files)) }}
-        style={{
-          border: `2px dashed ${drag ? 'var(--accent)' : 'var(--border)'}`,
-          borderRadius: 'var(--radius)', padding: '40px 20px',
-          textAlign: 'center', cursor: 'pointer', marginBottom: 20,
-          background: drag ? 'color-mix(in srgb, var(--accent) 5%, transparent)' : 'var(--surface)',
-          transition: 'all .2s',
-        }}
       >
-        <div style={{ fontSize: 36, marginBottom: 8, opacity: .5 }}>↑</div>
+        <span className="dl-dropzone__icon" aria-hidden>
+          {files.length ? <FileUp size={22} /> : <UploadCloud size={22} />}
+        </span>
         {files.length === 1
-          ? <p style={{ color: 'var(--accent)', fontWeight: 600 }}>{files[0].name} ({(files[0].size / 1024).toFixed(1)} KB)</p>
+          ? <p className="dl-dropzone__title dl-dropzone__title--file">{files[0].name} ({(files[0].size / 1024).toFixed(1)} KB)</p>
           : files.length > 1
-          ? <p style={{ color: 'var(--accent)', fontWeight: 600 }}>
-              {files.length} files ({(files.reduce((n, f) => n + f.size, 0) / 1024 / 1024).toFixed(1)} MB)
+          ? <p className="dl-dropzone__title dl-dropzone__title--file">
+              {t('upload.nFiles', { n: files.length, size: (files.reduce((n, f) => n + f.size, 0) / 1024 / 1024).toFixed(1) })}
             </p>
-          : <><p style={{ fontWeight: 600 }}>Drop files here or click to browse</p>
-             <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 4 }}>
-               CSV, XLSX, JSON, XML, Parquet, Access (MDB/ACCDB) — several at once
+          : <><p className="dl-dropzone__title">{t('upload.drop')}</p>
+             <p className="dl-dropzone__hint">
+               {t('upload.formats')}
              </p></>
         }
+        {files.length > 0 && <p className="dl-dropzone__hint">{t('upload.chooseOther')}</p>}
         <input ref={inputRef} type="file" accept={ACCEPT} multiple style={{ display: 'none' }}
           onChange={e => pickFiles(Array.from(e.target.files ?? []))} />
       </div>
@@ -145,43 +163,41 @@ export default function Upload() {
         </p>
       )}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div className="card dl-upload__form">
         {many && (
           <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 5 }}>
-              These files should become
-            </label>
+            <div className="dl-field__label" style={{ marginBottom: 6 }}>
+              {t('upload.become')}
+            </div>
             <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>
               <input type="radio" name="mode" value="separate" checked={mode === 'separate'}
                      onChange={() => setMode('separate')} style={{ marginInlineEnd: 6 }} />
-              Separate datasets — one per file
+              {t('upload.separate')}
             </label>
             <label style={{ display: 'block', fontSize: 13 }}>
               <input type="radio" name="mode" value="append" checked={mode === 'append'}
                      onChange={() => setMode('append')} style={{ marginInlineEnd: 6 }} />
-              A single dataset — rows appended together
+              {t('upload.append')}
             </label>
           </div>
         )}
         <div>
-          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 5 }}>
-            Dataset name *
+          <label className="dl-field" style={{ marginBottom: 0 }}>
+            <span className="dl-field__label">{t('upload.name')}</span>
+            <input value={name} onChange={e => { nameTyped.current = e.target.value.trim().length > 0; setName(e.target.value) }} maxLength={120} placeholder={t('upload.namePh')} className="dl-field__input" />
           </label>
-          <input value={name} onChange={e => setName(e.target.value)} placeholder="My dataset" style={{ width: '100%' }} />
           {many && mode === 'separate' && (
             <p style={{ color: 'var(--muted)', fontSize: 11, marginTop: 4 }}>
               Each file's own name is added, e.g. “{name || 'My dataset'} — {files[0].name.replace(/\.[^.]+$/, '')}”.
             </p>
           )}
         </div>
-        <div>
-          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 5 }}>
-            Description (optional)
-          </label>
-          <input value={desc} onChange={e => setDesc(e.target.value)} placeholder="Short description…" style={{ width: '100%' }} />
-        </div>
+        <label className="dl-field" style={{ marginBottom: 0 }}>
+          <span className="dl-field__label">{t('upload.desc')}</span>
+          <input value={desc} onChange={e => setDesc(e.target.value)} placeholder={t('upload.descPh')} className="dl-field__input" />
+        </label>
         <button onClick={submit} disabled={busy} className="btn btn-primary" style={{ alignSelf: 'flex-start' }}>
-          {busy ? 'Uploading…' : 'Upload'}
+          {busy ? t('upload.uploading') : t('upload.upload')}
         </button>
         {busy && (
           // The button label alone is easy to miss on a large file -- a
@@ -193,7 +209,7 @@ export default function Upload() {
       </div>
 
       {errors.length > 0 && (
-        <div style={{ marginTop: 20, border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 14 }}>
+        <div role="alert" className="dl-upload__errors">
           <p style={{ fontWeight: 600, marginBottom: 8 }}>
             {errors.length} file{errors.length === 1 ? '' : 's'} could not be uploaded
           </p>

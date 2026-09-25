@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Plug } from 'lucide-react'
+import { fieldStyle } from '../../components/ui/fieldStyle'
+import { useT } from '../../i18n'
+import { Plug, Plus } from 'lucide-react'
 import { customConnectorsApi, dataSourcesApi } from '../../services/api'
 import type { CustomConnector, ConnectorSpec } from '../../services/api'
 import toast from 'react-hot-toast'
@@ -26,10 +28,7 @@ function PresetModal({ initial, catalog, onSave, onClose }: {
   const [saving, setSaving] = useState(false)
 
   const spec = catalog.find(s => s.key === baseType)
-  const inp = {
-    style: { width: '100%', fontSize: 12, padding: '5px 8px', boxSizing: 'border-box' as const,
-      background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)' },
-  }
+  const inp = { style: fieldStyle }
 
   const toggleLocked = (name: string) => setLocked(prev => {
     const next = new Set(prev)
@@ -102,6 +101,7 @@ function PresetModal({ initial, catalog, onSave, onClose }: {
 }
 
 export default function AdminCustomConnectors() {
+  const t = useT()
   const [presets, setPresets] = useState<CustomConnector[]>([])
   const [catalog, setCatalog] = useState<ConnectorSpec[]>([])
   const [loading, setLoading] = useState(true)
@@ -140,8 +140,8 @@ export default function AdminCustomConnectors() {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: 24 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, flex: 1 }}>Custom Connectors</h1>
-        <button className="btn btn-primary btn-sm" onClick={() => setModal('add')}>+ New Custom Connector</button>
+        <h1 className="dl-page-title" style={{ flex: 1 }}>{t('nav.customConnectors')}</h1>
+        <button className="btn btn-primary" onClick={() => setModal('add')}><Plus size={16} aria-hidden /> {t('admin.newConnector')}</button>
       </div>
 
       {loading && <LoadingState />}
@@ -153,16 +153,15 @@ export default function AdminCustomConnectors() {
           description="Create a sanctioned, pre-configured preset of a connector type for the rest of your org to use." />
       )}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div className="dl-rows">
         {presets.map(cc => (
-          <div key={cc.id} style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
-            background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 16px' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: 14 }}>{cc.label}</div>
-              <div style={{ fontSize: 11, color: 'var(--muted)' }}>{cc.base_type} · {cc.locked_fields.length} locked field(s)</div>
+          <div key={cc.id} className="dl-rows__row">
+            <div className="dl-rows__main">
+              <div className="dl-rows__title">{cc.label}</div>
+              <div className="dl-rows__meta">{cc.base_type} · {cc.locked_fields.length} locked field(s)</div>
             </div>
-            <button className="btn btn-ghost btn-sm" onClick={() => setModal(cc)} style={{ fontSize: 11 }}>Edit</button>
-            <button className="btn btn-ghost btn-sm" onClick={() => handleDelete(cc)} style={{ fontSize: 11, color: 'var(--danger)' }}>Delete</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => setModal(cc)}>{t('admin.edit')}</button>
+            <button className="btn btn-ghost btn-sm dl-danger-item" onClick={() => handleDelete(cc)}>{t('admin.delete')}</button>
           </div>
         ))}
       </div>

@@ -4,11 +4,11 @@ import { Outlet, NavLink, useLocation } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import CommandPalette from './CommandPalette'
 import TopBar from './TopBar'
-import { visibleSections, type NavItem } from './navigation'
+import { FOLDED_BY_DEFAULT, isUnder, visibleSections, type NavItem } from './navigation'
 import { NAV_ITEM_MESSAGE, SECTION_MESSAGE, useT } from '../i18n'
 import { useModalDialog } from './ui/useModalDialog'
 import {
-  ArrowLeftToLine, ArrowRightToLine, ChevronsLeft, ChevronsRight,
+  ArrowLeftToLine, ArrowRightToLine, ChevronDown, ChevronsLeft, ChevronsRight,
 } from 'lucide-react'
 
 function getInitialTheme(): 'dark' | 'light' {
@@ -17,6 +17,16 @@ function getInitialTheme(): 'dark' | 'light' {
   // Light (the blue/white identity) is the product default; a user's explicit
   // toggle above always wins over it.
   return 'light'
+}
+
+/** Folded rail sections, by section title. Only explicit choices are stored:
+ *  a title absent from the map takes its FOLDED_BY_DEFAULT default, so a
+ *  section added later arrives in its intended state for everyone. */
+function getInitialFolds(): Record<string, boolean> {
+  try {
+    const raw = JSON.parse(localStorage.getItem('rail-folded') ?? '{}')
+    return raw && typeof raw === 'object' ? raw : {}
+  } catch { return {} }
 }
 
 /** Below this width the rail stops being persistent and becomes a drawer. */
@@ -41,6 +51,7 @@ export default function Layout() {
   const [expanded, setExpanded] = useState(() => localStorage.getItem('rail-expanded') !== '0')
   const [narrow, setNarrow] = useState(() => window.innerWidth < DRAWER_BREAKPOINT)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [folds, setFolds] = useState<Record<string, boolean>>(getInitialFolds)
   const { pathname } = useLocation()
 
   useEffect(() => {
@@ -48,6 +59,9 @@ export default function Layout() {
     localStorage.setItem('theme', theme)
   }, [theme])
   useEffect(() => { localStorage.setItem('rail-expanded', expanded ? '1' : '0') }, [expanded])
+  useEffect(() => {
+    try { localStorage.setItem('rail-folded', JSON.stringify(folds)) } catch { /* storage full or blocked: folds just won't persist */ }
+  }, [folds])
 
   // matchMedia rather than a resize listener: it fires only on the crossing,
   // not on every pixel of a drag.
@@ -70,6 +84,13 @@ export default function Layout() {
   const drawerRef = useModalDialog<HTMLElement>(() => setDrawerOpen(false))
 
   const toggle = () => setTheme(t => t === 'dark' ? 'light' : 'dark')
+  // The command palette's "Switch theme" command: the shell owns the theme,
+  // so the palette asks rather than writing the attribute itself.
+  useEffect(() => {
+    const on = () => setTheme(t => t === 'dark' ? 'light' : 'dark')
+    window.addEventListener('datalytics:toggle-theme', on)
+    return () => window.removeEventListener('datalytics:toggle-theme', on)
+  }, [])
   const { user } = useAuth()
   const t = useT()
 
@@ -83,12 +104,31 @@ export default function Layout() {
   const linkClass = ({ isActive }: { isActive: boolean }) =>
     `dl-rail__link${isActive ? ' active' : ''}`
 
-  const section = (label: string | null) => {
+  // Labeled, a section heading is the button that folds it: the whole name is
+  // the target, and aria-expanded carries the state. While folded it shows
+  // how many pages are inside, so a folded section never reads as empty.
+  // Collapsed to icons there is no room for a name, so the heading is a rule
+  // and every entry stays visible.
+  const section = (label: string | null, count: number, bodyId: string) => {
     if (label === null) return null
     const heading = (label && SECTION_MESSAGE[label]) ? t(SECTION_MESSAGE[label]) : label
-    return labeled
-      ? <div className="dl-rail__section">{heading}</div>
-      : <div className="dl-rail__rule" />
+    if (!labeled) return <div className="dl-rail__rule" />
+    const folded = isFolded(label)
+    return (
+      <button type="button" className="dl-rail__section dl-rail__section--toggle"
+        aria-expanded={!folded} aria-controls={bodyId} onClick={() => toggleFold(label)}>
+        <span className="dl-rail__section-name">{heading}</span>
+        {folded && (
+          <span className="dl-rail__count" title={t('nav.sectionItems', { n: count })}>
+            <span aria-hidden>{count}</span>
+            <span className="dl-sr-only">{t('nav.sectionItems', { n: count })}</span>
+          </span>
+        )}
+        <span aria-hidden className={`dl-rail__chev${folded ? ' dl-rail__chev--folded' : ''}`}>
+          <ChevronDown size={14} />
+        </span>
+      </button>
+    )
   }
 
   // Lucide throughout, never emoji: platform emoji render in a dozen colorful
@@ -109,6 +149,23 @@ export default function Layout() {
     isOrgAdmin: !!user?.role?.is_org_admin,
     isSuperAdmin: !!user?.is_super_admin,
   })
+
+  // A section is folded by the viewer's last choice, else by its default.
+  const isFolded = (title: string | null) =>
+    title !== null && (folds[title] ?? FOLDED_BY_DEFAULT.has(title))
+  const toggleFold = (title: string) =>
+    setFolds(f => ({ ...f, [title]: !(f[title] ?? FOLDED_BY_DEFAULT.has(title)) }))
+
+  // Arriving on a page inside a folded section unfolds it: the rail must
+  // always show where you are. It is recorded as a choice, so folding it
+  // again from here sticks.
+  useEffect(() => {
+    // Prefix match, ignoring `end`: /datasets/170 lives under Datasets for the
+    // rail's purposes even though the Datasets LINK is only active on /datasets.
+    const home = sections.find(s => s.title !== null && s.items.some(i => isUnder(pathname, { to: i.to })))
+    if (home?.title && isFolded(home.title)) setFolds(f => ({ ...f, [home.title as string]: false }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname])
 
   const railWidth = labeled ? 248 : 56
   const railHidden = narrow && !drawerOpen
@@ -149,15 +206,21 @@ export default function Layout() {
         </button>
       )}
 
-      {sections.map(s => (
+      {sections.map(s => {
+        const bodyId = `rail-section-${(s.title ?? 'root').toLowerCase().replace(/\W+/g, '-')}`
+        const hideItems = labeled && isFolded(s.title)
+        return (
         <div key={s.title ?? 'root'} className="dl-rail__group">
-          {section(s.title)}
-          {s.items.map(renderItem)}
+          {section(s.title, s.items.length, bodyId)}
+          <div id={bodyId} className="dl-rail__items">
+            {!hideItems && s.items.map(renderItem)}
+          </div>
           {/* The workspace tree belongs under Dashboards: it IS the dashboard
               list, organised. It renders nothing while the rail is collapsed
               to icons, where a tree has no room to be legible. */}
         </div>
-      ))}
+        )
+      })}
 
       <div className="dl-rail__spacer" />
 

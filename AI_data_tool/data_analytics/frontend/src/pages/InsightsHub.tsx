@@ -71,7 +71,7 @@ export default function InsightsHub() {
   useEffect(() => { load().finally(() => setLoading(false)) }, [])
 
   const { filtered, input, noMatches } = useListFilter(
-    datasets, d => [d.name], 'Search datasets…')
+    datasets, d => [d.name], t('search.datasetsEllipsis'))
 
   const current = datasets.find(d => d.id === selected) ?? null
   const isDirectQuery = current?.mode === 'directquery'
@@ -104,9 +104,9 @@ export default function InsightsHub() {
   useEffect(runScan, [selected, isDirectQuery])
 
   return (
-    <div style={{ padding: 24, maxWidth: 1000 }}>
-      <h1 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>{t('nav.insights')}</h1>
-      <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>
+    <div style={{ maxWidth: 1200 }}>
+      <h1 className="dl-page-title" style={{ marginBottom: 4 }}>{t('nav.insights')}</h1>
+      <p className="dl-page-head__sub" style={{ marginBottom: 16 }}>
         {t('insights.subtitle')}
       </p>
 
@@ -172,9 +172,9 @@ export default function InsightsHub() {
               border: '1px solid var(--border)', borderRadius: 'var(--radius, 8px)' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: scan.narrative || strong.length ? 8 : 0 }}>
                 <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.05em' }}>
-                  Top insights
+                  {t('insights.top')}
                 </span>
-                <Link to={`/datasets/${selected}#insights`} style={{ fontSize: 12 }}>View full scan →</Link>
+                <Link to={`/datasets/${selected}#insights`} style={{ fontSize: 12 }}>{t('insights.fullScan')}</Link>
               </div>
               {/* The narrative earns its place by CONNECTING findings. With
                   exactly one, it restates the bullet directly beneath it --

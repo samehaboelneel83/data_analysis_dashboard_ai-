@@ -15,7 +15,7 @@ function ImportPagePicker({ reportId, onAdded, itemStyle }: {
 
   return (
     <div style={{ borderTop: '1px solid var(--border)', marginTop: 4, paddingTop: 4 }}>
-      <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', padding: '4px 10px' }}>
+      <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', padding: '4px 10px' }}>
         Import a page from…
       </div>
       <select aria-label="Source report" value={source?.id ?? ''} style={{ margin: '0 10px 6px', fontSize: 11, width: 'calc(100% - 20px)' }}
@@ -65,7 +65,7 @@ export function PageTemplateMenu({ reportId, activePageId, onClose, onAdded }: {
     <div role="menu" aria-label="Page templates" style={{ position: 'absolute', top: '100%', insetInlineStart: 0, zIndex: 50,
       background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8,
       boxShadow: '0 8px 24px rgba(0,0,0,.2)', padding: 4, minWidth: 200 }}>
-      <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', padding: '4px 10px' }}>Built-in layouts</div>
+      <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', padding: '4px 10px' }}>Built-in layouts</div>
       {builtins.map(t => (
         <button key={t.key} role="menuitem" style={item}
           onClick={() => pageTemplatesApi.addFrom(reportId, { builtin: t.key })
@@ -74,7 +74,7 @@ export function PageTemplateMenu({ reportId, activePageId, onClose, onAdded }: {
         </button>
       ))}
       {saved.length > 0 && (
-        <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', padding: '4px 10px', borderTop: '1px solid var(--border)', marginTop: 4 }}>Your templates</div>
+        <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', padding: '4px 10px', borderTop: '1px solid var(--border)', marginTop: 4 }}>Your templates</div>
       )}
       {saved.map(t => (
         <div key={t.id} style={{ display: 'flex', alignItems: 'center' }}>

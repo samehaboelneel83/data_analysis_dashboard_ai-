@@ -117,7 +117,7 @@ export default function DatasetShareDialog({ datasetId, onClose }: {
                     border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px' }}>
                     <span style={{ flex: 1 }}>{s.email}</span>
                     <button aria-label={`Remove share for ${s.email}`} className="btn btn-ghost btn-sm"
-                      style={{ fontSize: 10, color: 'var(--danger)' }}
+                      style={{ fontSize: 11, color: 'var(--danger)' }}
                       onClick={() => handleRemove(s)}>Remove</button>
                   </li>
                 ))}

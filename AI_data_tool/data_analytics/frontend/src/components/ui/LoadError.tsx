@@ -11,6 +11,8 @@
  * an interruption with a retry, because the correct next action is to try again
  * rather than to create something.
  */
+import { detailToText } from '../../lib/friendlyError'
+
 export default function LoadError({ what, error, onRetry }: {
   /** What failed to load, in the user's words: "reports", "the lineage graph". */
   what: string
@@ -20,9 +22,15 @@ export default function LoadError({ what, error, onRetry }: {
   // The server's own message when there is one -- it is usually more specific
   // than anything generic we could write here. Falls back rather than showing
   // "[object Object]" or an axios stack.
-  const detail =
-    (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-    ?? (error instanceof Error ? error.message : undefined)
+  const raw = (error as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+  const status = (error as { response?: { status?: number } })?.response?.status
+  // Never hand React a non-string: a 422's `detail` is an array of objects,
+  // and rendering it crashed the page (and everything around it).
+  const detail = raw !== undefined && raw !== null
+    ? detailToText(raw)
+    : (error instanceof Error && error.message !== 'Network Error' ? error.message : undefined)
+  // A 404 is not something "trying again" can fix.
+  const gone = status === 404
 
   return (
     <div role="alert" className="card"
@@ -34,11 +42,14 @@ export default function LoadError({ what, error, onRetry }: {
           : 'The server did not respond. This does not mean the data is missing — ' +
             'it means we could not reach it.'}
       </p>
-      {onRetry && (
-        <button className="btn btn-sm" style={{ marginTop: 14 }} onClick={onRetry}>
-          Try again
-        </button>
-      )}
+      <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+        {onRetry && !gone && (
+          <button className="btn btn-sm" onClick={onRetry}>Try again</button>
+        )}
+        {gone && (
+          <button className="btn btn-sm" onClick={() => window.history.back()}>Go back</button>
+        )}
+      </div>
     </div>
   )
 }

@@ -249,7 +249,7 @@ export default function FolderShareDialog({ node, onClose, onChanged }: {
                       <option value="edit">Edit</option>
                     </select>
                     <button aria-label={`Stop sharing with ${label(g)}`} className="btn btn-ghost btn-sm"
-                      disabled={saving} style={{ fontSize: 10, color: 'var(--danger)' }}
+                      disabled={saving} style={{ fontSize: 11, color: 'var(--danger)' }}
                       onClick={() => void remove(g)}>Remove</button>
                   </li>
                 ))}

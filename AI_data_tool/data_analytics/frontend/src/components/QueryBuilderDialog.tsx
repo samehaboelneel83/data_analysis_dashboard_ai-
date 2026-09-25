@@ -21,7 +21,7 @@ interface HavingRow { table: string; column: string; aggregation: string; op: st
 const OPS = ['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'contains', 'in', 'is_null', 'not_null']
 const AGGS = ['', 'sum', 'avg', 'min', 'max', 'count', 'count_distinct']
 
-const label = { display: 'block', fontSize: 10, fontWeight: 700, color: 'var(--muted)',
+const label = { display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--muted)',
   textTransform: 'uppercase' as const, letterSpacing: '.06em', marginBottom: 4 }
 
 /**
@@ -316,7 +316,7 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
               {tables.filter(t => t !== base && !joins.some(j => j.table === t)).map(t =>
                 <option key={t} value={t}>{t}</option>)}
             </select>
-            <span style={{ fontSize: 10, color: 'var(--muted)' }}>
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>
               Click a column, then a column in another table, to draw a join.
             </span>
           </div>
@@ -402,7 +402,7 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
                   </select>
                   {colSelect(hierTable, hierId, setHierId, 'Hierarchy id column')}
                   {colSelect(hierTable, hierParent, setHierParent, 'Hierarchy parent column')}
-                  <span style={{ fontSize: 10, color: 'var(--muted)', alignSelf: 'center' }}>
+                  <span style={{ fontSize: 11, color: 'var(--muted)', alignSelf: 'center' }}>
                     adds __level, __path, __root_id
                   </span>
                 </div>
@@ -429,7 +429,7 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
                   style={{ border: 'none', background: 'none', color: 'var(--danger)', cursor: 'pointer' }}>✕</button>
               </div>
             ))}
-            <button className="btn" style={{ fontSize: 10 }} disabled={!base} title={!base ? 'Choose a base table first' : undefined}
+            <button className="btn" style={{ fontSize: 11 }} disabled={!base} title={!base ? 'Choose a base table first' : undefined}
               onClick={() => setJoins(p => [...p, { left_table: base, table: '', left_column: '', right_column: '', how: 'left' }])}>+ Add join</button>
 
             <label style={{ ...label, marginTop: 12 }}>Columns</label>
@@ -458,14 +458,14 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
                   style={{ border: 'none', background: 'none', color: 'var(--danger)', cursor: 'pointer' }}>✕</button>
               </div>
             ))}
-            <button className="btn" style={{ fontSize: 10 }} disabled={!base} title={!base ? 'Choose a base table first' : undefined}
+            <button className="btn" style={{ fontSize: 11 }} disabled={!base} title={!base ? 'Choose a base table first' : undefined}
               onClick={() => setCols(p => [...p, { table: base, column: '', aggregation: '', alias: '', func: '' }])}>+ Add column</button>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12 }}>
               <label style={{ ...label, marginBottom: 0 }}>Filters</label>
               {filters.length > 1 && (
                 <select aria-label="Filters match" value={filtersJoiner}
-                  onChange={e => setFiltersJoiner(e.target.value as 'and' | 'or')} style={{ fontSize: 10 }}>
+                  onChange={e => setFiltersJoiner(e.target.value as 'and' | 'or')} style={{ fontSize: 11 }}>
                   <option value="and">Match ALL (AND)</option>
                   <option value="or">Match ANY (OR)</option>
                 </select>
@@ -492,10 +492,10 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
                   style={{ border: 'none', background: 'none', color: 'var(--danger)', cursor: 'pointer' }}>✕</button>
               </div>
             ))}
-            <button className="btn" style={{ fontSize: 10 }} disabled={!base} title={!base ? 'Choose a base table first' : undefined}
+            <button className="btn" style={{ fontSize: 11 }} disabled={!base} title={!base ? 'Choose a base table first' : undefined}
               onClick={() => setFilters(p => [...p, { table: base, column: '', op: 'eq', value: '' }])}>+ Add filter</button>
             {filters.some(f => f.column) && (
-              <div data-testid="qb-where-preview" style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
+              <div data-testid="qb-where-preview" style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
                 WHERE {compileWhere(
                   filters.map((f): SqlConditionRow => ({ table: f.table, column: f.column, op: f.op as SqlConditionRow['op'], value: f.value })),
                   filtersJoiner)}
@@ -532,7 +532,7 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
                       style={{ border: 'none', background: 'none', color: 'var(--danger)', cursor: 'pointer' }}>✕</button>
                   </div>
                 ))}
-                <button className="btn" style={{ fontSize: 10 }}
+                <button className="btn" style={{ fontSize: 11 }}
                   onClick={() => setHaving(p => [...p, { table: base, column: '', aggregation: 'sum', op: 'gt', value: '' }])}>
                   + Add having
                 </button>
@@ -565,10 +565,10 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
             {sqlError && <div role="alert" style={{ fontSize: 11, color: 'var(--danger)', marginTop: 4 }}>{sqlError}</div>}
             {functions.length > 0 && (
               <details style={{ marginTop: 8 }}>
-                <summary style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', cursor: 'pointer' }}>
+                <summary style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', cursor: 'pointer' }}>
                   ƒ Database functions ({functions.length})
                 </summary>
-                <ul style={{ listStyle: 'none', fontSize: 10, color: 'var(--muted)', maxHeight: 100, overflowY: 'auto', marginTop: 4 }}>
+                <ul style={{ listStyle: 'none', fontSize: 11, color: 'var(--muted)', maxHeight: 100, overflowY: 'auto', marginTop: 4 }}>
                   {functions.map(f => <li key={f.name}>{f.name}() → {f.returns}</li>)}
                 </ul>
               </details>

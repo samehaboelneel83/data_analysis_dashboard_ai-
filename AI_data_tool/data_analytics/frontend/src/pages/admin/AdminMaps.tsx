@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useT } from '../../i18n'
 import toast from 'react-hot-toast'
 import { boundarySetsApi, mapSettingsApi, type BoundaryPack, type BoundarySetSummary, type MapSettings } from '../../services/api'
 import { setTileSettings } from '../../components/report/geo/tiles'
@@ -15,6 +16,7 @@ import PackTermsConfirm from '../../components/report/PackTermsConfirm'
  * maps points this at its own XYZ tile server.
  */
 export default function AdminMaps() {
+  const t = useT()
   const [form, setForm] = useState<MapSettings>({ tile_url: '', attribution: '', contrast_tile_url: '' })
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<unknown>(null)
@@ -71,8 +73,8 @@ export default function AdminMaps() {
   )
   const installable = packs.filter(p => !sets.some(s => s.name === p.name))
   return (
-    <div style={{ padding: 24, maxWidth: 820 }}>
-      <h1 style={{ fontSize: 20, marginBottom: 4 }}>Maps</h1>
+    <div style={{ maxWidth: 820 }}>
+      <h1 className="dl-page-title" style={{ marginBottom: 4 }}>{t('nav.maps')}</h1>
       <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 0 }}>
         Basemap tiles and region boundaries for every map in the organisation.
       </p>

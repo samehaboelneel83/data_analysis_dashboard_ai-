@@ -67,8 +67,8 @@ describe('AdminRowSecurityRules load failure', () => {
 describe('AdminRowSecurityRules — S0b codeless builder', () => {
   it('pre-suggests the email-typed column over the plain one', async () => {
     renderPage()
-    await waitFor(() => expect(screen.getByRole('button', { name: '+ New Rule' })).not.toBeDisabled())
-    fireEvent.click(screen.getByRole('button', { name: '+ New Rule' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'New rule' })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole('button', { name: 'New rule' }))
 
     const columnSelect = screen.getByLabelText('Column') as HTMLSelectElement
     const suggestedGroup = columnSelect.querySelector('optgroup[label="Suggested (looks like a user/owner column)"]')
@@ -79,16 +79,16 @@ describe('AdminRowSecurityRules — S0b codeless builder', () => {
 
   it('generates the exact expression for "current user email"', async () => {
     renderPage()
-    await waitFor(() => expect(screen.getByRole('button', { name: '+ New Rule' })).not.toBeDisabled())
-    fireEvent.click(screen.getByRole('button', { name: '+ New Rule' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'New rule' })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole('button', { name: 'New rule' }))
 
     expect(screen.getByText('owner_email == USEREMAIL()')).toBeInTheDocument()
   })
 
   it('generates a literal expression when "Literal value" is picked', async () => {
     renderPage()
-    await waitFor(() => expect(screen.getByRole('button', { name: '+ New Rule' })).not.toBeDisabled())
-    fireEvent.click(screen.getByRole('button', { name: '+ New Rule' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'New rule' })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole('button', { name: 'New rule' }))
 
     fireEvent.change(screen.getByLabelText('Column'), { target: { value: 'region' } })
     fireEvent.change(screen.getByLabelText('Match'), { target: { value: 'literal' } })
@@ -100,8 +100,8 @@ describe('AdminRowSecurityRules — S0b codeless builder', () => {
   it('"Use this expression" copies the generated text into the filter, and Save sends it through the existing API', async () => {
     vi.mocked(adminRlsRulesApi.create).mockResolvedValue({ id: 9, role_id: 1, dataset_id: 1, filter_expr: 'owner_email == USEREMAIL()', auto_generated: false, created_at: '' })
     renderPage()
-    await waitFor(() => expect(screen.getByRole('button', { name: '+ New Rule' })).not.toBeDisabled())
-    fireEvent.click(screen.getByRole('button', { name: '+ New Rule' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'New rule' })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole('button', { name: 'New rule' }))
 
     fireEvent.click(screen.getByRole('button', { name: 'Use this expression' }))
     expect(screen.getByPlaceholderText("region == 'North'")).toHaveValue('owner_email == USEREMAIL()')
@@ -115,8 +115,8 @@ describe('AdminRowSecurityRules — S0b codeless builder', () => {
 
   it('re-derives the picked column and generated expression when the dataset is switched', async () => {
     renderPage()
-    await waitFor(() => expect(screen.getByRole('button', { name: '+ New Rule' })).not.toBeDisabled())
-    fireEvent.click(screen.getByRole('button', { name: '+ New Rule' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'New rule' })).not.toBeDisabled())
+    fireEvent.click(screen.getByRole('button', { name: 'New rule' }))
 
     expect((screen.getByLabelText('Column') as HTMLSelectElement).value).toBe('owner_email')
     expect(screen.getByText('owner_email == USEREMAIL()')).toBeInTheDocument()

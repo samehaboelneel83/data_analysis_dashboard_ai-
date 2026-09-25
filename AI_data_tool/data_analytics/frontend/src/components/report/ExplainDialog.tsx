@@ -79,7 +79,7 @@ export default function ExplainDialog({ datasetId, column, onClose }: {
             {result.narrative_source === 'model' && (
               // Named rather than implied. The numbers below are computed; this
               // line is not, and the difference matters to anyone acting on it.
-              <p style={{ fontSize: 10, color: 'var(--muted)', margin: '4px 0 0' }}>
+              <p style={{ fontSize: 11, color: 'var(--muted)', margin: '4px 0 0' }}>
                 Generated from the figures below.
               </p>
             )}
@@ -97,7 +97,7 @@ export default function ExplainDialog({ datasetId, column, onClose }: {
                 <RelationshipPlot rel={rel} />
                 {rel.kind === 'scatter' && (
                   <div style={{ marginTop: 10, borderTop: '1px solid var(--border)', paddingTop: 8 }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>
                       Goal seek
                     </div>
                     <div style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12, flexWrap: 'wrap' }}>

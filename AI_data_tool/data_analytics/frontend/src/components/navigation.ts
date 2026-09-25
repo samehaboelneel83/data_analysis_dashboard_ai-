@@ -149,3 +149,43 @@ export function visibleSections(viewer: NavViewer): NavSection[] {
     .map(s => ({ ...s, items: s.items.filter(i => canSee(i.permission, viewer)) }))
     .filter(s => s.items.length > 0)
 }
+
+/**
+ * Sections that start folded in the rail. Admin is eleven destinations an org
+ * admin visits occasionally; open, it pushed the rail past a 900px window and
+ * hid its own last entries below the fold. Folding is per viewer and
+ * remembered (Layout stores it), and a section always unfolds when the
+ * current page lives inside it -- the rail never hides where you are.
+ */
+export const FOLDED_BY_DEFAULT: ReadonlySet<string> = new Set(['Admin'])
+
+/** True when `pathname` is this destination or a page beneath it. */
+export function isUnder(pathname: string, item: Pick<NavItem, 'to' | 'end'>): boolean {
+  if (item.end || item.to === '/') return pathname === item.to
+  return pathname === item.to || pathname.startsWith(item.to + '/')
+}
+
+/**
+ * The rail section a page belongs to, for the top bar's breadcrumb. The
+ * longest matching destination wins; a page that is reachable but not itself
+ * in the rail (an admin sub-page, say) falls back to the section whose
+ * destinations share its first path segment. Home and the top-level entries
+ * have no section, and return null.
+ */
+export function sectionForPath(pathname: string): string | null {
+  let best: { len: number; title: string | null } | null = null
+  for (const s of NAVIGATION) {
+    for (const i of s.items) {
+      if (i.to !== '/' && isUnder(pathname, { to: i.to }) && (!best || i.to.length > best.len)) {
+        best = { len: i.to.length, title: s.title }
+      }
+    }
+  }
+  if (best) return best.title
+  const head = '/' + (pathname.split('/')[1] ?? '')
+  if (head === '/') return null
+  for (const s of NAVIGATION) {
+    if (s.title && s.items.some(i => i.to.startsWith(head + '/'))) return s.title
+  }
+  return null
+}

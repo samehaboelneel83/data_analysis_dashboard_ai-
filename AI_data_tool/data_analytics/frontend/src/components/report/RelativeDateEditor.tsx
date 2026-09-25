@@ -63,7 +63,7 @@ export default function RelativeDateEditor({ value, onChange, label, compact }: 
           )}
         </div>
       )}
-      <div role={problem ? 'alert' : undefined} style={{ fontSize: 10, color: problem ? 'var(--danger)' : 'var(--muted)' }}>
+      <div role={problem ? 'alert' : undefined} style={{ fontSize: 11, color: problem ? 'var(--danger)' : 'var(--muted)' }}>
         {problem ?? describeSpec(value)}
       </div>
     </div>

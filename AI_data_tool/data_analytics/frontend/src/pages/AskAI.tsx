@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Pencil, Plus, Trash2 } from 'lucide-react'
+import { Bot, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import EmptyState from '../components/ui/EmptyState'
 import ChatPane from '../components/chat/ChatPane'
 import { agentApi, datasetsApi, dataSourcesApi } from '../services/api'
 import type { AgentConversation } from '../services/api'
@@ -70,7 +72,7 @@ export default function AskAI() {
       })
       // A failed dataset list must not read as "no data yet" -- an error
       // dressed as an empty state is the defect, not a degradation.
-      .catch((e: any) => setError(e?.response?.data?.detail ?? 'Failed to load your data'))
+      .catch((e: any) => setError(e?.response?.data?.detail ?? t('ask.loadFailed')))
       .finally(() => setLoading(false))
   }, [])
 
@@ -148,17 +150,16 @@ export default function AskAI() {
   }
 
   return (
-    <div style={{ padding: 24, maxWidth: 1200, display: 'flex', flexDirection: 'column',
+    <div style={{ maxWidth: 1200, display: 'flex', flexDirection: 'column',
       height: '100%', boxSizing: 'border-box' }}>
-      <h1 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>{t('nav.askAi')}</h1>
-      <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
+      <h1 className="dl-page-title" style={{ marginBottom: 4 }}>{t('nav.askAi')}</h1>
+      <p className="dl-page-head__sub" style={{ marginBottom: 16, maxWidth: 720 }}>
         {t('ask.subtitle')}
       </p>
 
-      <div style={{ marginBottom: 12 }}>
+      <div style={{ marginBottom: 16 }}>
         <select value={current} onChange={e => choose(e.target.value)} aria-label={t('ask.scope')}
-          style={{ fontSize: 12, padding: '6px 8px', background: 'var(--surface2)',
-            border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)', minWidth: 260 }}>
+          style={{ minWidth: 300, minHeight: 36 }}>
           <option value="">{t('ask.choose')}</option>
           {datasets.length > 0 && (
             <optgroup label={t('nav.datasets')}>
@@ -174,15 +175,16 @@ export default function AskAI() {
       </div>
 
       {error && (
-        <div role="alert" className="card" style={{ padding: 16, color: 'var(--negative, #e2606c)' }}>{error}</div>
+        <div role="alert" className="card" style={{ padding: 16, color: 'var(--dl-error-text)',
+          background: 'var(--dl-error-bg)', borderColor: 'var(--dl-error-line)' }}>{error}</div>
       )}
 
       {!scoped && !loading && !error && (
-        <div className="card" style={{ padding: '40px 24px', textAlign: 'center', color: 'var(--muted)' }}>
-          {datasets.length === 0 && sources.length === 0
-            ? 'No data yet — upload a dataset or add a connection first.'
-            : 'Pick a dataset or connection above to start asking.'}
-        </div>
+        datasets.length === 0 && sources.length === 0
+          ? <EmptyState icon={Bot} title={t('ask.noData')}
+              action={<Link to="/upload" className="btn btn-primary">{t('ask.uploadDataset')}</Link>} />
+          : <EmptyState icon={Bot} title={t('ask.pick')}
+              description={t('ask.pickHint')} />
       )}
 
       {scoped && (
@@ -193,13 +195,13 @@ export default function AskAI() {
               style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 600,
                 padding: '7px 10px', borderRadius: 8, border: '1px solid var(--border)',
                 background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer' }}>
-              <Plus size={14} aria-hidden /> New chat
+              <Plus size={14} aria-hidden /> {t('ask.newChat')}
             </button>
-            <ul aria-label="Conversations" style={{ listStyle: 'none', margin: 0, padding: 0,
+            <ul aria-label={t('ask.conversations')} style={{ listStyle: 'none', margin: 0, padding: 0,
               overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
               {conversations.length === 0 && (
                 <li style={{ fontSize: 12, color: 'var(--muted)', padding: '6px 8px' }}>
-                  No conversations yet.
+                  {t('ask.noConversations')}
                 </li>
               )}
               {conversations.map(c => (
@@ -232,11 +234,11 @@ export default function AskAI() {
                       )}
                     </button>
                   )}
-                  <button aria-label={`Rename ${c.title}`} title="Rename" style={iconBtn}
+                  <button aria-label={`Rename ${c.title}`} title={t('ask.rename')} style={iconBtn}
                     onClick={() => setEditing({ id: c.id, title: c.title })}>
                     <Pencil size={13} aria-hidden />
                   </button>
-                  <button aria-label={`Delete ${c.title}`} title="Delete" style={iconBtn}
+                  <button aria-label={`Delete ${c.title}`} title={t('ask.delete')} style={iconBtn}
                     onClick={() => void remove(c)}>
                     <Trash2 size={13} aria-hidden />
                   </button>

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom'
-import CommandPalette from './CommandPalette'
+import CommandPalette, { matchScore } from './CommandPalette'
 import { reportsApi, datasetsApi, dataSourcesApi } from '../services/api'
 
 vi.mock('../services/api', () => ({
@@ -71,5 +71,30 @@ describe('CommandPalette', () => {
     await screen.findByLabelText('Search everything')
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(screen.queryByLabelText('Search everything')).not.toBeInTheDocument()
+  })
+
+  it('groups results under headings and offers commands', async () => {
+    mount()
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true })
+    const input = await screen.findByLabelText('Search everything')
+    await waitFor(() => expect(reportsApi.list).toHaveBeenCalled())
+    fireEvent.change(input, { target: { value: 'upload' } })
+    expect(await screen.findByText('Upload a file')).toBeInTheDocument()
+    expect(screen.getByText('Commands')).toBeInTheDocument()
+    expect(screen.getByText('Pages')).toBeInTheDocument()
+  })
+})
+
+describe('matchScore', () => {
+  it('prefers a prefix, then a word, then a substring', () => {
+    expect(matchScore('quarterly sales', 'quar')).toBe(0)
+    expect(matchScore('quarterly sales', 'sal')).toBe(1)
+    expect(matchScore('quarterly sales', 'rterl')).toBe(2)
+  })
+  it('only takes a compact subsequence that starts a word', () => {
+    expect(matchScore('quarterly sales', 'qtl')).toBe(3)
+    // letters scattered across a long name are not a match any more
+    expect(matchScore('students attendance log export', 'sales')).toBe(-1)
+    expect(matchScore('orders', 'os')).toBe(-1)
   })
 })
