@@ -3276,12 +3276,32 @@ async def refresh_dataset(
     # features silently degrades until the next metadata sync.
     semantic_types = {c.name: c.semantic_type for c in dataset.columns if c.semantic_type}
 
+    # E05: the columns something on this dataset names. A full load missing
+    # one is refused BEFORE the file is written; `column_map` (new -> old)
+    # re-attaches a renamed column, and `force` accepts the break knowingly.
+    from ..services.dataset_refresh import SchemaBreak
+    from ..services.dependencies import find_dependents_of
+    dependents = {} if body.force else await find_dependents_of(db, dataset, sorted(known_columns))
+    required = {n for n, deps in dependents.items() if deps}
+
     start = time.monotonic()
     try:
         outcome = await asyncio.to_thread(
             run_refresh, cfg, dataset.filename, dataset.source_table, dataset.source_query,
             requested_mode, cursor_column, cursor_value, known_columns,
+            required, body.column_map,
         )
+    except SchemaBreak as e:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=409, content={
+            "detail": (f"Not refreshed: the source no longer has {', '.join(repr(m) for m in e.missing)}, "
+                       "which this dataset's widgets or calculations use. Map each to its new name, "
+                       "or refresh anyway with force."),
+            "code": "schema_break",
+            "missing": e.missing,
+            "suggestions": e.suggestions,
+            "dependents": {m: dependents.get(m, []) for m in e.missing},
+        })
     except Exception as e:
         raise HTTPException(400, f"Refresh failed: {e}")
     duration_ms = int((time.monotonic() - start) * 1000)
@@ -3324,8 +3344,12 @@ async def refresh_dataset(
         duration_ms=duration_ms, executor="pandas", cache_hit=False,
     )
 
+    # populate_existing: the session (expire_on_commit=False) still holds the
+    # column collection loaded at the top of this request, and a plain
+    # selectinload keeps it -- the response echoed the PRE-refresh columns.
     result2 = await db.execute(
         select(Dataset).options(selectinload(Dataset.columns)).where(Dataset.id == dataset_id)
+        .execution_options(populate_existing=True)
     )
     ds_out = result2.scalar_one()
     ds_out.refresh_warning = outcome.get("warning")

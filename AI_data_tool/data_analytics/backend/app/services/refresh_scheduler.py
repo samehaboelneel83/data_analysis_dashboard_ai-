@@ -691,15 +691,35 @@ async def refresh_one(session, ds: Dataset) -> bool:
             return False
         cfg = dict(src.config or {})
         cfg["type"] = src.type
+        # E05: the columns something on this dataset names. A rewrite that
+        # would drop one is refused before the file is touched, and SAID --
+        # recorded like any scheduler failure -- rather than silently breaking
+        # every widget that uses it on the next tick.
+        from .dataset_refresh import SchemaBreak
+        from .dependencies import find_dependents_of
+        known = [c.name for c in (await session.execute(
+            select(DatasetColumn).where(DatasetColumn.dataset_id == ds.id))).scalars().all()]
+        required = {n for n, deps in (await find_dependents_of(session, ds, known)).items() if deps}
+        # Passed only when something is required, so a dataset nothing uses
+        # makes exactly the call it always made.
+        guard = {"required_columns": required} if required else {}
         try:
             df, _type_map = await asyncio.to_thread(
-                rewrite_dataset_file, cfg, ds.filename, ds.source_table, ds.source_query)
+                rewrite_dataset_file, cfg, ds.filename, ds.source_table, ds.source_query, **guard)
             # O3: rewrite_dataset_file is always a full rewrite (no watermark
             # here -- see module docstring), so the manifest kind is "full"
             # and there is no cursor value to carry.
             if ds.filename:
                 await write_materialization(
                     session, ds.id, ds.filename, "full", len(df), list(df.columns), None)
+        except SchemaBreak as e:
+            log.warning("Scheduled refresh refused for dataset %s: %s", ds.id, e)
+            await record_failure(session, "dataset", ds.id,
+                                 f"Not refreshed: {e}, still used on this dataset. "
+                                 "Refresh it by hand to map the new column names.")
+            ds.last_refreshed_at = datetime.utcnow()
+            await session.commit()
+            return True
         except Exception as e:  # noqa: BLE001 - see docstring
             log.warning("Scheduled refresh failed for dataset %s: %s", ds.id, e)
             if is_aggregate:

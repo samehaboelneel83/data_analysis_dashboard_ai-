@@ -88,6 +88,11 @@ class DatasetRefreshRequest(BaseModel):
     configured watermark column (if any) carries over."""
     mode: str = "full"                      # full | incremental
     cursor_column: Optional[str] = None
+    # E05: a full load that drops a column something uses answers 409 with the
+    # missing names and likely matches. `column_map` renames incoming columns
+    # (new name -> the old name everything uses); `force` refreshes anyway.
+    column_map: Optional[dict[str, str]] = None
+    force: bool = False
 
 
 class ColumnMeta(BaseModel):

@@ -18,18 +18,57 @@ from ..core import telemetry
 from .frame_cache import sidecar_path, write_parquet_sidecar
 
 
+class SchemaBreak(Exception):
+    """The source no longer has columns something on this dataset uses (E05).
+
+    A refresh used to overwrite the file regardless, and every widget, measure
+    or filter naming a vanished column broke at once, silently. Raised BEFORE
+    anything is written, so the file on disk is still the last good one.
+    `suggestions` pairs each missing column with the new columns that look
+    like its renamed self -- the mapping the caller can send back."""
+
+    def __init__(self, missing: list[str], suggestions: dict[str, list[str]]):
+        self.missing = missing
+        self.suggestions = suggestions
+        super().__init__("The source no longer has " + ", ".join(repr(m) for m in missing))
+
+
+def _norm(name: str) -> str:
+    return "".join(ch for ch in str(name).lower() if ch.isalnum())
+
+
+def guard_schema(df: pd.DataFrame, required: set[str] | None,
+                 column_map: dict[str, str] | None = None) -> pd.DataFrame:
+    """Apply a rename mapping (new column -> the old name everything uses),
+    then refuse if anything `required` is still missing."""
+    if column_map:
+        df = df.rename(columns={new: old for new, old in column_map.items() if new in df.columns})
+    missing = sorted(set(required or ()) - set(df.columns))
+    if missing:
+        import difflib
+        fresh = [c for c in df.columns if c not in (required or ())]
+        suggestions = {}
+        for m in missing:
+            same = [c for c in fresh if _norm(c) == _norm(m)]
+            suggestions[m] = same or difflib.get_close_matches(str(m), [str(c) for c in fresh], n=3, cutoff=0.6)
+        raise SchemaBreak(missing, suggestions)
+    return df
+
+
 def rewrite_dataset_file(
     source_cfg: dict, filename: str, source_table: str | None, source_query: str | None,
+    required_columns: set[str] | None = None,
 ) -> tuple[pd.DataFrame, dict]:
     """Re-fetch from the connection and overwrite the cached CSV in place.
 
     Returns the fresh frame and its detected type map so the caller can update
     DatasetColumn rows. Synchronous and blocking — callers run it in a thread.
+    `required_columns`: raise SchemaBreak, writing nothing, if any is gone.
     """
     from .ingest import detect_types
     from .connections import import_to_dataframe
 
-    df = import_to_dataframe(source_cfg, source_table, source_query)
+    df = guard_schema(import_to_dataframe(source_cfg, source_table, source_query), required_columns)
     path = Path(filename)
     path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(path, index=False)
@@ -94,8 +133,15 @@ def refresh_dataset(
     cursor_column: str | None,
     cursor_value: str | None,
     valid_columns: set[str] | None = None,
+    required_columns: set[str] | None = None,
+    column_map: dict[str, str] | None = None,
 ) -> dict:
     """Full or incremental refresh of one source-backed dataset's cached file.
+
+    E05: `column_map` renames incoming columns (new -> old) before anything
+    else, and a FULL load missing any of `required_columns` raises SchemaBreak
+    before the file is touched. (An incremental append keeps the file's
+    existing columns, so it cannot drop one.)
 
     Full: re-run the stored query/table wholesale, overwriting the file — the
     existing manual-refresh behaviour, now also the fallback for every
@@ -120,7 +166,7 @@ def refresh_dataset(
         span.set_attribute("requested_mode", mode)
         result = _refresh_dataset_body(
             source_cfg, filename, source_table, source_query, mode,
-            cursor_column, cursor_value, valid_columns,
+            cursor_column, cursor_value, valid_columns, required_columns, column_map,
         )
         span.set_attribute("status", "ok")
         span.set_attribute("effective_mode", result["mode"])
@@ -138,6 +184,8 @@ def _refresh_dataset_body(
     cursor_column: str | None,
     cursor_value: str | None,
     valid_columns: set[str] | None = None,
+    required_columns: set[str] | None = None,
+    column_map: dict[str, str] | None = None,
 ) -> dict:
     from .ingest import detect_types
     from .connections import import_to_dataframe
@@ -170,6 +218,8 @@ def _refresh_dataset_body(
         try:
             incr_sql = build_incremental_query(source_table, source_query, cursor_column, cursor_value, cols)
             new_rows = import_to_dataframe(source_cfg, None, incr_sql, params={"cursor_val": cursor_value})
+            if column_map:
+                new_rows = new_rows.rename(columns={n: o for n, o in column_map.items() if n in new_rows.columns})
         except Exception as e:  # noqa: BLE001 - bad cursor/query: fall back, don't 500
             effective_mode = "full"
             warning = f"Incremental query failed ({e}) — ran a full refresh instead."
@@ -188,7 +238,8 @@ def _refresh_dataset_body(
 
     # Full load: explicitly requested, the first incremental run (no baseline
     # cursor yet), or any of the fallbacks above.
-    df = import_to_dataframe(source_cfg, source_table, source_query)
+    df = guard_schema(import_to_dataframe(source_cfg, source_table, source_query),
+                      required_columns, column_map)
     if path is not None:
         path.parent.mkdir(parents=True, exist_ok=True)
         df.to_csv(path, index=False)

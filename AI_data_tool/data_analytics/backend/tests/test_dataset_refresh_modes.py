@@ -426,3 +426,102 @@ async def test_materialization_manifest_is_org_scoped(
         _select(Materialization).where(Materialization.dataset_id == ds_a.id)
     )).scalars().all()
     assert len(rows) == 1  # exists, but scoped away from org b's view above
+
+
+# ── E05: a refresh that drops a column something uses is refused ────────────
+
+class TestARefreshCannotSilentlyBreakWhatUsesIt:
+    """A source that renamed or dropped a column used to be refreshed anyway:
+    the file was overwritten, the column rows recreated, and every widget,
+    measure or filter naming the old column broke at once. The refresh now
+    compares the new columns with what find_dependents reports FIRST."""
+
+    async def _world(self, db_session, org_id, tmp_path):
+        from app.models.models import DatasetColumn, Report, ReportPage, ReportWidget
+        ds = await _seeded_dataset(db_session, org_id, tmp_path)
+        for col in ("id", "updated_at"):
+            db_session.add(DatasetColumn(dataset_id=ds.id, name=col, dtype="numeric", missing_pct=0, stats={}))
+        report = Report(name="R", org_id=org_id, dataset_id=ds.id)
+        db_session.add(report)
+        await db_session.flush()
+        page = ReportPage(report_id=report.id, name="P", position=0)
+        db_session.add(page)
+        await db_session.flush()
+        db_session.add(ReportWidget(page_id=page.id, widget_type="kpi", title="Latest",
+                                    config={"measure": "updated_at"}, layout={"x": 0, "y": 0, "w": 3, "h": 3}))
+        await db_session.commit()
+        return ds
+
+    async def test_it_is_refused_before_the_file_changes_with_a_suggested_mapping(
+            self, client, db_session, two_orgs, auth_headers, monkeypatch, tmp_path):
+        ds = await self._world(db_session, two_orgs["a"]["org"].id, tmp_path)
+        before = open(ds.filename, encoding="utf-8").read()
+        renamed = pd.DataFrame([{"id": 1, "Updated At": 10}, {"id": 2, "Updated At": 20}])
+        monkeypatch.setattr("app.services.connections.import_to_dataframe",
+                            lambda cfg, table, query, params=None: renamed)
+
+        r = await client.post(f"/api/v1/datasets/{ds.id}/refresh", json={"mode": "full"},
+                              headers=auth_headers["a"])
+
+        assert r.status_code == 409, r.text
+        body = r.json()
+        assert body["code"] == "schema_break" and body["missing"] == ["updated_at"]
+        assert body["suggestions"] == {"updated_at": ["Updated At"]}
+        assert [d["kind"] for d in body["dependents"]["updated_at"]] == ["widget"]
+        assert open(ds.filename, encoding="utf-8").read() == before      # untouched
+
+    async def test_the_mapping_reattaches_the_renamed_column(
+            self, client, db_session, two_orgs, auth_headers, monkeypatch, tmp_path):
+        ds = await self._world(db_session, two_orgs["a"]["org"].id, tmp_path)
+        renamed = pd.DataFrame([{"id": 1, "Updated At": 10}, {"id": 2, "Updated At": 20}])
+        monkeypatch.setattr("app.services.connections.import_to_dataframe",
+                            lambda cfg, table, query, params=None: renamed)
+
+        r = await client.post(f"/api/v1/datasets/{ds.id}/refresh",
+                              json={"mode": "full", "column_map": {"Updated At": "updated_at"}},
+                              headers=auth_headers["a"])
+
+        assert r.status_code == 200, r.text
+        assert r.json()["row_count"] == 2
+        # The file is what every widget reads: it carries the OLD name, so
+        # the KPI on `updated_at` still resolves after the source renamed it.
+        assert list(pd.read_csv(ds.filename).columns) == ["id", "updated_at"]
+
+    async def test_force_accepts_the_break_knowingly(
+            self, client, db_session, two_orgs, auth_headers, monkeypatch, tmp_path):
+        ds = await self._world(db_session, two_orgs["a"]["org"].id, tmp_path)
+        monkeypatch.setattr("app.services.connections.import_to_dataframe",
+                            lambda cfg, table, query, params=None: pd.DataFrame([{"id": 1}]))
+        r = await client.post(f"/api/v1/datasets/{ds.id}/refresh", json={"mode": "full", "force": True},
+                              headers=auth_headers["a"])
+        assert r.status_code == 200
+
+    async def test_an_unused_column_may_disappear(
+            self, client, db_session, two_orgs, auth_headers, monkeypatch, tmp_path):
+        ds = await self._world(db_session, two_orgs["a"]["org"].id, tmp_path)
+        monkeypatch.setattr("app.services.connections.import_to_dataframe",
+                            lambda cfg, table, query, params=None: pd.DataFrame([{"updated_at": 5}]))
+        r = await client.post(f"/api/v1/datasets/{ds.id}/refresh", json={"mode": "full"},
+                              headers=auth_headers["a"])
+        assert r.status_code == 200       # `id` went, and nothing named it
+        # ...and the response says so: it used to echo the column list the
+        # request STARTED with, because the re-select reused the loaded one.
+        assert [c["name"] for c in r.json()["columns"]] == ["updated_at"]
+
+
+async def test_the_scheduler_refuses_the_same_break_and_says_so(db_session, two_orgs, monkeypatch, tmp_path):
+    from sqlalchemy import select as _select
+    from app.models.models import ScheduleFailure
+    from app.services.refresh_scheduler import refresh_one
+    world = TestARefreshCannotSilentlyBreakWhatUsesIt()
+    ds = await world._world(db_session, two_orgs["a"]["org"].id, tmp_path)
+    before = open(ds.filename, encoding="utf-8").read()
+    monkeypatch.setattr("app.services.connections.import_to_dataframe",
+                        lambda cfg, table, query, params=None: pd.DataFrame([{"id": 1}]))
+
+    assert await refresh_one(db_session, ds) is True
+
+    assert open(ds.filename, encoding="utf-8").read() == before
+    failure = (await db_session.execute(_select(ScheduleFailure).where(
+        ScheduleFailure.kind == "dataset", ScheduleFailure.item_id == ds.id))).scalar_one()
+    assert "updated_at" in failure.last_error and "Not refreshed" in failure.last_error
