@@ -90,7 +90,7 @@ describe('Upload', () => {
     await waitFor(() => expect(datasetsApi.upload).toHaveBeenCalled())
     expect(datasetsApi.uploadBatch).not.toHaveBeenCalled()
     // ...and still lands the user on the dataset it just made.
-    expect(navigate).toHaveBeenCalledWith('/datasets/7')
+    expect(navigate).toHaveBeenCalledWith('/datasets/7?new=1')   // E06: lands with its profile running
   })
 
   it('sends an Access file through the batch endpoint even on its own', async () => {

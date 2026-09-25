@@ -1100,3 +1100,26 @@ describe('the data quality report (2026-09-25)', () => {
     expect(report).toHaveTextContent('amount >= 0: 2 rows fail')
   })
 })
+
+describe('a dataset just imported (E06)', () => {
+  beforeEach(() => {
+    vi.mocked(dataPreviewApi.query).mockResolvedValue({ rows: [], total: 0, columns: [] } as never)
+    vi.mocked(datasetsApi.get).mockResolvedValue(importDataset())
+    vi.mocked(analysisApi.get).mockRejectedValue({ response: { status: 404 } })
+    vi.mocked(analysisApi.run).mockReset().mockResolvedValue({ overview: { rows: 10, columns: 2 } } as never)
+  })
+
+  it('runs its profile on arrival instead of waiting behind a button', async () => {
+    render(
+      <MemoryRouter initialEntries={['/datasets/29?new=1']}>
+        <Routes><Route path="/datasets/:id" element={<DatasetDetail />} /></Routes>
+      </MemoryRouter>)
+    await waitFor(() => expect(analysisApi.run).toHaveBeenCalledWith(29))
+  })
+
+  it('does not scan on an ordinary visit', async () => {
+    renderDetail(29)
+    await screen.findAllByText('CSV Upload')
+    expect(analysisApi.run).not.toHaveBeenCalled()
+  })
+})

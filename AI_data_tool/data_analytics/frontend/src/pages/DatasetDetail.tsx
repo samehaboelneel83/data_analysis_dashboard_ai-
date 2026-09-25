@@ -197,7 +197,18 @@ export default function DatasetDetail() {
       // one (the backend would 400) — skip the request entirely rather than
       // firing a call that can only fail.
       if (ds.mode === 'directquery') { setLoading(false); return }
-      analysisApi.get(dsId).then(setAnalysis).catch(() => null).finally(() => setLoading(false))
+      analysisApi.get(dsId).then(setAnalysis)
+        // E06: straight after an import the profile is run, not left behind a
+        // button -- the first thing a person does with new data is look at it.
+        // Only then: a normal visit does not trigger a full scan. `new` is
+        // dropped from the address so a reload does not scan again.
+        .catch(() => {
+          if (searchParams.get('new') === '1') {
+            window.history.replaceState(null, '', window.location.pathname)
+            void runAnalysisRef.current?.()
+          }
+        })
+        .finally(() => setLoading(false))
     }).catch(e => { setLoadError(e ?? new Error('failed')); setLoading(false) })
   }, [dsId])
   useEffect(loadDataset, [loadDataset])
@@ -276,6 +287,7 @@ export default function DatasetDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, ds])
 
+  const runAnalysisRef = useRef<(() => Promise<void>) | null>(null)
   const runAnalysis = async () => {
     setRunning(true)
     try {
@@ -285,6 +297,7 @@ export default function DatasetDetail() {
     } catch { toast.error('Analysis failed') }
     finally { setRunning(false) }
   }
+  runAnalysisRef.current = runAnalysis
 
   const applyFilters = () => {
     setPage(0)

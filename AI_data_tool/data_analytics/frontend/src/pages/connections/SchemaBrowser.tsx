@@ -79,7 +79,7 @@ export function SchemaBrowser({ ds, onClose }: { ds: DataSource; onClose: () => 
       const r = await dataSourcesApi.import(ds.id, dsName, selected ?? undefined, query.trim() || undefined, mode)
       toast.success(mode === 'directquery' ? `"${r.name}" connected — queries the live source directly` : `Imported "${r.name}" — ${r.row_count.toLocaleString()} rows`)
       // Land on the new dataset, as Upload does -- not on Home.
-      navigate(`/datasets/${r.id}`)
+      navigate(`/datasets/${r.id}?new=1`)
     } catch (e: any) {
       toast.error(e?.response?.data?.detail ?? 'Import failed')
     } finally { setImporting(false) }

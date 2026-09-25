@@ -89,7 +89,7 @@ export default function Upload() {
       if (files.length === 1 && !isAccess(files[0])) {
         const ds = await datasetsApi.upload(files[0], name, desc)
         toast.success(t('upload.done'))
-        navigate(`/datasets/${ds.id}`)
+        navigate(`/datasets/${ds.id}?new=1`)
         return
       }
 
@@ -107,7 +107,7 @@ export default function Upload() {
 
       toast.success(`Uploaded ${res.created} dataset${res.created === 1 ? '' : 's'}`)
       const only = res.items[0]?.dataset
-      navigate(res.created === 1 && only ? `/datasets/${only.id}` : '/datasets')
+      navigate(res.created === 1 && only ? `/datasets/${only.id}?new=1` : '/datasets')
     } catch (e: any) {
       // A total failure comes back as the same body under `detail`.
       const detail = e?.response?.data?.detail
