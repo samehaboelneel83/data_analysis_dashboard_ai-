@@ -362,6 +362,10 @@ export const datasetsApi = {
   refresh: (id: number, body?: { mode?: 'full' | 'incremental'; cursor_column?: string | null;
                                  column_map?: Record<string, string>; force?: boolean }) =>
     api.post<Dataset>(`/datasets/${id}/refresh`, body ?? { mode: 'full' }).then(r => r.data),
+  /** The data-quality report over the rows this viewer's charts use; `rules`
+   *  are expressions a good row satisfies ("amount >= 0"). */
+  quality: (id: number, rules: string[] = []) =>
+    api.post<QualityReport>(`/datasets/${id}/quality`, { rules }).then(r => r.data),
   /** Set the automatic refresh interval, or null to clear it. Minimum 5 minutes;
    *  the server refuses DirectQuery (nothing is cached to refresh). */
   setSchedule: (id: number, interval_minutes: number | null) =>
@@ -2508,4 +2512,26 @@ export interface ConnectionRowPolicy {
   role_id: number
   role_name: string
   predicate: string
+}
+
+export interface QualityColumn {
+  column: string
+  dtype: string
+  missing: number
+  missing_pct: number
+  distinct: number
+  outliers: number | null
+  issues: string[]
+}
+
+export interface QualityReport {
+  rows: number
+  columns: number
+  missing_cells: number
+  missing_pct: number
+  duplicate_rows: number
+  duplicate_examples: Record<string, unknown>[]
+  columns_with_issues: number
+  column_report: QualityColumn[]
+  rules: { rule: string; failing_rows?: number; examples?: Record<string, unknown>[]; error?: string }[]
 }

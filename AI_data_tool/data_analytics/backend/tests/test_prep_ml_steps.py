@@ -168,3 +168,49 @@ def test_balance_can_leave_the_evaluation_rows_alone():
     assert train == {"no": 6, "yes": 6}
     # Validation is exactly what it was: 3 'no' rows, none copied or dropped.
     assert got[got["p"] == "Validation"]["y"].tolist() == ["no", "no", "no"]
+
+
+class TestDataQualityReport:
+    """Missing values, duplicate rows, type problems, outliers and the
+    author's own rules, in one report over the rows the viewer's charts use."""
+
+    df = pd.DataFrame({
+        "id": [1, 2, 2, 3, 4, 5],
+        "amount": [10.0, 12.0, 12.0, -5.0, 11.0, 900.0],
+        "code": ["1", "2", "2", "3", "4", "x"],          # mostly numbers, as text
+        "name": [" a", "b", "b", "c", None, "e"],
+        "const": ["k"] * 6,
+    })
+
+    def test_columns_duplicates_and_rules(self):
+        from app.services.data_quality import quality_report
+        r = quality_report(self.df, ["amount >= 0", "no_such_column > 1"])
+        assert r["rows"] == 6 and r["duplicate_rows"] == 1
+        assert len(r["duplicate_examples"]) == 2                     # both copies shown
+        by = {c["column"]: c for c in r["column_report"]}
+        assert by["name"]["missing"] == 1 and "17% missing" in by["name"]["issues"]
+        assert "1 value with leading/trailing spaces" in by["name"]["issues"]
+        assert "constant" in by["const"]["issues"]
+        assert by["amount"]["outliers"] == 2                         # -5 and 900
+        assert "mixed numbers and text" in by["code"]["issues"]      # 5 of 6 parse: 83% < 90%
+        amount_rule, bad_rule = r["rules"]
+        assert amount_rule["failing_rows"] == 1 and amount_rule["examples"][0]["amount"] == -5.0
+        assert "error" in bad_rule                                   # reported, not raised
+
+    async def test_the_endpoint_runs_the_rules_and_is_org_scoped(
+            self, client, db_session, two_orgs, auth_headers, tmp_path):
+        from app.models.models import Dataset, DatasetColumn
+        path = tmp_path / "q.csv"
+        pd.DataFrame({"region": ["N", "N", "S"], "salary": [1, 1, 99]}).to_csv(path, index=False)
+        ds = Dataset(name="Q", filename=str(path), org_id=two_orgs["a"]["org"].id, mode="import")
+        db_session.add(ds)
+        await db_session.flush()
+        db_session.add_all([DatasetColumn(dataset_id=ds.id, name="region", dtype="categorical"),
+                            DatasetColumn(dataset_id=ds.id, name="salary", dtype="numeric")])
+        await db_session.commit()
+        r = await client.post(f"/api/v1/datasets/{ds.id}/quality", json={"rules": ["salary < 50"]},
+                              headers=auth_headers["a"])
+        assert r.status_code == 200, r.text
+        assert r.json()["duplicate_rows"] == 1 and r.json()["rules"][0]["failing_rows"] == 1
+        assert (await client.post(f"/api/v1/datasets/{ds.id}/quality", json={},
+                                  headers=auth_headers["b"])).status_code == 404

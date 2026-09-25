@@ -129,6 +129,7 @@ LAYER_MAP: dict[str, int] = {
     # L2 callers allowlisted below; conformance plan task 2.4 splits it.
     "services/analytics": L5_ANALYTICS,
     "services/insights": L5_ANALYTICS,
+    "services/data_quality": L5_ANALYTICS,
     "services/report_composer": L5_ANALYTICS,
     "services/explain": L5_ANALYTICS,
     "services/llm": L5_ANALYTICS,

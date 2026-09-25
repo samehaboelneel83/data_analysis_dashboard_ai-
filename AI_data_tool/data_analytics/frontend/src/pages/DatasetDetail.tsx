@@ -36,6 +36,7 @@ import DatasetShareDialog from '../components/DatasetShareDialog'
 import { AuthContext } from '../contexts/AuthContext'
 import toast from 'react-hot-toast'
 import SchemaBreakDialog, { isSchemaBreak, type SchemaBreak } from '../components/dataset/SchemaBreakDialog'
+import DataQualityPanel from '../components/dataset/DataQualityPanel'
 
 import { type Tab, OPS, FILTER_FUNC_CATS, PAGE_SIZE } from './datasetDetail/constants'
 
@@ -753,6 +754,7 @@ export default function DatasetDetail() {
       {/* ── Overview tab ── */}
       {tab === 'overview' && (
         <div>
+          {ds.mode !== 'directquery' && <DataQualityPanel datasetId={dsId} />}
           {analysis?.sampled && (
             <div style={{ marginBottom: 12, fontSize: 12, color: 'var(--muted)', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px' }}>
               Based on a live sample of {analysis.sample_size?.toLocaleString()} of {analysis.total_rows?.toLocaleString()} rows.

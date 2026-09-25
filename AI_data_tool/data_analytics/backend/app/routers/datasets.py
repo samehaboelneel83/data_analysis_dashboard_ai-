@@ -2491,6 +2491,43 @@ async def check_join(dataset_id: int, body: dict, db: AsyncSession = Depends(get
 
 # ── Materialize: a pipeline's result as a dataset of its own ──────────────────
 
+class QualityRequest(BaseModel):
+    #: The author's own checks, as filter expressions a GOOD row satisfies
+    #: ("amount >= 0", "`email` != ''"); each reports the rows that fail it.
+    rules: list[str] = []
+
+
+@router.post("/{dataset_id}/quality")
+async def data_quality(dataset_id: int, body: QualityRequest = QualityRequest(),
+                       db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Missing values, duplicate rows, type problems, outliers and rule checks
+    in one report -- over the rows THIS viewer's charts are built from: RLS,
+    the saved prep pipeline (joins secured as the caller), column security."""
+    from ..services.data_quality import quality_report
+    from ..services.prep import apply_prep_steps, prep_steps_of, resolve_join_frames
+    from ..services.widget_data import apply_rls_filter
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
+    if not ds.filename or ds.mode == "directquery":
+        raise HTTPException(400, "The quality report reads imported data; DirectQuery data stays in the source")
+    rls_expr = await resolve_rls_expr(db, current_user, dataset_id)
+    denied = await resolve_denied_columns(db, current_user, dataset_id)
+    steps = prep_steps_of(ds)
+    aux = await resolve_join_frames(db, current_user, steps) if steps else {}
+
+    def _run():
+        df = apply_rls_filter(load_file(ds.filename), rls_expr)
+        if steps:
+            df = apply_prep_steps(df, steps, aux)
+        present = [c for c in (denied or []) if c in df.columns]
+        if present:
+            df = df.drop(columns=present)
+        return quality_report(df, body.rules)
+
+    return await asyncio.to_thread(_run)
+
+
 async def _require_readable_join_targets(db: AsyncSession, user: User, steps) -> None:
     """Every dataset a pipeline JOINS must be one this caller may read.
 

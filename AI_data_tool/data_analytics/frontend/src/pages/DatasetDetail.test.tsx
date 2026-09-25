@@ -8,7 +8,7 @@ import type { Dataset, User } from '../services/api'
 import { axeViolations } from '../test/axe'
 
 vi.mock('../services/api', () => ({
-  datasetsApi: { get: vi.fn(), refresh: vi.fn(), setSchedule: vi.fn(),
+  datasetsApi: { get: vi.fn(), refresh: vi.fn(), setSchedule: vi.fn(), quality: vi.fn(),
                  list: vi.fn().mockResolvedValue([]) },
   analysisApi: { get: vi.fn(), run: vi.fn(), segment: vi.fn(), keyInfluencers: vi.fn(), associationRules: vi.fn() },
   insightsApi: { run: vi.fn() },
@@ -1071,5 +1071,32 @@ describe('a refresh refused because the source changed (E05)', () => {
 
     await waitFor(() => expect(datasetsApi.refresh).toHaveBeenLastCalledWith(29,
       expect.objectContaining({ force: true, column_map: {} })))
+  })
+})
+
+describe('the data quality report (2026-09-25)', () => {
+  beforeEach(() => {
+    vi.mocked(analysisApi.get).mockRejectedValue(new Error('none'))
+    vi.mocked(dataPreviewApi.query).mockResolvedValue({ rows: [], total: 0, columns: [] } as never)
+    vi.mocked(datasetsApi.get).mockResolvedValue(importDataset())
+  })
+
+  it('runs on demand with the author\u2019s rules and shows what it found', async () => {
+    vi.mocked(datasetsApi.quality).mockResolvedValue({
+      rows: 1200, columns: 5, missing_cells: 30, missing_pct: 0.5, duplicate_rows: 3,
+      duplicate_examples: [{ id: 7, amount: 10 }], columns_with_issues: 1,
+      column_report: [{ column: 'amount', dtype: 'float64', missing: 0, missing_pct: 0, distinct: 90,
+                        outliers: 4, issues: ['4 outliers'] }],
+      rules: [{ rule: 'amount >= 0', failing_rows: 2, examples: [] }],
+    } as never)
+    renderDetail(29)
+    fireEvent.change(await screen.findByLabelText('Quality rules'), { target: { value: 'amount >= 0\n' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Check data quality' }))
+    const report = await screen.findByTestId('quality-report')
+    expect(datasetsApi.quality).toHaveBeenCalledWith(29, ['amount >= 0'])
+    expect(report).toHaveTextContent('1,200 rows × 5 columns')
+    expect(report).toHaveTextContent('3 duplicate rows')
+    expect(report).toHaveTextContent('amount4 outliers')
+    expect(report).toHaveTextContent('amount >= 0: 2 rows fail')
   })
 })
