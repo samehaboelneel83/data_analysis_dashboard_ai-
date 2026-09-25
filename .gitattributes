@@ -1,0 +1,31 @@
+# Text: stored as LF in the repo, checked out as LF on every OS.
+* text=auto eol=lf
+
+# Binary: never converted, never diffed as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.jfif binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.pdf binary
+*.xlsx binary
+*.xls binary
+*.docx binary
+*.pptx binary
+*.zip binary
+*.gz binary
+*.tar binary
+*.db binary
+*.sqlite binary
+*.parquet binary
+*.duckdb binary
+*.mdb binary
+*.accdb binary
+*.pkl binary
+*.thumbnail binary
