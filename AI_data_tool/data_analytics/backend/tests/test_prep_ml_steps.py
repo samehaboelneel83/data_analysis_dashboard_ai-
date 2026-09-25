@@ -157,3 +157,14 @@ class TestAppend:
     def test_a_missing_dataset_appends_nothing(self):
         a = pd.DataFrame({"region": ["N"]})
         assert len(apply_prep_steps(a, [{"kind": "append", "dataset_id": 9}], {})) == 1
+
+
+def test_balance_can_leave_the_evaluation_rows_alone():
+    df = pd.DataFrame({"y": ["no"] * 6 + ["yes"] * 2 + ["no"] * 3,
+                       "p": ["Training"] * 8 + ["Validation"] * 3})
+    got = run(df, {"kind": "balance", "column": "y", "method": "oversample", "seed": 3,
+                   "only_column": "p", "only_value": "Training"})
+    train = got[got["p"] == "Training"]["y"].value_counts().to_dict()
+    assert train == {"no": 6, "yes": 6}
+    # Validation is exactly what it was: 3 'no' rows, none copied or dropped.
+    assert got[got["p"] == "Validation"]["y"].tolist() == ["no", "no", "no"]

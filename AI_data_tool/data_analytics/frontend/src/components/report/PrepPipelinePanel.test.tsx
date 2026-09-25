@@ -1,13 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import PrepPipelinePanel, { suggestJoinKeys, joinPairs, writeJoinPairs } from './PrepPipelinePanel'
-import { prepApi, datasetsApi, relationshipsApi } from '../../services/api'
+import { prepApi, datasetsApi, relationshipsApi, widgetDataApi } from '../../services/api'
 import type { Relationship } from '../../services/api'
 
 vi.mock('../../services/api', () => ({
   prepApi: { get: vi.fn(), set: vi.fn(), preview: vi.fn(), materialize: vi.fn(), rebuild: vi.fn() },
   datasetsApi: { list: vi.fn(), get: vi.fn() },
   relationshipsApi: { list: vi.fn() },
+  widgetDataApi: { query: vi.fn() },
 }))
 
 const columns = [
@@ -473,5 +474,56 @@ describe('cell corrections in the pipeline', () => {
     await waitFor(() => expect(screen.getByTestId('prep-empty')).toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: /add step/i }))
     expect(screen.queryByRole('button', { name: /edit cells/i })).not.toBeInTheDocument()
+  })
+})
+
+describe('preparation for analysis and modelling (2026-09-25)', () => {
+  it('offers the new steps in the add menu', async () => {
+    render(<PrepPipelinePanel datasetId={1} columns={columns} />)
+    await waitFor(() => expect(screen.getByTestId('prep-empty')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '+ Add step' }))
+    for (const label of ['Outliers', 'Normalize', 'Encode categories', 'Date parts', 'Select features',
+      'PCA components', 'Balance classes', 'Append rows (another dataset)', 'Partition (train / validation / test)']) {
+      expect(screen.getByText(label)).toBeInTheDocument()
+    }
+  })
+
+  it('summarises each new step on its card', async () => {
+    vi.mocked(prepApi.get).mockResolvedValue([
+      { kind: 'outliers', columns: ['amount'], method: 'iqr', k: 1.5, action: 'cap' },
+      { kind: 'encode', column: 'region', method: 'onehot', categories: ['US', 'CA'] },
+      { kind: 'partition', name: 'p', train_pct: 70, test_pct: 15, stratify: 'region', seed: 42 },
+      { kind: 'balance', column: 'region', method: 'oversample', only_column: 'p', only_value: 'Training' },
+    ])
+    render(<PrepPipelinePanel datasetId={1} columns={columns} />)
+    const cards = await screen.findAllByTestId('prep-step-card')
+    const text = cards.map(c => c.textContent).join(' | ')
+    expect(text).toContain('amount: IQR × 1.5, cap')
+    expect(text).toContain('region → 2 one-hot columns')
+    expect(text).toContain('70% training, 15% test, stratified by region')
+    expect(text).toContain('region: oversample, only p = Training')
+  })
+
+  it('joins and appends offer import datasets only', async () => {
+    vi.mocked(datasetsApi.list).mockResolvedValue([
+      { id: 2, name: 'Cairo sales', mode: 'import' }, { id: 3, name: 'Live warehouse', mode: 'directquery' },
+    ] as any)
+    render(<PrepPipelinePanel datasetId={1} columns={columns} />)
+    await waitFor(() => expect(screen.getByTestId('prep-empty')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '+ Add step' }))
+    fireEvent.click(screen.getByText('Append rows (another dataset)'))
+    const picker = await screen.findByRole('combobox', { name: 'Dataset to append' })
+    await waitFor(() => expect(picker).toHaveTextContent('Cairo sales'))
+    expect(picker).not.toHaveTextContent('Live warehouse')
+  })
+
+  it('fills one-hot categories from the data', async () => {
+    vi.mocked(prepApi.get).mockResolvedValue([{ kind: 'encode', column: 'region', method: 'onehot', categories: [] }])
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'US', value: 5 }, { name: 'CA', value: 2 }] } as any)
+    render(<PrepPipelinePanel datasetId={1} columns={columns} />)
+    fireEvent.click(await screen.findByTestId('prep-step-card'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Fill from data' }))
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Categories' })).toHaveValue('US, CA'))
+    expect(widgetDataApi.query).toHaveBeenCalledWith(1, { dimension: 'region', limit: 50 }, [], 'bar')
   })
 })

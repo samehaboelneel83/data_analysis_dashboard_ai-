@@ -2,6 +2,7 @@ import type { CSSProperties } from 'react'
 import ExpressionBuilder from '../../expr/ExpressionBuilder'
 import type { PrepStep, DatasetColumn, Dataset } from '../../../services/api'
 import { joinPairs, writeJoinPairs } from './join'
+import { widgetDataApi } from '../../../services/api'
 import { FILTER_FUNC_CATS } from './model'
 
 const selStyle: CSSProperties = {
@@ -49,7 +50,26 @@ export function MultiColCheckboxes({ value, onChange, columns }:
 
 // ── Per-kind mini forms ──────────────────────────────────────────────────────
 
-export function StepEditor({ step, columns, otherDatasets, joinColumns = [], suggestKeys, onChange }: {
+const numberIn = (value: unknown, fallback: number) => (typeof value === 'number' ? value : fallback)
+const hint: CSSProperties = { fontSize: 11, color: 'var(--muted)', marginTop: 4 }
+
+/** One-hot needs its categories up front; this fills them from the data (the
+ *  column's values by frequency, under the viewer's own row security). */
+function FillCategories({ datasetId, column, onFill }:
+  { datasetId?: number; column: string; onFill: (cats: string[]) => void }) {
+  if (!datasetId || !column) return null
+  return (
+    <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}
+      onClick={() => {
+        void widgetDataApi.query(datasetId, { dimension: column, limit: 50 }, [], 'bar')
+          .then(r => onFill(((r?.rows as { name?: unknown }[]) || [])
+            .map(x => x.name).filter(v => v != null && v !== '').map(String)))
+          .catch(() => {})
+      }}>Fill from data</button>
+  )
+}
+
+export function StepEditor({ step, columns, otherDatasets, joinColumns = [], suggestKeys, onChange, datasetId }: {
   step: PrepStep; columns: DatasetColumn[]; otherDatasets: Dataset[]
   /** Column names of the dataset this step joins to, when it is a join and
       that dataset's columns have loaded. Empty means "not known yet". */
@@ -57,8 +77,212 @@ export function StepEditor({ step, columns, otherDatasets, joinColumns = [], sug
   /** Best known key pair for a candidate target, from the org's relationships. */
   suggestKeys?: (targetId: number) => { left_on: string; right_on: string; source: string } | null
   onChange: (patch: Partial<PrepStep>) => void
+  /** The dataset being prepared, for steps that read its values (one-hot). */
+  datasetId?: number
 }) {
   switch (step.kind) {
+    case 'outliers': {
+      const cols = (step.columns as string[]) || []
+      return (
+        <div>
+          <div style={labelStyle}>Numeric columns</div>
+          <MultiColCheckboxes value={cols} columns={columns} onChange={v => onChange({ columns: v })} />
+          <div style={rowStyle}>
+            <select aria-label="Outlier method" value={(step.method as string) || 'iqr'} style={selStyle}
+              onChange={e => onChange({ method: e.target.value, k: e.target.value === 'zscore' ? 3 : 1.5 })}>
+              <option value="iqr">IQR (quartiles)</option>
+              <option value="zscore">z-score</option>
+            </select>
+            <span style={labelStyle}>Threshold</span>
+            <input type="number" step="0.1" min={0.1} aria-label="Outlier threshold" style={{ ...selStyle, width: 64 }}
+              value={numberIn(step.k, step.method === 'zscore' ? 3 : 1.5)}
+              onChange={e => onChange({ k: Number(e.target.value) })} />
+            <select aria-label="Outlier action" value={(step.action as string) || 'flag'} style={selStyle}
+              onChange={e => onChange({ action: e.target.value })}>
+              <option value="flag">flag in a column</option>
+              <option value="remove">remove the rows</option>
+              <option value="cap">cap to the limits</option>
+            </select>
+          </div>
+          {(step.action ?? 'flag') === 'flag' && (
+            <div style={rowStyle}>
+              <span style={labelStyle}>Flag column</span>
+              <input value={(step.name as string) ?? '_Outlier_'} style={{ ...selStyle, flex: 1 }}
+                aria-label="Flag column name" onChange={e => onChange({ name: e.target.value })} />
+            </div>
+          )}
+          <div style={hint}>
+            {step.method === 'zscore'
+              ? `Outside ${numberIn(step.k, 3)} standard deviations of the mean.`
+              : `Beyond ${numberIn(step.k, 1.5)} × the interquartile range past the quartiles (1.5 is the box-plot rule).`}
+          </div>
+        </div>
+      )
+    }
+    case 'normalize':
+      return (
+        <div>
+          <div style={labelStyle}>Numeric columns</div>
+          <MultiColCheckboxes value={(step.columns as string[]) || []} columns={columns}
+            onChange={v => onChange({ columns: v })} />
+          <div style={rowStyle}>
+            <select aria-label="Normalization method" value={(step.method as string) || 'minmax'} style={selStyle}
+              onChange={e => onChange({ method: e.target.value })}>
+              <option value="minmax">min-max (0 to 1)</option>
+              <option value="zscore">z-score (mean 0, sd 1)</option>
+              <option value="log">log (1 + x)</option>
+            </select>
+            <span style={labelStyle}>New column suffix</span>
+            <input value={(step.suffix as string) ?? ''} placeholder="empty = replace" style={{ ...selStyle, width: 110 }}
+              aria-label="New column suffix" onChange={e => onChange({ suffix: e.target.value })} />
+          </div>
+        </div>
+      )
+    case 'encode': {
+      const cats = (step.categories as string[]) || []
+      return (
+        <div>
+          <div style={rowStyle}>
+            <ColSelect value={(step.column as string) || ''} columns={columns} onChange={v => onChange({ column: v })} />
+            <select aria-label="Encoding method" value={(step.method as string) || 'onehot'} style={selStyle}
+              onChange={e => onChange({ method: e.target.value })}>
+              <option value="onehot">one-hot (a 0/1 column per value)</option>
+              <option value="label">label code (0, 1, 2…)</option>
+            </select>
+          </div>
+          <div style={rowStyle}>
+            <input value={cats.join(', ')} style={{ ...selStyle, flex: 1 }} aria-label="Categories"
+              placeholder={step.method === 'label' ? 'order (optional), comma-separated' : 'categories, comma-separated'}
+              onChange={e => onChange({ categories: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })} />
+            <FillCategories datasetId={datasetId} column={(step.column as string) || ''}
+              onFill={v => onChange({ categories: v })} />
+          </div>
+          <label style={{ ...rowStyle, fontSize: 11 }}>
+            <input type="checkbox" checked={!!step.drop_original} style={{ margin: 0 }}
+              onChange={e => onChange({ drop_original: e.target.checked })} />
+            Remove the original column
+          </label>
+        </div>
+      )
+    }
+    case 'date_parts': {
+      const parts = (step.parts as string[]) || []
+      const all = ['year', 'quarter', 'month', 'day', 'weekday', 'hour', 'dayofyear', 'week']
+      return (
+        <div>
+          <ColSelect value={(step.column as string) || ''} columns={columns} placeholder="date column…"
+            onChange={v => onChange({ column: v })} />
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+            {all.map(p => (
+              <label key={p} style={{ fontSize: 11, display: 'flex', gap: 3, alignItems: 'center' }}>
+                <input type="checkbox" checked={parts.includes(p)} style={{ margin: 0 }}
+                  onChange={() => onChange({ parts: parts.includes(p) ? parts.filter(x => x !== p) : [...parts, p] })} />
+                {p}
+              </label>
+            ))}
+          </div>
+        </div>
+      )
+    }
+    case 'feature_select': {
+      const rule = (key: string, label: string, placeholder: string) => (
+        <div style={rowStyle}>
+          <span style={{ ...labelStyle, minWidth: 150 }}>{label}</span>
+          <input type="number" step="any" aria-label={label} placeholder={placeholder} style={{ ...selStyle, width: 80 }}
+            value={typeof step[key] === 'number' ? (step[key] as number) : ''}
+            onChange={e => onChange({ [key]: e.target.value === '' ? undefined : Number(e.target.value) })} />
+        </div>
+      )
+      return (
+        <div>
+          {rule('max_missing_pct', 'Drop if empty above (%)', 'e.g. 50')}
+          {rule('min_variance', 'Drop if variance at most', 'e.g. 0')}
+          {rule('max_correlation', 'Drop if correlation above', 'e.g. 0.95')}
+          <div style={{ ...labelStyle, marginTop: 6 }}>Always keep</div>
+          <MultiColCheckboxes value={(step.keep as string[]) || []} columns={columns}
+            onChange={v => onChange({ keep: v })} />
+          <div style={hint}>Of two correlated columns the first is kept. A constant column counts as zero variance.</div>
+        </div>
+      )
+    }
+    case 'pca': {
+      const cols = (step.columns as string[]) || []
+      return (
+        <div>
+          <div style={labelStyle}>Numeric columns (two or more)</div>
+          <MultiColCheckboxes value={cols} columns={columns} onChange={v => onChange({ columns: v })} />
+          <div style={rowStyle}>
+            <span style={labelStyle}>Components</span>
+            <input type="number" min={1} max={Math.max(1, Math.min(cols.length, 10))} aria-label="Components"
+              value={numberIn(step.n, 2)} style={{ ...selStyle, width: 60 }}
+              onChange={e => onChange({ n: Math.round(Number(e.target.value)) })} />
+            <span style={labelStyle}>Prefix</span>
+            <input value={(step.prefix as string) ?? 'PC'} style={{ ...selStyle, width: 60 }} aria-label="Prefix"
+              onChange={e => onChange({ prefix: e.target.value })} />
+          </div>
+          <div style={hint}>Standardized first; rows with a blank in any chosen column get blank scores.</div>
+        </div>
+      )
+    }
+    case 'balance':
+      return (
+        <div>
+          <div style={rowStyle}>
+            <ColSelect value={(step.column as string) || ''} columns={columns} placeholder="class column…"
+              onChange={v => onChange({ column: v })} />
+            <select aria-label="Balancing method" value={(step.method as string) || 'undersample'} style={selStyle}
+              onChange={e => onChange({ method: e.target.value })}>
+              <option value="undersample">under-sample to the smallest class</option>
+              <option value="oversample">over-sample to the largest class</option>
+            </select>
+            <span style={labelStyle}>Seed</span>
+            <input type="number" value={numberIn(step.seed, 42)} style={{ ...selStyle, width: 64 }} aria-label="Seed"
+              onChange={e => onChange({ seed: Math.round(Number(e.target.value)) })} />
+          </div>
+          <div style={rowStyle}>
+            <span style={labelStyle}>Only rows where</span>
+            <ColSelect value={(step.only_column as string) || ''} columns={columns} placeholder="all rows"
+              onChange={v => onChange({ only_column: v || undefined, only_value: v ? (step.only_value ?? 'Training') : undefined })} />
+            {!!step.only_column && (
+              <>
+                <span style={{ fontSize: 11 }}>=</span>
+                <input value={String(step.only_value ?? '')} style={{ ...selStyle, width: 100 }} aria-label="Only rows with value"
+                  onChange={e => onChange({ only_value: e.target.value })} />
+              </>
+            )}
+          </div>
+          <div style={hint}>Balance the TRAINING rows only (e.g. _Partition_ = Training): resampling the
+            validation rows too would make the model look better than it is. The other rows are kept as they are.</div>
+        </div>
+      )
+    case 'append':
+      return (
+        <div>
+          <div style={rowStyle}>
+            <select aria-label="Dataset to append" value={(step.dataset_id as number) ?? ''} style={selStyle}
+              onChange={e => onChange({ dataset_id: e.target.value ? Number(e.target.value) : null })}>
+              <option value="">dataset…</option>
+              {otherDatasets.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+          </div>
+          <div style={rowStyle}>
+            <span style={labelStyle}>Source column</span>
+            <input value={(step.source_column as string) ?? ''} placeholder="optional, e.g. source"
+              style={{ ...selStyle, width: 120 }} aria-label="Source column"
+              onChange={e => onChange({ source_column: e.target.value || undefined })} />
+          </div>
+          {!!step.source_column && (
+            <div style={rowStyle}>
+              <input value={(step.base_label as string) ?? ''} placeholder="label for these rows" style={{ ...selStyle, flex: 1 }}
+                aria-label="Label for these rows" onChange={e => onChange({ base_label: e.target.value })} />
+              <input value={(step.label as string) ?? ''} placeholder="label for the appended rows" style={{ ...selStyle, flex: 1 }}
+                aria-label="Label for the appended rows" onChange={e => onChange({ label: e.target.value })} />
+            </div>
+          )}
+          <div style={hint}>Stacks the other dataset's rows under these, matching columns by name — the same table
+            imported from two databases becomes one dataset.</div>
+        </div>
+      )
     case 'filter_rows':
       return (
         <ExpressionBuilder
@@ -99,6 +323,17 @@ export function StepEditor({ step, columns, otherDatasets, joinColumns = [], sug
           <div style={labelStyle}>Match on (empty = all columns)</div>
           <MultiColCheckboxes value={(step.subset as string[]) || []} columns={columns}
             onChange={v => onChange({ subset: v })} />
+          {step.kind === 'dedupe' && (
+            <div style={rowStyle}>
+              <span style={labelStyle}>Keep</span>
+              <select aria-label="Which copy to keep" value={(step.keep as string) || 'first'} style={selStyle}
+                onChange={e => onChange({ keep: e.target.value })}>
+                <option value="first">the first copy</option>
+                <option value="last">the last copy</option>
+                <option value="none">no copy (drop them all)</option>
+              </select>
+            </div>
+          )}
         </div>
       )
     case 'aggregate': {
@@ -218,6 +453,9 @@ export function StepEditor({ step, columns, otherDatasets, joinColumns = [], sug
             <span style={labelStyle}>Training %</span>
             <input type="number" min={1} max={99} value={(step.train_pct as number) ?? 70} style={{ ...selStyle, width: 64 }}
               aria-label="Training percent" onChange={e => onChange({ train_pct: Number(e.target.value) })} />
+            <span style={labelStyle}>Test %</span>
+            <input type="number" min={0} max={98} value={(step.test_pct as number) ?? 0} style={{ ...selStyle, width: 64 }}
+              aria-label="Test percent" onChange={e => onChange({ test_pct: Number(e.target.value) || undefined })} />
             <span style={labelStyle}>Seed</span>
             <input type="number" value={(step.seed as number) ?? 42} style={{ ...selStyle, width: 64 }}
               aria-label="Seed" onChange={e => onChange({ seed: Math.round(Number(e.target.value)) })} />
@@ -227,9 +465,15 @@ export function StepEditor({ step, columns, otherDatasets, joinColumns = [], sug
             <ColSelect value={(step.key as string) || ''} columns={columns} placeholder="each row on its own"
               onChange={v => onChange({ key: v || undefined })} />
           </div>
+          <div style={rowStyle}>
+            <span style={labelStyle}>Stratify by</span>
+            <ColSelect value={(step.stratify as string) || ''} columns={columns} placeholder="no stratification"
+              onChange={v => onChange({ stratify: v || undefined })} />
+          </div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-            Labels every row Training or Validation from a seeded hash, so a row stays on its side under
-            any filter or security rule. Model widgets take it as their Partition and score on Validation.
+            Labels every row Training, Validation{(step.test_pct as number) ? ' or Test' : ''} from a seeded hash, so a
+            row stays on its side under any filter or security rule. Stratifying splits each class in the same
+            proportions. Model widgets take it as their Partition and score on Validation.
           </div>
         </div>
       )
@@ -239,7 +483,7 @@ export function StepEditor({ step, columns, otherDatasets, joinColumns = [], sug
           <div style={rowStyle}>
             <ColSelect value={(step.column as string) || ''} columns={columns} onChange={v => onChange({ column: v })} />
             <select value={(step.method as string) || 'value'} style={selStyle} onChange={e => onChange({ method: e.target.value })}>
-              {['value', 'zero', 'mean', 'median', 'mode', 'ffill'].map(m => <option key={m} value={m}>{m}</option>)}
+              {['value', 'zero', 'mean', 'median', 'mode', 'ffill', 'bfill', 'interpolate'].map(m => <option key={m} value={m}>{m}</option>)}
             </select>
           </div>
           {step.method === 'value' && (

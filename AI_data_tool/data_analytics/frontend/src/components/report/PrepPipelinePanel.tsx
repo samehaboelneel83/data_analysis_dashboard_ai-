@@ -47,7 +47,7 @@ function summaryOf(s: PrepStep): string {
     case 'remove_columns': return ((s.columns as string[]) || []).join(', ') || '(none selected)'
     case 'drop_nulls':     return ((s.columns as string[]) || []).length ? (s.columns as string[]).join(', ') : 'any column'
     case 'fill_nulls':     return `${s.column || '?'} with ${s.method}`
-    case 'partition':      return `${s.name || '?'}: ${s.train_pct ?? '?'}% training${s.key ? `, whole ${s.key} per side` : ''} (seed ${s.seed ?? 42})`
+    case 'partition':      return `${s.name || '?'}: ${s.train_pct ?? '?'}% training${s.test_pct ? `, ${s.test_pct}% test` : ''}${s.stratify ? `, stratified by ${s.stratify}` : ''}${s.key ? `, whole ${s.key} per side` : ''} (seed ${s.seed ?? 42})`
     case 'edit_cells': {
       const edits = (s.edits as { key: string }[]) || []
       return `${edits.length} correction${edits.length === 1 ? '' : 's'} to ${s.column || '?'}, by ${s.key_column || '?'}`
@@ -58,6 +58,22 @@ function summaryOf(s: PrepStep): string {
       const keys = joinPairs(s).map(p => `${p.left || '?'} = ${p.right || '?'}`).join(' and ')
       return `dataset #${s.dataset_id ?? '?'} (${s.how}) on ${keys}`
     }
+    case 'append':         return `rows of dataset #${s.dataset_id ?? '?'}${s.source_column ? `, labelled in ${s.source_column}` : ''}`
+    case 'outliers': {
+      const cols = ((s.columns as string[]) || []).join(', ') || '?'
+      const act = { flag: `flag in ${s.name || '_Outlier_'}`, remove: 'remove rows', cap: 'cap' }[(s.action as string) || 'flag']
+      return `${cols}: ${s.method === 'zscore' ? `z > ${s.k ?? 3}` : `IQR × ${s.k ?? 1.5}`}, ${act}`
+    }
+    case 'normalize':      return `${((s.columns as string[]) || []).join(', ') || '?'} → ${s.method}${s.suffix ? ` into *${s.suffix}` : ''}`
+    case 'encode':         return s.method === 'label'
+      ? `${s.column || '?'} → ${s.column || '?'}_code`
+      : `${s.column || '?'} → ${((s.categories as string[]) || []).length} one-hot column${((s.categories as string[]) || []).length === 1 ? '' : 's'}`
+    case 'date_parts':     return `${s.column || '?'} → ${((s.parts as string[]) || []).join(', ') || '?'}`
+    case 'feature_select': return [s.max_missing_pct != null && `empty > ${s.max_missing_pct}%`,
+      s.min_variance != null && `variance ≤ ${s.min_variance}`, s.max_correlation != null && `|r| > ${s.max_correlation}`]
+      .filter(Boolean).join(', ') || '(no rule)'
+    case 'pca':            return `${((s.columns as string[]) || []).length} columns → ${s.n ?? 2} components (${s.prefix || 'PC'}1…)`
+    case 'balance':        return `${s.column || '?'}: ${s.method}${s.only_column ? `, only ${s.only_column} = ${s.only_value}` : ''}`
     default:                return ''
   }
 }
@@ -117,7 +133,9 @@ export default function PrepPipelinePanel({ datasetId, columns }: Props) {
     prepApi.get(datasetId).then(saved => {
       if (!cancelled) setSteps(saved.map(withKey))
     }).finally(() => !cancelled && setLoading(false))
-    datasetsApi.list().then(list => !cancelled && setOtherDatasets(list.filter(d => d.id !== datasetId)))
+    // Import datasets only: a join or append runs over loaded data, and a
+    // DirectQuery dataset was listed here only to be refused on save.
+    datasetsApi.list().then(list => !cancelled && setOtherDatasets(list.filter(d => d.id !== datasetId && d.mode !== 'directquery')))
     // Key detection already exists (name -> type -> value overlap -> cardinality);
     // this is the first thing that reads its output at join time.
     relationshipsApi.list().then(r => !cancelled && setRels(r)).catch(() => {})
@@ -305,7 +323,7 @@ export default function PrepPipelinePanel({ datasetId, columns }: Props) {
 
               {isSelected && (
                 <div onClick={e => e.stopPropagation()} style={{ marginTop: 6, borderTop: '1px solid var(--border)', paddingTop: 6 }}>
-                  <StepEditor step={s} columns={columns} otherDatasets={otherDatasets}
+                  <StepEditor step={s} columns={columns} otherDatasets={otherDatasets} datasetId={datasetId}
                         joinColumns={typeof s.dataset_id === 'number' ? (joinCols[s.dataset_id] ?? []) : []}
                         suggestKeys={(targetId) => suggestJoinKeys(rels, datasetId, targetId)}
                     onChange={patch => updateStep(idx, patch)} />

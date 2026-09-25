@@ -34,7 +34,15 @@ export const KIND_LABELS: Record<string, string> = {
   drop_nulls: 'Drop empty rows',
   fill_nulls: 'Fill empty values',
   join: 'Join dataset',
-  partition: 'Partition (train / validation)',
+  partition: 'Partition (train / validation / test)',
+  append: 'Append rows (another dataset)',
+  outliers: 'Outliers',
+  normalize: 'Normalize',
+  encode: 'Encode categories',
+  date_parts: 'Date parts',
+  feature_select: 'Select features',
+  pca: 'PCA components',
+  balance: 'Balance classes',
   // Written by the data grid's cell editor, never added from the menu here.
   edit_cells: 'Edit cells',
 }
@@ -43,12 +51,15 @@ export const KIND_ICONS: Record<string, string> = {
   filter_rows: '⏳', sort: '↕', dedupe: '⧉', drop_duplicates: '⧉', aggregate: 'Σ',
   rename: '✎', retype: '#', split: '✂', trim: '␣', case: 'Aa', replace: '⇄',
   remove_columns: '⊟', drop_nulls: '∅', fill_nulls: '▦', join: '⋈', partition: '◧',
+  append: '⊕', outliers: '⚑', normalize: '⇲', encode: '⌗', date_parts: '📅', feature_select: '⛉',
+  pca: '⊿', balance: '⚖',
   edit_cells: '⌨',
 }
 
 export const ADD_MENU_KINDS = [
   'filter_rows', 'sort', 'dedupe', 'aggregate', 'rename', 'retype', 'split',
-  'trim', 'case', 'replace', 'remove_columns', 'drop_nulls', 'fill_nulls', 'join', 'partition',
+  'trim', 'case', 'replace', 'remove_columns', 'drop_nulls', 'fill_nulls', 'join', 'append', 'partition',
+  'outliers', 'normalize', 'encode', 'date_parts', 'feature_select', 'pca', 'balance',
 ]
 
 let keySeq = 1
@@ -71,6 +82,14 @@ export function newStep(kind: string): PrepStep {
     case 'fill_nulls':     return { kind, column: '', method: 'value', value: '' }
     case 'join':           return { kind, dataset_id: null, how: 'left', left_on: '', right_on: '' }
     case 'partition':      return { kind, name: '_Partition_', train_pct: 70, seed: 42 }
+    case 'append':         return { kind, dataset_id: null }
+    case 'outliers':       return { kind, columns: [], method: 'iqr', k: 1.5, action: 'flag', name: '_Outlier_' }
+    case 'normalize':      return { kind, columns: [], method: 'minmax', suffix: '' }
+    case 'encode':         return { kind, column: '', method: 'onehot', categories: [] }
+    case 'date_parts':     return { kind, column: '', parts: ['year', 'month'] }
+    case 'feature_select': return { kind, min_variance: 0, keep: [] }
+    case 'pca':            return { kind, columns: [], n: 2, prefix: 'PC' }
+    case 'balance':        return { kind, column: '', method: 'undersample', seed: 42 }
     default:                return { kind }
   }
 }

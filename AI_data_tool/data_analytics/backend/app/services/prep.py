@@ -354,6 +354,8 @@ def validate_prep_steps(steps: list, known_columns: set[str],
                      f"step {i + 1}: method must be one of {sorted(_BALANCE_METHODS)}")
             seed = s.get("seed", 42)
             _require(isinstance(seed, int) and not isinstance(seed, bool), f"step {i + 1}: seed must be a whole number")
+            if s.get("only_column"):
+                has(s["only_column"], i)
         elif kind == "append":
             _require(isinstance(s.get("dataset_id"), int), f"step {i + 1}: append needs a dataset_id")
             other_cols = (join_columns or {}).get(s["dataset_id"])
@@ -675,6 +677,15 @@ def _balance(df: pd.DataFrame, s: dict) -> pd.DataFrame:
     c = s["column"]
     if c not in df.columns:
         return df
+    only = s.get("only_column")
+    if only:
+        # Balance the TRAINING rows only (only_column = only_value): resampling
+        # the evaluation rows too would grade the model on copies of itself.
+        if only not in df.columns:
+            return df
+        inside = df[only].astype(str) == str(s.get("only_value", ""))
+        balanced = _balance(df[inside], {**s, "only_column": None})
+        return pd.concat([balanced, df[~inside]], ignore_index=True)
     known = df[df[c].notna()]
     counts = known[c].value_counts()
     if len(counts) < 2:
