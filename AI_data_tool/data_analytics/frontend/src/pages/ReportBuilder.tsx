@@ -1353,7 +1353,7 @@ export default function ReportBuilder() {
     setLeftTab('fields')
     setShowDsMenu(true)
     datasetsApi.list().then(setAllDatasets).catch(() => {})
-    requestAnimationFrame(() => document.getElementById('add-dataset-button')?.scrollIntoView({ block: 'center' }))
+    requestAnimationFrame(() => document.getElementById('add-dataset-button')?.scrollIntoView?.({ block: 'center' }))
   }
   useEffect(() => {
     const onAdd = () => openDatasetPicker()

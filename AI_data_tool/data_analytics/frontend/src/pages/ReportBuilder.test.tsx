@@ -532,14 +532,23 @@ describe('ReportBuilder Fields pane', () => {
     ))
   })
 
-  it('does nothing when a field is clicked with no widget selected', async () => {
+  it('leaves the existing widget alone when a field is clicked with no widget selected', async () => {
+    // With nothing selected, a click makes a NEW chart from the field. The mock
+    // returns a real widget: the default vi.fn() resolved undefined, and the
+    // builder's undo entry then read `.layout` off it as an unhandled rejection
+    // that vitest pinned on whichever test ran next.
     vi.mocked(reportsApi.updateWidget).mockClear()
+    vi.mocked(reportsApi.addWidget).mockClear().mockResolvedValue({
+      id: 6, page_id: 100, widget_type: 'kpi', title: 'Sales',
+      config: { measure: 'sales' }, layout: { x: 0, y: 5, w: 6, h: 5 },
+    } as any)
     vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
     vi.mocked(datasetsApi.get).mockResolvedValue(datasetWithColumns() as any)
     renderBuilder()
     await screen.findByTestId('view-strip')
 
     fireEvent.click(screen.getByRole('button', { name: /^[#ƒx Aa]* ?sales$/ }))
+    await waitFor(() => expect(reportsApi.addWidget).toHaveBeenCalledTimes(1))
     expect(reportsApi.updateWidget).not.toHaveBeenCalled()
   })
 })
