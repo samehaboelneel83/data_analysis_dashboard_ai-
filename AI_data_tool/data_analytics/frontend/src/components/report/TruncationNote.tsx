@@ -20,6 +20,15 @@ export function truncationSentence(t: Truncation, dimension?: string): string {
   return `Showing ${t.shown.toLocaleString()} of ${t.of.toLocaleString()} ${what}`
 }
 
+/** E04: rows whose category is blank are dropped by all three engines (a
+ *  deliberate standard), and every grouped series now says how many. This is
+ *  the reader's half: without it the bars silently sum to less than the
+ *  total everywhere else. */
+export function missingCategorySentence(rows: number, dimension?: string): string {
+  const one = rows === 1
+  return `${rows.toLocaleString()} row${one ? '' : 's'} with no ${dimension || 'category'} ${one ? 'is' : 'are'} not shown`
+}
+
 export function TruncationNote({ t, dimension, onShowMore }:
   { t: Truncation; dimension?: string; onShowMore?: (limit: number) => void }) {
   if (!t?.applied) return null

@@ -2522,3 +2522,27 @@ describe('WidgetRenderer animated result (Phase 6.3)', () => {
     expect(screen.getByTestId('anim-label').textContent).toBe('2025')
   })
 })
+
+describe('rows with no category (E04 missing_category)', () => {
+  it('says how many rows the bars leave out', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({
+      type: 'series', dimension: 'region', rows: [{ name: 'East', value: 10 }],
+      missing_category: { rows: 3 },
+    } as never)
+    renderWidget({ widget: barWidget() })
+    expect(await screen.findByTestId('missing-category-note'))
+      .toHaveTextContent('3 rows with no region are not shown')
+  })
+
+  it('says nothing when every row had one', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({
+      type: 'series', dimension: 'region', rows: [{ name: 'East', value: 10 }],
+      missing_category: { rows: 0 }, truncation: { applied: true, shown: 1, of: 5 },
+    } as never)
+    renderWidget({ widget: barWidget() })
+    // The truncation note comes from the same response, so once it is on
+    // screen the data has landed and the absence below means something.
+    await screen.findByTestId('truncation-note')
+    expect(screen.queryByTestId('missing-category-note')).toBeNull()
+  })
+})

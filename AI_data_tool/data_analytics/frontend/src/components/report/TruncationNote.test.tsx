@@ -36,3 +36,12 @@ describe('TruncationNote', () => {
     expect(screen.queryByRole('button')).toBeNull()
   })
 })
+
+describe('missingCategorySentence', () => {
+  it('counts the rows and names the field, in the singular when it is one', async () => {
+    const { missingCategorySentence } = await import('./TruncationNote')
+    expect(missingCategorySentence(1200, 'region')).toBe('1,200 rows with no region are not shown')
+    expect(missingCategorySentence(1, 'region')).toBe('1 row with no region is not shown')
+    expect(missingCategorySentence(2)).toBe('2 rows with no category are not shown')
+  })
+})

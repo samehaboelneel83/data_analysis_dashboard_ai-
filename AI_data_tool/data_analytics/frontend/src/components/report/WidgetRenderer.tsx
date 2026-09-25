@@ -21,7 +21,7 @@ import { ASSIGN_DATA_EVENT, missingRequiredRoles } from './WidgetPlaceholder'
 
 /** Charts whose bars/points are groups of rows two of which can be tested (Phase 7.2). */
 const DIFFERENCE_TYPES: string[] = ['bar', 'line', 'area', 'pie', 'donut', 'dot_plot', 'step', 'treemap', 'funnel']
-import { TruncationNote, PATCH_WIDGET_EVENT } from './TruncationNote'
+import { TruncationNote, PATCH_WIDGET_EVENT, missingCategorySentence } from './TruncationNote'
 export { CustomVisual } from './CustomVisual'
 
 const PREVIEW_W = 320
@@ -1130,6 +1130,13 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
           onShowMore={editMode ? (limit: number) => window.dispatchEvent(new CustomEvent(PATCH_WIDGET_EVENT, {
             detail: { widgetId: widget.id, patch: { limit }, label: `Show ${limit === data.truncation.of ? 'all ' : ''}${limit} ${(data.dimension ?? data.category) ? `${data.dimension ?? data.category} values` : 'groups'} in "${widget.title || widget.widget_type}"` },
           })) : undefined} />
+      )}
+
+      {!loading && !hiddenByRule && (data?.missing_category?.rows ?? 0) > 0 && missingRequiredRoles(widget).length === 0 && (
+        <div data-testid="missing-category-note" role="note"
+          style={{ fontSize: 10.5, color: 'var(--muted)', padding: '2px 8px 4px', lineHeight: 1.3 }}>
+          {missingCategorySentence(data.missing_category.rows, data.dimension ?? data.category)}
+        </div>
       )}
 
       {!loading && !hiddenByRule && partial && (
