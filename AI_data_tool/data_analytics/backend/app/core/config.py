@@ -167,6 +167,13 @@ class Settings(BaseSettings):
     # ladder; these are the two promises execution keeps regardless: no query
     # holds the source longer than this, and no result is unbounded.
     agent_statement_timeout_s: int = Field(default=30, ge=1)
+
+    # E07: the ceiling on any ONE query against a customer's database -- an
+    # import, a refresh, a DirectQuery widget. Without it, a runaway query held
+    # a worker (and the source) until someone restarted something. Generous,
+    # because a large import is legitimately slow; 0 turns it off. Postgres
+    # enforces it server-side; MySQL and ClickHouse as a socket read timeout.
+    source_statement_timeout_s: int = Field(default=900, ge=0)
     agent_row_cap: int = Field(default=5000, ge=1)
 
     # Import-mode's source-frame ceiling. DirectQuery has always been bounded

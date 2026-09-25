@@ -54,14 +54,15 @@ def test_public_stays_reachable_alongside_it():
 
 def test_no_schema_means_no_change():
     args = connectors.connect_args(pg())
-    assert "options" not in args
+    # (options may carry the E07 statement ceiling; what must be absent is a path)
+    assert "search_path" not in args.get("options", "")
     # The connect timeout that was already there is untouched.
     assert args.get("connect_timeout") == 8
 
 
 def test_a_blank_schema_is_the_same_as_none():
     for blank in ("", "   ", None):
-        assert "options" not in connectors.connect_args(pg(schema=blank))
+        assert "search_path" not in connectors.connect_args(pg(schema=blank)).get("options", "")
 
 
 @pytest.mark.parametrize("bad", [

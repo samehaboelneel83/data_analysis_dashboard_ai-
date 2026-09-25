@@ -61,10 +61,13 @@ def test_duckdb_url_defaults_to_in_memory():
     assert C.build_url({"type": "duckdb", "filepath": "/a.duckdb"}) == "duckdb:////a.duckdb"
 
 
-def test_connect_timeout_only_for_networked_drivers():
+def test_connect_timeout_only_for_networked_drivers(monkeypatch):
     """DuckDB maps to the postgresql SQL family but connects in-process; the
     network connect_timeout must key on the real driver, never the family, or
     duckdb.connect() raises on the unexpected kwarg."""
+    # The statement ceiling (E07) is pinned in test_source_tls_and_timeouts.py.
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "source_statement_timeout_s", 0)
     assert C.connect_args({"type": "postgresql"}) == {"connect_timeout": 8}
     assert C.connect_args({"type": "redshift"}) == {"connect_timeout": 8}
     assert C.connect_args({"type": "mysql"}) == {"connect_timeout": 8}

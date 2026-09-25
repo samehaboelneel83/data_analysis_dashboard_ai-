@@ -113,6 +113,17 @@ class ConnectorSpec:
 
 # ── field-group helpers (keep the catalog terse) ─────────────────────────────
 
+#: E07: how a connection uses TLS. "default" leaves the driver's own choice
+#: (libpq: prefer; PyMySQL: off), which is every connection saved before this.
+TLS_MODES = ("default", "disable", "require", "verify-ca", "verify-full")
+
+_TLS_FIELDS = (
+    ConfigField("ssl_mode", "TLS", "select", default="default", options=TLS_MODES),
+    ConfigField("ssl_root_cert", "CA certificate file on the server (verify modes)",
+                placeholder="/certs/ca.pem"),
+)
+
+
 def _hostport_fields(port: int, *, schema: bool = False) -> tuple[ConfigField, ...]:
     fields = [
         ConfigField("host", "Host", required=True, placeholder="localhost"),
@@ -162,14 +173,14 @@ def _pg(key, label, icon, port, *, full_stats):
     pushdown for engines that don't implement WIDTH_BUCKET/CORR/PERCENTILE_CONT."""
     return ConnectorSpec(
         key, label, icon, "PostgreSQL-compatible", "postgresql",
-        "postgresql+psycopg2", port, _hostport_fields(port, schema=True), "psycopg2",
+        "postgresql+psycopg2", port, _hostport_fields(port, schema=True) + _TLS_FIELDS, "psycopg2",
         stat_override=None if full_stats else False,
         percentile_override=None if full_stats else False)
 
 
 def _my(key, label, icon, port):
     return ConnectorSpec(key, label, icon, "MySQL-compatible", "mysql",
-                         "mysql+pymysql", port, _hostport_fields(port), "pymysql")
+                         "mysql+pymysql", port, _hostport_fields(port) + _TLS_FIELDS, "pymysql")
 
 
 def _mssql(key, label, icon, port):
@@ -411,14 +422,28 @@ def connect_args(cfg: dict) -> dict:
     MySQL has no schema distinct from the database anyway.
     """
     backend = _backend_of(cfg)
+    limit = _statement_limit_s()
     # clickhouse-driver takes connect_timeout as well, and an unreachable
     # warehouse must fail in seconds rather than hold a worker open. It has no
     # search_path, so it returns before the schema branch below.
     if backend == "clickhouse":
-        return {"connect_timeout": 8}
+        args = {"connect_timeout": 8}
+        if limit:
+            args["send_receive_timeout"] = limit
+        return args
     if backend not in ("postgresql", "mysql"):
         return {}
     args: dict = {"connect_timeout": 8}
+    options: list[str] = []
+    # E07: no source query may hold a worker (and the source) forever. Postgres
+    # enforces it server-side, so the source stops working too; a session that
+    # needs less (the agent, metadata sampling) still SETs its own, shorter one.
+    # PyMySQL has only the socket read timeout, which frees OUR side.
+    if limit:
+        if backend == "postgresql":
+            options.append(f"-cstatement_timeout={limit * 1000}")
+        else:
+            args["read_timeout"] = limit
     schema = (cfg.get("schema") or "").strip() if backend == "postgresql" else ""
     if schema:
         if not _SCHEMA_RE.match(schema):
@@ -427,8 +452,47 @@ def connect_args(cfg: dict) -> dict:
                 "underscores only, starting with a letter or underscore")
         # public stays on the path: extensions install there by default, and
         # anything already qualified against it must keep working.
-        args["options"] = f"-csearch_path={schema},public"
+        options.append(f"-csearch_path={schema},public")
+    if options:
+        args["options"] = " ".join(options)
+    args.update(_tls_args(cfg, backend))
     return args
+
+
+def _statement_limit_s() -> int:
+    from ..core.config import settings
+    return int(getattr(settings, "source_statement_timeout_s", 0) or 0)
+
+
+def _tls_args(cfg: dict, backend: str) -> dict:
+    """E07: the connection's TLS mode, in each driver's own words.
+
+    Nothing set TLS before: a source reached over an untrusted network sent
+    its password and rows in clear unless the server happened to insist.
+    "default" (and a connection saved before this existed) changes nothing.
+    """
+    mode = (cfg.get("ssl_mode") or "default").strip()
+    if mode == "default":
+        return {}
+    if mode not in TLS_MODES:
+        raise ValueError(f"{mode!r} is not a TLS mode; use one of {', '.join(TLS_MODES)}")
+    ca = (cfg.get("ssl_root_cert") or "").strip()
+    if mode.startswith("verify") and not ca:
+        raise ValueError(f"TLS mode {mode} needs the CA certificate file to verify against")
+    if backend == "postgresql":
+        args = {"sslmode": mode}
+        if ca:
+            args["sslrootcert"] = ca
+        return args
+    # PyMySQL (1.x) keyword arguments.
+    if mode == "disable":
+        return {"ssl_disabled": True}
+    if mode == "require":
+        import ssl
+        # Encrypted, not verified: what libpq's "require" means too.
+        return {"ssl": {"check_hostname": False, "verify_mode": ssl.CERT_NONE}}
+    return {"ssl_ca": ca, "ssl_verify_cert": True,
+            "ssl_verify_identity": mode == "verify-full"}
 
 
 def _guard_host(host: str | None) -> None:
