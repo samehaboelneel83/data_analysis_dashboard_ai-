@@ -518,3 +518,18 @@ describe('the Datasets table on a phone (BUG-041)', () => {
     expect(block![0]).toMatch(/\.dl-cell-sub \{[^}]*white-space: normal[^}]*line-clamp: 2/)
   })
 })
+
+describe("a dataset's Data tab on a narrow screen (BUG-037)", () => {
+  it('index.css stacks it with the preview table on top, and leaves wide screens alone', async () => {
+    const fs = await import('node:fs')
+    const path = await import('node:path')
+    const url = await import('node:url')
+    const here = path.dirname(url.fileURLToPath(import.meta.url))
+    const css = fs.readFileSync(path.resolve(here, '../index.css'), 'utf8')
+    const detail = fs.readFileSync(path.resolve(here, './DatasetDetail.tsx'), 'utf8')
+    expect(css).toMatch(/@media \(max-width: 899px\) \{\s*\.dl-data-tab \{ flex-direction: column-reverse; \}/)
+    // The panels come first in the DOM, so column-reverse is what puts the table on top.
+    expect(detail.indexOf('className="dl-data-tab__panels"')).toBeGreaterThan(detail.indexOf('className="dl-data-tab"'))
+    expect(css).not.toMatch(/@media \(min-width[^)]*\) \{\s*\.dl-data-tab/)
+  })
+})

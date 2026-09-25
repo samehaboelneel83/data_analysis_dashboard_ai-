@@ -1162,10 +1162,10 @@ export default function DatasetDetail() {
 
       {/* ── Data tab ── */}
       {tab === 'data' && (
-        <div style={{ display: 'flex', gap: 14, flex: 1, minHeight: 0 }}>
+        <div className="dl-data-tab" style={{ display: 'flex', gap: 14, flex: 1, minHeight: 0 }}>
 
           {/* Left panel: Filters + CalcColumns */}
-          <div style={{ width: 260, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto' }}>
+          <div className="dl-data-tab__panels" style={{ width: 260, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto' }}>
 
             {/* Filters */}
             <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 12 }}>

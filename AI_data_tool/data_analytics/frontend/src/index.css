@@ -505,7 +505,15 @@ svg.recharts-surface { direction: ltr; }
    at the card's edge (overflow: hidden clipped the last columns entirely). */
 .dl-table-card > .dl-table { min-inline-size: 560px; }
 @media (min-width: 700px) { .dl-table-card > .dl-table { min-inline-size: 0; } }
-/* BUG-041, below the same breakpoint: nothing said the table scrolled, and a
+/* BUG-037: a dataset's Data tab is two columns on a wide screen -- authoring
+   panels left, the preview table right -- by design. On a narrow one the
+   260px panel column squeezed the table, and stacked it came after four
+   panels, so the table (the thing you came to see) goes on top instead. */
+@media (max-width: 899px) {
+  .dl-data-tab { flex-direction: column-reverse; }
+  .dl-data-tab > .dl-data-tab__panels { width: auto !important; overflow-y: visible !important; }
+}
+/* BUG-041, below the table card's 700px breakpoint: nothing said the table scrolled, and a
    description ended mid-word in an ellipsis. Scroll shadows: the two `local`
    covers travel with the content and hide the `scroll` shadows beneath them
    at whichever edge has nothing more to show -- no script, and symmetric, so
