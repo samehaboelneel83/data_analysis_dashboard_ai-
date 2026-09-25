@@ -25,17 +25,21 @@ const renderAt = (path: string) =>
 
 beforeEach(() => vi.clearAllMocks())
 
+// The crumb's leaf marks the current page but is NOT a heading: the page's own
+// <h1> is the only one (BUG-030 -- there used to be two per page).
+const currentPage = () => screen.getByRole('navigation', { name: 'Breadcrumb' }).querySelector('[aria-current="page"]')
+
 describe('TopBar', () => {
   it('titles the current page, longest route prefix winning', () => {
     renderAt('/monitoring/jobs')
-    expect(screen.getByRole('heading', { name: 'Refresh & jobs' })).toBeInTheDocument()
+    expect(currentPage()).toHaveTextContent('Refresh & jobs')
   })
 
   it('puts the rail section in front of the page, as a breadcrumb', () => {
     renderAt('/admin/users')
     const trail = screen.getByRole('navigation', { name: 'Breadcrumb' })
     expect(trail).toHaveTextContent('Admin')
-    expect(screen.getByRole('heading', { name: 'Users' })).toHaveAttribute('aria-current', 'page')
+    expect(currentPage()).toHaveTextContent('Users')
   })
 
   it('an admin page that is not itself in the rail still gets its section', () => {
@@ -46,11 +50,11 @@ describe('TopBar', () => {
   it('names the record a detail page is showing, with the list as a link back', () => {
     renderAt('/datasets/170')
     act(() => { window.dispatchEvent(new CustomEvent(CRUMB_EVENT, { detail: { path: '/datasets/170', title: 'Sales 2024' } })) })
-    expect(screen.getByRole('heading', { name: 'Sales 2024' })).toHaveAttribute('aria-current', 'page')
+    expect(currentPage()).toHaveTextContent('Sales 2024')
     expect(screen.getByRole('link', { name: 'Datasets' })).toHaveAttribute('href', '/datasets')
     // A title sent for another path is never shown here.
     act(() => { window.dispatchEvent(new CustomEvent(CRUMB_EVENT, { detail: { path: '/reports/9', title: 'Other' } })) })
-    expect(screen.queryByRole('heading', { name: 'Other' })).not.toBeInTheDocument()
+    expect(currentPage()).not.toHaveTextContent('Other')
   })
 
   it('Home has no section in front of it', () => {
@@ -60,7 +64,12 @@ describe('TopBar', () => {
 
   it('falls back to Home for the root', () => {
     renderAt('/')
-    expect(screen.getByRole('heading', { name: 'Home' })).toBeInTheDocument()
+    expect(currentPage()).toHaveTextContent('Home')
+  })
+
+  it('adds no heading of its own -- the page carries the one <h1>', () => {
+    renderAt('/admin/users')
+    expect(screen.queryAllByRole('heading')).toHaveLength(0)
   })
 
   it('the search button opens the command palette, not a second search', () => {

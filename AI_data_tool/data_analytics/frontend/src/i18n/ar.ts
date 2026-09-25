@@ -52,6 +52,7 @@ export const ar: Record<MessageKey, string> = {
   'top.darkTitle': 'الوضع الداكن',
   'top.lightTitle': 'الوضع الفاتح',
   'top.breadcrumb': 'مسار التنقل',
+  'top.skipToContent': 'انتقل إلى المحتوى',
   'admin.edit': 'تعديل',
   'admin.delete': 'حذف',
   'admin.revoke': 'إبطال',

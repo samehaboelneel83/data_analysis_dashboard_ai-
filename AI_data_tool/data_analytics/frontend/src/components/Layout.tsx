@@ -245,6 +245,7 @@ export default function Layout() {
 
   return (
     <div className="dl-shell">
+      <a href="#main" className="dl-skip-link">{t('top.skipToContent')}</a>
       {rail}
       {narrow && drawerOpen && (
         // The scrim is painted with explicit edges rather than `inset: 0` so it
@@ -262,7 +263,7 @@ export default function Layout() {
             cancel exactly THIS value instead of hard-coding a number that
             drifts from it -- which is what put the builder's toolbar off the
             top of the window in present mode and at narrow widths. */}
-        <main className="dl-shell__content"
+        <main id="main" tabIndex={-1} className="dl-shell__content"
           style={{ padding: 'var(--dl-shell-pad)',
             ...({ '--dl-shell-pad': narrow ? 'var(--dl-4)' : 'var(--dl-6)' } as CSSProperties) }}>
           <Outlet />

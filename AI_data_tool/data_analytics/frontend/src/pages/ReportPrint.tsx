@@ -60,7 +60,7 @@ export default function ReportPrint() {
 
       <div className="print-toolbar" style={{ display: 'flex', gap: 10, alignItems: 'center',
         padding: '10px 16px', borderBottom: '1px solid #ddd' }}>
-        <strong style={{ fontSize: 15 }}>{report.name}</strong>
+        <h1 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>{report.name}</h1>
         <span style={{ color: '#888', fontSize: 12 }}>{pages.length} page{pages.length === 1 ? '' : 's'}</span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <button className="btn btn-primary btn-sm" onClick={() => window.print()}>

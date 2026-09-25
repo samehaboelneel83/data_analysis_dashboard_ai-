@@ -209,4 +209,17 @@ describe('Layout — the theme switch lives in the header', () => {
     expect(within(screen.getByTestId('app-rail'))
       .queryByRole('button', { name: /Switch to (dark|light) mode/ })).not.toBeInTheDocument()
   })
+
+  it('opens with a skip link to the page content (BUG-030)', () => {
+    renderLayout()
+    const skip = screen.getByRole('link', { name: 'Skip to content' })
+    // First in the document, so it is the first Tab stop, ahead of the rail.
+    expect(document.querySelector('a[href], button')).toBe(skip)
+    expect(skip).toHaveAttribute('href', '#main')
+    const main = screen.getByRole('main')
+    expect(main).toHaveAttribute('id', 'main')
+    // Focusable by script only, so following the link lands focus inside it.
+    expect(main).toHaveAttribute('tabindex', '-1')
+    expect(main).toHaveTextContent('Page Content')
+  })
 })

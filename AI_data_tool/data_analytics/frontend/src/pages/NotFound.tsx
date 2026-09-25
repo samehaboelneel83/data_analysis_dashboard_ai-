@@ -9,7 +9,7 @@ export default function NotFound() {
   const { pathname } = useLocation()
   const t = useT()
   return (
-    <EmptyState icon={Compass} title={t('notFound.title')}
+    <EmptyState icon={Compass} title={t('notFound.title')} titleAs="h1"
       description={t('notFound.body', { path: pathname })}
       action={<>
         <Link to="/" className="btn btn-primary">{t('nav.home')}</Link>

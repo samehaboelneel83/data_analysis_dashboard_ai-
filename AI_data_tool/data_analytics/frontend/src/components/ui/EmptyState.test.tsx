@@ -36,4 +36,12 @@ describe('EmptyState', () => {
     render(<EmptyState icon={Database} title="No connections yet" />)
     expect(screen.queryByRole('button')).toBeNull()
   })
+
+  it('carries the page heading when it IS the page (NotFound), and none otherwise', () => {
+    const { unmount } = render(<EmptyState icon={Database} title="Page not found" titleAs="h1" />)
+    expect(screen.getByRole('heading', { level: 1, name: 'Page not found' })).toBeInTheDocument()
+    unmount()
+    render(<EmptyState icon={Database} title="No datasets yet" />)
+    expect(screen.queryByRole('heading')).toBeNull()
+  })
 })

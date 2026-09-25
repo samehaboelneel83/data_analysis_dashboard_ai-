@@ -50,6 +50,7 @@ export const en = {
   'top.darkTitle': 'Dark mode',
   'top.lightTitle': 'Light mode',
   'top.breadcrumb': 'Breadcrumb',
+  'top.skipToContent': 'Skip to content',
   'admin.edit': 'Edit',
   'admin.delete': 'Delete',
   'admin.revoke': 'Revoke',

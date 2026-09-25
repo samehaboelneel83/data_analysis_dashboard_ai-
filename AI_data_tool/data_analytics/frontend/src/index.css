@@ -1069,6 +1069,24 @@ html[data-presenting="1"] .dl-bleed { margin: 0; block-size: 100%; }
   z-index: 1050;
 }
 
+/* Read by screen readers, never drawn: a heading a page needs for its outline
+   when its visible title is a control (the builder's rename button). */
+.dl-sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* The first Tab stop on every page: past the rail and the top bar, straight
+   to the page. Off-screen until focused, then pinned over the top bar. */
+.dl-skip-link {
+  position: fixed; inset-block-start: 8px; inset-inline-start: 8px; z-index: 2000;
+  padding: 8px 14px; border-radius: 8px; background: var(--surface); color: var(--text);
+  border: 2px solid var(--accent); font-weight: 600; text-decoration: none;
+  transform: translateY(-200%);
+}
+.dl-skip-link:focus { transform: none; }
+.dl-shell__content:focus { outline: none; }
+
 /* ============================================================
    Connections — the source list
    Same grammar as the Datasets table: one card, rows inside it, horizontal

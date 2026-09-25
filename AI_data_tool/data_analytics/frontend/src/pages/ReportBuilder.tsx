@@ -2619,6 +2619,10 @@ export default function ReportBuilder() {
                 if (e.key === 'Escape') { e.stopPropagation(); setRenaming(false) }
               }} />
           ) : editMode ? (
+            <>
+            {/* The page's one <h1>: the top bar's crumb is not a heading. The
+                visible name here is a rename button, so the heading is hidden. */}
+            <h1 className="dl-sr-only">{report.name}</h1>
             <button type="button" title={report.name} aria-label="Rename this dashboard" onClick={() => setRenaming(true)}
               className="dl-report-name"
               style={{ fontWeight:700, fontSize:16, background:'none', border:'1px dashed transparent', borderRadius:4,
@@ -2627,8 +2631,9 @@ export default function ReportBuilder() {
               onMouseLeave={e => { e.currentTarget.style.borderColor = 'transparent' }}>
               {report.name}
             </button>
+            </>
           ) : (
-            <span style={{ fontWeight:700, fontSize:16 }}>{report.name}</span>
+            <h1 style={{ fontWeight:700, fontSize:16, margin:0 }}>{report.name}</h1>
           )}
           {dataset && canEdit && (
             <nav aria-label="Breadcrumb" style={{ display:'flex', alignItems:'center', gap:4 }}>
@@ -3129,6 +3134,9 @@ export default function ReportBuilder() {
 
           {/* Canvas */}
           <div style={{ flex:1, overflowY:'auto', overflowX:'auto' }}>
+            {/* Report (h1) > page (h2) > widget titles (level 3), the outline
+                ReportPrint draws too; without it the widgets skip a level. */}
+            {activePage && <h2 className="dl-sr-only">{activePage.title || activePage.name}</h2>}
             {editMode && recoverable.length > 0 && (
               <div role="status" data-testid="recovery-banner"
                 style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', margin:'0 0 8px', padding:'6px 10px',

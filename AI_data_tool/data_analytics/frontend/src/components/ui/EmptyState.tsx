@@ -12,16 +12,19 @@ import type { ReactNode } from 'react'
  * up with `<div>` text where Dashboard used `<p>`, and no two pages agreed on a
  * font size.
  */
-export default function EmptyState({ icon: Icon, title, description, action }: {
+export default function EmptyState({ icon: Icon, title, description, action, titleAs: Title = 'p' }: {
   icon: LucideIcon
   title: string
   description?: string
   action?: ReactNode
+  /** 'h1' when the empty state IS the page (NotFound) and so carries its heading. */
+  titleAs?: 'p' | 'h1'
 }) {
   return (
     <div className="card" style={{ textAlign: 'center', padding: '56px 24px' }}>
       <Icon size={40} color="var(--muted)" style={{ margin: '0 auto 16px' }} />
-      <p style={{ fontWeight: 600, marginBottom: description || action ? 8 : 0 }}>{title}</p>
+      <Title style={{ fontWeight: 600, marginBottom: description || action ? 8 : 0,
+        ...(Title === 'h1' ? { fontSize: 'inherit', marginTop: 0 } : {}) }}>{title}</Title>
       {description && (
         <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: action ? 20 : 0 }}>
           {description}

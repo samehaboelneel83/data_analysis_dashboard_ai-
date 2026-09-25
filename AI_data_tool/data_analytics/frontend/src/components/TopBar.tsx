@@ -101,8 +101,10 @@ export default function TopBar({ onOpenNav, theme, onToggleTheme }: {
           already opens with its own large heading, so the bar used to print
           the same word twice a hand's width apart ("Datasets" / "Datasets").
           The section in front answers the question the page title cannot:
-          which part of the product this is. The current page stays a heading
-          so a screen reader's heading list still starts from it. */}
+          which part of the product this is. The current page is marked
+          aria-current, not a heading: the page's own <h1> is the one heading
+          (two per page was BUG-030), and a page whose visible title is a
+          control carries a hidden one. */}
       <nav aria-label={t('top.breadcrumb')} className="dl-crumbs"
         style={{ flex: compact ? '1 1 0' : undefined }}>
         {section && !compact && (
@@ -119,10 +121,10 @@ export default function TopBar({ onOpenNav, theme, onToggleTheme }: {
                 <span aria-hidden className="dl-crumbs__sep"><ChevronRight size={14} /></span>
               </>
             )}
-            <h1 className="dl-crumbs__page" aria-current="page" title={leafTitle}>{leafTitle}</h1>
+            <span className="dl-crumbs__page" aria-current="page" title={leafTitle}>{leafTitle}</span>
           </>
         ) : (
-          <h1 className="dl-crumbs__page" aria-current="page">{t(messageForPath(pathname))}</h1>
+          <span className="dl-crumbs__page" aria-current="page">{t(messageForPath(pathname))}</span>
         )}
       </nav>
 
