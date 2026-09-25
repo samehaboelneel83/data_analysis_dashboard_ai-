@@ -142,7 +142,20 @@ export default function MeasuresPanel({ datasetId, columns, onChanged }: Props) 
       title: `Delete the measure "${name}"?`,
       body: 'Any widget using it stops working, in this report and every other one. This cannot be undone.',
     })) return
-    const next = await measuresApi.delete(datasetId, name)
+    let next: MeasureDef[]
+    try {
+      next = await measuresApi.delete(datasetId, name)
+    } catch (e: any) {
+      // E05: something still names it, so the server refused with the list.
+      // This used to reject unhandled -- the person confirmed and nothing happened.
+      if (e?.response?.status !== 409) throw e
+      if (!await confirm({
+        title: `"${name}" is still in use`,
+        body: `${e.response.data?.detail ?? ''} Deleting it breaks those.`.replace(/ Delete anyway with \?force=true\./, ''),
+        confirmLabel: 'Delete anyway', destructive: true,
+      })) return
+      next = await measuresApi.delete(datasetId, name, true)
+    }
     setMeasures(next)
     onChanged(next)
   }

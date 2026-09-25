@@ -60,3 +60,23 @@ describe('CalcColumnsPanel custom functions', () => {
     expect(screen.queryByTestId('cat-Custom')).toBeNull()
   })
 })
+
+describe('deleting a calculated column something still uses (E05)', () => {
+  it('asks again with what uses it, then deletes with force', async () => {
+    const { calcColumnsApi } = await import('../../services/api')
+    vi.mocked(calcColumnsApi.list).mockResolvedValue([{ name: 'unit', expression: '[profit] / [sales]' }] as never)
+    vi.mocked(calcColumnsApi.delete).mockReset()
+      .mockRejectedValueOnce(Object.assign(new Error('409'), { response: { status: 409, data: {
+        detail: "'unit' is used by measure 'U'. Delete anyway with ?force=true." } } }))
+      .mockResolvedValueOnce([] as never)
+    render(<CalcColumnsPanel datasetId={3} columns={[]} onChanged={vi.fn()} />)
+    await screen.findByText('unit')
+
+    fireEvent.click(screen.getByTitle('Delete'))
+    fireEvent.click(await screen.findByRole('button', { name: /^delete$/i }))
+    expect(await screen.findByRole('alertdialog')).toHaveTextContent("used by measure 'U'")
+    fireEvent.click(screen.getByRole('button', { name: 'Delete anyway' }))
+
+    await waitFor(() => expect(calcColumnsApi.delete).toHaveBeenLastCalledWith(3, 'unit', true))
+  })
+})

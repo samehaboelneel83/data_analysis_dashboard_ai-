@@ -64,7 +64,20 @@ export default function CalcColumnsPanel({ datasetId, columns, onChanged }: Prop
       title: `Delete the calculated column "${name}"?`,
       body: 'Any widget or calculation built on it stops working, in this report and every other one. This cannot be undone.',
     })) return
-    const updated = await calcColumnsApi.delete(datasetId, name)
+    let updated: CalcColumn[]
+    try {
+      updated = await calcColumnsApi.delete(datasetId, name)
+    } catch (e: any) {
+      // E05: something still names it, so the server refused with the list.
+      // This used to reject unhandled -- the person confirmed and nothing happened.
+      if (e?.response?.status !== 409) throw e
+      if (!await confirm({
+        title: `"${name}" is still in use`,
+        body: `${e.response.data?.detail ?? ''} Deleting it breaks those.`.replace(/ Delete anyway with \?force=true\./, ''),
+        confirmLabel: 'Delete anyway', destructive: true,
+      })) return
+      updated = await calcColumnsApi.delete(datasetId, name, true)
+    }
     setCalcCols(updated); onChanged(updated)
   }
 

@@ -150,3 +150,43 @@ describe('MeasuresPanel', () => {
     expect(measuresApi.delete).not.toHaveBeenCalled()
   })
 })
+
+describe('deleting a measure something still uses (E05)', () => {
+  const inUse = () => Object.assign(new Error('409'), { response: { status: 409, data: {
+    detail: "'Margin' is used by widget 'Margin by region on Sales'. Delete anyway with ?force=true." } } })
+
+  it('names what uses it and deletes only when the person says so', async () => {
+    vi.mocked(measuresApi.list).mockResolvedValue([{ name: 'Margin', expression: 'SUM(a)' }])
+    vi.mocked(measuresApi.delete).mockReset()
+      .mockRejectedValueOnce(inUse()).mockResolvedValueOnce([])
+    render(<MeasuresPanel datasetId={1} columns={columns} onChanged={vi.fn()} />)
+    await screen.findByText('Margin')
+
+    fireEvent.click(screen.getByRole('button', { name: /Delete Margin/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /^delete$/i }))
+
+    const second = await screen.findByRole('alertdialog')
+    expect(second).toHaveTextContent("used by widget 'Margin by region on Sales'")
+    expect(second).not.toHaveTextContent('force=true')     // an API detail, not advice for a person
+    fireEvent.click(screen.getByRole('button', { name: 'Delete anyway' }))
+
+    await waitFor(() => expect(measuresApi.delete).toHaveBeenLastCalledWith(1, 'Margin', true))
+    expect(measuresApi.delete).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps it when the person backs out of the second question', async () => {
+    vi.mocked(measuresApi.list).mockResolvedValue([{ name: 'Margin', expression: 'SUM(a)' }])
+    vi.mocked(measuresApi.delete).mockReset().mockRejectedValueOnce(inUse())
+    render(<MeasuresPanel datasetId={1} columns={columns} onChanged={vi.fn()} />)
+    await screen.findByText('Margin')
+
+    fireEvent.click(screen.getByRole('button', { name: /Delete Margin/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /^delete$/i }))
+    await screen.findByRole('button', { name: 'Delete anyway' })
+    fireEvent.click(screen.getByRole('button', { name: /cancel/i }))
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    expect(measuresApi.delete).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('Margin')).toBeInTheDocument()
+  })
+})

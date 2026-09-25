@@ -1072,7 +1072,8 @@ export interface MappingCheck {
 export const calcColumnsApi = {
   list:    (dsId: number)                            => api.get<CalcColumn[]>(`/datasets/${dsId}/calculated-columns`).then(r => r.data),
   save:    (dsId: number, col: CalcColumn)           => api.put<CalcColumn[]>(`/datasets/${dsId}/calculated-columns`, col).then(r => r.data),
-  delete:  (dsId: number, name: string)              => api.delete<CalcColumn[]>(`/datasets/${dsId}/calculated-columns/${encodeURIComponent(name)}`).then(r => r.data),
+  // `force`: delete even though something names it (the server answers 409 otherwise).
+  delete:  (dsId: number, name: string, force?: boolean) => api.delete<CalcColumn[]>(`/datasets/${dsId}/calculated-columns/${encodeURIComponent(name)}`, force ? { params: { force: true } } : undefined).then(r => r.data),
   preview: (dsId: number, expression: string)        => api.post<{ok:boolean;dtype?:string;sample?:unknown[];error?:string}>(`/datasets/${dsId}/calculated-columns/preview`, { expression }).then(r => r.data),
 }
 
@@ -1442,7 +1443,8 @@ export interface MeasurePreviewResult {
 export const measuresApi = {
   list:    (dsId: number)                    => api.get<MeasureDef[]>(`/datasets/${dsId}/measures`).then(r => r.data),
   save:    (dsId: number, m: MeasureDef)     => api.post<MeasureDef[]>(`/datasets/${dsId}/measures`, m).then(r => r.data),
-  delete:  (dsId: number, name: string)      => api.delete<MeasureDef[]>(`/datasets/${dsId}/measures/${encodeURIComponent(name)}`).then(r => r.data),
+  // `force`: delete even though something names it (the server answers 409 otherwise).
+  delete:  (dsId: number, name: string, force?: boolean) => api.delete<MeasureDef[]>(`/datasets/${dsId}/measures/${encodeURIComponent(name)}`, force ? { params: { force: true } } : undefined).then(r => r.data),
   preview: (dsId: number, body: { expression: string; group_by?: string }) =>
     api.post<MeasurePreviewResult>(`/datasets/${dsId}/measures/preview`, body).then(r => r.data),
 }
