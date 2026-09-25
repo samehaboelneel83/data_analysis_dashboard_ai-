@@ -3756,6 +3756,9 @@ export default function ReportBuilder() {
       {canEdit && editMode && activePage && (
         <CopilotChat key={activePage.id} reportId={reportId} pageId={activePage.id}
           selectedWidgetId={selectedW?.id ?? null}
+          selectedWidgetTitle={selectedW ? (selectedW.title || null) : null}
+          reportName={report.name} pageName={activePage.title || activePage.name}
+          widgetCount={activePage.widgets?.length ?? 0} datasetId={report.dataset_id}
           onApplied={onCopilotApplied} />
       )}
       {shareOpen && (

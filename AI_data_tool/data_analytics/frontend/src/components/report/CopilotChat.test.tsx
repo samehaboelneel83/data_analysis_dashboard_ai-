@@ -1,24 +1,25 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import CopilotChat from './CopilotChat'
-import { reportsApi } from '../../services/api'
+import { insightsApi, reportsApi } from '../../services/api'
+import { axeViolations } from '../../test/axe'
 
 /** The page copilot panel: opens without touching the canvas, sends the
  *  message with its own recent turns, reports what was applied, and asks the
  *  builder to reload only when something actually changed. */
 
-beforeEach(() => vi.restoreAllMocks())
+beforeEach(() => { vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear() })
 
 const mount = (onApplied = vi.fn()) => {
   render(<CopilotChat reportId={9} pageId={4} onApplied={onApplied} />)
   return onApplied
 }
 
-const openPanel = () => fireEvent.click(screen.getByRole('button', { name: 'Page copilot' }))
+const openPanel = () => fireEvent.click(screen.getByRole('button', { name: 'Ask AI about this dashboard' }))
 
 const type = (text: string) => {
-  fireEvent.change(screen.getByLabelText('Copilot message'), { target: { value: text } })
-  fireEvent.keyDown(screen.getByLabelText('Copilot message'), { key: 'Enter' })
+  fireEvent.change(screen.getByLabelText('Message to Ask AI'), { target: { value: text } })
+  fireEvent.keyDown(screen.getByLabelText('Message to Ask AI'), { key: 'Enter' })
 }
 
 describe('CopilotChat', () => {
@@ -26,7 +27,7 @@ describe('CopilotChat', () => {
     mount()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     openPanel()
-    expect(screen.getByRole('dialog', { name: 'Page copilot' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Ask AI' })).toBeInTheDocument()
   })
 
   it('sends the message and shows the reply with what was applied', async () => {
@@ -150,9 +151,9 @@ describe('CopilotChat', () => {
     openPanel()
     type('add something')
     await waitFor(() =>
-      expect(screen.getByText(/could not reach the copilot/i)).toBeInTheDocument())
+      expect(screen.getByText(/could not reach Ask AI/i)).toBeInTheDocument())
     expect(onApplied).not.toHaveBeenCalled()
-    expect(screen.getByLabelText('Copilot message')).not.toBeDisabled()
+    expect(screen.getByLabelText('Message to Ask AI')).not.toBeDisabled()
   })
 
   it('disables the input while a request is in flight', async () => {
@@ -161,9 +162,9 @@ describe('CopilotChat', () => {
     mount()
     openPanel()
     type('slow one')
-    await waitFor(() => expect(screen.getByLabelText('Copilot message')).toBeDisabled())
+    await waitFor(() => expect(screen.getByLabelText('Message to Ask AI')).toBeDisabled())
     resolve({ reply: 'ok', applied: [], notes: [], results: [] })
-    await waitFor(() => expect(screen.getByLabelText('Copilot message')).not.toBeDisabled())
+    await waitFor(() => expect(screen.getByLabelText('Message to Ask AI')).not.toBeDisabled())
   })
 
   it('Escape closes the panel', () => {
@@ -171,5 +172,110 @@ describe('CopilotChat', () => {
     openPanel()
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('Ctrl+/ opens and closes it from anywhere', () => {
+    mount()
+    fireEvent.keyDown(document, { key: '/', ctrlKey: true })
+    expect(screen.getByRole('dialog', { name: 'Ask AI' })).toBeInTheDocument()
+    fireEvent.keyDown(document, { key: '/', ctrlKey: true })
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('greets with the page it is looking at, and a suggestion asks when clicked', async () => {
+    const copilot = vi.spyOn(reportsApi, 'copilot').mockResolvedValue({
+      reply: 'It shows sales.', applied: [], notes: [], results: [] })
+    render(<CopilotChat reportId={9} pageId={4} onApplied={vi.fn()}
+      reportName="Sales Overview" pageName="Page 1" widgetCount={3} />)
+    openPanel()
+    expect(screen.getByText("Hi, I'm looking at Page 1 with you.")).toBeInTheDocument()
+    expect(screen.getByText(/read the 3 widgets/)).toBeInTheDocument()
+    expect(screen.getByText('Sales Overview · Page 1')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Explain this page/ }))
+    await waitFor(() => expect(copilot).toHaveBeenCalledWith(9, 4, expect.objectContaining({ message: 'Explain this page' })))
+    await waitFor(() => screen.getByText('It shows sales.'))
+  })
+
+  it('"Add a chart of" fills the box instead of sending', () => {
+    const copilot = vi.spyOn(reportsApi, 'copilot')
+    mount()
+    openPanel()
+    fireEvent.click(screen.getByRole('button', { name: /Add a chart of/ }))
+    expect(screen.getByLabelText('Message to Ask AI')).toHaveValue('Add a chart of ')
+    expect(copilot).not.toHaveBeenCalled()
+  })
+
+  it('shows a thinking card while it works', async () => {
+    let resolve!: (v: { reply: string; applied: never[]; notes: never[]; results: never[] }) => void
+    vi.spyOn(reportsApi, 'copilot').mockReturnValue(new Promise(r => { resolve = r }))
+    render(<CopilotChat reportId={9} pageId={4} onApplied={vi.fn()} pageName="Page 1" widgetCount={3} />)
+    openPanel()
+    type('what drives revenue?')
+    expect(await screen.findByRole('status')).toHaveTextContent('Reading 3 widgets on Page 1')
+    resolve({ reply: 'ok', applied: [], notes: [], results: [] })
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
+  })
+
+  it('minimise keeps the conversation; close clears it', async () => {
+    vi.spyOn(reportsApi, 'copilot').mockResolvedValue({ reply: 'Kept.', applied: [], notes: [], results: [] })
+    mount()
+    openPanel()
+    type('hello')
+    await waitFor(() => screen.getByText('Kept.'))
+    fireEvent.click(screen.getByRole('button', { name: 'Minimise' }))
+    openPanel()
+    expect(screen.getByText('Kept.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Close and clear' }))
+    openPanel()
+    expect(screen.queryByText('Kept.')).not.toBeInTheDocument()
+  })
+
+  it('a real insight puts a dot on the button, and the card in the panel', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    vi.spyOn(insightsApi, 'runShared').mockResolvedValue({
+      narrative: '', findings: [{ kind: 'share', score: 0.9, title: 'Latin America has the smallest share',
+        detail: '23%, 3 points behind Europe', columns: ['region'], novelty: 'new' }] } as never)
+    render(<CopilotChat reportId={9} pageId={4} onApplied={vi.fn()} datasetId={32} />)
+    await vi.advanceTimersByTimeAsync(3000)
+    vi.useRealTimers()
+    await waitFor(() => expect(screen.getByText('Ask AI has a new insight')).toBeInTheDocument())
+    openPanel()
+    expect(screen.getByText('New insight')).toBeInTheDocument()
+    expect(screen.getByText(/Latin America has the smallest share/)).toBeInTheDocument()
+    // Seen once: the dot does not come back.
+    fireEvent.click(screen.getByRole('button', { name: 'Minimise' }))
+    expect(screen.queryByText('Ask AI has a new insight')).not.toBeInTheDocument()
+  })
+
+  it('no insight, no dot', async () => {
+    vi.spyOn(insightsApi, 'runShared').mockResolvedValue({ narrative: '', findings: [] } as never)
+    mount()
+    expect(screen.queryByText('Ask AI has a new insight')).not.toBeInTheDocument()
+  })
+
+  it('Alt+arrows move it to another corner, and it remembers', () => {
+    const { container } = render(<CopilotChat reportId={9} pageId={4} onApplied={vi.fn()} />)
+    const root = () => container.querySelector('.dl-askai')!
+    expect(root()).toHaveClass('dl-askai--bottom', 'dl-askai--end')
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Ask AI about this dashboard' }), { key: 'ArrowUp', altKey: true })
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Ask AI about this dashboard' }), { key: 'ArrowLeft', altKey: true })
+    expect(root()).toHaveClass('dl-askai--top', 'dl-askai--start')
+    expect(localStorage.getItem('datalytics.askai.corner')).toBe('top-start')
+  })
+
+  it('hides while the dashboard is presenting', () => {
+    const { container } = render(<CopilotChat reportId={9} pageId={4} onApplied={vi.fn()} />)
+    act(() => { window.dispatchEvent(new CustomEvent('datalytics:present', { detail: true })) })
+    expect(container.querySelector('.dl-askai')).toBeNull()
+    act(() => { window.dispatchEvent(new CustomEvent('datalytics:present', { detail: false })) })
+    expect(container.querySelector('.dl-askai')).not.toBeNull()
+  })
+
+  it('button and open panel have no accessibility violations', async () => {
+    const { container } = render(<CopilotChat reportId={9} pageId={4} onApplied={vi.fn()}
+      reportName="Sales" pageName="Page 1" widgetCount={2} />)
+    expect(await axeViolations(container)).toEqual([])
+    openPanel()
+    expect(await axeViolations(container)).toEqual([])
   })
 })

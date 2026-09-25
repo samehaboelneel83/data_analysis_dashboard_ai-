@@ -1,28 +1,41 @@
-import { useEffect, useRef, useState } from 'react'
-import { Bot, Check, X } from 'lucide-react'
-import { reportsApi } from '../../services/api'
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent } from 'react'
+import { ArrowUp, ArrowUpRight, BookOpen, Check, Lightbulb, Minus, MoreHorizontal, PencilLine,
+  RotateCcw, Sparkles, TrendingUp, X } from 'lucide-react'
+import { insightsApi, reportsApi } from '../../services/api'
 import type { AgentResult } from '../../services/api'
-import { ResultGrid } from '../chat/ResultView'
+import ResultView from '../chat/ResultView'
+import AiMascot from '../ai/AiMascot'
+import { useT } from '../../i18n'
+import { localDigits } from '../../lib/arabicFormats'
+import './copilot.css'
 
 /**
- * The page copilot: edit the OPEN dashboard page in plain language.
+ * Ask AI on a dashboard page: edit the OPEN page in plain language, or ask
+ * about its data.
  *
- * A floating button in the builder (edit mode, edit rights only) opens this
- * panel. Each message goes to the copilot endpoint, which sees the page as
- * the server knows it — widgets, their configs, the dataset's columns — and
- * applies any requested edits before replying; the panel then asks the
- * builder to reload, so the canvas redraws the new state.
+ * A floating mascot button in the builder (edit mode, edit rights only)
+ * opens this panel. Each message goes to the copilot endpoint, which sees the
+ * page as the server knows it — widgets, their configs, the dataset's
+ * columns — and applies any requested edits before replying; the panel then
+ * asks the builder to reload, so the canvas redraws the new state.
  *
  * It refuses NOTHING on this page (the complaint that shaped it: a config
  * change typed into the data chat came back "not answerable by SQL"). A page
  * command becomes applied edits; a DATA question is delegated server-side to
- * the same agent Ask AI uses, and the rows come back as a grid right here.
+ * the same agent Ask AI uses, and the rows come back right here.
  *
  * Deliberately NOT ChatPane: that surface keeps its threads as the record of
  * answers. This one issues commands about the PAGE; the record of a command
  * is the page itself (plus the report's revision counter), so history lives
- * only in the panel for the session. Everything is component state and
- * async — nothing blocks the canvas.
+ * only in the panel for the session.
+ *
+ * The button: breathes and blinks at rest; opens into an "Ask AI" pill on
+ * hover/focus (tooltip names Ctrl+/); turns into a close button while the
+ * panel is open; shrinks and fades while the canvas scrolls; can be dragged
+ * to any corner (remembered; Alt+arrows from the keyboard); mirrors in RTL;
+ * hidden while presenting. A dot marks a finding from the dataset's insight
+ * scan that this person hasn't seen yet -- never a made-up one.
  */
 export interface CopilotChatProps {
   reportId: number
@@ -33,6 +46,13 @@ export interface CopilotChatProps {
   /** Called after a reply whose actions changed the page, with what the
    *  server reports about the change (the version to restore to undo it). */
   onApplied: (change?: { beforeVersionId: number | null; summary: string | null }) => void | Promise<void>
+  /** Context for the header, greeting and suggestions. All optional. */
+  reportName?: string
+  pageName?: string
+  widgetCount?: number
+  selectedWidgetTitle?: string | null
+  /** The report's dataset: its insight scan feeds the badge and card. */
+  datasetId?: number | null
 }
 
 interface Turn {
@@ -46,53 +66,154 @@ interface Turn {
   results?: AgentResult[]
 }
 
+interface Insight { key: string; title: string; detail: string }
+
 let nextId = 1
 
 /** How many panel turns ride along with the next message, so "make it blue"
  *  can lean on what was just discussed without the prompt growing unbounded. */
 const HISTORY_TURNS = 6
 
-const APPLIED_VERB: Record<string, string> = {
-  create: 'Added', update: 'Updated', delete: 'Removed',
-  add_calculated_column: 'Added formula',
-}
+type Corner = 'bottom-end' | 'bottom-start' | 'top-end' | 'top-start'
+const CORNER_KEY = 'datalytics.askai.corner'
+const SEEN_KEY = 'datalytics.askai.seenInsights'
+const INSIGHT_CACHE = 'datalytics.askai.insight.'
 
-export default function CopilotChat({ reportId, pageId, selectedWidgetId, onApplied }: CopilotChatProps) {
+const readCorner = (): Corner => {
+  try {
+    const v = localStorage.getItem(CORNER_KEY)
+    return v === 'bottom-start' || v === 'top-end' || v === 'top-start' ? v : 'bottom-end'
+  } catch { return 'bottom-end' }
+}
+const readSeen = (): string[] => {
+  try { const v = JSON.parse(localStorage.getItem(SEEN_KEY) || '[]'); return Array.isArray(v) ? v : [] } catch { return [] }
+}
+const isRtl = () => typeof document !== 'undefined' && document.documentElement.dir === 'rtl'
+
+export default function CopilotChat({
+  reportId, pageId, selectedWidgetId, onApplied,
+  reportName, pageName, widgetCount, selectedWidgetTitle, datasetId,
+}: CopilotChatProps) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const [turns, setTurns] = useState<Turn[]>([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [corner, setCorner] = useState<Corner>(readCorner)
+  const [drag, setDrag] = useState<{ x: number; y: number } | null>(null)
+  const [scrolling, setScrolling] = useState(false)
+  const [presenting, setPresenting] = useState(
+    () => typeof document !== 'undefined' && document.documentElement.dataset.presenting === '1')
+  const [insight, setInsight] = useState<Insight | null>(null)
+  const [seen, setSeen] = useState<string[]>(readSeen)
   const listRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const dragStart = useRef<{ x: number; y: number; moved: boolean } | null>(null)
+  const suppressClick = useRef(false)
 
+  const toggle = useCallback(() => { setOpen(o => !o); setMenuOpen(false) }, [])
+
+  // Escape closes; Ctrl+/ (Cmd+/) toggles from anywhere on the page.
   useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && open) { setOpen(false); btnRef.current?.focus(); return }
+      if ((e.ctrlKey || e.metaKey) && e.key === '/') { e.preventDefault(); toggle() }
+    }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
+  }, [open, toggle])
+
+  // Opening puts the cursor in the question box.
+  useEffect(() => {
+    if (open) requestAnimationFrame(() => inputRef.current?.focus())
   }, [open])
 
   // New content scrolls into view; the canvas behind never moves. Optional
   // call: jsdom elements have no scrollTo, and a missing scroll is cosmetic.
   useEffect(() => {
     listRef.current?.scrollTo?.({ top: listRef.current.scrollHeight })
-  }, [turns, open])
+  }, [turns, open, busy])
 
-  const send = async () => {
-    const message = input.trim()
+  // Get out of the way while the canvas scrolls: shrink and fade, then come
+  // back shortly after the scrolling stops. Scrolls inside the panel don't count.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const onScroll = (e: Event) => {
+      if (panelRef.current && e.target instanceof Node && panelRef.current.contains(e.target)) return
+      setScrolling(true)
+      clearTimeout(timer)
+      timer = setTimeout(() => setScrolling(false), 700)
+    }
+    document.addEventListener('scroll', onScroll, true)
+    return () => { document.removeEventListener('scroll', onScroll, true); clearTimeout(timer) }
+  }, [])
+
+  // Present mode hides it (the builder stamps <html data-presenting="1"> and
+  // announces the switch).
+  useEffect(() => {
+    const on = (e: Event) => setPresenting(!!(e as CustomEvent).detail)
+    window.addEventListener('datalytics:present', on)
+    return () => window.removeEventListener('datalytics:present', on)
+  }, [])
+
+  // One real finding from the dataset's insight scan, if there is one. The
+  // scan is shared with the pin cards (runShared) and cached for the browser
+  // session, so opening the builder doesn't start a new scan every time.
+  useEffect(() => {
+    if (datasetId == null) return
+    let alive = true
+    const cacheKey = INSIGHT_CACHE + datasetId
+    try {
+      const cached = sessionStorage.getItem(cacheKey)
+      if (cached) { setInsight(JSON.parse(cached)); return () => { alive = false } }
+    } catch { /* no cache */ }
+    const timer = setTimeout(() => {
+      if (typeof insightsApi?.runShared !== 'function') return
+      insightsApi.runShared(datasetId)
+        .then(r => {
+          const top = [...(r?.findings ?? [])]
+            .filter(f => f.novelty !== 'unchanged')
+            .sort((a, b) => b.score - a.score)[0]
+          const found = top
+            ? { key: `${datasetId}:${top.kind}:${top.columns.join(',')}`, title: top.title, detail: top.detail }
+            : null
+          try { sessionStorage.setItem(cacheKey, JSON.stringify(found)) } catch { /* ok */ }
+          if (alive) setInsight(found)
+        })
+        .catch(() => { /* no insight is fine: the badge simply doesn't show */ })
+    }, 2500)
+    return () => { alive = false; clearTimeout(timer) }
+  }, [datasetId])
+
+  const badge = !!insight && !open && !seen.includes(insight.key)
+  useEffect(() => {
+    // Seeing the card in the open panel counts as having seen the insight.
+    if (open && insight && !seen.includes(insight.key)) {
+      const next = [...seen, insight.key].slice(-50)
+      setSeen(next)
+      try { localStorage.setItem(SEEN_KEY, JSON.stringify(next)) } catch { /* ok */ }
+    }
+  }, [open, insight, seen])
+
+  const send = async (text?: string) => {
+    const message = (text ?? input).trim()
     if (!message || busy) return
-    setInput('')
+    if (text === undefined) setInput('')
     setBusy(true)
     const history = turns
-      .filter(t => t.kind !== 'error')
+      .filter(x => x.kind !== 'error')
       .slice(-HISTORY_TURNS)
-      .map(t => ({ role: t.role, content: t.text }))
-    setTurns(t => [...t, { id: nextId++, role: 'user', text: message }])
+      .map(x => ({ role: x.role, content: x.text }))
+    setTurns(x => [...x, { id: nextId++, role: 'user', text: message }])
     try {
       const got = await reportsApi.copilot(reportId, pageId,
         { message, history, selected_widget_id: selectedWidgetId ?? null })
       const applied = got.applied.map(a =>
-        `${APPLIED_VERB[a.op] ?? a.op} ${a.title ?? `widget ${a.widget_id ?? ''}`}`.trim())
-      setTurns(t => [...t, {
+        `${appliedVerb(a.op, t)} ${a.title ?? `widget ${a.widget_id ?? ''}`}`.trim())
+      setTurns(x => [...x, {
         id: nextId++, role: 'assistant',
         text: [got.reply, ...(got.notes ?? [])].filter(Boolean).join('\n'),
         applied, results: got.results ?? [],
@@ -101,15 +222,66 @@ export default function CopilotChat({ reportId, pageId, selectedWidgetId, onAppl
     } catch (e) {
       // A permission refusal is not a network problem; say which it was.
       const status = (e as { response?: { status?: number } })?.response?.status
-      setTurns(t => [...t, {
+      setTurns(x => [...x, {
         id: nextId++, role: 'assistant', kind: 'error',
-        text: status === 403
-          ? 'You do not have edit rights on this page.'
-          : 'Could not reach the copilot. The page was not changed.',
+        text: status === 403 ? t('copilot.err.forbidden') : t('copilot.err.unreachable'),
       }])
     } finally {
       setBusy(false)
     }
+  }
+
+  // ── Drag to a corner ──────────────────────────────────────────────────────
+  const saveCorner = (c: Corner) => {
+    setCorner(c)
+    try { localStorage.setItem(CORNER_KEY, c) } catch { /* ok */ }
+  }
+  const onPointerDown = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    if (e.button !== 0) return
+    dragStart.current = { x: e.clientX, y: e.clientY, moved: false }
+  }
+  const onPointerMove = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    const s = dragStart.current
+    if (!s) return
+    if (!s.moved && Math.hypot(e.clientX - s.x, e.clientY - s.y) < 6) return
+    if (!s.moved) {
+      s.moved = true
+      suppressClick.current = true
+      e.currentTarget.setPointerCapture?.(e.pointerId)
+      setOpen(false)
+    }
+    setDrag({ x: e.clientX, y: e.clientY })
+  }
+  const onPointerUp = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    const s = dragStart.current
+    dragStart.current = null
+    if (!s?.moved) return
+    const right = e.clientX > window.innerWidth / 2
+    const end = isRtl() ? !right : right
+    saveCorner(`${e.clientY > window.innerHeight / 2 ? 'bottom' : 'top'}-${end ? 'end' : 'start'}`)
+    setDrag(null)
+  }
+  // A drag ends in pointerup; the click that follows must not toggle the panel.
+  const onClick = () => {
+    if (suppressClick.current) { suppressClick.current = false; return }
+    toggle()
+  }
+  // Keyboard users can move it too: Alt+arrows pick the corner.
+  const onBtnKey = (e: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (!e.altKey) return
+    const rtl = isRtl()
+    const toStart = (c: Corner) => c.replace('end', 'start') as Corner
+    const toEnd = (c: Corner) => c.replace('start', 'end') as Corner
+    const map: Record<string, (c: Corner) => Corner> = {
+      ArrowUp: c => c.replace('bottom', 'top') as Corner,
+      ArrowDown: c => c.replace('top', 'bottom') as Corner,
+      ArrowLeft: rtl ? toEnd : toStart,
+      ArrowRight: rtl ? toStart : toEnd,
+    }
+    const f = map[e.key]
+    if (!f) return
+    e.preventDefault()
+    saveCorner(f(corner))
   }
 
   // Float over the CANVAS, not over the settings panel: pinned to the window
@@ -117,105 +289,211 @@ export default function CopilotChat({ reportId, pageId, selectedWidgetId, onAppl
   // Apply buttons). The panel is resizable and collapsible, so follow its width.
   const endOffset = useEndPanelWidth('builder-right')
 
+  if (presenting) return null
+
+  const [vert, horiz] = corner.split('-') as ['top' | 'bottom', 'start' | 'end']
+  const pos: React.CSSProperties = drag
+    ? { left: drag.x - 28, top: drag.y - 28 }
+    : {
+        [vert]: vert === 'bottom' ? 'var(--dl-askai-bottom)' : 'var(--dl-askai-top)',
+        [horiz === 'end' ? 'insetInlineEnd' : 'insetInlineStart']: horiz === 'end' ? 24 + endOffset : 24,
+      }
+
+  const n = widgetCount ?? 0
+  const page = pageName || t('copilot.thisPage')
+  const suggestions: { icon: typeof BookOpen; text: string; fill?: boolean }[] = [
+    { icon: BookOpen, text: t('copilot.sug.explain') },
+    selectedWidgetTitle
+      ? { icon: Sparkles, text: t('copilot.sug.summarize', { name: selectedWidgetTitle }) }
+      : { icon: TrendingUp, text: t('copilot.sug.stands') },
+    { icon: Sparkles, text: t('copilot.sug.improve') },
+    { icon: PencilLine, text: t('copilot.sug.addChart'), fill: true },
+  ]
+
+  const cls = ['dl-askai', `dl-askai--${vert}`, `dl-askai--${horiz}`]
+  if (open) cls.push('is-open')
+  if (scrolling && !open) cls.push('is-shy')
+  if (drag) cls.push('is-dragging')
+
   return (
-    <>
-      {!open && (
-        <button onClick={() => setOpen(true)} aria-label="Page copilot" title="Page copilot"
-          style={{ position: 'fixed', insetInlineEnd: 24 + endOffset, bottom: 24, zIndex: 1000,
-            width: 48, height: 48, borderRadius: '50%', border: 'none', cursor: 'pointer',
-            background: 'var(--accent)', color: 'var(--mc-accent-fg)', display: 'inline-flex',
-            alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 6px 20px rgb(15 23 42 / .25)' }}>
-          <Bot size={22} aria-hidden />
-        </button>
-      )}
-
+    <div className={cls.join(' ')} style={pos}>
       {open && (
-        <div role="dialog" aria-label="Page copilot"
-          style={{ position: 'fixed', insetInlineEnd: 24 + endOffset, bottom: 24, zIndex: 1000,
-            width: 360, maxWidth: 'calc(100vw - 48px)', height: 460,
-            maxHeight: 'calc(100vh - 96px)', display: 'flex', flexDirection: 'column',
-            background: 'var(--surface)', border: '1px solid var(--border)',
-            borderRadius: 12, boxShadow: '0 12px 40px rgb(15 23 42 / .3)', overflow: 'hidden' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px',
-            borderBottom: '1px solid var(--border)', background: 'var(--surface2)' }}>
-            <Bot size={16} aria-hidden style={{ color: 'var(--accent)' }} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 12.5, fontWeight: 700 }}>Page copilot</div>
-              <div style={{ fontSize: 10.5, color: 'var(--muted)' }}>
-                Ask about this page, or tell it what to add or change.
-              </div>
+        <div ref={panelRef} role="dialog" aria-label={t('copilot.title')} className="dl-askai__panel">
+          <header className="dl-askai__head">
+            <span className="dl-askai__avatar" aria-hidden><AiMascot size={22} /></span>
+            <div className="dl-askai__head-text">
+              <div className="dl-askai__title">{t('copilot.title')}</div>
+              {(reportName || pageName) && (
+                <div className="dl-askai__context" dir="auto"
+                  title={[reportName, pageName].filter(Boolean).join(' · ')}>
+                  {[reportName, pageName].filter(Boolean).join(' · ')}
+                </div>
+              )}
             </div>
-            <button onClick={() => setOpen(false)} aria-label="Close copilot"
-              style={{ background: 'none', border: 'none', cursor: 'pointer',
-                color: 'var(--muted)', padding: 4, display: 'inline-flex' }}>
-              <X size={15} aria-hidden />
+            <div className="dl-askai__menu-wrap">
+              <button type="button" className="dl-askai__icon" aria-label={t('copilot.more')} title={t('copilot.more')}
+                aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(o => !o)}>
+                <MoreHorizontal size={16} aria-hidden />
+              </button>
+              {menuOpen && (
+                <div role="menu" className="dl-askai__menu">
+                  <button type="button" role="menuitem" disabled={turns.length === 0 || busy}
+                    onClick={() => { setTurns([]); setMenuOpen(false); inputRef.current?.focus() }}>
+                    <RotateCcw size={14} aria-hidden /> {t('copilot.newChat')}
+                  </button>
+                  <button type="button" role="menuitem"
+                    onClick={() => {
+                      setCorner('bottom-end'); setMenuOpen(false)
+                      try { localStorage.removeItem(CORNER_KEY) } catch { /* ok */ }
+                    }}>
+                    <ArrowUpRight size={14} aria-hidden className="dl-askai__flip" /> {t('copilot.resetCorner')}
+                  </button>
+                </div>
+              )}
+            </div>
+            <button type="button" className="dl-askai__icon" aria-label={t('copilot.minimize')} title={t('copilot.minimize')}
+              onClick={() => { setOpen(false); btnRef.current?.focus() }}>
+              <Minus size={16} aria-hidden />
             </button>
-          </div>
+            <button type="button" className="dl-askai__icon" aria-label={t('copilot.endChat')} title={t('copilot.endChat')}
+              onClick={() => { setOpen(false); setTurns([]); btnRef.current?.focus() }}>
+              <X size={16} aria-hidden />
+            </button>
+          </header>
 
-          <div ref={listRef} style={{ flex: 1, overflowY: 'auto', padding: 10,
-            display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div ref={listRef} className="dl-askai__body">
             {turns.length === 0 && (
-              <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0 }}>
-                Try: “add a bar chart of revenue by region”, “set the revenue
-                chart’s auto-reload to 60 seconds”, “remove the table”, or a
-                data question like “total revenue by region”.
-              </p>
-            )}
-            {turns.map(t => (
-              <div key={t.id} style={{
-                alignSelf: t.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '90%',
-                borderRadius: 10, padding: '7px 10px', fontSize: 12.5, whiteSpace: 'pre-wrap',
-                ...(t.role === 'user'
-                  ? { background: 'var(--accent)', color: 'var(--mc-accent-fg)' }
-                  : t.kind === 'error'
-                    ? { background: '#fdecec', border: '1px solid #f0acac', color: '#a4231f' }
-                    : { background: 'var(--surface2)', color: 'var(--text)' }),
-              }}>
-                {t.text}
-                {t.results && t.results.length > 0 && (
-                  <div style={{ marginTop: 6 }}>
-                    {t.results.map((r, i) => <ResultGrid key={i} result={r} />)}
+              <div className="dl-askai__hello">
+                <p className="dl-askai__hello-title">{t('copilot.hello', { page })}</p>
+                <p className="dl-askai__hello-sub">
+                  {n > 0 ? t('copilot.helloSub', { n: localDigits(String(n)) }) : t('copilot.helloSubEmpty')}
+                </p>
+                {insight && (
+                  <div className="dl-askai__insight">
+                    <span className="dl-askai__insight-icon" aria-hidden><Lightbulb size={15} /></span>
+                    <div className="dl-askai__insight-body">
+                      <p className="dl-askai__insight-title">{t('copilot.insight')}</p>
+                      <p className="dl-askai__insight-text" dir="auto">
+                        {insight.title}{insight.detail ? ` — ${insight.detail}` : ''}
+                      </p>
+                      <button type="button" className="dl-askai__insight-more" disabled={busy}
+                        onClick={() => void send(t('copilot.tellMore', { title: insight.title }))}>
+                        {t('copilot.tellMoreBtn')}
+                      </button>
+                    </div>
                   </div>
                 )}
-                {t.applied && t.applied.length > 0 && (
-                  <ul style={{ listStyle: 'none', margin: '6px 0 0', padding: 0,
-                    display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    {t.applied.map((a, i) => (
-                      <li key={i} style={{ display: 'flex', alignItems: 'center', gap: 5,
-                        fontSize: 11.5, color: 'var(--success, #16a34a)' }}>
-                        <Check size={12} aria-hidden /> {a}
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                <p className="dl-askai__sug-label">{t('copilot.suggested')}</p>
+                <ul className="dl-askai__sug">
+                  {suggestions.map(s => (
+                    <li key={s.text}>
+                      <button type="button" disabled={busy}
+                        onClick={() => {
+                          if (s.fill) { setInput(s.text + ' '); inputRef.current?.focus() }
+                          else void send(s.text)
+                        }}>
+                        <s.icon size={15} aria-hidden className="dl-askai__sug-icon" />
+                        <span dir="auto">{s.text}</span>
+                        {s.fill
+                          ? <PencilLine size={13} aria-hidden className="dl-askai__sug-go" />
+                          : <ArrowUpRight size={13} aria-hidden className="dl-askai__sug-go dl-askai__flip" />}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {turns.map(x => x.role === 'user' ? (
+              <div key={x.id} className="dl-askai__msg dl-askai__msg--user" dir="auto">{x.text}</div>
+            ) : (
+              <div key={x.id} className={`dl-askai__msg dl-askai__msg--ai${x.kind === 'error' ? ' is-error' : ''}`}>
+                <span className="dl-askai__avatar dl-askai__avatar--sm" aria-hidden><AiMascot size={16} /></span>
+                <div className="dl-askai__msg-body">
+                  <div className="dl-askai__msg-text" dir="auto">{x.text}</div>
+                  {x.results && x.results.length > 0 && (
+                    <div className="dl-askai__result"><ResultView results={x.results} /></div>
+                  )}
+                  {x.applied && x.applied.length > 0 && (
+                    <ul className="dl-askai__applied">
+                      {x.applied.map((a, i) => (
+                        <li key={i}><Check size={12} aria-hidden /> {a}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               </div>
             ))}
+
             {busy && (
-              <span style={{ fontSize: 11.5, color: 'var(--muted)' }}>Working…</span>
+              <div className="dl-askai__msg dl-askai__msg--ai dl-askai__thinking" role="status" aria-live="polite">
+                <span className="dl-askai__avatar dl-askai__avatar--sm" aria-hidden><AiMascot size={16} /></span>
+                <div className="dl-askai__msg-body">
+                  <strong className="dl-askai__thinking-title">{t('copilot.thinking')}</strong>
+                  <span className="dl-askai__dots" aria-hidden><i /><i /><i /></span>
+                  <p className="dl-askai__reading">
+                    {n > 0 ? t('copilot.reading', { n: localDigits(String(n)), page }) : t('copilot.readingPage', { page })}
+                  </p>
+                  <span className="dl-askai__skel" aria-hidden><i /><i /><i /></span>
+                </div>
+              </div>
             )}
           </div>
 
-          <div style={{ display: 'flex', gap: 6, padding: 10, borderTop: '1px solid var(--border)' }}>
-            <input value={input} disabled={busy}
-              placeholder="Tell the copilot what to do…"
-              aria-label="Copilot message"
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') void send() }}
-              style={{ flex: 1, padding: '7px 9px', fontSize: 12.5,
-                border: '1px solid var(--border)', borderRadius: 6,
-                background: 'var(--surface)', color: 'var(--text)' }} />
-            <button onClick={() => void send()} disabled={busy}
-              style={{ padding: '7px 12px', fontSize: 12.5, borderRadius: 6, border: 'none',
-                background: busy ? 'var(--muted)' : 'var(--accent)', color: 'var(--mc-accent-fg)',
-                cursor: busy ? 'default' : 'pointer' }}>
-              Send
-            </button>
+          <div className="dl-askai__composer">
+            <div className="dl-askai__box">
+              <textarea ref={inputRef} rows={1} value={input} disabled={busy}
+                placeholder={t('copilot.placeholder')}
+                aria-label={t('copilot.inputLabel')}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send() }
+                }} />
+              <button type="button" className="dl-askai__send" onClick={() => void send()} disabled={busy}
+                aria-label={t('copilot.send')} title={t('copilot.send')}>
+                <ArrowUp size={16} aria-hidden />
+              </button>
+            </div>
+            <p className="dl-askai__hint" aria-hidden>
+              <kbd>Enter</kbd> {t('copilot.hintSend')} · <kbd>Shift</kbd>+<kbd>Enter</kbd> {t('copilot.hintLine')}
+            </p>
           </div>
         </div>
       )}
-    </>
+
+      <div className="dl-askai__anchor">
+        {!open && !drag && (
+          <span className="dl-askai__tip" role="tooltip" id="dl-askai-tip">
+            {t('copilot.tooltip')} <kbd>Ctrl</kbd> <kbd>/</kbd>
+          </span>
+        )}
+        <button ref={btnRef} type="button" className={`dl-askai__btn${badge ? ' has-badge' : ''}`}
+          aria-label={open ? t('copilot.hide') : t('copilot.open')}
+          aria-expanded={open} aria-describedby={open ? undefined : 'dl-askai-tip'}
+          aria-keyshortcuts="Control+/"
+          onClick={onClick} onKeyDown={onBtnKey}
+          onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
+          onPointerCancel={() => { dragStart.current = null; setDrag(null) }}>
+          <span className="dl-askai__label">{t('copilot.title')}</span>
+          <span className="dl-askai__face" aria-hidden>
+            {open ? <X size={22} /> : <AiMascot size={30} alive />}
+          </span>
+          {badge && <span className="dl-askai__badge" aria-hidden />}
+          {badge && <span className="dl-sr-only">{t('copilot.badge')}</span>}
+        </button>
+      </div>
+    </div>
   )
+}
+
+function appliedVerb(op: string, t: ReturnType<typeof useT>): string {
+  switch (op) {
+    case 'create': return t('copilot.applied.create')
+    case 'update': return t('copilot.applied.update')
+    case 'delete': return t('copilot.applied.delete')
+    case 'add_calculated_column': return t('copilot.applied.formula')
+    default: return op
+  }
 }
 
 function useEndPanelWidth(sideId: string): number {
