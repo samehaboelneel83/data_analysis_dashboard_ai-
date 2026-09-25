@@ -26,7 +26,10 @@ _ALLOWED_FILES = {
     "routers/analysis.py",
     "routers/datasets.py",
     "routers/reports.py",
-    "routers/widget_data.py",
+    # apply_report_parameters: an expression parameter's benchmark is computed
+    # over the RLS-filtered BASE frame, straight off load_file. (Moved here from
+    # routers/widget_data.py so the PDF and the digest apply parameters too.)
+    "services/parameters.py",
     "services/agent/graph.py",   # dataset-mode: secures each frame before DuckDB registration
     # _rebuild_derived: a scheduled rebuild has nobody at the keyboard, so it
     # resolves RLS as the dataset's recorded builder and filters the base frame

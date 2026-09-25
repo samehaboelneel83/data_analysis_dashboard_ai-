@@ -12,11 +12,10 @@ from ..core.capability import require_dataset_read
 from ..core.org_scope import check_org
 from ..core.rls import expand_author_expressions, resolve_denied_columns, resolve_rls_expr
 from ..dependencies import get_current_user
-from ..models.models import DataSource, Dataset, Report, ReportParameter, User
+from ..models.models import DataSource, Dataset, Report, User
 from ..schemas.schemas import WidgetDataRequest
 from ..services.display_rules import result_frame
-from ..services.parameters import ParameterError, encode_literal, substitute
-from ..services.measure_eval import evaluate_measure
+from ..services.parameters import ParameterError, apply_report_parameters
 from ..services import quotas
 from ..services.semantic_guard import config_refusal
 
@@ -36,8 +35,8 @@ def _safe_filename(name: str) -> str:
 from ..core.widget_errors import CodedHTTPException, widget_error
 from ..services.direct_query import DirectQueryUnsupported, SourceUnavailable, run_direct_query
 from ..services.prep import prep_steps_of, resolve_join_frames
-from ..services.widget_data import (ImportRowCapExceeded, apply_rls_filter, sums_measure_by_default,
-                                    get_widget_data, load_file)
+from ..services.widget_data import (ImportRowCapExceeded, sums_measure_by_default,
+                                    get_widget_data)
 
 router = APIRouter(prefix="/datasets", tags=["widget-data"])
 
@@ -78,118 +77,20 @@ def _config_uses_measure(config: dict, measures: list[dict]) -> bool:
 async def _apply_report_parameters(req: WidgetDataRequest, db: AsyncSession, current_user: User) -> WidgetDataRequest:
     """Substitute this viewer's parameter values before anything is evaluated.
 
-    Two surfaces, two treatments:
-      * structured filter VALUES ("@name" as a filter's value, or inside its list) --
-        replaced with the typed value directly. Filters compare as data, never as
-        code, so no literal encoding is involved.
-      * calculated-column EXPRESSIONS -- routed through substitute(), which encodes
-        each value as a literal of the parameter's declared type. That encoding is the
-        entire injection story; see services/parameters.py.
-
-    An unknown @name in a filter is a 400, not a pass-through: a filter comparing a
-    column against the literal string "@budget" matches nothing and looks like a data
-    bug rather than the config bug it is.
+    The substitution itself lives in services.parameters.apply_report_parameters,
+    so the PDF and the scheduled Excel digest apply parameters exactly as this
+    route does (a service cannot import a router). Kept here: the report lookup,
+    the org check, and turning a ParameterError into the widget's 400.
     """
     if not req.report_id:
         return req
-
     report = await db.get(Report, req.report_id)
     check_org(report, current_user, "Report not found")
-    defs = (await db.execute(
-        select(ReportParameter).where(ReportParameter.report_id == report.id)
-    )).scalars().all()
-    if not defs:
-        return req
-    by_name = {d.name: d for d in defs}
-
-    # Expression parameters: value computed over the WHOLE source (RLS-scoped, but
-    # immune to report/widget filters) at query time, so a benchmark or a
-    # self-updating slider range reflects the data rather than a typed constant. The
-    # expression rides in default_value; the computed scalar wins over any viewer
-    # value. Import datasets only — a warehouse benchmark would need a SQL aggregate.
-    expr_defs = [d for d in defs if d.param_type == "expression"]
-    computed: dict[str, float] = {}
-    if expr_defs:
-        ds = await db.get(Dataset, report.dataset_id) if report.dataset_id else None
-        if ds is None:
-            raise widget_error(400, "parameter", "Expression parameters need the report to have a primary dataset")
-        if ds.mode == "directquery":
-            raise widget_error(400, "parameter", "Expression parameters require an import dataset")
-        rls = await resolve_rls_expr(db, current_user, ds.id)
-        # Column security as well: an expression parameter over a denied column
-        # would hand this viewer its aggregate as a benchmark value.
-        denied = await resolve_denied_columns(db, current_user, ds.id)
-
-        def _compute() -> dict[str, float]:
-            frame = apply_rls_filter(load_file(ds.filename), rls)
-            present = [c for c in denied if c in frame.columns]
-            if present:
-                frame = frame.drop(columns=present)
-            out: dict[str, float] = {}
-            for d in expr_defs:
-                out[d.name] = float(evaluate_measure(d.default_value or "", frame, []))
-            return out
-        try:
-            computed = await asyncio.to_thread(_compute)
-        except Exception as e:
-            raise widget_error(400, "parameter", f"Expression parameter could not be evaluated: {e}")
-
-    # Computed expression values win over a viewer-supplied value (a benchmark is not
-    # something a viewer overrides); everything else takes the viewer value or default.
-    effective = {**req.parameters, **computed}
-
-    def typed(name: str):
-        d = by_name.get(name)
-        if d is None:
-            raise widget_error(400, "parameter", f"Unknown report parameter @{name}")
-        raw = effective.get(name, d.default_value)
-        if raw is None:
-            raise widget_error(400, "parameter", f"Parameter @{name} has no value and no default")
-        if d.param_type in ("number", "expression"):
-            try:
-                return float(raw)
-            except (TypeError, ValueError):
-                raise widget_error(400, "parameter", f"Parameter @{name} expects a number")
-        return str(raw)[:500]
-
-    config = dict(req.config or {})
-
-    # rank.n may be parameter-driven ("@name"): SAS drives the rank count from
-    # a parameter, and a slider bound to top-N is the natural use. Typed as a
-    # number and floored to an int like any count.
-    rank_cfg = config.get("rank")
-    if isinstance(rank_cfg, dict) and isinstance(rank_cfg.get("n"), str) and rank_cfg["n"].startswith("@"):
-        rank_cfg = dict(rank_cfg)
-        resolved = typed(rank_cfg["n"][1:])
-        try:
-            rank_cfg["n"] = int(float(resolved))
-        except (TypeError, ValueError):
-            raise widget_error(400, "parameter", f"Parameter {rank_cfg['n']} is not a number usable as a rank count")
-        config["rank"] = rank_cfg
-
-    filters = []
-    for f in (config.get("filters") or []):
-        f = dict(f)
-        v = f.get("value")
-        if isinstance(v, str) and v.startswith("@"):
-            f["value"] = typed(v[1:])
-        elif isinstance(v, list):
-            f["value"] = [typed(x[1:]) if isinstance(x, str) and x.startswith("@") else x for x in v]
-        filters.append(f)
-    if filters:
-        config["filters"] = filters
-
-    calc_cols = []
-    for c in (req.calculated_columns or []):
-        c = dict(c)
-        expr = c.get("expression")
-        if isinstance(expr, str) and "@" in expr:
-            try:
-                c["expression"] = substitute(expr, effective, defs)
-            except ParameterError as e:
-                raise widget_error(400, "parameter", str(e))
-        calc_cols.append(c)
-
+    try:
+        config, calc_cols = await apply_report_parameters(
+            db, current_user, report, req.config, req.calculated_columns, req.parameters)
+    except ParameterError as e:
+        raise widget_error(400, "parameter", str(e))
     return req.model_copy(update={"config": config, "calculated_columns": calc_cols})
 
 

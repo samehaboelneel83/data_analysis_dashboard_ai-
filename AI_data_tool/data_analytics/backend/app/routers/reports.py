@@ -1297,11 +1297,8 @@ async def _resolve_report_sections(db, report: Report, user: User,
                 # Skipped here, a filter on "@region" compared the column to
                 # the literal text "@region": the PDF showed an empty or
                 # different number from the dashboard it was made from.
-                from ..schemas.schemas import WidgetDataRequest
-                from .widget_data import _apply_report_parameters
-                config = (await _apply_report_parameters(
-                    WidgetDataRequest(config=dict(w.config or {}), widget_type=w.widget_type,
-                                      report_id=report.id), db, user)).config
+                from ..services.parameters import apply_report_parameters
+                config, _ = await apply_report_parameters(db, user, report, w.config, [], {})
                 result = await asyncio.to_thread(
                     get_widget_data,
                     ds.filename, config, widget_type=w.widget_type,

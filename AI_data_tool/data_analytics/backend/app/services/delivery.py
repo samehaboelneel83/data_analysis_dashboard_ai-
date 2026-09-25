@@ -124,11 +124,16 @@ async def build_digest(db, report: Report, creator: User,
                     from ..core.rls import expand_author_expressions
                     author_filter, calc_cols, measure_defs = await expand_author_expressions(
                         db, creator, ds.default_filter_expr, ds.calculated_columns, ds.measures)
+                    # Report parameters at their defaults, as the chart and the
+                    # PDF apply them -- a filter on "@market" used to compare the
+                    # column to that literal text and the sheet came out empty.
+                    from .parameters import apply_report_parameters
+                    config, _ = await apply_report_parameters(db, creator, report, w.config, [], {})
                     # Off the scheduler's event loop: a slow parse here would
                     # otherwise delay every later schedule/alert in the tick.
                     result = await asyncio.to_thread(
                         get_widget_data,
-                        ds.filename, dict(w.config or {}), widget_type=w.widget_type,
+                        ds.filename, config, widget_type=w.widget_type,
                         calculated_columns=calc_cols or None,
                         filter_expr=author_filter or None,
                         rls_filter_expr=rls, use_cache=False,

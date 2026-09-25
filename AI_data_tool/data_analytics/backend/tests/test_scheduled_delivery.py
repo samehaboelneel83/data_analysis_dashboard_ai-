@@ -365,6 +365,25 @@ class TestExportsComputeWhatTheDashboardShows:
         assert {r["name"]: r["value"] for r in rows} == {"US": 150.0}
 
     @pytest.mark.asyncio
+    async def test_the_digest_applies_report_parameters_like_the_chart(
+            self, client, auth_headers, db_session, two_orgs, sales_ds):
+        from app.models.models import Report, ReportParameter, ReportWidget
+        ds = await _dataset(db_session, two_orgs["a"]["org"].id, sales_ds)
+        rid = await _report_with_widget(client, auth_headers["a"], ds)
+        db_session.add(ReportParameter(report_id=rid, name="market", param_type="text", default_value="CA"))
+        w = (await db_session.execute(select(ReportWidget))).scalars().first()
+        w.config = {**w.config, "filters": [{"column": "region", "op": "eq", "value": "@market"}]}
+        await db_session.commit()
+
+        report = await db_session.get(Report, rid)
+        payload, sheets = await build_digest(db_session, report, two_orgs["a"]["user"])
+        # It compared region to the literal "@market": no rows, and the sheet
+        # was dropped from the digest altogether.
+        assert sheets == 1
+        book = pd.read_excel(io.BytesIO(payload), sheet_name="By region")
+        assert {r["name"]: r["value"] for _, r in book.iterrows()} == {"CA": 30.0}
+
+    @pytest.mark.asyncio
     async def test_the_digest_expands_user_functions_as_the_sender(
             self, client, auth_headers, db_session, two_orgs, sales_ds):
         from app.models.models import Report
