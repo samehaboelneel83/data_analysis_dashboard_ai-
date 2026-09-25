@@ -134,3 +134,34 @@ class TestAPasswordResetEndsExistingSessions:
                                json={"email": "renamed@example.com"}, headers=auth_headers["a"])
         assert r.status_code == 200, r.text
         assert (await client.get("/api/v1/auth/me", headers=old)).status_code == 200
+
+
+class TestErrorsKeepCorsHeaders:
+    """An escaped exception used to reach the browser as a CORS violation: the
+    safeguard that turns it into a JSON 500 sat OUTSIDE CORSMiddleware, so the
+    500 carried no Access-Control-Allow-Origin and the real error was invisible
+    (a one-line TypeError once became a CORS hunt). CORS is now registered
+    last, which makes it the outermost layer."""
+
+    ORIGIN = "http://localhost:3001"
+
+    async def test_an_unhandled_error_is_a_readable_500_with_cors_headers(self, client):
+        from app.main import app
+
+        async def _boom():
+            raise TypeError("escaped on purpose")
+
+        app.add_api_route("/api/v1/__cors_boom", _boom, methods=["GET"])
+        try:
+            r = await client.get("/api/v1/__cors_boom", headers={"Origin": self.ORIGIN})
+        finally:
+            app.router.routes[:] = [rt for rt in app.router.routes
+                                    if getattr(rt, "path", "") != "/api/v1/__cors_boom"]
+        assert r.status_code == 500
+        assert r.json()["code"] == "internal"
+        assert r.headers.get("access-control-allow-origin") == self.ORIGIN
+
+    def test_cors_is_the_outermost_middleware(self):
+        from starlette.middleware.cors import CORSMiddleware as _Cors
+        from app.main import app
+        assert app.user_middleware[0].cls is _Cors

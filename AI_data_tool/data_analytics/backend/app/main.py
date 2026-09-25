@@ -488,13 +488,8 @@ app = FastAPI(title="Datalytics API", version="2.0.0", lifespan=lifespan,
               redoc_url="/redoc" if _docs_on else None,
               openapi_url="/openapi.json" if _docs_on else None)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.origins_list(),
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORSMiddleware is registered LAST, below the two http middlewares: see the
+# note there.
 
 # E3: OpenTelemetry, opt-in (settings.otel_enabled, default False).
 # setup_telemetry is itself a hard no-op when disabled -- no otel import
@@ -521,9 +516,13 @@ async def unhandled_errors_keep_cors_headers(request, call_next):
     debugging goes looking at origins and headers instead of at the traceback
     that actually caused it.
 
-    Registered after CORSMiddleware, so it sits INSIDE it: the JSONResponse below
-    travels back out through CORS and picks up the headers. The real error is
-    logged with its traceback, and the client gets a 500 it can actually read.
+    CORSMiddleware is added AFTER this, so it sits OUTSIDE it: the JSONResponse
+    below travels back out through CORS and picks up the headers. The real error
+    is logged with its traceback, and the client gets a 500 it can actually read.
+    (`add_middleware` inserts at the front, so the LAST registration is the
+    outermost layer. This docstring used to say the reverse while CORS was
+    registered first -- the handler sat outside CORS and every escaped 500
+    still reached the browser as a CORS error.)
     """
     try:
         return await call_next(request)
@@ -534,6 +533,18 @@ async def unhandled_errors_keep_cors_headers(request, call_next):
             content={"detail": "Internal server error. See server logs for details.",
                      "code": "internal"},
         )
+
+
+# Outermost, so every response the layers above produce -- this safeguard's
+# 500, the rate limiter's 429 -- carries the CORS headers a browser needs to
+# show it at all. Pinned in tests/test_security.py (TestErrorsKeepCorsHeaders).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.origins_list(),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(datasets.router,     prefix="/api/v1")
 app.include_router(analysis.router,     prefix="/api/v1")
