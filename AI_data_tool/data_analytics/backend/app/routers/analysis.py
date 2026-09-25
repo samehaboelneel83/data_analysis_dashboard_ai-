@@ -100,6 +100,9 @@ async def run_analysis(dataset_id: int, req: AnalysisRequest, db: AsyncSession =
     result = await db.execute(select(Dataset).options(selectinload(Dataset.columns)).where(Dataset.id == dataset_id))
     ds = result.scalar_one_or_none()
     check_org(ds, current_user, "Dataset not found")
+    # The profile is the dataset's data, summarised: same read gate as the
+    # dataset page itself (it checked the org alone).
+    await require_dataset_read(db, current_user, dataset_id)
 
     rls_expr = await resolve_rls_expr(db, current_user, dataset_id)
 
@@ -181,6 +184,7 @@ async def run_analysis(dataset_id: int, req: AnalysisRequest, db: AsyncSession =
 async def get_analysis(dataset_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
 
     rls_expr = await resolve_rls_expr(db, current_user, dataset_id)
     denied = await resolve_denied_columns(db, current_user, dataset_id)

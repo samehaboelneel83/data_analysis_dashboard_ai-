@@ -2233,10 +2233,15 @@ async def apply_data_view(dataset_id: int, view_id: int,
     from ..services.data_views import apply_view
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
+    # Applying a view REWRITES the dataset's modelling (measures, filter, prep
+    # steps): an authoring action, gated like every other one. It checked the
+    # org alone, so any member could re-model a colleague's dataset this way.
+    await require_dataset_capability(db, current_user, dataset_id, "data")
     if ds.mode == "directquery":
         raise HTTPException(400, "Data views apply to import datasets")
     view = await db.get(DataView, view_id)
     check_org(view, current_user, "Data view not found")
+    await _require_readable_join_targets(db, current_user, (view.payload or {}).get("prep_steps"))
     report = await apply_view(db, ds, view.payload or {})
     await audit(db, current_user, "dataset.apply_data_view", "dataset", ds.id, view.name)
     await db.commit()
@@ -2304,6 +2309,7 @@ async def set_prep_steps(dataset_id: int, steps: list[dict], db: AsyncSession = 
     await require_dataset_capability(db, current_user, dataset_id, "data")
     if ds.mode == "directquery":
         raise HTTPException(400, "Prep steps apply to import datasets; DirectQuery data is shaped in SQL")
+    await _require_readable_join_targets(db, current_user, steps)
 
     result = await db.execute(select(DatasetColumn.name).where(DatasetColumn.dataset_id == dataset_id))
     known = {r[0] for r in result.all()}
@@ -2346,10 +2352,12 @@ async def preview_prep_steps(dataset_id: int, steps: list[dict], db: AsyncSessio
     from ..services.widget_data import _safe, apply_rls_filter
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
     if not ds.filename or ds.mode == "directquery":
         raise HTTPException(400, "Prep preview is available for import-mode datasets only")
     if not isinstance(steps, list) or len(steps) > MAX_STEPS:
         raise HTTPException(400, f"steps must be a list of at most {MAX_STEPS}")
+    await _require_readable_join_targets(db, current_user, steps)
     rls_expr = await resolve_rls_expr(db, current_user, dataset_id)
     denied = await resolve_denied_columns(db, current_user, dataset_id)
     from ..services.prep import resolve_join_frames
@@ -2449,9 +2457,11 @@ async def check_join(dataset_id: int, body: dict, db: AsyncSession = Depends(get
     from ..services.widget_data import apply_rls_filter
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
     if not ds.filename or ds.mode == "directquery":
         raise HTTPException(400, "Join checks are available for import-mode datasets only")
     steps, index = body.get("steps"), body.get("index")
+    await _require_readable_join_targets(db, current_user, steps)
     if not isinstance(steps, list) or len(steps) > MAX_STEPS or not isinstance(index, int) \
             or not 0 <= index < len(steps) or not isinstance(steps[index], dict) or steps[index].get("kind") != "join":
         raise HTTPException(400, "steps[index] must be a join step")
@@ -2480,6 +2490,23 @@ async def check_join(dataset_id: int, body: dict, db: AsyncSession = Depends(get
 
 
 # ── Materialize: a pipeline's result as a dataset of its own ──────────────────
+
+async def _require_readable_join_targets(db: AsyncSession, user: User, steps) -> None:
+    """Every dataset a pipeline JOINS must be one this caller may read.
+
+    Join targets were checked for org only. Since datasets became per-user,
+    that let a member join a colleague's private dataset in the prep editor
+    and read its rows in the preview and the join check -- and a saved
+    pipeline carried them into the member's own charts and snapshots. Same
+    404 as a target that does not exist: a dataset you were not given does
+    not exist for you. (A dashboard VIEWER is unaffected: what they read is
+    the author's saved pipeline, through the dashboard's own rung.)"""
+    from ..core.capability import can_read_dataset
+    from ..services.prep import collect_join_dataset_ids
+    for sid in collect_join_dataset_ids(steps if isinstance(steps, list) else []):
+        if not await can_read_dataset(db, user, sid):
+            raise HTTPException(404, f"joined dataset {sid} does not exist")
+
 
 async def _validated_join_columns(
     db: AsyncSession, org_id: int, steps: list[dict],
@@ -2644,6 +2671,7 @@ async def materialize_dataset(
 
     known = {r[0] for r in (await db.execute(
         select(DatasetColumn.name).where(DatasetColumn.dataset_id == dataset_id))).all()}
+    await _require_readable_join_targets(db, current_user, steps)
     join_columns = await _validated_join_columns(db, current_user.org_id, steps)
     try:
         validate_prep_steps(steps, known, join_columns)
@@ -3028,6 +3056,7 @@ async def rebuild_dataset(
 
     known = {r[0] for r in (await db.execute(
         select(DatasetColumn.name).where(DatasetColumn.dataset_id == base.id))).all()}
+    await _require_readable_join_targets(db, current_user, steps)
     join_columns = await _validated_join_columns(db, current_user.org_id, steps)
     try:
         validate_prep_steps(steps, known, join_columns)

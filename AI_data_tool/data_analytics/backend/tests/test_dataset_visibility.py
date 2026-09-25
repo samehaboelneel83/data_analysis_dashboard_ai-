@@ -606,3 +606,55 @@ class TestADashboardPassesOnOnlyWhatItsAuthorCanRead:
         await db_session.commit()
         _, sheets = await build_digest(db_session, report, creator)
         assert sheets == 0
+
+
+class TestAJoinCannotReachAColleaguesDataset:
+    """E06 audit. Join targets were checked for ORG only, so a member could
+    join a colleague's private dataset in the prep editor and read its rows
+    in the preview and the join check -- and a saved pipeline or a snapshot
+    carried them into the member's own charts. Every authoring surface now
+    requires the caller to be able to read each joined dataset."""
+
+    def _join(self, right_id):
+        return {"kind": "join", "dataset_id": right_id, "how": "left",
+                "left_on": "region", "right_on": "region", "columns": ["amount"]}
+
+    @pytest.mark.asyncio
+    async def test_every_authoring_surface_refuses_the_private_join(self, client, world):
+        h = _headers(world["outsider"])
+        own, private = world["other"].id, world["owned"].id
+        steps = [self._join(private)]
+        for method, url, body in (
+                ("post", f"/api/v1/datasets/{own}/prep-preview", steps),
+                ("post", f"/api/v1/datasets/{own}/join-check", {"steps": steps, "index": 0}),
+                ("put", f"/api/v1/datasets/{own}/prep-steps", steps),
+                ("post", f"/api/v1/datasets/{own}/materialize", {"name": "Grab", "steps": steps})):
+            r = await getattr(client, method)(url, json=body, headers=h)
+            assert r.status_code == 404, (url, r.status_code, r.text)
+            assert "North" not in r.text
+
+    @pytest.mark.asyncio
+    async def test_the_owner_may_still_join_their_own_data(self, client, world):
+        h = _headers(world["owner"])
+        r = await client.post(f"/api/v1/datasets/{world['owned'].id}/prep-preview",
+                              json=[self._join(world["second"].id)], headers=h)
+        assert r.status_code == 200, r.text
+
+    @pytest.mark.asyncio
+    async def test_the_profile_is_as_private_as_the_dataset(self, client, world):
+        h = _headers(world["outsider"])
+        r = await client.post(f"/api/v1/datasets/{world['owned'].id}/analysis",
+                              json={"analysis_type": "full"}, headers=h)
+        assert r.status_code == 404
+        assert (await client.get(f"/api/v1/datasets/{world['owned'].id}/analysis", headers=h)).status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_applying_a_view_to_a_colleagues_dataset_is_refused(self, client, db_session, world):
+        from app.models.models import DataView
+        view = DataView(org_id=world["org"].id, name="Mine", payload={"measures": []},
+                        creator_user_id=world["outsider"].id)
+        db_session.add(view)
+        await db_session.commit()
+        r = await client.post(f"/api/v1/datasets/{world['owned'].id}/apply-data-view",
+                              params={"view_id": view.id}, headers=_headers(world["outsider"]))
+        assert r.status_code in (403, 404), r.text
