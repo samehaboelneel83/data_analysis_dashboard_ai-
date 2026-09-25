@@ -12,7 +12,7 @@ import type { BrushRange } from './chartRenderers/axisOptions'
 import { useWindowedRows, WINDOW_THRESHOLD } from './useWindowedRows'
 import { CustomVisual } from './CustomVisual'
 import { seriesName } from './chartRenderers/axisOptions'
-import { WidgetPlaceholder, missingRequiredRoles, familyOf } from './WidgetPlaceholder'
+import { WidgetPlaceholder, missingRequiredRoles, missingWidgetOptions, familyOf } from './WidgetPlaceholder'
 import { MeasuredChart } from './MeasuredChart'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -294,7 +294,7 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
   // (Some shapers answer an incomplete config with an empty result rather than
   // a refusal, so "nothing to draw" -- not only "no response" -- counts.)
   {
-    const missing = missingRequiredRoles(widget)
+    const missing = [...missingRequiredRoles(widget), ...missingWidgetOptions(widget)]
     // Same shapes WidgetRenderer counts for its row metric: many results carry
     // no `rows` key at all (matrix, cells, bars, links, forecast, value).
     const drawable = data?.rows?.length || data?.matrix?.length || data?.cells?.length

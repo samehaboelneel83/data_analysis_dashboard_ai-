@@ -40,6 +40,30 @@ export function missingRequiredRoles(widget: Pick<Widget, 'widget_type' | 'confi
     .map(rf => (rf.label ?? rf.role).replace(/\s*\(.*\)\s*$/, ''))
 }
 
+const HIERARCHY_TYPES = new Set(['tree', 'sunburst', 'icicle', 'circle_pack', 'dendrogram', 'org'])
+
+/** What a type needs that is chosen as a widget OPTION rather than a role slot:
+ *  a hierarchy's ordered levels, a layered map's first layer, a saved model.
+ *  Their ROLE_SPECS are all optional, so missingRequiredRoles found nothing
+ *  and an unfinished one said "No data." or drew nothing (BUG-038) instead of
+ *  the placeholder every other chart shows. */
+export function missingWidgetOptions(widget: Pick<Widget, 'widget_type' | 'config'>): string[] {
+  const cfg = (widget.config ?? {}) as Record<string, unknown>
+  const has = (k: string) => {
+    const v = cfg[k]
+    return !(v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0))
+  }
+  const wt = widget.widget_type
+  if (HIERARCHY_TYPES.has(wt)) return has('levels') || (has('id_col') && has('parent_col')) ? [] : ['Hierarchy levels']
+  if (wt === 'map_layers') {
+    return has(configKeyFor('category')) || (has(configKeyFor('lat')) && has(configKeyFor('lon')))
+      ? [] : ['Country or Latitude/Longitude']
+  }
+  if (wt === 'model_score') return has('prediction_model_id') ? [] : ['Saved model']
+  if (wt === 'model_compare') return has('compare') ? [] : ['Models to compare']
+  return []
+}
+
 
 type Family = 'bars' | 'line' | 'pie' | 'scatter' | 'table' | 'kpi' | 'map'
 

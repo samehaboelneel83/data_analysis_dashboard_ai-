@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import { WidgetPlaceholder, missingRequiredRoles, familyOf, emptyPickerReason } from './WidgetPlaceholder'
+import { WidgetPlaceholder, missingRequiredRoles, missingWidgetOptions, familyOf, emptyPickerReason } from './WidgetPlaceholder'
+import { WidgetBody } from './WidgetBody'
 
 describe('missingRequiredRoles', () => {
   it('names the required role a new bar chart still needs', () => {
@@ -46,5 +47,38 @@ describe('emptyPickerReason -- an empty picker always says why', () => {
   it('no column of the kind the field takes', () => {
     expect(emptyPickerReason(true, 'numeric')).toMatch(/no numeric columns/)
     expect(emptyPickerReason(true, 'datetime')).toMatch(/no date columns/)
+  })
+})
+
+describe('missingWidgetOptions (BUG-038)', () => {
+  const need = (widget_type: string, config: Record<string, unknown> = {}) =>
+    missingWidgetOptions({ widget_type, config } as never)
+
+  it('names what a hierarchy, a layered map or a scorer still needs', () => {
+    for (const t of ['tree', 'sunburst', 'icicle', 'circle_pack', 'dendrogram', 'org']) {
+      expect(need(t), t).toEqual(['Hierarchy levels'])
+    }
+    expect(need('map_layers')).toEqual(['Country or Latitude/Longitude'])
+    expect(need('model_score')).toEqual(['Saved model'])
+    expect(need('model_compare')).toEqual(['Models to compare'])
+  })
+
+  it('is satisfied by either hierarchy mode, either map layer, or a chosen model', () => {
+    expect(need('sunburst', { levels: ['region', 'city'] })).toEqual([])
+    expect(need('org', { id_col: 'id', parent_col: 'manager' })).toEqual([])
+    expect(need('org', { id_col: 'id' })).toEqual(['Hierarchy levels'])
+    expect(need('map_layers', { dimension: 'country' })).toEqual([])
+    expect(need('map_layers', { lat: 'lat', lon: 'lon' })).toEqual([])
+    expect(need('map_layers', { lat: 'lat' })).toEqual(['Country or Latitude/Longitude'])
+    expect(need('model_score', { prediction_model_id: 4 })).toEqual([])
+    expect(need('bar')).toEqual([])
+  })
+
+  it('an unfinished hierarchy shows the placeholder, not "No data."', () => {
+    render(<WidgetBody widget={{ id: 1, page_id: 1, widget_type: 'icicle', title: 'Icicle', config: {},
+      layout: { x: 0, y: 0, w: 6, h: 4 } } as never} data={{ rows: [] }}
+      localSelected={null} onClickPoint={() => {}} broadcasts={false} />)
+    expect(screen.getByTestId('widget-placeholder')).toHaveTextContent('Needs Hierarchy levels')
+    expect(screen.queryByText('No data.')).toBeNull()
   })
 })
