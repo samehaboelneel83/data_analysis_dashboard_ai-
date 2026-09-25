@@ -58,7 +58,9 @@ export function tileUrl(template: string, z: number, x: number, y: number): stri
     .replace('{s}', 'abc'[(x + y) % 3])
 }
 
-export interface TileImage { key: string; href: string; x: number; y: number; size: number }
+/** `z/tx/ty`: the tile's own address (tx wrapped into the world), which a
+ *  vector tile needs to turn its local coordinates back into lon/lat. */
+export interface TileImage { key: string; href: string; x: number; y: number; size: number; z: number; tx: number; ty: number }
 
 /**
  * The tiles that cover a w×h view of a d3 Web-Mercator projection.
@@ -85,7 +87,8 @@ export function tilesFor(projection: { scale(): number; (p: [number, number]): [
   for (let i = i0; i <= i1; i++) {
     for (let j = j0; j <= j1; j++) {
       const tx = ((i % n) + n) % n
-      out.push({ key: `${z}/${i}/${j}`, href: tileUrl(template, z, tx, j), x: x0 + i * size, y: y0 + j * size, size })
+      out.push({ key: `${z}/${i}/${j}`, href: tileUrl(template, z, tx, j), x: x0 + i * size, y: y0 + j * size, size,
+                 z, tx, ty: j })
     }
   }
   return out

@@ -86,7 +86,8 @@ export default function AdminMaps() {
           streets and terrain under every map; maps then use the tiles' Web Mercator projection.
         </p>
         {field('tile_url', 'Tile address', 'https://tiles.example.local/{z}/{x}/{y}.png',
-          'Must contain {z}, {x} and {y}. {s} rotates a/b/c subdomains. Tiles are fetched by each viewer’s browser.')}
+          'Must contain {z}, {x} and {y}. {s} rotates a/b/c subdomains. Tiles are fetched by each viewer’s browser. '
+          + 'Image tiles (.png/.jpg) or vector tiles (.pbf/.mvt, e.g. TileServer GL’s /data/<name>/{z}/{x}/{y}.pbf).')}
         {field('attribution', 'Attribution', '© OpenStreetMap contributors',
           'Shown in the corner of every map with tiles. Required by almost every tile licence.')}
         {field('contrast_tile_url', 'High-contrast tile address (optional)', 'https://tiles.example.local/contrast/{z}/{x}/{y}.png',
