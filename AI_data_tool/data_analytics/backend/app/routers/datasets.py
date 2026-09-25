@@ -3300,6 +3300,7 @@ async def refresh_dataset(
             "code": "schema_break",
             "missing": e.missing,
             "suggestions": e.suggestions,
+            "available": e.available,
             "dependents": {m: dependents.get(m, []) for m in e.missing},
         })
     except Exception as e:

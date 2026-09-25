@@ -356,7 +356,10 @@ export const datasetsApi = {
       `/datasets/${id}/suggest-dashboards`, body, { timeout: 300000, signal }).then(r => r.data),
   get:     (id: number) => api.get<Dataset>(`/datasets/${id}`).then(r => r.data),
   delete:  (id: number) => api.delete(`/datasets/${id}`),
-  refresh: (id: number, body?: { mode?: 'full' | 'incremental'; cursor_column?: string | null }) =>
+  // E05: a full refresh that drops a column in use answers 409 `schema_break`
+  // (see SchemaBreakDialog); resend with column_map (new -> old) or force.
+  refresh: (id: number, body?: { mode?: 'full' | 'incremental'; cursor_column?: string | null;
+                                 column_map?: Record<string, string>; force?: boolean }) =>
     api.post<Dataset>(`/datasets/${id}/refresh`, body ?? { mode: 'full' }).then(r => r.data),
   /** Set the automatic refresh interval, or null to clear it. Minimum 5 minutes;
    *  the server refuses DirectQuery (nothing is cached to refresh). */

@@ -27,9 +27,11 @@ class SchemaBreak(Exception):
     `suggestions` pairs each missing column with the new columns that look
     like its renamed self -- the mapping the caller can send back."""
 
-    def __init__(self, missing: list[str], suggestions: dict[str, list[str]]):
+    def __init__(self, missing: list[str], suggestions: dict[str, list[str]],
+                 available: list[str] | None = None):
         self.missing = missing
         self.suggestions = suggestions
+        self.available = available or []   # every incoming column, for a picker
         super().__init__("The source no longer has " + ", ".join(repr(m) for m in missing))
 
 
@@ -51,7 +53,7 @@ def guard_schema(df: pd.DataFrame, required: set[str] | None,
         for m in missing:
             same = [c for c in fresh if _norm(c) == _norm(m)]
             suggestions[m] = same or difflib.get_close_matches(str(m), [str(c) for c in fresh], n=3, cutoff=0.6)
-        raise SchemaBreak(missing, suggestions)
+        raise SchemaBreak(missing, suggestions, [str(c) for c in df.columns])
     return df
 
 

@@ -1024,3 +1024,52 @@ describe('DatasetDetail accessibility', () => {
     expect(await axeViolations(container)).toEqual([])
   })
 })
+
+describe('a refresh refused because the source changed (E05)', () => {
+  const refused = () => Object.assign(new Error('409'), { response: { status: 409, data: {
+    code: 'schema_break', detail: 'Not refreshed', missing: ['updated_at'],
+    suggestions: { updated_at: ['Updated At'] }, available: ['id', 'Updated At'],
+    dependents: { updated_at: [{ kind: 'widget', label: 'Latest on Sales' }] },
+  } } })
+
+  beforeEach(() => {
+    vi.mocked(analysisApi.get).mockRejectedValue(new Error('none'))
+    vi.mocked(dataPreviewApi.query).mockResolvedValue({ rows: [], total: 0, columns: [] } as never)
+    vi.mocked(datasetsApi.get).mockResolvedValue(importDataset())
+  })
+
+  const runRefresh = async () => {
+    fireEvent.click(await screen.findByRole('button', { name: /Refresh/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Run' }))
+  }
+
+  it('asks for the new name, preset to the likely match, and refreshes with the mapping', async () => {
+    vi.mocked(datasetsApi.refresh).mockReset()
+      .mockRejectedValueOnce(refused()).mockResolvedValueOnce({ ...importDataset(), row_count: 2 } as never)
+    renderDetail(29)
+    await runRefresh()
+
+    const dialog = await screen.findByRole('dialog', { name: 'The source changed' })
+    expect(dialog).toHaveTextContent('widget "Latest on Sales"')
+    expect(screen.getByLabelText('New name for updated_at')).toHaveValue('Updated At')
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh with these names' }))
+
+    await waitFor(() => expect(datasetsApi.refresh).toHaveBeenLastCalledWith(29,
+      expect.objectContaining({ mode: 'full', column_map: { 'Updated At': 'updated_at' } })))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'The source changed' })).toBeNull())
+  })
+
+  it('"Refresh anyway" sends force; "gone" leaves the name unmapped', async () => {
+    vi.mocked(datasetsApi.refresh).mockReset()
+      .mockRejectedValueOnce(refused()).mockResolvedValueOnce(importDataset() as never)
+    renderDetail(29)
+    await runRefresh()
+    await screen.findByRole('dialog', { name: 'The source changed' })
+    fireEvent.change(screen.getByLabelText('New name for updated_at'), { target: { value: '' } })
+    expect(screen.getByRole('button', { name: 'Refresh with these names' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh anyway' }))
+
+    await waitFor(() => expect(datasetsApi.refresh).toHaveBeenLastCalledWith(29,
+      expect.objectContaining({ force: true, column_map: {} })))
+  })
+})

@@ -467,6 +467,8 @@ class TestARefreshCannotSilentlyBreakWhatUsesIt:
         body = r.json()
         assert body["code"] == "schema_break" and body["missing"] == ["updated_at"]
         assert body["suggestions"] == {"updated_at": ["Updated At"]}
+        assert body["available"] == ["id", "Updated At"]       # for the mapping picker
+        assert body["available"] == ["id", "Updated At"]
         assert [d["kind"] for d in body["dependents"]["updated_at"]] == ["widget"]
         assert open(ds.filename, encoding="utf-8").read() == before      # untouched
 

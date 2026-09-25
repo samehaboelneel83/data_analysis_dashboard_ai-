@@ -35,6 +35,7 @@ import QueryBuilderDialog from '../components/QueryBuilderDialog'
 import DatasetShareDialog from '../components/DatasetShareDialog'
 import { AuthContext } from '../contexts/AuthContext'
 import toast from 'react-hot-toast'
+import SchemaBreakDialog, { isSchemaBreak, type SchemaBreak } from '../components/dataset/SchemaBreakDialog'
 
 import { type Tab, OPS, FILTER_FUNC_CATS, PAGE_SIZE } from './datasetDetail/constants'
 
@@ -357,13 +358,16 @@ export default function DatasetDetail() {
     }
   }
 
-  const handleRefresh = async (mode: 'full' | 'incremental' = 'full', cursorColumn?: string) => {
+  const handleRefresh = async (mode: 'full' | 'incremental' = 'full', cursorColumn?: string,
+                               resolve?: { column_map?: Record<string, string>; force?: boolean }) => {
     setRefreshing(true)
     setPvError(null)
     setShowRefreshMenu(false)
+    setSchemaBreak(null)
     try {
       const updated = await datasetsApi.refresh(dsId, {
         mode, cursor_column: mode === 'incremental' ? (cursorColumn || undefined) : undefined,
+        ...resolve,
       })
       setDs(updated)
       setCalcCols(updated.calculated_columns ?? [])
@@ -374,11 +378,19 @@ export default function DatasetDetail() {
       }
       loadPreview(0, filterRows, updated.calculated_columns ?? [], sortBy, sortDir, search)
     } catch (err: any) {
-      toast.error(err?.response?.data?.detail ?? 'Refresh failed')
+      // E05: refused because the source dropped a column in use -- nothing was
+      // written. Ask for the mapping instead of only toasting the refusal.
+      if (err?.response?.status === 409 && isSchemaBreak(err.response.data)) {
+        setSchemaBreak({ info: err.response.data, mode, cursorColumn })
+      } else {
+        toast.error(err?.response?.data?.detail ?? 'Refresh failed')
+      }
     } finally {
       setRefreshing(false)
     }
   }
+  const [schemaBreak, setSchemaBreak] = useState<
+    { info: SchemaBreak; mode: 'full' | 'incremental'; cursorColumn?: string } | null>(null)
 
   /** Minutes, or null to clear. The server owns the 5-minute floor -- repeating
    *  the number here would be a second place to update when it changes, so the
@@ -526,6 +538,12 @@ export default function DatasetDetail() {
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      {schemaBreak && (
+        <SchemaBreakDialog info={schemaBreak.info}
+          onMap={column_map => void handleRefresh(schemaBreak.mode, schemaBreak.cursorColumn, { column_map })}
+          onForce={column_map => void handleRefresh(schemaBreak.mode, schemaBreak.cursorColumn, { column_map, force: true })}
+          onClose={() => setSchemaBreak(null)} />
+      )}
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexShrink: 0 }}>
         <Link to="/datasets" style={{ color: 'var(--muted)', fontSize: 12, textDecoration: 'none' }}>{arrows.back} {tr('dataset.back')}</Link>
