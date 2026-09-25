@@ -201,3 +201,88 @@ class TestWhatTheReaderActuallySees:
         assert "10" in body, "the actual size is missing"
         assert "3" in body, "the configured cap is missing"
         assert "internal server error" not in body.lower()
+
+
+# ── E07: a database import is never silently partial ─────────────────────────
+
+def _sqlite_source(tmp_path, n, name="big"):
+    import sqlite3
+    path = tmp_path / f"{name}.db"
+    conn = sqlite3.connect(str(path))
+    conn.execute("CREATE TABLE t (id INTEGER, v REAL)")
+    conn.executemany("INSERT INTO t VALUES (?, ?)", [(i, i * 0.5) for i in range(n)])
+    conn.commit()
+    conn.close()
+    return {"type": "sqlite", "filepath": str(path)}, path
+
+
+class TestDatabaseImportsAreWholeOrRefused:
+    def test_a_table_past_100k_rows_imports_whole(self, tmp_path):
+        """It stopped at exactly 100,000 rows, and the dataset looked complete."""
+        from app.services.connections import import_to_dataframe
+        cfg, _ = _sqlite_source(tmp_path, 100_001)
+        assert len(import_to_dataframe(cfg, "t", None)) == 100_001
+
+    def test_over_the_cap_a_table_or_a_query_is_refused(self, tmp_path, monkeypatch):
+        from app.services.connections import ImportTooLarge, import_to_dataframe
+        monkeypatch.setattr(settings, "import_row_cap", 50)
+        cfg, _ = _sqlite_source(tmp_path, 51)
+        with pytest.raises(ImportTooLarge, match="more than 50 rows"):
+            import_to_dataframe(cfg, "t", None)
+        with pytest.raises(ImportTooLarge):
+            import_to_dataframe(cfg, None, "SELECT * FROM t WHERE id >= 0")
+        assert len(import_to_dataframe(cfg, None, "SELECT * FROM t WHERE id < 50")) == 50   # at the cap: fine
+
+    def test_an_empty_result_keeps_its_columns(self, tmp_path, monkeypatch):
+        from app.services.connections import import_to_dataframe
+        monkeypatch.setattr(settings, "import_row_cap", 10)
+        cfg, _ = _sqlite_source(tmp_path, 3)
+        got = import_to_dataframe(cfg, None, "SELECT * FROM t WHERE id > 99")
+        assert list(got.columns) == ["id", "v"] and got.empty
+
+    def test_a_quote_in_a_table_name_stays_an_identifier(self):
+        from app.services.connections import _limit_sql
+        assert _limit_sql("postgresql", 'x" UNION SELECT 1 --', 5) == 'SELECT * FROM "x"" UNION SELECT 1 --" LIMIT 5'
+
+
+class TestTheImportEndpoint:
+    @pytest.fixture(autouse=True)
+    def _uploads(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(settings, "upload_dir", str(tmp_path / "uploads"))
+
+    async def _source(self, db_session, org_id, cfg):
+        from app.models.models import DataSource
+        src = DataSource(name="db", type="sqlite", config={"filepath": cfg["filepath"]}, org_id=org_id)
+        db_session.add(src)
+        await db_session.commit()
+        await db_session.refresh(src)
+        return src
+
+    async def test_over_the_cap_is_a_clear_refusal_and_no_dataset(
+            self, client, db_session, two_orgs, auth_headers, tmp_path, monkeypatch):
+        from sqlalchemy import select
+        from app.models.models import Dataset
+        monkeypatch.setattr(settings, "import_row_cap", 10)
+        cfg, _ = _sqlite_source(tmp_path, 11)
+        src = await self._source(db_session, two_orgs["a"]["org"].id, cfg)
+        r = await client.post(f"/api/v1/data-sources/{src.id}/import", headers=auth_headers["a"],
+                              json={"dataset_name": "Too big", "table": "t"})
+        assert r.status_code == 400 and "more than 10 rows" in r.json()["detail"]
+        assert (await db_session.execute(select(Dataset).where(Dataset.name == "Too big"))).first() is None
+
+    async def test_two_imports_with_one_name_get_their_own_per_org_files(
+            self, client, db_session, two_orgs, auth_headers, tmp_path):
+        """The file was upload_dir/<name>.csv for EVERY org: the second import
+        overwrote the first, across tenants."""
+        from app.models.models import Dataset
+        cfg, _ = _sqlite_source(tmp_path, 3)
+        ids = []
+        for org in ("a", "b"):
+            src = await self._source(db_session, two_orgs[org]["org"].id, cfg)
+            r = await client.post(f"/api/v1/data-sources/{src.id}/import", headers=auth_headers[org],
+                                  json={"dataset_name": "Sales", "table": "t"})
+            assert r.status_code == 200, r.text
+            ids.append(r.json()["id"])
+        a, b = [await db_session.get(Dataset, i) for i in ids]
+        assert a.filename != b.filename
+        assert str(two_orgs["a"]["org"].id) in a.filename and str(two_orgs["b"]["org"].id) in b.filename

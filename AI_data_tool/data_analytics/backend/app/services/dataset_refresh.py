@@ -18,6 +18,17 @@ from ..core import telemetry
 from .frame_cache import sidecar_path, write_parquet_sidecar
 
 
+def write_csv_atomic(df: pd.DataFrame, path) -> None:
+    """Write beside the live file, then swap it in (E07). A refresh writes over
+    the file a dataset is reading; a crash or a full disk mid-write used to
+    leave a truncated CSV behind a dataset that still looked ready."""
+    import os
+    path = Path(path)
+    tmp = path.with_name(path.name + ".tmp")
+    df.to_csv(tmp, index=False)
+    os.replace(tmp, path)
+
+
 class SchemaBreak(Exception):
     """The source no longer has columns something on this dataset uses (E05).
 
@@ -73,7 +84,7 @@ def rewrite_dataset_file(
     df = guard_schema(import_to_dataframe(source_cfg, source_table, source_query), required_columns)
     path = Path(filename)
     path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(path, index=False)
+    write_csv_atomic(df, path)
     write_parquet_sidecar(str(path))  # synchronous like the rest; callers thread us
     return df, detect_types(df)
 
@@ -228,9 +239,13 @@ def _refresh_dataset_body(
         else:
             df = (pd.concat([existing_df, new_rows], ignore_index=True)
                   if existing_df is not None and len(existing_df) else new_rows)
+            # The cap is on what the dataset HOLDS: appending past it refuses
+            # like a full load over it would, rather than growing unchecked.
+            from .connections import _checked, _import_cap
+            _checked(df, _import_cap())
             if path is not None:
                 path.parent.mkdir(parents=True, exist_ok=True)
-                df.to_csv(path, index=False)
+                write_csv_atomic(df, path)
                 write_parquet_sidecar(str(path))
             return {
                 "df": df, "type_map": detect_types(df), "mode": "incremental",
@@ -244,7 +259,7 @@ def _refresh_dataset_body(
                       required_columns, column_map)
     if path is not None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        df.to_csv(path, index=False)
+        write_csv_atomic(df, path)
         write_parquet_sidecar(str(path))
     new_cursor = _max_cursor(df, cursor_column, cursor_value) if cursor_column else cursor_value
     return {

@@ -568,10 +568,12 @@ async def import_dataset(ds_id: int, req: ImportRequest, db: AsyncSession = Depe
             file_path = Path(file_path_hint)
             file_path.parent.mkdir(parents=True, exist_ok=True)
         else:
-            upload_dir = Path(settings.upload_dir)
-            upload_dir.mkdir(parents=True, exist_ok=True)
-            safe_name = req.dataset_name.replace(' ', '_').replace('/', '_')
-            file_path = upload_dir / f"{safe_name}.csv"
+            # E07: a fresh, per-org path -- the same allocator uploads use. It
+            # was  upload_dir/<dataset name>.csv : shared by EVERY org, so two
+            # imports named alike overwrote each other's data across tenants,
+            # and a name carrying  ..\  escaped the upload folder on Windows.
+            from ..services.upload_store import allocate_path
+            file_path = allocate_path(current_user.org_id, "import.csv")
         # Type detection BEFORE the write, not after. `detect_types` converts in
         # place -- an epoch-integer column becomes real datetimes, a text date
         # column becomes datetimes -- and running it afterwards left that
@@ -579,7 +581,13 @@ async def import_dataset(ds_id: int, req: ImportRequest, db: AsyncSession = Depe
         # then labelled `datetime` while every widget re-read integers off the
         # CSV, which is a disagreement no unit test on the type can see.
         type_map = detect_types(df)
-        df.to_csv(file_path, index=False)
+        # Written aside, then swapped in: a re-import writes over the LIVE file,
+        # and a crash or a full disk mid-write left a truncated CSV that the
+        # dataset still pointed at. os.replace is atomic on one filesystem.
+        import os
+        tmp = file_path.with_name(file_path.name + ".tmp")
+        df.to_csv(tmp, index=False)
+        os.replace(tmp, file_path)
         write_parquet_sidecar(str(file_path))  # already on a worker thread
         return df, str(file_path), type_map
 

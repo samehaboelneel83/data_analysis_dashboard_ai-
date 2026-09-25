@@ -12,7 +12,10 @@ def _build_url(cfg: dict) -> str:
 
 
 def _limit_sql(db_type: str, table: str, limit: int, schema: str | None = None) -> str:
-    full = f'"{schema}"."{table}"' if schema else f'"{table}"'
+    # An embedded quote is doubled, as SQL requires: interpolated raw, a table
+    # named  x" UNION ...  would leave its identifier and become SQL.
+    q = lambda name: '"' + str(name).replace('"', '""') + '"'  # noqa: E731
+    full = f'{q(schema)}.{q(table)}' if schema else q(table)
     if db_type == 'sqlserver':
         return f"SELECT TOP {limit} * FROM {full}"
     elif db_type == 'oracle':
@@ -125,22 +128,68 @@ def preview_table(cfg: dict, table: str | None, query: str | None, limit: int = 
         engine.dispose()
 
 
+class ImportTooLarge(ValueError):
+    """The source has more rows than an import may hold (settings.import_row_cap).
+
+    E07: a TABLE import used to stop silently at 100,000 rows and the dataset
+    looked complete -- a partial dataset masquerading as ready. Refusing, with
+    the way forward, is the same call the cap already makes everywhere else."""
+
+
+def _too_large(cap: int) -> ImportTooLarge:
+    return ImportTooLarge(
+        f"The source returns more than {cap:,} rows, the import limit. Narrow it with a "
+        "query (a filter or a date range), or ask an administrator to raise IMPORT_ROW_CAP.")
+
+
+def _import_cap() -> int:
+    from ..core.config import settings
+    return int(settings.import_row_cap or 0)
+
+
+def _checked(df: pd.DataFrame, cap: int) -> pd.DataFrame:
+    if cap and len(df) > cap:
+        raise _too_large(cap)
+    return df
+
+
+def _capped_read(sql: str, engine, params: dict | None, cap: int) -> pd.DataFrame:
+    """read_sql, stopping as soon as the cap is passed. Chunked, so a custom
+    query over a huge table is refused without first holding all of it in
+    memory, and dialect-free: the query itself is never rewritten."""
+    if not cap:
+        return pd.read_sql(sql, engine, params=params)
+    chunks, n = [], 0
+    for chunk in pd.read_sql(sql, engine, params=params, chunksize=min(cap + 1, 100_000)):
+        chunks.append(chunk)
+        n += len(chunk)
+        if n > cap:
+            raise _too_large(cap)
+    if not chunks:  # no rows: read once more for the column names
+        return pd.read_sql(sql, engine, params=params)
+    return pd.concat(chunks, ignore_index=True)
+
+
 def import_to_dataframe(cfg: dict, table: str | None, query: str | None, params: dict | None = None) -> pd.DataFrame:
+    cap = _import_cap()
     if cfg['type'] == 'api':
         result = _fetch_api(cfg, limit=None)
-        return pd.DataFrame(result['rows'], columns=result['columns'])
+        return _checked(pd.DataFrame(result['rows'], columns=result['columns']), cap)
     if cfg['type'] == 'access':
         from . import mdb
         _reject_access_query(query)
-        return mdb.read_table(_access_path(cfg), table)
+        return _checked(mdb.read_table(_access_path(cfg), table), cap)
     url    = _build_url(cfg)
     engine = create_engine(url, connect_args=connectors.connect_args(cfg))
     try:
-        sql = query.strip() if query else _limit_sql(connectors.sql_family_of(cfg) or cfg['type'], table, 100_000, cfg.get('schema'))
+        # A table read asks for ONE row past the cap: enough to know it is over,
+        # never the whole table. (cap 0 = no limit, for an operator with disk.)
+        sql = query.strip() if query else _limit_sql(connectors.sql_family_of(cfg) or cfg['type'], table,
+                                                    cap + 1 if cap else 10 ** 12, cfg.get('schema'))
         # F3: incremental refresh binds `:cursor_val` -- SQLAlchemy's text()
         # params rather than string formatting, so a cursor value can never
         # break out of its position regardless of type or content.
-        return pd.read_sql(sql, engine, params=params)
+        return _capped_read(sql, engine, params, cap)
     finally:
         engine.dispose()
 
