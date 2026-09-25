@@ -171,3 +171,60 @@ async def test_directquery_dataset_rejects_a_measure_role(db_session, two_orgs, 
 
     assert r.status_code == 400
     assert "not yet supported for DirectQuery" in r.json()["detail"]
+
+
+class TestMetricVersions:
+    """E05: editing a measure's formula changed every chart, export and AI
+    answer built on it, with no record of what it had been."""
+
+    async def _save(self, client, headers, ds, expression, agg=None):
+        body = {"name": "Margin", "expression": expression, **({"default_aggregation": agg} if agg else {})}
+        r = await client.post(f"/api/v1/datasets/{ds.id}/measures", json=body, headers=headers)
+        assert r.status_code == 200, r.text
+        return next(m for m in r.json() if m["name"] == "Margin")
+
+    async def test_a_changed_formula_is_a_new_version_and_the_old_one_is_kept(
+            self, db_session, two_orgs, auth_headers, client, tmp_path):
+        ds = await _make_dataset(db_session, two_orgs["a"]["org"].id, tmp_path)
+        h = auth_headers["a"]
+        v1 = await self._save(client, h, ds, "SUM(profit) / SUM(sales)")
+        assert v1["version"] == 1 and v1["history"] == [] and v1["saved_by"]
+        same = await self._save(client, h, ds, "SUM(profit) / SUM(sales)")
+        assert same["version"] == 1                          # nothing changed, no version
+        v2 = await self._save(client, h, ds, "SUM(profit) / SUM(sales) * 100")
+        assert v2["version"] == 2
+        assert [x["expression"] for x in v2["history"]] == ["SUM(profit) / SUM(sales)"]
+
+        hist = (await client.get(f"/api/v1/datasets/{ds.id}/measures/Margin/history", headers=h)).json()
+        assert hist["current"]["version"] == 2
+        assert [x["version"] for x in hist["history"]] == [1]
+
+    async def test_restore_brings_a_formula_back_as_a_new_version(
+            self, db_session, two_orgs, auth_headers, client, tmp_path):
+        ds = await _make_dataset(db_session, two_orgs["a"]["org"].id, tmp_path)
+        h = auth_headers["a"]
+        await self._save(client, h, ds, "SUM(profit) / SUM(sales)")
+        await self._save(client, h, ds, "SUM(profit) / SUM(sales) * 100")
+        r = await client.post(f"/api/v1/datasets/{ds.id}/measures/Margin/restore", json={"version": 1}, headers=h)
+        assert r.status_code == 200, r.text
+        m = next(x for x in r.json() if x["name"] == "Margin")
+        assert m["version"] == 3 and m["expression"] == "SUM(profit) / SUM(sales)"
+        assert [x["version"] for x in m["history"]] == [1, 2]      # history is only appended
+        missing = await client.post(f"/api/v1/datasets/{ds.id}/measures/Margin/restore", json={"version": 9}, headers=h)
+        assert missing.status_code == 404
+
+    async def test_a_rename_keeps_the_history(self, db_session, two_orgs, auth_headers, client, tmp_path):
+        ds = await _make_dataset(db_session, two_orgs["a"]["org"].id, tmp_path)
+        h = auth_headers["a"]
+        await self._save(client, h, ds, "SUM(profit) / SUM(sales)")
+        await self._save(client, h, ds, "SUM(profit) / SUM(sales) * 100")
+        r = await client.post(f"/api/v1/datasets/{ds.id}/measures/Margin/rename", json={"new_name": "Margin %"}, headers=h)
+        assert r.status_code == 200, r.text
+        hist = (await client.get(f"/api/v1/datasets/{ds.id}/measures/Margin %25/history", headers=h)).json()
+        assert hist["current"]["version"] == 2 and len(hist["history"]) == 1
+
+    async def test_another_org_sees_no_history(self, db_session, two_orgs, auth_headers, client, tmp_path):
+        ds = await _make_dataset(db_session, two_orgs["a"]["org"].id, tmp_path)
+        await self._save(client, auth_headers["a"], ds, "SUM(profit)")
+        r = await client.get(f"/api/v1/datasets/{ds.id}/measures/Margin/history", headers=auth_headers["b"])
+        assert r.status_code == 404

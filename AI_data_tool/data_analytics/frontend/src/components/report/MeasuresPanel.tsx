@@ -89,6 +89,20 @@ export default function MeasuresPanel({ datasetId, columns, onChanged }: Props) 
   const [preview, setPreview] = useState<MeasurePreviewResult | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /** Which measure's earlier formulas are open (E05 metric versions). */
+  const [historyOf, setHistoryOf] = useState<string | null>(null)
+
+  const restore = async (name: string, version: number) => {
+    try {
+      const next = await measuresApi.restore(datasetId, name, version)
+      setMeasures(next)
+      onChanged(next)
+      setHistoryOf(null)
+    } catch (e: any) {
+      // A restored formula is re-validated: a column it used may since have gone.
+      setError(e?.response?.data?.detail ?? 'Could not restore this version')
+    }
+  }
 
   const [loadFailed, setLoadFailed] = useState(false)
 
@@ -186,10 +200,24 @@ export default function MeasuresPanel({ datasetId, columns, onChanged }: Props) 
       )}
 
       {measures.map(m => (
-        <div key={m.name} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 7px',
-          background: 'var(--surface2)', borderRadius: 5, marginBottom: 3, fontSize: 11 }}>
+        <div key={m.name} style={{ marginBottom: 3 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 7px',
+          background: 'var(--surface2)', borderRadius: 5, fontSize: 11 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: 600 }}>{m.name}</div>
+            <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+              {m.name}
+              {/* E05: a formula that has changed says so -- every chart, export
+                  and AI answer on it changed with it. */}
+              {(m.history?.length ?? 0) > 0 && (
+                <button type="button" aria-expanded={historyOf === m.name}
+                  aria-label={`Version ${m.version ?? 1} of ${m.name}: show earlier formulas`}
+                  onClick={() => setHistoryOf(historyOf === m.name ? null : m.name)}
+                  style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 99, cursor: 'pointer',
+                    fontSize: 10, padding: '0 6px', color: 'var(--muted)', fontWeight: 500 }}>
+                  v{m.version ?? 1}
+                </button>
+              )}
+            </div>
             <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--muted)',
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {m.expression}
@@ -201,6 +229,23 @@ export default function MeasuresPanel({ datasetId, columns, onChanged }: Props) 
           <button title={`Delete ${m.name}`} aria-label={`Delete ${m.name}`}
             onClick={() => remove(m.name)}
             style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>×</button>
+        </div>
+        {historyOf === m.name && (
+          <ul aria-label={`Earlier formulas of ${m.name}`}
+            style={{ listStyle: 'none', margin: '2px 0 4px 10px', padding: 0, fontSize: 10.5 }}>
+            {[...(m.history ?? [])].reverse().map(h => (
+              <li key={h.version} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0' }}>
+                <span style={{ color: 'var(--muted)', minWidth: 22 }}>v{h.version}</span>
+                <span style={{ flex: 1, minWidth: 0, fontFamily: 'var(--mono)', overflow: 'hidden',
+                  textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={h.expression}>{h.expression}</span>
+                {h.saved_at && <span style={{ color: 'var(--muted)' }}>{h.saved_at.slice(0, 10)}</span>}
+                <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: 10, padding: '0 6px' }}
+                  aria-label={`Restore version ${h.version} of ${m.name}`}
+                  onClick={() => void restore(m.name, h.version)}>Restore</button>
+              </li>
+            ))}
+          </ul>
+        )}
         </div>
       ))}
 

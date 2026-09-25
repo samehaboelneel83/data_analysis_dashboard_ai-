@@ -10,6 +10,7 @@ vi.mock('../../services/api', () => ({
     save: vi.fn(),
     delete: vi.fn(),
     preview: vi.fn(),
+    restore: vi.fn(),
   },
 }))
 
@@ -188,5 +189,37 @@ describe('deleting a measure something still uses (E05)', () => {
     await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
     expect(measuresApi.delete).toHaveBeenCalledTimes(1)
     expect(screen.getByText('Margin')).toBeInTheDocument()
+  })
+})
+
+describe('metric versions (E05)', () => {
+  const versioned = {
+    name: 'Margin', expression: 'SUM(profit) / SUM(sales) * 100', version: 2,
+    history: [{ version: 1, expression: 'SUM(profit) / SUM(sales)', saved_at: '2026-09-20T10:00:00Z' }],
+  }
+
+  it('shows the version of a changed formula and restores an earlier one', async () => {
+    vi.mocked(measuresApi.list).mockResolvedValue([versioned] as never)
+    vi.mocked(measuresApi.restore).mockResolvedValue(
+      [{ ...versioned, version: 3, expression: 'SUM(profit) / SUM(sales)' }] as never)
+    const onChanged = vi.fn()
+    render(<MeasuresPanel datasetId={1} columns={columns} onChanged={onChanged} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Version 2 of Margin/ }))
+    const earlier = screen.getByRole('list', { name: 'Earlier formulas of Margin' })
+    expect(earlier).toHaveTextContent('v1')
+    expect(earlier).toHaveTextContent('SUM(profit) / SUM(sales)')
+    expect(earlier).toHaveTextContent('2026-09-20')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Restore version 1 of Margin' }))
+    await waitFor(() => expect(measuresApi.restore).toHaveBeenCalledWith(1, 'Margin', 1))
+    await waitFor(() => expect(onChanged).toHaveBeenCalled())
+  })
+
+  it('shows no version badge on a formula that never changed', async () => {
+    vi.mocked(measuresApi.list).mockResolvedValue([{ name: 'Total', expression: 'SUM(sales)', version: 1, history: [] }] as never)
+    render(<MeasuresPanel datasetId={1} columns={columns} onChanged={vi.fn()} />)
+    await screen.findByText('Total')
+    expect(screen.queryByRole('button', { name: /Version/ })).toBeNull()
   })
 })

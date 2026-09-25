@@ -1062,8 +1062,89 @@ async def save_measure(dataset_id: int, measure: MeasureDef, db: AsyncSession = 
     check_org(ds, current_user, "Dataset not found")
     await require_dataset_capability(db, current_user, dataset_id, "data")
     await _validate_measure(measure, ds, db)
+    prior = next((m for m in (ds.measures or []) if m.get("name") == measure.name), None)
     items = [m for m in (ds.measures or []) if m.get("name") != measure.name]
-    items.append(measure.model_dump(exclude_none=True))
+    items.append(_versioned(measure.model_dump(exclude_none=True), prior, current_user))
+    ds.measures = items
+    flag_modified(ds, "measures")
+    await db.commit()
+    return items
+
+
+# ── E05: metric versions ─────────────────────────────────────────────────────
+# A measure is the org's definition of a number ("Margin %"), and editing its
+# formula silently changed every chart, export and AI answer built on it, with
+# no record of what it had been. Each measure now carries its version and the
+# formulas it had before, inside its own JSON (so it travels with the dataset,
+# its snapshots and packages, and a rename keeps it). History is only ever
+# appended: a restore brings an old formula back as a NEW version.
+
+#: Past versions kept per measure; the oldest fall off.
+MEASURE_HISTORY_CAP = 20
+#: What makes a new version: the number would come out different.
+_VERSIONED_FIELDS = ("expression", "default_aggregation", "format")
+
+
+def _versioned(new: dict, prior: dict | None, user: User) -> dict:
+    """`new` with its version and history carried forward from `prior`: a
+    changed formula, aggregation or format pushes the prior one onto the
+    history and bumps the version; an unchanged save changes nothing."""
+    stamp = {"saved_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+             "saved_by": getattr(user, "email", None)}
+    if prior is None:
+        return {**new, "version": 1, "history": [], **stamp}
+    version = int(prior.get("version") or 1)
+    history = list(prior.get("history") or [])
+    if all(new.get(k) == prior.get(k) for k in _VERSIONED_FIELDS):
+        return {**new, "version": version, "history": history,
+                "saved_at": prior.get("saved_at"), "saved_by": prior.get("saved_by")}
+    history.append({"version": version,
+                    **{k: prior.get(k) for k in _VERSIONED_FIELDS if prior.get(k) is not None},
+                    "saved_at": prior.get("saved_at"), "saved_by": prior.get("saved_by")})
+    return {**new, "version": version + 1, "history": history[-MEASURE_HISTORY_CAP:], **stamp}
+
+
+@router.get("/{dataset_id}/measures/{measure_name}/history")
+async def measure_history(dataset_id: int, measure_name: str, db: AsyncSession = Depends(get_db),
+                          current_user: User = Depends(get_current_user)):
+    """The measure's current version and every earlier formula, newest first."""
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
+    m = next((m for m in (ds.measures or []) if m.get("name") == measure_name), None)
+    if m is None:
+        raise HTTPException(404, f"No measure named '{measure_name}'")
+    current = {"version": int(m.get("version") or 1),
+               **{k: m.get(k) for k in _VERSIONED_FIELDS if m.get(k) is not None},
+               "saved_at": m.get("saved_at"), "saved_by": m.get("saved_by")}
+    return {"name": measure_name, "current": current,
+            "history": sorted(m.get("history") or [], key=lambda h: -int(h.get("version") or 0))}
+
+
+class MeasureRestore(BaseModel):
+    version: int
+
+
+@router.post("/{dataset_id}/measures/{measure_name}/restore")
+async def restore_measure(dataset_id: int, measure_name: str, body: MeasureRestore,
+                          db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Bring an earlier formula back as a NEW version -- the history is never
+    rewritten, so undoing a restore is just restoring again."""
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_capability(db, current_user, dataset_id, "data")
+    m = next((m for m in (ds.measures or []) if m.get("name") == measure_name), None)
+    if m is None:
+        raise HTTPException(404, f"No measure named '{measure_name}'")
+    old = next((h for h in (m.get("history") or []) if int(h.get("version") or 0) == body.version), None)
+    if old is None:
+        raise HTTPException(404, f"'{measure_name}' has no version {body.version}")
+    restored = MeasureDef(name=measure_name, expression=old["expression"],
+                          default_aggregation=old.get("default_aggregation"), format=old.get("format"))
+    # The formula must still resolve today: a column it used may have gone.
+    await _validate_measure(restored, ds, db)
+    items = [x for x in (ds.measures or []) if x.get("name") != measure_name]
+    items.append(_versioned(restored.model_dump(exclude_none=True), m, current_user))
     ds.measures = items
     flag_modified(ds, "measures")
     await db.commit()

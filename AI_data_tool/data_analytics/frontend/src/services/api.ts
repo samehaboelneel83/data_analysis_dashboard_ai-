@@ -1435,6 +1435,20 @@ export interface MeasureDef {
   expression: string
   default_aggregation?: string
   format?: CalcColumnFormat
+  /** E05 metric versions, kept by the server: a changed formula is a new
+   *  version and the earlier ones are listed here, oldest first. */
+  version?: number
+  history?: MeasureVersion[]
+  saved_at?: string | null
+  saved_by?: string | null
+}
+
+export interface MeasureVersion {
+  version: number
+  expression: string
+  default_aggregation?: string
+  saved_at?: string | null
+  saved_by?: string | null
 }
 
 export interface MeasurePreviewResult {
@@ -1449,6 +1463,9 @@ export const measuresApi = {
   save:    (dsId: number, m: MeasureDef)     => api.post<MeasureDef[]>(`/datasets/${dsId}/measures`, m).then(r => r.data),
   // `force`: delete even though something names it (the server answers 409 otherwise).
   delete:  (dsId: number, name: string, force?: boolean) => api.delete<MeasureDef[]>(`/datasets/${dsId}/measures/${encodeURIComponent(name)}`, force ? { params: { force: true } } : undefined).then(r => r.data),
+  /** Bring an earlier formula back -- as a NEW version; history is never rewritten. */
+  restore: (dsId: number, name: string, version: number) =>
+    api.post<MeasureDef[]>(`/datasets/${dsId}/measures/${encodeURIComponent(name)}/restore`, { version }).then(r => r.data),
   preview: (dsId: number, body: { expression: string; group_by?: string }) =>
     api.post<MeasurePreviewResult>(`/datasets/${dsId}/measures/preview`, body).then(r => r.data),
 }
