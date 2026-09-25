@@ -1,0 +1,3 @@
+# Line-ending normalization (CRLF/mixed -> LF, .gitattributes added).
+# Skip it in blame: git config blame.ignoreRevsFile .git-blame-ignore-revs
+6f27028e269007a32d9825cb886c5c42340ef3d2
