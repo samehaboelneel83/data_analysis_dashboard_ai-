@@ -1206,6 +1206,101 @@ html[data-presenting="1"] .dl-bleed { margin: 0; block-size: 100%; }
   color: var(--mc-danger);
 }
 
+/* Durable import jobs (components/jobs): the Imports list on Connections and
+   the status line in the schema browser. Same row in both places. */
+.dl-jobs {
+  margin-block-start: var(--dl-4);
+  padding: var(--dl-3) var(--dl-4);
+}
+
+.dl-jobs__title {
+  font-size: var(--dl-text-body);
+  font-weight: 600;
+  margin: 0;
+}
+
+.dl-jobs__sub {
+  margin: 2px 0 var(--dl-2);
+  font-size: var(--dl-text-data);
+  color: var(--muted);
+}
+
+.dl-job {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--dl-3);
+  padding-block: var(--dl-2);
+  border-block-start: 1px solid var(--border);
+}
+
+.dl-jobs .dl-job:first-of-type { border-block-start: 0; }
+
+.dl-job__body { flex: 1; min-inline-size: 0; }
+
+.dl-job__subject {
+  font-size: var(--dl-text-data);
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dl-job__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--dl-1) var(--dl-2);
+  font-size: var(--dl-text-data);
+  color: var(--muted);
+}
+
+.dl-job__state {
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--dl-text-micro);
+  border-radius: var(--dl-radius-badge);
+  padding-inline: var(--dl-2);
+  padding-block: 1px;
+  white-space: nowrap;
+  background: var(--surface2);
+  color: var(--text);
+}
+
+.dl-job__state--ok { background: var(--mc-success-soft); color: var(--mc-success); }
+.dl-job__state--fail { background: var(--mc-danger-soft); color: var(--mc-danger); }
+
+.dl-job__error {
+  margin-block-start: 2px;
+  font-size: var(--dl-text-data);
+  color: var(--mc-danger);
+  overflow-wrap: anywhere;
+}
+
+.dl-job__actions {
+  display: flex;
+  gap: var(--dl-1);
+  flex-shrink: 0;
+}
+
+.dl-job-inline {
+  padding: var(--dl-2) var(--dl-3);
+  border: 1px solid var(--border);
+  border-radius: var(--dl-radius-control);
+  background: var(--surface2);
+}
+
+.dl-job-inline .dl-job { border-block-start: 0; padding-block: 0; }
+
+/* The panel is already surface2; a neutral chip on it needs the lighter one. */
+.dl-job-inline .dl-job__state--neutral { background: var(--surface); }
+
+.dl-job-inline__hint {
+  margin-block-start: var(--dl-1);
+  font-size: var(--dl-text-micro);
+  color: var(--muted);
+}
+
 /* The read-only explanation for a non-admin. A notice, not an error: nothing
    has gone wrong, the controls simply are not theirs. */
 .dl-conn-notice {

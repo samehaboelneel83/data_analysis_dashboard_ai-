@@ -1,7 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { dataSourcesApi } from '../../services/api'
-import type { DataSource } from '../../services/api'
+import type { DataSource, Job } from '../../services/api'
+import { useT } from '../../i18n'
+import ImportJobRow from '../../components/jobs/ImportJobRow'
+import { useJob } from '../../components/jobs/useJob'
+import { newIdempotencyKey } from '../../components/jobs/idempotency'
 import toast from 'react-hot-toast'
 import { Z_OVERLAY } from '../../lib/zIndex'
 import IconLabel from '../../components/ui/IconLabel'
@@ -10,9 +14,16 @@ import { useModalDialog } from '../../components/ui/useModalDialog'
 import { TYPE_LABEL } from './typeMaps'
 
 /* ── Schema Browser ────────────────────────────────────── */
-export function SchemaBrowser({ ds, onClose }: { ds: DataSource; onClose: () => void }) {
+export function SchemaBrowser({ ds, onClose, onQueued }: {
+  ds: DataSource
+  onClose: () => void
+  /** Told when an import job is queued (or a retry replaces it), so the page
+   *  behind the dialog can show it in its Imports list. */
+  onQueued?: (job: Job) => void
+}) {
   const dialogRef = useModalDialog<HTMLDivElement>(onClose)
   const navigate = useNavigate()
+  const t = useT()
   const [tables,    setTables]    = useState<{ name: string; kind: string }[]>([])
   const [loading,   setLoading]   = useState(true)
   const [selected,  setSelected]  = useState<string | null>(null)
@@ -72,18 +83,55 @@ export function SchemaBrowser({ ds, onClose }: { ds: DataSource; onClose: () => 
     loadPreview(undefined, query)
   }
 
+  // An import copies data and can run for minutes, so it is a durable job on
+  // the server (E07): this dialog only starts it and follows it. DirectQuery
+  // copies nothing and still answers at once.
+  const [jobId, setJobId] = useState<number | null>(null)
+  // One key per intent: a double-click or a resent request finds the job it
+  // already made. A changed table, query, name or mode is a new intent.
+  const keyRef = useRef<string | null>(null)
+  useEffect(() => { keyRef.current = null }, [selected, query, dsName, mode])
+
+  const { job, setJob } = useJob(jobId, j => {
+    if (j.state === 'succeeded' && j.result?.dataset_id != null) {
+      toast.success(t('importJobs.succeededToast', {
+        name: j.result.dataset_name ?? dsName, rows: (j.result.row_count ?? 0).toLocaleString() }))
+      // Land on the new dataset, as Upload does -- not on Home.
+      navigate(`/datasets/${j.result.dataset_id}?new=1`)
+    } else {
+      // Failed or cancelled: the next click is a new attempt, not this job.
+      keyRef.current = null
+    }
+  })
+
+  const followJob = (j: Job) => {
+    setJobId(j.id)
+    setJob(j)
+    onQueued?.(j)
+  }
+
   const handleImport = async () => {
     if (!dsName.trim()) { toast.error('Enter a dataset name'); return }
     setImporting(true)
     try {
-      const r = await dataSourcesApi.import(ds.id, dsName, selected ?? undefined, query.trim() || undefined, mode)
-      toast.success(mode === 'directquery' ? `"${r.name}" connected — queries the live source directly` : `Imported "${r.name}" — ${r.row_count.toLocaleString()} rows`)
-      // Land on the new dataset, as Upload does -- not on Home.
-      navigate(`/datasets/${r.id}?new=1`)
+      if (mode === 'directquery') {
+        const r = await dataSourcesApi.import(ds.id, dsName, selected ?? undefined, query.trim() || undefined, mode)
+        toast.success(`"${r.name}" connected — queries the live source directly`)
+        navigate(`/datasets/${r.id}?new=1`)
+        return
+      }
+      if (!keyRef.current) keyRef.current = newIdempotencyKey()
+      const queued = await dataSourcesApi.queueImport(ds.id, {
+        dataset_name: dsName, table: selected ?? undefined, query: query.trim() || undefined,
+      }, keyRef.current)
+      toast.success(t('importJobs.queued', { name: dsName }))
+      followJob(queued)
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail ?? 'Import failed')
+      toast.error(e?.response?.data?.detail ?? (mode === 'directquery' ? 'Import failed' : t('importJobs.startFailed')))
     } finally { setImporting(false) }
   }
+
+  const jobActive = job != null && (job.state === 'queued' || job.state === 'running')
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', display: 'flex',
@@ -220,7 +268,7 @@ export function SchemaBrowser({ ds, onClose }: { ds: DataSource; onClose: () => 
                     placeholder="Dataset name…"
                     style={{ flex: 1, fontSize: 12, padding: '5px 8px', background: 'var(--surface2)',
                       border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)' }} />
-                  <button className="btn btn-primary btn-sm" onClick={handleImport} disabled={importing}>
+                  <button className="btn btn-primary btn-sm" onClick={handleImport} disabled={importing || jobActive}>
                     {importing
                       ? (mode === 'directquery' ? 'Connecting…' : 'Importing…')
                       : (mode === 'directquery'
@@ -233,6 +281,12 @@ export function SchemaBrowser({ ds, onClose }: { ds: DataSource; onClose: () => 
                     ? 'Queries the live source on every widget render — no data copied to this server.'
                     : 'Copies the current result set into this app; refresh by re-importing.'}
                 </div>
+                {job && (
+                  <div className="dl-job-inline">
+                    <ImportJobRow job={job} compact onChange={j => (j.id === job.id ? setJob(j) : followJob(j))} />
+                    {jobActive && <div className="dl-job-inline__hint">{t('importJobs.closeHint')}</div>}
+                  </div>
+                )}
               </div>
             )}
           </div>

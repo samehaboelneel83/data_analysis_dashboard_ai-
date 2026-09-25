@@ -39,7 +39,7 @@ what it owns, where its code lives, and the contract it exposes to the layer abo
 | 3 | **Storage & Persistence** | Durable state and cached state | `models/models.py`, `alembic/`, `services/cache_backend.py` |
 | 4 | **Query & Semantic** | Translating widget intent into safe, governed SQL | `services/query_builder.py`, `widget_data.py`, `widget_shaping.py`, `direct_query.py`, `duck_agg.py`, `prep.py`, `sql_expr.py`, `core/rls.py` |
 | 5 | **Analytics & AI** | Statistics, forecasting, anomaly detection, NL→SQL | `services/analysis/`, `services/agent/`, `analytics.py` |
-| 6 | **API & Services** | HTTP surface, authn/authz, delivery, sharing | `routers/` (29 modules), `core/security.py`, `services/delivery.py`, `refresh_scheduler.py`, `services/automation_runner.py` |
+| 6 | **API & Services** | HTTP surface, authn/authz, delivery, sharing | `routers/` (30 modules), `core/security.py`, `services/delivery.py`, `refresh_scheduler.py`, `services/automation_runner.py` |
 | 7 | **Presentation** | Report authoring and rendering | `frontend/src/pages/`, `components/report/` |
 
 Layers depend **downward only**. Layer 7 never reaches past Layer 6; Layer 6
@@ -1109,7 +1109,7 @@ relationships, a profile, and no unmasked personal data.
 
 ### Relational store
 
-PostgreSQL 16 Alpine. **81 tables** defined in `models/models.py` via async
+PostgreSQL 16 Alpine. **82 tables** defined in `models/models.py` via async
 SQLAlchemy, grouped by concern:
 
 | Group | Representative tables |
@@ -1129,11 +1129,11 @@ SQLAlchemy, grouped by concern:
 | Maps | `boundary_sets`, `org_map_settings` |
 | Models | `prediction_models` |
 | Workspace | `workspace_nodes`, `workspace_folder_roles`, `workspace_folder_grants` |
-| Pipelines | `dataflows`, `dataflow_capabilities`, `automation_runs`, `automation_steps`, `custom_connectors`, `schedule_failures` |
+| Pipelines | `dataflows`, `dataflow_capabilities`, `automation_runs`, `automation_steps`, `custom_connectors`, `schedule_failures`, `jobs` |
 | Platform | `saml_authn_requests`, `org_mcp_access`, `eval_runs` |
 | Ops | `sync_runs`, `schema_versions`, `column_stats`, `materializations`, `quotas`, `query_runs` |
 
-Schema changes go through **Alembic** (`backend/alembic/`, 39 revisions).
+Schema changes go through **Alembic** (`backend/alembic/`, 40 revisions).
 `postgres/init.sql` provides the initial schema and indexes.
 
 ### Cache
@@ -1408,7 +1408,7 @@ retrieval against the embeddings container, with a circuit breaker.
 
 ### Routers
 
-**29 router modules**, mounted with 31 `include_router` calls in `main.py` --
+**30 router modules**, mounted with 32 `include_router` calls in `main.py` --
 `analysis` and `metadata` each expose a second router. All under `/api/v1`
 except the agent:
 
@@ -1436,7 +1436,29 @@ except the agent:
 | `boundary_sets`, `map_settings` | Region boundaries, starter packs, basemap tiles |
 | `pins` | Pinned tiles |
 | `dataflows`, `custom_connectors` | Reusable prep flows, admin-defined connectors |
+| `jobs` | Durable background jobs: list, progress, cancel, retry |
 | `agent` | NL query (mounted at root) |
+
+### Durable jobs
+
+`services/jobs.py` is the plan's `Job` contract: long work runs outside the
+request that asked for it, in a worker loop started in `main.lifespan` (one per
+process, `JOB_WORKER_ENABLED`). Database imports are the first workload:
+`POST /data-sources/{id}/import-jobs` answers at once with a queued job, and
+`GET /jobs/{id}` reports its progress and, when it succeeds, the dataset id.
+`POST /data-sources/{id}/import` still imports inside the request; both run
+`services/source_import.py`.
+
+| Property | How |
+|----------|-----|
+| Claiming | A compare-and-set `UPDATE ... WHERE <still claimable>`; the job is kept only if one row changed. No advisory lock, so several processes share one queue. |
+| Restart | A claim holds a 60 s lease, renewed while the work runs. A dead worker stops renewing; the job is claimed again as `attempt + 1`. After `max_attempts` interrupted attempts it fails as `interrupted`. |
+| Fencing | Every state write is conditional on the worker's own lease token, and the handler commits its effects in the same transaction as `succeeded`. A worker that lost its lease commits nothing. |
+| Cancellation | Queued: cancelled at once. Running: stops at the next checkpoint with nothing written. A source query already running is bounded by `SOURCE_STATEMENT_TIMEOUT_S`, not interrupted. |
+| Idempotency | An `Idempotency-Key` header returns the job that key already made; the same key with other inputs is a 409. |
+| Retry | A new job with the same, immutable inputs and `retry_of` pointing back. |
+| Permissions | Checked again when the job runs, as the person who queued it now is. |
+| Errors | Sanitized: credentials masked, text capped, an unexpected crash stored as a generic sentence. |
 
 ### The automation chain
 
@@ -2148,8 +2170,8 @@ Agent pane (7)
 
 | Suite | Scope | Count |
 |-------|-------|-------|
-| Backend | `backend/tests/` | ~5,300 tests across 395 modules |
-| Frontend | colocated `*.test.ts(x)` | ~2,800 tests across 216 files |
+| Backend | `backend/tests/` | ~5,300 tests across 396 modules |
+| Frontend | colocated `*.test.ts(x)` | ~2,800 tests across 217 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |
 | Doc audit | `tests/test_architecture_doc.py` | Enforces the *counts* in this document |

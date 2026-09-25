@@ -175,6 +175,12 @@ class Settings(BaseSettings):
     # enforces it server-side; MySQL and ClickHouse as a socket read timeout.
     source_statement_timeout_s: int = Field(default=900, ge=0)
 
+    # E07/E12: run the durable job worker (services/jobs.py) in this process.
+    # On by default: queued imports never start without it. Off only for a
+    # process that must not do background work (a one-off admin shell, a
+    # dedicated web-only replica while another process runs the jobs).
+    job_worker_enabled: bool = True
+
     # E07: the zone every offset-carrying timestamp is stored in, as plain
     # wall-clock time (services/timezones.py). An IANA name; UTC unless an
     # install says otherwise (e.g. Africa/Cairo). Timestamps with no offset

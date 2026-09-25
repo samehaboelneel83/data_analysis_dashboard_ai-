@@ -2170,3 +2170,62 @@ class AutomationStep(Base):
     finished_at = Column(DateTime(timezone=True), nullable=True)
 
     run = relationship("AutomationRun", back_populates="steps")
+
+
+class Job(Base):
+    """One piece of long-running work, run outside the request that asked for it.
+
+    The plan's `Job` contract (§8): state, owner and org, immutable inputs, an
+    idempotency key, progress, attempt and lease, cancellation, output refs and
+    a sanitized error. Built once for every long workload (imports first, then
+    refreshes, exports, training and automation -- E07, E12, E13), one workload
+    at a time; `services/jobs.py` is the only code that changes `state`.
+
+    A worker owns a running job through its LEASE: `lease_owner` is a fresh
+    token per attempt and `lease_expires_at` is renewed while the work runs.
+    A process that dies stops renewing, the lease runs out, and any worker
+    (the restarted one included) claims the job again with `attempt + 1`.
+    Every write a worker makes is conditional on still holding its token, so
+    a worker that lost its lease cannot record an outcome -- or commit the
+    job's effects, which are committed in the same transaction as `succeeded`.
+
+    `inputs` is written once, at enqueue, and never edited: a retry is a NEW
+    row pointing back through `retry_of`, so what a job ran with is always
+    what its row says.
+    """
+    __tablename__ = "jobs"
+    __table_args__ = (UniqueConstraint("org_id", "idempotency_key",
+                                       name="uq_job_org_idempotency_key"),)
+    id         = Column(Integer, primary_key=True)
+    org_id     = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"),
+                        nullable=False, index=True)
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    #: The handler that runs it, e.g. "dataset.import" (services/jobs.HANDLERS).
+    kind       = Column(String(40), nullable=False)
+    #: queued | running | succeeded | failed | cancelled
+    state      = Column(String(20), nullable=False, default="queued", index=True)
+    #: A short human label for lists ("Warehouse · orders"). Display only.
+    subject    = Column(String(255), nullable=True)
+    inputs     = Column(JSON, nullable=False, default=dict)
+    #: Chosen by the client, so a double-click or a resent request finds the
+    #: job it already made instead of starting a second one.
+    idempotency_key = Column(String(100), nullable=True)
+    #: {"stage": "querying" | "writing" | "saving", "rows": int?}
+    progress   = Column(JSON, nullable=True)
+    #: Output references, e.g. {"dataset_id": 12, "row_count": 3400}.
+    result     = Column(JSON, nullable=True)
+    #: Sanitized, never a traceback: credentials in connection strings are
+    #: masked and the text is capped (services/jobs.sanitize_error).
+    error      = Column(Text, nullable=True)
+    #: refused | interrupted | unexpected | not_allowed
+    error_code = Column(String(40), nullable=True)
+    attempt      = Column(Integer, nullable=False, default=0)
+    max_attempts = Column(Integer, nullable=False, default=3)
+    lease_owner      = Column(String(100), nullable=True)
+    lease_expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    cancel_requested = Column(Boolean, nullable=False, default=False)
+    retry_of   = Column(Integer, ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True)
+    created_at  = Column(DateTime(timezone=True), default=datetime.utcnow, index=True)
+    updated_at  = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+    started_at  = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)

@@ -1866,6 +1866,41 @@ export interface IndexAdvice {
   index_check: 'checked' | 'unavailable' | 'unsupported'
 }
 
+/** A durable background job (backend services/jobs.py). `state` is the
+ *  truth; `cancel_requested` on a running job means "stopping". */
+export type JobState = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+export interface Job {
+  id: number
+  kind: string
+  state: JobState
+  subject: string | null
+  progress: { stage?: string; rows?: number; resumed?: boolean } | null
+  result: { dataset_id?: number; dataset_name?: string; row_count?: number;
+            col_count?: number; replaced?: boolean } | null
+  error: string | null
+  error_code: string | null
+  attempt: number
+  max_attempts: number
+  cancel_requested: boolean
+  retry_of: number | null
+  created_by: number | null
+  created_at: string | null
+  started_at: string | null
+  finished_at: string | null
+  updated_at: string | null
+}
+
+export const isJobActive = (j: Pick<Job, 'state'>) => j.state === 'queued' || j.state === 'running'
+
+export const jobsApi = {
+  list: (params: { kind?: string; state?: JobState; active?: boolean; limit?: number } = {}) =>
+    api.get<Job[]>('/jobs', { params }).then(r => r.data),
+  get: (id: number) => api.get<Job>(`/jobs/${id}`).then(r => r.data),
+  cancel: (id: number) => api.post<Job>(`/jobs/${id}/cancel`).then(r => r.data),
+  /** A NEW job with the same inputs; the failed one stays as history. */
+  retry: (id: number) => api.post<Job>(`/jobs/${id}/retry`).then(r => r.data),
+}
+
 export const dataSourcesApi = {
   indexAdvice: (id: number, days = 30) =>
     api.get<IndexAdvice>(`/data-sources/${id}/index-advice`, { params: { days } }).then(r => r.data),
@@ -1888,6 +1923,15 @@ export const dataSourcesApi = {
             query_model?: Record<string, unknown>, dataset_id?: number) =>
     api.post<{ id: number; name: string; row_count: number; col_count: number; mode: string }>(
       `/data-sources/${id}/import`, { dataset_name, table, query, mode, query_model, dataset_id }).then(r => r.data),
+  /** Queue an import as a durable job (E07) and return at once. The job runs
+   *  in the server's worker: closing the tab loses nothing, and it can be
+   *  cancelled or retried. `idempotencyKey` makes a double-click or a resent
+   *  request answer with the job it already made. Poll `jobsApi.get`. */
+  queueImport: (id: number, body: { dataset_name: string; table?: string; query?: string;
+                query_model?: Record<string, unknown>; dataset_id?: number },
+                idempotencyKey?: string) =>
+    api.post<Job>(`/data-sources/${id}/import-jobs`, { ...body, mode: 'import' },
+      idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : undefined).then(r => r.data),
   /** Propose a dashboard for a kind of person, from this connection's catalog --
    *  the step BEFORE a dataset exists. The backend has answered this since it
    *  shipped and nothing ever called it. Slow by nature (the model designs, then

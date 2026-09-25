@@ -7,6 +7,7 @@ import type { DataSource, ConnectorSpec } from '../services/api'
 import toast from 'react-hot-toast'
 import { useConfirm } from '../components/ui/ConfirmDialog'
 import QueryBuilderDialog from '../components/QueryBuilderDialog'
+import ImportQueue from '../components/jobs/ImportQueue'
 import { useListFilter } from '../components/ui/ListFilter'
 import IconLabel from '../components/ui/IconLabel'
 import {
@@ -46,6 +47,9 @@ export default function Connections() {
   const goTo = useNavigate()
   const [browser,  setBrowser]  = useState<DataSource | null>(null)
   const [building, setBuilding] = useState<DataSource | null>(null)
+  // Bumped when the schema browser queues an import, so the Imports list
+  // shows it without waiting for its next poll.
+  const [queueKey, setQueueKey] = useState(0)
   const [testing,  setTesting]  = useState<number | null>(null)
   const [testResults, setTestResults] = useState<Record<number, boolean | null>>({})
 
@@ -242,6 +246,11 @@ export default function Connections() {
         })}
       </div>
 
+      {/* Imports run as server-side jobs; this is where one started from the
+          browser can be found again after the dialog is closed. Admin-only,
+          like the import itself. */}
+      {canAdminister && <ImportQueue refreshKey={queueKey} />}
+
       {modal && catalog.length > 0 && (
         <ConnectionModal
           initial={modal === 'add' ? null : modal}
@@ -251,7 +260,8 @@ export default function Connections() {
         />
       )}
       {browser && (
-        <SchemaBrowser ds={browser} onClose={() => setBrowser(null)} />
+        <SchemaBrowser ds={browser} onClose={() => setBrowser(null)}
+          onQueued={() => setQueueKey(k => k + 1)} />
       )}
       {building && (
         <QueryBuilderDialog ds={building} onClose={() => setBuilding(null)} />

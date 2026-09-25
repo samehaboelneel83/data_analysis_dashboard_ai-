@@ -18,6 +18,7 @@ from .routers import boundary_sets, map_settings, prediction_models, authz, revi
 from .routers import workspace
 from .routers import dataflows
 from .routers import pins
+from .routers import jobs as jobs_router
 from .routers import agent as agent_router
 
 
@@ -416,6 +417,13 @@ async def lifespan(app: FastAPI):
     from .services.refresh_scheduler import run_scheduler
     scheduler = asyncio.create_task(run_scheduler(AsyncSessionLocal))
 
+    # E07/E12: the durable job worker (services/jobs.py). One per process,
+    # like the scheduler; claims are compare-and-set on the jobs row, so
+    # several processes share one queue without a lock. A job a previous
+    # process was running is resumed once its lease runs out.
+    from .services.jobs import run_worker as run_job_worker
+    job_worker = asyncio.create_task(run_job_worker(AsyncSessionLocal)) if settings.job_worker_enabled else None
+
     # T4: opt-in nightly eval gate (settings.eval_gate_enabled, default
     # False) -- a stand-in for CI, not CI itself. See services/eval_schedule.py.
     from .services import eval_schedule
@@ -474,6 +482,12 @@ async def lifespan(app: FastAPI):
             await scheduler
         except asyncio.CancelledError:
             pass
+        if job_worker is not None:
+            job_worker.cancel()
+            try:
+                await job_worker
+            except asyncio.CancelledError:
+                pass
         if eval_scheduler is not None:
             eval_scheduler.cancel()
             try:
@@ -577,6 +591,7 @@ app.include_router(dataflows.router,     prefix="/api/v1")
 app.include_router(platform.router,      prefix="/api/v1")
 app.include_router(sso.router,           prefix="/api/v1")
 app.include_router(pins.router,          prefix="/api/v1")
+app.include_router(jobs_router.router,   prefix="/api/v1")
 # Layer 1 — metadata plane. Two routers because the routes hang off two
 # different resources: sync/review/drift under a data source, column
 # statistics under a dataset.

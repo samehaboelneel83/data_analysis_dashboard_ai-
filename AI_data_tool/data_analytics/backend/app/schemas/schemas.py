@@ -611,6 +611,30 @@ class ImportRequest(BaseModel):
     dataset_id: Optional[int] = None
 
 
+class JobOut(BaseModel):
+    """A durable job as its owner sees it (services/jobs.py). `inputs` stays
+    server-side: it can carry a whole query model, and nothing on screen needs
+    it -- `subject` names the job and a retry reuses the stored inputs."""
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    kind: str
+    state: str
+    subject: Optional[str] = None
+    progress: Optional[dict] = None
+    result: Optional[dict] = None
+    error: Optional[str] = None
+    error_code: Optional[str] = None
+    attempt: int = 0
+    max_attempts: int = 3
+    cancel_requested: bool = False
+    retry_of: Optional[int] = None
+    created_by: Optional[int] = None
+    created_at: Optional[datetime] = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
 class OrganizationOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int

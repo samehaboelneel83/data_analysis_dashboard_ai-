@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 import pandas as pd
 from sqlalchemy import select
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import or_, select
 from sqlalchemy.orm import selectinload
@@ -436,257 +436,55 @@ async def preview_data(ds_id: int, req: TablePreviewRequest, db: AsyncSession = 
 async def import_dataset(ds_id: int, req: ImportRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_org_admin)):
     ds = await db.get(DataSource, ds_id)
     check_org(ds, current_user, "Data source not found")
-    cfg = dict(ds.config)
-    cfg['type'] = ds.type
+    # The work itself lives in services/source_import.py, shared with the
+    # queued path (POST /{ds_id}/import-jobs), so both run the same import.
+    from ..services.source_import import ImportRefused, import_from_source
+    try:
+        return await import_from_source(db, current_user, ds, req)
+    except ImportRefused as e:
+        raise HTTPException(e.status_code, str(e))
 
-    # D1: when dataset_id is set, this is a re-import of a builder-created
-    # dataset -- update the row and its data in place (full reload semantics)
-    # instead of creating a sibling. selectinload so `.columns` is safe to
-    # touch on this async session without a lazy-load round trip.
-    existing = None
+
+
+@router.post("/{ds_id}/import-jobs", status_code=202)
+async def queue_import(ds_id: int, req: ImportRequest,
+                       idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", max_length=100),
+                       db: AsyncSession = Depends(get_db),
+                       current_user: User = Depends(require_org_admin)):
+    """Queue an import as a durable job and answer at once (E07).
+
+    The import runs in the background worker: closing the tab loses nothing,
+    it can be cancelled and retried, and a server restart resumes it. Poll
+    GET /jobs/{id} for progress; its `result.dataset_id` is the dataset.
+
+    What can be checked now is checked now -- the connection, the dataset a
+    re-import targets -- so an obviously wrong request is refused here rather
+    than as a failed job a minute later. Everything is checked again when the
+    job runs. DirectQuery copies nothing and stays on POST /{ds_id}/import."""
+    from ..schemas.schemas import JobOut
+    from ..services import jobs as job_service
+    from ..services.source_import import IMPORT_JOB_KIND, job_inputs
+
+    ds = await db.get(DataSource, ds_id)
+    check_org(ds, current_user, "Data source not found")
+    if req.mode != "import":
+        raise HTTPException(400, "Only imports are queued; DirectQuery connects at once "
+                                 "(POST /data-sources/{id}/import)")
+    if not (req.dataset_name or "").strip():
+        raise HTTPException(400, "Enter a dataset name")
+    if not req.table and not (req.query or "").strip():
+        raise HTTPException(400, "Choose a table or write a query")
     if req.dataset_id is not None:
-        result = await db.execute(
-            select(Dataset).options(selectinload(Dataset.columns)).where(Dataset.id == req.dataset_id)
-        )
-        existing = result.scalar_one_or_none()
-        check_org(existing, current_user, "Dataset not found")
-
-    async def _replace_columns(dataset: Dataset, cols: list[DatasetColumn]) -> None:
-        # semantic_type (email/phone/url/...) comes from metadata sync or a
-        # manual edit, never from this re-import's fresh type detection --
-        # carry it forward by column name or every re-import quietly wipes it
-        # until the next metadata sync, degrading the codeless RLS builder
-        # and auto-generate in the meantime.
-        semantic_types = {c.name: c.semantic_type for c in dataset.columns if c.semantic_type}
-        # Provenance survives a re-import for the same reason semantic_type
-        # does: it was established once, possibly from a more informative
-        # query than this one, and `link_columns` below can only ADD links.
-        # Losing it would silently strip every description the dataset had
-        # been resolving through it until the next sync.
-        source_links = {c.name: c.source_column_id for c in dataset.columns if c.source_column_id}
-        for col in list(dataset.columns):
-            await db.delete(col)
-        await db.flush()
-        for col in cols:
-            if col.semantic_type is None:
-                col.semantic_type = semantic_types.get(col.name)
-            if col.source_column_id is None:
-                col.source_column_id = source_links.get(col.name)
-            db.add(col)
-
-    if req.mode == "directquery":
-        # Refuse up front for a source that cannot serve DirectQuery at all.
-        # The probe below is only a preview, and preview works for import-only
-        # types (Access reads its file, the API connector fetches its rows), so
-        # without this check the request SUCCEEDS and creates a dataset that
-        # cannot render -- the failure surfaces later, at the first widget, far
-        # from the choice that caused it.
-        try:
-            spec = connectors.resolve(ds.type)
-        except connectors.UnknownConnector:
-            spec = None
-        if spec is not None and not spec.supports_directquery:
-            raise HTTPException(
-                400, f"{spec.label} cannot be queried live — import the table "
-                     f"instead (mode='import')")
-
-        # No data materializes -- just a lightweight schema probe (same preview_table
-        # used by the schema browser) to populate DatasetColumn rows, since the
-        # DirectQuery query path (direct_query.py) validates every column it touches
-        # against that allowlist before it ever reaches SQL.
-        def _probe():
-            return preview_table(cfg, req.table, req.query, limit=50)
-
-        try:
-            preview = await asyncio.to_thread(_probe)
-        except Exception as e:
-            raise HTTPException(400, str(e))
-
-        probe_df = pd.DataFrame(preview['rows'], columns=preview['columns'])
-        type_map = detect_types(probe_df) if len(probe_df) else {}
-        new_cols = [DatasetColumn(name=c, dtype=type_map.get(c, 'unknown'), stats={}) for c in preview['columns']]
-
-        if existing is not None:
-            existing.name = req.dataset_name
-            existing.description = f"DirectQuery from {ds.name} ({ds.type})"
-            existing.data_source_id = ds_id
-            existing.source_table = req.table
-            existing.source_query = req.query
-            existing.query_model = req.query_model
-            existing.mode = "directquery"
-            existing.filename = None
-            existing.row_count = 0
-            existing.col_count = len(preview['columns'])
-            existing.file_size = 0
-            for c in new_cols:
-                c.dataset_id = existing.id
-            await _replace_columns(existing, new_cols)
-            # Record where each column came from, so `services/knowledge.py` can
-            # resolve its description, semantic type and enum labels out of the
-            # source catalog at read time. Best-effort by design: a source that was
-            # never synced has no catalog to link against, and an import must not
-            # fail because metadata is missing.
-            await knowledge.link_columns(db, existing)
-            await _audit_import(db, current_user, existing, ds, req, replaced=True)
-            await db.commit()
-            await db.refresh(existing)
-            return {'id': existing.id, 'name': existing.name, 'row_count': 0, 'col_count': existing.col_count, 'mode': 'directquery'}
-
-        dataset = Dataset(
-            name=req.dataset_name,
-            description=f"DirectQuery from {ds.name} ({ds.type})",
-            filename=None, row_count=0, col_count=len(preview['columns']), file_size=0,
-            data_source_id=ds_id, source_table=req.table, source_query=req.query,
-            query_model=req.query_model, mode="directquery", org_id=current_user.org_id,
-        )
-        db.add(dataset)
-        await db.flush()
-        for c in new_cols:
-            c.dataset_id = dataset.id
-            db.add(c)
-        # Record where each column came from, so `services/knowledge.py` can
-        # resolve its description, semantic type and enum labels out of the
-        # source catalog at read time. Best-effort by design: a source that was
-        # never synced has no catalog to link against, and an import must not
-        # fail because metadata is missing.
-        await knowledge.link_columns(db, dataset)
-        await _audit_import(db, current_user, dataset, ds, req, replaced=False)
-        await db.commit()
-        await db.refresh(dataset)
-        return {'id': dataset.id, 'name': dataset.name, 'row_count': 0, 'col_count': dataset.col_count, 'mode': 'directquery'}
-
-    def _run(file_path_hint: str | None):
-        df = import_to_dataframe(cfg, req.table, req.query)
-        # Two columns with the same name make `df[name]` a DataFrame rather than a
-        # Series, and every later truth test on it raises a pandas message that
-        # names nothing the person wrote. Refuse here, naming the column instead.
-        dupes = duplicate_columns(df.columns)
-        if dupes:
-            raise ValueError(
-                "The query returns more than one column named %s. Give each one a "
-                "different name with AS, for example `l.unit AS lab_unit`."
-                % ", ".join("'%s'" % d for d in dupes))
-        if file_path_hint:
-            file_path = Path(file_path_hint)
-            file_path.parent.mkdir(parents=True, exist_ok=True)
-        else:
-            # E07: a fresh, per-org path -- the same allocator uploads use. It
-            # was  upload_dir/<dataset name>.csv : shared by EVERY org, so two
-            # imports named alike overwrote each other's data across tenants,
-            # and a name carrying  ..\  escaped the upload folder on Windows.
-            from ..services.upload_store import allocate_path
-            file_path = allocate_path(current_user.org_id, "import.csv")
-        # Type detection BEFORE the write, not after. `detect_types` converts in
-        # place -- an epoch-integer column becomes real datetimes, a text date
-        # column becomes datetimes -- and running it afterwards left that
-        # conversion in a frame that had already been serialised. The dataset was
-        # then labelled `datetime` while every widget re-read integers off the
-        # CSV, which is a disagreement no unit test on the type can see.
-        # E07: offset-carrying instants to the reference zone, before typing
-        # (a two-offset column is otherwise typed datetime and unusable).
-        from ..services.timezones import normalize_instants
-        normalize_instants(df)
-        type_map = detect_types(df)
-        # Written aside, then swapped in: a re-import writes over the LIVE file,
-        # and a crash or a full disk mid-write left a truncated CSV that the
-        # dataset still pointed at. os.replace is atomic on one filesystem.
-        import os
-        tmp = file_path.with_name(file_path.name + ".tmp")
-        df.to_csv(tmp, index=False)
-        os.replace(tmp, file_path)
-        write_parquet_sidecar(str(file_path))  # already on a worker thread
-        return df, str(file_path), type_map
-
+        check_org(await db.get(Dataset, req.dataset_id), current_user, "Dataset not found")
+    what = req.table or "query"
+    subject = f"{ds.name} · {what} → {req.dataset_name.strip()}"
     try:
-        df, file_path, type_map = await asyncio.to_thread(_run, existing.filename if existing is not None else None)
-    except Exception as e:
-        raise HTTPException(400, str(e))
-
-    new_cols = [DatasetColumn(name=col_name, dtype=dtype,
-                               missing_pct=missing_pct(df[col_name]), stats={})
-                for col_name, dtype in type_map.items()]
-
-    if existing is not None:
-        existing.name = req.dataset_name
-        existing.description = f"Imported from {ds.name} ({ds.type})"
-        existing.filename = file_path
-        existing.row_count = len(df)
-        existing.col_count = len(df.columns)
-        existing.file_size = Path(file_path).stat().st_size
-        existing.data_source_id = ds_id
-        existing.source_table = req.table
-        existing.source_query = req.query
-        existing.query_model = req.query_model
-        existing.mode = "import"
-        for c in new_cols:
-            c.dataset_id = existing.id
-        await _replace_columns(existing, new_cols)
-        # Record where each column came from, so `services/knowledge.py` can
-        # resolve its description, semantic type and enum labels out of the
-        # source catalog at read time. Best-effort by design: a source that was
-        # never synced has no catalog to link against, and an import must not
-        # fail because metadata is missing.
-        await knowledge.link_columns(db, existing)
-        await _audit_import(db, current_user, existing, ds, req, replaced=True)
-        await db.commit()
-        await db.refresh(existing)
-        return {'id': existing.id, 'name': existing.name, 'row_count': existing.row_count, 'col_count': existing.col_count, 'mode': 'import'}
-
-    # Task E2: storage quota, new-dataset imports only -- a re-import above
-    # overwrites its own existing file in place rather than growing total
-    # usage, so it's exempt (checking it would need a "size delta" this
-    # in-place overwrite doesn't cleanly expose).
-    new_file_size = Path(file_path).stat().st_size
-    try:
-        await quotas.enforce_storage_quota(db, current_user.org_id, new_file_size)
-    except (HTTPException, quotas.QuotaExceeded):
-        # QuotaExceeded is NOT an HTTPException: catching only the latter left
-        # a refused import's file on disk (E07) -- and its parquet sidecar.
-        from ..services.frame_cache import remove_parquet_sidecar
-        Path(file_path).unlink(missing_ok=True)
-        remove_parquet_sidecar(str(file_path))
-        raise
-
-    dataset = Dataset(last_refreshed_at=datetime.utcnow(),  # E06: when the data was loaded
-        name=req.dataset_name,
-        description=f"Imported from {ds.name} ({ds.type})",
-        filename=file_path,
-        row_count=len(df),
-        col_count=len(df.columns),
-        file_size=Path(file_path).stat().st_size,
-        data_source_id=ds_id,
-        source_table=req.table,
-        source_query=req.query,
-        query_model=req.query_model,
-        org_id=current_user.org_id,
-    )
-    db.add(dataset)
-    await db.flush()
-    for c in new_cols:
-        c.dataset_id = dataset.id
-        db.add(c)
-
-    # Record where each column came from, so `services/knowledge.py` can
-    # resolve its description, semantic type and enum labels out of the
-    # source catalog at read time. Best-effort by design: a source that was
-    # never synced has no catalog to link against, and an import must not
-    # fail because metadata is missing.
-    await knowledge.link_columns(db, dataset)
-    await _audit_import(db, current_user, dataset, ds, req, replaced=False)
-    await db.commit()
-    await db.refresh(dataset)
-    return {'id': dataset.id, 'name': dataset.name, 'row_count': dataset.row_count, 'col_count': dataset.col_count, 'mode': 'import'}
-
-
-async def _audit_import(db: AsyncSession, user: User, dataset, source, req, *, replaced: bool) -> None:
-    """E07: who brought which data in, from where, and how much. Uploads,
-    exports and deletes were audited; an import from a database was not."""
-    from ..services.audit import record
-    what = req.table or ("query: " + " ".join((req.query or "").split())[:200])
-    rows = "live" if dataset.mode == "directquery" else f"{dataset.row_count:,} rows"
-    await record(db, user, "dataset.reimport" if replaced else "dataset.import", "dataset",
-                 dataset.id, f"{source.name} ({source.type}) {what} -> {rows}")
-
+        job, _created = await job_service.enqueue(
+            db, user=current_user, kind=IMPORT_JOB_KIND, inputs=job_inputs(ds_id, req),
+            subject=subject, idempotency_key=idempotency_key)
+    except job_service.IdempotencyConflict as e:
+        raise HTTPException(409, str(e))
+    return JobOut.model_validate(job)
 
 class SimilarDatasetsRequest(BaseModel):
     """What a dataset WOULD be built from, before anything is created."""

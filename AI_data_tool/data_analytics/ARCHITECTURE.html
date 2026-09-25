@@ -251,7 +251,7 @@
   <div class="stack">
     <a class="slab" data-l="1" href="#l1"><span class="sn">01</span><span class="st">Data Sources &amp; Connectivity</span><span class="sd">45 connectors · DirectQuery</span></a>
     <a class="slab" data-l="2" href="#l2"><span class="sn">02</span><span class="st">Ingestion &amp; Metadata</span><span class="sd">profile · introspect · drift</span></a>
-    <a class="slab" data-l="3" href="#l3"><span class="sn">03</span><span class="st">Storage &amp; Persistence</span><span class="sd">81 tables · Valkey cache</span></a>
+    <a class="slab" data-l="3" href="#l3"><span class="sn">03</span><span class="st">Storage &amp; Persistence</span><span class="sd">82 tables · Valkey cache</span></a>
     <a class="slab" data-l="4" href="#l4"><span class="sn">04</span><span class="st">Query &amp; Semantic</span><span class="sd">25 aggregations · RLS</span></a>
     <a class="slab" data-l="5" href="#l5"><span class="sn">05</span><span class="st">Analytics &amp; AI</span><span class="sd">stats · forecast · NL→SQL</span></a>
     <a class="slab" data-l="6" href="#l6"><span class="sn">06</span><span class="st">API &amp; Services</span><span class="sd">19 routers · auth · delivery</span></a>
@@ -268,7 +268,7 @@
         <tr><td class="num">3</td><th>Storage &amp; Persistence</th><td>Durable state and cached state</td><td><code>models/models.py</code>, <code>alembic/</code>, <code>cache_backend.py</code></td></tr>
         <tr><td class="num">4</td><th>Query &amp; Semantic</th><td>Translating widget intent into safe, governed SQL</td><td><code>query_builder.py</code>, <code>widget_data.py</code>, <code>widget_shaping.py</code>, <code>direct_query.py</code>, <code>duck_agg.py</code>, <code>prep.py</code>, <code>core/rls.py</code></td></tr>
         <tr><td class="num">5</td><th>Analytics &amp; AI</th><td>Statistics, forecasting, anomaly detection, NL→SQL</td><td><code>services/analysis/</code>, <code>services/agent/</code>, <code>analytics.py</code></td></tr>
-        <tr><td class="num">6</td><th>API &amp; Services</th><td>HTTP surface, authn/authz, delivery, sharing</td><td><code>routers/</code> (29 modules), <code>core/security.py</code>, <code>delivery.py</code>, <code>refresh_scheduler.py</code>, <code>services/automation_runner.py</code></td></tr>
+        <tr><td class="num">6</td><th>API &amp; Services</th><td>HTTP surface, authn/authz, delivery, sharing</td><td><code>routers/</code> (30 modules), <code>core/security.py</code>, <code>delivery.py</code>, <code>refresh_scheduler.py</code>, <code>services/automation_runner.py</code></td></tr>
         <tr><td class="num">7</td><th>Presentation</th><td>Report authoring and rendering</td><td><code>frontend/src/pages/</code>, <code>components/report/</code></td></tr>
       </tbody>
     </table>
@@ -619,7 +619,7 @@ STAT_FAMILIES       = {"postgresql"}</code></pre>
   <p class="owns"><strong>Owns:</strong> durable state, cached state, and schema evolution.</p>
 
   <h3>Relational store</h3>
-  <p>PostgreSQL 16 Alpine. <strong>81 tables</strong> defined in <code>models/models.py</code> via async SQLAlchemy, grouped by concern.</p>
+  <p>PostgreSQL 16 Alpine. <strong>82 tables</strong> defined in <code>models/models.py</code> via async SQLAlchemy, grouped by concern.</p>
   <div class="scroll">
     <table>
       <thead><tr><th>Group</th><th>Representative tables</th></tr></thead>
@@ -638,13 +638,13 @@ STAT_FAMILIES       = {"postgresql"}</code></pre>
         <tr><th>Maps</th><td><code>boundary_sets</code>, <code>org_map_settings</code></td></tr>
         <tr><th>Models</th><td><code>prediction_models</code></td></tr>
         <tr><th>Workspace</th><td><code>workspace_nodes</code>, <code>workspace_folder_roles</code>, <code>workspace_folder_grants</code></td></tr>
-        <tr><th>Pipelines</th><td><code>dataflows</code>, <code>dataflow_capabilities</code>, <code>automation_runs</code>, <code>automation_steps</code>, <code>custom_connectors</code>, <code>schedule_failures</code></td></tr>
+        <tr><th>Pipelines</th><td><code>dataflows</code>, <code>dataflow_capabilities</code>, <code>automation_runs</code>, <code>automation_steps</code>, <code>custom_connectors</code>, <code>schedule_failures</code>, <code>jobs</code></td></tr>
         <tr><th>Platform</th><td><code>saml_authn_requests</code>, <code>org_mcp_access</code>, <code>eval_runs</code></td></tr>
         <tr><th>Ops</th><td><code>sync_runs</code>, <code>schema_versions</code>, <code>column_stats</code>, <code>materializations</code>, <code>quotas</code>, <code>query_runs</code></td></tr>
       </tbody>
     </table>
   </div>
-  <p>Schema changes go through <strong>Alembic</strong> (<code>backend/alembic/</code>, 39 revisions). <code>postgres/init.sql</code> provides the initial schema and indexes.</p>
+  <p>Schema changes go through <strong>Alembic</strong> (<code>backend/alembic/</code>, 40 revisions). <code>postgres/init.sql</code> provides the initial schema and indexes.</p>
 
   <h3>Cache</h3>
   <p><code>services/cache_backend.py</code> defines a <code>CacheBackend</code> interface with two implementations — <code>InProcessCache</code> for single-process or test runs, and <code>ValkeyCache</code> for the deployed stack. <code>frame_cache.py</code> caches computed result frames; <code>core/rate_limit.py</code> uses the same backend for throttling.</p>
@@ -826,7 +826,7 @@ llm_reserved_interactive = 2</code></pre>
   <p class="owns"><strong>Owns:</strong> the HTTP surface, identity, and everything that leaves the system.</p>
 
   <h3>Routers</h3>
-  <p><strong>29 router modules</strong>, mounted with 31 <code>include_router</code> calls in <code>main.py</code> — <code>analysis</code> and <code>metadata</code> each expose a second router. All under <code>/api/v1</code> except the agent.</p>
+  <p><strong>30 router modules</strong>, mounted with 32 <code>include_router</code> calls in <code>main.py</code> — <code>analysis</code> and <code>metadata</code> each expose a second router. All under <code>/api/v1</code> except the agent.</p>
   <div class="scroll">
     <table>
       <thead><tr><th>Router</th><th>Surface</th></tr></thead>
@@ -853,7 +853,26 @@ llm_reserved_interactive = 2</code></pre>
         <tr><th><code>boundary_sets</code>, <code>map_settings</code></th><td>Region boundaries, starter packs, basemap tiles</td></tr>
         <tr><th><code>pins</code></th><td>Pinned tiles</td></tr>
         <tr><th><code>dataflows</code>, <code>custom_connectors</code></th><td>Reusable prep flows, admin-defined connectors</td></tr>
+        <tr><th><code>jobs</code></th><td>Durable background jobs: list, progress, cancel, retry</td></tr>
         <tr><th><code>agent</code></th><td>NL query (mounted at root)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Durable jobs</h3>
+  <p><code>services/jobs.py</code> is the plan's <code>Job</code> contract: long work runs outside the request that asked for it, in a worker loop started in <code>main.lifespan</code> (one per process, <code>JOB_WORKER_ENABLED</code>). Database imports are the first workload: <code>POST /data-sources/{id}/import-jobs</code> answers at once with a queued job, and <code>GET /jobs/{id}</code> reports its progress and, when it succeeds, the dataset id. <code>POST /data-sources/{id}/import</code> still imports inside the request; both run <code>services/source_import.py</code>.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Property</th><th>How</th></tr></thead>
+      <tbody>
+        <tr><th>Claiming</th><td>A compare-and-set <code>UPDATE ... WHERE &lt;still claimable&gt;</code>; the job is kept only if one row changed. No advisory lock, so several processes share one queue.</td></tr>
+        <tr><th>Restart</th><td>A claim holds a 60 s lease, renewed while the work runs. A dead worker stops renewing; the job is claimed again as <code>attempt + 1</code>. After <code>max_attempts</code> interrupted attempts it fails as <code>interrupted</code>.</td></tr>
+        <tr><th>Fencing</th><td>Every state write is conditional on the worker's own lease token, and the handler commits its effects in the same transaction as <code>succeeded</code>. A worker that lost its lease commits nothing.</td></tr>
+        <tr><th>Cancellation</th><td>Queued: cancelled at once. Running: stops at the next checkpoint with nothing written. A source query already running is bounded by <code>SOURCE_STATEMENT_TIMEOUT_S</code>, not interrupted.</td></tr>
+        <tr><th>Idempotency</th><td>An <code>Idempotency-Key</code> header returns the job that key already made; the same key with other inputs is a 409.</td></tr>
+        <tr><th>Retry</th><td>A new job with the same, immutable inputs and <code>retry_of</code> pointing back.</td></tr>
+        <tr><th>Permissions</th><td>Checked again when the job runs, as the person who queued it now is.</td></tr>
+        <tr><th>Errors</th><td>Sanitized: credentials masked, text capped, an unexpected crash stored as a generic sentence.</td></tr>
       </tbody>
     </table>
   </div>
@@ -1121,8 +1140,8 @@ llm_reserved_interactive = 2</code></pre>
     <table>
       <thead><tr><th>Suite</th><th>Scope</th><th>Count</th></tr></thead>
       <tbody>
-        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~5,300 tests · 395 modules</td></tr>
-        <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~2,800 tests · 216 files</td></tr>
+        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~5,300 tests · 396 modules</td></tr>
+        <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~2,800 tests · 217 files</td></tr>
         <tr><th>Evals</th><td><code>backend/evals/</code></td><td>Agent quality gates (<code>run_eval_gate.ps1</code>)</td></tr>
         <tr><th>Conformance</th><td><code>tests/test_layer_conformance.py</code></td><td>Enforces the layer boundaries above</td></tr>
         <tr><th>Doc audit</th><td><code>tests/test_architecture_doc.py</code></td><td>Enforces the <em>counts</em> in this document</td></tr>
