@@ -16,11 +16,11 @@ describe('DataViewsBar', () => {
   it('saves the current dataset as a named view', async () => {
     vi.mocked(dataViewsApi.save).mockResolvedValue({ id: 9, name: 'Q2' })
     render(<DataViewsBar datasetId={7} />)
-    fireEvent.click(await screen.findByRole('button', { name: /Save current as view/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Save settings as template/ }))
     fireEvent.change(screen.getByLabelText('Data view name'), { target: { value: 'Q2' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(dataViewsApi.save).toHaveBeenCalledWith(7, 'Q2'))
-    expect(screen.getByTestId('dataview-status')).toHaveTextContent('Saved data view "Q2"')
+    expect(screen.getByTestId('dataview-status')).toHaveTextContent('Saved settings template "Q2"')
   })
 
   it('applies a view and reports applied and skipped pieces verbatim', async () => {
@@ -30,7 +30,7 @@ describe('DataViewsBar', () => {
     })
     const onApplied = vi.fn()
     render(<DataViewsBar datasetId={7} onApplied={onApplied} />)
-    fireEvent.change(await screen.findByLabelText('Saved data views'), { target: { value: '3' } })
+    fireEvent.change(await screen.findByLabelText('Settings templates'), { target: { value: '3' } })
     fireEvent.click(screen.getByRole('button', { name: 'Apply to this dataset' }))
     await waitFor(() => expect(dataViewsApi.apply).toHaveBeenCalledWith(7, 3))
     const status = screen.getByTestId('dataview-status')
@@ -60,20 +60,20 @@ describe('the view applied to new datasets', () => {
 
   it('offers the toggle to an admin', async () => {
     render(<DataViewsBar datasetId={7} {...asAdmin} />)
-    fireEvent.change(await screen.findByLabelText('Saved data views'), { target: { value: '3' } })
+    fireEvent.change(await screen.findByLabelText('Settings templates'), { target: { value: '3' } })
     expect(screen.getByLabelText(/default for new datasets/i)).toBeInTheDocument()
   })
 
   it('does not offer it to anyone else', async () => {
     render(<DataViewsBar datasetId={7} />)
-    fireEvent.change(await screen.findByLabelText('Saved data views'), { target: { value: '3' } })
+    fireEvent.change(await screen.findByLabelText('Settings templates'), { target: { value: '3' } })
     expect(screen.queryByLabelText(/default for new datasets/i)).not.toBeInTheDocument()
   })
 
   it('turns it on for the chosen view', async () => {
     vi.mocked(dataViewsApi.setDefault).mockResolvedValue({ id: 3, name: 'Sales semantics', is_default: true })
     render(<DataViewsBar datasetId={7} {...asAdmin} />)
-    fireEvent.change(await screen.findByLabelText('Saved data views'), { target: { value: '3' } })
+    fireEvent.change(await screen.findByLabelText('Settings templates'), { target: { value: '3' } })
     fireEvent.click(screen.getByLabelText(/default for new datasets/i))
     await waitFor(() => expect(dataViewsApi.setDefault).toHaveBeenCalledWith(3, true))
   })
@@ -82,7 +82,7 @@ describe('the view applied to new datasets', () => {
     vi.mocked(dataViewsApi.list).mockResolvedValue([
       { id: 3, name: 'Sales semantics', pieces: [], is_default: true }])
     render(<DataViewsBar datasetId={7} {...asAdmin} />)
-    fireEvent.change(await screen.findByLabelText('Saved data views'), { target: { value: '3' } })
+    fireEvent.change(await screen.findByLabelText('Settings templates'), { target: { value: '3' } })
     await waitFor(() =>
       expect(screen.getByLabelText(/default for new datasets/i)).toBeChecked())
   })
@@ -91,7 +91,7 @@ describe('the view applied to new datasets', () => {
     // Nobody should have to discover from a surprising upload that every new
     // dataset now arrives with someone else's semantic layer on it.
     render(<DataViewsBar datasetId={7} {...asAdmin} />)
-    fireEvent.change(await screen.findByLabelText('Saved data views'), { target: { value: '3' } })
+    fireEvent.change(await screen.findByLabelText('Settings templates'), { target: { value: '3' } })
     expect(screen.getByText(/applied to every dataset uploaded into this organisation/i))
       .toBeInTheDocument()
   })

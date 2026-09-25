@@ -1348,7 +1348,7 @@ export default function DatasetDetail() {
             {/* Transform pipeline (F2) — sort/filter/aggregate/etc, ordered, previewable */}
             {ds.mode !== 'directquery' && (
               <div id="prep-pipeline" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 12 }}>
-                <PrepPipelinePanel datasetId={dsId} columns={ds.columns} />
+                <PrepPipelinePanel datasetId={dsId} columns={ds.columns} datasetName={ds.name} />
               </div>
             )}
 

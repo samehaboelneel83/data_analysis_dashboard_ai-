@@ -111,7 +111,7 @@ describe('the admin default reaches the data views bar', () => {
         <DataView datasetId={7} mode="import" />
       </AuthContext.Provider>
     )
-    fireEvent.change(await screen.findByLabelText('Saved data views'), { target: { value: '3' } })
+    fireEvent.change(await screen.findByLabelText('Settings templates'), { target: { value: '3' } })
     expect(await screen.findByLabelText(/default for new datasets/i)).toBeInTheDocument()
   })
 
@@ -131,7 +131,7 @@ describe('the admin default reaches the data views bar', () => {
         <DataView datasetId={7} mode="import" />
       </AuthContext.Provider>
     )
-    fireEvent.change(await screen.findByLabelText('Saved data views'), { target: { value: '3' } })
+    fireEvent.change(await screen.findByLabelText('Settings templates'), { target: { value: '3' } })
     await waitFor(() =>
       expect(screen.queryByLabelText(/default for new datasets/i)).not.toBeInTheDocument())
   })

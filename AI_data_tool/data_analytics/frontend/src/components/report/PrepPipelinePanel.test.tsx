@@ -91,7 +91,7 @@ describe('PrepPipelinePanel', () => {
     // The disabled step is still sent to preview (so the backend can mark it
     // skipped) and, critically, still sent to save -- it is never dropped.
     await waitFor(() => expect(prepApi.preview).toHaveBeenLastCalledWith(1, [{ kind: 'trim', disabled: true }]))
-    fireEvent.click(screen.getByRole('button', { name: /Save pipeline/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Save as this dataset’s view/ }))
     await waitFor(() => expect(prepApi.set).toHaveBeenCalledWith(1, [{ kind: 'trim', disabled: true }]))
   })
 
@@ -132,11 +132,11 @@ describe('PrepPipelinePanel', () => {
     expect(screen.getByTestId('prep-final-preview')).toHaveTextContent('rows out')
   })
 
-  it('saves the enabled steps via Save pipeline', async () => {
+  it("saves the enabled steps as the dataset's view", async () => {
     vi.mocked(prepApi.get).mockResolvedValue([{ kind: 'trim' }])
     render(<PrepPipelinePanel datasetId={1} columns={columns} />)
     await waitFor(() => expect(screen.getAllByTestId('prep-step-card')).toHaveLength(1))
-    fireEvent.click(screen.getByRole('button', { name: /Save pipeline/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Save as this dataset’s view/ }))
     await waitFor(() => expect(prepApi.set).toHaveBeenCalledWith(1, [{ kind: 'trim' }]))
   })
 
@@ -539,5 +539,21 @@ describe('preparation for analysis and modelling (2026-09-25)', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Fill from data' }))
     await waitFor(() => expect(screen.getByRole('textbox', { name: 'Categories' })).toHaveValue('US, CA'))
     expect(widgetDataApi.query).toHaveBeenCalledWith(1, { dimension: 'region', limit: 50 }, [], 'bar')
+  })
+})
+
+describe('the saved pipeline is the dataset view (E06, decided 2026-09-25)', () => {
+  it('says what saving means and offers the dashboard built on it', async () => {
+    vi.mocked(prepApi.get).mockResolvedValue([{ kind: 'trim' }])
+    vi.mocked(reportsApi.create).mockResolvedValue({ id: 91 } as any)
+    const assign = vi.fn()
+    vi.stubGlobal('location', { ...window.location, assign })
+    render(<PrepPipelinePanel datasetId={1} columns={columns} datasetName="Sales" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Save as this dataset’s view' }))
+    expect(await screen.findByTestId('view-saved')).toHaveTextContent('Every chart, report and export on this dataset now reads these steps')
+    fireEvent.click(screen.getByRole('button', { name: 'Build a dashboard on this view' }))
+    await waitFor(() => expect(reportsApi.create).toHaveBeenCalledWith({ name: 'Sales dashboard', dataset_id: 1 }))
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('/reports/91'))
+    vi.unstubAllGlobals()
   })
 })

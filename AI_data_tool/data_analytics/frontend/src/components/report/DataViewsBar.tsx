@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react'
 import { dataViewsApi } from '../../services/api'
 
 /**
- * Save/apply reusable data views: a named snapshot of a dataset's semantic
+ * Save/apply SETTINGS TEMPLATES (stored as "data views"): a named snapshot of a dataset's semantic
  * layer (roles, formats, calc columns, measures, filter, prep, hierarchy),
- * applicable to any other import dataset in the org.
+ * applicable to any other import dataset in the org. Called templates in the UI
+ * since 2026-09-25: a dataset's VIEW is its saved prep pipeline, and two things
+ * named "view" in one product read as one.
  *
  * The apply result is reported verbatim — what applied, what was skipped and
  * why — because a silent partial apply would leave the author believing
@@ -31,11 +33,11 @@ export default function DataViewsBar({ datasetId, onApplied, isAdmin }: {
     if (!name.trim()) return
     try {
       await dataViewsApi.save(datasetId, name.trim())
-      setStatus(`Saved data view "${name.trim()}"`)
+      setStatus(`Saved settings template "${name.trim()}"`)
       setSaving(false); setName('')
       refresh()
     } catch {
-      setStatus('Could not save the data view')
+      setStatus('Could not save the settings template')
     }
   }
 
@@ -82,13 +84,13 @@ export default function DataViewsBar({ datasetId, onApplied, isAdmin }: {
           <button className="btn" style={{ fontSize: 11 }} onClick={() => { setSaving(false); setName('') }}>Cancel</button>
         </>
       ) : (
-        <button className="btn" style={{ fontSize: 11 }} onClick={() => setSaving(true)}>Save current as view…</button>
+        <button className="btn" style={{ fontSize: 11 }} onClick={() => setSaving(true)}>Save settings as template…</button>
       )}
-      <select aria-label="Saved data views" value={selected} onChange={e => setSelected(e.target.value)} style={{ fontSize: 11 }}>
-        <option value="">— choose a view —</option>
+      <select aria-label="Settings templates" value={selected} onChange={e => setSelected(e.target.value)} style={{ fontSize: 11 }}>
+        <option value="">— choose a settings template —</option>
         {views.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
       </select>
-      <button className="btn" style={{ fontSize: 11 }} disabled={!selected} title={!selected ? 'Choose a saved view first' : undefined} onClick={() => void apply()}>Apply to this dataset</button>
+      <button className="btn" style={{ fontSize: 11 }} disabled={!selected} title={!selected ? 'Choose a template first' : undefined} onClick={() => void apply()}>Apply to this dataset</button>
       {isAdmin && chosen && (
         <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--muted)' }}>
           <input type="checkbox" checked={!!chosen.is_default}

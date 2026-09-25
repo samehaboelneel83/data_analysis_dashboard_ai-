@@ -19,6 +19,8 @@ export { joinPairs, writeJoinPairs, suggestJoinKeys } from './prepPipeline/join'
 interface Props {
   datasetId: number
   columns: DatasetColumn[]
+  /** For naming a dashboard built on the view. */
+  datasetName?: string
 }
 
 function summaryOf(s: PrepStep): string {
@@ -86,7 +88,7 @@ function summaryOf(s: PrepStep): string {
  *  `right_on` came first and is what every pipeline saved before composite
  *  keys still carries, so it is read as a one-pair list rather than migrated.
  */
-export default function PrepPipelinePanel({ datasetId, columns }: Props) {
+export default function PrepPipelinePanel({ datasetId, columns, datasetName }: Props) {
   const [steps, setSteps]     = useState<EditStep[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving]   = useState(false)
@@ -105,6 +107,7 @@ export default function PrepPipelinePanel({ datasetId, columns }: Props) {
   const [savingAs, setSavingAs] = useState(false)
   const [saveErr, setSaveErr] = useState<string | null>(null)
   const [saved, setSaved] = useState<Dataset | null>(null)
+  const [viewSaved, setViewSaved] = useState(false)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // The joined dataset already carries its column list on the standard read,
@@ -166,7 +169,8 @@ export default function PrepPipelinePanel({ datasetId, columns }: Props) {
     setSaving(true)
     try {
       await prepApi.set(datasetId, apiSteps())
-      toast.success('Pipeline saved')
+      toast.success('View saved')
+      setViewSaved(true)
     } catch (e: any) {
       toast.error(e?.response?.data?.detail || 'Save failed')
     } finally {
@@ -336,11 +340,27 @@ export default function PrepPipelinePanel({ datasetId, columns }: Props) {
         })}
       </div>
 
+      {/* E06: the saved pipeline IS the dataset's view (decided 2026-09-25).
+          It is applied on every read -- widgets, exports, AI, the quality
+          report -- with each viewer's own row and column security, which a
+          stored snapshot could not honour. Saying so is most of the feature. */}
       {steps.length > 0 && (
         <button className="btn btn-primary btn-sm" style={{ width: '100%', fontSize: 11, marginTop: 10 }}
           onClick={save} disabled={saving}>
-          {saving ? 'Saving…' : 'Save pipeline'}
+          {saving ? 'Saving…' : 'Save as this dataset’s view'}
         </button>
+      )}
+      {viewSaved && (
+        <div data-testid="view-saved" role="status"
+          style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span>Saved. Every chart, report and export on this dataset now reads these steps, each for its own viewer.</span>
+          <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}
+            onClick={() => {
+              reportsApi.create({ name: datasetName ? `${datasetName} dashboard` : 'New dashboard', dataset_id: datasetId })
+                .then(r => window.location.assign(`/reports/${(r as { id: number }).id}`))
+                .catch(e => toast.error(e?.response?.data?.detail ?? 'Could not create the dashboard'))
+            }}>Build a dashboard on this view</button>
+        </div>
       )}
 
       {previewErr && (
