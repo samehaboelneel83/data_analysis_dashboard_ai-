@@ -97,6 +97,11 @@ Two accounts exist so row-level security can be *shown* rather than described.
 Not secrets: they exist only inside the demo org, see only demo data, and are
 deleted on unseed. A login nobody can use demonstrates nothing.
 
+Emails are unique across the install, so these two addresses belong to the
+**first** org the demo is seeded into. Any other org seeded afterwards gets its
+own pair, `demo-emea+org<N>@example.invalid` and
+`demo-global+org<N>@example.invalid` (N is that org's id), same password.
+
 ---
 
 ## 1 · "Which regions are underperforming, and why?"

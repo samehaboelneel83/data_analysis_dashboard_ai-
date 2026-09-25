@@ -231,7 +231,7 @@ async def _remove_demo_identities_and_grants(db: AsyncSession, org_id: int) -> N
     """
     demo_users = (await db.execute(
         select(User).where(User.org_id == org_id,
-                           User.email.in_(list(DEMO_USER_EMAILS.values())))
+                           User.email.in_(demo_emails_for_org(org_id)))
     )).scalars().all()
     if not demo_users:
         return
@@ -497,6 +497,29 @@ DEMO_USER_EMAILS = {
     "global": "demo-global@example.invalid",
 }
 
+
+def org_demo_email(base: str, org_id: int) -> str:
+    """The per-org form of a demo login: demo-emea+org4@example.invalid."""
+    local, _, domain = base.partition("@")
+    return f"{local}+org{org_id}@{domain}"
+
+
+def demo_emails_for_org(org_id: int) -> list[str]:
+    """Every address a demo login of this org can have -- the documented base
+    one (the first org seeded keeps it) and the per-org form -- for teardown."""
+    return [e for base in DEMO_USER_EMAILS.values() for e in (base, org_demo_email(base, org_id))]
+
+
+async def _demo_email(db: AsyncSession, key: str, org_id: int) -> str:
+    """Emails are unique install-wide, so the documented address can belong to
+    one org only. Seeding a second org used to REUSE the first org's user --
+    org 4's "restricted login" logged into org 1. The first org to claim the
+    documented address keeps it (DEMO_WALKTHROUGH.md stays true); every other
+    org gets its own +org<N> address."""
+    base = DEMO_USER_EMAILS[key]
+    owner = (await db.execute(select(User.org_id).where(User.email == base))).scalars().first()
+    return base if owner is None or owner == org_id else org_demo_email(base, org_id)
+
 #: RLS filter for the restricted role. The Global analyst gets no rule at all,
 #: which is the comparison: same report, same widgets, different rows.
 #: The Demo — Sales dataset's region column holds "North America" / "Europe" /
@@ -549,9 +572,9 @@ async def _seed_demo_identities(db: AsyncSession, org_id: int) -> dict[str, User
             db.add(role)
             await db.flush()
 
-        email = DEMO_USER_EMAILS[key]
+        email = await _demo_email(db, key, org_id)
         user = (await db.execute(
-            select(User).where(User.email == email)
+            select(User).where(User.email == email, User.org_id == org_id)
         )).scalars().first()
         if user is None:
             user = User(

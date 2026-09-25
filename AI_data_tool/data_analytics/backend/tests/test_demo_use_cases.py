@@ -355,6 +355,37 @@ class TestIdentitiesAndGrants:
             assert sorted(pairs) == [(org_id, org_id), (other.id, other.id)], model.__name__
 
     @pytest.mark.asyncio
+    async def test_a_second_org_gets_its_own_logins_and_unseeds_them(self, org_id, db_session, seeded):
+        """Demo emails are unique install-wide, so a second org used to REUSE
+        the first org's demo users: its 'restricted login' logged into org 1.
+        The first org keeps the documented addresses; others get +org<N>."""
+        from app.models.models import Role, User
+        from app.services.demo_use_cases import DEMO_USER_EMAILS, _remove_existing_use_cases
+        other = Organization(name="Second Demo Co")
+        db_session.add(other)
+        await db_session.flush()
+        await seed_demo_use_cases(db_session, other.id, await seed_demo_datasets(db_session, other.id))
+
+        rows = (await db_session.execute(
+            select(User.email, User.org_id, Role.org_id).join(Role, Role.id == User.role_id)
+            .where(User.email.like("demo-%@example.invalid")))).all()
+        by_org = {}
+        for email, user_org, role_org in rows:
+            assert user_org == role_org, email          # a login's role is its own org's
+            by_org.setdefault(user_org, set()).add(email)
+        assert by_org[org_id] == set(DEMO_USER_EMAILS.values())
+        assert by_org[other.id] == {f"demo-emea+org{other.id}@example.invalid",
+                                    f"demo-global+org{other.id}@example.invalid"}
+
+        await _remove_existing_use_cases(db_session, other.id)
+        left = (await db_session.execute(select(User.email).where(User.org_id == other.id,
+                                                                  User.email.like("demo-%")))).scalars().all()
+        assert left == []
+        still = (await db_session.execute(select(User.email).where(User.org_id == org_id,
+                                                                   User.email.like("demo-%")))).scalars().all()
+        assert set(still) == set(DEMO_USER_EMAILS.values())       # org 1 untouched
+
+    @pytest.mark.asyncio
     async def test_the_emea_filter_actually_matches_rows(self, org_id, db_session, seeded):
         """A filter that matches nothing is indistinguishable from a filter that
         works perfectly -- both show zero rows. This shipped once: the rule read
