@@ -105,6 +105,10 @@ async def run_agent(db, *, question: str, source: DataSource | None = None,
     dataset_key = (",".join(str(i) for i in sorted(d.id for d in datasets))
                   if dataset_mode else None)
     table_names = dataset_table_names([d.name for d in datasets]) if dataset_mode else []
+    # The prose names a dataset as its author did, not by its query table
+    # (BUG-032); source mode's tables are real and have no other name.
+    display_names = (dict(zip(table_names, (d.name for d in datasets)))
+                     if dataset_mode else None)
 
     # Column security (R1): what this user's role must not see, per table.
     # Dataset mode maps each dataset's rules onto its DuckDB table name;
@@ -236,7 +240,8 @@ async def run_agent(db, *, question: str, source: DataSource | None = None,
                     if kind in ("presentation", "describe") else None)
             if prev is not None:
                 if kind == "describe":
-                    return await _describe(db, run, started, prev, resolved, client)
+                    return await _describe(db, run, started, prev, resolved, client,
+                                           names=display_names)
                 return _present(db, run, started, prev, resolved)
             if charting:
                 # "i need chart" with nothing charted yet: not a re-show, and
@@ -581,8 +586,9 @@ async def run_agent(db, *, question: str, source: DataSource | None = None,
     # already-correct final result is the failure this closes structurally,
     # not just by prompt instruction.
     answer = await explain(effective_question, results, concerns, client,
-                           sink_ids=sinks)
-    run.answer = answer or render_fallback(results, concerns, sink_ids=sinks)
+                           sink_ids=sinks, names=display_names)
+    run.answer = answer or render_fallback(results, concerns, sink_ids=sinks,
+                                           names=display_names)
 
     if not concerns:
         # Only a sane, successful answer is worth teaching from — see
@@ -688,7 +694,7 @@ async def _chat_reply(run: AgentRun, started: float, question: str,
 
 
 async def _describe(db, run: AgentRun, started: float, prev: dict,
-                    resolved: dict, client) -> AgentRun:
+                    resolved: dict, client, names: dict[str, str] | None = None) -> AgentRun:
     """"Explain this chart" -- the rows already exist, so the answer is prose
     ABOUT them and no query runs.
 
@@ -718,9 +724,9 @@ async def _describe(db, run: AgentRun, started: float, prev: dict,
                                       ms=0)
     run.intent = "describe"
     prose = await describe_result(resolved.get("question") or run.question,
-                                  results, concerns, client)
+                                  results, concerns, client, names=names)
     return _finish(run, started, status="ok",
-                   answer=prose or render_fallback(results, concerns))
+                   answer=prose or render_fallback(results, concerns, names=names))
 
 
 #: Formats that need two columns chosen before anything can be drawn.

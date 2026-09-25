@@ -512,3 +512,41 @@ class TestDatasetDashboardRequest:
         assert run.intent == "chat"
         assert "dashboard" in (run.answer or "").lower()
         assert (await db_session.execute(select(AgentStep))).scalars().all() == []
+
+
+class TestTheAnswerNamesTheDatasetAsItsAuthorDid:
+    async def test_the_explain_prompt_carries_the_display_name(self, db_session, tmp_path):
+        """BUG-032, both sides of the seam: the graph builds the query-table
+        names and must hand explain() the SAME mapping back to display names,
+        or the prose keeps saying `qa_chrome_sales` however explain() is
+        written."""
+        org = Organization(name="Acme")
+        db_session.add(org)
+        await db_session.flush()
+        role = Role(name="analyst", org_id=org.id)
+        db_session.add(role)
+        await db_session.flush()
+        user = User(email="n@corp.com", password_hash="x", org_id=org.id, role_id=role.id)
+        user.role = role
+        db_session.add(user)
+        path = _write_csv(tmp_path / "q.csv", ["region", "sales"], [("west", 2580), ("east", 10)])
+        ds = Dataset(name="QA_CHROME sales", org_id=org.id, mode="import", filename=path)
+        db_session.add(ds)
+        await db_session.flush()
+        db_session.add_all([DatasetColumn(dataset_id=ds.id, name="region", dtype="text"),
+                            DatasetColumn(dataset_id=ds.id, name="sales", dtype="numeric")])
+        await db_session.commit()
+
+        client = ScriptedClient(
+            classify=[NOT_AMBIGUOUS], plan=[ONE_STEP],
+            generate=[{"sql": "SELECT region, sum(sales) AS total FROM qa_chrome_sales GROUP BY region"}])
+        run = await run_agent(db_session, question="sales by region",
+                              datasets=[ds], user=user, client=client)
+        await db_session.commit()
+
+        assert run.status == "ok", run.answer
+        prompt = client.explain_calls[-1]
+        assert 'rows from "QA_CHROME sales"' in prompt
+        assert "rows from qa_chrome_sales" not in prompt
+        assert "'total': 2580}" in prompt and "2580.0" not in prompt
+        assert prompt.index("'west'") < prompt.index("'east'")

@@ -2,6 +2,9 @@
 correctly computed result must not be discarded when prose generation fails."""
 from __future__ import annotations
 
+import math
+from decimal import Decimal
+
 import sqlglot
 from sqlglot import exp
 
@@ -33,7 +36,17 @@ def _row_noun(r: StepResult) -> str:
     return "rows"
 
 
-def _label(r: StepResult) -> str:
+def _display(table: str, names: dict[str, str] | None) -> str:
+    """A dataset's own name for its query table (BUG-032). Dataset mode queries
+    each dataset under a sanitized table name ("QA_CHROME_sales" becomes
+    qa_chrome_sales), and answers used to repeat that internal name to the
+    person who named the data. A real database table (source mode) has no
+    other name and stays as it is."""
+    shown = (names or {}).get(table)
+    return f'"{shown}"' if shown else table
+
+
+def _label(r: StepResult, names: dict[str, str] | None = None) -> str:
     """What a result IS, for the model that will describe it.
 
     The figures used to be labelled `step step_1 (...)`, and the model read
@@ -55,12 +68,53 @@ def _label(r: StepResult) -> str:
         except Exception:
             tables = []
     if tables:
-        return f"rows from {', '.join(tables)}"
+        return f"rows from {', '.join(_display(t, names) for t in tables)}"
     return "query result"
 
 
+def _tidy(v):
+    """A number as a person writes it (BUG-032): a float64 sum reached the
+    model as 2580.0 and was repeated that way. Whole values lose the ".0";
+    others keep four decimals, more than any answer states."""
+    if isinstance(v, bool) or not isinstance(v, (float, Decimal)):
+        return v
+    f = float(v)
+    if math.isnan(f) or math.isinf(f):
+        return v
+    return int(f) if f.is_integer() and abs(f) < 1e15 else round(f, 4)
+
+
+def _is_number(v) -> bool:
+    return isinstance(v, (int, float, Decimal)) and not isinstance(v, bool)
+
+
+def _ordered(r: StepResult) -> list:
+    """The rows in the order a reader expects (BUG-032). With no ORDER BY the
+    engine returns groups in whatever order it likes, and the answer listed
+    them that way; then the rows go largest first by their LAST numeric
+    column -- the measure, which a SELECT puts after its dimensions. An
+    explicit ORDER BY is the author's order and is kept. Only the copy the
+    prose is written from is sorted; the stored result is untouched."""
+    rows = list(r.rows or [])
+    if r.step_id == "catalog" or len(rows) < 2 or not isinstance(rows[0], dict):
+        return rows
+    try:
+        if not r.sql or sqlglot.parse_one(r.sql).args.get("order") is not None:
+            return rows
+    except Exception:
+        return rows
+    numeric = [k for k in rows[0]
+               if all(row.get(k) is None or _is_number(row.get(k)) for row in rows)
+               and any(row.get(k) is not None for row in rows)]
+    if not numeric:
+        return rows
+    key = numeric[-1]
+    return sorted(rows, key=lambda row: (row.get(key) is None, -float(row.get(key) or 0)))
+
+
 def _facts(results: dict[str, StepResult],
-           sink_ids: set[str] | None = None) -> str:
+           sink_ids: set[str] | None = None,
+           names: dict[str, str] | None = None) -> str:
     """Only SINK steps' rows are ever shown to the model (H6 follow-up): a
     multi-step run's intermediate steps exist purely to feed a later step's
     SQL — their rows were already consumed by generate_sql's parent_facts —
@@ -80,14 +134,17 @@ def _facts(results: dict[str, StepResult],
             # because the shown sample carried no total count. Stating the
             # TOTAL next to the sample means the prose can never claim a
             # count its own figures disprove.
-            lines.append(f"{_label(r)} ({n} {_row_noun(r)}, showing {shown}): "
-                        f"{r.rows[:20]!r}")
+            sample = [{k: _tidy(v) for k, v in row.items()} if isinstance(row, dict) else row
+                      for row in _ordered(r)[:20]]
+            lines.append(f"{_label(r, names)} ({n} {_row_noun(r)}, showing {shown}): "
+                        f"{sample!r}")
     return "\n".join(lines)
 
 
 def render_fallback(results: dict[str, StepResult], concerns: list[str],
-                    sink_ids: set[str] | None = None) -> str:
-    text = "Result:\n" + _facts(results, sink_ids)
+                    sink_ids: set[str] | None = None,
+                    names: dict[str, str] | None = None) -> str:
+    text = "Result:\n" + _facts(results, sink_ids, names)
     if concerns:
         text += "\nNotes: " + "; ".join(concerns)
     return text
@@ -95,7 +152,8 @@ def render_fallback(results: dict[str, StepResult], concerns: list[str],
 
 async def describe(question: str, results: dict[str, StepResult],
                    concerns: list[str], client,
-                   sink_ids: set[str] | None = None) -> str | None:
+                   sink_ids: set[str] | None = None,
+                   names: dict[str, str] | None = None) -> str | None:
     """"Explain this chart" -- the rows are already on the person's screen.
 
     A separate prompt from `explain`, not a separate module: both write prose
@@ -116,8 +174,11 @@ async def describe(question: str, results: dict[str, StepResult],
             "surprising), and whatever their message asks about it.\n"
             "Use ONLY the figures given and state numbers exactly; never "
             "invent one, and never describe a value you were not given. "
-            "Refer to data by its TABLE names as the figures label them; "
+            "Refer to data by the names the figures label it with -- a "
+            "quoted name is the dataset's own name, used as written; "
             "never call anything a step, a result set or a figure. "
+            "Do not suggest further analyses, and never mention a column "
+            "that is not in the figures. "
             "NEVER say the result cannot be shown, drawn, charted or "
             "determined — it is already shown; your job is to describe it, "
             "not to judge whether it can be displayed. If notes are present, "
@@ -125,7 +186,7 @@ async def describe(question: str, results: dict[str, StepResult],
             "figures are a sample of a larger result means you describe the "
             "sample AS a sample.")},
          {"role": "user", "content": (
-             f"Their message: {question}\n\nFigures:\n{_facts(results, sink_ids)}\n\n"
+             f"Their message: {question}\n\nFigures:\n{_facts(results, sink_ids, names)}\n\n"
              f"Notes: {'; '.join(concerns) or 'none'}")}],
         max_tokens=300, temperature=0.2)
     return got.strip() if got else None
@@ -133,13 +194,17 @@ async def describe(question: str, results: dict[str, StepResult],
 
 async def explain(question: str, results: dict[str, StepResult],
                   concerns: list[str], client,
-                  sink_ids: set[str] | None = None) -> str | None:
+                  sink_ids: set[str] | None = None,
+                  names: dict[str, str] | None = None) -> str | None:
     got = await client.complete(
         [{"role": "system", "content": (
             "Answer the user's question in 1-3 sentences from ONLY the "
             "figures given. State numbers exactly; do not invent any. Refer "
-            "to data by its TABLE names as the figures label them; never "
-            "call anything a step, a result set or a figure. Each block "
+            "to data by the names the figures label it with -- a quoted "
+            "name is the dataset's own name, used as written; never "
+            "call anything a step, a result set or a figure. Do not "
+            "suggest further analyses, and never mention a column that is "
+            "not in the figures. List groups in the order given. Each block "
             "states what its entries ARE -- rows, columns or tables -- so "
             "use that noun: a catalog listing 13 columns must never be "
             "described as 13 rows. If "
@@ -157,7 +222,7 @@ async def explain(question: str, results: dict[str, StepResult],
             "to determine', which misrepresent a real, computed empty "
             "result as a failure.")},
          {"role": "user", "content": (
-             f"Question: {question}\n\nFigures:\n{_facts(results, sink_ids)}\n\n"
+             f"Question: {question}\n\nFigures:\n{_facts(results, sink_ids, names)}\n\n"
              f"Notes: {'; '.join(concerns) or 'none'}")}],
         max_tokens=250, temperature=0.2)
     return got.strip() if got else None

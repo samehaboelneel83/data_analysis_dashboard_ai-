@@ -214,3 +214,65 @@ class TestTheCatalogStepIsCountedInItsOwnUnit:
 
     def test_an_ordinary_query_still_counts_rows(self):
         assert "2 rows" in _facts(results())
+
+
+class TestAnswersReadLikeTheirData:
+    """BUG-032: the numbers were right but the prose was not -- it named the
+    internal query table (`qa_chrome_sales`), repeated float64 sums as
+    `2580.0`, listed groups in the engine's arbitrary order, and offered
+    analyses on columns the data does not have."""
+
+    def _r(self, sql, rows):
+        return {"s1": StepResult(step_id="s1", status="ok", sql=sql, rows=rows, error=None,
+                                 validation_failures=[], repair_attempts=0, ms=0)}
+
+    def test_a_dataset_is_named_as_its_author_named_it(self):
+        facts = _facts(self._r("SELECT region, SUM(sales) AS s FROM qa_chrome_sales GROUP BY region",
+                               [{"region": "N", "s": 1.0}]),
+                       names={"qa_chrome_sales": "QA_CHROME_sales"})
+        assert 'rows from "QA_CHROME_sales"' in facts
+        assert "qa_chrome_sales" not in facts
+
+    def test_a_real_table_keeps_its_name(self):
+        facts = _facts(self._r("SELECT id FROM mdl_course", [{"id": 1}]), names=None)
+        assert "rows from mdl_course" in facts
+
+    def test_whole_numbers_lose_the_point_zero_and_others_are_rounded(self):
+        facts = _facts(self._r("SELECT region, SUM(sales) AS s FROM t GROUP BY region ORDER BY region",
+                               [{"region": "N", "s": 2580.0}, {"region": "S", "s": 1/3},
+                                {"region": "W", "s": True}]))
+        assert "'s': 2580}" in facts and "2580.0" not in facts
+        assert "0.3333" in facts and "0.33333" not in facts
+        assert "True" in facts           # a flag is not a number
+
+    def test_unordered_groups_are_listed_largest_first(self):
+        facts = _facts(self._r("SELECT region, SUM(sales) AS s FROM t GROUP BY region",
+                               [{"region": "N", "s": 10.0}, {"region": "S", "s": 30.0},
+                                {"region": "E", "s": None}, {"region": "W", "s": 20.0}]))
+        assert facts.index("'S'") < facts.index("'W'") < facts.index("'N'") < facts.index("'E'")
+
+    def test_an_explicit_order_by_is_kept(self):
+        facts = _facts(self._r("SELECT month, SUM(sales) AS s FROM t GROUP BY month ORDER BY month",
+                               [{"month": 1, "s": 5.0}, {"month": 2, "s": 50.0}]))
+        assert facts.index("'month': 1") < facts.index("'month': 2")
+
+    def test_the_stored_rows_are_not_reordered(self):
+        res = self._r("SELECT region, SUM(sales) AS s FROM t GROUP BY region",
+                      [{"region": "N", "s": 10.0}, {"region": "S", "s": 30.0}])
+        _facts(res)
+        assert [r["region"] for r in res["s1"].rows] == ["N", "S"]
+
+    async def test_the_prompt_names_the_dataset_and_forbids_invented_suggestions(self):
+        client = FakeClient("ok")
+        await explain("total by region?", self._r("SELECT region FROM qa_chrome_sales", [{"region": "N"}]),
+                      [], client, names={"qa_chrome_sales": "QA_CHROME_sales"})
+        system = client.calls[0]["messages"][0]["content"]
+        user = client.calls[0]["messages"][1]["content"]
+        assert "Do not suggest further analyses" in system
+        assert "never mention a column that is not in the figures" in system
+        assert '"QA_CHROME_sales"' in user
+
+    def test_the_fallback_uses_the_same_names_and_numbers(self):
+        text = render_fallback(self._r("SELECT SUM(x) AS s FROM qa_chrome_sales", [{"s": 2580.0}]),
+                               [], names={"qa_chrome_sales": "QA_CHROME_sales"})
+        assert '"QA_CHROME_sales"' in text and "2580.0" not in text
