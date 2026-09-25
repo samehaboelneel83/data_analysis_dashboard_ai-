@@ -167,6 +167,11 @@ def _copy_capped(stream, path: Path) -> str:
     return digest.hexdigest()
 
 
+def _upload_detail(filename: str | None, ds, sheet: str | None) -> str:
+    return (f"{filename or 'file'}{f' [{sheet}]' if sheet else ''} -> "
+            f"{ds.row_count:,} rows, {ds.col_count} columns")
+
+
 async def _duplicate_of(db: AsyncSession, user: User, dataset_id: int) -> dict | None:
     """E07: another dataset the uploader can read that holds the same bytes
     (the oldest, which is the one dashboards most likely use). Advisory: the
@@ -420,6 +425,8 @@ async def upload_dataset(
         db, current_user.org_id, source_filename=file.filename, stream=file.file,
         name=name, description=description, owner_id=current_user.id,
         sheet=sheet.strip() or None)
+    await audit(db, current_user, "dataset.upload", "dataset", ds.id,
+                _upload_detail(file.filename, ds, sheet.strip() or None))
     await db.commit()
     result = await db.execute(
         select(Dataset).options(selectinload(Dataset.columns)).where(Dataset.id == ds.id)
@@ -750,6 +757,17 @@ async def upload_datasets(
     # before the duplicate lookup reads its org and grants.
     await db.refresh(current_user)
     await db.refresh(current_user, ["role"])   # relationships are not reloaded by the first
+    # E07: audited here, once the batch is settled, not per file: a rollback
+    # for a failed file would discard an entry written beside it.
+    for item in items:
+        if item.dataset is not None:
+            await audit(db, current_user, "dataset.upload", "dataset", item.dataset.id,
+                        _upload_detail(item.source_filename, item.dataset, None))
+    failed = [i.source_filename for i in items if i.status == "error"]
+    if failed:
+        await audit(db, current_user, "dataset.upload_failed", None, None,
+                    f"{len(failed)} of {len(items)} refused: " + ", ".join(failed))
+    await db.commit()
     for item in items:
         if item.dataset is not None:
             item.dataset.duplicate_of = await _duplicate_of(db, current_user, item.dataset.id)
@@ -3800,6 +3818,10 @@ async def refresh_dataset(
             len(df), list(df.columns), outcome.get("cursor_value"),
         )
 
+    # E07: a manual reload replaces what every dashboard on it shows.
+    await audit(db, current_user, "dataset.refresh", "dataset", dataset.id,
+                f"{outcome['mode']} from {src.name} -> {len(df):,} rows"
+                + (" (forced past a schema break)" if body.force else ""))
     await db.commit()
 
     log_query_run_sync(

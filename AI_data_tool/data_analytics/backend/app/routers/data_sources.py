@@ -527,6 +527,7 @@ async def import_dataset(ds_id: int, req: ImportRequest, db: AsyncSession = Depe
             # never synced has no catalog to link against, and an import must not
             # fail because metadata is missing.
             await knowledge.link_columns(db, existing)
+            await _audit_import(db, current_user, existing, ds, req, replaced=True)
             await db.commit()
             await db.refresh(existing)
             return {'id': existing.id, 'name': existing.name, 'row_count': 0, 'col_count': existing.col_count, 'mode': 'directquery'}
@@ -549,6 +550,7 @@ async def import_dataset(ds_id: int, req: ImportRequest, db: AsyncSession = Depe
         # never synced has no catalog to link against, and an import must not
         # fail because metadata is missing.
         await knowledge.link_columns(db, dataset)
+        await _audit_import(db, current_user, dataset, ds, req, replaced=False)
         await db.commit()
         await db.refresh(dataset)
         return {'id': dataset.id, 'name': dataset.name, 'row_count': 0, 'col_count': dataset.col_count, 'mode': 'directquery'}
@@ -621,6 +623,7 @@ async def import_dataset(ds_id: int, req: ImportRequest, db: AsyncSession = Depe
         # never synced has no catalog to link against, and an import must not
         # fail because metadata is missing.
         await knowledge.link_columns(db, existing)
+        await _audit_import(db, current_user, existing, ds, req, replaced=True)
         await db.commit()
         await db.refresh(existing)
         return {'id': existing.id, 'name': existing.name, 'row_count': existing.row_count, 'col_count': existing.col_count, 'mode': 'import'}
@@ -632,8 +635,12 @@ async def import_dataset(ds_id: int, req: ImportRequest, db: AsyncSession = Depe
     new_file_size = Path(file_path).stat().st_size
     try:
         await quotas.enforce_storage_quota(db, current_user.org_id, new_file_size)
-    except HTTPException:
+    except (HTTPException, quotas.QuotaExceeded):
+        # QuotaExceeded is NOT an HTTPException: catching only the latter left
+        # a refused import's file on disk (E07) -- and its parquet sidecar.
+        from ..services.frame_cache import remove_parquet_sidecar
         Path(file_path).unlink(missing_ok=True)
+        remove_parquet_sidecar(str(file_path))
         raise
 
     dataset = Dataset(last_refreshed_at=datetime.utcnow(),  # E06: when the data was loaded
@@ -661,9 +668,20 @@ async def import_dataset(ds_id: int, req: ImportRequest, db: AsyncSession = Depe
     # never synced has no catalog to link against, and an import must not
     # fail because metadata is missing.
     await knowledge.link_columns(db, dataset)
+    await _audit_import(db, current_user, dataset, ds, req, replaced=False)
     await db.commit()
     await db.refresh(dataset)
     return {'id': dataset.id, 'name': dataset.name, 'row_count': dataset.row_count, 'col_count': dataset.col_count, 'mode': 'import'}
+
+
+async def _audit_import(db: AsyncSession, user: User, dataset, source, req, *, replaced: bool) -> None:
+    """E07: who brought which data in, from where, and how much. Uploads,
+    exports and deletes were audited; an import from a database was not."""
+    from ..services.audit import record
+    what = req.table or ("query: " + " ".join((req.query or "").split())[:200])
+    rows = "live" if dataset.mode == "directquery" else f"{dataset.row_count:,} rows"
+    await record(db, user, "dataset.reimport" if replaced else "dataset.import", "dataset",
+                 dataset.id, f"{source.name} ({source.type}) {what} -> {rows}")
 
 
 class SimilarDatasetsRequest(BaseModel):
