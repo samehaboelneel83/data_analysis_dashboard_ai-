@@ -54,6 +54,9 @@ async def _migrate(conn):
         "ALTER TABLE report_pages ADD COLUMN IF NOT EXISTS layout_template VARCHAR(40)",
         # 0038: session revocation cut-off (see User.tokens_valid_after).
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS tokens_valid_after TIMESTAMP WITH TIME ZONE",
+        # 0039: duplicate-upload detection (see Dataset.content_sha256).
+        "ALTER TABLE datasets ADD COLUMN IF NOT EXISTS content_sha256 VARCHAR(64)",
+        "CREATE INDEX IF NOT EXISTS ix_datasets_content_sha256 ON datasets (content_sha256)",
         "ALTER TABLE reports ADD COLUMN IF NOT EXISTS theme VARCHAR(20) NOT NULL DEFAULT 'default'",
         "ALTER TABLE reports ADD COLUMN IF NOT EXISTS display_rules JSON DEFAULT '[]'",
         # ── Layer 1 — Connectors & Ingestion ────────────────────────────────

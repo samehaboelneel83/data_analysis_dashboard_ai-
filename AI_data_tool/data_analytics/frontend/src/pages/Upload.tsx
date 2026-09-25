@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { datasetsApi } from '../services/api'
-import type { BatchUploadItem, BatchUploadMode } from '../services/api'
+import type { BatchUploadItem, BatchUploadMode, Dataset } from '../services/api'
 import toast from 'react-hot-toast'
 import { useT } from '../i18n'
 import LoadingState from '../components/ui/LoadingState'
@@ -9,6 +9,18 @@ import { FileUp, UploadCloud } from 'lucide-react'
 
 const ACCEPT = '.csv,.xlsx,.xls,.json,.xml,.parquet,.mdb,.accdb'
 const ACCESS_RE = /\.(mdb|accdb)$/i
+
+/** E07: the server names an existing dataset holding the same bytes. The
+ *  upload still happened; say so, long enough to read, so a dashboard is not
+ *  built on the wrong copy by accident. */
+function warnDuplicates(list: (Dataset | null | undefined)[]) {
+  for (const d of list) {
+    if (d?.duplicate_of) {
+      toast(`"${d.name}" has the same content as "${d.duplicate_of.name}", which you already have.`,
+            { icon: '⚠', duration: 10000 })
+    }
+  }
+}
 
 const isAccess = (f: File) => ACCESS_RE.test(f.name)
 
@@ -89,12 +101,14 @@ export default function Upload() {
       if (files.length === 1 && !isAccess(files[0])) {
         const ds = await datasetsApi.upload(files[0], name, desc)
         toast.success(t('upload.done'))
+        warnDuplicates([ds])
         navigate(`/datasets/${ds.id}?new=1`)
         return
       }
 
       const res = await datasetsApi.uploadBatch(files, name, desc, mode)
       const failures = res.items.filter(i => i.status === 'error')
+      warnDuplicates(res.items.map(i => i.dataset))
       setErrors(failures)
 
       if (failures.length) {

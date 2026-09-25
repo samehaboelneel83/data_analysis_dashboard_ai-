@@ -28,7 +28,8 @@ vi.mock('react-router-dom', async () => {
 })
 
 vi.mock('react-hot-toast', () => ({
-  default: { success: vi.fn(), error: vi.fn() },
+  // Callable too: a plain toast() carries the duplicate-upload warning.
+  default: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }),
 }))
 
 vi.mock('../services/api', () => ({
@@ -259,5 +260,35 @@ describe('a name that is already taken (BUG-027)', () => {
     fireEvent.change(screen.getByPlaceholderText('My dataset'), { target: { value: 'Sales 2024' } })
     await waitFor(() => expect(datasetsApi.list).toHaveBeenCalled())
     expect(screen.queryByText(/already have a dataset/)).toBeNull()
+  })
+})
+
+describe('an upload that repeats a dataset you already have (E07)', () => {
+  it('says which one, after a single upload, and still opens the new dataset', async () => {
+    ;(datasetsApi.upload as any).mockResolvedValue({ id: 8, name: 'Sales again', duplicate_of: { id: 3, name: 'Sales' } })
+    show()
+    fireEvent.change(screen.getByPlaceholderText('My dataset'), { target: { value: 'Sales again' } })
+    pick([file('x.csv')])
+    submit()
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/datasets/8?new=1'))
+    expect(toast).toHaveBeenCalledWith(
+      '"Sales again" has the same content as "Sales", which you already have.', expect.anything())
+  })
+
+  it('names each repeated file of a batch, and stays quiet for the rest', async () => {
+    ;(datasetsApi.uploadBatch as any).mockResolvedValue({
+      items: [
+        { source_filename: 'a.csv', status: 'created', dataset: { id: 1, name: 'B — a', duplicate_of: { id: 3, name: 'Sales' } }, error: null },
+        { source_filename: 'b.csv', status: 'created', dataset: { id: 2, name: 'B — b', duplicate_of: null }, error: null },
+      ],
+      created: 2, failed: 0, mode: 'separate',
+    })
+    show()
+    fireEvent.change(screen.getByPlaceholderText('My dataset'), { target: { value: 'B' } })
+    pick([file('a.csv'), file('b.csv')])
+    submit()
+    await waitFor(() => expect(navigate).toHaveBeenCalled())
+    expect(toast).toHaveBeenCalledTimes(1)
+    expect((toast as any).mock.calls[0][0]).toContain('"B — a" has the same content as "Sales"')
   })
 })

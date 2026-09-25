@@ -1133,7 +1133,7 @@ SQLAlchemy, grouped by concern:
 | Platform | `saml_authn_requests`, `org_mcp_access`, `eval_runs` |
 | Ops | `sync_runs`, `schema_versions`, `column_stats`, `materializations`, `quotas`, `query_runs` |
 
-Schema changes go through **Alembic** (`backend/alembic/`, 38 revisions).
+Schema changes go through **Alembic** (`backend/alembic/`, 39 revisions).
 `postgres/init.sql` provides the initial schema and indexes.
 
 ### Cache
@@ -2148,7 +2148,7 @@ Agent pane (7)
 
 | Suite | Scope | Count |
 |-------|-------|-------|
-| Backend | `backend/tests/` | ~5,300 tests across 390 modules |
+| Backend | `backend/tests/` | ~5,300 tests across 391 modules |
 | Frontend | colocated `*.test.ts(x)` | ~2,800 tests across 213 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |

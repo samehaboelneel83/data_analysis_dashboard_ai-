@@ -46,6 +46,9 @@ class Dataset(Base):
     # a failed attempt so a broken source retries on its schedule, not every tick.
     refresh_interval_minutes = Column(Integer, nullable=True)
     last_refreshed_at        = Column(DateTime(timezone=True), nullable=True)
+    # E07: SHA-256 of the file as uploaded, so a second upload of the same bytes
+    # can say which dataset already holds them. NULL for non-upload datasets.
+    content_sha256           = Column(String(64), nullable=True, index=True)
     # An aggregate dataset: a scheduled GROUP BY over a DirectQuery source
     # (services/aggregates.py). The pointer is how read-time security finds
     # the SOURCE's rules -- they are never copied -- so it cascades: an

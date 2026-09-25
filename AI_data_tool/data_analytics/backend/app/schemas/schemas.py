@@ -201,6 +201,9 @@ class DatasetOut(BaseModel):
     # mode fell back (e.g. incremental with no/invalid watermark column). Never
     # persisted; absent on every other read of a dataset.
     refresh_warning:          Optional[str] = None
+    # E07: transient, on an upload's response only -- {"id", "name"} of a
+    # dataset the uploader can read that holds the same bytes. Advisory.
+    duplicate_of:             Optional[dict] = None
     # SH1: transient, computed per-request from DatasetShare -- true when THIS
     # viewer has an explicit share grant (never persisted on Dataset itself).
     shared:                   bool = False

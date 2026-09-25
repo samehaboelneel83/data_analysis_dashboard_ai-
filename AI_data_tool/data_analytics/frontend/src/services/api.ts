@@ -167,6 +167,9 @@ export interface Dataset {
   // F3: transient -- present only on the response of a manual refresh whose
   // requested mode fell back (e.g. incremental with no usable watermark column).
   refresh_warning?:          string | null
+  // E07: transient -- on an upload's response only: a dataset the uploader
+  // can read that already holds the same bytes. Advisory; the upload happened.
+  duplicate_of?:             { id: number; name: string } | null
   // SH1: transient, computed per-viewer -- true when the CURRENT user has an
   // explicit share grant on this dataset (never true for org-wide default read).
   shared?:                   boolean

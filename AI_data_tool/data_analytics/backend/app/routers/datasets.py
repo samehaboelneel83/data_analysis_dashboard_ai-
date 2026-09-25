@@ -146,21 +146,45 @@ async def get_dataset(dataset_id: int, db: AsyncSession = Depends(get_db), curre
     return await _without_denied_columns(db, current_user, ds, with_knowledge=True)
 
 
-def _copy_capped(stream, path: Path) -> None:
+def _copy_capped(stream, path: Path) -> str:
     """Copy an upload to disk, stopping at the per-file limit (E07). The whole
     stream used to land first and be measured afterwards, so a 20 GB upload
-    wrote 20 GB before being refused."""
+    wrote 20 GB before being refused. Returns the SHA-256 of the bytes as
+    uploaded, for duplicate detection."""
+    import hashlib
     limit = settings.max_upload_mb * 1024 * 1024
-    written = 0
+    written, digest = 0, hashlib.sha256()
     with open(path, "wb") as f:
         while chunk := stream.read(1024 * 1024):
             written += len(chunk)
             if written > limit:
                 break
             f.write(chunk)
+            digest.update(chunk)
     if written > limit:
         path.unlink(missing_ok=True)
         raise HTTPException(400, f"File exceeds {settings.max_upload_mb} MB limit")
+    return digest.hexdigest()
+
+
+async def _duplicate_of(db: AsyncSession, user: User, dataset_id: int) -> dict | None:
+    """E07: another dataset the uploader can read that holds the same bytes
+    (the oldest, which is the one dashboards most likely use). Advisory: the
+    upload still happened; the response says which dataset it repeats."""
+    sha = (await db.execute(select(Dataset.content_sha256)
+                            .where(Dataset.id == dataset_id))).scalar_one_or_none()
+    if not sha:
+        return None
+    rows = (await db.execute(
+        select(Dataset.id, Dataset.name)
+        .where(Dataset.org_id == user.org_id, Dataset.content_sha256 == sha,
+               Dataset.id != dataset_id)
+        .order_by(Dataset.id))).all()
+    readable = await readable_dataset_ids(db, user) if rows else None
+    for rid, rname in rows:
+        if readable is None or rid in readable:
+            return {"id": rid, "name": rname}
+    return None
 
 
 def _canonical_csv(path: Path) -> None:
@@ -222,7 +246,7 @@ async def _ingest_upload_file(
 
     file_path = upload_store.allocate_path(org_id, source_filename)
 
-    _copy_capped(stream, file_path)
+    content_sha256 = _copy_capped(stream, file_path)
     file_size = file_path.stat().st_size
 
     # A batch also has a ceiling on the REQUEST, not just each file: twenty
@@ -274,7 +298,7 @@ async def _ingest_upload_file(
         ds = Dataset(last_refreshed_at=datetime.utcnow(),  # E06: when the data was loaded
             name=name, description=description or None, filename=str(file_path),
             row_count=len(df), col_count=len(df.columns), file_size=file_path.stat().st_size,
-            org_id=org_id, created_by=owner_id,
+            org_id=org_id, created_by=owner_id, content_sha256=content_sha256,
         )
         db.add(ds)
         await db.flush()
@@ -343,7 +367,9 @@ async def upload_dataset(
     result = await db.execute(
         select(Dataset).options(selectinload(Dataset.columns)).where(Dataset.id == ds.id)
     )
-    return result.scalar_one()
+    out = DatasetOut.model_validate(result.scalar_one())
+    out.duplicate_of = await _duplicate_of(db, current_user, ds.id)
+    return out
 
 
 def _missing_pct(series) -> float:
@@ -654,6 +680,12 @@ async def upload_datasets(
                 source_filename=f.filename or "", status="error",
                 error=f"Could not import this file: {e}"))
 
+    # A failed file's rollback expired current_user; refresh it (async-safe)
+    # before the duplicate lookup reads its org and grants.
+    await db.refresh(current_user)
+    for item in items:
+        if item.dataset is not None:
+            item.dataset.duplicate_of = await _duplicate_of(db, current_user, item.dataset.id)
     return _batch_result(items, "separate", quota_hit=quota_hit)
 
 
