@@ -155,10 +155,10 @@ async def test_a_denied_source_column_denies_the_measures_built_on_it(
 
     r = await client.post(f"/api/v1/datasets/{agg.id}/widget-data", json=BAR, headers=headers)
     # `amount_sum` is dropped from the frame before the widget ever sees it, so
-    # the requested measure column doesn't exist; aggregation="sum" over an
-    # absent measure falls back to counting rows per group (existing,
-    # unrelated widget_data.py behaviour -- see the grouped-series branch) --
-    # it never reveals the withheld sums, and the outcome is deterministic.
+    # the requested measure column doesn't exist. That used to fall back to
+    # counting rows per group -- no sums leaked, but a count under a sum's name.
+    # Since E05 slice 2 an unresolvable field is an explicit error instead:
+    # still nothing withheld is revealed, and nothing misleading is drawn.
     assert r.status_code == 200, r.text
     if engine["name"] == "duckdb":
         # The widget's own measure IS the denied column: duck_agg.plan()
@@ -169,7 +169,9 @@ async def test_a_denied_source_column_denies_the_measures_built_on_it(
         # a future widening of the gate has to look at this line.
         assert not engine["ran"], (
             f"expected DuckDB to decline on a denied measure column, but it ran ({engine['reason']!r})")
-    assert {x["name"]: x["value"] for x in r.json()["rows"]} == {"N": 1, "S": 1}, r.json()
+    body = r.json()
+    assert body["type"] == "error" and body["code"] == "unknown_field", body
+    assert body["rows"] == [] and "amount_sum" in body["message"]
 
     count_widget = dict(BAR, config={"dimension": "region", "measure": "row_count", "aggregation": "sum"})
     r2 = await client.post(f"/api/v1/datasets/{agg.id}/widget-data", json=count_widget, headers=headers)

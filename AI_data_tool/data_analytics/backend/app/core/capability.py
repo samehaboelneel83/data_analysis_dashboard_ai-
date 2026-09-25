@@ -313,6 +313,11 @@ async def max_dataset_capability(db: AsyncSession, user: User, dataset_id: int) 
 
 
 async def require_dataset_capability(db: AsyncSession, user: User, dataset_id: int, min_level: str) -> None:
+    # Authoring defaults OPEN (above) and never asked whether you could SEE the
+    # dataset, so a colleague could delete or re-model an owner's private
+    # dataset by id while every read of it answered 404. Read first: what you
+    # were not given does not exist for you, to change any more than to open.
+    await require_dataset_read(db, user, dataset_id)
     if rank(await max_dataset_capability(db, user, dataset_id)) < _RANK[min_level]:
         raise HTTPException(
             403, f"Editing this dataset's data model needs {min_level}-level access to a report that uses it")
@@ -329,6 +334,7 @@ async def require_dataset_capability(db: AsyncSession, user: User, dataset_id: i
 # The rule now, in one place:
 #
 #   admin > owner > explicit DatasetShare > a dashboard you can already open
+#                                           (for data its AUTHOR can read)
 #
 # The last rung is what keeps sharing coherent. A workspace shared 'view'
 # hands somebody dashboards; those dashboards have to resolve their data or
@@ -381,31 +387,75 @@ async def report_dataset_ids(db: AsyncSession, report_ids: list[int]) -> set[int
     return ids
 
 
+async def _directly_readable_ids(db: AsyncSession, org_id: int, user_id: int,
+                                 is_admin: bool) -> set[int] | None:
+    """The first three rungs only -- admin, owner (or unowned), DatasetShare.
+    None means "every dataset in the org"."""
+    if is_admin:
+        return None
+    ids = set((await db.execute(
+        select(Dataset.id).where(
+            Dataset.org_id == org_id,
+            or_(Dataset.created_by == user_id, Dataset.created_by.is_(None)))
+    )).scalars().all())
+    ids |= set((await db.execute(
+        select(DatasetShare.dataset_id).where(DatasetShare.user_id == user_id)
+    )).scalars().all())
+    return ids
+
+
+async def _dashboard_rung_ids(db: AsyncSession, report_ids: list[int]) -> set[int]:
+    """What the last rung opens: each report's data AS FAR AS ITS AUTHOR MAY
+    READ IT DIRECTLY.
+
+    It used to be every dataset the report draws on, which made the rung a
+    one-way valve. Revoking a DatasetShare changed nothing once the grantee
+    had built their own report on the data -- the rung counted their own
+    report -- and a dashboard shared by someone who had since lost access
+    kept handing that data to every viewer. Now a dashboard passes on only
+    what its author can read without it, so neither survives a revocation.
+    A report with no recorded author (fixtures, pre-0020 rows) keeps the old
+    behaviour, like unowned datasets."""
+    if not report_ids:
+        return set()
+    from ..models.models import Role
+    rows = (await db.execute(
+        select(Report.id, Report.org_id, Report.created_by, Role.is_org_admin)
+        .outerjoin(User, User.id == Report.created_by)
+        .outerjoin(Role, Role.id == User.role_id)
+        .where(Report.id.in_(report_ids))
+    )).all()
+    by_author: dict[tuple, list[int]] = {}
+    for rid, org_id, author, is_admin in rows:
+        by_author.setdefault((org_id, author, bool(is_admin)), []).append(rid)
+    out: set[int] = set()
+    for (org_id, author, is_admin), rids in by_author.items():
+        drawn = await report_dataset_ids(db, rids)
+        if author is None:
+            out |= drawn
+            continue
+        direct = await _directly_readable_ids(db, org_id, author, is_admin)
+        out |= drawn if direct is None else drawn & direct
+    return out
+
+
 async def readable_dataset_ids(db: AsyncSession, user: User) -> set[int] | None:
     """Datasets this user may READ. None means "every dataset in the org".
 
     One resolution for the whole request: a 28-widget page must not re-derive
     it 28 times, so callers that loop should resolve once and reuse.
     """
-    if user.role and user.role.is_org_admin:
+    is_admin = bool(user.role and user.role.is_org_admin)
+    ids = await _directly_readable_ids(db, user.org_id, user.id, is_admin)
+    if ids is None:
         return None
-
-    ids = set((await db.execute(
-        select(Dataset.id).where(
-            Dataset.org_id == user.org_id,
-            or_(Dataset.created_by == user.id, Dataset.created_by.is_(None)))
-    )).scalars().all())
-
-    ids |= set((await db.execute(
-        select(DatasetShare.dataset_id).where(DatasetShare.user_id == user.id)
-    )).scalars().all())
 
     org_report_ids = list((await db.execute(
         select(Report.id).where(Report.org_id == user.org_id)
     )).scalars().all())
     caps = await effective_capabilities(db, user, org_report_ids)
     visible = [rid for rid, level in caps.items() if level != "none"]
-    ids |= await report_dataset_ids(db, visible)
+    ids |= await _dashboard_rung_ids(db, visible)
     return ids
 
 
@@ -417,7 +467,8 @@ async def can_read_dataset(db: AsyncSession, user: User, dataset_id: int, *,
     report it belongs to, so one capability check on that report answers the
     question without resolving the user's whole readable set. It is not a
     loophole -- the report must itself resolve to something other than 'none'
-    for this viewer, and the dataset must actually be one that report draws on.
+    for this viewer, and the dataset must be one that report draws on AND its
+    author may read directly (`_dashboard_rung_ids`).
     """
     if user.role and user.role.is_org_admin:
         return True
@@ -425,7 +476,7 @@ async def can_read_dataset(db: AsyncSession, user: User, dataset_id: int, *,
         report = await db.get(Report, report_id)
         if (report is not None and report.org_id == user.org_id
                 and await effective_capability(db, user, report_id) != "none"
-                and dataset_id in await report_dataset_ids(db, [report_id])):
+                and dataset_id in await _dashboard_rung_ids(db, [report_id])):
             return True
     ids = await readable_dataset_ids(db, user)
     return ids is None or dataset_id in ids
@@ -498,6 +549,7 @@ async def require_dataset_write(db: AsyncSession, user: User, dataset: object,
 
     flow_id = (derived_from_of(dataset) or {}).get("dataflow_id")
     if isinstance(flow_id, int):
+        await require_dataset_read(db, user, dataset.id)  # see require_dataset_capability
         await require_dataflow_capability(db, user, flow_id, min_level)
         return
     await require_dataset_capability(db, user, dataset.id, min_level)

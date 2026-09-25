@@ -842,8 +842,10 @@ describe('a donut can carry its total in the middle', () => {
     await waitFor(() => expect(scaled.textContent).toContain(`${(748).toLocaleString()}K`))
   })
 
-  it('draws nothing extra when it is not asked for', async () => {
-    const { container } = renderDonut({ measure: 'orders' })
+  it('is on by default, and draws nothing extra once turned off', async () => {
+    const { container: on } = renderDonut({ measure: 'orders' })
+    await waitFor(() => expect(on.textContent).toContain((748000).toLocaleString()))
+    const { container } = renderDonut({ measure: 'orders', donut_total: false })
     await waitFor(() => expect(container.querySelector('svg')).not.toBeNull())
     expect(container.textContent).not.toContain((748000).toLocaleString())
   })
@@ -870,9 +872,14 @@ describe('every chart says what its axes are', () => {
   const titles = (c: HTMLElement) =>
     [...c.querySelectorAll('.recharts-label')].map(el => el.textContent)
 
-  it('a bar chart: the dimension along the bottom, the measure up the side', () => {
+  it('a bar chart draws no derived axis titles: the card title already names it', () => {
+    // The report design (2026-09-24): upright categories, value ticks, and no
+    // axis titles unless the author typed one. The derived names still reach
+    // the tooltip through seriesName, so the reading is never lost.
     const { container } = renderBar(cfg)
-    expect(titles(container)).toEqual(expect.arrayContaining(['region', 'sum(total)']))
+    const found = titles(container)
+    expect(found).not.toContain('region')
+    expect(found).not.toContain('sum(total)')
   })
 
   it('a dot plot, which is the same chart lying down, swaps them', () => {
@@ -925,11 +932,12 @@ describe('every chart says what its axes are', () => {
   it('mirrors the value-axis title with the axis in RTL', () => {
     // The value axis moves to the RIGHT in a mirrored page, and the title has
     // to move and rotate with it -- pinned to the left it lands on the data.
-    // The derived title had never been through that path: every RTL test in
-    // this suite builds a config with no fields to derive from.
+    // A bar chart only draws titles an author typed (see above), so this
+    // mirrors authored ones -- the same Label path the derived ones used.
     const { container } = render(
       <div style={{ width: 600, height: 400 }}>
-        <BarChartRenderer {...base} cfg={cfg} rtl /></div>)
+        <BarChartRenderer {...base} rtl
+          cfg={{ ...cfg, x_axis_label: 'region', y_axis_label: 'sum(total)' }} /></div>)
     const rotated = [...container.querySelectorAll('.recharts-label')]
       .find(el => el.textContent === 'sum(total)')
     expect(rotated).toBeTruthy()
@@ -939,12 +947,13 @@ describe('every chart says what its axes are', () => {
   })
 
   it('a small tile still draws its bars as well as its titles', () => {
-    // A title costs 16px of height and 16px of width. That was always true of
-    // a title someone typed; it is now true of every chart, so the smallest
-    // tile on a dense dashboard is the one to check.
+    // A title costs 16px of height and 16px of width, so the smallest tile on
+    // a dense dashboard is the one to check -- with typed titles, the only
+    // ones a bar chart draws.
     const { container } = render(
       <div style={{ width: 260, height: 140 }}>
-        <BarChartRenderer {...base} cfg={cfg} plotW={260} plotH={140} /></div>)
+        <BarChartRenderer {...base} plotW={260} plotH={140}
+          cfg={{ ...cfg, x_axis_label: 'region', y_axis_label: 'sum(total)' }} /></div>)
     expect(container.querySelectorAll('.recharts-bar-rectangle').length)
       .toBeGreaterThan(0)
     expect(titles(container)).toEqual(expect.arrayContaining(['region', 'sum(total)']))

@@ -152,3 +152,142 @@ def missing_roles(widget_type: str, config: dict) -> list[str]:
         v = cfg.get(config_key_for_role(role))
         return not (v is None or v == "" or (isinstance(v, (list, tuple)) and not v))
     return [config_key_for_role(r) for r in required if not present(r)]
+
+
+class InvalidWidget(ValueError):
+    """A widget payload no engine can execute as written. Raised at SAVE time."""
+
+
+# ── Formatting capabilities (E03 slice 2) ─────────────────────────────────────
+# Mirror of CAPABILITIES in frontend/src/components/report/widgetCapabilities.ts:
+# which formatting options each widget type's renderer actually HONOURS (that
+# file documents, renderer by renderer, why each type gets what it gets).
+# tests/test_widget_roles.py re-derives the map from the TypeScript and fails
+# on drift, the same tripwire REQUIRED_ROLES has.
+_FULL_WITH_LEGEND = ("axes", "yScale", "yDomain", "grid", "legend", "dataLabels")
+_FULL_NO_LEGEND = ("axes", "yScale", "yDomain", "grid", "dataLabels")
+_DUAL_SCALE = ("axes", "grid", "legend", "dataLabels")
+_VALUE_ON_X_AXIS = ("axes", "grid", "dataLabels")
+
+FORMATTING_CAPABILITIES: dict[str, frozenset[str]] = {k: frozenset(v) for k, v in {
+    "bar": _FULL_WITH_LEGEND + ("overview", "patterns", "xCategoryAxis"),
+    "bubble": _FULL_WITH_LEGEND,
+    "ribbon": _FULL_WITH_LEGEND,
+    "line": _FULL_NO_LEGEND + ("overview", "xCategoryAxis"),
+    "area": _FULL_NO_LEGEND + ("overview", "xCategoryAxis"),
+    "step": _FULL_NO_LEGEND + ("overview", "xCategoryAxis"),
+    "histogram": _FULL_NO_LEGEND + ("xCategoryAxis",),
+    "waterfall": _FULL_NO_LEGEND + ("xCategoryAxis",),
+    "scatter": _FULL_NO_LEGEND,
+    "bubble_change": _FULL_NO_LEGEND,
+    "needle": _FULL_NO_LEGEND + ("xCategoryAxis",),
+    "numeric_series": _FULL_NO_LEGEND,
+    "pie": ("patterns", "dataLabels"),
+    "donut": ("patterns", "legend", "dataLabels"),
+    "funnel": ("patterns", "dataLabels"),
+    "treemap": ("dataLabels",),
+    "forecast": ("axes", "yScale", "yDomain", "grid", "xCategoryAxis"),
+    "dual_axis_bar": _DUAL_SCALE + ("xCategoryAxis",),
+    "dual_axis_line": _DUAL_SCALE + ("patterns", "xCategoryAxis"),
+    "dual_axis_bar_line": _DUAL_SCALE + ("patterns", "xCategoryAxis"),
+    "dual_axis_time_series": _DUAL_SCALE + ("patterns", "xCategoryAxis"),
+    "comparative_time_series": _DUAL_SCALE + ("patterns", "xCategoryAxis"),
+    "dot_plot": _VALUE_ON_X_AXIS,
+    "butterfly": _VALUE_ON_X_AXIS,
+    "schedule": ("axes", "grid"),
+    "table": ("tableOptions",),
+    "crosstab": ("tableOptions",),
+    "matrix": ("tableOptions",),
+}.items()}
+
+#: The config keys WidgetConfigPanel writes ONLY under each capability (its
+#: save effect, "only write keys the capability map actually grants"). A key
+#: listed here on a type without the capability is an option its renderer
+#: ignores -- stored, shown as set, and doing nothing.
+CAPABILITY_KEYS: dict[str, tuple[str, ...]] = {
+    "axes": ("x_axis_label", "y_axis_label", "axis_tick_size", "axis_tick_color",
+             "y_axis_angle", "axis_line", "tick_line"),
+    "xCategoryAxis": ("x_axis_angle",),
+    "yScale": ("y_scale",),
+    "yDomain": ("y_min", "y_max"),
+    "grid": ("grid", "grid_style", "grid_color", "wall_color", "show_as_table"),
+    "legend": ("legend", "legend_position"),
+    "overview": ("overview_axis",),
+    "dataLabels": ("data_labels",),
+    "patterns": ("series_patterns",),
+    "tableOptions": ("show_totals", "show_subtotals", "totals_position", "totals_scope",
+                     "table_row_numbers"),
+}
+
+
+def unsupported_options(widget_type: str, config: dict) -> list[str]:
+    """Formatting keys set on `config` that `widget_type`'s renderer ignores."""
+    granted = FORMATTING_CAPABILITIES.get(widget_type, frozenset())
+    out = []
+    for cap, keys in CAPABILITY_KEYS.items():
+        if cap in granted:
+            continue
+        out += [k for k in keys if config.get(k) not in (None, "", [])]
+    return out
+
+
+def validate_widget_payload(widget_type: str | None, config: dict | None) -> None:
+    """Refuse, when a widget is SAVED, what would otherwise fail silently later.
+
+    The server stored any `widget_type` string and any config dict. A typo'd
+    type rendered as an empty tile; a misspelt aggregation fell back to SUM in
+    both pandas paths -- a different number, with nothing to say so; a filter
+    given as a string was skipped. Each failed far from its cause, so this is
+    the one place such a mistake can be told to whoever made it.
+
+    Deliberately narrow (E03 slice 1): the TYPE, and the SHAPE of the fields
+    every engine reads. Unknown extra keys stay allowed -- a config carries
+    dozens of renderer options, and declaring those is the next slice.
+    `widget_type=None` checks the config alone (a PATCH that keeps the type).
+    Raises InvalidWidget naming the field.
+    """
+    if widget_type is not None and widget_type not in REQUIRED_ROLES:
+        raise InvalidWidget(f"Unknown widget type {widget_type!r}")
+    if config is None:
+        return
+    if not isinstance(config, dict):
+        raise InvalidWidget("config must be an object")
+
+    from .widget_data import AGGREGATION_NAMES
+    for key in ("aggregation", "aggregation2"):
+        agg = config.get(key)
+        if agg is None or agg == "":
+            continue
+        if not isinstance(agg, str) or agg.lower() not in AGGREGATION_NAMES:
+            raise InvalidWidget(
+                f"{key} {agg!r} is not a supported aggregation "
+                f"(an unknown name would silently be summed)")
+
+    filters = config.get("filters")
+    if filters is not None:
+        if not isinstance(filters, list):
+            raise InvalidWidget("filters must be a list")
+        for i, f in enumerate(filters):
+            if not isinstance(f, dict):
+                raise InvalidWidget(f"filters[{i}] must be an object")
+            if f.get("column") is not None and not isinstance(f["column"], str):
+                raise InvalidWidget(f"filters[{i}].column must be a column name")
+
+    measures = config.get("measures")
+    if measures is not None and not isinstance(measures, list):
+        raise InvalidWidget("measures must be a list")
+    roles = config.get("roles")
+    if roles is not None and not isinstance(roles, dict):
+        raise InvalidWidget("roles must be an object")
+
+    # Slice 2: an option this type's renderer would ignore. The builder never
+    # sends one (it rebuilds the config from the capability map on every save);
+    # the API, the copilot and an import could, and it would sit in the config
+    # looking set while doing nothing. Needs the type, so a config-only check
+    # (widget_type=None) skips it -- callers pass the EFFECTIVE type instead.
+    if widget_type is not None:
+        ignored = unsupported_options(widget_type, config)
+        if ignored:
+            raise InvalidWidget(
+                f"{', '.join(ignored)} {'has' if len(ignored) == 1 else 'have'} "
+                f"no effect on a {widget_type} widget")

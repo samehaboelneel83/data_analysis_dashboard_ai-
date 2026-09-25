@@ -26,6 +26,10 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      # REQUIRED: backend/Dockerfile has dev and prod stages, and with no
+      # target a multi-stage build takes the last one. docker-compose.prod.yml
+      # switches this to `prod`.
+      target: dev
     container_name: datalytics_backend
     restart: unless-stopped
     # UVICORN_WORKERS >1 runs a multi-process server (no auto-reload): CPU-bound

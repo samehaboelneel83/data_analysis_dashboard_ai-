@@ -226,8 +226,12 @@ def plan(config: dict, columns: list[str], source: str,
         dim_expr = dim_i
 
     # `total` is counted here -- after the user's filters, before the null drop.
+    # The second column is the null drop itself: how many filtered rows the
+    # `IS NOT NULL` below removes, which the shaped result discloses as
+    # `missing_category` (the shaper cannot count rows it never sees).
     filtered_where = " AND ".join(where) if where else "TRUE"
-    count_sql = f"SELECT COUNT(*) FROM {source} WHERE {filtered_where}"
+    count_sql = (f"SELECT COUNT(*), COUNT(*) - COUNT({dim_expr}) "
+                 f"FROM {source} WHERE {filtered_where}")
     if granularity:
         probe_sql = (f"SELECT COUNT({dim_i}) - COUNT({ts}), COUNT({ts}) "
                      f"FROM {source} WHERE {filtered_where}")
@@ -305,12 +309,13 @@ def aggregate(file_path: str, config: dict, columns: list[str],
         # `total` in a shaped result means SOURCE rows, not groups -- the shaper
         # derives it from len(df), which for a pre-aggregated frame would be the
         # group count instead. Ask for the real number so the two engines agree.
-        total = con.execute(p.count_sql, p.params).fetchone()[0]
+        total, missing = con.execute(p.count_sql, p.params).fetchone()
     finally:
         con.close()
 
     frame = frame.rename(columns={"__dim__": p.dimension, "__value__": p.measure})
     frame.attrs["source_row_count"] = int(total)
+    frame.attrs["missing_dimension_rows"] = int(missing)
     return frame
 
 

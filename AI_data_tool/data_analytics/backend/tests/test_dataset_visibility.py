@@ -354,3 +354,255 @@ class TestUploadsRecordTheirOwner:
         # ...and a colleague cannot open it.
         assert (await client.get(f"/api/v1/datasets/{ds.id}",
                                  headers=_headers(world["outsider"]))).status_code == 404
+
+
+class TestYouCannotChangeWhatYouCannotRead:
+    """Authoring (`max_dataset_capability`) and reading were two rules that
+    never met. Authoring defaults OPEN -- 'data' unless every report using the
+    dataset restricts your role -- and never asked whether you could see the
+    dataset, so a colleague could delete, refresh or re-model an owner's
+    private dataset by id while every read of it answered 404."""
+
+    @pytest.mark.asyncio
+    async def test_a_colleague_cannot_delete_a_dataset_they_cannot_read(
+            self, client, db_session, world):
+        r = await client.delete(f"/api/v1/datasets/{world['owned'].id}",
+                                headers=_headers(world["outsider"]))
+        assert r.status_code == 404, r.text
+        assert await db_session.get(Dataset, world["owned"].id) is not None
+
+    @pytest.mark.asyncio
+    async def test_nor_change_its_data_model(self, client, world):
+        r = await client.post(f"/api/v1/datasets/{world['other'].id}/measures",
+                              json={"name": "Total", "expression": "SUM([amount])"},
+                              headers=_headers(world["owner"]))
+        assert r.status_code == 404, r.text
+
+    @pytest.mark.asyncio
+    async def test_the_owner_still_can(self, client, world):
+        r = await client.post(f"/api/v1/datasets/{world['owned'].id}/measures",
+                              json={"name": "Total", "expression": "SUM([amount])"},
+                              headers=_headers(world["owner"]))
+        assert r.status_code in (200, 201), r.text
+
+    @pytest.mark.asyncio
+    async def test_a_share_grantee_still_can(self, client, db_session, world):
+        db_session.add(DatasetShare(dataset_id=world["owned"].id,
+                                    user_id=world["outsider"].id))
+        await db_session.commit()
+        r = await client.post(f"/api/v1/datasets/{world['owned'].id}/measures",
+                              json={"name": "Total", "expression": "SUM([amount])"},
+                              headers=_headers(world["outsider"]))
+        assert r.status_code in (200, 201), r.text
+
+    @pytest.mark.asyncio
+    async def test_an_unowned_dataset_stays_open(self, client, world):
+        r = await client.post(f"/api/v1/datasets/{world['legacy'].id}/measures",
+                              json={"name": "Total", "expression": "SUM([amount])"},
+                              headers=_headers(world["outsider"]))
+        assert r.status_code in (200, 201), r.text
+
+
+class TestADashboardCannotBeAKeyToDataYouWereNotGiven:
+    """The last read rung -- "a dashboard you can already open" -- counts every
+    dataset a visible report draws on. Nothing checked who put the dataset
+    THERE: a member could make their own report, point it at a colleague's
+    private dataset, and the rung would open it to them."""
+
+    ROWS = {"widget_type": "table", "config": {"columns": ["region", "amount"]}}
+
+    async def _own_report(self, client, world, **fields):
+        return await client.post("/api/v1/reports", json={"name": "Mine", **fields},
+                                 headers=_headers(world["outsider"]))
+
+    @pytest.mark.asyncio
+    async def test_creating_a_report_on_it_is_refused(self, client, world):
+        r = await self._own_report(client, world, dataset_id=world["owned"].id)
+        assert r.status_code == 404, r.text
+
+    @pytest.mark.asyncio
+    async def test_attaching_it_to_your_own_report_is_refused(self, client, world):
+        rep = (await self._own_report(client, world)).json()
+        for body in ({"dataset_id": world["owned"].id},
+                     {"additional_dataset_ids": [world["owned"].id]}):
+            r = await client.patch(f"/api/v1/reports/{rep['id']}", json=body,
+                                   headers=_headers(world["outsider"]))
+            assert r.status_code == 404, (body, r.text)
+        r = await client.post(f"/api/v1/datasets/{world['owned'].id}/widget-data",
+                              json={**self.ROWS, "report_id": rep["id"]},
+                              headers=_headers(world["outsider"]))
+        assert r.status_code == 404, r.text
+
+    @pytest.mark.asyncio
+    async def test_pointing_a_widget_at_it_is_refused(self, client, world):
+        rep = (await self._own_report(client, world, dataset_id=world["legacy"].id)).json()
+        page = (await client.post(f"/api/v1/reports/{rep['id']}/pages",
+                                  json={"name": "P", "position": 0},
+                                  headers=_headers(world["outsider"]))).json()
+        r = await client.post(
+            f"/api/v1/reports/{rep['id']}/pages/{page['id']}/widgets",
+            json={"widget_type": "table", "title": "T",
+                  "config": {"dataset_id": world["owned"].id},
+                  "layout": {"x": 0, "y": 0, "w": 6, "h": 4}},
+            headers=_headers(world["outsider"]))
+        assert r.status_code == 404, r.text
+
+        ok = (await client.post(
+            f"/api/v1/reports/{rep['id']}/pages/{page['id']}/widgets",
+            json={"widget_type": "table", "title": "T", "config": {},
+                  "layout": {"x": 0, "y": 0, "w": 6, "h": 4}},
+            headers=_headers(world["outsider"]))).json()
+        r = await client.patch(
+            f"/api/v1/reports/{rep['id']}/pages/{page['id']}/widgets/{ok['id']}",
+            json={"config": {"dataset_id": world["owned"].id}},
+            headers=_headers(world["outsider"]))
+        assert r.status_code == 404, r.text
+
+    @pytest.mark.asyncio
+    async def test_a_template_cannot_carry_it_in(self, client, db_session, world):
+        """A saved template keeps each widget's own dataset_id."""
+        from app.models.models import PageTemplate
+        tpl = PageTemplate(org_id=world["org"].id, name="Costs", payload={
+            "name": "Costs", "widgets": [{"widget_type": "table", "title": "T",
+                                          "config": {"dataset_id": world["second"].id}}]})
+        db_session.add(tpl)
+        await db_session.commit()
+        rep = (await self._own_report(client, world)).json()
+        r = await client.post(f"/api/v1/reports/{rep['id']}/pages/from-template",
+                              json={"template_id": tpl.id}, headers=_headers(world["outsider"]))
+        assert r.status_code == 404, r.text
+
+    @pytest.mark.asyncio
+    async def test_a_view_only_reader_cannot_add_pages(self, client, db_session, world):
+        """from-template bumped the revision itself and so skipped the edit
+        check every other page/widget write gets from _bump_revision."""
+        from app.models.models import ReportCapability
+        from app.services.page_templates import BUILTIN_TEMPLATES
+        db_session.add(ReportCapability(report_id=world["report"].id,
+                                        role_id=world["outsider"].role_id, level="view"))
+        world["report"].published = True
+        await db_session.commit()
+        r = await client.post(f"/api/v1/reports/{world['report'].id}/pages/from-template",
+                              json={"builtin": next(iter(BUILTIN_TEMPLATES))},
+                              headers=_headers(world["outsider"]))
+        assert r.status_code == 403, r.text
+
+    @pytest.mark.asyncio
+    async def test_data_you_can_read_still_attaches(self, client, world):
+        r = await self._own_report(client, world, dataset_id=world["other"].id,
+                                   additional_dataset_ids=[world["legacy"].id])
+        assert r.status_code == 201, r.text
+
+    @pytest.mark.asyncio
+    async def test_editing_a_shared_dashboard_does_not_need_its_datasets_twice(
+            self, client, db_session, world):
+        """A grantee reads the owner's data THROUGH the dashboard, and may edit
+        it. Re-saving a widget that already points at that data is not a new
+        claim on it, so it must not be refused."""
+        from app.models.models import ReportCapability
+        member_role_id = world["outsider"].role_id
+        db_session.add(ReportCapability(report_id=world["report"].id,
+                                        role_id=member_role_id, level="edit"))
+        world["report"].published = True
+        await db_session.commit()
+        widgets = (await client.get(f"/api/v1/reports/{world['report'].id}",
+                                    headers=_headers(world["outsider"]))).json()
+        page = widgets["pages"][0]
+        second = next(w for w in page["widgets"] if w["title"] == "From second")
+        r = await client.patch(
+            f"/api/v1/reports/{world['report'].id}/pages/{page['id']}/widgets/{second['id']}",
+            json={"config": {**second["config"], "aggregation": "avg"}},
+            headers=_headers(world["outsider"]))
+        assert r.status_code == 200, r.text
+
+
+class TestADashboardPassesOnOnlyWhatItsAuthorCanRead:
+    """The last rung used to open every dataset a visible report draws on, so
+    it was a one-way valve: once a grantee had built a report on shared data,
+    revoking the share changed nothing (the rung counted their OWN report),
+    and everyone they had shared that report with kept the data too. A
+    dashboard now passes on only what its author can read directly."""
+
+    ROWS = {"widget_type": "table", "config": {"columns": ["region", "amount"]}}
+
+    async def _grantee_report(self, client, db_session, world, *, published=False):
+        """The outsider is shared the owner's dataset and builds on it."""
+        share = DatasetShare(dataset_id=world["owned"].id, user_id=world["outsider"].id)
+        db_session.add(share)
+        await db_session.commit()
+        r = await client.post("/api/v1/reports",
+                              json={"name": "Built on a share", "dataset_id": world["owned"].id},
+                              headers=_headers(world["outsider"]))
+        assert r.status_code == 201, r.text
+        report = await db_session.get(Report, r.json()["id"])
+        report.published = published
+        await db_session.commit()
+        return share, report
+
+    async def _read(self, client, user, dataset_id, report_id):
+        return await client.post(f"/api/v1/datasets/{dataset_id}/widget-data",
+                                 json={**self.ROWS, "report_id": report_id},
+                                 headers=_headers(user))
+
+    @pytest.mark.asyncio
+    async def test_revoking_the_share_revokes_it_despite_the_grantees_own_report(
+            self, client, db_session, world):
+        share, report = await self._grantee_report(client, db_session, world)
+        assert (await self._read(client, world["outsider"], world["owned"].id, report.id)).status_code == 200
+
+        await db_session.delete(share)
+        await db_session.commit()
+
+        assert (await self._read(client, world["outsider"], world["owned"].id, report.id)).status_code == 404
+        assert (await client.get(f"/api/v1/datasets/{world['owned'].id}",
+                                 headers=_headers(world["outsider"]))).status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_revoking_it_reaches_everyone_the_grantee_shared_the_report_with(
+            self, client, db_session, world):
+        share, report = await self._grantee_report(client, db_session, world, published=True)
+        colleague = User(org_id=world["org"].id, role_id=world["outsider"].role_id,
+                         email="colleague@dataland.test", password_hash=hash_password("pw"))
+        db_session.add(colleague)
+        await db_session.commit()
+        assert (await self._read(client, colleague, world["owned"].id, report.id)).status_code == 200
+
+        await db_session.delete(share)
+        await db_session.commit()
+
+        assert (await self._read(client, colleague, world["owned"].id, report.id)).status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_an_authors_dashboard_still_shares_their_own_data(self, client, db_session, world):
+        """The rung's purpose survives: the owner's published dashboard
+        resolves its data for a colleague who was never shared the dataset."""
+        world["report"].published = True
+        await db_session.commit()
+        for ds in (world["owned"], world["second"]):
+            r = await self._read(client, world["outsider"], ds.id, world["report"].id)
+            assert r.status_code == 200, r.text
+
+    @pytest.mark.asyncio
+    async def test_the_digest_stops_mailing_data_its_creator_lost(self, client, db_session, world):
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+        from app.services.delivery import build_digest
+        share, report = await self._grantee_report(client, db_session, world)
+        page = (await db_session.execute(
+            select(ReportPage).where(ReportPage.report_id == report.id))).scalars().first()
+        db_session.add(ReportWidget(page_id=page.id, widget_type="bar", title="By region",
+                                    config={"dimension": "region", "measure": "amount",
+                                            "aggregation": "sum"},
+                                    layout={"x": 0, "y": 0, "w": 6, "h": 4}))
+        await db_session.commit()
+        creator = (await db_session.execute(
+            select(User).options(selectinload(User.role))
+            .where(User.id == world["outsider"].id))).scalar_one()
+
+        _, sheets = await build_digest(db_session, report, creator)
+        assert sheets == 1
+
+        await db_session.delete(share)
+        await db_session.commit()
+        _, sheets = await build_digest(db_session, report, creator)
+        assert sheets == 0

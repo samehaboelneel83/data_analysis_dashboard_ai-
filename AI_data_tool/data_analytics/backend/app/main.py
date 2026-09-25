@@ -52,6 +52,8 @@ async def _migrate(conn):
         "ALTER TABLE report_pages ADD COLUMN IF NOT EXISTS mobile_layout JSON",
         "ALTER TABLE report_pages ADD COLUMN IF NOT EXISTS layout_mode VARCHAR(20)",
         "ALTER TABLE report_pages ADD COLUMN IF NOT EXISTS layout_template VARCHAR(40)",
+        # 0038: session revocation cut-off (see User.tokens_valid_after).
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS tokens_valid_after TIMESTAMP WITH TIME ZONE",
         "ALTER TABLE reports ADD COLUMN IF NOT EXISTS theme VARCHAR(20) NOT NULL DEFAULT 'default'",
         "ALTER TABLE reports ADD COLUMN IF NOT EXISTS display_rules JSON DEFAULT '[]'",
         # ── Layer 1 — Connectors & Ingestion ────────────────────────────────
@@ -235,11 +237,16 @@ async def _run_alembic() -> None:
 
     Like `_run_secrets_migration`, this is wrapped end-to-end: any failure
     (bad revision, unreachable DB, a bug in a future migration) is logged
-    and swallowed rather than bricking startup. create_all + `_migrate`
-    still run right after this, unconditionally, and remain what actually
-    guarantees the schema is correct this cycle -- Alembic is additive
-    here, not yet load-bearing.
+    rather than bricking startup, so /health/live and the logs stay
+    reachable. It is NOT swallowed any more: the failure is recorded in
+    `_MIGRATION_ERROR` and /health/ready answers 503 while it is set, so a
+    replica whose schema never reached head stays out of rotation instead of
+    serving as if it had (on 2026-09-19 the dev stack did exactly that for
+    every boot, over an oversized revision id). A run that "succeeds" but
+    leaves the DB off the script head is recorded the same way.
     """
+    global _MIGRATION_ERROR
+    _MIGRATION_ERROR = None
     try:
         import asyncio
         import os
@@ -296,8 +303,23 @@ async def _run_alembic() -> None:
                     upgrade_exc,
                 )
                 await asyncio.to_thread(command.stamp, cfg, "head")
-    except Exception:
-        logger.exception("alembic startup migration failed; continuing startup unmigrated (create_all/_migrate still run)")
+
+        # Verify, don't infer: the version the DB now records must be the
+        # script head, whichever branch ran above.
+        from alembic.script import ScriptDirectory
+        from sqlalchemy import text as sa_text
+        head = ScriptDirectory.from_config(cfg).get_current_head()
+        async with engine.connect() as conn:
+            current = (await conn.execute(sa_text("SELECT version_num FROM alembic_version"))).scalar()
+        if current != head:
+            logger.error("alembic: database is at %r, script head is %r -- not ready", current, head)
+            _MIGRATION_ERROR = "revision_mismatch"
+    except Exception as exc:
+        # Type name only: /health/ready is unauthenticated and a connection
+        # error's message can carry the DSN.
+        _MIGRATION_ERROR = type(exc).__name__
+        logger.exception("alembic startup migration failed; this replica will report "
+                         "not ready (create_all/_migrate still run)")
 
 
 async def _run_secrets_migration(session: AsyncSession) -> None:
@@ -344,6 +366,11 @@ _STARTUP_LOCK_KEY = 0x5DA7A171C5  # arbitrary, stable; distinct from scheduler k
 #: sent traffic. Module-level rather than app.state so the readiness handler
 #: can read it without a request-scoped app reference.
 _STARTUP_COMPLETE = False
+
+#: Set by `_run_alembic` when the schema did not reach the script head: the
+#: failing exception's type name, or "revision_mismatch". /health/ready is 503
+#: while it is set. None means the last run verified the DB at head.
+_MIGRATION_ERROR: str | None = None
 
 
 @asynccontextmanager
@@ -677,10 +704,18 @@ async def health_ready(response: Response):
         checks["valkey"] = {"status": "not_configured"}
 
     # -- migrations (startup-derived) ------------------------------------
-    checks["migrations"] = {
-        "status": "ok" if _STARTUP_COMPLETE else "pending",
-        "detail": "applied during startup under an advisory lock",
-    }
+    if _MIGRATION_ERROR is not None:
+        # A replica that could not bring its schema to head must not take
+        # traffic: every request would run against columns and tables that
+        # may not exist. /health/live stays up so the logs can be read.
+        checks["migrations"] = {"status": "failed", "required": True,
+                                "error": _MIGRATION_ERROR}
+        ready = False
+    else:
+        checks["migrations"] = {
+            "status": "ok" if _STARTUP_COMPLETE else "pending",
+            "detail": "applied during startup under an advisory lock",
+        }
     if not _STARTUP_COMPLETE:
         ready = False
 

@@ -26,6 +26,15 @@ import app.models.models  # noqa: F401  -- registers every table on Base.metadat
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+@pytest.fixture(autouse=True)
+def _isolate_migration_error(monkeypatch):
+    """_run_alembic records failures in a module global that /health/ready
+    reads; a test that forces a failure must not leave every later readiness
+    test answering 503."""
+    from app import main as app_main
+    monkeypatch.setattr(app_main, "_MIGRATION_ERROR", None)
+
+
 def _alembic_config() -> Config:
     cfg = Config(os.path.join(BACKEND_DIR, "alembic.ini"))
     cfg.set_main_option("script_location", os.path.join(BACKEND_DIR, "alembic"))
@@ -206,7 +215,31 @@ class TestStartupResilience:
             await app_main._run_alembic()  # must not raise
 
         assert any("alembic startup migration failed" in r.message for r in caplog.records)
+        # Logged AND recorded: readiness must see it (gap: it used to be
+        # swallowed, and the replica reported ready on an unmigrated schema).
+        assert app_main._MIGRATION_ERROR == "RuntimeError"
         await test_engine.dispose()
+
+    async def test_a_run_that_leaves_the_db_off_head_is_recorded(self, tmp_path, monkeypatch):
+        """No exception, wrong result: the stamp lands on an older revision.
+        Verified against the script head, not inferred from 'nothing raised'."""
+        from app import main as app_main
+
+        db_path = tmp_path / "offhead.db"
+        test_engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+        async with test_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        monkeypatch.setattr(app_main, "engine", test_engine)
+        os.environ["ALEMBIC_DATABASE_URL"] = f"sqlite+aiosqlite:///{db_path}"
+        try:
+            real_stamp = command.stamp
+            monkeypatch.setattr("alembic.command.stamp",
+                                lambda cfg, _rev: real_stamp(cfg, "0001_baseline"))
+            await app_main._run_alembic()
+            assert app_main._MIGRATION_ERROR == "revision_mismatch"
+        finally:
+            os.environ.pop("ALEMBIC_DATABASE_URL", None)
+            await test_engine.dispose()
 
 
 class TestAdoptionStampsHead:
@@ -261,6 +294,7 @@ class TestSelfHeal:
             await asyncio.to_thread(command.stamp, _alembic_config(), "0001_baseline")
 
             await app_main._run_alembic()  # must not raise; must self-heal
+            assert app_main._MIGRATION_ERROR is None  # healed means ready
 
             async with test_engine.connect() as conn:
                 version = (await conn.execute(

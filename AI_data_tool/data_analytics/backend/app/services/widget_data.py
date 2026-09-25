@@ -160,6 +160,22 @@ def _enforce_import_row_cap(df, file_path: str) -> None:
 
 
 # ── Aggregation function map ──────────────────────────────────────────────────
+#: Every aggregation name the pandas engine implements -- the scalar path
+#: (`_agg_series`) and the grouped path (`_pandas_agg_fn`) alike, which
+#: tests/test_widget_contract.py pins. Both paths fall back to SUM for a name
+#: they do not know, so an unknown name is not an error at read time: it is a
+#: silently different number. `widget_roles.validate_widget_payload` refuses
+#: such a name when a widget is SAVED, which is the only place it can be told.
+AGGREGATION_NAMES = frozenset({
+    "sum", "none", "raw", "first", "avg", "mean", "average", "min", "minimum",
+    "max", "maximum", "median", "count", "frequency", "countd", "distinct",
+    "std", "stdev", "variance", "var", "range", "p25", "p75", "p90", "p95",
+    "stderr", "sem", "standard_error", "skewness", "skew", "kurtosis", "kurt",
+    "cv", "coefficient_of_variation", "uss", "uncorrected_sum_of_squares",
+    "css", "corrected_sum_of_squares", "tstat", "t_statistic", "pvalue", "p_value",
+})
+
+
 def _agg_series(series: pd.Series, agg: str) -> float | None:
     """Apply a named aggregation to a pandas Series."""
     s = series.dropna()
@@ -256,6 +272,14 @@ def _pandas_agg_fn(agg: str):
         "tstat": lambda x: (x.mean() / x.sem()) if x.count() > 1 and x.sem() else None,
         "pvalue": _p_value_of_mean,
     }
+    # The long spellings the scalar path has always accepted. Missing here, a
+    # KPI on "standard_error" showed the standard error while a bar chart with
+    # the same config silently showed a SUM -- the fallback below.
+    for long, short in (("standard_error", "stderr"), ("coefficient_of_variation", "cv"),
+                        ("uncorrected_sum_of_squares", "uss"),
+                        ("corrected_sum_of_squares", "css"),
+                        ("t_statistic", "tstat"), ("p_value", "pvalue")):
+        mapping[long] = mapping[short]
     return mapping.get(agg, "sum")
 
 
@@ -366,7 +390,14 @@ def _dimension_granularity_label(series: pd.Series, granularity: str) -> pd.Seri
     dt = series if pd.api.types.is_datetime64_any_dtype(series) else pd.to_datetime(series, errors="coerce")
     granularity = (granularity or "").lower()
     if granularity == "year":
-        return dt.dt.year
+        # Whole numbers, not `dt.dt.year` as it comes: one missing date turns
+        # that int64 column into float64 and every label with it. Plain ints
+        # with NaN for the missing row -- the same missing value strftime
+        # leaves for month and day, and `.where` leaves for quarter and week
+        # -- rather than a nullable-int column, whose gap stringifies as the
+        # text "<NA>" (see the note below). The row builder in shape_series
+        # has to keep them whole too; see its zip() over the columns.
+        return dt.dt.year.astype("Int64").astype(object).where(dt.notna())
     # Quarter and week are built by string concatenation over nullable ints,
     # and `Int64.astype(str)` renders a missing value as the text "<NA>" --
     # so a null date used to become the LABEL "<NA>-Q<NA>", a garbage bar on
@@ -594,6 +625,30 @@ def shape_series(df: pd.DataFrame, config: dict) -> dict:
 
     # 3. Crosstab (dim + dim2)
     if dim and dim2 and dim in df.columns and dim2 in df.columns:
+        # Ranking (Top/Bottom N, All Other) on the ROWS: each row ranked by its
+        # own aggregate over its raw rows -- the number its subtotal shows --
+        # through the shared helper, so ties, percent mode and bottom-N are the
+        # bar chart's. The panel offered this on crosstabs and matrices while
+        # this branch had no ranking at all: a control that saved and did
+        # nothing. The heatmap's crosstab-shaped path is the model here.
+        # Totals stay over EVERY source row (`full_df`); the pivot is built from
+        # the kept rows, and the Other row from the excluded raw rows below.
+        full_df = df
+        src_meas = meas if meas in df.columns else None
+        if measure_def is not None:
+            row_rank_vals = _measure_eval.evaluate_measure(measure_def["expression"], df, [dim])
+        else:
+            row_rank_vals = _total_over_rows(df, [dim], src_meas, agg_fn)
+        groups_of = int(len(row_rank_vals))
+        rank_keep = _rank_selection(row_rank_vals, config)
+        other_raw = None
+        if rank_keep is not None:
+            kept_labels = row_rank_vals.index[rank_keep]
+            excluded_raw = df[~df[dim].isin(kept_labels)]
+            df = df[df[dim].isin(kept_labels)]
+            if (config.get("rank") or {}).get("other") and len(excluded_raw) > 0:
+                other_raw = excluded_raw
+
         if measure_def is not None:
             # Post-aggregation measure at the INTERSECTION grain: evaluated per
             # (dim, dim2) cell, which is exactly what SAS's per-crossing
@@ -625,6 +680,24 @@ def shape_series(df: pd.DataFrame, config: dict) -> dict:
                 row_vals = _total_over_rows(df, [dim], meas if meas in df.columns else None, agg_fn)
                 pivot["__total__"] = pivot[dim].map(row_vals).fillna(0)
 
+        if other_raw is not None:
+            # Every cell of the Other row is the same kind of number as every
+            # other cell: re-aggregated (or, for a measure, re-evaluated) from
+            # the excluded rows' RAW data per column, and its subtotal at no
+            # column grain -- never a sum of the cells it replaces, which for
+            # avg, countd or a ratio would be a different number.
+            if measure_def is not None:
+                other_cells = _measure_eval.evaluate_measure(measure_def["expression"], other_raw, [dim2])
+                other_sub = _measure_eval.evaluate_measure(measure_def["expression"], other_raw, [])
+            else:
+                other_cells = _total_over_rows(other_raw, [dim2], src_meas, agg_fn)
+                other_sub = _total_over_rows(other_raw, [], src_meas, agg_fn)
+            other_row = {c: (other_sub if c == "__total__" else other_cells.get(c, 0))
+                         for c in pivot.columns if c != dim}
+            other_row[dim] = "All Other"
+            pivot = pd.concat([pivot, pd.DataFrame([other_row])[list(pivot.columns)]],
+                              ignore_index=True)
+
         col_names = [str(c) for c in pivot.columns]
         result = {
             "type": "crosstab",
@@ -634,38 +707,39 @@ def shape_series(df: pd.DataFrame, config: dict) -> dict:
             # `total` here counts the grid's rows (the renderer's contract); the
             # POPULATION the grid describes is the rows scanned, like every other
             # widget -- a crosstab beside a bar must not read "4" against "2,000".
-            "rows_scanned": int(len(df)),
+            "rows_scanned": int(len(full_df)),
             "truncation": {"applied": False, "shown": int(len(pivot)), "of": int(len(pivot)),
                            "limit": None, "reason": "none", "unit": "rows"},
         }
         if config.get("show_totals"):
-            if measure_def is not None:
-                # Column totals for a measure: re-evaluated at the COLUMN grain
-                # (and the grand total at no grain), for the same non-additivity
-                # reason as the row subtotals above.
-                col_vals = _measure_eval.evaluate_measure(measure_def["expression"], df, [dim2])
-                grand = _measure_eval.evaluate_measure(measure_def["expression"], df, [])
-                result["totals"] = [
-                    None if c == dim
-                    else _safe(grand) if c == "__total__"
-                    else _safe(col_vals.get(c, 0))
-                    for c in pivot.columns
-                ]
-            else:
-                # Column totals at the column grain and the grand total at no grain,
-                # each aggregated from the source rows -- the same rule the measure
-                # branch above follows, for the same non-additivity reason.
-                src_meas = meas if meas in df.columns else None
-                col_vals = _total_over_rows(df, [dim2], src_meas, agg_fn)
-                grand = _total_over_rows(df, [], src_meas, agg_fn)
-                result["totals"] = [
-                    None if c == dim
-                    else _safe(grand) if c == "__total__"
-                    else _safe(col_vals.get(c))
-                    for c in pivot.columns
-                ]
-            result["totals_basis"] = {"unit": "groups", "shown": len(pivot), "of": len(pivot),
-                                      "truncated": False, "suppressed_excluded": False}
+            def _cross_totals(frame: pd.DataFrame) -> list:
+                # Column totals at the column grain and the grand total at no
+                # grain, each aggregated (or, for a measure, re-evaluated) from
+                # the source rows -- the same non-additivity rule as the row
+                # subtotals above.
+                if measure_def is not None:
+                    col_vals = _measure_eval.evaluate_measure(measure_def["expression"], frame, [dim2])
+                    grand = _measure_eval.evaluate_measure(measure_def["expression"], frame, [])
+                    missing = 0
+                else:
+                    col_vals = _total_over_rows(frame, [dim2], src_meas, agg_fn)
+                    grand = _total_over_rows(frame, [], src_meas, agg_fn)
+                    missing = None
+                return [None if c == dim
+                        else _safe(grand) if c == "__total__"
+                        else _safe(col_vals.get(c, missing))
+                        for c in pivot.columns]
+
+            # Over every source row: with an Other row the grid shows them all.
+            result["totals"] = _cross_totals(full_df)
+            # Rows a rank hid WITHOUT a bucket are not on the grid; say so, and
+            # give the visible rows' own totals as well -- the series path's
+            # contract (`totals_shown` / `totals_basis`).
+            hidden = rank_keep is not None and other_raw is None
+            if hidden:
+                result["totals_shown"] = _cross_totals(df)
+            result["totals_basis"] = {"unit": "groups", "shown": len(pivot), "of": groups_of,
+                                      "truncated": hidden, "suppressed_excluded": False}
         return result
 
     # 4. Grouped series
@@ -677,6 +751,15 @@ def shape_series(df: pd.DataFrame, config: dict) -> dict:
         # Inside this block it travels under an internal name and is emitted
         # under its real one.
         dim_key = dim if dim != "value" else "__dim__"
+        # Rows whose category is missing are DROPPED by every groupby below
+        # (pandas' default; DuckDB and DirectQuery add `IS NOT NULL` to match).
+        # So a chart and its Total exclude them while a KPI of the same measure
+        # counts them -- 800 beside 840 on one dashboard, with nothing saying
+        # why. Counted here, on the filtered frame, and disclosed on the result
+        # like `truncation`: an exclusion is never silent. The two pushdown
+        # engines hand this shaper a frame with the rows already gone, so they
+        # measure it in SQL and overwrite the 0 computed here.
+        missing_rows = int(df[dim].isna().sum())
         if measure_def is not None:
             # Post-aggregation measure: one value per group, computed at this grain.
             values = _measure_eval.evaluate_measure(measure_def["expression"], df, [dim])
@@ -856,10 +939,14 @@ def shape_series(df: pd.DataFrame, config: dict) -> dict:
             target_fn = agg_fn if agg in ("sum", "mean", "avg", "median", "min", "max") else "sum"
             targets = df.groupby(dim)[target_col].agg(target_fn)
             grouped = grouped.merge(targets.rename("__target__"), left_on=dim_key, right_index=True, how="left")
-            rows = [{"name": _safe(row[dim_key]), "value": _safe(row["value"]), "target": _safe(row["__target__"])}
-                    for _, row in grouped.iterrows()]
+            # Column by column, not iterrows(): a row Series mixing an int name
+            # with a float value is upcast to float, which turned every year
+            # label into "2024.0" on the axis.
+            rows = [{"name": _safe(n), "value": _safe(v), "target": _safe(t)}
+                    for n, v, t in zip(grouped[dim_key], grouped["value"], grouped["__target__"])]
         else:
-            rows = [{"name": _safe(row[dim_key]), "value": _safe(row["value"])} for _, row in grouped.iterrows()]
+            rows = [{"name": _safe(n), "value": _safe(v)}
+                    for n, v in zip(grouped[dim_key], grouped["value"])]
 
         # Running aggregations (applied to already-grouped rows)
         if running == "sum":
@@ -879,6 +966,9 @@ def shape_series(df: pd.DataFrame, config: dict) -> dict:
             "aggregation": agg,
             "rows": rows,
             "total": len(df),
+            # Always present, like `truncation`: rows this chart left out
+            # because their category is missing (see the count above).
+            "missing_category": {"rows": missing_rows},
             # Always present, so a client never has to infer a cut from a count.
             "truncation": {
                 "applied": groups_before_limit > len(rows),
@@ -3157,14 +3247,32 @@ def resolve_roles(config: dict) -> dict:
 def get_widget_data_from_df(
     df: pd.DataFrame, config: dict, widget_type: str = "bar",
     measures: list[dict] | None = None, flag_partial: bool = True,
+    check_fields: bool = True,
 ) -> dict:
     """Dispatch to the shaper registered for widget_type, falling back to shape_series
     for any widget_type not yet registered (keeps unknown/future types working).
 
     Measure definitions travel to the shaper inside a copy of config rather than as a
     new parameter on all 15 shaper signatures. The key is overwritten, never merged, so
-    a client cannot smuggle its own measure definitions in through the request body."""
+    a client cannot smuggle its own measure definitions in through the request body.
+
+    `check_fields=False` is for a PRE-AGGREGATED frame (the DuckDB and DirectQuery
+    aggregate paths), which holds only the dimension and measure columns and whose
+    caller has already validated the config's fields against the dataset."""
     shaper = SHAPERS.get(widget_type, shape_series)
+    if check_fields:
+        # A field the widget names that is neither a column here nor a defined
+        # measure used to fall through the shaper's no-measure branch and
+        # render a ROW COUNT under the measure's name -- live, "Margin % by
+        # region" read 517, 514, 509, 460 after its measure was renamed. An
+        # explicit error the frontend already draws as a tile, never a count.
+        known = set(df.columns) | {m.get("name") for m in (measures or []) if isinstance(m, dict)}
+        for key in ("measure", "measure2", "dimension", "dimension2"):
+            name = config.get(key)
+            if isinstance(name, str) and name and name not in known:
+                return {"type": "error", "code": "unknown_field",
+                        "message": f"'{name}' is not a column or measure on this dataset",
+                        "field": key, "rows": [], "total": 0}
     # The widget type travels IN the config as well, for the same reason
     # measure_defs does: the five hierarchy layouts share one shaper and it must
     # know which of them it is drawing -- a sunburst refuses aggregations a tree
@@ -3943,7 +4051,10 @@ def get_widget_data(
                 # groupby is a no-op pass-through -- the same grain invariant
                 # run_direct_query relies on, which is why only grain-safe
                 # aggregations are eligible.
-                result = get_widget_data_from_df(duck_df, config, widget_type, flag_partial=False)
+                # check_fields off: the frame is pre-aggregated, and duck_agg.plan
+                # already refused any dimension/measure that is not a real column.
+                result = get_widget_data_from_df(duck_df, config, widget_type, flag_partial=False,
+                                                 check_fields=False)
                 # The shaper derives `total` from len(df), which on a
                 # pre-aggregated frame is the GROUP count. `total` means source
                 # rows, so restore the real figure DuckDB counted.
@@ -3951,6 +4062,11 @@ def get_widget_data(
                 if source_rows is not None and "total" in result:
                     result["total"] = source_rows
                     result["rows_scanned"] = source_rows  # the population, not the pre-aggregated groups
+                # Same reason: the null-keyed rows never reached the shaper, so
+                # its own count of them is 0. DuckDB counted them.
+                missing = duck_df.attrs.get("missing_dimension_rows")
+                if missing is not None and "missing_category" in result:
+                    result["missing_category"] = {"rows": int(missing)}
                 if use_cache:
                     try:
                         entry_size = len(json.dumps(result, default=str))

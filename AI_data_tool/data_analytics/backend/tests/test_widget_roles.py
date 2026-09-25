@@ -111,3 +111,195 @@ class TestConfigKeyForRole:
     ])
     def test_it_matches_the_panel(self, role, key):
         assert config_key_for_role(role) == key
+
+
+# ── E03 slice 1: the server knows what a widget is ────────────────────────────
+
+class TestValidateWidgetPayload:
+    """Saving used to accept any widget type and any config. Each case below
+    stored fine and then failed far from its cause -- an empty tile, a SUM
+    where a median was asked for, a filter nobody applied."""
+
+    @pytest.mark.parametrize("wtype,cfg,field", [
+        ("barchart", {}, "widget type"),
+        ("bar", {"aggregation": "medain"}, "aggregation"),
+        ("bar", {"aggregation2": 7}, "aggregation2"),
+        ("bar", {"filters": "region = North"}, "filters"),
+        ("bar", {"filters": ["region"]}, "filters[0]"),
+        ("bar", {"filters": [{"column": 3, "op": "eq"}]}, "filters[0].column"),
+        ("bar", {"measures": "revenue"}, "measures"),
+        ("bar", {"roles": ["dimension"]}, "roles"),
+    ])
+    def test_refused_with_the_field_named(self, wtype, cfg, field):
+        from app.services.widget_roles import InvalidWidget, validate_widget_payload
+        with pytest.raises(InvalidWidget, match=re.escape(field)):
+            validate_widget_payload(wtype, cfg)
+
+    @pytest.mark.parametrize("cfg", [
+        {},
+        {"dimension": "region", "measure": "revenue", "aggregation": "SUM"},
+        {"aggregation": "", "aggregation2": None},
+        {"filters": [], "measures": [], "roles": {}},
+        {"filters": [{"column": "region", "op": "eq", "value": "N"}, {"op": "and"}]},
+        # Unknown extra keys are renderer options -- allowed in this slice.
+        {"bar_mode": "stacked", "some_future_option": {"a": 1}},
+    ])
+    def test_shapes_the_live_data_uses_still_pass(self, cfg):
+        from app.services.widget_roles import validate_widget_payload
+        validate_widget_payload("bar", cfg)
+
+    def test_every_frontend_type_is_accepted(self):
+        from app.services.widget_roles import validate_widget_payload
+        for wtype in REQUIRED_ROLES:
+            validate_widget_payload(wtype, {})
+
+
+class TestEveryAggregationNameMeansOneThing:
+    """Both pandas paths fall back to SUM for a name they do not know. The
+    scalar path (a KPI) knew `standard_error`, `coefficient_of_variation`,
+    `t_statistic`... and the grouped path (a bar chart) did not -- so the same
+    config showed the statistic on one widget and a sum on the other."""
+
+    def test_the_scalar_and_grouped_paths_agree_on_every_name(self):
+        import math
+        import pandas as pd
+        from app.services.widget_data import AGGREGATION_NAMES, _agg_series, _pandas_agg_fn
+        s = pd.Series([2.0, 3.0, 5.0, 7.0, 11.0, 13.0])
+        df = pd.DataFrame({"g": ["a"] * len(s), "v": s})
+        for name in sorted(AGGREGATION_NAMES):
+            scalar = _agg_series(s, name)
+            grouped = df.groupby("g")["v"].agg(_pandas_agg_fn(name)).iloc[0]
+            assert math.isclose(float(scalar), float(grouped), rel_tol=1e-9), (name, scalar, grouped)
+
+    def test_the_long_names_are_not_summed(self):
+        import pandas as pd
+        from app.services.widget_data import _pandas_agg_fn
+        df = pd.DataFrame({"g": ["a"] * 4, "v": [1.0, 2.0, 3.0, 10.0]})
+        total = df["v"].sum()
+        for name in ("standard_error", "coefficient_of_variation", "t_statistic", "p_value",
+                     "uncorrected_sum_of_squares", "corrected_sum_of_squares"):
+            got = df.groupby("g")["v"].agg(_pandas_agg_fn(name)).iloc[0]
+            assert got != total, name
+
+
+class TestSavingValidates:
+    async def _page(self, client, headers):
+        rep = (await client.post("/api/v1/reports", json={"name": "V"}, headers=headers)).json()
+        return rep, rep["pages"][0]["id"]
+
+    async def test_add_widget_refuses_an_unknown_type_and_a_bad_aggregation(
+            self, client, auth_headers):
+        rep, page = await self._page(client, auth_headers["a"])
+        url = f"/api/v1/reports/{rep['id']}/pages/{page}/widgets"
+        for body in ({"widget_type": "piechart", "config": {}},
+                     {"widget_type": "bar", "config": {"aggregation": "averge"}}):
+            r = await client.post(url, json={**body, "layout": {"x": 0, "y": 0, "w": 6, "h": 4}},
+                                  headers=auth_headers["a"])
+            assert r.status_code == 400, r.text
+
+    async def test_a_patch_is_judged_on_what_it_changes(self, client, auth_headers):
+        rep, page = await self._page(client, auth_headers["a"])
+        w = (await client.post(f"/api/v1/reports/{rep['id']}/pages/{page}/widgets",
+                               json={"widget_type": "bar", "config": {"aggregation": "sum"},
+                                     "layout": {"x": 0, "y": 0, "w": 6, "h": 4}},
+                               headers=auth_headers["a"])).json()
+        url = f"/api/v1/reports/{rep['id']}/pages/{page}/widgets/{w['id']}"
+        moved = await client.patch(url, json={"layout": {"x": 1, "y": 0, "w": 6, "h": 4}},
+                                   headers=auth_headers["a"])
+        assert moved.status_code == 200, moved.text
+        bad = await client.patch(url, json={"config": {"filters": "x"}}, headers=auth_headers["a"])
+        assert bad.status_code == 400
+
+
+# ── E03 slice 2: options a widget type cannot honour ──────────────────────────
+
+CAPS_FILE = SPEC_FILE.parent.parent / "components" / "report" / "widgetCapabilities.ts"
+
+
+def frontend_capabilities() -> dict[str, set[str]]:
+    """CAPABILITIES in widgetCapabilities.ts, spreads resolved."""
+    text = CAPS_FILE.read_text(encoding="utf-8")
+    consts = {name: set(re.findall(r"'(\w+)'", body)) for name, body in re.findall(
+        r"const (\w+): FormattingCapability\[\] = \[([^\]]*)\]", text)}
+    block = re.search(r"const CAPABILITIES[^=]*=\s*\{(.*?)\n\}", text, re.S)
+    assert block, "CAPABILITIES not found in widgetCapabilities.ts"
+    out: dict[str, set[str]] = {}
+    for name, value in re.findall(r"^\s*(\w+):\s*(.+?),?\s*$", block.group(1), re.M):
+        caps: set[str] = set()
+        for spread in re.findall(r"\.\.\.(\w+)", value):
+            caps |= consts[spread]
+        caps |= set(re.findall(r"'(\w+)'", value))
+        if value.strip().rstrip(",") in consts:          # `bubble: FULL_WITH_LEGEND`
+            caps |= consts[value.strip().rstrip(",")]
+        out[name] = caps
+    return out
+
+
+class TestCapabilityParityWithTheFrontend:
+    def test_the_capability_file_was_actually_read(self):
+        caps = frontend_capabilities()
+        assert len(caps) >= 25 and "bar" in caps and "table" in caps
+
+    def test_every_type_grants_the_same_options_on_both_sides(self):
+        from app.services.widget_roles import FORMATTING_CAPABILITIES
+        fe = frontend_capabilities()
+        assert set(fe) == set(FORMATTING_CAPABILITIES), (
+            "widget types differ: add or remove them in widget_roles.FORMATTING_CAPABILITIES")
+        for wtype, caps in fe.items():
+            assert FORMATTING_CAPABILITIES[wtype] == caps, wtype
+
+    def test_every_capability_has_its_keys(self):
+        from app.services.widget_roles import CAPABILITY_KEYS
+        used = set().union(*frontend_capabilities().values())
+        assert used <= set(CAPABILITY_KEYS), used - set(CAPABILITY_KEYS)
+
+
+class TestUnsupportedOptionsAreRefused:
+    @pytest.mark.parametrize("wtype,cfg,key", [
+        ("pie", {"y_scale": "log"}, "y_scale"),
+        ("dual_axis_bar", {"y_min": 0}, "y_min"),           # would clip the wrong axis
+        ("word_cloud", {"grid": True}, "grid"),
+        ("box_plot", {"x_axis_angle": 0}, "x_axis_angle"),   # seen live, from a model
+        ("kpi", {"data_labels": True}, "data_labels"),
+        ("bar", {"show_totals": True}, "show_totals"),
+    ])
+    def test_named_in_the_refusal(self, wtype, cfg, key):
+        from app.services.widget_roles import InvalidWidget, validate_widget_payload
+        with pytest.raises(InvalidWidget, match=f"{key} has no effect on a {wtype}"):
+            validate_widget_payload(wtype, cfg)
+
+    @pytest.mark.parametrize("wtype,cfg", [
+        ("bar", {"y_scale": "log", "x_axis_angle": -45, "series_patterns": True, "overview_axis": True}),
+        ("donut", {"legend": False, "data_labels": True, "series_patterns": True}),
+        ("table", {"show_totals": True, "totals_position": "before", "show_subtotals": False}),
+        ("pie", {"y_scale": None, "grid": ""}),                # unset values are not options
+    ])
+    def test_granted_or_unset_options_pass(self, wtype, cfg):
+        from app.services.widget_roles import validate_widget_payload
+        validate_widget_payload(wtype, cfg)
+
+    def test_the_suggestion_generator_drops_them_instead_of_proposing_them(self):
+        from app.services.suggest_dataset_dashboard import polish_widget
+        out = polish_widget({"widget_type": "box_plot", "title": "Spread",
+                             "config": {"measure": "tat", "x_axis_angle": 0}},
+                            {"columns": [], "structure": {}})
+        assert "x_axis_angle" not in out["config"]
+        assert out["config"]["measure"] == "tat"
+
+
+class TestATypeSwitchIsJudgedAsTheWidgetItBecomes:
+    async def test_switching_to_a_type_that_ignores_an_option_is_refused(
+            self, client, auth_headers):
+        h = auth_headers["a"]
+        rep = (await client.post("/api/v1/reports", json={"name": "S"}, headers=h)).json()
+        page = rep["pages"][0]["id"]
+        w = (await client.post(f"/api/v1/reports/{rep['id']}/pages/{page}/widgets",
+                               json={"widget_type": "bar", "config": {"y_scale": "log"},
+                                     "layout": {"x": 0, "y": 0, "w": 6, "h": 4}},
+                               headers=h)).json()
+        url = f"/api/v1/reports/{rep['id']}/pages/{page}/widgets/{w['id']}"
+        r = await client.patch(url, json={"widget_type": "pie"}, headers=h)
+        assert r.status_code == 400 and "y_scale" in r.text
+        # ...and the same switch with the config the builder would send passes.
+        r = await client.patch(url, json={"widget_type": "pie", "config": {}}, headers=h)
+        assert r.status_code == 200, r.text

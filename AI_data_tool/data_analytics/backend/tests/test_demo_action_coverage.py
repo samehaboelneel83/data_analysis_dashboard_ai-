@@ -114,7 +114,9 @@ CONFIG_FEATURES = [
     ("cross-filter interaction", "interaction"),
     ("prep pipelines", "prep_steps"),
     ("calculated columns", "calculated_columns"),
-    ("post-aggregation measures", "measure_defs"),
+    # Post-aggregation measures are NOT a config key: a widget's own
+    # `measure_defs` is overwritten by the server by design, so its presence
+    # certified a chart that drew row counts. See the dedicated test below.
     ("display rules", "display_rules"),
 ]
 
@@ -137,6 +139,23 @@ async def test_the_demo_uses_this_widget_feature(label, key, db_session, fully_s
         f"no seeded widget uses {label} (config key {key!r}). The demo renders "
         f"but stops demonstrating this."
     )
+
+
+@pytest.mark.asyncio
+async def test_the_demo_charts_a_post_aggregation_measure(db_session, fully_seeded):
+    """Some seeded widget's `measure` names a measure defined on its DATASET --
+    the only place the server reads measures from."""
+    from app.models.models import Dataset, Report, ReportPage, ReportWidget
+    rows = (await db_session.execute(
+        select(ReportWidget.config, Report.dataset_id)
+        .join(ReportPage, ReportPage.id == ReportWidget.page_id)
+        .join(Report, Report.id == ReportPage.report_id))).all()
+    measures = {d.id: {m.get("name") for m in d.measures or []}
+                for d in (await db_session.execute(select(Dataset))).scalars()}
+    assert any((cfg or {}).get("measure") in measures.get((cfg or {}).get("dataset_id") or rds, set())
+               for cfg, rds in rows), (
+        "no seeded widget charts a dataset measure. The demo renders but stops "
+        "demonstrating post-aggregation measures.")
 
 
 class TestIdentities:

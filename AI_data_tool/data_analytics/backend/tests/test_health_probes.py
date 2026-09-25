@@ -132,6 +132,20 @@ class TestReadiness:
         assert r.status_code == 503
         assert r.json()["checks"]["migrations"]["status"] == "pending"
 
+    @pytest.mark.asyncio
+    async def test_a_failed_migration_is_not_ready(self, monkeypatch):
+        """Startup finished, Postgres answers -- and the schema never reached
+        head. That replica must not take traffic; it used to report ready."""
+        monkeypatch.setattr(main_module, "_STARTUP_COMPLETE", True)
+        monkeypatch.setattr(main_module, "_MIGRATION_ERROR", "StringDataRightTruncationError")
+        r = await _get("/health/ready")
+        assert r.status_code == 503
+        mig = r.json()["checks"]["migrations"]
+        assert mig == {"status": "failed", "required": True,
+                       "error": "StringDataRightTruncationError"}
+        # Liveness is unaffected, so the logs stay reachable.
+        assert (await _get("/health/live")).status_code == 200
+
 
 class TestValkeyIsOptional:
     @pytest.mark.asyncio

@@ -350,9 +350,23 @@ async def _resolve_widget_data(
         denied = sorted(set(await resolve_denied_columns(db, current_user, dataset_id) or [])
                         | set(redact_columns or []))
         if denied:
-            referenced = {v for v in req.config.values() if isinstance(v, str)}
-            for f in (req.config.get("filters") or []):
-                referenced.add(str(f.get("column")))
+            # Every string ANYWHERE in the config, not just top-level values:
+            # `measures: [...]`, `roles: {...}` and filter entries name columns
+            # one or more levels down, and the SQL is built from them. Walking
+            # the whole tree rather than a list of known keys means a new
+            # nested field is covered the day it ships. The cost is that a
+            # title equal to a denied column's name is refused too -- the
+            # fail-closed side, as above.
+            referenced: set[str] = set()
+            stack: list = [req.config]
+            while stack:
+                node = stack.pop()
+                if isinstance(node, str):
+                    referenced.add(node)
+                elif isinstance(node, dict):
+                    stack.extend(node.values())
+                elif isinstance(node, (list, tuple)):
+                    stack.extend(node)
             if referenced & set(denied):
                 raise widget_error(403, "forbidden_column", "This widget references a column your role cannot access")
 
@@ -367,7 +381,7 @@ async def _resolve_widget_data(
                     run_direct_query,
                     source_cfg, ds, req.config, widget_type=req.widget_type, rls_filter_expr=rls_filter_expr,
                     cache_ttl_seconds=source.cache_ttl_seconds, cache_epoch=source.cache_epoch,
-                    org_id=current_user.org_id,
+                    org_id=current_user.org_id, drop_columns=denied or None,
                 )
         except DirectQueryUnsupported as e:
             raise widget_error(400, "unsupported", str(e))
@@ -433,11 +447,47 @@ async def _resolve_widget_data(
         raise widget_error(413, "row_cap", str(e))
 
 
+async def _guard_script_execution(db: AsyncSession, current_user: User,
+                                  req: WidgetDataRequest) -> None:
+    """Only code an org admin SAVED may run for anyone else.
+
+    reports._guard_script_authoring gates who may write a script tile, but these
+    two endpoints take the widget type and config from the caller -- without
+    this, any member who can read a dataset could post their own code here and
+    run it as the server user, never touching the authoring gate.
+
+    An admin may run unsaved code (the builder previews a draft). Anyone else
+    runs a script only when its code is exactly that of a saved script tile in
+    their own org, which is what a viewer of an admin-written tile sends. The
+    shared, embed, package and review routes resolve saved widgets themselves
+    and never come through here."""
+    if req.widget_type != "script":
+        return
+    if current_user.role and current_user.role.is_org_admin:
+        return
+    code = (req.config or {}).get("code")
+    if code:
+        from ..models.models import ReportPage, ReportWidget
+        saved = (await db.execute(
+            select(ReportWidget.config)
+            .join(ReportPage, ReportPage.id == ReportWidget.page_id)
+            .join(Report, Report.id == ReportPage.report_id)
+            .where(Report.org_id == current_user.org_id,
+                   ReportWidget.widget_type == "script"))).scalars().all()
+        if any(isinstance(c, dict) and c.get("code") == code for c in saved):
+            return
+    raise widget_error(
+        403, "forbidden",
+        "A script tile runs code on the server, so only code an organisation "
+        "admin has saved can run. Ask an admin to review and save it.")
+
+
 @router.post("/{dataset_id}/widget-data")
 async def query_widget(
     dataset_id: int, req: WidgetDataRequest,
     db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
+    await _guard_script_execution(db, current_user, req)
     return await _resolve_widget_data(dataset_id, req, db, current_user)
 
 
@@ -454,6 +504,7 @@ async def export_widget(
     fmt = (format or "csv").lower()
     if fmt not in _EXPORT_FORMATS:
         raise widget_error(400, "unsupported", f"Unsupported export format: {format}")
+    await _guard_script_execution(db, current_user, req)
 
     ds_check = (await db.execute(select(Dataset).where(Dataset.id == dataset_id))).scalar_one_or_none()
     from .datasets import _dataset_has_security, _exports_disabled, _policy_dataset

@@ -89,6 +89,11 @@ def test_histogram_matches_import_mode(sales_table):
     df = pd.DataFrame(ROWS, columns=["region", "revenue", "cost"])
     import_result = shape_histogram(df, config)
 
+    # `rows_scanned` is the one population field every DirectQuery strategy
+    # stamps (direct_query._run_direct_query_inner); the raw import shaper
+    # compared against here does not, its caller does. Pinned on its own
+    # rather than letting it fail the equivalence of everything else.
+    assert direct_result.pop("rows_scanned") == len(ROWS)
     assert direct_result == import_result
 
 

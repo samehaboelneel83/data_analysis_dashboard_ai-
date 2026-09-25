@@ -1,0 +1,46 @@
+# Production override: the backend runs the self-contained `prod` image.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile prod up -d --build
+#
+# What changes against the dev stack:
+#   - the backend image carries its own source (no ./backend bind mount), runs
+#     as the unprivileged `datalytics` user (uid 10001), and runs uvicorn with
+#     workers and no --reload;
+#   - ENV is production, so the dev-only fallbacks in core/config.py are off.
+#
+# Before the FIRST start on a volume the old root-run image wrote to, hand the
+# uploads volume to that user, or imports fail with "permission denied":
+#   docker run --rm -v datalytics_uploaded_files:/data alpine chown -R 10001:10001 /data
+#
+# SECRET_KEY and POSTGRES_PASSWORD must be set in the environment (or .env);
+# the defaults in docker-compose.yml are development values. With ENV=production
+# the backend REFUSES TO START on the default key or one under 32 characters
+# (core/config.py) -- the default is public, and it signs every login token.
+#
+# Moving an existing install off the old key: saved connection passwords are
+# encrypted with a key DERIVED from SECRET_KEY unless CONNECTOR_SECRET_KEY is
+# set, so changing SECRET_KEY alone makes every stored password unreadable.
+# Pin the connector key to the old derivation FIRST, then change SECRET_KEY:
+#   CONNECTOR_SECRET_KEY=$(python -c "import base64,hashlib,sys; print(base64.urlsafe_b64encode(hashlib.sha256(b'datasource-config-v1:'+sys.argv[1].encode()).digest()).decode())" "<old SECRET_KEY>")
+#   SECRET_KEY=$(python -c "import secrets; print(secrets.token_urlsafe(48))")
+# Changing SECRET_KEY also signs everyone out (their tokens no longer verify).
+#
+# Connections to private/internal hosts stay ALLOWED by default: a customer-
+# hosted install normally connects to its own internal databases. Set
+# CONNECTOR_ALLOW_PRIVATE_HOSTS=false when every source is public, to block
+# requests to internal addresses (cloud metadata endpoints are always blocked).
+#
+# Login sessions last ACCESS_TOKEN_EXPIRE_HOURS (default 168 = 7 days); a
+# password reset ends a user's existing sessions immediately.
+
+services:
+  backend:
+    build:
+      target: prod
+    # The dev command runs --reload; the prod image's own CMD runs workers.
+    command: !reset null
+    volumes: !override
+      - uploaded_files:/app/uploads
+    environment:
+      ENV: production
+      UVICORN_WORKERS: ${UVICORN_WORKERS:-2}

@@ -325,6 +325,65 @@ class TestOverTheWire:
         assert sorted(row[0] for row in body["rows"]) == ["N", "S"]
 
 
+class TestOnlySavedCodeRunsForNonAdmins:
+    """The authoring gate says who may WRITE a script tile; /widget-data takes
+    the type and config from the caller. Without a gate there too, a member
+    could post their own code and run it as the server user."""
+
+    async def _saved_tile(self, db_session, client, headers, org_id, tmp_path, code):
+        report, page = await _report_with_page(db_session, client, headers, org_id, tmp_path)
+        r = await client.post(
+            f"/api/v1/reports/{report.id}/pages/{page['id']}/widgets",
+            json={"widget_type": "script", "title": "Script", "config": {"code": code},
+                  "layout": {"x": 0, "y": 0, "w": 6, "h": 5}},
+            headers=headers)
+        assert r.status_code == 201, r.text
+        return report
+
+    async def test_a_non_admin_cannot_run_their_own_code(
+            self, db_session, two_orgs, auth_headers, client, tmp_path):
+        report = await self._saved_tile(db_session, client, auth_headers["a"],
+                                        two_orgs["a"]["org"].id, tmp_path, "result = df")
+        member = await _member_headers(db_session, two_orgs["a"]["org"].id, report.id)
+        for path in ("widget-data", "widget-data/export?format=csv"):
+            r = await client.post(
+                f"/api/v1/datasets/{report.dataset_id}/{path}",
+                json={"widget_type": "script", "report_id": report.id,
+                      "config": {"code": "import os; result = os.listdir('/')"}},
+                headers=member)
+            assert r.status_code == 403, (path, r.text)
+            assert "admin" in r.json()["detail"].lower()
+
+    async def test_a_non_admin_can_run_a_tile_an_admin_saved(
+            self, db_session, two_orgs, auth_headers, client, tmp_path):
+        code = "result = df[['region']]"
+        report = await self._saved_tile(db_session, client, auth_headers["a"],
+                                        two_orgs["a"]["org"].id, tmp_path, code)
+        member = await _member_headers(db_session, two_orgs["a"]["org"].id, report.id)
+        r = await client.post(
+            f"/api/v1/datasets/{report.dataset_id}/widget-data",
+            json={"widget_type": "script", "report_id": report.id, "config": {"code": code}},
+            headers=member)
+        assert r.status_code == 200, r.text
+        assert r.json()["columns"] == ["region"]
+
+    async def test_code_saved_in_another_org_does_not_count(
+            self, db_session, two_orgs, auth_headers, client, tmp_path):
+        code = "result = df[['sales']]"
+        other = tmp_path / "b"
+        other.mkdir()
+        await self._saved_tile(db_session, client, auth_headers["b"],
+                               two_orgs["b"]["org"].id, other, code)
+        report, _ = await _report_with_page(db_session, client, auth_headers["a"],
+                                            two_orgs["a"]["org"].id, tmp_path)
+        member = await _member_headers(db_session, two_orgs["a"]["org"].id, report.id)
+        r = await client.post(
+            f"/api/v1/datasets/{report.dataset_id}/widget-data",
+            json={"widget_type": "script", "report_id": report.id, "config": {"code": code}},
+            headers=member)
+        assert r.status_code == 403, r.text
+
+
 class TestTheInputIsDeclaredToo:
     """Output truncation was flagged from the start; the INPUT cap was silent.
     A script summing a column over the first 200,000 of 900,000 rows returns a

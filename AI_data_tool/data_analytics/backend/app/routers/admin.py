@@ -159,6 +159,10 @@ async def update_user(user_id: int, body: UserUpdate, db: AsyncSession = Depends
         user.email = body.email
     if body.password is not None:
         user.password_hash = hash_password(body.password)
+        # A reset is the moment a revocation is certainly wanted (a leaked or
+        # shared password): every login token issued before now stops working.
+        from datetime import datetime, timezone
+        user.tokens_valid_after = datetime.now(timezone.utc)
     if body.role_id is not None:
         role = await db.get(Role, body.role_id)
         check_org(role, current_user, "Role not found")

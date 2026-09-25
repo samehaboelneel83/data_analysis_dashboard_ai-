@@ -11,8 +11,39 @@ function minOf(values: number[]): number | undefined {
   return finite.length ? Math.min(...finite) : undefined
 }
 
+// ── The report design's bar look ─────────────────────────────────────────────
+// Numbers (value ticks, value labels) in tabular figures so digits line up;
+// a thin baseline under the bars and no axis titles unless the author typed
+// one -- the card title already says what the bars are and what they count.
+// Category ticks keep the shared size: a bigger face tilts labels sooner, the
+// opposite of the upright axis the design draws. Every piece stays
+// overridable from the Formatting panel: defaults, applied where cfg is silent.
+//
+// NOT the mono face the design sets them in: Recharts measures SVG text with
+// its real font and wraps it at spaces when it overflows its box, and the
+// gutters and bar widths are sized for the sans face. In mono, "$ 2,400,000"
+// broke in two -- the "$" on a line of its own above the number (seen on the
+// Sales Overview capture, 2026-09-24). Tabular figures give the alignment the
+// mono face was there for, at the width everything was measured for.
+const MONO = { fontVariantNumeric: 'tabular-nums' as const }
+const BASELINE = { stroke: 'var(--border)', strokeWidth: 1 }
+
+function designAxes(cfg: ChartRendererProps['cfg']) {
+  return {
+    xCfg: cfg,
+    xOpts: { title: (cfg.x_axis_label as string | undefined) ?? '' },
+    yOpts: { title: (cfg.y_axis_label as string | undefined) ?? '' },
+    axisLine: cfg.axis_line ?? BASELINE,
+  }
+}
+
+function monoTick(t: Record<string, unknown>) {
+  return { ...t, style: { ...((t.style as object) ?? {}), ...MONO } }
+}
+
 export default function BarChartRenderer({ rows, data, cfg, rtl, broadcasts, localSelected, onClickPoint, measureFmt, ruleStyles, plotW, plotH, onBrushChange }: ChartRendererProps) {
   const getFill = getFillFactory(broadcasts, localSelected, ruleStyles?.rows)
+  const look = designAxes(cfg)
   const mode = (cfg.bar_mode as string) || 'clustered'
   const { rows: seriesRows, series } = toBarSeries(data, mode)
   const analyticsLines = computeAnalyticsLines(rows, cfg.analytics)
@@ -46,9 +77,13 @@ export default function BarChartRenderer({ rows, data, cfg, rtl, broadcasts, loc
           onClick={broadcasts ? (d: any) => d?.activePayload?.[0] && onClickPoint(d.activePayload[0].payload.name) : undefined}>
           <Customized component={() => <PatternDefs colors={series.map((_, i) => COLORS[i % COLORS.length])} enabled={!!cfg.series_patterns} />} />
           {grid && <CartesianGrid {...grid} />}
-          <XAxis dataKey="name" {...xAxisProps(cfg, rtl, seriesRows.map((r: any) => String(r.name)), plotW)} />
-          <YAxis {...yAxisProps(cfg, rtl, measureFmt, isPercent ? undefined : axisValues, observedMin, { height: plotH })}
-            tickFormatter={v => isPercent ? `${v}%` : fmtStr(v, measureFmt)} />
+          <XAxis dataKey="name" {...xAxisProps(look.xCfg, rtl, seriesRows.map((r: any) => String(r.name)), plotW, look.xOpts)}
+            axisLine={look.axisLine} />
+          {(() => {
+            const y = yAxisProps(cfg, rtl, measureFmt, isPercent ? undefined : axisValues, observedMin, { height: plotH, ...look.yOpts })
+            return <YAxis {...y} tick={monoTick(y.tick as Record<string, unknown>)}
+              tickFormatter={v => isPercent ? `${v}%` : fmtStr(v, measureFmt)} />
+          })()}
           {/* Each line names its series ("Online: 138"). The name used to be
               blanked, so a four-series tooltip was four bare numbers told
               apart only by colour. */}
@@ -77,7 +112,22 @@ export default function BarChartRenderer({ rows, data, cfg, rtl, broadcasts, loc
   }
 
   const observedMin = minOf(rows.map((r: any) => Number(r.value)))
-  const labels = labelListProps(cfg, measureFmt, 'value', rows.length)
+  // A simple bar chart prints its values on the bars unless the author said
+  // otherwise: with a dozen bars or fewer the number IS the reading, and the
+  // axis becomes a guide rather than the only way to get it. Past twelve the
+  // labels start to crowd, so it stays opt-in there.
+  const autoLabels = cfg.data_labels === undefined && rows.length > 0 && rows.length <= 12
+  const baseLabels = labelListProps(autoLabels ? { ...cfg, data_labels: true } : cfg, measureFmt, 'value', rows.length)
+  const labels = baseLabels
+    ? { ...baseLabels, offset: 6, style: { fill: 'var(--text)', fillOpacity: 0.8, fontSize: 11, fontWeight: 500, ...MONO },
+        // One line, always. Recharts wraps a label at spaces once it is wider
+        // than its bar, and a slim bar is narrower than "$ 2,221,092" -- the
+        // "$" landed on a line of its own above the number. Non-breaking
+        // spaces are not in Recharts' break set, so the value stays whole.
+        valueAccessor: (entry: Record<string, unknown>, index: number) =>
+          String(baseLabels.valueAccessor(entry, index)).replace(/ /g, ' ') }
+    : null
+  const y = yAxisProps(cfg, rtl, measureFmt, rows.map((r: any) => r.value), observedMin, { height: plotH, ...look.yOpts })
   // A bound target column (rows carry `target`): each bar gets a tick at its own
   // target and is recoloured by attainment. Attainment colouring yields to an explicit
   // display-rule fill -- a rule is the author saying what a mark means, and the
@@ -93,17 +143,21 @@ export default function BarChartRenderer({ rows, data, cfg, rtl, broadcasts, loc
   const partialLabel: string | undefined = data?.partial_period?.label
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <BarChart data={rows} margin={chartMargin(rtl, { top: 4, right: 8, bottom: 20, left: 0 })}
+      <BarChart data={rows} margin={chartMargin(rtl, { top: labels ? 20 : 4, right: 8, bottom: 20, left: 0 })}
+        // Slim bars with air between them, as the design draws them: a bar is
+        // read by its height, and a wide one adds ink without adding meaning.
+        barCategoryGap="36%" maxBarSize={96}
         onClick={broadcasts ? (d: any) => d?.activePayload?.[0] && onClickPoint(d.activePayload[0].payload.name) : undefined}
         style={{ cursor: broadcasts ? 'pointer' : 'default' }}
       >
         {grid && <CartesianGrid {...grid} />}
-        <XAxis dataKey="name" {...xAxisProps(cfg, rtl, rows.map((r: any) => String(r.name)), plotW)} />
-        <YAxis {...yAxisProps(cfg, rtl, measureFmt, rows.map((r: any) => r.value), observedMin, { height: plotH })} tickFormatter={v => fmtStr(v, measureFmt)} />
-        <Tooltip contentStyle={TT} formatter={(v: unknown) => [fmtStr(v, measureFmt), seriesName(cfg)]}
+        <XAxis dataKey="name" {...xAxisProps(look.xCfg, rtl, rows.map((r: any) => String(r.name)), plotW, look.xOpts)}
+          axisLine={look.axisLine} />
+        <YAxis {...y} tick={monoTick(y.tick as Record<string, unknown>)} tickFormatter={v => fmtStr(v, measureFmt)} />
+        <Tooltip contentStyle={TT} cursor={{ fill: 'var(--surface2)' }} formatter={(v: unknown) => [fmtStr(v, measureFmt), seriesName(cfg)]}
           labelFormatter={(l: unknown) => partialLabel != null && String(l) === partialLabel
             ? `${String(l)} (partial — data to ${data.partial_period.through})` : String(l)} />
-        <Bar dataKey="value" radius={[4,4,0,0]}>
+        <Bar dataKey="value" radius={[6, 6, 0, 0]}>
           {rows.map((r: any, i: number) => {
             const s = getFill(r.name, i)
             const attainment = hasTargets && !ruleStyles?.rows?.[i]?.fill && typeof r.target === 'number'

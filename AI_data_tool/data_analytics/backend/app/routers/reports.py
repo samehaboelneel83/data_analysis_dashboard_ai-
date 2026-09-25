@@ -7,8 +7,8 @@ from sqlalchemy import select, update as sa_update
 from sqlalchemy.orm import selectinload
 from ..core.database import get_db
 from ..core.org_scope import check_org
-from ..core.capability import (effective_capabilities, effective_capability,
-                               require_capability)
+from ..core.capability import (_config_dataset_ids, effective_capabilities, effective_capability,
+                               require_capability, require_dataset_read)
 from ..dependencies import get_current_user
 from ..services.audit import record as audit
 from ..models.models import CommonFilter, DataAlert, OrgTheme, PageRoleVisibility, PageTemplate, Report, ReportClassification, ReportParameter, ReportSchedule, ReportPage, ReportUserGrant, ReportVersion, ReportWidget, Bookmark, RecentView, Role, User
@@ -155,12 +155,16 @@ async def _capture_version(report_id: int, db: AsyncSession,
 
     by_page: dict[int, list[dict]] = {}
     for w in widget_rows:
+        # `id` is kept so a restore can REMAP references: widget configs and
+        # bookmarks point at widgets and pages by id, and a restore recreates
+        # both with new ones (see _remap_restored_refs).
         by_page.setdefault(w["page_id"], []).append(
-            {"widget_type": w["widget_type"], "title": w["title"],
+            {"id": w["id"], "widget_type": w["widget_type"], "title": w["title"],
              "config": w["config"], "layout": w["layout"]})
     snapshot = {
         "report": {"theme": rep.theme, "display_rules": rep.display_rules},
         "pages": [{
+            "id": p["id"],
             "name": p["name"], "title": p["title"], "page_type": p["page_type"],
             "prompt_column": p["prompt_column"], "prompt_label": p["prompt_label"],
             "position": p["position"], "page_size": p["page_size"],
@@ -216,8 +220,26 @@ async def list_reports(db: AsyncSession = Depends(get_db), current_user: User = 
     return visible
 
 
+async def _require_readable_datasets(db: AsyncSession, user: User, ids, *, already=()) -> None:
+    """Only data you can already read may be attached to a report.
+
+    The last read rung ("a dashboard you can already open") opens every
+    dataset a visible report draws on -- its primary, its additional ids and
+    each widget's own `config.dataset_id`. Nothing checked who put a dataset
+    there, so a member could make their own report, point it at a colleague's
+    private dataset, and the rung handed it to them.
+
+    Only NEWLY attached ids are checked (`already` = what the row held): an
+    editor re-saving a shared dashboard reads its data through that dashboard
+    and is not making a new claim on it."""
+    for ds_id in sorted({i for i in ids if isinstance(i, int)} - set(already)):
+        await require_dataset_read(db, user, ds_id)
+
+
 @router.post("", response_model=ReportOut, status_code=201)
 async def create_report(body: ReportCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    await _require_readable_datasets(
+        db, current_user, [body.dataset_id, *(getattr(body, "additional_dataset_ids", None) or [])])
     obj = Report(**body.model_dump(), org_id=current_user.org_id,
                  created_by=current_user.id)
     db.add(obj)
@@ -452,6 +474,9 @@ async def delete_common_filter(report_id: int, filter_id: int,
 async def update_report(report_id: int, body: ReportUpdate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     from sqlalchemy.orm.attributes import flag_modified
     obj = await _get_report(report_id, db, current_user)
+    await _require_readable_datasets(
+        db, current_user, [body.dataset_id, *(body.additional_dataset_ids or [])],
+        already=[obj.dataset_id, *(obj.additional_dataset_ids or [])])
     # Unset fields are left alone; an explicit null clears ONLY the primary
     # dataset (undoing "attach data" on a report created without one). Every
     # other null is ignored as before -- a report cannot lose its name.
@@ -681,6 +706,16 @@ def _guard_script_authoring(widget_type: str | None, config: dict | None,
              "admin can create or change one. Ask an admin to review the code.")
 
 
+def _validate_widget(widget_type: str | None, config: dict | None) -> None:
+    """400 on a payload no engine can execute as written (E03 slice 1; see
+    widget_roles.validate_widget_payload)."""
+    from ..services.widget_roles import InvalidWidget, validate_widget_payload
+    try:
+        validate_widget_payload(widget_type, config)
+    except InvalidWidget as e:
+        raise HTTPException(400, str(e))
+
+
 #: The widget types whose renderer draws totals and subtotals (WidgetBody's table
 #: branch); only these are created carrying the totals defaults.
 _TOTALS_TABLE_TYPES = frozenset({"table", "crosstab", "matrix"})
@@ -695,7 +730,9 @@ async def add_widget(report_id: int, page_id: int, body: WidgetCreate, db: Async
     if not page:
         raise HTTPException(404, "Page not found")
     fields = body.model_dump()
+    _validate_widget(fields.get("widget_type"), fields.get("config"))
     _guard_script_authoring(fields.get("widget_type"), fields.get("config"), current_user)
+    await _require_readable_datasets(db, current_user, _config_dataset_ids(fields.get("config")))
     if fields.get("widget_type") in _TOTALS_TABLE_TYPES:
         # New tables take the current totals defaults: subtotals off, totals drawn
         # BEFORE their data. Stamped here, on creation, rather than changed at read
@@ -723,10 +760,20 @@ async def update_widget(report_id: int, page_id: int, widget_id: int, body: Widg
     if not widget:
         raise HTTPException(404, "Widget not found")
     changes = body.model_dump(exclude_none=True)
+    # Only when this PATCH changes the type or the config: a legacy config nobody
+    # is editing is not re-litigated because someone moved the tile. When it
+    # does, the widget it ENDS UP as is judged -- a type switch that keeps a
+    # bar's y_scale onto a pie is caught even though the config was not sent.
+    if "widget_type" in changes or "config" in changes:
+        _validate_widget(changes.get("widget_type") or widget.widget_type,
+                         changes["config"] if "config" in changes else (widget.config or {}))
     # The TYPE decides the gate, and it may be the stored one (editing an
     # existing tile) or the incoming one (turning a chart into a script tile).
     _guard_script_authoring(changes.get("widget_type") or widget.widget_type,
                             changes.get("config"), current_user)
+    if "config" in changes:
+        await _require_readable_datasets(db, current_user, _config_dataset_ids(changes["config"]),
+                                         already=_config_dataset_ids(widget.config))
     for k, v in changes.items():
         setattr(widget, k, v)
     await _bump_revision(report_id, db, current_user)
@@ -821,6 +868,125 @@ async def list_versions(report_id: int, db: AsyncSession = Depends(get_db),
     } for v, email in rows]
 
 
+#: Widget-config keys holding the id of ANOTHER widget / of a page in the same
+#: report. The frontend reads these (WidgetConfigPanel, WidgetRenderer,
+#: ReportBuilder); page_templates remaps container_id the same way.
+_WIDGET_REF_KEYS = ("container_id",)
+_PAGE_REF_KEYS = ("drillthroughPageId", "tooltipPageId", "actionPageId")
+
+
+def _remap_restored_refs(widgets: list, bookmarks: list,
+                         page_map: dict, widget_map: dict) -> dict:
+    """Point every id reference at the restored pages and widgets.
+
+    A restore recreates pages and widgets with NEW ids, and until now the
+    references into them were copied verbatim: a container's children, a
+    widget's interaction targets, its drill-through / tooltip / navigation
+    page, and every bookmark all pointed at ids that no longer existed. None of
+    it errors -- the wiring just silently stops working.
+
+    A reference to something the snapshot does not contain is DROPPED, never
+    left dangling (the same rule `_prune_actions_targeting` and
+    page_templates apply). Returns counts for the response.
+    """
+    remapped = dropped = 0
+
+    def page_ref(v):
+        nonlocal remapped, dropped
+        if v in page_map:
+            remapped += 1
+            return page_map[v], True
+        dropped += 1
+        return None, False
+
+    for w in widgets:
+        cfg = dict(w.config or {})
+        changed = False
+        for key in _WIDGET_REF_KEYS:
+            if cfg.get(key) is not None:
+                changed = True
+                if cfg[key] in widget_map:
+                    cfg[key] = widget_map[cfg[key]]
+                    remapped += 1
+                else:
+                    cfg.pop(key)
+                    dropped += 1
+        for key in _PAGE_REF_KEYS:
+            if cfg.get(key) is not None:
+                changed = True
+                new, ok = page_ref(cfg[key])
+                if ok:
+                    cfg[key] = new
+                else:
+                    cfg.pop(key)
+        interaction = cfg.get("interaction")
+        if isinstance(interaction, dict) and isinstance(interaction.get("actions"), list):
+            kept = []
+            for a in interaction["actions"]:
+                if isinstance(a, dict) and "targetId" in a:
+                    if a["targetId"] in widget_map:
+                        kept.append({**a, "targetId": widget_map[a["targetId"]]})
+                        remapped += 1
+                    else:
+                        dropped += 1
+                else:
+                    kept.append(a)
+            cfg["interaction"] = {**interaction, "actions": kept}
+            changed = True
+        if changed:
+            w.config = cfg   # rebuilt, not mutated: JSON columns are not tracked
+
+    for b in bookmarks:
+        st = dict(b.state or {})
+        if st.get("pageId") is not None:
+            new, ok = page_ref(st["pageId"])
+            st["pageId"] = new if ok else None
+        filters = []
+        for f in st.get("activeFilters") or []:
+            if not isinstance(f, dict):
+                continue
+            f = dict(f)
+            wid, pid = f.get("sourceWidgetId"), f.get("sourcePageId")
+            if wid is not None and wid not in widget_map:
+                dropped += 1   # a selection made on a widget that is gone
+                continue
+            if wid is not None:
+                f["sourceWidgetId"] = widget_map[wid]
+                remapped += 1
+            if pid is not None:
+                new, ok = page_ref(pid)
+                if ok:
+                    f["sourcePageId"] = new
+                else:
+                    continue
+            filters.append(f)
+        if "activeFilters" in st:
+            st["activeFilters"] = filters
+        if isinstance(st.get("promptValues"), dict):
+            # Keyed by page id (JSON object keys arrive as strings).
+            pv = {}
+            for k, v in st["promptValues"].items():
+                try:
+                    old = int(k)
+                except (TypeError, ValueError):
+                    continue
+                new, ok = page_ref(old)
+                if ok:
+                    pv[str(new)] = v
+            st["promptValues"] = pv
+        if isinstance(st.get("hiddenWidgetIds"), list):
+            hidden = []
+            for wid in st["hiddenWidgetIds"]:
+                if wid in widget_map:
+                    hidden.append(widget_map[wid])
+                    remapped += 1
+                else:
+                    dropped += 1
+            st["hiddenWidgetIds"] = hidden
+        b.state = st
+    return {"links_remapped": remapped, "links_dropped": dropped}
+
+
 @router.post("/{report_id}/versions/{version_id}/restore")
 async def restore_version(report_id: int, version_id: int,
                           db: AsyncSession = Depends(get_db),
@@ -846,11 +1012,28 @@ async def restore_version(report_id: int, version_id: int,
 
     existing = (await db.execute(select(ReportPage).where(
         ReportPage.report_id == report_id))).scalars().all()
+    # Page-role restrictions are ACCESS, not content: restoring Tuesday's
+    # charts must not also lift today's "Finance only" on a page. Read them
+    # before the pages (and, by cascade, the rows) go, keyed by page id and by
+    # name -- the id matches when the snapshot is from the same page lifetime,
+    # the name when an earlier restore already renumbered the pages.
+    vis_rows = (await db.execute(select(PageRoleVisibility).where(
+        PageRoleVisibility.page_id.in_([p.id for p in existing])))).scalars().all() if existing else []
+    roles_by_page: dict[int, set[int]] = {}
+    for row in vis_rows:
+        roles_by_page.setdefault(row.page_id, set()).add(row.role_id)
+    names = [p.name for p in existing]
+    roles_by_name = {p.name: roles_by_page[p.id] for p in existing
+                     if p.id in roles_by_page and names.count(p.name) == 1}
     for page in existing:
         await db.delete(page)
     await db.flush()
 
     snap = version.snapshot or {}
+    has_ids = any("id" in (p or {}) for p in snap.get("pages") or [])
+    page_map: dict[int, int] = {}
+    new_widgets: list[tuple[object, ReportWidget]] = []
+    restricted = 0
     for pdata in snap.get("pages") or []:
         page = ReportPage(report_id=report_id,
                           name=pdata.get("name") or "Page 1",
@@ -867,12 +1050,33 @@ async def restore_version(report_id: int, version_id: int,
                           layout_template=pdata.get("layout_template"))
         db.add(page)
         await db.flush()
+        if pdata.get("id") is not None:
+            page_map[pdata["id"]] = page.id
+        roles = roles_by_page.get(pdata.get("id")) or roles_by_name.get(page.name)
+        if roles:
+            restricted += 1
+            for role_id in sorted(roles):
+                db.add(PageRoleVisibility(page_id=page.id, role_id=role_id))
         for wdata in pdata.get("widgets") or []:
-            db.add(ReportWidget(page_id=page.id,
-                                widget_type=wdata.get("widget_type") or "text",
-                                title=wdata.get("title"),
-                                config=wdata.get("config") or {},
-                                layout=wdata.get("layout") or {"x": 0, "y": 0, "w": 6, "h": 4}))
+            w = ReportWidget(page_id=page.id,
+                             widget_type=wdata.get("widget_type") or "text",
+                             title=wdata.get("title"),
+                             config=wdata.get("config") or {},
+                             layout=wdata.get("layout") or {"x": 0, "y": 0, "w": 6, "h": 4})
+            db.add(w)
+            new_widgets.append((wdata.get("id"), w))
+    await db.flush()
+    widget_map = {old: w.id for old, w in new_widgets if old is not None}
+    if has_ids:
+        bookmarks = (await db.execute(select(Bookmark).where(
+            Bookmark.report_id == report_id))).scalars().all()
+        links = _remap_restored_refs([w for _, w in new_widgets], bookmarks,
+                                     page_map, widget_map)
+    else:
+        # A snapshot from before ids were recorded: nothing to map from, so the
+        # references are copied as they were (the old behaviour) rather than all
+        # dropped. Said in the response rather than guessed at.
+        links = {"links_remapped": 0, "links_dropped": 0, "links_unverified": True}
     rep_content = snap.get("report") or {}
     if rep_content.get("theme") is not None:
         report.theme = rep_content["theme"]
@@ -886,8 +1090,12 @@ async def restore_version(report_id: int, version_id: int,
             # The state this restore replaced, itself restorable -- what a redo
             # of an undone copilot change goes back to.
             "saved_current_as_version_id": saved.id if saved is not None else None,
-            "note": "Pins and page-role visibility that pointed at the "
-                    "replaced widgets were removed with them."}
+            **links,
+            "pages_restricted": restricted,
+            "note": "Widget links and bookmarks were pointed at the restored "
+                    "pages and widgets; links to anything the version does not "
+                    "contain were removed. Page-role restrictions in force "
+                    "were kept. Pins on the replaced widgets were removed."}
 
 
 # ── Bookmarks ─────────────────────────────────────────────────────────────────
@@ -1774,6 +1982,10 @@ async def add_page_from_template(report_id: int, body: dict,
     """
     report = await db.get(Report, report_id)
     check_org(report, current_user, "Report not found")
+    # Adding a page is an edit. Every other page/widget write gets this from
+    # _bump_revision; this one bumps the counter itself and so never did --
+    # a view-only reader could add pages to someone else's dashboard.
+    await require_capability(db, current_user, report_id, "edit")
 
     if body.get("template_id") is not None:
         tpl = await db.get(PageTemplate, int(body["template_id"]))
@@ -1784,11 +1996,25 @@ async def add_page_from_template(report_id: int, body: dict,
         if payload is None:
             raise HTTPException(404, "No such built-in template")
     elif body.get("source_report_id") is not None and body.get("source_page_id") is not None:
+        # The router's draft-privacy gate covers the PATH report only; the
+        # source arrives in the body, so a draft you cannot open would
+        # otherwise be copyable page by page.
+        await require_capability(db, current_user, int(body["source_report_id"]), "view")
         source = await _load_page(db, int(body["source_report_id"]),
                                   int(body["source_page_id"]), current_user)
         payload = serialize_page(source)
     else:
         raise HTTPException(400, "Provide template_id, builtin, or source_report_id + source_page_id")
+
+    for spec in payload.get("widgets") or []:
+        _validate_widget(str(spec.get("widget_type") or "text"), spec.get("config") or {})
+
+    # A template keeps each widget's `config.dataset_id`; instantiating it
+    # attaches those datasets to THIS report (see _require_readable_datasets).
+    await _require_readable_datasets(
+        db, current_user,
+        {i for spec in (payload.get("widgets") or []) for i in _config_dataset_ids(spec.get("config"))},
+        already=[report.dataset_id, *(report.additional_dataset_ids or [])])
 
     position = len((await db.execute(
         select(ReportPage).where(ReportPage.report_id == report_id)

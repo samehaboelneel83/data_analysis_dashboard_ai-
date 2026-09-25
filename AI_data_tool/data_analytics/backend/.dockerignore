@@ -1,0 +1,16 @@
+# Kept out of the prod image's `COPY . .`. The dev image copies no source at
+# all (it is bind-mounted), so this only shapes the prod build.
+.venv/
+venv/
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+# Runtime data belongs in volumes, never baked into an image.
+uploads/
+*.db
+*.sqlite
+*.log
+.env
+.env.*

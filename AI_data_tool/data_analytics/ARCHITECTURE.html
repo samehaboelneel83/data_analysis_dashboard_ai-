@@ -644,7 +644,7 @@ STAT_FAMILIES       = {"postgresql"}</code></pre>
       </tbody>
     </table>
   </div>
-  <p>Schema changes go through <strong>Alembic</strong> (<code>backend/alembic/</code>, 37 revisions). <code>postgres/init.sql</code> provides the initial schema and indexes.</p>
+  <p>Schema changes go through <strong>Alembic</strong> (<code>backend/alembic/</code>, 38 revisions). <code>postgres/init.sql</code> provides the initial schema and indexes.</p>
 
   <h3>Cache</h3>
   <p><code>services/cache_backend.py</code> defines a <code>CacheBackend</code> interface with two implementations — <code>InProcessCache</code> for single-process or test runs, and <code>ValkeyCache</code> for the deployed stack. <code>frame_cache.py</code> caches computed result frames; <code>core/rate_limit.py</code> uses the same backend for throttling.</p>
@@ -1121,8 +1121,8 @@ llm_reserved_interactive = 2</code></pre>
     <table>
       <thead><tr><th>Suite</th><th>Scope</th><th>Count</th></tr></thead>
       <tbody>
-        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~5,300 tests · 382 modules</td></tr>
-        <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~2,800 tests · 210 files</td></tr>
+        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~5,300 tests · 384 modules</td></tr>
+        <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~2,800 tests · 211 files</td></tr>
         <tr><th>Evals</th><td><code>backend/evals/</code></td><td>Agent quality gates (<code>run_eval_gate.ps1</code>)</td></tr>
         <tr><th>Conformance</th><td><code>tests/test_layer_conformance.py</code></td><td>Enforces the layer boundaries above</td></tr>
         <tr><th>Doc audit</th><td><code>tests/test_architecture_doc.py</code></td><td>Enforces the <em>counts</em> in this document</td></tr>

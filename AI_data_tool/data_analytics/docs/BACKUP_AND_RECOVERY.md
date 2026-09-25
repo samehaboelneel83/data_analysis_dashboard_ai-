@@ -204,6 +204,34 @@ prevent. Steps 1–3 can all pass with a completely empty uploads volume.
 **Record the drill.** "We have backups" is not a recovery plan; "we restored on
 2026-08-28 in 22 minutes" is.
 
+### Drill log
+
+| Date | Dump | Target | Restore → ready | Checks |
+|---|---|---|---|---|
+| 2026-09-24 | `datalytics-20260924-231107.dump` (3.0 MB) + uploads tarball (52 MB, 140 files) from `backup.ps1` | Scratch Postgres 16 + the **prod** backend image, on an `--internal` Docker network | **15 s** | Readiness 200, migrations `ok`; row counts identical to live (89 reports, 736 widgets, 65 datasets, 26 users, 3 row rules, 1,325 report versions); `Demo — Sales` served 2,000 rows and the same `sum(revenue)` = 8,632,596.81 as live |
+
+How that drill avoided side effects, worth repeating:
+
+- **An `--internal` network.** A restored backend runs its scheduler at once,
+  over the restored schedules. With no route out it cannot reach a webhook or
+  a mail server, so nothing is delivered from the copy.
+- **The live `SECRET_KEY`.** Connection passwords are encrypted with a key
+  derived from it (`connector_secret_key`), so a restore with a different key
+  starts fine and then fails every DirectQuery source. Keep the key with the
+  backup's configuration, never inside the backup itself.
+
+### The production image and the uploads volume
+
+`docker-compose.prod.yml` runs the backend's `prod` image stage: the source is
+baked in, the process runs as the unprivileged `datalytics` user (**uid
+10001**), and there is no auto-reloader. A volume the old root-run image wrote
+is owned by root and that user cannot write to it. Hand it over once before
+the first start, and whenever a tarball is restored into a volume:
+
+```bash
+docker run --rm -v datalytics_uploaded_files:/data alpine chown -R 10001:10001 /data
+```
+
 ---
 
 ## What this does not cover

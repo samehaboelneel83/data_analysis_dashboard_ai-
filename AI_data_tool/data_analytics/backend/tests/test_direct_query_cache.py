@@ -62,3 +62,12 @@ def test_cache_key_changes_across_ttl_buckets():
     k_bucket_b = _directquery_cache_key({}, _dataset(), {}, "bar", None, 60, now=now + 61)
     assert k_bucket_a == k_bucket_a_again  # same 60s bucket
     assert k_bucket_a != k_bucket_b        # rolled into the next bucket
+
+
+def test_key_differs_by_denied_columns():
+    # Two roles with different column rules must never share a cached result.
+    k1 = _directquery_cache_key({}, _dataset(), {}, "table", None, 60)
+    k2 = _directquery_cache_key({}, _dataset(), {}, "table", None, 60, drop_columns=["salary"])
+    k3 = _directquery_cache_key({}, _dataset(), {}, "table", None, 60, drop_columns=["salary"])
+    assert k1 != k2
+    assert k2 == k3

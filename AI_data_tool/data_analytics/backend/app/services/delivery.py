@@ -101,6 +101,11 @@ async def build_digest(db, report: Report, creator: User,
                 ds = await db.get(Dataset, dataset_id)
                 if ds is None or ds.org_id != report.org_id or not ds.filename:
                     continue
+                # Access as of THIS run, not as of when the schedule was made:
+                # a creator whose share was revoked must stop mailing the data.
+                from ..core.capability import can_read_dataset
+                if not await can_read_dataset(db, creator, ds.id, report_id=report.id):
+                    continue
                 try:
                     steps = prep_steps_of(ds)
                     aux = await resolve_join_frames(db, creator, steps) if steps else {}
@@ -192,7 +197,11 @@ async def run_schedule(db, schedule) -> None:
         )
 
     report = await db.get(Report, schedule.report_id)
-    creator = await db.get(User, schedule.creator_user_id)
+    # Role eager-loaded: build_digest asks can_read_dataset, which reads
+    # `creator.role`, and a lazy load there fails under the async session.
+    creator = (await db.execute(
+        select(User).options(selectinload(User.role))
+        .where(User.id == schedule.creator_user_id))).scalar_one_or_none()
     schedule.last_run_at = datetime.utcnow()
     if report is None or creator is None:
         schedule.last_status = "disabled: report or creator no longer exists"

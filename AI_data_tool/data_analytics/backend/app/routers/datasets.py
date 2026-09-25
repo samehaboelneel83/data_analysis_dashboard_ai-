@@ -912,11 +912,42 @@ async def save_calculated_column(dataset_id: int, col: CalcColumnDef, db: AsyncS
     return cols
 
 
+async def _refuse_if_referenced(db: AsyncSession, ds: Dataset, name: str, force: bool):
+    """A measure or calculated column that something still names is not
+    deleted unless the caller said `force`. Deleting it anyway used to leave
+    every widget that named it silently showing a ROW COUNT (shape_series'
+    no-measure branch) -- E05: a change shows its consequences first."""
+    from fastapi.responses import JSONResponse
+    from ..services.dependencies import describe, find_dependents
+    dependents = await find_dependents(db, ds, name)
+    if dependents and not force:
+        return JSONResponse(status_code=409, content={
+            "detail": f"'{name}' is {describe(dependents)}. Delete anyway with ?force=true.",
+            "dependents": dependents})
+    return None
+
+
+@router.get("/{dataset_id}/dependents")
+async def dataset_dependents(dataset_id: int, name: str, db: AsyncSession = Depends(get_db),
+                             current_user: User = Depends(get_current_user)):
+    """Everything that references `name` (a column, calculated column or
+    measure) on this dataset: widgets, other expressions, alerts, hierarchies,
+    filters and aggregates. What a change to it would touch."""
+    from ..services.dependencies import find_dependents
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
+    return {"name": name, "dependents": await find_dependents(db, ds, name)}
+
+
 @router.delete("/{dataset_id}/calculated-columns/{col_name}")
-async def delete_calculated_column(dataset_id: int, col_name: str, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def delete_calculated_column(dataset_id: int, col_name: str, force: bool = False, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
     await require_dataset_capability(db, current_user, dataset_id, "data")
+    refused = await _refuse_if_referenced(db, ds, col_name, force)
+    if refused is not None:
+        return refused
     cols = [c for c in (ds.calculated_columns or []) if c.get('name') != col_name]
     ds.calculated_columns = cols
     flag_modified(ds, 'calculated_columns')
@@ -994,10 +1025,13 @@ async def save_measure(dataset_id: int, measure: MeasureDef, db: AsyncSession = 
 
 
 @router.delete("/{dataset_id}/measures/{measure_name}")
-async def delete_measure(dataset_id: int, measure_name: str, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def delete_measure(dataset_id: int, measure_name: str, force: bool = False, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
     await require_dataset_capability(db, current_user, dataset_id, "data")
+    refused = await _refuse_if_referenced(db, ds, measure_name, force)
+    if refused is not None:
+        return refused
     items = [m for m in (ds.measures or []) if m.get("name") != measure_name]
     ds.measures = items
     flag_modified(ds, "measures")

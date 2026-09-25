@@ -417,6 +417,31 @@ def sales_csv(tmp_path):
 
 
 @pytest.fixture
+def chain_csv(tmp_path, monkeypatch):
+    """A dataset the WHOLE chain can finish on, deterministically.
+
+    Step 5 holds a run whose proposal is empty ("nothing was proposed to
+    review") -- by design, a dashboard of nothing is not a result. The 4-row
+    `sales_csv` gives the scan no findings, and so does `scannable_csv`: its
+    cycles leave every faculty's mean identical. Here fee tracks score and
+    score tracks faculty, so the scan has something real to say. The model is
+    switched off so the run takes the deterministic path and never depends on
+    an LLM being reachable."""
+    import pandas as pd
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "llm_enabled", False)
+    n = 120
+    faculty = ["eng", "law", "med", "arts"] * (n // 4)
+    base = {"eng": 60.0, "law": 70.0, "med": 90.0, "arts": 50.0}
+    wobble = [-3.0, 1.0, 4.0, -2.0, 0.0, 2.5]
+    score = [base[f] + wobble[i % len(wobble)] for i, f in enumerate(faculty)]
+    p = tmp_path / "chain.csv"
+    pd.DataFrame({"faculty": faculty, "score": score,
+                  "fee": [800.0 + 6.0 * s for s in score]}).to_csv(p, index=False)
+    return p
+
+
+@pytest.fixture
 def artifact_dir(tmp_path, monkeypatch):
     """Point the upload root at a temp dir so profile artifacts land there."""
     from app.core.config import settings
@@ -470,12 +495,12 @@ class TestProfileStepHappyPath:
         assert run.status == "running"          # six steps still to go
 
     async def test_the_rest_of_the_chain_still_walks_to_done(
-            self, db_session, sales_csv, artifact_dir):
+            self, db_session, chain_csv, artifact_dir):
         """Profile being real must not break the steps behind it."""
         org, _admin = await _seed(db_session)
         _role, user = await ProfileFixtures.member(
             db_session, org, "analyst@example.invalid")
-        ds = await ProfileFixtures.dataset(db_session, org, user, sales_csv)
+        ds = await ProfileFixtures.dataset(db_session, org, user, chain_csv)
 
         run = await automation_runner.create_run(
             db_session, org_id=org.id, created_by=user.id,
@@ -658,7 +683,7 @@ class TestTheShippedStepList:
             "profile", "describe", "scan", "propose", "review", "compose", "notify"]
 
     async def test_the_shipped_chain_runs_end_to_end_unmonkeypatched(
-            self, db_session, sales_csv, artifact_dir):
+            self, db_session, chain_csv, artifact_dir):
         """The chain must be walkable exactly as shipped.
 
         Step 1 is real now, so this needs a real dataset -- which is the point:
@@ -668,7 +693,7 @@ class TestTheShippedStepList:
         org, _admin = await _seed(db_session)
         _role, user = await ProfileFixtures.member(
             db_session, org, "shipped@example.invalid")
-        ds = await ProfileFixtures.dataset(db_session, org, user, sales_csv)
+        ds = await ProfileFixtures.dataset(db_session, org, user, chain_csv)
 
         run = await automation_runner.create_run(
             db_session, org_id=org.id, created_by=user.id,
@@ -896,7 +921,7 @@ class TestTheFrameHasACeiling:
 
 class TestTheRunDirectoryIsCleanedUp:
     async def test_a_completed_run_leaves_nothing_on_disk(
-            self, db_session, sales_csv, artifact_dir):
+            self, db_session, chain_csv, artifact_dir):
         """A run's artifacts exist to be handed between its own steps. Once it
         is done they are a copy of one person's rows sitting on disk with
         nothing reading it -- so they go, in one place, the way
@@ -904,7 +929,7 @@ class TestTheRunDirectoryIsCleanedUp:
         org, _admin = await _seed(db_session)
         _role, user = await ProfileFixtures.member(
             db_session, org, "clean@example.invalid")
-        ds = await ProfileFixtures.dataset(db_session, org, user, sales_csv)
+        ds = await ProfileFixtures.dataset(db_session, org, user, chain_csv)
         run = await automation_runner.create_run(
             db_session, org_id=org.id, created_by=user.id,
             trigger="manual", subject_type="dataset", subject_id=ds.id)

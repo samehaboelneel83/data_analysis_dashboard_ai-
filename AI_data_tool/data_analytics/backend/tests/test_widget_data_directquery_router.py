@@ -244,3 +244,50 @@ async def test_directquery_widget_end_to_end_returns_aggregated_series(client, d
     rows = {r["name"]: r["value"] for r in body["rows"]}
     assert rows == {"east": 150, "west": 30}
     assert body["total"] == 3
+
+
+async def _seed_column_denied_viewer(db_session, org_id, ds_id, email, denied=("revenue",)):
+    from app.models.models import ColumnSecurityRule
+    role, headers = await _seed_viewer(db_session, org_id, email)
+    db_session.add(ColumnSecurityRule(role_id=role.id, dataset_id=ds_id, denied_columns=list(denied)))
+    await db_session.commit()
+    return headers
+
+
+@pytest.mark.parametrize("config", [
+    {"measures": ["revenue"]},
+    {"roles": {"measure": "revenue"}},
+    {"columns": [{"name": "revenue"}]},
+])
+async def test_directquery_refuses_a_denied_column_named_below_the_top_level(
+        client, db_session, two_orgs, tmp_path, config):
+    """The check read only top-level strings and filter columns, so a denied
+    column one level down -- a measures list, a roles dict -- reached the SQL."""
+    org_id = two_orgs["a"]["org"].id
+    src = await _seed_data_source(db_session, org_id, config={"filepath": _seed_sqlite_sales_db(tmp_path)})
+    ds = await _seed_directquery_dataset(db_session, org_id, src.id)
+    headers = await _seed_column_denied_viewer(db_session, org_id, ds.id, "nested-deny@example.com")
+
+    resp = await client.post(f"/api/v1/datasets/{ds.id}/widget-data",
+                             json={"config": config, "widget_type": "table"}, headers=headers)
+
+    assert resp.status_code == 403, resp.text
+    assert resp.json()["code"] == "forbidden_column"
+
+
+async def test_directquery_table_with_no_column_list_omits_a_denied_column(
+        client, db_session, two_orgs, tmp_path):
+    """The row fetch is SELECT *, and a table with no column list draws every
+    column it is handed -- so the denied one came back with its values."""
+    org_id = two_orgs["a"]["org"].id
+    src = await _seed_data_source(db_session, org_id, config={"filepath": _seed_sqlite_sales_db(tmp_path)})
+    ds = await _seed_directquery_dataset(db_session, org_id, src.id)
+    headers = await _seed_column_denied_viewer(db_session, org_id, ds.id, "table-deny@example.com")
+
+    resp = await client.post(f"/api/v1/datasets/{ds.id}/widget-data",
+                             json={"config": {}, "widget_type": "table"}, headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["columns"] == ["region"]
+    assert all(len(row) == 1 for row in body["rows"])

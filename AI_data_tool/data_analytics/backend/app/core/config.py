@@ -1,4 +1,4 @@
-﻿from pydantic import Field
+﻿from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -310,10 +310,40 @@ class Settings(BaseSettings):
     # has its own `cache_ttl_seconds` per call and uses that instead.
     valkey_cache_ttl_s: int = Field(default=300, ge=1)
 
+    #: How long a login token lives. 168h (7 days) is the historical value, kept
+    #: as the default so no session changes length on upgrade; a deployment
+    #: that wants shorter sessions sets ACCESS_TOKEN_EXPIRE_HOURS. A password
+    #: reset ends a user's existing sessions regardless (User.tokens_valid_after).
+    access_token_expire_hours: int = Field(default=168, ge=1)
+
     def origins_list(self) -> list[str]:
         return [o.strip() for o in self.allowed_origins.split(",")]
 
+    def is_production(self) -> bool:
+        """Anything that is not explicitly a development or test environment.
+        The same rule sso.py's secure-cookie choice has always used."""
+        return (self.env or "").lower() not in ("development", "dev", "test")
+
+    @model_validator(mode="after")
+    def _refuse_a_known_secret_in_production(self) -> "Settings":
+        # The JWT signing key. Its default is printed in this file and in
+        # docker-compose.yml, so a production install left on it lets anyone
+        # mint an admin login token. Refusing to START is the only safe answer:
+        # a warning in a log nobody reads leaves the door open.
+        if self.is_production() and (self.secret_key in _KNOWN_DEV_SECRETS
+                                     or len(self.secret_key) < 32):
+            raise ValueError(
+                "SECRET_KEY is a development default or shorter than 32 characters, "
+                "and ENV is not development/test. Set a long random SECRET_KEY "
+                "(e.g. `python -c \"import secrets; print(secrets.token_urlsafe(48))\"`) "
+                "before starting in production.")
+        return self
+
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False)
+
+
+#: Signing keys that ship in this repository, so are public by definition.
+_KNOWN_DEV_SECRETS = frozenset({"change_me_in_production", "changeme", "secret", ""})
 
 
 settings = Settings()

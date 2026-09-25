@@ -15,13 +15,33 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_DAYS = 7
 
 
 def create_access_token(user_id: int, org_id: int) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
-    payload = {"sub": str(user_id), "org_id": org_id, "exp": expire}
+    now = datetime.now(timezone.utc)
+    expire = now + timedelta(hours=settings.access_token_expire_hours)
+    # `iat` is what lets a password reset end this session early: the
+    # dependency refuses a token issued before User.tokens_valid_after.
+    payload = {"sub": str(user_id), "org_id": org_id, "exp": expire,
+               "iat": int(now.timestamp())}
     return jwt.encode(payload, settings.secret_key, algorithm=ALGORITHM)
+
+
+def issued_before_cutoff(payload: dict, cutoff: datetime | None) -> bool:
+    """True when this token predates the user's revocation cut-off.
+
+    Whole seconds on both sides (`iat` is an integer), so a token minted in the
+    same second as the reset -- the fresh login right after it -- survives. A
+    token with no `iat` was minted before revocation existed and is refused
+    once any cut-off is set."""
+    if cutoff is None:
+        return False
+    if cutoff.tzinfo is None:          # SQLite hands back naive UTC
+        cutoff = cutoff.replace(tzinfo=timezone.utc)
+    iat = payload.get("iat")
+    if not isinstance(iat, (int, float)):
+        return True
+    return int(iat) < int(cutoff.timestamp())
 
 
 def decode_access_token(token: str) -> dict | None:

@@ -393,10 +393,20 @@ async def _apply_performance_features(db: AsyncSession, report: Report) -> None:
     widgets = await _widgets_of(db, report)
     by_title = {w.title: w for w in widgets}
 
-    # The margin measure, attached where margin is actually charted.
+    # The margin measure, defined on the DATASET -- the only place the server
+    # reads measures from. It used to ride inline as the widget's own
+    # `measure_defs`, which get_widget_data_from_df overwrites by design (a
+    # request may not smuggle in definitions), so the chart named a measure
+    # that did not exist and drew row counts: 517, 514, 509, 460 as "Margin %".
     margin = by_title.get("Margin % by region")
     if margin is not None:
-        _patch_config(margin, measure_defs=[MARGIN_MEASURE], measure="Margin %")
+        from ..models.models import Dataset
+        ds = await db.get(Dataset, report.dataset_id) if report.dataset_id else None
+        if ds is not None and not any(m.get("name") == MARGIN_MEASURE["name"]
+                                      for m in ds.measures or []):
+            ds.measures = [*(ds.measures or []), dict(MARGIN_MEASURE)]
+        cfg = {k: v for k, v in (margin.config or {}).items() if k != "measure_defs"}
+        margin.config = {**cfg, "measure": MARGIN_MEASURE["name"]}
 
     # Sync the slicer across pages: the interaction the walkthrough drives.
     slicer = by_title.get("Region")

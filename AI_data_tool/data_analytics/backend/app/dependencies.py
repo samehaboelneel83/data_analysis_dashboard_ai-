@@ -6,7 +6,7 @@ from sqlalchemy.orm import selectinload
 
 from .core.api_keys import looks_like_api_key, prefix_of, verify
 from .core.database import get_db
-from .core.security import decode_access_token
+from .core.security import decode_access_token, issued_before_cutoff
 from .models.models import ApiKey, User
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
@@ -22,12 +22,17 @@ _CREDS_ERROR = HTTPException(
 )
 
 
-async def _load_active_user(db: AsyncSession, user_id: int) -> User:
+async def _load_active_user(db: AsyncSession, user_id: int, payload: dict | None = None) -> User:
     user = (await db.execute(
         select(User).options(selectinload(User.role), selectinload(User.organization))
         .where(User.id == user_id)
     )).scalar_one_or_none()
     if user is None or not user.is_active:
+        raise _CREDS_ERROR
+    # A login token minted before the user's password was reset is dead, even
+    # with days left on it. API keys pass no payload: they are revoked on their
+    # own row, not by a password change.
+    if payload is not None and issued_before_cutoff(payload, user.tokens_valid_after):
         raise _CREDS_ERROR
     return user
 
@@ -65,7 +70,7 @@ async def get_current_user(
     user_id = payload.get("sub")
     if user_id is None:
         raise _CREDS_ERROR
-    return await _load_active_user(db, int(user_id))
+    return await _load_active_user(db, int(user_id), payload)
 
 
 async def get_current_user_optional(
@@ -89,7 +94,7 @@ async def get_current_user_optional(
         user_id = payload.get("sub")
         if user_id is None:
             return None
-        return await _load_active_user(db, int(user_id))
+        return await _load_active_user(db, int(user_id), payload)
     except HTTPException:
         return None
 

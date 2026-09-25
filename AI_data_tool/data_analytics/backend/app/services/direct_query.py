@@ -363,6 +363,23 @@ def build_count_sql(
     return _finalize_for_dialect(sql, dialect), {**(rls_params or {}), **params}
 
 
+def build_missing_dim_count_sql(
+    dataset, plan: QueryPlan, dialect: str,
+    rls_where: str = "", rls_params: dict | None = None,
+) -> tuple[str, dict]:
+    """How many filtered rows `_dim_group_where` removes for having a NULL
+    dimension. Those rows are in no group and no total, but they ARE in a KPI
+    of the same measure; the shaped result discloses the count as
+    `missing_category` so a reader can see why the two disagree. Same base,
+    same WHERE, same RLS as everything else -- only the null predicate differs."""
+    base = _base_query_sql(dataset, rls_where)
+    where_sql, params = _build_where(plan.filters)
+    where_clause = f" WHERE {where_sql}" if where_sql else ""
+    sql = (f"SELECT COUNT(*) - COUNT({_quote(plan.dim)}) "
+           f"FROM ({base}) AS src{where_clause}")
+    return _finalize_for_dialect(sql, dialect), {**(rls_params or {}), **params}
+
+
 def _dim_group_where(plan: QueryPlan) -> tuple[str, dict]:
     """The WHERE clause for a per-dimension GROUP BY, with NULL dimension rows
     excluded.
@@ -678,6 +695,7 @@ def _directquery_cache_key(
     source_cfg: dict, dataset, config: dict, widget_type: str,
     rls_filter_expr: str | None, ttl_seconds: int, now: float | None = None,
     row_cap: int | None = None, cache_epoch: int = 0,
+    drop_columns: list[str] | None = None,
 ) -> str:
     """Cache key for DirectQuery results, reusing widget_data's own LRU cache
     rather than a second cache structure. `kind` + data_source_id + source_table/
@@ -706,6 +724,10 @@ def _directquery_cache_key(
         "row_cap": row_cap,
         "ttl_bucket": bucket,
         "cache_epoch": cache_epoch,
+        # Two roles with different column rules must never share an entry --
+        # the same guarantee rls_filter_expr gives rows, and the same key
+        # import mode folds into its own cache (widget_data "__denied__").
+        "denied": sorted(drop_columns or []),
     }
     return json.dumps(payload, sort_keys=True, default=str)
 
@@ -836,7 +858,7 @@ def _run_direct_query_inner(
     source_cfg: dict, dataset, config: dict, widget_type: str = "bar",
     rls_filter_expr: str | None = None, row_cap: int | None = None,
     cache_ttl_seconds: int = 60, cache_epoch: int = 0,
-    org_id: int | None = None,
+    org_id: int | None = None, drop_columns: list[str] | None = None,
 ) -> dict:
     # E3: one span per DirectQuery execution. Attributes carry only
     # identifiers/status/timings -- never the built SQL or config values,
@@ -850,7 +872,7 @@ def _run_direct_query_inner(
         if cache_ttl_seconds > 0:
             cache_key = _directquery_cache_key(
                 source_cfg, dataset, config, widget_type, rls_filter_expr, cache_ttl_seconds,
-                row_cap=row_cap, cache_epoch=cache_epoch,
+                row_cap=row_cap, cache_epoch=cache_epoch, drop_columns=drop_columns,
             )
             cached = _widget_data_cache_get(cache_key)
             if cached is not None:
@@ -867,7 +889,8 @@ def _run_direct_query_inner(
                 span.set_attribute("ms", ms)
                 return copy.deepcopy(cached)
 
-        result = _dispatch_direct_query(source_cfg, dataset, config, widget_type, rls_filter_expr, row_cap)
+        result = _dispatch_direct_query(source_cfg, dataset, config, widget_type, rls_filter_expr, row_cap,
+                                        drop_columns=drop_columns)
         # The one population field, whichever pushdown strategy answered (the
         # stat strategies return without passing through the import shaper).
         if isinstance(result, dict) and "rows_scanned" not in result and isinstance(result.get("total"), int):
@@ -919,6 +942,7 @@ def _run_direct_query_inner(
 def _fetch_and_compute(
     source_cfg: dict, dataset, config: dict, widget_type: str,
     rls_filter_expr: str | None, row_cap: int | None,
+    drop_columns: list[str] | None = None,
 ) -> dict:
     """Fetch the rows and let the ordinary shaper do the work.
 
@@ -951,12 +975,14 @@ def _fetch_and_compute(
         except (TypeError, ValueError):
             pass
     return _run_row_capped(source_cfg, dataset, config, widget_type,
-                           rls_filter_expr, effective, allow_any_widget=True)
+                           rls_filter_expr, effective, allow_any_widget=True,
+                           drop_columns=drop_columns)
 
 
 def _dispatch_direct_query(
     source_cfg: dict, dataset, config: dict, widget_type: str,
     rls_filter_expr: str | None, row_cap: int | None,
+    drop_columns: list[str] | None = None,
 ) -> dict:
     if widget_type == "histogram":
         return _run_histogram(source_cfg, dataset, config, rls_filter_expr)
@@ -964,7 +990,19 @@ def _dispatch_direct_query(
         return _run_correlation_matrix(source_cfg, dataset, config, rls_filter_expr)
     if widget_type in ROW_CAPPED_WIDGET_TYPES:
         return _fetch_and_compute(source_cfg, dataset, config, widget_type,
-                                  rls_filter_expr, row_cap)
+                                  rls_filter_expr, row_cap, drop_columns=drop_columns)
+    if config.get("rank"):
+        # Top/bottom N needs the RAW rows, not a pushed-down page: the "All
+        # Other" bucket is the aggregation over the excluded categories' own
+        # rows (an average of their averages is a different number -- 14.17
+        # for 17.0 on the golden fixture), the SQL LIMIT would cut categories
+        # before the rank ever saw them, and the count path below builds its
+        # rows straight from SQL and never ranks at all. Fetching is what
+        # DuckDB does too (it declines `rank`): the same pandas code as import
+        # mode, over every source row up to the analysis cap, marked `sampled`
+        # beyond it -- a right number or a declared sample, never a wrong one.
+        return _fetch_and_compute(source_cfg, dataset, config, widget_type,
+                                  rls_filter_expr, row_cap, drop_columns=drop_columns)
     if widget_type in AGGREGATE_STRATEGY_WIDGET_TYPES and not config.get("measure"):
         # No measure = "count of rows per dimension value" (the single most common
         # widget shape). This can't reuse the plain aggregate path below, which
@@ -997,7 +1035,7 @@ def _dispatch_direct_query(
         if widget_type not in SHAPERS:
             raise
         return _fetch_and_compute(source_cfg, dataset, config, widget_type,
-                                  rls_filter_expr, row_cap)
+                                  rls_filter_expr, row_cap, drop_columns=drop_columns)
     _validate_columns(dataset, plan)
     rls_where, rls_params = _translate_rls(dataset, rls_filter_expr)
 
@@ -1015,17 +1053,28 @@ def _dispatch_direct_query(
             dataset, plan, dialect, rls_where=rls_where, rls_params=rls_params,
         )
 
+    missing_sql, missing_params = build_missing_dim_count_sql(
+        dataset, plan, dialect, rls_where=rls_where, rls_params=rls_params)
+
     engine = get_engine(source_cfg)
     with engine.connect() as conn:
         df = pd.read_sql(text(sql), conn, params=params)
         total_rows = conn.execute(text(count_sql), count_params).scalar_one()
+        missing_rows = conn.execute(text(missing_sql), missing_params).scalar_one()
         grand_total, n_groups = (conn.execute(text(total_sql), total_params).one()
                                  if wants_totals else (None, None))
 
-    result = get_widget_data_from_df(df, config, widget_type, flag_partial=False)
+    # check_fields off: `df` is the pushed-down GROUP BY (dimension + measure
+    # only), and _validate_columns above already refused an unknown field.
+    result = get_widget_data_from_df(df, config, widget_type, flag_partial=False,
+                                     check_fields=False)
     if "total" in result:
         result["total"] = total_rows
         result["rows_scanned"] = total_rows  # the population, not the pre-aggregated groups
+    if "missing_category" in result:
+        # The shaper saw a frame with the NULL group already excluded, so its
+        # own count is 0; the SQL above measured the rows that were left out.
+        result["missing_category"] = {"rows": int(missing_rows or 0)}
     # Truncation, measured in SQL. The shaper only ever sees the LIMITed page,
     # so its own `truncation` would always say "nothing cut" -- a false
     # all-clear. A page that came back short cannot have been cut; only a FULL
@@ -1195,6 +1244,7 @@ def _run_correlation_matrix(source_cfg: dict, dataset, config: dict, rls_filter_
 def _run_row_capped(
     source_cfg: dict, dataset, config: dict, widget_type: str,
     rls_filter_expr: str | None, row_cap: int, allow_any_widget: bool = False,
+    drop_columns: list[str] | None = None,
 ) -> dict:
     dialect = connectors.sql_family_of(source_cfg)
     if dialect not in SUPPORTED_FAMILIES:
@@ -1212,6 +1262,11 @@ def _run_row_capped(
             dataset, plan, dialect, row_cap, sampled, rls_where=rls_where, rls_params=rls_params,
         )
         df = pd.read_sql(text(fetch_sql), conn, params=fetch_params)
+        # The fetch is SELECT *, so a column the viewer's role may not see is in
+        # this frame; a table with no explicit column list would draw it. Dropped
+        # before shaping, as import mode does with the same list.
+        if drop_columns:
+            df = df.drop(columns=[c for c in drop_columns if c in df.columns])
 
         result = get_widget_data_from_df(df, config, widget_type, flag_partial=False)
 
@@ -1312,21 +1367,27 @@ def _run_count_series(
             dataset, plan, dialect, rls_where=rls_where, rls_params=rls_params, count_only=True,
         )
 
+    missing_sql, missing_params = build_missing_dim_count_sql(
+        dataset, plan, dialect, rls_where=rls_where, rls_params=rls_params)
+
     engine = get_engine(source_cfg)
     with engine.connect() as conn:
         result_rows = conn.execute(text(sql), params).all()
         total_rows = conn.execute(text(count_sql), count_params).scalar_one()
+        missing_rows = conn.execute(text(missing_sql), missing_params).scalar_one()
         grand_total, n_groups = (conn.execute(text(total_sql), total_params).one()
                                  if wants_totals else (None, None))
 
     # Constructed directly to match shape_series's own no-measure grouped-series
-    # branch field-for-field (type/dimension/measure/aggregation/rows/total) --
-    # not routed through get_widget_data_from_df, since that would re-aggregate.
+    # branch field-for-field (type/dimension/measure/aggregation/rows/total/
+    # missing_category) -- not routed through get_widget_data_from_df, since
+    # that would re-aggregate.
     rows = [{"name": _safe(name), "value": int(cnt)} for name, cnt in result_rows]
     agg = (config.get("aggregation") or "sum").lower()
     result = {
         "type": "series", "dimension": plan.dim, "measure": "count",
         "aggregation": agg, "rows": rows, "total": int(total_rows),
+        "missing_category": {"rows": int(missing_rows or 0)},
     }
     if wants_totals:
         # Same positional alignment shape_series uses for its own `totals`.

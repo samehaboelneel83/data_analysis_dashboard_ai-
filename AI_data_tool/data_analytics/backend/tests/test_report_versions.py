@@ -121,6 +121,87 @@ class TestRestore:
                                 headers=auth_headers["a"])).json()
         assert got["name"] == "New name"   # charts went back; the name did not
 
+    async def test_restore_rewires_links_between_widgets_pages_and_bookmarks(
+            self, client, auth_headers, report, db_session):
+        """Restore recreates pages and widgets with NEW ids. The references
+        into them -- a container's child, an interaction target, a drill
+        page, a bookmark -- used to be copied verbatim and silently point at
+        nothing."""
+        from app.models.models import Bookmark, ReportPage
+        h = auth_headers["a"]
+        page_id = report["pages"][0]["id"]
+        box = await add_widget(client, h, report, "Box", wtype="container")
+        child = await add_widget(client, h, report, "Child")
+        base = f"/api/v1/reports/{report['id']}/pages/{page_id}/widgets"
+        r = await client.patch(f"{base}/{child['id']}", headers=h, json={"config": {
+            "dimension": "region", "container_id": box["id"],
+            "drillthroughPageId": page_id,
+            "interaction": {"actions": [{"targetId": box["id"], "type": "filter"},
+                                        {"targetId": 987654, "type": "filter"}]}}})
+        assert r.status_code == 200, r.text
+        r = await client.post(f"/api/v1/reports/{report['id']}/bookmarks", headers=h, json={
+            "name": "Mine", "state": {
+                "pageId": page_id, "hiddenWidgetIds": [box["id"]], "promptValues": {},
+                "activeFilters": [{"column": "region", "value": "N", "label": "N",
+                                   "sourceWidgetId": child["id"], "sourcePageId": page_id}]}})
+        assert r.status_code in (200, 201), r.text
+        await add_widget(client, h, report, "Later")      # captures the wired state
+        wired = (await versions(client, h, report["id"]))[0]
+
+        r = await client.post(f"/api/v1/reports/{report['id']}/versions/{wired['id']}/restore",
+                              headers=h)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        # The 987654 target never existed: dropped, and counted.
+        assert body["links_dropped"] == 1
+        assert body["links_remapped"] >= 6
+
+        db_session.expire_all()
+        new_page = (await db_session.execute(select(ReportPage).where(
+            ReportPage.report_id == report["id"]))).scalars().one()
+        ws = {w.title: w for w in (await db_session.execute(select(ReportWidget).where(
+            ReportWidget.page_id == new_page.id))).scalars().all()}
+        assert set(ws) == {"Box", "Child"}
+        cfg = ws["Child"].config
+        # Checked against the RESTORED rows by title, not as "!= old id":
+        # SQLite reuses freed ids, so a new id can equal the one it replaced.
+        assert cfg["container_id"] == ws["Box"].id
+        assert cfg["drillthroughPageId"] == new_page.id
+        assert [a["targetId"] for a in cfg["interaction"]["actions"]] == [ws["Box"].id]
+        bm = (await db_session.execute(select(Bookmark).where(
+            Bookmark.report_id == report["id"]))).scalars().one()
+        assert bm.state["pageId"] == new_page.id
+        assert bm.state["hiddenWidgetIds"] == [ws["Box"].id]
+        assert bm.state["activeFilters"][0]["sourceWidgetId"] == ws["Child"].id
+        assert bm.state["activeFilters"][0]["sourcePageId"] == new_page.id
+
+    async def test_a_page_role_restriction_survives_a_restore(
+            self, client, auth_headers, report, db_session, two_orgs):
+        """Restriction rows cascade with the pages a restore deletes, so a
+        restore used to LIFT "Finance only" off a page -- a restore of
+        content quietly widening access."""
+        from app.models.models import PageRoleVisibility, ReportPage, Role
+        h = auth_headers["a"]
+        role = Role(org_id=two_orgs["a"]["org"].id, name="Finance", is_org_admin=False)
+        db_session.add(role)
+        await db_session.flush()
+        role_id = role.id   # read before expire_all(), which would lazy-load it
+        db_session.add(PageRoleVisibility(page_id=report["pages"][0]["id"], role_id=role_id))
+        await db_session.commit()
+        await add_widget(client, h, report, "W")
+        vs = await versions(client, h, report["id"])
+
+        r = await client.post(f"/api/v1/reports/{report['id']}/versions/{vs[0]['id']}/restore",
+                              headers=h)
+        assert r.status_code == 200, r.text
+        assert r.json()["pages_restricted"] == 1
+        db_session.expire_all()
+        new_page = (await db_session.execute(select(ReportPage).where(
+            ReportPage.report_id == report["id"]))).scalars().one()
+        rows = (await db_session.execute(select(PageRoleVisibility).where(
+            PageRoleVisibility.page_id == new_page.id))).scalars().all()
+        assert [x.role_id for x in rows] == [role_id]
+
     async def test_cross_org_and_wrong_report_are_404(self, client,
                                                       auth_headers, report):
         await add_widget(client, auth_headers["a"], report, "W")

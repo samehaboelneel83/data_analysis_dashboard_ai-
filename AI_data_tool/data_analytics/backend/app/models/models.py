@@ -479,6 +479,10 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     is_active     = Column(Boolean, nullable=False, default=True)
     created_at    = Column(DateTime(timezone=True), default=datetime.utcnow)
+    #: Login tokens issued before this instant are refused (migration 0038).
+    #: Set when a password is reset, so a token minted with the old password
+    #: stops working at once instead of living out its 7 days. NULL = no cut-off.
+    tokens_valid_after = Column(DateTime(timezone=True), nullable=True)
 
     organization = relationship("Organization", back_populates="users")
     role         = relationship("Role", back_populates="users")

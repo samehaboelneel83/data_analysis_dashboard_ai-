@@ -605,6 +605,15 @@ def polish_widget(widget: dict, profile: dict) -> dict:
             # Not about cardinality -- about how many labels fit under an axis.
             config["limit"] = READABLE_CATEGORIES
 
+    # A formatting option this type's renderer ignores (the model sets
+    # `x_axis_angle` on box and dot plots). Dropped here rather than proposed:
+    # the dialog saves proposals through add-widget, which refuses such an
+    # option (widget_roles.validate_widget_payload), so leaving it in would
+    # fail "Create" halfway through a dashboard.
+    from .widget_roles import unsupported_options
+    for key in unsupported_options(widget.get("widget_type") or "", config):
+        config.pop(key, None)
+
     return {**widget, "config": config}
 
 

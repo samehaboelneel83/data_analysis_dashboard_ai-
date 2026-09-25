@@ -106,3 +106,18 @@ def test_row_capped_rls_is_fail_closed_on_untranslatable_expression(xy_sqlite_so
             xy_sqlite_source, _dataset(), config, widget_type="numeric_series",
             rls_filter_expr="SUM(x) > 100",
         )
+
+
+def test_row_capped_drops_denied_columns_before_shaping(xy_sqlite_source):
+    # The fetch is SELECT *; a table with no column list draws whatever it gets.
+    result = run_direct_query(xy_sqlite_source, _dataset(), {}, widget_type="table",
+                              drop_columns=["y"])
+    assert result["columns"] == ["x"]
+    assert result["total"] == 20
+
+
+def test_a_warm_unrestricted_entry_is_not_served_to_a_restricted_role(xy_sqlite_source):
+    run_direct_query(xy_sqlite_source, _dataset(), {}, widget_type="table", cache_ttl_seconds=60)
+    restricted = run_direct_query(xy_sqlite_source, _dataset(), {}, widget_type="table",
+                                  cache_ttl_seconds=60, drop_columns=["y"])
+    assert restricted["columns"] == ["x"]

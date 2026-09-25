@@ -131,10 +131,25 @@ class TestTheFeaturesThatMakeItAUseCase:
     async def test_margin_is_a_post_aggregation_measure(self, org_id, db_session, seeded):
         """A region's margin is NOT the sum of its products' margins. Summing a
         precomputed column would be wrong, so this must be a measure."""
-        widgets = await _widgets(db_session, seeded["reports"]["performance"])
+        from app.models.models import Dataset
+        from app.services.widget_data import get_widget_data
+        report = seeded["reports"]["performance"]
+        widgets = await _widgets(db_session, report)
         margin = next(w for w in widgets if w.title == "Margin % by region")
-        assert margin.config["measure_defs"] == [MARGIN_MEASURE]
+        ds = await db_session.get(Dataset, report.dataset_id)
+        # On the DATASET, where the server reads measures from. This test used
+        # to assert the widget's own `measure_defs` -- which the server
+        # overwrites by design, so it passed while the chart drew row counts.
+        assert MARGIN_MEASURE["name"] in [m["name"] for m in ds.measures or []]
+        assert "measure_defs" not in margin.config
         assert "SUM(revenue)" in MARGIN_MEASURE["expression"]
+        # ...and the chart computes margins, not counts: percentages, each
+        # under 100, where the old wiring drew hundreds of rows per region.
+        result = get_widget_data(ds.filename, margin.config, widget_type=margin.widget_type,
+                                 measures=ds.measures, use_cache=False)
+        assert result["type"] == "series", result
+        values = [r["value"] for r in result["rows"]]
+        assert values and all(0 < v < 100 for v in values), values
 
     @pytest.mark.asyncio
     async def test_the_slicer_syncs_across_pages(self, org_id, db_session, seeded):
