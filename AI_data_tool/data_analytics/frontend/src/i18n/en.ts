@@ -223,6 +223,7 @@ export const en = {
   'pager.next': 'Next',
   'pager.page': 'Page {n}',
   'pager.aria': 'Dataset pages',
+  'pager.perPage': 'Per page',
 
   'search.datasetsEllipsis': 'Search datasets…',
   'search.deliveries': 'Search deliveries…',

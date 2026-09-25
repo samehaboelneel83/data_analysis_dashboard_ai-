@@ -73,7 +73,16 @@ const storesItsOwnRows = (d: DatasetSummary) => d.mode !== 'directquery'
  * endpoint grows those parameters and a count, the browser already holds every
  * row and slices what it shows.
  */
-const PAGE_SIZE = 8
+const PAGE_SIZES = [8, 25, 50] as const
+const DEFAULT_PAGE_SIZE = PAGE_SIZES[0]
+// Per-viewer, per-browser: a convenience, not a setting anyone else sees.
+const PAGE_SIZE_KEY = 'datalytics:datasets-page-size'
+function storedPageSize(): number {
+  try {
+    const n = Number(localStorage.getItem(PAGE_SIZE_KEY))
+    return (PAGE_SIZES as readonly number[]).includes(n) ? n : DEFAULT_PAGE_SIZE
+  } catch { return DEFAULT_PAGE_SIZE }
+}
 
 export default function Dashboard() {
   const t = useT()
@@ -86,6 +95,14 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<unknown>(null)
   const [page, setPage] = useState(1)
+  // 8 by default (BUG-031 asked for more; the default stays so the list reads
+  // the same for everyone until they choose otherwise).
+  const [pageSize, setPageSizeState] = useState(storedPageSize)
+  const setPageSize = (n: number) => {
+    setPageSizeState(n)
+    setPage(1)
+    try { localStorage.setItem(PAGE_SIZE_KEY, String(n)) } catch { /* private window */ }
+  }
 
   // This is the landing page, and it had no `.catch` at all: an outage left an
   // unhandled rejection and rendered "No datasets yet" -- telling a user with a
@@ -119,14 +136,14 @@ export default function Dashboard() {
   const testLike = datasets.filter(d => looksLikeTestData(d.name))
 
   const rows = dsFilter.filtered
-  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE))
+  const pageCount = Math.max(1, Math.ceil(rows.length / pageSize))
   // Narrowing the search must not strand you on page 5 of a two-page result,
   // looking at an empty table. Clamping here rather than in an effect keeps it
   // a pure function of the current query -- an effect would render the empty
   // page once before correcting it.
   const current = Math.min(page, pageCount)
-  const start = (current - 1) * PAGE_SIZE
-  const visible = rows.slice(start, start + PAGE_SIZE)
+  const start = (current - 1) * pageSize
+  const visible = rows.slice(start, start + pageSize)
   // Deliberately NOT in the URL: this route documents no query parameters and
   // the deep links into it (from Home, from the rail) depend on that.
   useEffect(() => { setPage(1) }, [dsFilter.query])
@@ -309,9 +326,16 @@ export default function Dashboard() {
               <nav className="dl-pager" aria-label={t('pager.aria')}>
                 <span className="dl-pager__info">
                   {t('pager.showing', { from: (start + 1).toLocaleString(),
-                    to: Math.min(start + PAGE_SIZE, rows.length).toLocaleString(),
+                    to: Math.min(start + pageSize, rows.length).toLocaleString(),
                     total: rows.length.toLocaleString() })}
                 </span>
+                <label className="dl-pager__info" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  {t('pager.perPage')}
+                  <select value={pageSize} onChange={e => setPageSize(Number(e.target.value))}
+                    style={{ width: 'auto', padding: '2px 6px' }}>
+                    {PAGE_SIZES.map(n => <option key={n} value={n}>{n.toLocaleString()}</option>)}
+                  </select>
+                </label>
                 <div className="dl-pager__controls">
                   <button type="button" className="dl-pager__btn"
                     onClick={() => setPage(current - 1)} disabled={current === 1}>

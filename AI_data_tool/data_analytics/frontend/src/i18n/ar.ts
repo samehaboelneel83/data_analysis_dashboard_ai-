@@ -225,6 +225,7 @@ export const ar: Record<MessageKey, string> = {
   'pager.next': 'التالي',
   'pager.page': 'صفحة {n}',
   'pager.aria': 'صفحات مجموعات البيانات',
+  'pager.perPage': 'لكل صفحة',
 
   'search.datasetsEllipsis': 'ابحث في مجموعات البيانات…',
   'search.deliveries': 'ابحث في التسليمات…',

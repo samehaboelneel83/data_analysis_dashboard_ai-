@@ -384,6 +384,25 @@ describe('paging through a long inventory', () => {
     expect(next()).toBeDisabled()
   })
 
+  it('lets the reader show more per page, back on page 1, and remembers it (BUG-031)', async () => {
+    localStorage.removeItem('datalytics:datasets-page-size')
+    vi.mocked(datasetsApi.list).mockResolvedValue(many(30) as never)
+    const first = renderDashboard()
+    await screen.findByText('ds_01')
+    fireEvent.click(screen.getByRole('button', { name: 'Page 2' }))
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Per page' }), { target: { value: '25' } })
+    expect(rowNames()).toHaveLength(25)
+    expect(rowNames()[0]).toBe('ds_01')
+    expect(screen.getByText(showing(1, 25, 30))).toBeInTheDocument()
+
+    first.unmount()
+    renderDashboard()
+    await screen.findByText('ds_01')
+    expect(rowNames()).toHaveLength(25)
+    localStorage.removeItem('datalytics:datasets-page-size')
+  })
+
   it('marks the current page for assistive tech', async () => {
     vi.mocked(datasetsApi.list).mockResolvedValue(many(19) as never)
     renderDashboard()
