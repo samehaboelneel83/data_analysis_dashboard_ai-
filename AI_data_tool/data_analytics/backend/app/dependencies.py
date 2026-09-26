@@ -148,3 +148,19 @@ async def require_super_admin(current_user: User = Depends(get_current_user)) ->
     if not is_super_admin(current_user):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Platform super-admin privileges required")
     return current_user
+
+
+def ai_meter(feature: str):
+    """E11: a dependency that meters every model call the endpoint makes.
+
+    Each completion made while the request runs counts against the caller's
+    org, whichever service makes it, and one `ai_usage` row records the
+    total when the request ends. Calls are refused (and fall back) once the
+    org's AI budget is spent; an endpoint where the model IS the answer also
+    calls `quotas.enforce_ai_budget(meter)` to refuse up front with a 429."""
+    async def _metered(db: AsyncSession = Depends(get_db),
+                       user: User = Depends(get_current_user)):
+        from .services import quotas
+        async with quotas.metered(db, user.org_id, user.id, feature) as meter:
+            yield meter
+    return _metered

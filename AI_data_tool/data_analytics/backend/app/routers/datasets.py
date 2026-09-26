@@ -12,7 +12,8 @@ from ..core.org_scope import check_org
 from ..core.capability import (readable_dataset_ids, require_dataset_capability,
                                require_dataset_read, require_dataset_write)
 from ..core.rls import resolve_denied_columns, resolve_rls_expr
-from ..dependencies import get_current_user, require_org_admin
+from ..dependencies import get_current_user, require_org_admin, ai_meter
+from ..services.llm import UsageMeter
 from ..services.audit import record as audit
 from pydantic import BaseModel, Field
 from ..models.models import (AnalysisResult, Dataset, DatasetColumn, DataSource,
@@ -1866,7 +1867,8 @@ async def set_column_meta(dataset_id: int, req: ColumnMetaUpdate, db: AsyncSessi
 @router.post("/{dataset_id}/suggest-dashboards")
 async def suggest_dashboards(dataset_id: int, req: SuggestDashboardsRequest,
                              db: AsyncSession = Depends(get_db),
-                             current_user: User = Depends(get_current_user)):
+                             current_user: User = Depends(get_current_user),
+                             _meter: UsageMeter = Depends(ai_meter("suggest"))):
     """Whole dashboards proposed for this dataset and this person.
 
     Two engines behind one endpoint, chosen by whether the person described
@@ -2066,7 +2068,8 @@ async def _suggest_from_insights(df, type_map: dict, ds: Dataset, probe) -> tupl
 
 @router.post("/{dataset_id}/insights")
 async def dataset_insights(dataset_id: int, db: AsyncSession = Depends(get_db),
-                           current_user: User = Depends(get_current_user)):
+                           current_user: User = Depends(get_current_user),
+                           _meter: UsageMeter = Depends(ai_meter("insights"))):
     """Unprompted ranked findings over the secured frame -- trends, standouts,
     laggards, correlations, outlier impact and data-quality flags, each carrying
     the numbers its sentence states, plus a one-paragraph narrative."""
@@ -2262,7 +2265,8 @@ async def goal_seek(dataset_id: int, x_column: str, y_column: str, target_y: flo
 
 @router.post("/{dataset_id}/explain")
 async def explain_column(dataset_id: int, column: str, body: dict | None = None,
-                         db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+                         db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
+                         _meter: UsageMeter = Depends(ai_meter("explain"))):
     """Which columns move `column`, ranked SAS-style (top factor = 1, rest
     proportional), plus the top factor's relationship data. Same secured frame
     as every widget; a denied response column fails closed."""

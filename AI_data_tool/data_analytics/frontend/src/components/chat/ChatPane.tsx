@@ -11,6 +11,7 @@ import ChoiceOptions, { isChoices } from './ChoiceOptions'
 import DashboardProposals, { type DashboardProposalsPresentation }
   from './DashboardProposals'
 import { useT } from '../../i18n'
+import { aiLimitMessage } from '../../lib/aiLimit'
 import Composer from './Composer'
 import AnswerText from './AnswerText'
 import AddToDashboard from './AddToDashboard'
@@ -243,9 +244,10 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
       }
       const result = await agentApi.ask(cid, question)
       setMessages(m => [...m, fromAnswer(result)])
-    } catch {
+    } catch (e) {
       setMessages(m => [...m, {
-        id: nextId++, role: 'assistant', text: 'Could not reach the agent. Try again.', kind: 'error',
+        id: nextId++, role: 'assistant', kind: 'error',
+        text: aiLimitMessage(e, t) ?? 'Could not reach the agent. Try again.',
       }])
     } finally {
       setBusy(false)

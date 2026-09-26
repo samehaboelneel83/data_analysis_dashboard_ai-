@@ -99,6 +99,14 @@ describe('asking a question', () => {
     expect(screen.getByPlaceholderText(/ask/i)).not.toBeDisabled()
   })
 
+  it('a question refused by the org\'s AI limit says so and when it resets, not "could not reach" (E11)', async () => {
+    vi.spyOn(agentApi, 'ask').mockRejectedValue({ response: { status: 429, headers: { 'retry-after': '7300' } } })
+    await send('total sales')
+    await waitFor(() => expect(screen.getByText(
+      'Your organization has reached its AI limit for now. It resets in 2 h.')).toBeInTheDocument())
+    expect(screen.queryByText(/could not reach/i)).not.toBeInTheDocument()
+  })
+
   it('asking against a set of datasets sends dataset_ids, not a data source', async () => {
     vi.spyOn(agentApi, 'ask').mockResolvedValue({
       run_id: 5, status: 'ok', answer: 'joined answer', intent: null, error: null })

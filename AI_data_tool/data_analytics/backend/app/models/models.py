@@ -1211,8 +1211,33 @@ class Quota(Base):
     max_agent_asks_per_day = Column(Integer, nullable=True)
     max_storage_mb        = Column(Integer, nullable=True)
     max_concurrent_asks    = Column(Integer, nullable=True)
+    # E11: the model's work, in tokens (prompt + completion), per UTC day and
+    # per calendar month. Counted from `ai_usage`; see services/quotas.py.
+    max_ai_tokens_per_day   = Column(Integer, nullable=True)
+    max_ai_tokens_per_month = Column(Integer, nullable=True)
     created_at           = Column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at           = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AiUsage(Base):
+    """E11: what one unit of work spent on the model, for one org.
+
+    One row per request (or background run) that called the model at least
+    once, or was refused a call because the org's AI budget was spent:
+    `feature` says what for (ask, copilot, suggest, insights, explain,
+    narrate, metadata, automation), `user_id` who asked (NULL for scheduled
+    work). The tokens are the endpoint's own `usage` counts. Summed by
+    services/quotas.py for the budget and by the platform usage report."""
+    __tablename__ = "ai_usage"
+    id         = Column(Integer, primary_key=True)
+    org_id     = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id    = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    feature    = Column(String(40), nullable=False)
+    calls      = Column(Integer, nullable=False, default=0)
+    refused    = Column(Integer, nullable=False, default=0)
+    tokens_in  = Column(Integer, nullable=False, default=0)
+    tokens_out = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, index=True)
 
 
 class ReportTranslation(Base):

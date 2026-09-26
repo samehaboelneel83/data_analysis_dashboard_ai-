@@ -21,7 +21,8 @@ from ..core.capability import require_dataset_read
 from ..core.database import get_db
 from ..core.org_scope import check_org
 from .data_sources import _visible_source_ids
-from ..dependencies import get_current_user, require_org_admin
+from ..dependencies import get_current_user, require_org_admin, ai_meter
+from ..services.llm import UsageMeter
 from ..models.models import (AgentFeedback, AgentMessage, AgentRun, AgentStep,
                              Conversation, Dataset, DataSource,
                              ObjectRowPolicy, Role, SourceObject, User)
@@ -274,7 +275,8 @@ async def delete_conversation(cid: int, db: AsyncSession = Depends(get_db),
 
 @router.post("/conversations/{cid}/ask")
 async def ask(cid: int, body: AskIn, db: AsyncSession = Depends(get_db),
-              user: User = Depends(get_current_user)):
+              user: User = Depends(get_current_user),
+              meter: UsageMeter = Depends(ai_meter("ask"))):
     conv = await _owned_conversation(db, cid, user)
 
     # E01: the scope is checked again on every question, not only when the
@@ -292,6 +294,7 @@ async def ask(cid: int, body: AskIn, db: AsyncSession = Depends(get_db),
     # concurrent-asks slot wraps the actual run so it's held for the run's
     # whole lifetime and released even if run_agent raises.
     await quotas.enforce_agent_quota(db, user.org_id)
+    quotas.enforce_ai_budget(meter)
 
     # Before the new message is added -- see _history for why.
     history = await _history(db, conv)

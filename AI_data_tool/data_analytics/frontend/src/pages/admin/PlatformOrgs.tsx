@@ -3,7 +3,7 @@ import { inlineFieldStyle } from '../../components/ui/fieldStyle'
 import { useT } from '../../i18n'
 import { Building2 } from 'lucide-react'
 import { platformApi } from '../../services/api'
-import type { OrgQuota, PlatformOrg } from '../../services/api'
+import type { OrgAiUsage, OrgQuota, PlatformOrg } from '../../services/api'
 import toast from 'react-hot-toast'
 import EmptyState from '../../components/ui/EmptyState'
 import LoadError from '../../components/ui/LoadError'
@@ -11,6 +11,12 @@ import LoadingState from '../../components/ui/LoadingState'
 
 const fmtLimit = (n: number | null) => (n == null ? 'unlimited' : n.toLocaleString())
 const fmtMb = (bytes: number) => (bytes / (1024 * 1024)).toFixed(1)
+/** What each metered feature is, in the words an administrator uses. */
+const FEATURE_LABEL: Record<string, string> = {
+  ask: 'Ask AI questions', copilot: 'Dashboard copilot', suggest: 'Dashboard suggestions',
+  insights: 'Insight narratives', explain: 'Explain a column', narrate: 'Finding sentences',
+  metadata: 'Describing connections', automation: 'Automations',
+}
 
 export default function PlatformOrgs() {
   const t = useT()
@@ -71,7 +77,23 @@ export default function PlatformOrgs() {
       max_agent_asks_per_day: org.quota.max_agent_asks_per_day?.toString() ?? '',
       max_storage_mb: org.quota.max_storage_mb?.toString() ?? '',
       max_concurrent_asks: org.quota.max_concurrent_asks?.toString() ?? '',
+      max_ai_tokens_per_day: org.quota.max_ai_tokens_per_day?.toString() ?? '',
+      max_ai_tokens_per_month: org.quota.max_ai_tokens_per_month?.toString() ?? '',
     })
+  }
+
+  // E11: the breakdown behind an org's AI tokens, loaded when asked for.
+  const [aiUsage, setAiUsage] = useState<{ orgId: number; data: OrgAiUsage | null } | null>(null)
+  const toggleAiUsage = async (org: PlatformOrg) => {
+    if (aiUsage?.orgId === org.id) { setAiUsage(null); return }
+    setAiUsage({ orgId: org.id, data: null })
+    try {
+      const data = await platformApi.aiUsage(org.id)
+      setAiUsage(cur => cur?.orgId === org.id ? { orgId: org.id, data } : cur)
+    } catch (e: any) {
+      setAiUsage(null)
+      toast.error(e?.response?.data?.detail ?? 'Could not load AI usage')
+    }
   }
 
   const saveQuota = async (org: PlatformOrg) => {
@@ -81,6 +103,8 @@ export default function PlatformOrgs() {
       max_agent_asks_per_day: toNullableInt(quotaDraft.max_agent_asks_per_day ?? ''),
       max_storage_mb: toNullableInt(quotaDraft.max_storage_mb ?? ''),
       max_concurrent_asks: toNullableInt(quotaDraft.max_concurrent_asks ?? ''),
+      max_ai_tokens_per_day: toNullableInt(quotaDraft.max_ai_tokens_per_day ?? ''),
+      max_ai_tokens_per_month: toNullableInt(quotaDraft.max_ai_tokens_per_month ?? ''),
     }
     try {
       await platformApi.setQuota(org.id, body)
@@ -93,6 +117,7 @@ export default function PlatformOrgs() {
   const nameOf = (id: number | null) => (id == null ? '—' : orgs.find(o => o.id === id)?.name ?? `#${id}`)
 
   const inp = { style: inlineFieldStyle }
+  const cell = { padding: '2px 8px', borderBottom: '1px solid var(--border)' }
 
   return (
     <div>
@@ -160,8 +185,52 @@ export default function PlatformOrgs() {
               <span>Agent asks today: {o.usage.agent_asks_today} / {fmtLimit(o.quota.max_agent_asks_per_day)}</span>
               <span>Storage: {fmtMb(o.usage.storage_bytes)} MB / {fmtLimit(o.quota.max_storage_mb)}</span>
               <span>Concurrent asks: {fmtLimit(o.quota.max_concurrent_asks)}</span>
-              <button className="btn btn-ghost btn-sm" onClick={() => startEditQuota(o)} style={{ marginInlineStart: 'auto' }}>Edit quota</button>
+              <span>AI tokens today: {o.usage.ai_tokens_today.toLocaleString()} / {fmtLimit(o.quota.max_ai_tokens_per_day)}</span>
+              <span>AI tokens this month: {o.usage.ai_tokens_month.toLocaleString()} / {fmtLimit(o.quota.max_ai_tokens_per_month)}</span>
+              <button className="btn btn-ghost btn-sm" onClick={() => toggleAiUsage(o)} aria-expanded={aiUsage?.orgId === o.id}
+                style={{ marginInlineStart: 'auto' }}>AI usage</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => startEditQuota(o)}>Edit quota</button>
             </div>
+
+            {aiUsage?.orgId === o.id && (
+              <div data-testid="ai-usage" style={{ fontSize: 11.5, display: 'flex', gap: 24, flexWrap: 'wrap', fontVariantNumeric: 'tabular-nums' }}>
+                {aiUsage.data == null ? <span style={{ color: 'var(--muted)' }}>Loading…</span> : <>
+                  <div>
+                    <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                      Last {aiUsage.data.days} days: {aiUsage.data.total_tokens.toLocaleString()} tokens
+                    </div>
+                    {aiUsage.data.remaining != null && (
+                      <div style={{ color: aiUsage.data.remaining <= 0 ? 'var(--danger, #c0392b)' : 'var(--muted)' }}>
+                        {aiUsage.data.remaining <= 0
+                          ? `Budget used up ${aiUsage.data.binding_limit === 'ai_tokens_per_month' ? 'this month' : 'today'}: questions and the copilot are refused until it resets`
+                          : `${aiUsage.data.remaining.toLocaleString()} tokens left ${aiUsage.data.binding_limit === 'ai_tokens_per_month' ? 'this month' : 'today'}`}
+                      </div>
+                    )}
+                  </div>
+                  <table style={{ borderCollapse: 'collapse' }} aria-label={`AI tokens by feature for ${o.name}`}>
+                    <thead><tr><th style={{ ...cell, textAlign: 'start' }}>Feature</th><th style={cell}>Tokens</th><th style={cell}>Calls</th><th style={cell}>Refused</th></tr></thead>
+                    <tbody>
+                      {aiUsage.data.by_feature.length === 0 && <tr><td colSpan={4} style={{ ...cell, color: 'var(--muted)' }}>No AI use yet</td></tr>}
+                      {aiUsage.data.by_feature.map(f => (
+                        <tr key={f.feature}><td style={cell}>{FEATURE_LABEL[f.feature] ?? f.feature}</td>
+                          <td style={{ ...cell, textAlign: 'end' }}>{f.tokens.toLocaleString()}</td>
+                          <td style={{ ...cell, textAlign: 'end' }}>{f.calls.toLocaleString()}</td>
+                          <td style={{ ...cell, textAlign: 'end' }}>{f.refused.toLocaleString()}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <table style={{ borderCollapse: 'collapse' }} aria-label={`AI tokens by person for ${o.name}`}>
+                    <thead><tr><th style={{ ...cell, textAlign: 'start' }}>Person</th><th style={cell}>Tokens</th></tr></thead>
+                    <tbody>
+                      {aiUsage.data.by_user.slice(0, 10).map(u => (
+                        <tr key={u.user_id ?? 'none'}><td style={cell}>{u.email ?? 'Scheduled work'}</td>
+                          <td style={{ ...cell, textAlign: 'end' }}>{u.tokens.toLocaleString()}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>}
+              </div>
+            )}
 
             {editingQuotaId === o.id && (
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -188,6 +257,18 @@ export default function PlatformOrgs() {
                   <input aria-label={`Max concurrent asks for ${o.name}`} placeholder="unlimited"
                     value={quotaDraft.max_concurrent_asks ?? ''}
                     onChange={e => setQuotaDraft(d => ({ ...d, max_concurrent_asks: e.target.value }))} {...inp} />
+                </label>
+                <label style={{ fontSize: 11, color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                  Max AI tokens/day
+                  <input aria-label={`Max AI tokens per day for ${o.name}`} placeholder="unlimited" inputMode="numeric"
+                    value={quotaDraft.max_ai_tokens_per_day ?? ''}
+                    onChange={e => setQuotaDraft(d => ({ ...d, max_ai_tokens_per_day: e.target.value }))} {...inp} />
+                </label>
+                <label style={{ fontSize: 11, color: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                  Max AI tokens/month
+                  <input aria-label={`Max AI tokens per month for ${o.name}`} placeholder="unlimited" inputMode="numeric"
+                    value={quotaDraft.max_ai_tokens_per_month ?? ''}
+                    onChange={e => setQuotaDraft(d => ({ ...d, max_ai_tokens_per_month: e.target.value }))} {...inp} />
                 </label>
                 <button className="btn btn-primary btn-sm" onClick={() => saveQuota(o)}>Save quota</button>
                 <button className="btn btn-sm" onClick={() => setEditingQuotaId(null)}>Cancel</button>

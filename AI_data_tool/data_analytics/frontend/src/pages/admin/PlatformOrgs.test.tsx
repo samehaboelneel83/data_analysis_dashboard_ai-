@@ -3,18 +3,28 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import PlatformOrgs from './PlatformOrgs'
 
 vi.mock('../../services/api', () => {
-  const noQuota = { max_queries_per_day: null, max_agent_asks_per_day: null, max_storage_mb: null, max_concurrent_asks: null }
-  const noUsage = { queries_today: 0, agent_asks_today: 0, storage_bytes: 0 }
+  const noQuota = { max_queries_per_day: null, max_agent_asks_per_day: null, max_storage_mb: null, max_concurrent_asks: null,
+    max_ai_tokens_per_day: null, max_ai_tokens_per_month: null }
+  const noUsage = { queries_today: 0, agent_asks_today: 0, storage_bytes: 0, ai_tokens_today: 0, ai_tokens_month: 0 }
   return {
   platformApi: {
     listOrgs: vi.fn().mockResolvedValue([
       { id: 1, name: 'Parent Co', user_count: 3, parent_org_id: null, mcp_enabled: true, quota: noQuota, usage: noUsage },
-      { id: 2, name: 'Child Co', user_count: 1, parent_org_id: null, mcp_enabled: false, quota: noQuota,
-        usage: { queries_today: 4, agent_asks_today: 1, storage_bytes: 2 * 1024 * 1024 } },
+      { id: 2, name: 'Child Co', user_count: 1, parent_org_id: null, mcp_enabled: false,
+        quota: { ...noQuota, max_ai_tokens_per_day: 50000 },
+        usage: { queries_today: 4, agent_asks_today: 1, storage_bytes: 2 * 1024 * 1024,
+                 ai_tokens_today: 12345, ai_tokens_month: 67890 } },
     ]),
     createOrg: vi.fn().mockResolvedValue({ org_id: 9, name: 'Acme', admin_user_id: 5, admin_email: 'a@acme.com' }),
     setParent: vi.fn().mockResolvedValue({ org_id: 2, parent_org_id: 1 }),
     setMcp: vi.fn().mockResolvedValue({ org_id: 2, mcp_enabled: true }),
+    aiUsage: vi.fn().mockResolvedValue({
+      org_id: 2, days: 30, since: '2026-08-28', total_tokens: 67890, remaining: 0, binding_limit: 'ai_tokens_per_day',
+      by_day: [], by_feature: [{ feature: 'ask', tokens: 60000, calls: 40, refused: 3 },
+                               { feature: 'metadata', tokens: 7890, calls: 12, refused: 0 }],
+      by_user: [{ user_id: 7, email: 'ana@child.co', tokens: 60000, calls: 40, refused: 3 },
+                { user_id: null, email: null, tokens: 7890, calls: 12, refused: 0 }],
+    }),
     setQuota: vi.fn().mockResolvedValue({ org_id: 2, max_queries_per_day: 100, max_agent_asks_per_day: null, max_storage_mb: null, max_concurrent_asks: null }),
   },
   }
@@ -67,7 +77,40 @@ describe('PlatformOrgs', () => {
 
     await waitFor(() => expect(platformApi.setQuota).toHaveBeenCalledWith(2, {
       max_queries_per_day: 100, max_agent_asks_per_day: null, max_storage_mb: null, max_concurrent_asks: null,
+      max_ai_tokens_per_day: 50000, max_ai_tokens_per_month: null,
     }))
+  })
+
+  it('sets an AI token budget (E11)', async () => {
+    render(<PlatformOrgs />)
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Edit quota' }))[0])   // Parent Co
+    fireEvent.change(screen.getByLabelText('Max AI tokens per month for Parent Co'), { target: { value: '2000000' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save quota' }))
+    await waitFor(() => expect(platformApi.setQuota).toHaveBeenLastCalledWith(1, expect.objectContaining({
+      max_ai_tokens_per_day: null, max_ai_tokens_per_month: 2000000 })))
+  })
+
+  it('shows AI tokens against the budget, and where they went (E11)', async () => {
+    render(<PlatformOrgs />)
+    expect(await screen.findByText(/AI tokens today: 12,345 \/ 50,000/)).toBeInTheDocument()
+    expect(screen.getByText(/AI tokens this month: 67,890 \/ unlimited/)).toBeInTheDocument()
+
+    const toggle = screen.getAllByRole('button', { name: 'AI usage' })[1]
+    fireEvent.click(toggle)
+    await waitFor(() => expect(platformApi.aiUsage).toHaveBeenCalledWith(2))
+    const panel = await screen.findByTestId('ai-usage')
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(panel).toHaveTextContent('Budget used up today')
+    const byFeature = screen.getByRole('table', { name: 'AI tokens by feature for Child Co' })
+    expect(byFeature).toHaveTextContent('Ask AI questions')
+    expect(byFeature).toHaveTextContent('60,000')
+    expect(byFeature).toHaveTextContent('Describing connections')
+    const byPerson = screen.getByRole('table', { name: 'AI tokens by person for Child Co' })
+    expect(byPerson).toHaveTextContent('ana@child.co')
+    expect(byPerson).toHaveTextContent('Scheduled work')
+
+    fireEvent.click(toggle)
+    expect(screen.queryByTestId('ai-usage')).not.toBeInTheDocument()
   })
 })
 

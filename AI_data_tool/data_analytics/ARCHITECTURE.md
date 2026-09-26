@@ -1112,7 +1112,7 @@ relationships, a profile, and no unmasked personal data.
 
 ### Relational store
 
-PostgreSQL 16 Alpine. **83 tables** defined in `models/models.py` via async
+PostgreSQL 16 Alpine. **84 tables** defined in `models/models.py` via async
 SQLAlchemy, grouped by concern:
 
 | Group | Representative tables |
@@ -1134,9 +1134,9 @@ SQLAlchemy, grouped by concern:
 | Workspace | `workspace_nodes`, `workspace_folder_roles`, `workspace_folder_grants` |
 | Pipelines | `dataflows`, `dataflow_capabilities`, `automation_runs`, `automation_steps`, `custom_connectors`, `schedule_failures`, `jobs` |
 | Platform | `saml_authn_requests`, `org_mcp_access`, `eval_runs` |
-| Ops | `sync_runs`, `schema_versions`, `column_stats`, `materializations`, `quotas`, `query_runs` |
+| Ops | `sync_runs`, `schema_versions`, `column_stats`, `materializations`, `quotas`, `query_runs`, `ai_usage` |
 
-Schema changes go through **Alembic** (`backend/alembic/`, 41 revisions).
+Schema changes go through **Alembic** (`backend/alembic/`, 42 revisions).
 `postgres/init.sql` provides the initial schema and indexes.
 
 ### Cache
@@ -1441,6 +1441,21 @@ The client treats the endpoint as unreliable by design — it may be rebooted,
 reimaged, or saturated — and degrades to a documented failure rather than
 propagating an exception. `services/retrieval.py` handles embedding-based
 retrieval against the embeddings container, with a circuit breaker.
+
+**AI budgets (E11).** Every completion is metered against the org it is made
+for: a `UsageMeter` in a context variable (`services/llm.py`) that `_post`
+adds each call's `usage` tokens to, whichever service makes the call. Requests
+open one with the `ai_meter(feature)` dependency (Ask AI, the copilot,
+suggestions, insights, explain, narrate); detached work with
+`quotas.run_metered` (connection descriptions) or `quotas.metered` (the
+automation proposal step). Each unit of work that called the model, or was
+refused, writes one `ai_usage` row. `Quota.max_ai_tokens_per_day` and
+`max_ai_tokens_per_month` cap an org's tokens; once spent, a question or a
+copilot message is refused up front with a 429 and `Retry-After`, and every
+other call returns None, so those features fall back as they do when the model
+is down. A call is allowed while any budget remains, so a unit of work
+overshoots by at most its last call. `GET /platform/organizations/{id}/ai-usage`
+breaks an org's tokens down by day, feature and person.
 
 ---
 
@@ -2255,8 +2270,8 @@ Agent pane (7)
 
 | Suite | Scope | Count |
 |-------|-------|-------|
-| Backend | `backend/tests/` | ~5,300 tests across 407 modules |
-| Frontend | colocated `*.test.ts(x)` | ~2,900 tests across 224 files |
+| Backend | `backend/tests/` | ~5,300 tests across 408 modules |
+| Frontend | colocated `*.test.ts(x)` | ~2,900 tests across 225 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |
 | Doc audit | `tests/test_architecture_doc.py` | Enforces the *counts* in this document |

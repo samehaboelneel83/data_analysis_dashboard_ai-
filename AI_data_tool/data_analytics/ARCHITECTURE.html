@@ -251,7 +251,7 @@
   <div class="stack">
     <a class="slab" data-l="1" href="#l1"><span class="sn">01</span><span class="st">Data Sources &amp; Connectivity</span><span class="sd">45 connectors · DirectQuery</span></a>
     <a class="slab" data-l="2" href="#l2"><span class="sn">02</span><span class="st">Ingestion &amp; Metadata</span><span class="sd">profile · introspect · drift</span></a>
-    <a class="slab" data-l="3" href="#l3"><span class="sn">03</span><span class="st">Storage &amp; Persistence</span><span class="sd">83 tables · Valkey cache</span></a>
+    <a class="slab" data-l="3" href="#l3"><span class="sn">03</span><span class="st">Storage &amp; Persistence</span><span class="sd">84 tables · Valkey cache</span></a>
     <a class="slab" data-l="4" href="#l4"><span class="sn">04</span><span class="st">Query &amp; Semantic</span><span class="sd">25 aggregations · RLS</span></a>
     <a class="slab" data-l="5" href="#l5"><span class="sn">05</span><span class="st">Analytics &amp; AI</span><span class="sd">stats · forecast · NL→SQL</span></a>
     <a class="slab" data-l="6" href="#l6"><span class="sn">06</span><span class="st">API &amp; Services</span><span class="sd">19 routers · auth · delivery</span></a>
@@ -619,7 +619,7 @@ STAT_FAMILIES       = {"postgresql"}</code></pre>
   <p class="owns"><strong>Owns:</strong> durable state, cached state, and schema evolution.</p>
 
   <h3>Relational store</h3>
-  <p>PostgreSQL 16 Alpine. <strong>83 tables</strong> defined in <code>models/models.py</code> via async SQLAlchemy, grouped by concern.</p>
+  <p>PostgreSQL 16 Alpine. <strong>84 tables</strong> defined in <code>models/models.py</code> via async SQLAlchemy, grouped by concern.</p>
   <div class="scroll">
     <table>
       <thead><tr><th>Group</th><th>Representative tables</th></tr></thead>
@@ -640,11 +640,11 @@ STAT_FAMILIES       = {"postgresql"}</code></pre>
         <tr><th>Workspace</th><td><code>workspace_nodes</code>, <code>workspace_folder_roles</code>, <code>workspace_folder_grants</code></td></tr>
         <tr><th>Pipelines</th><td><code>dataflows</code>, <code>dataflow_capabilities</code>, <code>automation_runs</code>, <code>automation_steps</code>, <code>custom_connectors</code>, <code>schedule_failures</code>, <code>jobs</code></td></tr>
         <tr><th>Platform</th><td><code>saml_authn_requests</code>, <code>org_mcp_access</code>, <code>eval_runs</code></td></tr>
-        <tr><th>Ops</th><td><code>sync_runs</code>, <code>schema_versions</code>, <code>column_stats</code>, <code>materializations</code>, <code>quotas</code>, <code>query_runs</code></td></tr>
+        <tr><th>Ops</th><td><code>sync_runs</code>, <code>schema_versions</code>, <code>column_stats</code>, <code>materializations</code>, <code>quotas</code>, <code>query_runs</code>, <code>ai_usage</code></td></tr>
       </tbody>
     </table>
   </div>
-  <p>Schema changes go through <strong>Alembic</strong> (<code>backend/alembic/</code>, 41 revisions). <code>postgres/init.sql</code> provides the initial schema and indexes.</p>
+  <p>Schema changes go through <strong>Alembic</strong> (<code>backend/alembic/</code>, 42 revisions). <code>postgres/init.sql</code> provides the initial schema and indexes.</p>
 
   <h3>Cache</h3>
   <p><code>services/cache_backend.py</code> defines a <code>CacheBackend</code> interface with two implementations — <code>InProcessCache</code> for single-process or test runs, and <code>ValkeyCache</code> for the deployed stack. <code>frame_cache.py</code> caches computed result frames; <code>core/rate_limit.py</code> uses the same backend for throttling.</p>
@@ -823,6 +823,7 @@ llm_enabled  = True              # False → platform runs with no AI at all
 llm_max_concurrency      = 12
 llm_reserved_interactive = 2</code></pre>
   <p>The client treats the endpoint as unreliable by design — it may be rebooted, reimaged, or saturated — and degrades to a documented failure rather than propagating an exception. <code>services/retrieval.py</code> handles embedding-based retrieval against the embeddings container, with a circuit breaker.</p>
+  <p><strong>AI budgets (E11).</strong> Every completion is metered against the org it is made for: a <code>UsageMeter</code> in a context variable (<code>services/llm.py</code>) that <code>_post</code> adds each call's <code>usage</code> tokens to, whichever service makes the call. Requests open one with the <code>ai_meter(feature)</code> dependency (Ask AI, the copilot, suggestions, insights, explain, narrate); detached work with <code>quotas.run_metered</code> (connection descriptions) or <code>quotas.metered</code> (the automation proposal step). Each unit of work that called the model, or was refused, writes one <code>ai_usage</code> row. <code>Quota.max_ai_tokens_per_day</code> and <code>max_ai_tokens_per_month</code> cap an org's tokens; once spent, a question or a copilot message is refused up front with a 429 and <code>Retry-After</code>, and every other call returns None, so those features fall back as they do when the model is down. A call is allowed while any budget remains, so a unit of work overshoots by at most its last call. <code>GET /platform/organizations/{id}/ai-usage</code> breaks an org's tokens down by day, feature and person.</p>
 </section>
 
 <section id="l6">
@@ -1151,8 +1152,8 @@ llm_reserved_interactive = 2</code></pre>
     <table>
       <thead><tr><th>Suite</th><th>Scope</th><th>Count</th></tr></thead>
       <tbody>
-        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~5,300 tests · 407 modules</td></tr>
-        <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~2,900 tests · 224 files</td></tr>
+        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~5,300 tests · 408 modules</td></tr>
+        <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~2,900 tests · 225 files</td></tr>
         <tr><th>Evals</th><td><code>backend/evals/</code></td><td>Agent quality gates (<code>run_eval_gate.ps1</code>)</td></tr>
         <tr><th>Conformance</th><td><code>tests/test_layer_conformance.py</code></td><td>Enforces the layer boundaries above</td></tr>
         <tr><th>Doc audit</th><td><code>tests/test_architecture_doc.py</code></td><td>Enforces the <em>counts</em> in this document</td></tr>

@@ -2120,12 +2120,30 @@ export interface OrgQuota {
   max_agent_asks_per_day: number | null
   max_storage_mb: number | null
   max_concurrent_asks: number | null
+  /** E11: the model's tokens (prompt + completion) per UTC day / calendar month. */
+  max_ai_tokens_per_day: number | null
+  max_ai_tokens_per_month: number | null
 }
 
 export interface OrgUsage {
   queries_today: number
   agent_asks_today: number
   storage_bytes: number
+  ai_tokens_today: number
+  ai_tokens_month: number
+}
+
+/** E11: where an org's AI tokens went over the last `days` days. */
+export interface OrgAiUsage {
+  org_id: number
+  days: number
+  since: string
+  total_tokens: number
+  remaining: number | null
+  binding_limit: 'ai_tokens_per_day' | 'ai_tokens_per_month' | null
+  by_day: { day: string; tokens: number; calls: number; refused: number }[]
+  by_feature: { feature: string; tokens: number; calls: number; refused: number }[]
+  by_user: { user_id: number | null; email: string | null; tokens: number; calls: number; refused: number }[]
 }
 
 export interface PlatformOrg {
@@ -2141,6 +2159,8 @@ export interface PlatformOrg {
 
 export const platformApi = {
   listOrgs: () => api.get<PlatformOrg[]>('/platform/organizations').then(r => r.data),
+  aiUsage: (orgId: number, days = 30) =>
+    api.get<OrgAiUsage>(`/platform/organizations/${orgId}/ai-usage`, { params: { days } }).then(r => r.data),
   createOrg: (body: { name: string; admin_email: string; admin_password: string }) =>
     api.post<{ org_id: number; name: string; admin_user_id: number; admin_email: string }>('/platform/organizations', body).then(r => r.data),
   setParent: (orgId: number, parentOrgId: number | null) =>

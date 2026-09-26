@@ -26,7 +26,8 @@ from sqlalchemy.orm.attributes import flag_modified
 from ..core.capability import max_dataset_capability, rank, require_capability
 from ..core.database import get_db
 from ..core.org_scope import check_org
-from ..dependencies import get_current_user
+from ..dependencies import get_current_user, ai_meter
+from ..services.llm import UsageMeter
 from ..models.models import (Dataset, DataSource, Report, ReportPage,
                              ReportWidget, User)
 from ..services import llm as llm_service
@@ -177,7 +178,8 @@ def _clean_config(cfg: dict | None, columns: set[str], notes: list[str], *,
 @router.post("/{report_id}/pages/{page_id}/copilot")
 async def page_copilot(report_id: int, page_id: int, body: CopilotIn,
                        db: AsyncSession = Depends(get_db),
-                       user: User = Depends(get_current_user)):
+                       user: User = Depends(get_current_user),
+                       meter: UsageMeter = Depends(ai_meter("copilot"))):
     report = await db.get(Report, report_id)
     check_org(report, user, "Report not found")
     page = (await db.execute(select(ReportPage).where(
@@ -193,6 +195,7 @@ async def page_copilot(report_id: int, page_id: int, body: CopilotIn,
 
     # Same daily cap as the chat agent: both are one LLM call per message.
     await quotas.enforce_agent_quota(db, user.org_id)
+    quotas.enforce_ai_budget(meter)
 
     widgets = (await db.execute(select(ReportWidget).where(
         ReportWidget.page_id == page_id).order_by(ReportWidget.id))).scalars().all()

@@ -1,6 +1,6 @@
 """Task E2: per-tenant quota enforcement.
 
-Four independent limits (models.Quota), all nullable = unlimited:
+Independent limits (models.Quota), all nullable = unlimited:
   * max_queries_per_day     -- counted from query_runs, midnight UTC window
   * max_agent_asks_per_day  -- counted from agent_runs, midnight UTC window
   * max_storage_mb          -- sum of Dataset.file_size for the org's current
@@ -8,6 +8,10 @@ Four independent limits (models.Quota), all nullable = unlimited:
                                 schema) datasets
   * max_concurrent_asks     -- an in-process counter, NOT a DB count; gated
                                 by `concurrent_ask_slot` below
+  * max_ai_tokens_per_day / max_ai_tokens_per_month (E11)
+                             -- the model's tokens, summed from ai_usage
+                                since midnight UTC / the 1st of the month;
+                                metered by `metered` and `run_metered` below
 
 No quota row for an org (the common case) or a null field on an existing row
 means unlimited -- exactly today's behavior, unchanged. `get_quota` is the
@@ -25,8 +29,13 @@ from datetime import datetime, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import logging
+
 from ..core import telemetry
-from ..models.models import AgentRun, Dataset, QueryRun, Quota
+from ..models.models import AgentRun, AiUsage, Dataset, QueryRun, Quota
+from .llm import UsageMeter, release_meter, use_meter
+
+logger = logging.getLogger(__name__)
 
 
 class QuotaExceeded(Exception):
@@ -176,3 +185,115 @@ async def concurrent_ask_slot(db: AsyncSession, org_id: int):
     finally:
         if limit is not None:
             _concurrent_counts[org_id] = max(0, _concurrent_counts.get(org_id, 0) - 1)
+
+
+# ---------------------------------------------------------------------------
+# E11: AI budgets
+# ---------------------------------------------------------------------------
+
+def _month_start_utc() -> datetime:
+    return _midnight_utc().replace(day=1)
+
+
+def _seconds_until_next_month_utc() -> int:
+    start = _month_start_utc()
+    nxt = start.replace(year=start.year + 1, month=1) if start.month == 12 \
+        else start.replace(month=start.month + 1)
+    return max(1, int((nxt - datetime.utcnow()).total_seconds()))
+
+
+async def ai_tokens_used(db: AsyncSession, org_id: int, since: datetime) -> int:
+    return int((await db.execute(
+        select(func.coalesce(func.sum(AiUsage.tokens_in + AiUsage.tokens_out), 0))
+        .where(AiUsage.org_id == org_id, AiUsage.created_at >= since)
+    )).scalar_one())
+
+
+async def ai_budget(db: AsyncSession, org_id: int) -> tuple[int | None, str | None, int]:
+    """(tokens remaining, the limit that binds, seconds until it resets).
+
+    The tighter of the day and month limits; (None, None, 0) when the org has
+    neither, which costs one cached quota lookup and no count."""
+    quota = await get_quota(db, org_id)
+    if quota is None or (quota.max_ai_tokens_per_day is None
+                         and quota.max_ai_tokens_per_month is None):
+        return None, None, 0
+    best: tuple[int | None, str | None, int] = (None, None, 0)
+    if quota.max_ai_tokens_per_day is not None:
+        left = quota.max_ai_tokens_per_day - await ai_tokens_used(db, org_id, _midnight_utc())
+        best = (left, "ai_tokens_per_day", _seconds_until_next_midnight_utc())
+    if quota.max_ai_tokens_per_month is not None:
+        left = quota.max_ai_tokens_per_month - await ai_tokens_used(db, org_id, _month_start_utc())
+        if best[0] is None or left < best[0]:
+            best = (left, "ai_tokens_per_month", _seconds_until_next_month_utc())
+    return best
+
+
+async def open_ai_meter(db: AsyncSession, org_id: int, user_id: int | None,
+                        feature: str) -> UsageMeter:
+    remaining, kind, resets_in = await ai_budget(db, org_id)
+    return UsageMeter(org_id=org_id, user_id=user_id, feature=feature,
+                      remaining=remaining, limit_kind=kind, resets_in=resets_in)
+
+
+def enforce_ai_budget(meter: UsageMeter) -> None:
+    """429 + Retry-After before a model-first request (a question, the
+    copilot) when the org's budget is already spent. Features where the model
+    is an embellishment are not refused: their calls return None and they
+    fall back, as they do when the model is down."""
+    if not meter.spent:
+        return
+    kind = meter.limit_kind or "ai_tokens"
+    period = "this month" if kind == "ai_tokens_per_month" else "today"
+    raise QuotaExceeded(f"This organization's AI budget for {period} is used up",
+                        headers={"Retry-After": str(meter.resets_in or 60)},
+                        kind=kind)
+
+
+async def record_ai_usage(db: AsyncSession, meter: UsageMeter, *, commit: bool = True) -> None:
+    """One ai_usage row, when the meter saw a call or a refusal. Never raises:
+    the answer has been produced, and losing a usage row must not turn it
+    into an error. `commit=False` leaves the row to the caller's transaction
+    (a step that commits its own work)."""
+    if not (meter.calls or meter.refused):
+        return
+    try:
+        db.add(AiUsage(org_id=meter.org_id, user_id=meter.user_id, feature=meter.feature,
+                       calls=meter.calls, refused=meter.refused,
+                       tokens_in=meter.tokens_in, tokens_out=meter.tokens_out))
+        if commit:
+            await db.commit()
+    except Exception:                                         # noqa: BLE001
+        logger.exception("could not record AI usage for org %s (%s)", meter.org_id, meter.feature)
+        try:
+            await db.rollback()
+        except Exception:                                     # noqa: BLE001
+            pass
+
+
+@asynccontextmanager
+async def metered(db: AsyncSession, org_id: int, user_id: int | None, feature: str,
+                  *, commit: bool = True):
+    """Meter the model calls made inside the block, on the caller's session."""
+    meter = await open_ai_meter(db, org_id, user_id, feature)
+    token = use_meter(meter)
+    try:
+        yield meter
+    finally:
+        release_meter(token)
+        await record_ai_usage(db, meter, commit=commit)
+
+
+async def run_metered(session_factory, meter: UsageMeter, coro):
+    """Await `coro` (a detached background run) under `meter`.
+
+    The meter is opened by the request that starts the run (`open_ai_meter`
+    on its session), so the run starts at once; owned by no request, the run
+    records its usage on a session of its own when it ends."""
+    token = use_meter(meter)
+    try:
+        return await coro
+    finally:
+        release_meter(token)
+        async with session_factory() as db:
+            await record_ai_usage(db, meter)

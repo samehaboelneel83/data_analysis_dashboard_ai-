@@ -1023,8 +1023,13 @@ async def _propose_step(ctx: StepContext, session) -> str:
             # Masked HERE, at the boundary, rather than trusting the artifact:
             # this is the one call that leaves the chain.
             payload = await asyncio.to_thread(masked_profile_for_model, profile)
-            got, reason = await suggest_for_dataset(
-                payload, ds.description or None)
+            # E11: counted against the org's AI budget like a person's
+            # request; a spent budget makes the model decline, and the
+            # statistical proposal below is used.
+            from .quotas import metered
+            async with metered(session, ctx.org_id, ctx.user_id, "automation", commit=False):
+                got, reason = await suggest_for_dataset(
+                    payload, ds.description or None)
             if got:
                 proposals, path = list(got), "model"
             else:

@@ -145,6 +145,15 @@ describe('CopilotChat', () => {
       expect(screen.getByText(/do not have edit rights/i)).toBeInTheDocument())
   })
 
+  it('a message refused by the org\'s AI limit says so (E11)', async () => {
+    vi.spyOn(reportsApi, 'copilot').mockRejectedValue({ response: { status: 429, headers: {} } })
+    mount()
+    openPanel()
+    type('add something')
+    await waitFor(() => expect(screen.getByText(
+      'Your organization has reached its AI limit for now. Try again later.')).toBeInTheDocument())
+  })
+
   it('a failed request reads as an error and the panel stays usable', async () => {
     vi.spyOn(reportsApi, 'copilot').mockRejectedValue(new Error('down'))
     const onApplied = mount()

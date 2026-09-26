@@ -8,7 +8,8 @@ from sqlalchemy.orm import selectinload
 from ..core.database import get_db
 from ..core.org_scope import check_org
 from ..core.rls import resolve_denied_columns, resolve_rls_expr
-from ..dependencies import get_current_user
+from ..dependencies import get_current_user, ai_meter
+from ..services.llm import UsageMeter
 from ..models.models import Dataset, DataSource, AnalysisResult, User
 from ..schemas.schemas import (AssociationRulesRequest, AnalysisRequest, CompareGroupsRequest,
                                CorrelationTestRequest, GlmLogisticRequest,
@@ -41,7 +42,8 @@ class NarrateRequest(BaseModel):
 
 @registry_router.post("/narrate")
 async def narrate_finding(body: NarrateRequest,
-                          current_user: User = Depends(get_current_user)):
+                          current_user: User = Depends(get_current_user),
+                          _meter: UsageMeter = Depends(ai_meter("narrate"))):
     """Guarded LLM polish for one finding's sentence -- display-only.
 
     The client sends back a finding IT ALREADY HOLDS (obtained through the

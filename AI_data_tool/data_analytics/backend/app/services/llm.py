@@ -29,6 +29,8 @@ import json
 import logging
 import re
 import weakref
+from contextvars import ContextVar, Token
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -67,6 +69,73 @@ def _gates() -> tuple[asyncio.Semaphore, asyncio.Semaphore]:
                 (total_n, back_n))
         _GATES[loop] = made
     return made[0], made[1]
+
+
+# ---------------------------------------------------------------------------
+# E11: metering. Who a call is for, and whether their budget allows it.
+# ---------------------------------------------------------------------------
+
+#: What `last_error` says when a call was refused by the budget; callers
+#: already treat any None as "no model this time" and fall back.
+BUDGET_SPENT = "the organization's AI budget is used up"
+
+
+@dataclass
+class UsageMeter:
+    """One unit of work's use of the model: a request or a background run.
+
+    Opened by services/quotas.py for an org, with `remaining` = the tokens
+    its budget still allows (None: no budget). Every completion made while
+    the meter is current adds to it, whichever client or service made it, so
+    no call site has to opt in; one whose budget is spent is refused and
+    returns None, which every caller already handles as "the model did not
+    answer" (a template narrative, the statistical suggestion, no column
+    description). A call is allowed while anything remains, so a unit of
+    work can overshoot by the size of its last call, never by more.
+    """
+    org_id: int
+    user_id: int | None
+    feature: str
+    remaining: int | None = None
+    #: Which limit `remaining` comes from, and when it resets (seconds).
+    limit_kind: str | None = None
+    resets_in: int = 0
+    calls: int = 0
+    refused: int = 0
+    tokens_in: int = 0
+    tokens_out: int = 0
+
+    @property
+    def spent(self) -> bool:
+        return self.remaining is not None and self.remaining <= 0
+
+    def add(self, tokens_in: int, tokens_out: int) -> None:
+        self.calls += 1
+        self.tokens_in += tokens_in
+        self.tokens_out += tokens_out
+        if self.remaining is not None:
+            self.remaining -= tokens_in + tokens_out
+
+
+_meter: ContextVar[UsageMeter | None] = ContextVar("llm_usage_meter", default=None)
+
+
+def current_meter() -> UsageMeter | None:
+    return _meter.get()
+
+
+def use_meter(meter: UsageMeter | None) -> Token:
+    """Make `meter` the one this context's calls count against."""
+    return _meter.set(meter)
+
+
+def release_meter(token: Token) -> None:
+    """Undo `use_meter`. Tolerates being called from another context (a
+    dependency's teardown can be), where resetting the token is impossible."""
+    try:
+        _meter.reset(token)
+    except ValueError:
+        _meter.set(None)
 
 
 class LLMClient:
@@ -146,6 +215,12 @@ class LLMClient:
             return await self._post(payload)
 
     async def _post(self, payload: dict[str, Any]) -> str | None:
+        meter = _meter.get()
+        if meter is not None and meter.spent:
+            meter.refused += 1
+            self.last_error = BUDGET_SPENT
+            logger.info("LLM call refused: AI budget spent (org %s, %s)", meter.org_id, meter.feature)
+            return None
         self.call_count += 1
         try:
             async with httpx.AsyncClient(
@@ -168,8 +243,12 @@ class LLMClient:
             return None
 
         usage = data.get("usage") or {}
-        self.tokens_in += int(usage.get("prompt_tokens") or 0)
-        self.tokens_out += int(usage.get("completion_tokens") or 0)
+        t_in = int(usage.get("prompt_tokens") or 0)
+        t_out = int(usage.get("completion_tokens") or 0)
+        self.tokens_in += t_in
+        self.tokens_out += t_out
+        if meter is not None:
+            meter.add(t_in, t_out)
 
         try:
             choice = data["choices"][0]

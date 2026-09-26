@@ -25,7 +25,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.database import AsyncSessionLocal, get_db
 from ..core.org_scope import check_org
-from ..dependencies import get_current_user, require_org_admin
+from ..dependencies import get_current_user, require_org_admin, ai_meter
+from ..services.llm import UsageMeter
+from ..services import quotas
 from ..models.models import (ColumnStats, Dataset, DataSource, DatasetColumn,
                              Entity, GlossaryTerm, Relationship, SchemaVersion,
                              SourceColumn, SourceObject, SourceRelationship,
@@ -105,13 +107,16 @@ async def trigger_sync(
 
     # Detached from this request: the sync outlives the response, and the client
     # watches it through GET /sync/{run_id}.
-    asyncio.create_task(sync.run_sync_background(
-        AsyncSessionLocal, run.id, source.id, current_user.org_id,
-        cache=cache_module.get_cache(),
-        llm_client=llm_service.get_client(),
-        allow_llm=bool(source.allow_llm_sampling),
-        source_config=cfg,
-    ))
+    # E11: the run's model calls (column descriptions) count against the org.
+    meter = await quotas.open_ai_meter(db, current_user.org_id, current_user.id, "metadata")
+    asyncio.create_task(quotas.run_metered(AsyncSessionLocal, meter,
+        sync.run_sync_background(
+            AsyncSessionLocal, run.id, source.id, current_user.org_id,
+            cache=cache_module.get_cache(),
+            llm_client=llm_service.get_client(),
+            allow_llm=bool(source.allow_llm_sampling),
+            source_config=cfg,
+        )))
 
     return {"sync_run_id": run.id, "status": "running", "stages": []}
 
@@ -698,7 +703,8 @@ class SuggestDashboardIn(BaseModel):
 @router.post("/{source_id}/suggest-dashboard")
 async def suggest_dashboard_for_role(source_id: int, body: SuggestDashboardIn,
                                      db: AsyncSession = Depends(get_db),
-                                     current_user: User = Depends(get_current_user)):
+                                     current_user: User = Depends(get_current_user),
+                                     _meter: UsageMeter = Depends(ai_meter("suggest"))):
     """Propose a dashboard for a kind of person, from this connection's catalog.
 
     The existing `/reports/{id}/suggest-widgets` needs a dataset to already exist

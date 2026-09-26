@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 
 from ..core.database import get_db
 from ..dependencies import require_super_admin
-from ..models.models import AgentRun, Dataset, Organization, OrgParent, QueryRun, Quota, User
+from ..models.models import AgentRun, AiUsage, Dataset, Organization, OrgParent, QueryRun, Quota, User
 from ..services.audit import record as audit
 from ..services.auth_provisioning import create_organization_with_admin
 from ..services import org_access, quotas
@@ -78,6 +78,13 @@ async def list_orgs(db: AsyncSession = Depends(get_db),
     storage_bytes = dict((await db.execute(
         select(Dataset.org_id, func.coalesce(func.sum(Dataset.file_size), 0))
         .group_by(Dataset.org_id))).all())
+    ai_tokens = AiUsage.tokens_in + AiUsage.tokens_out
+    ai_today = dict((await db.execute(
+        select(AiUsage.org_id, func.coalesce(func.sum(ai_tokens), 0))
+        .where(AiUsage.created_at >= midnight).group_by(AiUsage.org_id))).all())
+    ai_month = dict((await db.execute(
+        select(AiUsage.org_id, func.coalesce(func.sum(ai_tokens), 0))
+        .where(AiUsage.created_at >= midnight.replace(day=1)).group_by(AiUsage.org_id))).all())
 
     def _quota_out(o_id: int) -> dict:
         q = quota_by_org.get(o_id)
@@ -86,6 +93,8 @@ async def list_orgs(db: AsyncSession = Depends(get_db),
             "max_agent_asks_per_day": q.max_agent_asks_per_day if q else None,
             "max_storage_mb": q.max_storage_mb if q else None,
             "max_concurrent_asks": q.max_concurrent_asks if q else None,
+            "max_ai_tokens_per_day": q.max_ai_tokens_per_day if q else None,
+            "max_ai_tokens_per_month": q.max_ai_tokens_per_month if q else None,
         }
 
     return [{"id": o.id, "name": o.name, "created_at": o.created_at,
@@ -94,7 +103,9 @@ async def list_orgs(db: AsyncSession = Depends(get_db),
              "quota": _quota_out(o.id),
              "usage": {"queries_today": queries_today.get(o.id, 0),
                        "agent_asks_today": asks_today.get(o.id, 0),
-                       "storage_bytes": int(storage_bytes.get(o.id, 0))}}
+                       "storage_bytes": int(storage_bytes.get(o.id, 0)),
+                       "ai_tokens_today": int(ai_today.get(o.id, 0)),
+                       "ai_tokens_month": int(ai_month.get(o.id, 0))}}
             for o in orgs]
 
 
@@ -103,6 +114,8 @@ class OrgQuotaSet(BaseModel):
     max_agent_asks_per_day: int | None = None
     max_storage_mb: int | None = None
     max_concurrent_asks: int | None = None
+    max_ai_tokens_per_day: int | None = Field(default=None, ge=0)
+    max_ai_tokens_per_month: int | None = Field(default=None, ge=0)
 
 
 @router.put("/organizations/{org_id}/quota")
@@ -123,15 +136,64 @@ async def set_org_quota(org_id: int, body: OrgQuotaSet, db: AsyncSession = Depen
     row.max_agent_asks_per_day = body.max_agent_asks_per_day
     row.max_storage_mb = body.max_storage_mb
     row.max_concurrent_asks = body.max_concurrent_asks
+    row.max_ai_tokens_per_day = body.max_ai_tokens_per_day
+    row.max_ai_tokens_per_month = body.max_ai_tokens_per_month
     await audit(db, current_user, "platform.set_org_quota", "organization", org_id,
                f"queries={body.max_queries_per_day} asks={body.max_agent_asks_per_day} "
-               f"storage_mb={body.max_storage_mb} concurrent={body.max_concurrent_asks}")
+               f"storage_mb={body.max_storage_mb} concurrent={body.max_concurrent_asks} "
+               f"ai_tokens_day={body.max_ai_tokens_per_day} "
+               f"ai_tokens_month={body.max_ai_tokens_per_month}")
     await db.commit()
     quotas.invalidate_quota_cache(org_id)
     return {"org_id": org_id, "max_queries_per_day": row.max_queries_per_day,
             "max_agent_asks_per_day": row.max_agent_asks_per_day,
             "max_storage_mb": row.max_storage_mb,
-            "max_concurrent_asks": row.max_concurrent_asks}
+            "max_concurrent_asks": row.max_concurrent_asks,
+            "max_ai_tokens_per_day": row.max_ai_tokens_per_day,
+            "max_ai_tokens_per_month": row.max_ai_tokens_per_month}
+
+
+@router.get("/organizations/{org_id}/ai-usage")
+async def org_ai_usage(org_id: int, days: int = 30, db: AsyncSession = Depends(get_db),
+                       current_user: User = Depends(require_super_admin)):
+    """E11: where an org's AI tokens went -- per day, per feature and per
+    person, over the last `days` days (1-366), with the calls the budget
+    refused. The numbers a budget is set from and a spike is explained by."""
+    if await db.get(Organization, org_id) is None:
+        raise HTTPException(404, "Organization not found")
+    days = max(1, min(int(days), 366))
+    since = _midnight_utc() - timedelta(days=days - 1)
+    # Folded here rather than grouped in SQL: a date bucket is spelled
+    # differently by every dialect, and one org's month is a few thousand rows.
+    rows = (await db.execute(select(
+        AiUsage.created_at, AiUsage.feature, AiUsage.user_id,
+        AiUsage.tokens_in + AiUsage.tokens_out, AiUsage.calls, AiUsage.refused)
+        .where(AiUsage.org_id == org_id, AiUsage.created_at >= since))).all()
+    by_day: dict[str, list[int]] = {}
+    by_feature: dict[str, list[int]] = {}
+    by_user: dict[int | None, list[int]] = {}
+    for created, feature, user_id, tok, n, ref in rows:
+        for bucket, key in ((by_day, created.date().isoformat()), (by_feature, feature),
+                            (by_user, user_id)):
+            acc = bucket.setdefault(key, [0, 0, 0])
+            acc[0] += int(tok or 0); acc[1] += int(n or 0); acc[2] += int(ref or 0)
+    emails = dict((await db.execute(select(User.id, User.email).where(
+        User.id.in_([u for u in by_user if u is not None])))).all()) if by_user else {}
+    remaining, kind, _ = await quotas.ai_budget(db, org_id)
+
+    def out(items, name):
+        return [{name: k, "tokens": v[0], "calls": v[1], "refused": v[2]}
+                for k, v in sorted(items, key=lambda kv: -kv[1][0])]
+    return {
+        "org_id": org_id, "days": days, "since": since.date().isoformat(),
+        "total_tokens": sum(v[0] for v in by_day.values()),
+        "remaining": remaining, "binding_limit": kind,
+        "by_day": [{"day": d, "tokens": v[0], "calls": v[1], "refused": v[2]}
+                   for d, v in sorted(by_day.items())],
+        "by_feature": out(by_feature.items(), "feature"),
+        "by_user": [{**r, "email": emails.get(r["user_id"]) if r["user_id"] else None}
+                    for r in out(by_user.items(), "user_id")],
+    }
 
 
 @router.get("/organizations/tree")

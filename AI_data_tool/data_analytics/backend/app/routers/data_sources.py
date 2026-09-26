@@ -235,13 +235,17 @@ async def _start_initial_sync(db: AsyncSession, ds: DataSource,
         await db.commit()
         await db.refresh(run)
 
-        asyncio.create_task(sync.run_sync_background(
-            AsyncSessionLocal, run.id, ds.id, ds.org_id,
-            cache=cache_module.get_cache(),
-            llm_client=llm_service.get_client(),
-            allow_llm=bool(ds.allow_llm_sampling),
-            source_config=cfg,
-        ))
+        from ..services import quotas
+        # E11: the run's model calls (column descriptions) count against the org.
+        meter = await quotas.open_ai_meter(db, ds.org_id, user.id, "metadata")
+        asyncio.create_task(quotas.run_metered(AsyncSessionLocal, meter,
+            sync.run_sync_background(
+                AsyncSessionLocal, run.id, ds.id, ds.org_id,
+                cache=cache_module.get_cache(),
+                llm_client=llm_service.get_client(),
+                allow_llm=bool(ds.allow_llm_sampling),
+                source_config=cfg,
+            )))
         return run.id
     except Exception:                                        # noqa: BLE001
         # The connection is created either way. A failure to START describing it

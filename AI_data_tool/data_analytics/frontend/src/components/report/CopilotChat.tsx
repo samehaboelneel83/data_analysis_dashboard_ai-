@@ -8,6 +8,7 @@ import ResultView, { focusFor, type EvidenceFocus } from '../chat/ResultView'
 import AnswerText from '../chat/AnswerText'
 import AiMascot from '../ai/AiMascot'
 import { useT } from '../../i18n'
+import { aiLimitMessage } from '../../lib/aiLimit'
 import { localDigits } from '../../lib/arabicFormats'
 import './copilot.css'
 
@@ -231,7 +232,8 @@ export default function CopilotChat({
       const status = (e as { response?: { status?: number } })?.response?.status
       setTurns(x => [...x, {
         id: nextId++, role: 'assistant', kind: 'error',
-        text: status === 403 ? t('copilot.err.forbidden') : t('copilot.err.unreachable'),
+        text: status === 403 ? t('copilot.err.forbidden')
+          : aiLimitMessage(e, t) ?? t('copilot.err.unreachable'),
       }])
     } finally {
       setBusy(false)

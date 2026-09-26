@@ -621,3 +621,24 @@ class TestDefinedMeasures:
             ReportWidget.title == "Margin by region"))).scalar_one()
         assert made.config["measure"] == "Margin %"
         assert r.json()["notes"] == ['Skipped an edit: no column named "Margin %".']
+
+
+class TestAiBudget:
+    async def test_a_spent_ai_budget_refuses_the_message_before_the_model_is_asked(
+            self, client, auth_headers, world, columns, model, db_session, two_orgs):
+        """E11: the copilot is a model-first request, like a question."""
+        from app.models.models import AiUsage, Quota
+        from app.services import quotas
+        org_id = two_orgs["a"]["org"].id
+        db_session.add_all([Quota(org_id=org_id, max_ai_tokens_per_day=1_000),
+                            AiUsage(org_id=org_id, feature="ask", calls=1, tokens_in=1_000)])
+        await db_session.commit()
+        quotas.invalidate_quota_cache(org_id)
+        model.append({"reply": "Added.", "data_question": None, "actions": []})
+        try:
+            r = await call(client, auth_headers["a"], world, "add a chart")
+        finally:
+            quotas.invalidate_quota_cache()
+        assert r.status_code == 429
+        assert "AI budget" in r.json()["detail"]
+        assert len(model) == 1, "the model must not be asked"
