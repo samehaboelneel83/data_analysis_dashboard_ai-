@@ -246,6 +246,7 @@ EXCUSED_ROUTES = {
     ("POST", "/api/v1/datasets/{dataset_id}/prediction-models"): "training; covered in test_prediction_models_api.py and below",
     ("GET", "/api/v1/datasets/{dataset_id}/prediction-models/{model_id}/drift"): "only through a model the caller may use (model_access.usable_model), over their secured frame; test_model_scoring.py",
     ("POST", "/api/v1/datasets/{dataset_id}/prediction-models/{model_id}/score-jobs"): "queues a job; the job re-checks as its owner and writes their secured rows; test_model_scoring.py",
+    ("POST", "/api/v1/datasets/{dataset_id}/widget-data/reconcile"): "multipart upload; resolves the widget through _resolve_widget_data as widget-data does (row rules, denied columns, other orgs); test_widget_reconcile.py",
 }
 
 

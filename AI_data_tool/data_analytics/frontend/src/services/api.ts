@@ -1851,6 +1851,19 @@ export const pageTemplatesApi = {
 // The cache key is the exact request body. RLS and column masks are resolved
 // server-side per token, and this cache lives in one tab of one session, so
 // the body IS the full identity of the result.
+export interface ReconcileMapping { keys: [string, string][]; values: [string, string][] }
+export interface ReconcileResult {
+  mapping: ReconcileMapping
+  columns: { widget: string[]; file: string[] }
+  counts: { match: number; mismatch: number; missing_in_widget: number; missing_in_file: number }
+  rows: { key: Record<string, unknown>; status: 'match' | 'mismatch' | 'missing_in_widget' | 'missing_in_file'
+          values: { column: string; expected: unknown; actual: unknown; difference: number | null; ok: boolean }[] }[]
+  totals: { column: string; expected: number; actual: number; difference: number }[]
+  duplicate_keys: { widget: number; file: number }
+  reconciled: boolean
+  file: string
+}
+
 export const WIDGET_DATA_TTL_MS = 30_000
 export const WIDGET_DATA_MAX_CONCURRENT = 6
 const WD_CACHE_MAX = 100
@@ -1951,6 +1964,20 @@ export const widgetDataApi = {
     })
     wdInflight.set(key, entry)
     return holdWd(entry, key, opts?.signal)
+  },
+
+  /** E17: compare the widget with the old report's export of the same table
+   *  (CSV or Excel). `mapping` pairs widget columns with file columns; left
+   *  out, the server pairs them by name. */
+  reconcile: (dsId: number, body: { config: Record<string, unknown>; widget_type: string
+                                    calculated_columns?: CalcColumn[]; report_id?: number
+                                    parameters?: Record<string, unknown> },
+              file: File, mapping?: ReconcileMapping) => {
+    const form = new FormData()
+    form.append('widget', JSON.stringify(body))
+    if (mapping) form.append('mapping', JSON.stringify(mapping))
+    form.append('file', file)
+    return api.post<ReconcileResult>(`/datasets/${dsId}/widget-data/reconcile`, form).then(r => r.data)
   },
 
   /** Downloads the widget's data. Goes through the same endpoint family as `query`,

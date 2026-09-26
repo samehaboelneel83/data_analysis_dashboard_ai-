@@ -1500,7 +1500,7 @@ except the agent:
 |--------|---------|
 | `datasets` | Upload, CRUD |
 | `analysis` (+ `registry`) | Run and retrieve analyses |
-| `widget_data` | Live widget queries |
+| `widget_data` | Live widget queries; exports; reconciling a widget with an old report's CSV/Excel export (`services/reconcile.py`, E17) |
 | `reports` | Reports, pages, widgets |
 | `hierarchy` | Data-view tree |
 | `data_sources` | Connections |
@@ -2336,8 +2336,8 @@ Agent pane (7)
 
 | Suite | Scope | Count |
 |-------|-------|-------|
-| Backend | `backend/tests/` | ~5,300 tests across 417 modules |
-| Frontend | colocated `*.test.ts(x)` | ~2,950 tests across 231 files |
+| Backend | `backend/tests/` | ~5,300 tests across 418 modules |
+| Frontend | colocated `*.test.ts(x)` | ~2,950 tests across 232 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |
 | Doc audit | `tests/test_architecture_doc.py` | Enforces the *counts* in this document |

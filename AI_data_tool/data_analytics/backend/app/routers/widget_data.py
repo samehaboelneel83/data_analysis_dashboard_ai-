@@ -2,7 +2,7 @@ import asyncio
 import io
 import re
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -608,6 +608,95 @@ def _export_frame(data: dict, config: dict):
             row[0] = "Total"
         frame = pd.concat([frame, pd.DataFrame([row], columns=frame.columns)], ignore_index=True)
     return frame
+
+
+#: A report's export is a table, not a warehouse: kept small enough to read
+#: whole and compare row by row in a request.
+_RECONCILE_MAX_BYTES = 10 * 1024 * 1024
+
+
+def _read_reconcile_file(name: str, raw: bytes):
+    """The owner's export as text cells (so the decimals it shows are known),
+    whatever its encoding or separator; Excel cells as they are."""
+    import os
+    import tempfile
+
+    import pandas as pd
+
+    from ..services.csv_dialect import canonicalize_csv
+    lower = (name or "").lower()
+    if lower.endswith((".xlsx", ".xlsm", ".xls")):
+        return pd.read_excel(io.BytesIO(raw), dtype=object)
+    if not lower.endswith((".csv", ".txt", ".tsv")):
+        raise widget_error(400, "unsupported", "Reconcile with a CSV or Excel file")
+    fd, path = tempfile.mkstemp(suffix=".csv")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(raw)
+        found = canonicalize_csv(path) or {}
+        frame = pd.read_csv(path, dtype=str, keep_default_na=False)
+    finally:
+        os.unlink(path)
+    if found.get("separator") == ";":
+        # The European convention: "1.234,5" is one thousand two hundred
+        # and thirty-four and a half. The rewrite converts a column only
+        # when every cell has that shape; a column mixing "150,25" and
+        # "300" is still one of numbers.
+        # A column with no comma at all is left alone ("1.5" stays one and a half).
+        euro = frame.apply(lambda col: col.str.contains(",", regex=False).any()
+                           and col.str.fullmatch(r"-?[\d.\s]*\d,\d+|-?[\d.\s]*\d").all())
+        for c in euro[euro].index:
+            frame[c] = frame[c].str.replace(".", "", regex=False).str.replace(",", ".", regex=False)
+    return frame
+
+
+@router.post("/{dataset_id}/widget-data/reconcile")
+async def reconcile_widget(
+    dataset_id: int, widget: str = Form(...), mapping: str | None = Form(None),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    """E17: compare the widget with the old report's export of the same table.
+
+    The widget resolves exactly as it draws for this reader (row and column
+    rules, filters, parameters), through `_resolve_widget_data`; its table is
+    the one its CSV export would write. See services/reconcile.py for how
+    rows pair and when two numbers agree. Returns nothing the reader could
+    not already see on the widget, so it needs read, not the export gate.
+    """
+    import json
+
+    from ..services.audit import record as audit
+    from ..services.reconcile import reconcile
+    try:
+        req = WidgetDataRequest(**json.loads(widget))
+        wanted = json.loads(mapping) if mapping else None
+    except (ValueError, TypeError) as e:
+        raise widget_error(400, "unsupported", f"Could not read the request: {e}")
+    raw = await file.read(_RECONCILE_MAX_BYTES + 1)
+    if len(raw) > _RECONCILE_MAX_BYTES:
+        raise widget_error(400, "unsupported", "The file is over 10 MB; export the table itself, not the data under it")
+    await _guard_script_execution(db, current_user, req)
+    data = await _resolve_widget_data(dataset_id, req, db, current_user)
+    actual = _export_frame(data, req.config or {})
+    if actual is None or actual.empty:
+        raise widget_error(400, "export_no_data", "This widget has no table to reconcile")
+    try:
+        expected = await asyncio.to_thread(_read_reconcile_file, file.filename or "", raw)
+        result = await asyncio.to_thread(reconcile, actual, expected, wanted)
+    except CodedHTTPException:
+        raise
+    except ValueError as e:
+        raise widget_error(400, "unsupported", str(e))
+    except Exception:                                   # noqa: BLE001 -- an unreadable file
+        raise widget_error(400, "unsupported", "Could not read that file as a table")
+    c = result["counts"]
+    await audit(db, current_user, "widget.reconcile", "report" if req.report_id else "dataset",
+                req.report_id or dataset_id,
+                f"{file.filename}: {c['match']} match, {c['mismatch']} differ, "
+                f"{c['missing_in_widget']} only in the file, {c['missing_in_file']} only in the widget")
+    await db.commit()
+    return {**result, "file": file.filename}
 
 
 @router.post("/{dataset_id}/widget-data/export")

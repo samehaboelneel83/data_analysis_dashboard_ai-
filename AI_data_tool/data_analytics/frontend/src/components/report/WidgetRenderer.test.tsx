@@ -689,6 +689,17 @@ describe('WidgetRenderer drillthrough context menu', () => {
     expect(screen.queryByRole('menuitem', { name: /Export data as CSV/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('menuitem', { name: /Export data as Excel/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('menuitem', { name: /Export as image/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: /Reconcile/i })).not.toBeInTheDocument()
+  })
+
+  it('reconciles with an old export from the same menu (E17)', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'North', value: 5 }], sampled: false })
+    const { container } = renderWidget({ widget: barWidget({ widget_type: 'list', config: { dimension: 'region' } }) })
+    await screen.findByText('North')
+    fireEvent.contextMenu(container.firstElementChild as Element)
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Reconcile with an export/i }))
+    expect(await screen.findByRole('dialog', { name: /Reconcile “Sales”/ })).toBeInTheDocument()
+    expect(screen.getByLabelText('Export file (CSV or Excel)')).toBeInTheDocument()
   })
 
   it('closes the context menu when clicking elsewhere without choosing an item', async () => {

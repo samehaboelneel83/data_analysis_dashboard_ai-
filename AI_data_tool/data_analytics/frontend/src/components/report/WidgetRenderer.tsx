@@ -1,10 +1,11 @@
-import { memo, useEffect, useState, useCallback, useMemo, useRef } from 'react'
+import { lazy, memo, Suspense, useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import type { PartialPeriod, RelativeNote } from '../../lib/relativeDates'
 import type { BrushRange } from './chartRenderers/axisOptions'
 import { createPortal } from 'react-dom'
 import { Copy, Trash2, MoreVertical, Link as LinkIcon } from 'lucide-react'
 import { widgetDataApi } from '../../services/api'
 import { isCanceledRequest } from '../../lib/canceledRequest'
+import { useT } from '../../i18n'
 import { pickChartSvg, svgToPng } from '../../lib/widgetImage'
 import toast from 'react-hot-toast'
 import ActionMenu from '../ActionMenu'
@@ -18,6 +19,7 @@ import { Z_OVERLAY, Z_DROPDOWN } from '../../lib/zIndex'
 import { getChildNode, walkToDepth } from '../../lib/hierarchyUtils'
 
 import { WidgetBody } from './WidgetBody'
+const ReconcileDialog = lazy(() => import('./ReconcileDialog'))
 import { ASSIGN_DATA_EVENT, missingRequiredRoles } from './WidgetPlaceholder'
 
 /** Charts whose bars/points are groups of rows two of which can be tested (Phase 7.2). */
@@ -604,6 +606,8 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
   // Right-click context menu — mirrors the header button's drill-through action, closer to
   // Power BI's actual right-click-a-data-point trigger.
   const [showContextMenu, setShowContextMenu] = useState(false)
+  const [reconcileOpen, setReconcileOpen] = useState(false)
+  const t = useT()
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 })
   useEffect(() => {
     if (!showContextMenu) return
@@ -1146,6 +1150,13 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
             onClose={() => setKitDialog(null)} />
         )
       })(), document.body)}
+      {reconcileOpen && widgetDatasetId != null && createPortal(
+        <Suspense fallback={null}>
+          <ReconcileDialog title={widget.title || wt} datasetId={widgetDatasetId}
+            body={{ config: mergedConfig as Record<string, unknown>, widget_type: wt,
+                    calculated_columns: effectiveCalcCols, report_id: reportId, parameters: parameters ?? {} }}
+            onClose={() => setReconcileOpen(false)} />
+        </Suspense>, document.body)}
       {kitDialog === 'why' && createPortal(
         <WhyDialog title={title} sections={whySections()} onClose={() => setKitDialog(null)}
           footnote="Row-level security may also narrow the rows you can see; it is applied before everything above and is not shown here." />,
@@ -1360,6 +1371,13 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
                 onClick={e => { e.stopPropagation(); handleExportImage() }}
                 style={menuItemStyle}>
                 ⤓ Export as image
+              </button>
+              {/* E17: the migration check -- beside the exports, because the
+                  file it compares with is the old report's export. */}
+              <button role="menuitem"
+                onClick={e => { e.stopPropagation(); setShowContextMenu(false); setReconcileOpen(true) }}
+                style={menuItemStyle}>
+                ⇄ {t('rec.menu')}
               </button>
             </>
           )}
