@@ -28,7 +28,10 @@ vi.mock('../services/api', () => ({
   customFunctionsApi: { list: vi.fn().mockResolvedValue([]), save: vi.fn(), delete: vi.fn(), preview: vi.fn() },
   measuresApi: { list: vi.fn().mockResolvedValue([]), save: vi.fn(), delete: vi.fn(), preview: vi.fn() },
   dataSourcesApi: { list: vi.fn().mockResolvedValue([{ id: 5, name: 'Shop DB', type: 'sqlite', config: {} }]) },
-  prepApi: { get: vi.fn().mockResolvedValue([]), set: vi.fn(), preview: vi.fn(),
+  // preview answers: the panel previews on a debounce, which can fire after a
+  // test has finished, and a bare vi.fn() returning undefined then threw an
+  // uncaught ".then of undefined" into whichever test ran next.
+  prepApi: { get: vi.fn().mockResolvedValue([]), set: vi.fn(), preview: vi.fn().mockResolvedValue({ before: { rows: 0, columns: [] }, after: { rows: 0, columns: [] }, steps: [], sample: { columns: [], rows: [] } }),
              materialize: vi.fn(), rebuild: vi.fn() },
   // The prep panel reads these to suggest join keys.
   relationshipsApi: { list: vi.fn().mockResolvedValue([]) },
