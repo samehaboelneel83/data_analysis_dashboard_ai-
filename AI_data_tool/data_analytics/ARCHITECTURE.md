@@ -1871,7 +1871,14 @@ and scheduled deliveries. A release freezes content, never access: page
 restrictions are those at release time and those of now, both applied, and
 the dataset rung opens the release's datasets to its viewers, not the
 draft's. Editors see `unreleased_changes` and release with `POST
-/reports/{id}/release`.
+/reports/{id}/release`. Report parameters and pinned Home tiles follow the
+release too.
+
+Two editors on one widget no longer overwrite each other silently: the panel
+sends the revision its copy came from, and `update_widget` walks version
+history to refuse (409 `edit_conflict`, naming who) a change someone else made
+since. Restoring a version, and releasing, first name what the widgets use
+that no longer exists (`services/dependencies.version_dependencies`).
 
 ### Middleware
 

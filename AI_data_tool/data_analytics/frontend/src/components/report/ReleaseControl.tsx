@@ -9,7 +9,7 @@
  */
 import { useState } from 'react'
 import toast from 'react-hot-toast'
-import { reportsApi } from '../../services/api'
+import { reportsApi, describeMissing } from '../../services/api'
 import { useT } from '../../i18n'
 import { useDirection } from '../../contexts/DirectionContext'
 import type { Report } from '../../types/report'
@@ -47,8 +47,9 @@ export default function ReleaseControl({ report, canEdit, revision, onReleased }
   async function doRelease() {
     setBusy(true)
     try {
-      await reportsApi.release(report.id)
+      const got = await reportsApi.release(report.id)
       toast.success(tr('release.done'))
+      if (got?.missing?.length) toast(describeMissing(got.missing), { icon: '⚠' })
       onReleased?.()
     } catch (err) {
       const detail = (err as { response?: { data?: { detail?: { message?: string } | string } } })?.response?.data?.detail

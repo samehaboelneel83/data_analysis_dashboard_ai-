@@ -272,3 +272,117 @@ def describe(dependents: list[dict]) -> str:
     shown = ", ".join(f"{d['kind'].replace('_', ' ')} '{d['label']}'" for d in dependents[:5])
     more = f" and {len(dependents) - 5} more" if len(dependents) > 5 else ""
     return f"used by {shown}{more}"
+
+
+# ── What a saved version of a report depends on (E09) ─────────────────────────
+#
+# Restoring a version recreates its pages and widgets exactly as they were. The
+# widgets name datasets, columns, measures, calculated columns, report
+# parameters and hierarchy nodes that may have been renamed or deleted since,
+# and a widget whose measure is gone does not fail: it draws something else
+# (see the module docstring). So before a restore -- and in its answer, and
+# when a draft is released -- the version's dependencies are checked against
+# what exists NOW, and whatever is missing is named.
+
+#: Widget types that draw no data, so name nothing a dataset must hold.
+_NO_DATA_TYPES = {"text", "image", "shape", "button", "web_content", "container", "script",
+                  "custom_visual"}
+_PARAM_REF = re.compile(r"^@([A-Za-z_][A-Za-z0-9_]*)$")
+_ANY = frozenset()
+
+
+def config_names(config: object) -> set[str]:
+    """Every column or measure name a widget config refers to (the keys
+    `config_references` searches)."""
+    out: set[str] = set()
+    if not isinstance(config, dict):
+        return out
+
+    def add(v):
+        if isinstance(v, str) and v and not v.startswith("#"):
+            out.add(v)
+        elif isinstance(v, dict) and isinstance(v.get("name"), str):
+            out.add(v["name"])
+    for key in _NAME_KEYS:
+        add(config.get(key))
+    for key in _LIST_KEYS:
+        v = config.get(key)
+        for x in (v if isinstance(v, list) else []):
+            add(x)
+    roles = config.get("roles")
+    if isinstance(roles, dict):
+        for v in roles.values():
+            for x in (v if isinstance(v, list) else [v]):
+                add(x)
+    for f in config.get("filters") or []:
+        if isinstance(f, dict):
+            add(f.get("column"))
+    return out
+
+
+def _param_refs(config: dict) -> set[str]:
+    refs: set[str] = set()
+    for f in config.get("filters") or []:
+        if not isinstance(f, dict):
+            continue
+        values = f.get("value") if isinstance(f.get("value"), list) else [f.get("value")]
+        for v in values:
+            m = _PARAM_REF.match(v) if isinstance(v, str) else None
+            if m:
+                refs.add(m.group(1))
+    return refs
+
+
+async def version_dependencies(db: AsyncSession, report: Report, snapshot: dict) -> list[dict]:
+    """What a version's widgets use that no longer exists, one row per gap:
+    `{page, widget, kind, name}` with kind dataset | field | parameter |
+    hierarchy. An empty list means the version restores with everything it
+    names in place."""
+    from ..models.models import DatasetColumn, ReportParameter
+    from .prep import prep_steps_of
+    rep = (snapshot or {}).get("report") or {}
+    primary = rep.get("dataset_id") if "dataset_id" in rep else report.dataset_id
+    params = set((await db.execute(select(ReportParameter.name).where(
+        ReportParameter.report_id == report.id))).scalars().all())
+    known: dict[int, set[str] | None] = {}
+
+    async def fields_of(ds_id) -> set[str] | None:
+        if ds_id not in known:
+            ds = await db.get(Dataset, ds_id) if isinstance(ds_id, int) else None
+            if ds is None or ds.org_id != report.org_id:
+                known[ds_id] = None
+            elif prep_steps_of(ds):
+                # A prep pipeline can add columns (a join, a derived field)
+                # the stored column list does not have: nothing to check
+                # names against without running it.
+                known[ds_id] = _ANY
+            else:
+                cols = set((await db.execute(select(DatasetColumn.name).where(
+                    DatasetColumn.dataset_id == ds.id))).scalars().all())
+                cols |= {c.get("name") for c in (ds.calculated_columns or []) if isinstance(c, dict)}
+                cols |= {m.get("name") for m in (ds.measures or []) if isinstance(m, dict)}
+                known[ds_id] = cols
+        return known[ds_id]
+
+    missing: list[dict] = []
+    for page in (snapshot or {}).get("pages") or []:
+        for w in page.get("widgets") or []:
+            if w.get("widget_type") in _NO_DATA_TYPES:
+                continue
+            config = w.get("config") or {}
+            where = {"page": page.get("name"), "widget": w.get("title") or w.get("widget_type")}
+            raw = config.get("dataset_id")
+            ds_id = int(raw) if isinstance(raw, str) and raw.isdigit() else (raw if isinstance(raw, int) else primary)
+            if ds_id is not None:
+                fields = await fields_of(ds_id)
+                if fields is None:
+                    missing.append({**where, "kind": "dataset", "name": str(ds_id)})
+                elif fields is not _ANY:
+                    for name in sorted(config_names(config) - fields):
+                        missing.append({**where, "kind": "field", "name": name})
+            for name in sorted(_param_refs(config) - params):
+                missing.append({**where, "kind": "parameter", "name": name})
+            node = config.get("hierarchyNodeId")
+            if isinstance(node, int) and await db.get(HierarchyNode, node) is None:
+                missing.append({**where, "kind": "hierarchy", "name": str(node)})
+    return missing

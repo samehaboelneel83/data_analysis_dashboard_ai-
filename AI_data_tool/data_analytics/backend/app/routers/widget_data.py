@@ -100,9 +100,13 @@ async def _apply_report_parameters(req: WidgetDataRequest, db: AsyncSession, cur
         return req
     report = await db.get(Report, req.report_id)
     check_org(report, current_user, "Report not found")
+    # E09: the parameter definitions of the version this reader is served.
+    from ..services.report_release import served_release
+    release = await served_release(db, report.id, current_user)
     try:
         config, calc_cols = await apply_report_parameters(
-            db, current_user, report, req.config, req.calculated_columns, req.parameters)
+            db, current_user, report, req.config, req.calculated_columns, req.parameters,
+            release=release)
     except ParameterError as e:
         raise widget_error(400, "parameter", str(e))
     return req.model_copy(update={"config": config, "calculated_columns": calc_cols})

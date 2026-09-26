@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Bot, History, RotateCcw } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { reportsApi } from '../../services/api'
+import { reportsApi, describeMissing, type MissingDependency } from '../../services/api'
 
 /**
  * Version history for the open report (R2 of the competitive assessment).
@@ -58,14 +58,23 @@ export default function VersionHistoryPane({ reportId, currentRevision, onRestor
   useEffect(load, [reportId])
 
   const restore = async (v: VersionRow) => {
+    // E09: what this version names that no longer exists is said BEFORE the
+    // restore, not discovered as charts quietly drawing something else.
+    let missing: MissingDependency[] = []
+    try { missing = (await reportsApi.versionDependencies(reportId, v.id)).missing ?? [] } catch { /* the restore still says */ }
+    const gap = missing.length
+      ? `\n\nThis version uses things that no longer exist: ${describeMissing(missing)}. ` +
+        `Those widgets will not draw what they did.`
+      : ''
     if (!window.confirm(
       `Restore revision ${v.revision}? The current charts and layout are ` +
       `saved as a new version first, so you can undo this. The report's name ` +
-      `and sharing are not changed.`)) return
+      `and sharing are not changed.` + gap)) return
     setRestoring(v.id)
     try {
       const got = await reportsApi.restoreVersion(reportId, v.id)
       toast.success(`Restored revision ${got.restored_revision}`)
+      if (got.missing?.length) toast(`Restored, but missing: ${describeMissing(got.missing)}`, { icon: '⚠' })
       await onRestored()
       load()
     } catch {

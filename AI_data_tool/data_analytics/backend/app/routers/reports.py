@@ -11,7 +11,7 @@ from ..core.capability import (_config_dataset_ids, can_read_dataset, effective_
                                effective_capability, require_capability, require_dataset_read)
 from ..dependencies import get_current_user
 from ..services.audit import record as audit
-from ..models.models import CommonFilter, DataAlert, OrgTheme, PageRoleVisibility, PageTemplate, Report, ReportClassification, ReportParameter, ReportSchedule, ReportPage, ReportUserGrant, ReportVersion, ReportWidget, Bookmark, RecentView, Role, User
+from ..models.models import CommonFilter, DataAlert, OrgTheme, PageRoleVisibility, PageTemplate, Report, ReportClassification, ReportParameter, ReportRelease, ReportSchedule, ReportPage, ReportUserGrant, ReportVersion, ReportWidget, Bookmark, RecentView, Role, User
 from ..schemas.schemas import (
     ReportCreate, ReportUpdate, ReportOut,
     PageCreate, PageUpdate, PageOut,
@@ -125,6 +125,9 @@ async def _release_before_first_edit(report_id: int, db: AsyncSession, current_u
         row = (await db.execute(select(rep_t.c.published, rep_t.c.created_by)
                                 .where(rep_t.c.id == report_id))).first()
         if row is None or not row.published or row.created_by is None:
+            return
+        # One made earlier in this same request is still pending.
+        if any(isinstance(o, ReportRelease) and o.report_id == report_id for o in db.new):
             return
         if await has_release(db, report_id):
             return
@@ -668,7 +671,10 @@ async def release_report(report_id: int, body: dict | None = None,
     await audit(db, current_user, "report.release", "report", report.id, report.name)
     await db.commit()
     await db.refresh(release)
-    return {"release": summary(release), "unreleased_changes": False}
+    # Said, not refused: what the released widgets use that no longer exists.
+    from ..services.dependencies import version_dependencies as _missing
+    return {"release": summary(release), "unreleased_changes": False,
+            "missing": await _missing(db, report, release.snapshot)}
 
 
 @router.get("/{report_id}/releases")
@@ -894,6 +900,9 @@ async def update_widget(report_id: int, page_id: int, widget_id: int, body: Widg
     if not widget:
         raise HTTPException(404, "Widget not found")
     changes = body.model_dump(exclude_none=True)
+    base_revision = changes.pop("base_revision", None)
+    if base_revision is not None and ({"widget_type", "title", "config"} & changes.keys()):
+        await _refuse_edit_conflict(db, report, widget, int(base_revision), current_user)
     # Only when this PATCH changes the type or the config: a legacy config nobody
     # is editing is not re-litigated because someone moved the tile. When it
     # does, the widget it ENDS UP as is judged -- a type switch that keeps a
@@ -914,6 +923,59 @@ async def update_widget(report_id: int, page_id: int, widget_id: int, body: Widg
     await db.commit()
     await db.refresh(widget)
     return widget
+
+
+_CONFLICT_FIELDS = ("widget_type", "title", "config")
+
+
+def _widget_state(snapshot: dict, widget_id: int):
+    for page in (snapshot or {}).get("pages") or []:
+        for w in page.get("widgets") or []:
+            if w.get("id") == widget_id:
+                return tuple(w.get(k) for k in _CONFLICT_FIELDS)
+    return None
+
+
+async def _refuse_edit_conflict(db: AsyncSession, report: Report, widget: ReportWidget,
+                                base_revision: int, user: User) -> None:
+    """E09: make an edit conflict visible instead of a silent overwrite.
+
+    Every edit is saved at once, so two editors on one widget used to take
+    turns overwriting each other, and the second never knew the first had
+    been there. The editor now says which revision its copy came from.
+    Version history already holds the report as of each revision and who made
+    the next change, so the widget's history since then can be walked: if
+    someone OTHER than this editor changed its type, title or config, the
+    edit is refused with a 409 naming them and carrying their version. The
+    editor's own later edits are not a conflict. When the history no longer
+    reaches back that far (50 versions are kept), nothing can be said and
+    the edit goes through, as it always did."""
+    current = int(report.revision or 0)
+    if base_revision >= current:
+        return
+    versions = (await db.execute(
+        select(ReportVersion).where(ReportVersion.report_id == report.id,
+                                    ReportVersion.revision >= base_revision,
+                                    ReportVersion.revision < current)
+        .order_by(ReportVersion.revision, ReportVersion.id))).scalars().all()
+    if not versions or versions[0].revision != base_revision:
+        return
+    states = [_widget_state(v.snapshot, widget.id) for v in versions]
+    states.append(tuple(getattr(widget, k) for k in _CONFLICT_FIELDS))
+    for i, v in enumerate(versions):
+        before, after = states[i], states[i + 1]
+        if before is not None and before != after and v.created_by != user.id:
+            other = await db.get(User, v.created_by) if v.created_by else None
+            raise HTTPException(409, {
+                "code": "edit_conflict",
+                "message": (f"{other.email if other else 'Someone else'} changed "
+                            f"\"{widget.title or widget.widget_type}\" after you opened it. "
+                            "Your change was not saved."),
+                "changed_by": other.email if other else None,
+                "revision": current,
+                "current": {"widget_type": widget.widget_type, "title": widget.title,
+                            "config": widget.config or {}},
+            })
 
 
 async def _prune_actions_targeting(db: AsyncSession, report_id: int, widget_id: int) -> None:
@@ -1121,6 +1183,24 @@ def _remap_restored_refs(widgets: list, bookmarks: list,
     return {"links_remapped": remapped, "links_dropped": dropped}
 
 
+@router.get("/{report_id}/versions/{version_id}/dependencies")
+async def version_dependencies(report_id: int, version_id: int,
+                               db: AsyncSession = Depends(get_db),
+                               current_user: User = Depends(get_current_user)):
+    """E09: what this version's widgets use that no longer exists -- a
+    dataset, a column or measure, a report parameter, a hierarchy -- so the
+    editor sees it BEFORE restoring, not as charts that quietly draw
+    something else."""
+    from ..services.dependencies import version_dependencies as _missing
+    report = await db.get(Report, report_id)
+    check_org(report, current_user, "Report not found")
+    await require_capability(db, current_user, report_id, "edit")
+    version = await db.get(ReportVersion, version_id)
+    if version is None or version.report_id != report_id:
+        raise HTTPException(404, "Version not found")
+    return {"missing": await _missing(db, report, version.snapshot or {})}
+
+
 @router.post("/{report_id}/versions/{version_id}/restore")
 async def restore_version(report_id: int, version_id: int,
                           db: AsyncSession = Depends(get_db),
@@ -1141,6 +1221,8 @@ async def restore_version(report_id: int, version_id: int,
     if version is None or version.report_id != report_id:
         raise HTTPException(404, "Version not found")
 
+    from ..services.dependencies import version_dependencies as _missing
+    missing = await _missing(db, report, version.snapshot or {})
     saved = await _bump_revision(report_id, db, current_user)
     await db.flush()
 
@@ -1226,6 +1308,8 @@ async def restore_version(report_id: int, version_id: int,
             "saved_current_as_version_id": saved.id if saved is not None else None,
             **links,
             "pages_restricted": restricted,
+            # What the restored widgets use that no longer exists (E09).
+            "missing": missing,
             "note": "Widget links and bookmarks were pointed at the restored "
                     "pages and widgets; links to anything the version does not "
                     "contain were removed. Page-role restrictions in force "
@@ -1320,6 +1404,11 @@ _PARAM_TYPES = {"number", "text", "date", "expression"}
 async def list_parameters(report_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     report = await db.get(Report, report_id)
     check_org(report, current_user, "Report not found")
+    # E09: a viewer of a released report gets the parameters it was released with.
+    from ..services.report_release import served_release
+    release = await served_release(db, report_id, current_user)
+    if release is not None:
+        return [dict(p) for p in release.snapshot.get("parameters") or []]
     rows = (await db.execute(
         select(ReportParameter).where(ReportParameter.report_id == report_id)
         .order_by(ReportParameter.position, ReportParameter.id)
@@ -1366,7 +1455,10 @@ async def save_parameters(report_id: int, body: list[dict], db: AsyncSession = D
             options=[str(o)[:200] for o in (d.get("options") or [])][:50],
             position=i,
         ))
-    report.revision = (report.revision or 0) + 1
+    # Through the one mutation gate, like every other edit: it bumps the
+    # revision, records a version, and gives a published report its first
+    # release before the change (E09). It used to bump the counter by hand.
+    await _bump_revision(report_id, db, current_user)
     await db.commit()
     return await list_parameters(report_id, db, current_user)
 
@@ -1446,7 +1538,8 @@ async def _resolve_report_sections(db, report: Report, user: User,
                 # the literal text "@region": the PDF showed an empty or
                 # different number from the dashboard it was made from.
                 from ..services.parameters import apply_report_parameters
-                config, _ = await apply_report_parameters(db, user, report, w.config, [], {})
+                config, _ = await apply_report_parameters(db, user, report, w.config, [], {},
+                                                          release=release)
                 result = await asyncio.to_thread(
                     get_widget_data,
                     ds.filename, config, widget_type=w.widget_type,
@@ -2166,6 +2259,9 @@ async def add_page_from_template(report_id: int, body: dict,
     # _bump_revision; this one bumps the counter itself and so never did --
     # a view-only reader could add pages to someone else's dashboard.
     await require_capability(db, current_user, report_id, "edit")
+    # E09: before anything is flushed, so a published report's first release
+    # is what its viewers were seeing, not this page.
+    await _release_before_first_edit(report_id, db, current_user)
 
     if body.get("template_id") is not None:
         tpl = await db.get(PageTemplate, int(body["template_id"]))
@@ -2202,7 +2298,7 @@ async def add_page_from_template(report_id: int, body: dict,
     page, created = rehydrate_page(payload, report_id, position, db)
     await db.flush()
     resolve_index_refs(created)
-    report.revision = (report.revision or 0) + 1
+    await _bump_revision(report_id, db, current_user)
     await db.commit()
     return {"page_id": page.id, "widgets": len(created)}
 

@@ -402,7 +402,7 @@ describe('ReportBuilder Fields pane', () => {
     fireEvent.click(screen.getByRole('button', { name: /^[#ƒx Aa]* ?sales$/ }))
 
     await waitFor(() => expect(reportsApi.updateWidget).toHaveBeenCalledWith(
-      1, 100, 5, { config: expect.objectContaining({ dimension: 'region', measure: 'sales' }), title: 'Sales by Region' },
+      1, 100, 5, expect.objectContaining({ config: expect.objectContaining({ dimension: 'region', measure: 'sales' }), title: 'Sales by Region' }),
     ))
   })
 
@@ -422,12 +422,40 @@ describe('ReportBuilder Fields pane', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /^[#ƒx Aa]* ?sales$/ }))
     await waitFor(() => expect(reportsApi.updateWidget).toHaveBeenCalledWith(
-      1, 100, 5, { config: expect.objectContaining({ measure: 'sales' }), title: 'Sales by Region' }))
+      1, 100, 5, expect.objectContaining({ config: expect.objectContaining({ measure: 'sales' }), title: 'Sales by Region' })))
     await waitFor(() => expect(vi.mocked(reportsApi.get).mock.calls.length).toBeGreaterThan(1))
 
     fireEvent.click(screen.getByRole('button', { name: /^[#ƒx Aa]* ?region$/ }))
     await waitFor(() => expect(reportsApi.updateWidget).toHaveBeenLastCalledWith(
-      1, 100, 5, { config: expect.objectContaining({ measure: 'sales', dimension: 'region' }), title: 'Sales by Region' }))
+      1, 100, 5, expect.objectContaining({ config: expect.objectContaining({ measure: 'sales', dimension: 'region' }), title: 'Sales by Region' })))
+  })
+
+  it('shows a colleague\'s conflicting change instead of overwriting it, and can save anyway (E09)', async () => {
+    const r = reportWithWidget(); (r as any).revision = 7
+    vi.mocked(reportsApi.get).mockResolvedValue(r as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue(datasetWithColumns() as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    vi.mocked(reportsApi.updateWidget).mockReset()
+    vi.mocked(reportsApi.updateWidget)
+      .mockRejectedValueOnce({ response: { status: 409, data: { detail: {
+        code: 'edit_conflict', message: 'sam@example.com changed "Sales by Region" after you opened it. Your change was not saved.' } } } })
+      .mockResolvedValue({} as any)
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    fireEvent.click(screen.getByText('Sales by Region'))
+    await screen.findByText('Widget: Sales by Region')
+    fireEvent.click(screen.getByRole('button', { name: /^[#ƒx Aa]* ?sales$/ }))
+
+    // The save said which revision the editor's copy came from.
+    await waitFor(() => expect(reportsApi.updateWidget).toHaveBeenCalledWith(
+      1, 100, 5, expect.objectContaining({ base_revision: 7 })))
+    const banner = await screen.findByTestId('edit-conflict')
+    expect(banner).toHaveTextContent('sam@example.com changed "Sales by Region"')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save mine anyway' }))
+    await waitFor(() => expect(reportsApi.updateWidget).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(reportsApi.updateWidget).mock.calls[1][3]).not.toHaveProperty('base_revision')
+    await waitFor(() => expect(screen.queryByTestId('edit-conflict')).not.toBeInTheDocument())
   })
 
   it('lists dataset measures under their own heading, separate from numeric columns', async () => {
@@ -460,7 +488,7 @@ describe('ReportBuilder Fields pane', () => {
     fireEvent.click(screen.getByRole('button', { name: /Margin/ }))
 
     await waitFor(() => expect(reportsApi.updateWidget).toHaveBeenCalledWith(
-      1, 100, 5, { config: expect.objectContaining({ measure: 'Margin' }), title: 'Sales by Region' },
+      1, 100, 5, expect.objectContaining({ config: expect.objectContaining({ measure: 'Margin' }), title: 'Sales by Region' }),
     ))
   })
 
@@ -528,7 +556,7 @@ describe('ReportBuilder Fields pane', () => {
 
     await waitFor(() => expect(reportsApi.updateWidget).toHaveBeenCalledWith(
       1, 100, 5,
-      { config: expect.objectContaining({ measure: 'sales', aggregation: 'avg' }), title: 'Sales by Region' },
+      expect.objectContaining({ config: expect.objectContaining({ measure: 'sales', aggregation: 'avg' }), title: 'Sales by Region' }),
     ))
   })
 

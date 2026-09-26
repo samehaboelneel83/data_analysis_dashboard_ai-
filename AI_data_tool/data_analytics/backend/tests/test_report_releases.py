@@ -262,3 +262,155 @@ class TestDataFollowsTheRelease:
         assert [w["title"] for p in shared["pages"] for w in p["widgets"]] == ["Revenue"]
         data = await c.post(f"/api/v1/shared/{token}/widget-data/{world['widget']}")
         assert data.status_code == 200, data.text
+
+
+class TestPinsAndParametersFollowTheRelease:
+    async def test_a_pinned_widget_shows_as_released_and_goes_dormant_when_the_report_closes(self, world):
+        await _publish(world)
+        c, a, v, rid = world["client"], world["a"], world["v"], world["report"]
+        r = await c.post("/api/v1/pins", json={"widget_id": world["widget"]}, headers=v)
+        assert r.status_code == 201, r.text
+        await c.patch(f"/api/v1/reports/{rid}/pages/{world['page']}/widgets/{world['widget']}",
+                      json={"title": "Draft title"}, headers=a)
+        pins = (await c.get("/api/v1/pins", headers=v)).json()["pins"]
+        assert [p["title"] for p in pins] == ["Revenue"]
+        # Unpublished: the viewer can no longer open the report, so the pin
+        # is not served (it used to be, config and all).
+        await c.post(f"/api/v1/reports/{rid}/publish", json={"published": False}, headers=a)
+        assert (await c.get("/api/v1/pins", headers=v)).json()["pins"] == []
+
+    async def test_a_viewer_cannot_pin_a_widget_only_the_draft_has(self, world):
+        await _publish(world)
+        c, a, rid = world["client"], world["a"], world["report"]
+        w = (await c.post(f"/api/v1/reports/{rid}/pages/{world['page']}/widgets",
+                          json=_bar("Draft only"), headers=a)).json()["id"]
+        r = await c.post("/api/v1/pins", json={"widget_id": w}, headers=world["v"])
+        assert r.status_code == 404
+
+    async def test_parameters_are_served_as_released(self, world):
+        c, a, v, rid = world["client"], world["a"], world["v"], world["report"]
+        param = [{"name": "region", "param_type": "text", "default_value": "N"}]
+        assert (await c.put(f"/api/v1/reports/{rid}/parameters", json=param, headers=a)).status_code == 200
+        await _publish(world)
+        param[0]["default_value"] = "S"
+        await c.put(f"/api/v1/reports/{rid}/parameters", json=param, headers=a)
+
+        assert [p["default_value"] for p in (await c.get(f"/api/v1/reports/{rid}/parameters",
+                                                         headers=v)).json()] == ["N"]
+        assert [p["default_value"] for p in (await c.get(f"/api/v1/reports/{rid}/parameters",
+                                                         headers=a)).json()] == ["S"]
+
+        body = {"widget_type": "bar", "report_id": rid,
+                "config": {"dimension": "region", "measure": "revenue", "aggregation": "sum",
+                           "filters": [{"column": "region", "op": "eq", "value": "@region"}]}}
+        seen = (await c.post(f"/api/v1/datasets/{world['main']}/widget-data", json=body, headers=v)).json()
+        draft = (await c.post(f"/api/v1/datasets/{world['main']}/widget-data", json=body, headers=a)).json()
+        assert [r["name"] for r in seen["rows"]] == ["N"]
+        assert [r["name"] for r in draft["rows"]] == ["S"]
+
+
+class TestEditConflictsAreVisible:
+    """Two editors on one widget used to overwrite each other silently."""
+
+    async def _two_editors(self, world):
+        c, a, rid = world["client"], world["a"], world["report"]
+        _, other = await _member(world["db"], world["author"].org_id, "coeditor")
+        await world["db"].commit()
+        r = await c.post(f"/api/v1/reports/{rid}/grants", json={"email": other.email, "level": "edit"}, headers=a)
+        assert r.status_code == 201, r.text
+        base = (await _get(world, "a"))["revision"]
+        return other, _hdr(other), base
+
+    def _url(self, world, widget=None):
+        return f"/api/v1/reports/{world['report']}/pages/{world['page']}/widgets/{widget or world['widget']}"
+
+    async def test_a_colleagues_change_since_you_opened_it_is_a_409_naming_them(self, world):
+        other, o, base = await self._two_editors(world)
+        c = world["client"]
+        assert (await c.patch(self._url(world), json={"title": "Theirs"}, headers=o)).status_code == 200
+        r = await c.patch(self._url(world), json={"title": "Mine", "base_revision": base}, headers=world["a"])
+        assert r.status_code == 409
+        detail = r.json()["detail"]
+        assert detail["code"] == "edit_conflict"
+        assert detail["changed_by"] == other.email
+        assert detail["current"]["title"] == "Theirs"
+        # Nothing was written; saving without a base overwrites on purpose.
+        assert _titles(await _get(world, "a")) == ["Theirs"]
+        r = await c.patch(self._url(world), json={"title": "Mine"}, headers=world["a"])
+        assert r.status_code == 200 and _titles(await _get(world, "a")) == ["Mine"]
+
+    async def test_your_own_later_edits_are_not_a_conflict(self, world):
+        _, _, base = await self._two_editors(world)
+        c, a = world["client"], world["a"]
+        assert (await c.patch(self._url(world), json={"title": "One", "base_revision": base}, headers=a)).status_code == 200
+        assert (await c.patch(self._url(world), json={"title": "Two", "base_revision": base}, headers=a)).status_code == 200
+
+    async def test_a_change_to_another_widget_is_not_a_conflict(self, world):
+        _, o, base = await self._two_editors(world)
+        c, a, rid = world["client"], world["a"], world["report"]
+        w2 = (await c.post(f"/api/v1/reports/{rid}/pages/{world['page']}/widgets", json=_bar("Other"),
+                           headers=o)).json()["id"]
+        await c.patch(self._url(world, w2), json={"title": "Other renamed"}, headers=o)
+        r = await c.patch(self._url(world), json={"title": "Mine", "base_revision": base}, headers=a)
+        assert r.status_code == 200, r.text
+
+    async def test_moving_a_widget_is_never_refused(self, world):
+        _, o, base = await self._two_editors(world)
+        c = world["client"]
+        await c.patch(self._url(world), json={"title": "Theirs"}, headers=o)
+        r = await c.patch(self._url(world), json={"layout": {"x": 6, "y": 0, "w": 6, "h": 4},
+                                                  "base_revision": base}, headers=world["a"])
+        assert r.status_code == 200
+
+
+class TestRestoreSaysWhatIsMissing:
+    """Restoring a version brings back widgets that name fields, parameters and
+    hierarchies that may be gone since; a widget whose measure is gone does not
+    fail, it draws something else. So the gaps are named first."""
+
+    async def test_a_versions_missing_dependencies_are_named_before_and_after_restore(self, world):
+        c, a, rid, page = world["client"], world["a"], world["report"], world["page"]
+        broken = _bar("Margin by region")
+        broken["config"].update({"measure": "Margin", "hierarchyNodeId": 999999,
+                                 "filters": [{"column": "region", "op": "eq", "value": "@market"}]})
+        w = (await c.post(f"/api/v1/reports/{rid}/pages/{page}/widgets", json=broken, headers=a)).json()["id"]
+        await c.patch(f"/api/v1/reports/{rid}/pages/{page}/widgets/{w}", json={"title": "Renamed"}, headers=a)
+        versions = (await c.get(f"/api/v1/reports/{rid}/versions", headers=a)).json()
+        newest = versions[0]["id"]   # the state just before the rename: both widgets
+
+        r = await c.get(f"/api/v1/reports/{rid}/versions/{newest}/dependencies", headers=a)
+        assert r.status_code == 200, r.text
+        gaps = {(m["widget"], m["kind"], m["name"]) for m in r.json()["missing"]}
+        assert gaps == {("Margin by region", "field", "Margin"),
+                        ("Margin by region", "parameter", "market"),
+                        ("Margin by region", "hierarchy", "999999")}
+
+        r = await c.post(f"/api/v1/reports/{rid}/versions/{newest}/restore", json={}, headers=a)
+        assert r.status_code == 200, r.text
+        assert {(m["kind"], m["name"]) for m in r.json()["missing"]} == \
+            {("field", "Margin"), ("parameter", "market"), ("hierarchy", "999999")}
+
+    async def test_a_version_with_everything_in_place_has_nothing_missing(self, world):
+        c, a, rid = world["client"], world["a"], world["report"]
+        await c.patch(f"/api/v1/reports/{rid}/pages/{world['page']}/widgets/{world['widget']}",
+                      json={"title": "Renamed"}, headers=a)
+        newest = (await c.get(f"/api/v1/reports/{rid}/versions", headers=a)).json()[0]["id"]
+        r = await c.get(f"/api/v1/reports/{rid}/versions/{newest}/dependencies", headers=a)
+        assert r.json()["missing"] == []
+
+    async def test_a_viewer_cannot_read_version_dependencies(self, world):
+        await _publish(world)
+        c, rid = world["client"], world["report"]
+        await c.patch(f"/api/v1/reports/{rid}/pages/{world['page']}/widgets/{world['widget']}",
+                      json={"title": "Renamed"}, headers=world["a"])
+        newest = (await c.get(f"/api/v1/reports/{rid}/versions", headers=world["a"])).json()[0]["id"]
+        r = await c.get(f"/api/v1/reports/{rid}/versions/{newest}/dependencies", headers=world["v"])
+        assert r.status_code in (403, 404)
+
+    async def test_releasing_names_what_the_release_is_missing(self, world):
+        c, a, rid = world["client"], world["a"], world["report"]
+        broken = _bar("Ghost")
+        broken["config"]["measure"] = "Gone"
+        await c.post(f"/api/v1/reports/{rid}/pages/{world['page']}/widgets", json=broken, headers=a)
+        r = await c.post(f"/api/v1/reports/{rid}/release", json={}, headers=a)
+        assert [(m["widget"], m["name"]) for m in r.json()["missing"]] == [("Ghost", "Gone")]

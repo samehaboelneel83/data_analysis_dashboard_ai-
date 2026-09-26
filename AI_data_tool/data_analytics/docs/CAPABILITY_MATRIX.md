@@ -93,7 +93,7 @@ the report list, a PDF and the offline package -- and so are guest links,
 embeds and scheduled deliveries. A release is frozen content, never frozen
 access: a page restricted when it was released stays restricted after the
 draft deletes it, and a restriction added since applies too. Releasing needs
-`edit`; on a published report, the organization's publish gate applies.
+`edit`; on a published report, the organization's publish gate applies. Pinned Home tiles are served under the same rules: a pin on a report the reader can no longer open is not served, and a viewer's pin shows the released widget.
 
 ## Connections and imports
 
@@ -134,6 +134,3 @@ lookup, so the answer says nothing about whether the object exists.
 - **Column statistics** are computed over the whole table. For a caller whose
   rows are filtered, the value-bearing figures (top values, minimum, maximum,
   distinct count) are withheld rather than recomputed.
-- **Pinned tiles** return the widget configuration of the report they were
-  pinned from, including from a draft. The data behind a tile is still fetched
-  through the secured widget endpoint.

@@ -30,7 +30,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.models import (CommonFilter, PageRoleVisibility, Report, ReportPage,
-                             ReportRelease, ReportWidget)
+                             ReportParameter, ReportRelease, ReportWidget)
 from ..schemas.schemas import PageOut
 
 
@@ -42,7 +42,7 @@ async def content_snapshot(db: AsyncSession, report_id: int) -> tuple[dict, int]
     objects, and a release taken on a report's first edit must be what its
     viewers were seeing, not the edit that is about to commit."""
     rep_t, page_t, widget_t = Report.__table__, ReportPage.__table__, ReportWidget.__table__
-    vis_t, cf_t = PageRoleVisibility.__table__, CommonFilter.__table__
+    vis_t, cf_t, par_t = PageRoleVisibility.__table__, CommonFilter.__table__, ReportParameter.__table__
     with db.sync_session.no_autoflush:
         rep = (await db.execute(
             select(rep_t.c.revision, rep_t.c.theme, rep_t.c.display_rules, rep_t.c.dataset_id,
@@ -61,6 +61,9 @@ async def content_snapshot(db: AsyncSession, report_id: int) -> tuple[dict, int]
         filters = (await db.execute(
             select(cf_t).where(cf_t.c.report_id == report_id)
             .order_by(cf_t.c.position, cf_t.c.id))).mappings().all()
+        params = (await db.execute(
+            select(par_t).where(par_t.c.report_id == report_id)
+            .order_by(par_t.c.position, par_t.c.id))).mappings().all()
 
     by_page: dict[int, list[dict]] = {}
     for w in widgets:
@@ -80,6 +83,11 @@ async def content_snapshot(db: AsyncSession, report_id: int) -> tuple[dict, int]
         "pages": out_pages,
         "common_filters": [{"id": f["id"], "column": f["column"], "op": f["op"], "value": f["value"]}
                            for f in filters],
+        # Report parameters are content too: a chart that filters on @region
+        # must be served the definition it was released with.
+        "parameters": [{"id": x["id"], "name": x["name"], "param_type": x["param_type"],
+                        "label": x["label"], "default_value": x["default_value"],
+                        "options": list(x["options"] or [])} for x in params],
     }
     return snapshot, int(rep.revision or 0)
 
@@ -212,3 +220,12 @@ def page_objects(snapshot: dict) -> list:
 
 def primary_dataset_id(snapshot: dict):
     return ((snapshot or {}).get("report") or {}).get("dataset_id")
+
+
+def find_widget(snapshot: dict, widget_id: int) -> tuple[dict, dict] | None:
+    """`(page, widget)` of a widget id in a release, or None."""
+    for page in (snapshot or {}).get("pages") or []:
+        for w in page.get("widgets") or []:
+            if w.get("id") == widget_id:
+                return page, w
+    return None

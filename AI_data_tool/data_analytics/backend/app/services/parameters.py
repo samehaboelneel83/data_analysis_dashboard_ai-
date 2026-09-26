@@ -64,7 +64,7 @@ def substitute(expr: str, values: dict, definitions: list) -> str:
 
 async def apply_report_parameters(db, user, report, config: dict | None,
                                   calculated_columns: list | None,
-                                  values: dict | None) -> tuple[dict, list]:
+                                  values: dict | None, *, release=None) -> tuple[dict, list]:
     """Substitute a report's parameter values into one widget's config (and any
     request-level calculated columns) before anything is evaluated. Returns
     (config, calculated_columns); raises ParameterError with a sentence.
@@ -97,9 +97,18 @@ async def apply_report_parameters(db, user, report, config: dict | None,
 
     config = dict(config or {})
     calculated_columns = list(calculated_columns or [])
-    defs = (await db.execute(
-        select(ReportParameter).where(ReportParameter.report_id == report.id)
-    )).scalars().all()
+    # E09: the definitions of the version being computed. `release` is the
+    # report release the caller is rendering (routers decide which one a
+    # reader is served); None is the draft, read live.
+    primary = report.dataset_id
+    if release is not None:
+        from types import SimpleNamespace
+        defs = [SimpleNamespace(**p) for p in release.snapshot.get("parameters") or []]
+        primary = (release.snapshot.get("report") or {}).get("dataset_id")
+    else:
+        defs = (await db.execute(
+            select(ReportParameter).where(ReportParameter.report_id == report.id)
+        )).scalars().all()
     if not defs:
         return config, calculated_columns
     by_name = {d.name: d for d in defs}
@@ -112,7 +121,7 @@ async def apply_report_parameters(db, user, report, config: dict | None,
     expr_defs = [d for d in defs if d.param_type == "expression"]
     computed: dict[str, float] = {}
     if expr_defs:
-        ds = await db.get(Dataset, report.dataset_id) if report.dataset_id else None
+        ds = await db.get(Dataset, primary) if primary else None
         if ds is None:
             raise ParameterError("Expression parameters need the report to have a primary dataset")
         if ds.mode == "directquery":

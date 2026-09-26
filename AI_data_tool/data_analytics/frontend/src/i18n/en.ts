@@ -627,6 +627,8 @@ export const en = {
   'release.title.live': 'No release yet: viewers see every edit as you make it. Release to give them a fixed version.',
   'release.done': 'Released: viewers now see this version',
   'release.failed': 'Could not release',
+  'conflict.reload': 'Reload their version',
+  'conflict.overwrite': 'Save mine anyway',
   'builder.morePanels': 'More panels',
   'builder.more': 'More',
   'builder.page': 'Page',

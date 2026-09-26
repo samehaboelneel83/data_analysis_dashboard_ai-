@@ -136,7 +136,8 @@ async def build_digest(db, report: Report, creator: User,
                     # PDF apply them -- a filter on "@market" used to compare the
                     # column to that literal text and the sheet came out empty.
                     from .parameters import apply_report_parameters
-                    config, _ = await apply_report_parameters(db, creator, report, w.config, [], {})
+                    config, _ = await apply_report_parameters(db, creator, report, w.config, [], {},
+                                                              release=release)
                     # Off the scheduler's event loop: a slow parse here would
                     # otherwise delay every later schedule/alert in the tick.
                     result = await asyncio.to_thread(

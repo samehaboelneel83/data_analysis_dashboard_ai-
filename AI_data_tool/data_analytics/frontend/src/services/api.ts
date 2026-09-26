@@ -878,6 +878,22 @@ export interface RecentReport {
   my_capability: 'view' | 'edit' | 'data'
 }
 
+/** One thing a saved version or a release names that no longer exists (E09). */
+export interface MissingDependency {
+  page: string | null
+  widget: string
+  kind: 'dataset' | 'field' | 'parameter' | 'hierarchy'
+  name: string
+}
+
+/** "Margin by region" uses the field "Margin", … — for a confirm or a toast. */
+export function describeMissing(missing: MissingDependency[], max = 4): string {
+  const what = { dataset: 'dataset', field: 'field', parameter: 'parameter', hierarchy: 'hierarchy' }
+  const lines = missing.slice(0, max).map(m => `"${m.widget}" uses the ${what[m.kind]} "${m.name}"`)
+  const more = missing.length > max ? `, and ${missing.length - max} more` : ''
+  return lines.join('; ') + more
+}
+
 export const reportsApi = {
   /** This user's recently OPENED dashboards, newest first. Distinct from
    *  ordering the list by `updated_at`, which reports what changed rather than
@@ -897,7 +913,7 @@ export const reportsApi = {
     api.post<{ published: boolean }>(`/reports/${id}/publish`, { published }).then(r => r.data),
   /** E09: make the draft what viewers see. Editors only. */
   release: (id: number, note?: string) =>
-    api.post<{ release: ReportRelease; unreleased_changes: boolean }>(`/reports/${id}/release`, note ? { note } : {}).then(r => r.data),
+    api.post<{ release: ReportRelease; unreleased_changes: boolean; missing?: MissingDependency[] }>(`/reports/${id}/release`, note ? { note } : {}).then(r => r.data),
   /** The page copilot: one chat message about the OPEN page, answered by the
    *  same LLM endpoint the agent uses, with any page edits already applied
    *  server-side by the time the reply returns. `history` is the panel's own
@@ -911,8 +927,12 @@ export const reportsApi = {
       `/reports/${reportId}/versions`).then(r => r.data),
   restoreVersion: (reportId: number, versionId: number) =>
     api.post<{ restored_version_id: number; restored_revision: number; note: string
-               saved_current_as_version_id?: number | null }>(
+               saved_current_as_version_id?: number | null; missing?: MissingDependency[] }>(
       `/reports/${reportId}/versions/${versionId}/restore`, {}).then(r => r.data),
+  /** E09: what a version's widgets use that no longer exists. */
+  versionDependencies: (reportId: number, versionId: number) =>
+    api.get<{ missing: MissingDependency[] }>(
+      `/reports/${reportId}/versions/${versionId}/dependencies`).then(r => r.data),
   copilot: (reportId: number, pageId: number,
             body: { message: string
                     history?: { role: 'user' | 'assistant'; content: string }[]
@@ -953,7 +973,9 @@ export const reportsApi = {
 
   addWidget:    (rid: number, pid: number, data: Partial<Widget>) =>
     api.post<Widget>(`/reports/${rid}/pages/${pid}/widgets`, data).then(r => r.data),
-  updateWidget: (rid: number, pid: number, wid: number, data: Partial<Widget>) =>
+  /** `base_revision` (E09): the report revision this copy of the widget came
+   *  from. A change by someone else since then is a 409 `edit_conflict`. */
+  updateWidget: (rid: number, pid: number, wid: number, data: Partial<Widget> & { base_revision?: number }) =>
     api.patch<Widget>(`/reports/${rid}/pages/${pid}/widgets/${wid}`, data).then(r => r.data),
   deleteWidget: (rid: number, pid: number, wid: number) =>
     api.delete(`/reports/${rid}/pages/${pid}/widgets/${wid}`),

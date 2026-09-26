@@ -3,14 +3,17 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import VersionHistoryPane from './VersionHistoryPane'
 import { reportsApi } from '../../services/api'
 
-vi.mock('react-hot-toast', () => ({ default: { success: vi.fn(), error: vi.fn() } }))
+vi.mock('react-hot-toast', () => ({ default: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }))
 
 const ROWS = [
   { id: 9, revision: 3, created_at: '2026-09-05T10:00:00', created_by: 'a@b.com', pages: 1, widgets: 4 },
   { id: 8, revision: 2, created_at: '2026-09-05T09:00:00', created_by: 'a@b.com', pages: 1, widgets: 3 },
 ]
 
-beforeEach(() => vi.restoreAllMocks())
+beforeEach(() => {
+  vi.restoreAllMocks()
+  vi.spyOn(reportsApi, 'versionDependencies').mockResolvedValue({ missing: [] })
+})
 
 describe('VersionHistoryPane', () => {
   it('lists versions newest first and marks the current revision', async () => {
@@ -36,6 +39,21 @@ describe('VersionHistoryPane', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Restore revision 2' }))
     await waitFor(() => expect(restore).toHaveBeenCalledWith(5, 8))
     expect(onRestored).toHaveBeenCalled()
+  })
+
+  it('names what the version uses that no longer exists, before restoring (E09)', async () => {
+    vi.spyOn(reportsApi, 'versions').mockResolvedValue(ROWS)
+    vi.spyOn(reportsApi, 'versionDependencies').mockResolvedValue({ missing: [
+      { page: 'Overview', widget: 'Margin by region', kind: 'field', name: 'Margin' }] })
+    const restore = vi.spyOn(reportsApi, 'restoreVersion').mockResolvedValue({
+      restored_version_id: 8, restored_revision: 2, note: '',
+      missing: [{ page: 'Overview', widget: 'Margin by region', kind: 'field', name: 'Margin' }] })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    render(<VersionHistoryPane reportId={5} currentRevision={3} onRestored={vi.fn()} />)
+    await screen.findByText('Revision 2')
+    fireEvent.click(screen.getByRole('button', { name: 'Restore revision 2' }))
+    await waitFor(() => expect(restore).toHaveBeenCalledWith(5, 8))
+    expect(confirm.mock.calls[0][0]).toContain('"Margin by region" uses the field "Margin"')
   })
 
   it('a declined confirm restores nothing', async () => {

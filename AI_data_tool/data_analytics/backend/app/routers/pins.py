@@ -115,6 +115,20 @@ async def create_pin(body: PinCreate, db: AsyncSession = Depends(get_db),
     check_org(report, current_user, "Widget not found")
     if not await _page_visible(db, current_user, page.id):
         raise HTTPException(404, "Widget not found")
+    # The report itself must be one this user can open -- a draft someone
+    # else authored is not -- and a viewer of a released report can pin only
+    # what the release shows them (E09).
+    from ..core.capability import effective_capability
+    from ..services.report_release import latest_release, visible_release_pages
+    level = await effective_capability(db, current_user, report.id)
+    if level == "none":
+        raise HTTPException(404, "Widget not found")
+    if level == "view":
+        release = await latest_release(db, report.id)
+        if release is not None and not any(
+                w["id"] == widget.id for p in await visible_release_pages(db, release.snapshot, current_user)
+                for w in p.get("widgets") or []):
+            raise HTTPException(404, "Widget not found")
 
     existing = (await db.execute(
         select(PinnedTile).where(PinnedTile.user_id == current_user.id,
@@ -168,6 +182,17 @@ async def list_pins(db: AsyncSession = Depends(get_db),
         .order_by(PinnedTile.position.asc().nulls_last(), PinnedTile.id)
     )).all()
 
+    # The keyhole rule, as for pages: whether a pin's report can still be
+    # opened is decided on every read. A pin on a dashboard that was since
+    # unpublished, or whose grant was revoked, is dormant, not served. And a
+    # viewer of a released report sees the pinned widget as released (E09).
+    from ..core.capability import effective_capabilities
+    from ..services.report_release import (allowed_roles_by_page, find_widget, latest_releases,
+                                           primary_dataset_id)
+    report_ids = sorted({r.id for _p, _w, _pg, r in rows if r is not None})
+    levels = await effective_capabilities(db, current_user, report_ids) if report_ids else {}
+    releases = await latest_releases(db, [rid for rid in report_ids if levels.get(rid) == "view"])
+
     out = []
     for pin, widget, page, report in rows:
         base = {"id": pin.id, "position": pin.position, "size": pin.size,
@@ -187,6 +212,28 @@ async def list_pins(db: AsyncSession = Depends(get_db),
             continue
         # Widget pin.
         if widget is None or page is None or report is None:
+            continue
+        if levels.get(report.id, "none") == "none":
+            continue
+        release = releases.get(report.id)
+        if release is not None:
+            found = find_widget(release.snapshot, widget.id)
+            if found is None:
+                continue
+            rpage, rwidget = found
+            allowed = (await allowed_roles_by_page(db, release.snapshot)).get(rpage["id"])
+            if allowed is not None and not current_user.role.is_org_admin \
+                    and current_user.role_id not in allowed:
+                continue
+            out.append({**base, "pin_type": "widget",
+                        "widget_id": rwidget["id"],
+                        "widget_type": rwidget["widget_type"],
+                        "title": rwidget.get("title"),
+                        "config": rwidget.get("config") or {},
+                        "report_id": report.id,
+                        "report_name": report.name,
+                        "dataset_id": primary_dataset_id(release.snapshot),
+                        "page_id": rpage["id"]})
             continue
         if not await _page_visible(db, current_user, page.id):
             continue

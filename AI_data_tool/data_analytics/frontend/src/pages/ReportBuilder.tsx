@@ -337,6 +337,8 @@ export default function ReportBuilder() {
   const [loadedRevision, setLoadedRevision] = useState<number | null>(null)
   const loadedRevisionRef = useRef<number | null>(null)
   const [staleRevision, setStaleRevision] = useState<number | null>(null)
+  /** E09: a save refused because someone else changed the widget first. */
+  const [editConflict, setEditConflict] = useState<{ message: string; retry: () => void } | null>(null)
   useEffect(() => { loadedRevisionRef.current = loadedRevision }, [loadedRevision])
 
   // Load report
@@ -1662,14 +1664,30 @@ export default function ReportBuilder() {
   const stableOnSetParameter = useCallback((name: string, value: string) =>
     setParamValues(prev => ({ ...prev, [name]: value })), [])
 
-  const updateWidgetConfig = useCallback(async (config: Record<string, unknown>, title: string) => {
+  const updateWidgetConfig = useCallback(async (config: Record<string, unknown>, title: string, overwrite = false) => {
     if (!selectedW || !activePage) return
     const before = activePage.widgets.find(x => x.id === selectedW.id) ?? selectedW
     const beforeCfg = (before.config ?? {}) as Record<string, unknown>
     const beforeTitle = before.title
     setSaving(true)
     try {
-      await reportsApi.updateWidget(reportId, activePage.id, selectedW.id, { config, title })
+      // E09: say which revision this copy came from, so a colleague's change
+      // since then is refused and shown rather than silently overwritten.
+      // "Save mine anyway" sends it without one.
+      const base = overwrite ? undefined : (loadedRevisionRef.current ?? undefined)
+      try {
+        await reportsApi.updateWidget(reportId, activePage.id, selectedW.id,
+          { config, title, ...(base != null ? { base_revision: base } : {}) })
+      } catch (err) {
+        const detail = (err as { response?: { status?: number; data?: { detail?: { code?: string; message?: string } } } })?.response
+        if (detail?.status === 409 && detail.data?.detail?.code === 'edit_conflict') {
+          setEditConflict({ message: detail.data.detail.message ?? '',
+            retry: () => { setEditConflict(null); updateWidgetConfig(config, title, true) } })
+          return
+        }
+        throw err
+      }
+      setEditConflict(null)
       const keys = changedKeys(beforeCfg, config)
       if (keys.length || beforeTitle !== title) {
         const pageId = activePage.id
@@ -2959,6 +2977,20 @@ export default function ReportBuilder() {
         <>
         {/* Concurrent-edit warning. Non-blocking on purpose: the other session's
             change is already saved, so the useful action is to pull it in. */}
+        {editConflict && canEdit && (
+          <div data-testid="edit-conflict" role="alert" style={{ display:'flex', alignItems:'center', gap:10, padding:'7px 14px',
+            background:'rgba(220,80,60,.12)', borderBottom:'1px solid rgba(220,80,60,.4)',
+            fontSize:12, color:'var(--text)', flexShrink:0, flexWrap:'wrap' }}>
+            <span style={{ flex:1, minWidth:200 }}>{editConflict.message}</span>
+            <button className="btn btn-sm" onClick={() => { setEditConflict(null); loadReport() }}>
+              {tr('conflict.reload')}
+            </button>
+            <button className="btn btn-sm btn-ghost" onClick={editConflict.retry}>
+              {tr('conflict.overwrite')}
+            </button>
+          </div>
+        )}
+
         {staleRevision !== null && canEdit && (
           <div style={{ display:'flex', alignItems:'center', gap:10, padding:'7px 14px',
             background:'rgba(230,160,60,.14)', borderBottom:'1px solid rgba(230,160,60,.4)',

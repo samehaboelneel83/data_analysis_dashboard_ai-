@@ -341,6 +341,11 @@ class WidgetUpdate(BaseModel):
     title: Optional[str] = None
     config: Optional[dict] = None
     layout: Optional[dict] = None
+    #: E09: the report revision the editor's copy of this widget came from.
+    #: When given, a change to the widget's type, title or config by SOMEONE
+    #: ELSE since then is a 409 `edit_conflict` instead of a silent overwrite.
+    #: Not stored.
+    base_revision: Optional[int] = None
 
 
 class WidgetOut(BaseModel):

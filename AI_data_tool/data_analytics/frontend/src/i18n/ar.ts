@@ -629,6 +629,8 @@ export const ar: Record<MessageKey, string> = {
   'release.title.live': 'لا يوجد إصدار بعد: يرى المشاهدون كل تعديل فور إجرائه. أصدِر نسخة ليروا نسخة ثابتة.',
   'release.done': 'تم الإصدار: يرى المشاهدون هذه النسخة الآن',
   'release.failed': 'تعذّر الإصدار',
+  'conflict.reload': 'تحميل نسختهم',
+  'conflict.overwrite': 'احفظ نسختي على أي حال',
   'builder.morePanels': 'لوحات أخرى',
   'builder.more': 'المزيد',
   'builder.page': 'صفحة',
