@@ -365,6 +365,20 @@ export const datasetsApi = {
   refresh: (id: number, body?: { mode?: 'full' | 'incremental'; cursor_column?: string | null;
                                  column_map?: Record<string, string>; force?: boolean }) =>
     api.post<Dataset>(`/datasets/${id}/refresh`, body ?? { mode: 'full' }).then(r => r.data),
+  /** Queue the same refresh as a durable job (E12) and return at once; follow
+   *  it with `jobsApi.get`. A schema break fails the job with error_code
+   *  `schema_break` and the mapping details as its `result`. If one is already
+   *  queued or running for this dataset, its owner gets that job back. */
+  queueRefresh: (id: number, body: { mode?: 'full' | 'incremental'; cursor_column?: string | null;
+                                     column_map?: Record<string, string>; force?: boolean },
+                 idempotencyKey?: string) =>
+    api.post<Job>(`/datasets/${id}/refresh-jobs`, body,
+      idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : undefined).then(r => r.data),
+  /** The refresh of this dataset queued or running now: the job (yours, or
+   *  any as an admin), `{state, by_someone_else}` for a colleague's, or null. */
+  activeRefresh: (id: number) =>
+    api.get<Job | { state: JobState; by_someone_else: true } | null>(
+      `/datasets/${id}/refresh-jobs/active`).then(r => r.data),
   /** The data-quality report over the rows this viewer's charts use; `rules`
    *  are expressions a good row satisfies ("amount >= 0"). */
   quality: (id: number, rules: string[] = []) =>
@@ -1904,7 +1918,12 @@ export interface Job {
   subject: string | null
   progress: { stage?: string; rows?: number; resumed?: boolean } | null
   result: { dataset_id?: number; dataset_name?: string; row_count?: number;
-            col_count?: number; replaced?: boolean } | null
+            col_count?: number; replaced?: boolean
+            /** A refresh: what ran, and anything it fell back to. */
+            mode?: 'full' | 'incremental'; rows_added?: number; warning?: string | null
+            /** A refresh refused by a schema break (error_code `schema_break`). */
+            missing?: string[]; suggestions?: Record<string, string[]>; available?: string[]
+            dependents?: Record<string, { kind: string; label: string }[]> } | null
   error: string | null
   error_code: string | null
   attempt: number

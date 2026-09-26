@@ -384,6 +384,7 @@ READ_GATES = [
     Gate("alerts", "GET", "/api/v1/datasets/{ds}/alerts"),
     Gate("shares", "GET", "/api/v1/datasets/{ds}/shares", admin_only=True),
     Gate("measure history", "GET", "/api/v1/datasets/{ds}/measures/m/history"),
+    Gate("active refresh", "GET", "/api/v1/datasets/{ds}/refresh-jobs/active"),
 ]
 
 WRITE_GATES = [
@@ -403,6 +404,7 @@ WRITE_GATES = [
          body={"name": "a", "grain": ["dept"], "measures": [{"column": "headcount", "agg": "sum"}]}),
     Gate("rebuild", "POST", "/api/v1/datasets/{ds}/rebuild"),
     Gate("refresh", "POST", "/api/v1/datasets/{ds}/refresh", body={}),
+    Gate("queue refresh", "POST", "/api/v1/datasets/{ds}/refresh-jobs", body={}),
     Gate("create alert", "POST", "/api/v1/datasets/{ds}/alerts",
          body={"name": "a", "expression": "headcount > 0", "recipients": ["x@securia.test"]}),
     Gate("share", "POST", "/api/v1/datasets/{ds}/shares", body={"user_id": 1}, admin_only=True),

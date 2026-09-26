@@ -92,7 +92,7 @@ HANDLERS: dict[str, Handler] = {}
 
 #: Modules whose import registers handlers. Listed here so the worker and
 #: `enqueue` know every kind without depending on import order elsewhere.
-HANDLER_MODULES = ("app.services.source_import",)
+HANDLER_MODULES = ("app.services.source_import", "app.services.refresh_jobs")
 
 
 def load_handlers() -> None:
@@ -114,11 +114,17 @@ class JobError(Exception):
 
     Raise this for the expected failures (the source rejected the query, the
     quota is full, the user may no longer import). Anything else that escapes
-    a handler is stored as `unexpected` with a generic message."""
+    a handler is stored as `unexpected` with a generic message.
 
-    def __init__(self, message: str, code: str = "refused"):
+    `detail` is what the person needs to act on the refusal, stored as the
+    job's `result` (a refresh refused by a schema break carries the missing
+    columns and their likely new names, so the page can offer the mapping).
+    Like `message`, it must be fit for the person who queued the job."""
+
+    def __init__(self, message: str, code: str = "refused", detail: dict | None = None):
         super().__init__(message)
         self.code = code
+        self.detail = detail
 
 
 class JobCancelled(Exception):
@@ -439,7 +445,8 @@ async def execute(session_factory, job_id: int, token: str) -> str | None:
         return None
     except JobError as e:
         await _settle(session_factory, job_id, token, state=FAILED, error_code=e.code,
-                      error=sanitize_error(e), progress={"stage": "failed"})
+                      error=sanitize_error(e), progress={"stage": "failed"},
+                      **({"result": e.detail} if e.detail is not None else {}))
         return FAILED
     except asyncio.CancelledError:
         # The process is shutting down. Leave the row RUNNING: the lease runs

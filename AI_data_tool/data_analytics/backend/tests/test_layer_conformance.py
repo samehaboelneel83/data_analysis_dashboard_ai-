@@ -174,6 +174,9 @@ LAYER_MAP: dict[str, int] = {
     # refresh_scheduler orchestrates refresh THEN alerts/delivery: that is
     # operational orchestration composing downward, not ingestion.
     "services/refresh_scheduler": L6_API,
+    # The manual refresh, run now or as a durable job: orchestration with
+    # permission checks and audit, beside the scheduler that runs refreshes.
+    "services/refresh_jobs": L6_API,
     # Power Pi's automation runner sits beside it for the same reason and
     # shares its tick: sequencing profile -> scan -> propose -> compose is
     # orchestration over layers 2-5, not a member of any of them.

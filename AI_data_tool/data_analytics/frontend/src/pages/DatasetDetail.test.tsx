@@ -2,14 +2,18 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderWithProviders as render, screen, waitFor, fireEvent } from '../test/renderWithProviders'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import DatasetDetail from './DatasetDetail'
-import { datasetsApi, analysisApi, dataPreviewApi } from '../services/api'
+import { datasetsApi, analysisApi, dataPreviewApi, jobsApi } from '../services/api'
 import { AuthContext } from '../contexts/AuthContext'
 import type { Dataset, User } from '../services/api'
 import { axeViolations } from '../test/axe'
 
 vi.mock('../services/api', () => ({
   datasetsApi: { get: vi.fn(), refresh: vi.fn(), setSchedule: vi.fn(), quality: vi.fn(),
-                 list: vi.fn().mockResolvedValue([]) },
+                 list: vi.fn().mockResolvedValue([]),
+                 queueRefresh: vi.fn(), activeRefresh: vi.fn().mockResolvedValue(null) },
+  // E12: a refresh is a durable job the page follows.
+  jobsApi: { get: vi.fn(), cancel: vi.fn() },
+  isJobActive: (j: { state: string }) => j.state === 'queued' || j.state === 'running',
   analysisApi: { get: vi.fn(), run: vi.fn(), segment: vi.fn(), keyInfluencers: vi.fn(), associationRules: vi.fn() },
   insightsApi: { run: vi.fn() },
   // Phase 7.6: the "Use in Python" snippet reads the API origin.
@@ -1035,16 +1039,26 @@ describe('DatasetDetail accessibility', () => {
 })
 
 describe('a refresh refused because the source changed (E05)', () => {
-  const refused = () => Object.assign(new Error('409'), { response: { status: 409, data: {
-    code: 'schema_break', detail: 'Not refreshed', missing: ['updated_at'],
-    suggestions: { updated_at: ['Updated At'] }, available: ['id', 'Updated At'],
-    dependents: { updated_at: [{ kind: 'widget', label: 'Latest on Sales' }] },
-  } } })
+  // E12: the refresh runs as a job; a schema break fails it with the
+  // mapping details as its result.
+  const refusedJob = (id: number) => ({ id, kind: 'dataset.refresh', state: 'failed',
+    error_code: 'schema_break', error: 'Not refreshed', cancel_requested: false,
+    result: { missing: ['updated_at'], suggestions: { updated_at: ['Updated At'] },
+              available: ['id', 'Updated At'],
+              dependents: { updated_at: [{ kind: 'widget', label: 'Latest on Sales' }] } } })
+  const doneJob = (id: number) => ({ id, kind: 'dataset.refresh', state: 'succeeded',
+    cancel_requested: false, error: null, error_code: null,
+    result: { dataset_id: 29, row_count: 2, mode: 'full', warning: null } })
 
   beforeEach(() => {
     vi.mocked(analysisApi.get).mockRejectedValue(new Error('none'))
     vi.mocked(dataPreviewApi.query).mockResolvedValue({ rows: [], total: 0, columns: [] } as never)
     vi.mocked(datasetsApi.get).mockResolvedValue(importDataset())
+    vi.mocked(datasetsApi.queueRefresh).mockReset()
+      .mockResolvedValueOnce({ id: 71, state: 'queued' } as never)
+      .mockResolvedValueOnce({ id: 72, state: 'queued' } as never)
+    vi.mocked(jobsApi.get).mockReset().mockImplementation(async (id: number) =>
+      (id === 71 ? refusedJob(71) : doneJob(id)) as never)
   })
 
   const runRefresh = async () => {
@@ -1053,8 +1067,6 @@ describe('a refresh refused because the source changed (E05)', () => {
   }
 
   it('asks for the new name, preset to the likely match, and refreshes with the mapping', async () => {
-    vi.mocked(datasetsApi.refresh).mockReset()
-      .mockRejectedValueOnce(refused()).mockResolvedValueOnce({ ...importDataset(), row_count: 2 } as never)
     renderDetail(29)
     await runRefresh()
 
@@ -1063,14 +1075,13 @@ describe('a refresh refused because the source changed (E05)', () => {
     expect(screen.getByLabelText('New name for updated_at')).toHaveValue('Updated At')
     fireEvent.click(screen.getByRole('button', { name: 'Refresh with these names' }))
 
-    await waitFor(() => expect(datasetsApi.refresh).toHaveBeenLastCalledWith(29,
-      expect.objectContaining({ mode: 'full', column_map: { 'Updated At': 'updated_at' } })))
+    await waitFor(() => expect(datasetsApi.queueRefresh).toHaveBeenLastCalledWith(29,
+      expect.objectContaining({ mode: 'full', column_map: { 'Updated At': 'updated_at' } }),
+      expect.any(String)))
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'The source changed' })).toBeNull())
   })
 
   it('"Refresh anyway" sends force; "gone" leaves the name unmapped', async () => {
-    vi.mocked(datasetsApi.refresh).mockReset()
-      .mockRejectedValueOnce(refused()).mockResolvedValueOnce(importDataset() as never)
     renderDetail(29)
     await runRefresh()
     await screen.findByRole('dialog', { name: 'The source changed' })
@@ -1078,8 +1089,78 @@ describe('a refresh refused because the source changed (E05)', () => {
     expect(screen.getByRole('button', { name: 'Refresh with these names' })).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: 'Refresh anyway' }))
 
-    await waitFor(() => expect(datasetsApi.refresh).toHaveBeenLastCalledWith(29,
-      expect.objectContaining({ force: true, column_map: {} })))
+    await waitFor(() => expect(datasetsApi.queueRefresh).toHaveBeenLastCalledWith(29,
+      expect.objectContaining({ force: true, column_map: {} }), expect.any(String)))
+  })
+})
+
+describe('a refresh runs as a job the page follows (E12)', () => {
+  const job = (over: Record<string, unknown>) => ({ id: 81, kind: 'dataset.refresh', state: 'running',
+    cancel_requested: false, error: null, error_code: null, result: null,
+    progress: { stage: 'querying' }, ...over })
+
+  beforeEach(() => {
+    vi.mocked(analysisApi.get).mockRejectedValue(new Error('none'))
+    vi.mocked(dataPreviewApi.query).mockResolvedValue({ rows: [], total: 0, columns: [] } as never)
+    vi.mocked(datasetsApi.get).mockResolvedValue(importDataset())
+    vi.mocked(datasetsApi.queueRefresh).mockReset().mockResolvedValue({ id: 81, state: 'queued' } as never)
+    vi.mocked(datasetsApi.activeRefresh).mockReset().mockResolvedValue(null)
+    vi.mocked(jobsApi.get).mockReset()
+    vi.mocked(jobsApi.cancel).mockReset()
+  })
+
+  const run = async () => {
+    fireEvent.click(await screen.findByRole('button', { name: /Refresh from source/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Run' }))
+  }
+
+  it('queues with a fresh idempotency key and shows what the job is doing', async () => {
+    vi.mocked(jobsApi.get).mockResolvedValue(job({ progress: { stage: 'saving', rows: 1200 } }) as never)
+    renderDetail(29)
+    await run()
+    expect(await screen.findByRole('button', { name: 'Saving 1,200 rows…' })).toBeDisabled()
+    expect(screen.getByRole('status')).toHaveTextContent('you can leave this page')
+    const [, , key] = vi.mocked(datasetsApi.queueRefresh).mock.calls[0]
+    expect(key).toMatch(/\S{8,}/)
+    expect(datasetsApi.refresh).not.toHaveBeenCalled()
+  })
+
+  it('can be stopped while it runs', async () => {
+    vi.mocked(jobsApi.get).mockResolvedValue(job({}) as never)
+    vi.mocked(jobsApi.cancel).mockResolvedValue(job({ cancel_requested: true }) as never)
+    renderDetail(29)
+    await run()
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop refresh' }))
+    await waitFor(() => expect(jobsApi.cancel).toHaveBeenCalledWith(81))
+    expect(await screen.findByRole('button', { name: 'Stopping…' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'Stop refresh' })).toBeNull()
+  })
+
+  it('reloads the dataset when the job succeeds', async () => {
+    vi.mocked(jobsApi.get).mockResolvedValue(job({ state: 'succeeded',
+      result: { dataset_id: 29, row_count: 7, mode: 'full', warning: null } }) as never)
+    renderDetail(29)
+    await screen.findByRole('button', { name: /Refresh from source/ })
+    const loads = vi.mocked(datasetsApi.get).mock.calls.length
+    await run()
+    await waitFor(() => expect(vi.mocked(datasetsApi.get).mock.calls.length).toBe(loads + 1))
+    expect(await screen.findByRole('button', { name: /Refresh from source/ })).toBeEnabled()
+  })
+
+  it('a page opened mid-refresh follows the refresh already running', async () => {
+    vi.mocked(datasetsApi.activeRefresh).mockResolvedValue(job({ id: 90 }) as never)
+    vi.mocked(jobsApi.get).mockResolvedValue(job({ id: 90 }) as never)
+    renderDetail(29)
+    expect(await screen.findByRole('button', { name: 'Reading from the source…' })).toBeDisabled()
+    expect(jobsApi.get).toHaveBeenCalledWith(90)
+    expect(datasetsApi.queueRefresh).not.toHaveBeenCalled()
+  })
+
+  it('says when someone else is refreshing it', async () => {
+    vi.mocked(datasetsApi.activeRefresh).mockResolvedValue({ state: 'running', by_someone_else: true })
+    renderDetail(29)
+    expect(await screen.findByText('Someone else is refreshing this dataset.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Refresh from source/ })).toBeDisabled()
   })
 })
 

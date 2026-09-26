@@ -204,3 +204,12 @@ def duplicate_columns(names) -> list[str]:
         else:
             seen.add(key)
     return dupes
+
+
+def missing_pct(series) -> float:
+    """Percent of empty cells, always a finite number (JSON has no NaN)."""
+    try:
+        v = float(series.isnull().mean() * 100)
+    except Exception:
+        return 0.0
+    return round(v, 2) if v == v else 0.0

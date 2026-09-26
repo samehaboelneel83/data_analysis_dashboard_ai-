@@ -165,8 +165,14 @@ def refresh_dataset(
     valid_columns: set[str] | None = None,
     required_columns: set[str] | None = None,
     column_map: dict[str, str] | None = None,
+    write: bool = True,
 ) -> dict:
     """Full or incremental refresh of one source-backed dataset's cached file.
+
+    E12: `write=False` fetches and builds the new frame but leaves the file
+    alone; the caller writes it with `write_dataset_files` once it knows its
+    outcome will stand (a queued refresh does that only after it has fenced
+    its job's success, so two overlapping attempts cannot both append).
 
     E05: `column_map` renames incoming columns (new -> old) before anything
     else, and a FULL load missing any of `required_columns` raises SchemaBreak
@@ -197,6 +203,7 @@ def refresh_dataset(
         result = _refresh_dataset_body(
             source_cfg, filename, source_table, source_query, mode,
             cursor_column, cursor_value, valid_columns, required_columns, column_map,
+            write,
         )
         span.set_attribute("status", "ok")
         span.set_attribute("effective_mode", result["mode"])
@@ -216,8 +223,10 @@ def _refresh_dataset_body(
     valid_columns: set[str] | None = None,
     required_columns: set[str] | None = None,
     column_map: dict[str, str] | None = None,
+    write: bool = True,
 ) -> dict:
     from .ingest import detect_types
+    from .timezones import normalize_instants
     from .connections import import_to_dataframe
 
     warning = None
@@ -261,10 +270,12 @@ def _refresh_dataset_body(
             from .connections import _checked, _import_cap
             _checked(df, _import_cap())
             converted: list[str] = []
-            if path is not None:
+            if path is not None and write:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 converted = write_csv_atomic(df, path)
                 write_parquet_sidecar(str(path))
+            else:
+                converted = normalize_instants(df)
             return {
                 "df": df, "type_map": detect_types(df), "mode": "incremental",
                 "cursor_value": _max_cursor(df, cursor_column, cursor_value, converted),
@@ -276,16 +287,27 @@ def _refresh_dataset_body(
     df = guard_schema(import_to_dataframe(source_cfg, source_table, source_query),
                       required_columns, column_map)
     converted: list[str] = []
-    if path is not None:
+    if path is not None and write:
         path.parent.mkdir(parents=True, exist_ok=True)
         converted = write_csv_atomic(df, path)
         write_parquet_sidecar(str(path))
+    else:
+        converted = normalize_instants(df)
     new_cursor = (_max_cursor(df, cursor_column, cursor_value, converted)
                   if cursor_column else cursor_value)
     return {
         "df": df, "type_map": detect_types(df), "mode": "full",
         "cursor_value": new_cursor, "warning": warning, "rows_added": len(df),
     }
+
+
+def write_dataset_files(df: pd.DataFrame, filename: str) -> None:
+    """The file write `refresh_dataset(write=False)` left to its caller: the
+    CSV swapped in atomically, then its parquet sidecar. Blocking."""
+    path = Path(filename)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_csv_atomic(df, path)
+    write_parquet_sidecar(str(path))
 
 
 # ── O3: materialization manifest ────────────────────────────────────────────

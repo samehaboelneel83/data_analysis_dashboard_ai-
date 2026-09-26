@@ -1475,6 +1475,16 @@ process, `JOB_WORKER_ENABLED`). Database imports are the first workload:
 `POST /data-sources/{id}/import` still imports inside the request; both run
 `services/source_import.py`.
 
+Manual dataset refreshes are the second (E12): `POST /datasets/{id}/refresh-jobs`
+queues the refresh `POST /datasets/{id}/refresh` runs inside the request; both
+run `services/refresh_jobs.refresh_now`. The dataset page queues it and follows
+the job (stage, Stop, the schema-break mapping from the failed job's `result`).
+One refresh per dataset at a time: a second request gets the running job back
+(its owner) or a 409, the synchronous endpoint refuses while one is queued, and
+the scheduler skips the dataset. The queued refresh fetches without touching
+the file and writes it only after fencing its success, so an attempt that lost
+its lease cannot append the same rows twice.
+
 | Property | How |
 |----------|-----|
 | Claiming | A compare-and-set `UPDATE ... WHERE <still claimable>`; the job is kept only if one row changed. No advisory lock, so several processes share one queue. |
@@ -2227,7 +2237,7 @@ Agent pane (7)
 
 | Suite | Scope | Count |
 |-------|-------|-------|
-| Backend | `backend/tests/` | ~5,300 tests across 405 modules |
+| Backend | `backend/tests/` | ~5,300 tests across 406 modules |
 | Frontend | colocated `*.test.ts(x)` | ~2,800 tests across 221 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |

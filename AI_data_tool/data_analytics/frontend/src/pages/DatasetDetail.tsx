@@ -35,7 +35,10 @@ import QueryBuilderDialog from '../components/QueryBuilderDialog'
 import DatasetShareDialog from '../components/DatasetShareDialog'
 import { AuthContext } from '../contexts/AuthContext'
 import toast from 'react-hot-toast'
-import SchemaBreakDialog, { isSchemaBreak, type SchemaBreak } from '../components/dataset/SchemaBreakDialog'
+import SchemaBreakDialog, { type SchemaBreak } from '../components/dataset/SchemaBreakDialog'
+import { useJob } from '../components/jobs/useJob'
+import { newIdempotencyKey } from '../components/jobs/idempotency'
+import { isJobActive, jobsApi, type Job } from '../services/api'
 import DataQualityPanel from '../components/dataset/DataQualityPanel'
 
 import { type Tab, OPS, FILTER_FUNC_CATS, PAGE_SIZE } from './datasetDetail/constants'
@@ -126,7 +129,14 @@ export default function DatasetDetail() {
   const [savedFilter,   setSavedFilter]   = useState<string | null>(null)
   const [filterPreview, setFilterPreview] = useState<{ ok: boolean; passing?: number; total: number; error?: string } | null>(null)
   const [filterSaving,  setFilterSaving]  = useState(false)
-  const [refreshing,    setRefreshing]    = useState(false)
+  // E12: a refresh is a durable job. `queueing` covers the request that
+  // queues it; the job itself is followed until it ends.
+  const [queueing,      setQueueing]      = useState(false)
+  const [refreshJobId,  setRefreshJobId]  = useState<number | null>(null)
+  const [refreshByOther, setRefreshByOther] = useState(false)
+  const refreshReq = useRef<{ mode: 'full' | 'incremental'; cursorColumn?: string }>({ mode: 'full' })
+  const { job: refreshJob, setJob: setRefreshJob } = useJob(refreshJobId, j => { void onRefreshSettled(j) })
+  const refreshing = queueing || (refreshJobId != null && (!refreshJob || isJobActive(refreshJob)))
   // F3: load-mode picker -- full reload vs. watermark-driven incremental append.
   const [showRefreshMenu, setShowRefreshMenu] = useState(false)
   const [refreshMode,     setRefreshMode]     = useState<'full' | 'incremental'>('full')
@@ -374,35 +384,73 @@ export default function DatasetDetail() {
 
   const handleRefresh = async (mode: 'full' | 'incremental' = 'full', cursorColumn?: string,
                                resolve?: { column_map?: Record<string, string>; force?: boolean }) => {
-    setRefreshing(true)
+    setQueueing(true)
     setPvError(null)
     setShowRefreshMenu(false)
     setSchemaBreak(null)
+    refreshReq.current = { mode, cursorColumn }
     try {
-      const updated = await datasetsApi.refresh(dsId, {
+      // Queued, not awaited: the reload runs in the server's worker, so a
+      // closed tab or a proxy timeout loses nothing, and it can be stopped.
+      const job = await datasetsApi.queueRefresh(dsId, {
         mode, cursor_column: mode === 'incremental' ? (cursorColumn || undefined) : undefined,
         ...resolve,
-      })
-      setDs(updated)
-      setCalcCols(updated.calculated_columns ?? [])
-      if (updated.refresh_warning) {
-        toast.error(updated.refresh_warning)
-      } else {
-        toast.success(`Refreshed — ${updated.row_count.toLocaleString()} rows loaded`)
-      }
-      loadPreview(0, filterRows, updated.calculated_columns ?? [], sortBy, sortDir, search)
+      }, newIdempotencyKey())
+      setRefreshJobId(job.id)
     } catch (err: any) {
-      // E05: refused because the source dropped a column in use -- nothing was
-      // written. Ask for the mapping instead of only toasting the refusal.
-      if (err?.response?.status === 409 && isSchemaBreak(err.response.data)) {
-        setSchemaBreak({ info: err.response.data, mode, cursorColumn })
-      } else {
-        toast.error(err?.response?.data?.detail ?? 'Refresh failed')
-      }
+      toast.error(err?.response?.data?.detail ?? tr('refreshJob.failed'))
     } finally {
-      setRefreshing(false)
+      setQueueing(false)
     }
   }
+
+  /** The refresh job ended: show its data, its refusal or its stop. */
+  const onRefreshSettled = async (job: Job) => {
+    setRefreshJobId(null)
+    if (job.state === 'succeeded') {
+      const updated = await datasetsApi.get(dsId)
+      setDs(updated)
+      setCalcCols(updated.calculated_columns ?? [])
+      if (job.result?.warning) {
+        toast.error(job.result.warning)
+      } else {
+        toast.success(tr('refreshJob.done', { rows: (job.result?.row_count ?? updated.row_count).toLocaleString() }))
+      }
+      loadPreview(0, filterRows, updated.calculated_columns ?? [], sortBy, sortDir, search)
+    } else if (job.state === 'failed' && job.error_code === 'schema_break' && job.result?.missing) {
+      // E05: refused because the source dropped a column in use -- nothing
+      // was written. Ask for the mapping instead of only toasting it.
+      setSchemaBreak({
+        info: { detail: job.error ?? '', missing: job.result.missing,
+                suggestions: job.result.suggestions ?? {}, available: job.result.available ?? [],
+                dependents: job.result.dependents ?? {} },
+        mode: refreshReq.current.mode, cursorColumn: refreshReq.current.cursorColumn,
+      })
+    } else if (job.state === 'failed') {
+      toast.error(job.error ?? tr('refreshJob.failed'))
+    } else if (job.state === 'cancelled') {
+      toast(tr('refreshJob.stopped'))
+    }
+  }
+
+  // A page opened (or reloaded) while a refresh runs follows it.
+  useEffect(() => {
+    if (!Number.isFinite(dsId)) return
+    let alive = true
+    datasetsApi.activeRefresh(dsId).then(a => {
+      if (!alive || !a) return
+      if ('id' in a) setRefreshJobId(a.id)
+      else if (a.by_someone_else) setRefreshByOther(true)
+    }).catch(() => { /* the page works without it */ })
+    return () => { alive = false }
+  }, [dsId])
+
+  const refreshStage = !refreshJob || !isJobActive(refreshJob) ? tr('dataset.refreshing')
+    : refreshJob.cancel_requested ? tr('refreshJob.stopping')
+    : refreshJob.state === 'queued' ? tr('refreshJob.queued')
+    : refreshJob.progress?.stage === 'saving'
+      ? tr('refreshJob.saving', { rows: (refreshJob.progress?.rows ?? 0).toLocaleString() })
+      : tr('refreshJob.querying')
   const [schemaBreak, setSchemaBreak] = useState<
     { info: SchemaBreak; mode: 'full' | 'incremental'; cursorColumn?: string } | null>(null)
 
@@ -600,10 +648,24 @@ export default function DatasetDetail() {
                 {tr('dataset.lastRefreshed', { when: new Date(ds.last_refreshed_at).toLocaleString() })}
               </div>
             )}
-            <button onClick={() => setShowRefreshMenu(v => !v)} disabled={refreshing} className="btn btn-ghost btn-sm">
-              {refreshing ? tr('dataset.refreshing')
-                : <IconLabel icon={RefreshCw}>{ds.data_source_id ? tr('dataset.refreshFromSource') : tr('dataset.refreshSchedule')}</IconLabel>}
-            </button>
+            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+              <button onClick={() => setShowRefreshMenu(v => !v)} disabled={refreshing || refreshByOther}
+                className="btn btn-ghost btn-sm">
+                {refreshing ? refreshStage
+                  : <IconLabel icon={RefreshCw}>{ds.data_source_id ? tr('dataset.refreshFromSource') : tr('dataset.refreshSchedule')}</IconLabel>}
+              </button>
+              {refreshJob && isJobActive(refreshJob) && !refreshJob.cancel_requested && (
+                <button className="btn btn-ghost btn-sm" data-testid="refresh-stop"
+                  onClick={() => { void jobsApi.cancel(refreshJob.id).then(setRefreshJob).catch(() => {}) }}>
+                  {tr('refreshJob.stop')}
+                </button>
+              )}
+            </div>
+            {/* Said once, politely: the stage is on the button above. */}
+            <div role="status" style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'end', marginTop: 2 }}>
+              {refreshing && refreshJobId != null ? tr('refreshJob.background')
+                : refreshByOther ? tr('refreshJob.someoneElse') : null}
+            </div>
             {showRefreshMenu && (
               <div style={{ position: 'absolute', top: '100%', insetInlineEnd: 0, zIndex: 20, marginTop: 4,
                 background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8,
@@ -1550,7 +1612,7 @@ export default function DatasetDetail() {
                 {ds?.data_source_id && (ds?.source_table || ds?.source_query) ? (
                   <button className="btn btn-primary btn-sm" onClick={() => handleRefresh('full')} disabled={refreshing}
                     style={{ marginTop: 8 }}>
-                    {refreshing ? 'Refreshing…' : '↻ Refresh from source'}
+                    {refreshing ? refreshStage : '↻ Refresh from source'}
                   </button>
                 ) : ds?.data_source_id ? (
                   <div style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center', maxWidth: 320 }}>

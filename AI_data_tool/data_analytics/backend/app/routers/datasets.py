@@ -2,7 +2,7 @@ import asyncio
 import logging
 from datetime import datetime
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, Header, HTTPException, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -455,13 +455,8 @@ async def upload_dataset(
     return out
 
 
-def _missing_pct(series) -> float:
-    """Percent of empty cells, always a finite number (JSON has no NaN)."""
-    try:
-        v = float(series.isnull().mean() * 100)
-    except Exception:
-        return 0.0
-    return round(v, 2) if v == v else 0.0
+# Moved to services/ingest (the queued refresh needs it too); the old name stays.
+from ..services.ingest import missing_pct as _missing_pct  # noqa: E402
 
 
 async def _ingest_access_file(
@@ -3754,144 +3749,108 @@ async def refresh_dataset(
     dataset_id: int, body: DatasetRefreshRequest = DatasetRefreshRequest(),
     db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
-    """Re-fetch data from the original database connection.
+    """Re-fetch data from the original database connection, and answer when done.
 
-    F3: `body.mode` picks full reload (re-run the stored query/table wholesale)
-    or watermark-driven incremental (append only rows past the last cursor and
-    advance it). The Watermark row IS the persisted config — a manual
-    `cursor_column` here both drives this run and, once set, carries over to
-    the next one and to the background scheduler.
+    F3: `body.mode` picks full reload or watermark-driven incremental; E05: a
+    full load that drops a column something uses answers 409 `schema_break`.
+    The work itself is services/refresh_jobs.refresh_now, which the queued
+    path (POST /{id}/refresh-jobs) runs too. Refused (409) while a queued
+    refresh of this dataset is waiting or running: two refreshes over one
+    file at once is what the queue exists to prevent.
     """
-    import time
-    from datetime import datetime as _dt
-    from ..models.models import Watermark
-    from ..services.dataset_refresh import refresh_dataset as run_refresh, write_materialization
-    from ..services.query_log import log_query_run_sync
+    from fastapi.responses import JSONResponse
+    from ..services.refresh_jobs import (RefreshRefused, SchemaBreakRefused,
+                                         active_refresh_job, refresh_now)
 
-    result = await db.execute(
-        select(Dataset).options(selectinload(Dataset.columns)).where(Dataset.id == dataset_id)
-    )
-    dataset = result.scalar_one_or_none()
-    check_org(dataset, current_user, "Dataset not found")
-    await require_dataset_capability(db, current_user, dataset_id, "data")
-
-    if dataset.mode == "directquery":
-        raise HTTPException(400, "DirectQuery datasets always query the live source — there's nothing to refresh")
-    if not dataset.data_source_id:
-        raise HTTPException(400, "This dataset was not imported from a database connection")
-    if not dataset.source_table and not dataset.source_query:
-        raise HTTPException(400, "Source query not recorded — re-import from the Connections page")
-
-    src = await db.get(DataSource, dataset.data_source_id)
-    check_org(src, current_user, "Original data source no longer exists")
-
-    cfg = dict(src.config)
-    cfg['type'] = src.type
-
-    watermark = (await db.execute(
-        select(Watermark).where(Watermark.dataset_id == dataset_id)
-    )).scalar_one_or_none()
-
-    requested_mode = "incremental" if body.mode == "incremental" else "full"
-    cursor_column = body.cursor_column or (watermark.cursor_column if watermark else None)
-    # A cursor value only applies to the SAME column it was measured on -- switching
-    # the watermark column mid-flight must not filter by a value from a different one.
-    cursor_value = (watermark.cursor_value
-                    if watermark and watermark.cursor_column == cursor_column else None)
-
-    # Allowlist for the cursor-column identifier the incremental query below
-    # interpolates: this dataset's own known columns, captured before the
-    # delete+recreate further down touches them.
-    known_columns = {c.name for c in dataset.columns}
-    # semantic_type is set by metadata sync / the RLS builder / auto-generate,
-    # never re-derived from the refreshed data, so it has to be carried
-    # forward by name across the delete+recreate below or every one of those
-    # features silently degrades until the next metadata sync.
-    semantic_types = {c.name: c.semantic_type for c in dataset.columns if c.semantic_type}
-
-    # E05: the columns something on this dataset names. A full load missing
-    # one is refused BEFORE the file is written; `column_map` (new -> old)
-    # re-attaches a renamed column, and `force` accepts the break knowingly.
-    from ..services.dataset_refresh import SchemaBreak
-    from ..services.dependencies import find_dependents_of
-    dependents = {} if body.force else await find_dependents_of(db, dataset, sorted(known_columns))
-    required = {n for n, deps in dependents.items() if deps}
-
-    start = time.monotonic()
+    if await active_refresh_job(db, current_user.org_id, dataset_id) is not None:
+        await require_dataset_capability(db, current_user, dataset_id, "data")
+        raise HTTPException(409, "A refresh of this dataset is already queued or running")
     try:
-        outcome = await asyncio.to_thread(
-            run_refresh, cfg, dataset.filename, dataset.source_table, dataset.source_query,
-            requested_mode, cursor_column, cursor_value, known_columns,
-            required, body.column_map,
-        )
-    except SchemaBreak as e:
-        from fastapi.responses import JSONResponse
-        return JSONResponse(status_code=409, content={
-            "detail": (f"Not refreshed: the source no longer has {', '.join(repr(m) for m in e.missing)}, "
-                       "which this dataset's widgets or calculations use. Map each to its new name, "
-                       "or refresh anyway with force."),
-            "code": "schema_break",
-            "missing": e.missing,
-            "suggestions": e.suggestions,
-            "available": e.available,
-            "dependents": {m: dependents.get(m, []) for m in e.missing},
-        })
-    except Exception as e:
-        raise HTTPException(400, f"Refresh failed: {e}")
-    duration_ms = int((time.monotonic() - start) * 1000)
-
-    df, type_map = outcome["df"], outcome["type_map"]
-    dataset.row_count = len(df)
-    dataset.col_count = len(df.columns)
-    dataset.file_size = Path(dataset.filename).stat().st_size if dataset.filename else 0
-    dataset.last_refreshed_at = _dt.utcnow()
-
-    for col in list(dataset.columns):
-        await db.delete(col)
-    await db.flush()
-    for col_name, dtype in type_map.items():
-        db.add(DatasetColumn(
-            dataset_id=dataset.id, name=col_name, dtype=dtype,
-            missing_pct=_missing_pct(df[col_name]), stats={},
-            semantic_type=semantic_types.get(col_name),
-        ))
-
-    if cursor_column:
-        if watermark is None:
-            watermark = Watermark(dataset_id=dataset_id)
-            db.add(watermark)
-        watermark.strategy = outcome["mode"]
-        watermark.cursor_column = cursor_column
-        watermark.cursor_value = outcome["cursor_value"]
-
-    if dataset.filename:
-        await write_materialization(
-            db, dataset.id, dataset.filename, outcome["mode"],
-            len(df), list(df.columns), outcome.get("cursor_value"),
-        )
-
-    # E07: a manual reload replaces what every dashboard on it shows.
-    await audit(db, current_user, "dataset.refresh", "dataset", dataset.id,
-                f"{outcome['mode']} from {src.name} -> {len(df):,} rows"
-                + (" (forced past a schema break)" if body.force else ""))
-    await db.commit()
-
-    log_query_run_sync(
-        org_id=current_user.org_id, source_kind="refresh", data_source_id=dataset.data_source_id,
-        dataset_id=dataset.id, sql_hash=None, rows_returned=len(df),
-        duration_ms=duration_ms, executor="pandas", cache_hit=False,
-    )
+        _dataset, warning = await refresh_now(
+            db, current_user, dataset_id, mode=body.mode, cursor_column=body.cursor_column,
+            column_map=body.column_map, force=body.force)
+    except SchemaBreakRefused as e:
+        return JSONResponse(status_code=409, content=e.payload)
+    except RefreshRefused as e:
+        raise HTTPException(e.status_code, str(e))
 
     # populate_existing: the session (expire_on_commit=False) still holds the
-    # column collection loaded at the top of this request, and a plain
+    # column collection loaded at the top of the refresh, and a plain
     # selectinload keeps it -- the response echoed the PRE-refresh columns.
     result2 = await db.execute(
         select(Dataset).options(selectinload(Dataset.columns)).where(Dataset.id == dataset_id)
         .execution_options(populate_existing=True)
     )
     ds_out = result2.scalar_one()
-    ds_out.refresh_warning = outcome.get("warning")
+    ds_out.refresh_warning = warning
     return ds_out
+
+
+@router.post("/{dataset_id}/refresh-jobs", status_code=202)
+async def queue_refresh(
+    dataset_id: int, body: DatasetRefreshRequest = DatasetRefreshRequest(),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", max_length=100),
+    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    """Queue a refresh as a durable job and answer at once (E12).
+
+    The refresh runs in the background worker: a closed tab or a proxy
+    timeout loses nothing, it can be cancelled until its rows are fetched,
+    and a server restart resumes it. Poll GET /jobs/{id}; a schema break
+    fails the job with code `schema_break` and the mapping details as its
+    `result`. What can be checked now is checked now; everything is checked
+    again when the job runs.
+
+    One refresh per dataset at a time: if one is already queued or running,
+    its owner gets it back (200) and anyone else a 409."""
+    from fastapi.responses import JSONResponse
+    from ..schemas.schemas import JobOut
+    from ..services import jobs as job_service
+    from ..services.refresh_jobs import (REFRESH_JOB_KIND, RefreshRefused,
+                                         active_refresh_job, job_inputs,
+                                         load_refreshable)
+
+    try:
+        dataset, src = await load_refreshable(db, current_user, dataset_id)
+    except RefreshRefused as e:
+        raise HTTPException(e.status_code, str(e))
+    running = await active_refresh_job(db, current_user.org_id, dataset_id)
+    if running is not None:
+        if running.created_by != current_user.id:
+            raise HTTPException(409, "A refresh of this dataset is already queued or running")
+        return JSONResponse(status_code=200,
+                            content=JobOut.model_validate(running).model_dump(mode="json"))
+    what = "incremental refresh" if body.mode == "incremental" else "refresh"
+    try:
+        job, _created = await job_service.enqueue(
+            db, user=current_user, kind=REFRESH_JOB_KIND,
+            inputs=job_inputs(dataset_id, body.mode, body.cursor_column,
+                              body.column_map, body.force),
+            subject=f"{dataset.name} · {what} from {src.name}",
+            idempotency_key=idempotency_key)
+    except job_service.IdempotencyConflict as e:
+        raise HTTPException(409, str(e))
+    return JobOut.model_validate(job)
+
+
+@router.get("/{dataset_id}/refresh-jobs/active")
+async def active_refresh(dataset_id: int, db: AsyncSession = Depends(get_db),
+                         current_user: User = Depends(get_current_user)):
+    """The refresh of this dataset that is queued or running now, or null --
+    so a page opened (or reloaded) mid-refresh can follow it. Someone else's
+    job is reported only as `{"state", "by_someone_else": true}`: jobs are
+    visible to their owner and admins."""
+    from ..schemas.schemas import JobOut
+    from ..services.refresh_jobs import active_refresh_job
+
+    check_org(await db.get(Dataset, dataset_id), current_user, "Dataset not found")
+    await require_dataset_capability(db, current_user, dataset_id, "data")
+    job = await active_refresh_job(db, current_user.org_id, dataset_id)
+    if job is None:
+        return None
+    if job.created_by == current_user.id or (current_user.role and current_user.role.is_org_admin):
+        return JobOut.model_validate(job)
+    return {"state": job.state, "by_someone_else": True}
 
 
 # ── Data alerts ───────────────────────────────────────────────────────────────

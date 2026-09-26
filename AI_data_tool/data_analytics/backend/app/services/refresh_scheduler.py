@@ -631,6 +631,11 @@ async def refresh_one(session, ds: Dataset) -> bool:
     """
     from .dataset_refresh import rewrite_dataset_file, write_materialization
 
+    # E12: a queued manual refresh of this dataset owns it until it ends; the
+    # schedule catches up on its next tick instead of writing the file too.
+    from .refresh_jobs import active_refresh_job
+    if await active_refresh_job(session, ds.org_id, ds.id) is not None:
+        return False
     key = advisory_lock_key(ds.id)
     if not await _try_lock(session, key):
         return False

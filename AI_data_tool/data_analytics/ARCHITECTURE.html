@@ -864,6 +864,7 @@ llm_reserved_interactive = 2</code></pre>
 
   <h3>Durable jobs</h3>
   <p><code>services/jobs.py</code> is the plan's <code>Job</code> contract: long work runs outside the request that asked for it, in a worker loop started in <code>main.lifespan</code> (one per process, <code>JOB_WORKER_ENABLED</code>). Database imports are the first workload: <code>POST /data-sources/{id}/import-jobs</code> answers at once with a queued job, and <code>GET /jobs/{id}</code> reports its progress and, when it succeeds, the dataset id. <code>POST /data-sources/{id}/import</code> still imports inside the request; both run <code>services/source_import.py</code>.</p>
+  <p>Manual dataset refreshes are the second (E12): <code>POST /datasets/{id}/refresh-jobs</code> queues the refresh <code>POST /datasets/{id}/refresh</code> runs inside the request; both run <code>services/refresh_jobs.refresh_now</code>. The dataset page queues it and follows the job (stage, Stop, the schema-break mapping from the failed job's <code>result</code>). One refresh per dataset at a time: a second request gets the running job back (its owner) or a 409, the synchronous endpoint refuses while one is queued, and the scheduler skips the dataset. The queued refresh fetches without touching the file and writes it only after fencing its success, so an attempt that lost its lease cannot append the same rows twice.</p>
   <div class="scroll">
     <table>
       <thead><tr><th>Property</th><th>How</th></tr></thead>
@@ -1149,7 +1150,7 @@ llm_reserved_interactive = 2</code></pre>
     <table>
       <thead><tr><th>Suite</th><th>Scope</th><th>Count</th></tr></thead>
       <tbody>
-        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~5,300 tests · 405 modules</td></tr>
+        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~5,300 tests · 406 modules</td></tr>
         <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~2,800 tests · 221 files</td></tr>
         <tr><th>Evals</th><td><code>backend/evals/</code></td><td>Agent quality gates (<code>run_eval_gate.ps1</code>)</td></tr>
         <tr><th>Conformance</th><td><code>tests/test_layer_conformance.py</code></td><td>Enforces the layer boundaries above</td></tr>
