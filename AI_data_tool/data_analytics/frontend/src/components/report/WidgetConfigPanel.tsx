@@ -813,6 +813,31 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
   // it -- without that the control has no accessible name at all, and a screen reader
   // announces a bare combobox or spinbutton. Found by driving the real app: every
   // field built through this helper was unreachable by its visible label.
+  /** "Group dates by", under a dimension that is a date column. One control
+   *  for both ways the dimension field is drawn: the hierarchy picker (a
+   *  dataset with a drill hierarchy) used to leave it out, so a line chart
+   *  over dates could not be grouped by month there. */
+  const dateGrouping = () => (
+    // Buckets for a date axis, including the Hijri calendar
+    // (Phase 7.5): tabular Hijri, labelled 1448-03, month
+    // named on the axis in the reader's language.
+    <div style={{ margin:'-6px 0 10px' }}>
+      <label htmlFor="date-granularity" style={{ fontSize: 11, color:'var(--muted)' }}>Group dates by</label>
+      <select id="date-granularity" aria-label="Group dates by" value={dimensionGranularity}
+        onChange={e => setDimensionGranularity(e.target.value)} style={{ width:'100%', fontSize:11 }}>
+        <option value="">each date</option>
+        {['day', 'week', 'month', 'quarter', 'year'].map(g => <option key={g} value={g}>{g}</option>)}
+        <option value="hijri_month">Hijri month (هجري)</option>
+        <option value="hijri_year">Hijri year (هجري)</option>
+      </select>
+      {dimensionGranularity.startsWith('hijri') && (
+        <div style={{ fontSize: 11, color:'var(--muted)', marginTop:2 }}>
+          Tabular Hijri calendar: may differ by a day from Umm al-Qura at a month's start.
+        </div>
+      )}
+    </div>
+  )
+
   const fld = (lbl: string, el: React.ReactElement) => {
     const id = 'fld-' + lbl.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
     return (
@@ -1432,7 +1457,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               const hOptions = flattenHierarchy(hierarchy)
               const currentValue = hierarchyNodeId ? `h:${hierarchyNodeId}` : (roleValues[rf.role] ?? '')
               return (
-                <div key={rf.role} style={{ marginBottom: 12 }}>
+                <div key={rf.role} data-role={rf.role} style={{ marginBottom: 12 }}>
                   <label htmlFor="dimension-select" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
                     {rf.label ?? rf.role}
                   </label>
@@ -1459,6 +1484,9 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                       {hOptions.map(o => <option key={o.id} value={`h:${o.id}`}>{o.label}</option>)}
                     </optgroup>
                   </select>
+                  {!hierarchyNodeId && !!roleValues[rf.role]
+                    && effectiveCols.find(c => c.name === roleValues[rf.role])?.dtype === 'datetime'
+                    && dateGrouping()}
                   {hierarchyNodeId && (
                     <button type="button" onClick={() => setShowHierarchyEditor(s => !s)}
                       style={{ marginTop:4, background:'none', border:'none', color:'var(--accent)', cursor:'pointer', fontSize:11, padding:0 }}>
@@ -1485,7 +1513,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 : colOptions
               ).filter(o => !responseCol || o.value !== responseCol || selected.includes(o.value))
               return (
-                <div key={rf.role}>
+                <div key={rf.role} data-role={rf.role}>
                   {fld(`${rf.label ?? rf.role}${rf.required ? ' *' : ''}`, (
                     <div style={{ maxHeight:130, overflowY:'auto', display:'flex', flexDirection:'column', gap:3, background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:6, padding:'6px 8px' }}>
                       {options.map(o => {
@@ -1530,28 +1558,9 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
             const isDateCategory = rf.role === 'category' && !hierarchyNodeId && !!chosen
               && effectiveCols.find(c => c.name === chosen)?.dtype === 'datetime'
             return (
-              <div key={rf.role}>
+              <div key={rf.role} data-role={rf.role}>
                 {fld(label, sel(roleValues[rf.role] ?? '', v => setRole(rf.role, v), options, placeholder))}
-                {isDateCategory && (
-                  // Buckets for a date axis, including the Hijri calendar
-                  // (Phase 7.5): tabular Hijri, labelled 1448-03, month
-                  // named on the axis in the reader's language.
-                  <div style={{ margin:'-6px 0 10px' }}>
-                    <label htmlFor="date-granularity" style={{ fontSize: 11, color:'var(--muted)' }}>Group dates by</label>
-                    <select id="date-granularity" aria-label="Group dates by" value={dimensionGranularity}
-                      onChange={e => setDimensionGranularity(e.target.value)} style={{ width:'100%', fontSize:11 }}>
-                      <option value="">each date</option>
-                      {['day', 'week', 'month', 'quarter', 'year'].map(g => <option key={g} value={g}>{g}</option>)}
-                      <option value="hijri_month">Hijri month (هجري)</option>
-                      <option value="hijri_year">Hijri year (هجري)</option>
-                    </select>
-                    {dimensionGranularity.startsWith('hijri') && (
-                      <div style={{ fontSize: 11, color:'var(--muted)', marginTop:2 }}>
-                        Tabular Hijri calendar: may differ by a day from Umm al-Qura at a month's start.
-                      </div>
-                    )}
-                  </div>
-                )}
+                {isDateCategory && dateGrouping()}
                 {emptyWhy && (
                   <div data-testid="empty-picker-reason" style={{ fontSize:11, color:'var(--muted)', margin:'-6px 0 10px', display:'flex', gap:6, alignItems:'baseline', flexWrap:'wrap' }}>
                     <span>{emptyWhy}</span>

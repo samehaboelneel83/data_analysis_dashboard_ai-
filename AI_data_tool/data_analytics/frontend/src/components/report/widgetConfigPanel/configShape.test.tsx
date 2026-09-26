@@ -203,3 +203,31 @@ describe('the panel offers exactly the values a save accepts', () => {
     })
   }
 })
+
+describe('dates can be grouped on a dataset that has a drill hierarchy', () => {
+  // Found by the families browser journey: with a hierarchy, the dimension
+  // field is drawn as the hierarchy picker, which left out "Group dates by" --
+  // a line chart over dates could not be grouped by month.
+  const withDate: DatasetColumn[] = [
+    ...columns, { id: 9, name: 'order_date', dtype: 'datetime', missing_pct: 0, stats: {} },
+  ]
+  const hierarchy = [{ id: 1, dataset_id: 1, parent_id: null, name: 'Drill', node_type: 'folder',
+                       position: 0, created_at: '2026-01-01' },
+                     { id: 2, dataset_id: 1, parent_id: 1, name: 'Region', node_type: 'dimension',
+                       column_name: 'region', position: 0, created_at: '2026-01-01' }] as never
+
+  it('offers it under a date dimension, and saves the choice', () => {
+    const onUpdate = vi.fn()
+    render(<CrossFilterProvider><WidgetConfigPanel widget={widget('line', { dimension: 'order_date', measure: 'revenue' })}
+      columns={withDate} hierarchy={hierarchy} onUpdate={onUpdate} pages={pages} /></CrossFilterProvider>)
+    fireEvent.change(screen.getByLabelText('Group dates by'), { target: { value: 'month' } })
+    act(() => { vi.advanceTimersByTime(700) })
+    expect(onUpdate.mock.calls.at(-1)![0]).toMatchObject({ dimension: 'order_date', dimension_granularity: 'month' })
+  })
+
+  it('not under a text dimension', () => {
+    render(<CrossFilterProvider><WidgetConfigPanel widget={widget('line', { dimension: 'region', measure: 'revenue' })}
+      columns={withDate} hierarchy={hierarchy} onUpdate={vi.fn()} pages={pages} /></CrossFilterProvider>)
+    expect(screen.queryByLabelText('Group dates by')).toBeNull()
+  })
+})

@@ -188,6 +188,7 @@ export default function ChartGallery({ query, onQuery, onAdd }: {
                   const Icon = ICON_OF[w.type] ?? Brain
                   return (
                     <button key={w.type} type="button" className="dl-gallery__tile"
+                      data-widget-type={w.type}
                       onClick={() => onAdd(w.type)} title={w.label} aria-label={w.label}>
                       <Icon size={18} strokeWidth={1.9} aria-hidden />
                       <span className="dl-gallery__label">{tileName(w)}</span>
