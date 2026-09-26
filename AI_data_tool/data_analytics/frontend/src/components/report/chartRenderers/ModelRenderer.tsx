@@ -292,7 +292,8 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
         </div>
       )}
 
-      <div role="tabpanel" style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+      {/* Focusable: it scrolls, and a keyboard user must be able to (E10). */}
+      <div role="tabpanel" tabIndex={0} style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
         {active === 'coef' && <Coefficients coefs={r.detail?.coefficients ?? []} odds={kind === 'logistic'} />}
         {active === 'coef' && data.encodings && Object.keys(data.encodings).length > 0 && (
           <p style={{ fontSize: 10, color: 'var(--muted)', margin: '4px 0 0' }}>

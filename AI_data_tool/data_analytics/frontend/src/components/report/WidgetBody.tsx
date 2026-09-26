@@ -440,7 +440,9 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
   if (wt === 'card') {
     const rows: any[] = data.rows ?? []
     return (
-      <div dir={rtl ? 'rtl' : undefined} style={{ height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 10, padding: 8, containerType: 'inline-size' }}>
+      // Focusable: a card with more figures than its tile scrolls (E10).
+      <div dir={rtl ? 'rtl' : undefined} tabIndex={0} role="region" aria-label="Values"
+        style={{ height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 10, padding: 8, containerType: 'inline-size' }}>
         {rows.map((row, i) => (
           <div key={i} style={{ textAlign: 'center', minWidth: 0 }}>
             <div title={fmtStr(row.value, allFormats?.[row.name])}
@@ -669,7 +671,10 @@ function WindowedTable({ rtl, cfg, data, cols: inCols, rows: inRows, ruleStyles,
     </tr>
   )
   return (
+    // Focusable, so a keyboard user can scroll a table wider or longer than
+    // its tile (axe scrollable-region-focusable, E10).
     <div dir={rtl ? 'rtl' : undefined} ref={win.containerRef} onScroll={win.onScroll}
+      tabIndex={0} role="region" aria-label="Table"
       style={{ overflow: 'auto', height: '100%' }}>
       <table style={{ fontSize: 12 }}>
         <thead>
@@ -764,7 +769,10 @@ function WindowedList({ rtl, rows, ruleStyles, localSelected, broadcasts, onClic
 }) {
   const win = useWindowedRows(rows.length, 33, rows.length > WINDOW_THRESHOLD)
   return (
+    // Focusable, so a keyboard user can scroll a table wider or longer than
+    // its tile (axe scrollable-region-focusable, E10).
     <div dir={rtl ? 'rtl' : undefined} ref={win.containerRef} onScroll={win.onScroll}
+      tabIndex={0} role="region" aria-label="Table"
       style={{ overflow: 'auto', height: '100%' }}>
       {win.padTop > 0 && <div aria-hidden="true" style={{ height: win.padTop }} />}
       {rows.slice(win.start, win.end).map((row: any, idx: number) => {

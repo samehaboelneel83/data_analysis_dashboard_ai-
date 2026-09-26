@@ -86,7 +86,14 @@ async function uiLogin(browser, email, password, language = 'en') {
   await page.getByLabel(/^(password|كلمة المرور)$/i).fill(password)
   await page.getByRole('button', { name: /^(sign in|تسجيل الدخول)$/i }).click()
   await page.waitForURL(u => !String(u).includes('/login'), { timeout: 15000 })
+  await page.waitForLoadState('networkidle').catch(() => {})
   return { ctx, page, errors }
+}
+
+/** A navigation the app itself starts (the post-login redirect) can abort
+ *  ours; one retry is enough. */
+async function go(page, url) {
+  await page.goto(url).catch(() => page.goto(url))
 }
 
 async function widgetTitles(page) {
@@ -143,7 +150,7 @@ async function main() {
     const url = `${BASE}/reports/${made.report}`
 
     await step('the author sees the published dashboard as released', async () => {
-      await author.page.goto(url)
+      await go(author.page, url)
       const status = author.page.getByTestId('release-control').getByRole('status')
       await status.waitFor({ timeout: 15000 })
       expect((await status.textContent()).includes('Released'), `status: ${await status.textContent()}`)
@@ -157,7 +164,7 @@ async function main() {
       { title: 'Draft title' })
 
     await step('the viewer still sees the released title after a draft edit', async () => {
-      await viewer.page.goto(url)
+      await go(viewer.page, url)
       await viewer.page.getByText('Released title').first().waitFor({ timeout: 15000 })
       expect(!(await viewer.page.getByText('Draft title').count()), 'the draft reached the viewer')
       expect(!(await viewer.page.getByTestId('release-control').count()), 'a viewer was shown the release control')
@@ -165,7 +172,7 @@ async function main() {
     })
 
     await step('the author is told of unreleased changes and releases them from the keyboard', async () => {
-      await author.page.goto(url)
+      await go(author.page, url)
       const btn = author.page.getByRole('button', { name: 'Release changes' })
       await btn.waitFor({ timeout: 15000 })
       await author.page.screenshot({ path: path.join(OUT, '03_author_unreleased.png') })
@@ -176,7 +183,7 @@ async function main() {
     })
 
     await step('the viewer sees the released change', async () => {
-      await viewer.page.goto(url)
+      await go(viewer.page, url)
       await viewer.page.getByText('Draft title').first().waitFor({ timeout: 15000 })
       await viewer.page.screenshot({ path: path.join(OUT, '04_viewer_after_release.png') })
     })
@@ -189,7 +196,7 @@ async function main() {
     })
 
     await step('a viewer can reach every toolbar control from the keyboard', async () => {
-      await viewer.page.goto(url)
+      await go(viewer.page, url)
       await viewer.page.getByText('Draft title').first().waitFor({ timeout: 15000 })
       const seen = new Set()
       for (let i = 0; i < 40; i++) {
@@ -220,7 +227,7 @@ async function main() {
 
     await step('in Arabic the page runs right to left and the release control speaks Arabic', async () => {
       const ar = await uiLogin(browser, EMAIL, PASSWORD, 'ar')
-      await ar.page.goto(url)
+      await go(ar.page, url)
       await ar.page.getByTestId('release-control').waitFor({ timeout: 15000 })
       const dir = await ar.page.evaluate(() => document.documentElement.dir)
       expect(dir === 'rtl', `dir=${dir}`)

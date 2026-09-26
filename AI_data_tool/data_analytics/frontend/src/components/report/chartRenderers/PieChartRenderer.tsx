@@ -29,7 +29,10 @@ export default function PieChartRenderer({ rows, cfg, rtl, broadcasts, localSele
               // A display-rule fill is an explicit author statement and keeps its solid
               // colour; otherwise a slice takes its palette-coloured hatch when enabled.
               const fill = patterns && !ruleStyles?.rows?.[i]?.fill ? fillPattern(i, s.fill, true) : s.fill
-              return <Cell key={i} fill={fill} opacity={s.opacity} stroke={localSelected === r.name ? SELECTED_STROKE : 'none'} strokeWidth={s.strokeWidth ?? 0} />
+              // Each slice is drawn as role="img" by recharts; its name and
+              // value are its text alternative (axe svg-img-alt, E10).
+              return <Cell key={i} fill={fill} opacity={s.opacity} stroke={localSelected === r.name ? SELECTED_STROKE : 'none'} strokeWidth={s.strokeWidth ?? 0}
+                aria-label={`${r.name}: ${fmtStr(r.value, measureFmt)}`} />
             })}
           </Pie>
           <Tooltip contentStyle={TT} formatter={(v: unknown) => [fmtStr(v, measureFmt), seriesName(cfg)]} />

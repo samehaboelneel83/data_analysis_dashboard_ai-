@@ -31,10 +31,24 @@ export function MeasuredChart({ children }: {
         ? p : { w: r.width, h: r.height })
     }
     measure()
-    if (typeof ResizeObserver === 'undefined') return
+    // E10: recharts draws each scatter point, radial bar and pie slice as
+    // role="img". One without a name is an image with no text alternative
+    // (axe svg-img-alt) -- a scatter of 150 points was 150 of them. The chart
+    // as a whole is described by its tile, and its numbers are one click away
+    // as a table, so an UNNAMED mark is decorative: hidden from assistive
+    // technology, re-applied whenever recharts redraws. A mark a renderer
+    // names (pie slices carry "name: value") is left alone.
+    const hideUnnamedMarks = () => {
+      el.querySelectorAll('svg [role="img"]:not([aria-label]):not([aria-labelledby]):not([aria-hidden])')
+        .forEach(m => m.setAttribute('aria-hidden', 'true'))
+    }
+    hideUnnamedMarks()
+    const mo = typeof MutationObserver === 'undefined' ? null : new MutationObserver(hideUnnamedMarks)
+    mo?.observe(el, { childList: true, subtree: true })
+    if (typeof ResizeObserver === 'undefined') return () => mo?.disconnect()
     const ro = new ResizeObserver(measure)
     ro.observe(el)
-    return () => ro.disconnect()
+    return () => { ro.disconnect(); mo?.disconnect() }
   }, [])
   return (
     <div ref={ref} style={{

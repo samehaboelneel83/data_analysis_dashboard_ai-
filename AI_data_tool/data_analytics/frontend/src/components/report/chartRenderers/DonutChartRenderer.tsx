@@ -78,7 +78,10 @@ export default function DonutChartRenderer({ rows, cfg, rtl, broadcasts, localSe
               const fill = patterns && !ruleStyles?.rows?.[i]?.fill ? fillPattern(i, s.fill, true) : s.fill
               // A hairline of the card colour between slices, so adjacent
               // hues never bleed into one another.
-              return <Cell key={i} fill={fill} opacity={s.opacity} stroke="var(--surface)" strokeWidth={2} />
+              // Each slice is drawn as role="img" by recharts; its name and
+              // value are its text alternative (axe svg-img-alt, E10).
+              return <Cell key={i} fill={fill} opacity={s.opacity} stroke="var(--surface)" strokeWidth={2}
+                aria-label={`${r.name}: ${fmtStr(r.value, measureFmt)}`} />
             })}
           </Pie>
           <Tooltip contentStyle={TT} formatter={(v: unknown) => [fmtStr(v, measureFmt), seriesName(cfg)]} />
