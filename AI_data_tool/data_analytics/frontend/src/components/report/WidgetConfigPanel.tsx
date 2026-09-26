@@ -10,7 +10,8 @@ import type { Widget, WidgetType, ReportPage, HierarchyNode, Bookmark } from '..
 import BoundarySetPicker from './BoundarySetPicker'
 import { useGeoMatch } from './GeoMatchCheck'
 import { geoMatchSentence } from '../../lib/geoMatch'
-import { boundarySetsApi } from '../../services/api'
+import { boundarySetsApi, calendarSettingsApi } from '../../services/api'
+import { monthName } from '../../lib/fiscal'
 import MapPinsEditor from './MapPinsEditor'
 import GraphLayersEditor from './GraphLayersEditor'
 import MapLayersEditor, { type MapLayerCfg } from './MapLayersEditor'
@@ -221,6 +222,20 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
   const [tooltipPageId, setTooltipPageId] = useState<string>(cfg.tooltipPageId != null ? String(cfg.tooltipPageId) : '')
   const [hierarchyNodeId, setHierarchyNodeId] = useState<string>(cfg.hierarchyNodeId != null ? String(cfg.hierarchyNodeId) : '')
   const [dimensionGranularity, setDimensionGranularity] = useState<string>((cfg.dimension_granularity as string) ?? '')
+  // E10: a fiscal grouping follows the org's fiscal year ('') unless the
+  // widget names its own first month.
+  const [fiscalStart, setFiscalStart] = useState<string>(cfg.fiscal_start_month != null ? String(cfg.fiscal_start_month) : '')
+  const [orgFiscalStart, setOrgFiscalStart] = useState<number | null>(null)
+  useEffect(() => {
+    if (!dimensionGranularity.startsWith('fiscal') || orgFiscalStart != null) return
+    let live = true
+    try {
+      calendarSettingsApi.get()
+        .then(s => { if (live) setOrgFiscalStart(s.fiscal_year_start_month) })
+        .catch(() => {})
+    } catch { /* no calendar endpoint (a test double): the note just omits the month */ }
+    return () => { live = false }
+  }, [dimensionGranularity, orgFiscalStart])
   const [showHierarchyEditor, setShowHierarchyEditor] = useState(false)
   const [action,           setAction]           = useState<string>((cfg.action as string) ?? '')
   const [actionPageId,     setActionPageId]     = useState<string>(cfg.actionPageId != null ? String(cfg.actionPageId) : '')
@@ -414,6 +429,7 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
     setTooltipPageId(cfg.tooltipPageId != null ? String(cfg.tooltipPageId) : '')
     setHierarchyNodeId(cfg.hierarchyNodeId != null ? String(cfg.hierarchyNodeId) : '')
     setDimensionGranularity((cfg.dimension_granularity as string) ?? '')
+    setFiscalStart(cfg.fiscal_start_month != null ? String(cfg.fiscal_start_month) : '')
     setAction((cfg.action as string) ?? '')
     setActionPageId(cfg.actionPageId != null ? String(cfg.actionPageId) : '')
     setCarryFilters(!!cfg.carry_filters)
@@ -637,6 +653,7 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
     if (tooltipPageId) config.tooltipPageId = Number(tooltipPageId)
     if (hierarchyNodeId) config.hierarchyNodeId = Number(hierarchyNodeId)
     if (dimensionGranularity) config.dimension_granularity = dimensionGranularity
+    if (dimensionGranularity.startsWith('fiscal') && fiscalStart) config.fiscal_start_month = Number(fiscalStart)
     if (agg2) config.aggregation2 = agg2
     if (wt === 'bar' && barMode !== 'clustered') config.bar_mode = barMode
     // Degree is the renderer's own fallback, so writing it explicitly would
@@ -772,7 +789,7 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
     const timer = setTimeout(() => { onUpdate(config, title); clearPending(pendingId) }, 600)
     return () => clearTimeout(timer)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [title, datasetId, JSON.stringify(roleValues), JSON.stringify(multiRoleValues), JSON.stringify(modelOpts), agg, limit, sort, sortBy, sortCol, sortCustom, agg2, havingOp, havingValue, JSON.stringify(objFilters), rankMode, rankN, rankPercent, rankOther, quickCalc, suppressBelow, suppressComplement, running, content, label, rtl, tableCols.join(','), JSON.stringify(sortKeys), bins, baseline, fitLine, targetValue, gaugeShape, animPos, animOrder, animSize, animStyle, animOpacity, animBox, autoReload, drillthroughPageId, tooltipPageId, hierarchyNodeId, dimensionGranularity, action, actionPageId, carryFilters, actionBookmarkId, actionUrl, actionReportId, actionParamName, actionParamValue, barMode, forecastMethod, imageUrl, imageAlt, imageFit, webUrl, customUrl, shapeKind, shapeFill, shapeStroke, showAverageLine, referenceValue, referenceLabel, referenceColor, JSON.stringify(displayRules), xAxisLabel, yAxisLabel, axisTickSize, axisTickColor, axisLine, tickLine, xAxisAngle, yAxisAngle, yScale, yMin, yMax, showGrid, gridStyle, gridColor, wallColor, showAsTable, overviewAxis, latticeRows, latticeCols, animateBy, animateGran, slicerMode, containerMode, containerId, showLegend, legendPosition, dataLabels, seriesPatterns, showTotals, showSubtotals, totalsPosition, totalsScope, tableRowNumbers, tableRowLines, tableBanding, tableCondensed, tableSparkline, widgetBackground, widgetBorderColor, widgetBorderWidth, widgetRadius, widgetPadding, widgetSkin, altText, subtitle, boundarySetId, forecastTarget, centralityMetric,
+  }, [title, datasetId, JSON.stringify(roleValues), JSON.stringify(multiRoleValues), JSON.stringify(modelOpts), agg, limit, sort, sortBy, sortCol, sortCustom, agg2, havingOp, havingValue, JSON.stringify(objFilters), rankMode, rankN, rankPercent, rankOther, quickCalc, suppressBelow, suppressComplement, running, content, label, rtl, tableCols.join(','), JSON.stringify(sortKeys), bins, baseline, fitLine, targetValue, gaugeShape, animPos, animOrder, animSize, animStyle, animOpacity, animBox, autoReload, drillthroughPageId, tooltipPageId, hierarchyNodeId, dimensionGranularity, fiscalStart, action, actionPageId, carryFilters, actionBookmarkId, actionUrl, actionReportId, actionParamName, actionParamValue, barMode, forecastMethod, imageUrl, imageAlt, imageFit, webUrl, customUrl, shapeKind, shapeFill, shapeStroke, showAverageLine, referenceValue, referenceLabel, referenceColor, JSON.stringify(displayRules), xAxisLabel, yAxisLabel, axisTickSize, axisTickColor, axisLine, tickLine, xAxisAngle, yAxisAngle, yScale, yMin, yMax, showGrid, gridStyle, gridColor, wallColor, showAsTable, overviewAxis, latticeRows, latticeCols, animateBy, animateGran, slicerMode, containerMode, containerId, showLegend, legendPosition, dataLabels, seriesPatterns, showTotals, showSubtotals, totalsPosition, totalsScope, tableRowNumbers, tableRowLines, tableBanding, tableCondensed, tableSparkline, widgetBackground, widgetBorderColor, widgetBorderWidth, widgetRadius, widgetPadding, widgetSkin, altText, subtitle, boundarySetId, forecastTarget, centralityMetric,
       containerBackground, layer, scriptCode, transparent, legendTitle,
       y2AxisLabel, donutTotal, donutTotalLabel,
     // Hierarchy / faceting / forecast state. Omitting these would let the
@@ -829,7 +846,28 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
         {['day', 'week', 'month', 'quarter', 'year'].map(g => <option key={g} value={g}>{g}</option>)}
         <option value="hijri_month">Hijri month (هجري)</option>
         <option value="hijri_year">Hijri year (هجري)</option>
+        {/* A forecast continues a calendar sequence (next month, next
+            quarter); fiscal labels are not one it can extend. */}
+        {wt !== 'forecast' && <option value="fiscal_quarter">fiscal quarter</option>}
+        {wt !== 'forecast' && <option value="fiscal_year">fiscal year</option>}
       </select>
+      {dimensionGranularity.startsWith('fiscal') && (
+        <div style={{ marginTop: 4 }}>
+          <label htmlFor="fiscal-start-month" style={{ fontSize: 11, color:'var(--muted)' }}>Fiscal year starts in</label>
+          <select id="fiscal-start-month" value={fiscalStart} onChange={e => setFiscalStart(e.target.value)}
+            style={{ width:'100%', fontSize:11 }}>
+            <option value="">{orgFiscalStart
+              ? `the organisation's month (${monthName(orgFiscalStart, 'en')})`
+              : "the organisation's month"}</option>
+            {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+              <option key={m} value={String(m)}>{monthName(m, 'en')}</option>
+            ))}
+          </select>
+          <div style={{ fontSize: 11, color:'var(--muted)', marginTop:2 }}>
+            Labelled FY2025/26 and FY2025/26-Q1 (FY2025 when the year starts in January). Admin → Calendar sets the organisation's month.
+          </div>
+        </div>
+      )}
       {dimensionGranularity.startsWith('hijri') && (
         <div style={{ fontSize: 11, color:'var(--muted)', marginTop:2 }}>
           Tabular Hijri calendar: may differ by a day from Umm al-Qura at a month's start.

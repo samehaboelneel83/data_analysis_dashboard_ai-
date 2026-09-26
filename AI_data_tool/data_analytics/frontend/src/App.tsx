@@ -33,6 +33,7 @@ const AdminRowSecurityRules = lazy(() => import('./pages/admin/AdminRowSecurityR
 const ConnectionRowPolicies = lazy(() => import('./pages/admin/ConnectionRowPolicies'))
 const AdminExportPolicy = lazy(() => import('./pages/admin/AdminExportPolicy'))
 const AdminMaps = lazy(() => import('./pages/admin/AdminMaps'))
+const AdminCalendar = lazy(() => import('./pages/admin/AdminCalendar'))
 const PlatformOrgs = lazy(() => import('./pages/admin/PlatformOrgs'))
 const ApiKeys = lazy(() => import('./pages/admin/ApiKeys'))
 const AdminSso = lazy(() => import('./pages/admin/AdminSso'))
@@ -131,6 +132,7 @@ export default function App() {
                 <Route path="admin/api-keys" element={<ApiKeys />} />
                 <Route path="admin/sso" element={<AdminSso />} />
                 <Route path="admin/maps" element={<AdminMaps />} />
+                <Route path="admin/calendar" element={<AdminCalendar />} />
                 <Route path="admin/audit" element={<AdminAudit />} />
               </Route>
               <Route element={<RequireSuperAdmin />}>

@@ -427,6 +427,12 @@ def _dimension_granularity_label(series: pd.Series, granularity: str) -> pd.Seri
         return label.where(dt.notna())
     if granularity == "day":
         return dt.dt.strftime("%Y-%m-%d")
+    from .fiscal import fiscal_label, parse as parse_fiscal
+    fiscal = parse_fiscal(granularity)
+    if fiscal:
+        # E10: FY2025/26, FY2025/26-Q1 (see services/fiscal.py). The start
+        # month rides on the token, put there by with_fiscal_start.
+        return fiscal_label(dt, fiscal[0], fiscal[1])
     if granularity in ("hijri_month", "hijri_year"):
         # Phase 7.5: the tabular Hijri calendar, labelled 1448-03 / 1448.
         from .hijri import hijri_label

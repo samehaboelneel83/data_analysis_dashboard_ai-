@@ -12,7 +12,7 @@ from ..core.capability import require_dataset_read
 from ..core.org_scope import check_org
 from ..core.rls import expand_author_expressions, resolve_denied_columns, resolve_rls_expr
 from ..dependencies import get_current_user
-from ..models.models import DataSource, Dataset, Report, User
+from ..models.models import DataSource, Dataset, Organization, Report, User
 from ..schemas.schemas import WidgetDataRequest
 from ..services.display_rules import result_frame
 from ..services.parameters import ParameterError, apply_report_parameters
@@ -299,6 +299,19 @@ async def _clear_scoring_model(req: WidgetDataRequest, db: AsyncSession, current
         "__model_meta__": {"id": model.id, "version": model.version or 1}}})
 
 
+async def _apply_fiscal_start(req: WidgetDataRequest, db: AsyncSession, org_id: int) -> WidgetDataRequest:
+    """E10: a fiscal year or quarter starts in the org's month (or the
+    widget's own). Carried on the granularity token from here on, so the
+    dimension, a drill filter on a clicked bucket and every engine agree."""
+    from ..services.fiscal import with_fiscal_start
+    config = req.config or {}
+    if with_fiscal_start(config, 1) is config:       # nothing fiscal: no lookup
+        return req
+    org = await db.get(Organization, org_id)
+    return req.model_copy(update={"config": with_fiscal_start(
+        config, org.fiscal_year_start_month if org else 1)})
+
+
 async def _resolve_widget_data(
     dataset_id: int, req: WidgetDataRequest, db: AsyncSession, current_user: User,
     *, email_override: str | None = None, org_id_override: int | None = None,
@@ -369,6 +382,7 @@ async def _resolve_widget_data(
         raise widget_error(422, "semantic_veto", veto["message"])
 
     req = await _apply_report_parameters(req, db, current_user)
+    req = await _apply_fiscal_start(req, db, current_user.org_id)
 
     calc_cols = list(req.calculated_columns or []) + list(ds.calculated_columns or [])
     measure_defs = list(ds.measures or [])

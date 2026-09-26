@@ -9,6 +9,13 @@ import panelSource from '../WidgetConfigPanel.tsx?raw'
 import modelSource from '../ModelSettings.tsx?raw'
 import migrations from './widgetConfigMigrations.json'
 
+// The panel reads the org's fiscal month when a fiscal grouping is picked;
+// answered here rather than by whatever server happens to be on :8000.
+vi.mock('../../../services/api', async (orig) => ({
+  ...(await orig<Record<string, unknown>>()),
+  calendarSettingsApi: { get: vi.fn().mockResolvedValue({ fiscal_year_start_month: 7 }), set: vi.fn() },
+}))
+
 /**
  * E03: a panel edit keeps what the panel does not manage, legacy config
  * shapes open as what they are, and "Percentage %" is offered where it is
@@ -223,6 +230,33 @@ describe('dates can be grouped on a dataset that has a drill hierarchy', () => {
     fireEvent.change(screen.getByLabelText('Group dates by'), { target: { value: 'month' } })
     act(() => { vi.advanceTimersByTime(700) })
     expect(onUpdate.mock.calls.at(-1)![0]).toMatchObject({ dimension: 'order_date', dimension_granularity: 'month' })
+  })
+
+  it('groups by fiscal year, following the org unless the widget names a month (E10)', async () => {
+    const onUpdate = vi.fn()
+    render(<CrossFilterProvider><WidgetConfigPanel widget={widget('line', { dimension: 'order_date', measure: 'revenue' })}
+      columns={withDate} hierarchy={hierarchy} onUpdate={onUpdate} pages={pages} /></CrossFilterProvider>)
+    fireEvent.change(screen.getByLabelText('Group dates by'), { target: { value: 'fiscal_year' } })
+    act(() => { vi.advanceTimersByTime(700) })
+    const followsOrg = onUpdate.mock.calls.at(-1)![0]
+    expect(followsOrg).toMatchObject({ dimension_granularity: 'fiscal_year' })
+    expect(followsOrg).not.toHaveProperty('fiscal_start_month')
+    await act(async () => { await Promise.resolve() })
+    expect(screen.getByRole('option', { name: "the organisation's month (July)" })).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('Fiscal year starts in'), { target: { value: '4' } })
+    act(() => { vi.advanceTimersByTime(700) })
+    expect(onUpdate.mock.calls.at(-1)![0]).toMatchObject({ dimension_granularity: 'fiscal_year', fiscal_start_month: 4 })
+    // Back to months: the start month goes with the fiscal grouping.
+    fireEvent.change(screen.getByLabelText('Group dates by'), { target: { value: 'month' } })
+    act(() => { vi.advanceTimersByTime(700) })
+    expect(onUpdate.mock.calls.at(-1)![0]).not.toHaveProperty('fiscal_start_month')
+  })
+
+  it('a forecast is not offered fiscal periods it cannot continue', () => {
+    render(<CrossFilterProvider><WidgetConfigPanel widget={widget('forecast', { dimension: 'order_date', measure: 'revenue' })}
+      columns={withDate} hierarchy={hierarchy} onUpdate={vi.fn()} pages={pages} /></CrossFilterProvider>)
+    const select = screen.queryByLabelText('Group dates by') as HTMLSelectElement | null
+    if (select) expect([...select.options].map(o => o.value)).not.toContain('fiscal_year')
   })
 
   it('not under a text dimension', () => {

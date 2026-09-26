@@ -649,6 +649,14 @@ export interface MapSettings {
   contrast_tile_url: string | null
 }
 
+export interface CalendarSettings { fiscal_year_start_month: number }
+
+/** The org's fiscal year (E10): the month it starts in. */
+export const calendarSettingsApi = {
+  get: () => api.get<CalendarSettings>('/calendar-settings').then(r => r.data),
+  set: (body: CalendarSettings) => api.put<CalendarSettings>('/calendar-settings', body).then(r => r.data),
+}
+
 export const mapSettingsApi = {
   get: () => api.get<MapSettings>('/map-settings').then(r => r.data),
   set: (body: MapSettings) => api.put<MapSettings>('/map-settings', body).then(r => r.data),

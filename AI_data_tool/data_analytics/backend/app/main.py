@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 from .core.database import engine, Base, AsyncSessionLocal
 from .models.models import Dataset, Report, DataSource, Organization, Role
 from .routers import datasets, analysis, reports, hierarchy, widget_data, data_sources, custom_connectors, auth, admin, relationships, demo, notifications, shared, widget_templates, platform, sso, metadata, embed, report_copilot
-from .routers import boundary_sets, map_settings, prediction_models, authz, review, semantic
+from .routers import boundary_sets, map_settings, calendar_settings, prediction_models, authz, review, semantic
 from .routers import workspace
 from .routers import dataflows
 from .routers import pins
@@ -73,6 +73,8 @@ async def _migrate(conn):
         "ALTER TABLE prediction_models DROP CONSTRAINT IF EXISTS uq_prediction_models_org_dataset_name",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_prediction_models_org_dataset_name_version "
         "ON prediction_models (org_id, dataset_id, name, version)",
+        # 0044: the org's fiscal year (see Organization.fiscal_year_start_month).
+        "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS fiscal_year_start_month INTEGER NOT NULL DEFAULT 1",
         "ALTER TABLE reports ADD COLUMN IF NOT EXISTS theme VARCHAR(20) NOT NULL DEFAULT 'default'",
         "ALTER TABLE reports ADD COLUMN IF NOT EXISTS display_rules JSON DEFAULT '[]'",
         # ── Layer 1 — Connectors & Ingestion ────────────────────────────────
@@ -594,6 +596,7 @@ app.include_router(data_sources.router, prefix="/api/v1")
 app.include_router(custom_connectors.router, prefix="/api/v1")
 app.include_router(boundary_sets.router, prefix="/api/v1")
 app.include_router(map_settings.router, prefix="/api/v1")
+app.include_router(calendar_settings.router, prefix="/api/v1")
 app.include_router(authz.router, prefix="/api/v1")
 app.include_router(review.router, prefix="/api/v1")
 app.include_router(semantic.router, prefix="/api/v1")

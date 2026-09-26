@@ -1,4 +1,4 @@
-import { Home, Bot, Database, GitBranch, Waypoints, LayoutDashboard, Sparkles, RefreshCw, Mail, Activity, Users, Shield, Lock, EyeOff, Download, Key, Fingerprint, ScrollText, Building2, Network, Upload, Plug, Map as MapIcon, Workflow, type LucideIcon } from 'lucide-react'
+import { Home, Bot, Database, GitBranch, Waypoints, LayoutDashboard, Sparkles, RefreshCw, Mail, Activity, Users, Shield, Lock, EyeOff, Download, Key, Fingerprint, ScrollText, Building2, Network, Upload, Plug, Map as MapIcon, Workflow, CalendarDays, type LucideIcon } from 'lucide-react'
 
 /**
  * The navigation tree, as data.
@@ -113,6 +113,7 @@ export const NAVIGATION: NavSection[] = [
       { to: '/admin/custom-connectors', label: 'Custom connectors', icon: Plug, permission: 'org_admin' },
       { to: '/admin/sso', label: 'Single sign-on', icon: Fingerprint, permission: 'org_admin' },
       { to: '/admin/maps', label: 'Maps', icon: MapIcon, permission: 'org_admin' },
+      { to: '/admin/calendar', label: 'Calendar', icon: CalendarDays, permission: 'org_admin' },
       { to: '/admin/audit', label: 'Audit trail', icon: ScrollText, permission: 'org_admin' },
     ],
   },

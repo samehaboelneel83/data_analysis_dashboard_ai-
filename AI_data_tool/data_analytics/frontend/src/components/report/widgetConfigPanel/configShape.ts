@@ -43,7 +43,7 @@ export const PANEL_KEYS: ReadonlySet<string> = new Set([
   'anim_label_style', 'anim_label_opacity', 'anim_label_box',
   // every type
   'dataset_id', 'drillthroughPageId', 'tooltipPageId', 'hierarchyNodeId',
-  'dimension_granularity', 'aggregation2', 'bar_mode', 'centrality_metric', 'method',
+  'dimension_granularity', 'fiscal_start_month', 'aggregation2', 'bar_mode', 'centrality_metric', 'method',
   'event_value', 'max_depth', 'compare', 'prediction_model_id', 'model_follows', 'forecast_target',
   'display_rules', 'analytics', 'container_mode', 'background_url', 'container_id', 'z',
   // formatting
@@ -83,7 +83,8 @@ export const SETTING_VOCABULARIES: Record<string, readonly string[]> = {
   y_scale: ['linear', 'log'],
   gauge_shape: ['arc', 'speedometer', 'bullet', 'thermometer', 'progress'],
   container_mode: ['group', 'tabs', 'scroll', 'prompt', 'precision'],
-  dimension_granularity: ['year', 'quarter', 'month', 'week', 'day', 'hijri_month', 'hijri_year'],
+  dimension_granularity: ['year', 'quarter', 'month', 'week', 'day', 'hijri_month', 'hijri_year',
+                          'fiscal_year', 'fiscal_quarter'],
 }
 
 let managed: Set<string> | null = null

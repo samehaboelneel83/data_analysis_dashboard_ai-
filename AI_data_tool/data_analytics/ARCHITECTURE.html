@@ -646,7 +646,7 @@ STAT_FAMILIES       = {"postgresql"}</code></pre>
       </tbody>
     </table>
   </div>
-  <p>Schema changes go through <strong>Alembic</strong> (<code>backend/alembic/</code>, 43 revisions). <code>postgres/init.sql</code> provides the initial schema and indexes.</p>
+  <p>Schema changes go through <strong>Alembic</strong> (<code>backend/alembic/</code>, 44 revisions). <code>postgres/init.sql</code> provides the initial schema and indexes.</p>
 
   <h3>Cache</h3>
   <p><code>services/cache_backend.py</code> defines a <code>CacheBackend</code> interface with two implementations — <code>InProcessCache</code> for single-process or test runs, and <code>ValkeyCache</code> for the deployed stack. <code>frame_cache.py</code> caches computed result frames; <code>core/rate_limit.py</code> uses the same backend for throttling.</p>
@@ -833,7 +833,7 @@ llm_reserved_interactive = 2</code></pre>
   <p class="owns"><strong>Owns:</strong> the HTTP surface, identity, and everything that leaves the system.</p>
 
   <h3>Routers</h3>
-  <p><strong>31 router modules</strong>, mounted with 33 <code>include_router</code> calls in <code>main.py</code> — <code>analysis</code> and <code>metadata</code> each expose a second router. All under <code>/api/v1</code> except the agent.</p>
+  <p><strong>32 router modules</strong>, mounted with 34 <code>include_router</code> calls in <code>main.py</code> — <code>analysis</code> and <code>metadata</code> each expose a second router. All under <code>/api/v1</code> except the agent.</p>
   <div class="scroll">
     <table>
       <thead><tr><th>Router</th><th>Surface</th></tr></thead>
@@ -858,6 +858,7 @@ llm_reserved_interactive = 2</code></pre>
         <tr><th><code>semantic</code></th><td>Governed semantic-layer API (datasets, measures, RLS)</td></tr>
         <tr><th><code>prediction_models</code></th><td>Train, save and score models</td></tr>
         <tr><th><code>boundary_sets</code>, <code>map_settings</code></th><td>Region boundaries, starter packs, basemap tiles</td></tr>
+        <tr><th><code>calendar_settings</code></th><td>The org's fiscal year (the month it starts in); charts group dates by fiscal year and quarter (<code>services/fiscal.py</code>)</td></tr>
         <tr><th><code>pins</code></th><td>Pinned tiles</td></tr>
         <tr><th><code>dataflows</code>, <code>custom_connectors</code></th><td>Reusable prep flows, admin-defined connectors</td></tr>
         <tr><th><code>jobs</code></th><td>Durable background jobs: list, progress, cancel, retry</td></tr>
@@ -1157,8 +1158,8 @@ llm_reserved_interactive = 2</code></pre>
     <table>
       <thead><tr><th>Suite</th><th>Scope</th><th>Count</th></tr></thead>
       <tbody>
-        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~5,300 tests · 414 modules</td></tr>
-        <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~2,950 tests · 229 files</td></tr>
+        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~5,300 tests · 415 modules</td></tr>
+        <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~2,950 tests · 230 files</td></tr>
         <tr><th>Evals</th><td><code>backend/evals/</code></td><td>Agent quality gates (<code>run_eval_gate.ps1</code>)</td></tr>
         <tr><th>Conformance</th><td><code>tests/test_layer_conformance.py</code></td><td>Enforces the layer boundaries above</td></tr>
         <tr><th>Doc audit</th><td><code>tests/test_architecture_doc.py</code></td><td>Enforces the <em>counts</em> in this document</td></tr>

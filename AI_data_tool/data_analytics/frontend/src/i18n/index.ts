@@ -31,6 +31,7 @@ export const PATH_MESSAGE: [string, MessageKey][] = [
   ['/admin/api-keys', 'nav.apiKeys'],
   ['/admin/sso', 'nav.sso'],
   ['/admin/maps', 'nav.maps'],
+  ['/admin/calendar', 'nav.calendar'],
   ['/admin/audit', 'nav.audit'],
   // Admin pages that are reachable but not in the rail still need a title:
   // without an entry here the bar falls back to "Home", which reads as if
@@ -62,6 +63,7 @@ export const NAV_ITEM_MESSAGE: Record<string, MessageKey> = {
   '/admin/api-keys': 'nav.apiKeys',
   '/admin/sso': 'nav.sso',
   '/admin/maps': 'nav.maps',
+  '/admin/calendar': 'nav.calendar',
   '/admin/audit': 'nav.audit',
   '/admin/custom-connectors': 'nav.customConnectors',
   '/platform/organizations': 'nav.organizations',

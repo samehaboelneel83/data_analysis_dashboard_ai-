@@ -1162,7 +1162,7 @@ SQLAlchemy, grouped by concern:
 | Platform | `saml_authn_requests`, `org_mcp_access`, `eval_runs` |
 | Ops | `sync_runs`, `schema_versions`, `column_stats`, `materializations`, `quotas`, `query_runs`, `ai_usage` |
 
-Schema changes go through **Alembic** (`backend/alembic/`, 43 revisions).
+Schema changes go through **Alembic** (`backend/alembic/`, 44 revisions).
 `postgres/init.sql` provides the initial schema and indexes.
 
 ### Cache
@@ -1491,7 +1491,7 @@ breaks an org's tokens down by day, feature and person.
 
 ### Routers
 
-**31 router modules**, mounted with 33 `include_router` calls in `main.py` --
+**32 router modules**, mounted with 34 `include_router` calls in `main.py` --
 `analysis` and `metadata` each expose a second router. All under `/api/v1`
 except the agent:
 
@@ -1517,6 +1517,7 @@ except the agent:
 | `semantic` | Governed semantic-layer API (datasets, measures, RLS) |
 | `prediction_models` | Train, save and score models |
 | `boundary_sets`, `map_settings` | Region boundaries, starter packs, basemap tiles |
+| `calendar_settings` | The org's fiscal year (the month it starts in); charts group dates by fiscal year and quarter (`services/fiscal.py`) |
 | `pins` | Pinned tiles |
 | `dataflows`, `custom_connectors` | Reusable prep flows, admin-defined connectors |
 | `jobs` | Durable background jobs: list, progress, cancel, retry |
@@ -2333,8 +2334,8 @@ Agent pane (7)
 
 | Suite | Scope | Count |
 |-------|-------|-------|
-| Backend | `backend/tests/` | ~5,300 tests across 414 modules |
-| Frontend | colocated `*.test.ts(x)` | ~2,950 tests across 229 files |
+| Backend | `backend/tests/` | ~5,300 tests across 415 modules |
+| Frontend | colocated `*.test.ts(x)` | ~2,950 tests across 230 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |
 | Doc audit | `tests/test_architecture_doc.py` | Enforces the *counts* in this document |

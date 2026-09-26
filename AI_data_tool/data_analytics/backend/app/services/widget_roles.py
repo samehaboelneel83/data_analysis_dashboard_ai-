@@ -307,7 +307,8 @@ VOCABULARIES: dict[str, frozenset] = {
     "gauge_shape": frozenset({"arc", "speedometer", "bullet", "thermometer", "progress"}),
     "container_mode": frozenset({"group", "tabs", "scroll", "prompt", "precision"}),
     "dimension_granularity": frozenset({"year", "quarter", "month", "week", "day",
-                                        "hijri_month", "hijri_year"}),
+                                        "hijri_month", "hijri_year",
+                                        "fiscal_year", "fiscal_quarter"}),
 }
 _CASE_FOLDED = frozenset({"sort", "sort_by", "dimension_granularity"})
 INTERACTION_KEYS = frozenset({"broadcasts", "receives", "syncAllPages", "receiveMode", "actions"})

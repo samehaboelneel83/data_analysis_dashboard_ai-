@@ -499,6 +499,10 @@ class Organization(Base):
     id         = Column(Integer, primary_key=True)
     name       = Column(String(255), nullable=False)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    #: The month (1-12) the org's fiscal year starts in (E10, migration 0044).
+    #: Widgets grouped by fiscal year or quarter use it unless they name their
+    #: own; 1 makes the fiscal year the calendar year.
+    fiscal_year_start_month = Column(Integer, nullable=False, default=1, server_default="1")
 
     roles = relationship("Role", back_populates="organization", cascade="all, delete-orphan")
     users = relationship("User", back_populates="organization", cascade="all, delete-orphan")

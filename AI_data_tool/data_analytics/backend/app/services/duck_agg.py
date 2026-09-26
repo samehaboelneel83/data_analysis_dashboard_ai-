@@ -78,6 +78,7 @@ _SUPPORTED_KEYS = frozenset({
     "sort_by",       # applied by the shaper, not here
     "sort_col",      # only when it equals the dimension; checked below
     "dimension_granularity",  # date bucketing; the label SQL is below
+    "fiscal_start_month",     # inert: read only for a fiscal granularity, which has no SQL below
     "__demo__",      # a marker the demo fixtures carry; affects nothing
     # Totals presentation. Inert here: `show_subtotals` only acts on a crosstab
     # (`dimension2`, declined above) and the other two only when `show_totals`
