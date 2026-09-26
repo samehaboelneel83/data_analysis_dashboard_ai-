@@ -1982,6 +1982,52 @@ export interface Job {
 
 export const isJobActive = (j: Pick<Job, 'state'>) => j.state === 'queued' || j.state === 'running'
 
+/** E12: an automated analysis run (routers/automation.py). */
+export type AutomationStatus = 'pending' | 'running' | 'failed' | 'needs_review' | 'done' | 'cancelled'
+export interface AutomationStepRow {
+  name: string
+  label: string
+  order: number
+  status: 'pending' | 'running' | 'ok' | 'failed'
+  attempts: number
+  error: string | null
+  next_attempt_at: string | null
+  started_at: string | null
+  finished_at: string | null
+}
+export interface AutomationRunRow {
+  id: number
+  status: AutomationStatus
+  trigger: string
+  created_by: number | null
+  dataset: { id: number; name: string } | null
+  created_at: string | null
+  finished_at: string | null
+  error: string | null
+  summary: string | null
+  result_report: { id: number; name: string | null } | null
+  steps: AutomationStepRow[]
+  proposal_path?: string | null
+  widgets_accepted?: number | null
+  widgets_rejected?: number | null
+  rejection_reasons?: { title?: string; widget_type?: string; reason?: string }[]
+}
+export const isAutomationActive = (r: Pick<AutomationRunRow, 'status'>) =>
+  r.status === 'pending' || r.status === 'running' || r.status === 'failed'
+
+export const automationApi = {
+  list: (params: { dataset_id?: number } = {}) =>
+    api.get<AutomationRunRow[]>('/automation/runs', { params }).then(r => r.data),
+  get: (id: number) => api.get<AutomationRunRow>(`/automation/runs/${id}`).then(r => r.data),
+  start: (datasetId: number) =>
+    api.post<AutomationRunRow>('/automation/runs', { dataset_id: datasetId }).then(r => r.data),
+  approve: (id: number) => api.post<AutomationRunRow>(`/automation/runs/${id}/approve`).then(r => r.data),
+  reject: (id: number, reason?: string) =>
+    api.post<AutomationRunRow>(`/automation/runs/${id}/reject`, { reason: reason || null }).then(r => r.data),
+  cancel: (id: number) => api.post<AutomationRunRow>(`/automation/runs/${id}/cancel`).then(r => r.data),
+  retry: (id: number) => api.post<AutomationRunRow>(`/automation/runs/${id}/retry`).then(r => r.data),
+}
+
 export const jobsApi = {
   list: (params: { kind?: string; state?: JobState; active?: boolean; limit?: number } = {}) =>
     api.get<Job[]>('/jobs', { params }).then(r => r.data),

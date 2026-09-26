@@ -41,6 +41,7 @@ const AdminColumnSecurityRules = lazy(() => import('./pages/admin/AdminColumnSec
 const AdminOrgUnits = lazy(() => import('./pages/admin/AdminOrgUnits'))
 const AskAI = lazy(() => import('./pages/AskAI'))
 const InsightsHub = lazy(() => import('./pages/InsightsHub'))
+const Automations = lazy(() => import('./pages/Automations'))
 const MonitoringJobs = lazy(() => import('./pages/monitoring/MonitoringJobs'))
 const MonitoringDeliveries = lazy(() => import('./pages/monitoring/MonitoringDeliveries'))
 const MonitoringActivity = lazy(() => import('./pages/monitoring/MonitoringActivity'))
@@ -95,6 +96,7 @@ export default function App() {
               <Route path="upload" element={<Upload />} />
               <Route path="ask" element={<AskAI />} />
               <Route path="insights" element={<InsightsHub />} />
+              <Route path="automation" element={<Automations />} />
               <Route path="datasets/:id" element={<DatasetDetail />} />
               <Route path="reports" element={<Reports />} />
               <Route path="reports/:id" element={<ReportBuilder />} />

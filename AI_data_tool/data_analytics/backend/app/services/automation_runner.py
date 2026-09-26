@@ -552,12 +552,14 @@ def describe_run(run: AutomationRun) -> tuple[str, str | None]:
 
     Two shapes, because the reader acts on one and not the other: a
     finished run is something to open, a held run is something to decide.
-    A held run has no report yet, so its link is None until runs get a page
-    of their own -- a link to nowhere would be worse than no link.
+    A held run has no report yet, so it links to its own page, where the
+    decision is made (E12: runs have one now, /automation?run=<id>).
     """
     accepted = run.widgets_accepted or 0
     rejected = run.widgets_rejected or 0
     link = f"/reports/{run.result_report_id}" if run.result_report_id else None
+    if run.status == NEEDS_REVIEW and link is None:
+        link = f"/automation?run={run.id}"
     if run.status == NEEDS_REVIEW:
         why = f" {run.error}." if run.error else ""
         return (f"Your automated analysis needs a decision:{why} "
@@ -1593,11 +1595,29 @@ async def _fail(session, run: AutomationRun, step: AutomationStep,
     step.attempts = (step.attempts or 0) + 1
     step.next_attempt_at = now + timedelta(minutes=backoff_minutes(step.attempts))
     step.finished_at = now
-    run.status = "failed"
+    if not await _cancelled_meanwhile(session, run):
+        run.status = "failed"
     await session.commit()
     log.warning("automation run %s step %s failed (attempt %s), next try in "
                 "%s min: %s", run.id, step.name, step.attempts,
                 backoff_minutes(step.attempts), step.error)
+
+
+async def _cancelled_meanwhile(session, run: AutomationRun) -> bool:
+    """Whether someone cancelled the run while its step was running (E12).
+
+    Cancelling is a write from another request; this worker's copy of the run
+    still says `running`, and writing its own verdict over the top would
+    resurrect a run a person stopped. Read from the database, not the copy."""
+    # No autoflush: flushing this worker's own pending status first would
+    # overwrite the cancellation before it could be read.
+    with session.no_autoflush:
+        current = (await session.execute(
+            select(AutomationRun.status).where(AutomationRun.id == run.id))).scalar()
+    if current == "cancelled":
+        run.status = "cancelled"
+        return True
+    return False
 
 
 async def _succeed(session, run: AutomationRun, step: AutomationStep,
@@ -1613,7 +1633,10 @@ async def _succeed(session, run: AutomationRun, step: AutomationStep,
     step.finished_at = now
 
     remaining = [s for s in steps if s is not step and not s.output_ref]
-    if run.status == NEEDS_REVIEW:
+    if await _cancelled_meanwhile(session, run):
+        # The step's work is kept (its ref is its record); the run stays stopped.
+        pass
+    elif run.status == NEEDS_REVIEW:
         # The step succeeded -- it reviewed, and its artifact says what it
         # found -- but it stopped the RUN for a person. Saying "running" here
         # would put it straight back in the queue on the next tick and undo the

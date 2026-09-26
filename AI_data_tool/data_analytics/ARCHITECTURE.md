@@ -39,7 +39,7 @@ what it owns, where its code lives, and the contract it exposes to the layer abo
 | 3 | **Storage & Persistence** | Durable state and cached state | `models/models.py`, `alembic/`, `services/cache_backend.py` |
 | 4 | **Query & Semantic** | Translating widget intent into safe, governed SQL | `services/query_builder.py`, `widget_data.py`, `widget_shaping.py`, `direct_query.py`, `duck_agg.py`, `prep.py`, `sql_expr.py`, `core/rls.py` |
 | 5 | **Analytics & AI** | Statistics, forecasting, anomaly detection, NL→SQL | `services/analysis/`, `services/agent/`, `analytics.py` |
-| 6 | **API & Services** | HTTP surface, authn/authz, delivery, sharing | `routers/` (30 modules), `core/security.py`, `services/delivery.py`, `refresh_scheduler.py`, `services/automation_runner.py` |
+| 6 | **API & Services** | HTTP surface, authn/authz, delivery, sharing | `routers/` (31 modules), `core/security.py`, `services/delivery.py`, `refresh_scheduler.py`, `services/automation_runner.py` |
 | 7 | **Presentation** | Report authoring and rendering | `frontend/src/pages/`, `components/report/` |
 
 Layers depend **downward only**. Layer 7 never reaches past Layer 6; Layer 6
@@ -1478,7 +1478,7 @@ breaks an org's tokens down by day, feature and person.
 
 ### Routers
 
-**30 router modules**, mounted with 32 `include_router` calls in `main.py` --
+**31 router modules**, mounted with 33 `include_router` calls in `main.py` --
 `analysis` and `metadata` each expose a second router. All under `/api/v1`
 except the agent:
 
@@ -1507,6 +1507,7 @@ except the agent:
 | `pins` | Pinned tiles |
 | `dataflows`, `custom_connectors` | Reusable prep flows, admin-defined connectors |
 | `jobs` | Durable background jobs: list, progress, cancel, retry |
+| `automation` | Automated analysis runs: start, watch, approve or reject, cancel, retry (E12) |
 | `agent` | NL query (mounted at root) |
 
 ### Durable jobs
@@ -1569,6 +1570,17 @@ single source of truth for both the names and their order.
 | 5 | `review` | real — deterministic gate over the proposals; below the pass ratio the run stops at `needs_review` and the creator is told |
 | 6 | `compose` | real — the report, from the accepted widgets only; structural name, row values redacted from persisted text |
 | 7 | `notify` | real — one in-app notification to the creator, rendered from the typed record |
+
+**Started, watched and answered from the product (E12).** `routers/automation.py`
+starts a run on an imported dataset as the caller (authoring, like training a
+model; one unfinished run per dataset, a second start is a 409 naming it), lists
+the caller's runs (an admin's: the org's), shows one step by step, approves or
+rejects a held run, cancels an unfinished one and retries a failed step without
+waiting out its backoff. Every action is audited. The **Automations** page
+(Analyse → Automations, `/automation`) is its screen; a held run's notification
+links to `/automation?run=<id>`. A cancel is a write from another request, so
+the runner reads the run's status before recording a step's outcome and keeps
+`cancelled` rather than reviving the run.
 
 #### Step 4 is where customer data leaves the chain
 
@@ -2057,13 +2069,14 @@ React 18 · TypeScript · Vite · Recharts.
 
 ### Pages
 
-**17 pages** in `frontend/src/pages/`:
+**18 pages** in `frontend/src/pages/`:
 
 | Page | Purpose |
 |------|---------|
 | `ReportBuilder.tsx` | The designer — the largest module in the codebase |
 | `DatasetDetail.tsx` | Analysis viewer |
 | `Dashboard.tsx`, `Reports.tsx` | Dataset and report lists |
+| `Automations.tsx` | Automated analysis runs: start, follow, decide, cancel, retry (E12) |
 | `Upload.tsx` | Drag-and-drop ingestion |
 | `Connections.tsx` | Data source management |
 | `SourceReview.tsx` | Metadata review and approval |
@@ -2297,8 +2310,8 @@ Agent pane (7)
 
 | Suite | Scope | Count |
 |-------|-------|-------|
-| Backend | `backend/tests/` | ~5,300 tests across 411 modules |
-| Frontend | colocated `*.test.ts(x)` | ~2,950 tests across 226 files |
+| Backend | `backend/tests/` | ~5,300 tests across 412 modules |
+| Frontend | colocated `*.test.ts(x)` | ~2,950 tests across 227 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |
 | Doc audit | `tests/test_architecture_doc.py` | Enforces the *counts* in this document |

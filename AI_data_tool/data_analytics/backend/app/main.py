@@ -19,6 +19,7 @@ from .routers import workspace
 from .routers import dataflows
 from .routers import pins
 from .routers import jobs as jobs_router
+from .routers import automation as automation_router
 from .routers import agent as agent_router
 
 
@@ -611,6 +612,7 @@ app.include_router(platform.router,      prefix="/api/v1")
 app.include_router(sso.router,           prefix="/api/v1")
 app.include_router(pins.router,          prefix="/api/v1")
 app.include_router(jobs_router.router,   prefix="/api/v1")
+app.include_router(automation_router.router, prefix="/api/v1")
 # Layer 1 — metadata plane. Two routers because the routes hang off two
 # different resources: sync/review/drift under a data source, column
 # statistics under a dataset.

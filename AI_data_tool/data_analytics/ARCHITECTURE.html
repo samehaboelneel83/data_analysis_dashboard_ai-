@@ -255,7 +255,7 @@
     <a class="slab" data-l="4" href="#l4"><span class="sn">04</span><span class="st">Query &amp; Semantic</span><span class="sd">25 aggregations · RLS</span></a>
     <a class="slab" data-l="5" href="#l5"><span class="sn">05</span><span class="st">Analytics &amp; AI</span><span class="sd">stats · forecast · NL→SQL</span></a>
     <a class="slab" data-l="6" href="#l6"><span class="sn">06</span><span class="st">API &amp; Services</span><span class="sd">19 routers · auth · delivery</span></a>
-    <a class="slab" data-l="7" href="#l7"><span class="sn">07</span><span class="st">Presentation</span><span class="sd">57 widgets · 17 pages</span></a>
+    <a class="slab" data-l="7" href="#l7"><span class="sn">07</span><span class="st">Presentation</span><span class="sd">57 widgets · 18 pages</span></a>
   </div>
   <p class="flowhint">↑ data flows upward · dependencies point downward ↓</p>
 
@@ -268,7 +268,7 @@
         <tr><td class="num">3</td><th>Storage &amp; Persistence</th><td>Durable state and cached state</td><td><code>models/models.py</code>, <code>alembic/</code>, <code>cache_backend.py</code></td></tr>
         <tr><td class="num">4</td><th>Query &amp; Semantic</th><td>Translating widget intent into safe, governed SQL</td><td><code>query_builder.py</code>, <code>widget_data.py</code>, <code>widget_shaping.py</code>, <code>direct_query.py</code>, <code>duck_agg.py</code>, <code>prep.py</code>, <code>core/rls.py</code></td></tr>
         <tr><td class="num">5</td><th>Analytics &amp; AI</th><td>Statistics, forecasting, anomaly detection, NL→SQL</td><td><code>services/analysis/</code>, <code>services/agent/</code>, <code>analytics.py</code></td></tr>
-        <tr><td class="num">6</td><th>API &amp; Services</th><td>HTTP surface, authn/authz, delivery, sharing</td><td><code>routers/</code> (30 modules), <code>core/security.py</code>, <code>delivery.py</code>, <code>refresh_scheduler.py</code>, <code>services/automation_runner.py</code></td></tr>
+        <tr><td class="num">6</td><th>API &amp; Services</th><td>HTTP surface, authn/authz, delivery, sharing</td><td><code>routers/</code> (31 modules), <code>core/security.py</code>, <code>delivery.py</code>, <code>refresh_scheduler.py</code>, <code>services/automation_runner.py</code></td></tr>
         <tr><td class="num">7</td><th>Presentation</th><td>Report authoring and rendering</td><td><code>frontend/src/pages/</code>, <code>components/report/</code></td></tr>
       </tbody>
     </table>
@@ -832,7 +832,7 @@ llm_reserved_interactive = 2</code></pre>
   <p class="owns"><strong>Owns:</strong> the HTTP surface, identity, and everything that leaves the system.</p>
 
   <h3>Routers</h3>
-  <p><strong>30 router modules</strong>, mounted with 32 <code>include_router</code> calls in <code>main.py</code> — <code>analysis</code> and <code>metadata</code> each expose a second router. All under <code>/api/v1</code> except the agent.</p>
+  <p><strong>31 router modules</strong>, mounted with 33 <code>include_router</code> calls in <code>main.py</code> — <code>analysis</code> and <code>metadata</code> each expose a second router. All under <code>/api/v1</code> except the agent.</p>
   <div class="scroll">
     <table>
       <thead><tr><th>Router</th><th>Surface</th></tr></thead>
@@ -860,6 +860,7 @@ llm_reserved_interactive = 2</code></pre>
         <tr><th><code>pins</code></th><td>Pinned tiles</td></tr>
         <tr><th><code>dataflows</code>, <code>custom_connectors</code></th><td>Reusable prep flows, admin-defined connectors</td></tr>
         <tr><th><code>jobs</code></th><td>Durable background jobs: list, progress, cancel, retry</td></tr>
+        <tr><th><code>automation</code></th><td>Automated analysis runs: start, watch, approve or reject, cancel, retry (E12)</td></tr>
         <tr><th><code>agent</code></th><td>NL query (mounted at root)</td></tr>
       </tbody>
     </table>
@@ -869,6 +870,7 @@ llm_reserved_interactive = 2</code></pre>
   <p><code>services/jobs.py</code> is the plan's <code>Job</code> contract: long work runs outside the request that asked for it, in a worker loop started in <code>main.lifespan</code> (one per process, <code>JOB_WORKER_ENABLED</code>). Database imports are the first workload: <code>POST /data-sources/{id}/import-jobs</code> answers at once with a queued job, and <code>GET /jobs/{id}</code> reports its progress and, when it succeeds, the dataset id. <code>POST /data-sources/{id}/import</code> still imports inside the request; both run <code>services/source_import.py</code>.</p>
   <p>Manual dataset refreshes are the second (E12): <code>POST /datasets/{id}/refresh-jobs</code> queues the refresh <code>POST /datasets/{id}/refresh</code> runs inside the request; both run <code>services/refresh_jobs.refresh_now</code>. The dataset page queues it and follows the job (stage, Stop, the schema-break mapping from the failed job's <code>result</code>). One refresh per dataset at a time: a second request gets the running job back (its owner) or a 409, the synchronous endpoint refuses while one is queued, and the scheduler skips the dataset. The queued refresh fetches without touching the file and writes it only after fencing its success, so an attempt that lost its lease cannot append the same rows twice.</p>
   <p>Scheduled deliveries are the third (E12, <code>services/delivery_jobs.py</code>). With a job worker the scheduler no longer sends: it queues one <code>delivery.schedule</code> job per due occurrence, keyed by the schedule, the run the occurrence follows and its failure count, so every process that sees the same occurrence names the same job. The job claims the occurrence before sending, with a compare-and-set on the schedule row (<code>last_run_at</code> still the run it follows) committed together with a fenced write to its own row; a second job, a racing process or an author's Send now in between finds the row moved on and skips. Sending is at most once: an attempt resumed after the claim does not send again but says on the schedule that it was interrupted and not resent. A delivery that cannot be built fails its job and backs off; the next due tick queues a new one. With <code>JOB_WORKER_ENABLED</code> off the tick sends inline, as before.</p>
+  <p><strong>Automated analysis runs, from the product (E12).</strong> <code>routers/automation.py</code> starts a run of the seven-step automation chain (<code>services/automation_runner.py</code>) on an imported dataset as the caller (authoring; one unfinished run per dataset, a second start is a 409 naming it), lists the caller's runs (an admin's: the org's), shows one step by step, approves or rejects a held run, cancels an unfinished one and retries a failed step without waiting out its backoff; every action is audited. The <strong>Automations</strong> page (<code>/automation</code>) is its screen, and a held run's notification links to <code>/automation?run=&lt;id&gt;</code>. The runner reads a run's status before recording a step's outcome, so a cancel from another request is kept rather than revived.</p>
   <div class="scroll">
     <table>
       <thead><tr><th>Property</th><th>How</th></tr></thead>
@@ -989,7 +991,7 @@ llm_reserved_interactive = 2</code></pre>
   <p class="owns"><strong>Owns:</strong> authoring and rendering reports. React 18 · TypeScript · Vite · Recharts.</p>
 
   <h3>Pages</h3>
-  <p><strong>17 pages</strong> in <code>frontend/src/pages/</code>.</p>
+  <p><strong>18 pages</strong> in <code>frontend/src/pages/</code>.</p>
   <div class="scroll">
     <table>
       <thead><tr><th>Page</th><th>Purpose</th></tr></thead>
@@ -1154,8 +1156,8 @@ llm_reserved_interactive = 2</code></pre>
     <table>
       <thead><tr><th>Suite</th><th>Scope</th><th>Count</th></tr></thead>
       <tbody>
-        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~5,300 tests · 411 modules</td></tr>
-        <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~2,950 tests · 226 files</td></tr>
+        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~5,300 tests · 412 modules</td></tr>
+        <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~2,950 tests · 227 files</td></tr>
         <tr><th>Evals</th><td><code>backend/evals/</code></td><td>Agent quality gates (<code>run_eval_gate.ps1</code>)</td></tr>
         <tr><th>Conformance</th><td><code>tests/test_layer_conformance.py</code></td><td>Enforces the layer boundaries above</td></tr>
         <tr><th>Doc audit</th><td><code>tests/test_architecture_doc.py</code></td><td>Enforces the <em>counts</em> in this document</td></tr>
