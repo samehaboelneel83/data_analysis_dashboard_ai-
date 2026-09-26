@@ -4,7 +4,7 @@ import { Brain } from 'lucide-react'
 import EmptyState from '../ui/EmptyState'
 import { useT } from '../../i18n'
 import { predictionModelsApi } from '../../services/api'
-import type { DatasetColumn, PredictionModelSummary, ScoreResult } from '../../services/api'
+import type { DatasetColumn, DatasetSummaryForCard, PredictionModelSummary, ScoreResult } from '../../services/api'
 
 /**
  * Models kept so they can score rows they have never seen.
@@ -24,13 +24,68 @@ import type { DatasetColumn, PredictionModelSummary, ScoreResult } from '../../s
  *   the reader may not see is refused by the server with an explanation they
  *   can act on; rendering that as an empty result would send them hunting a bug.
  */
-export default function PredictionModelsPanel({ datasetId, columns, mode }: {
+const fmt = (v: number | null | undefined) => (v == null ? '—' : Number.isInteger(v) ? String(v) : v.toFixed(3))
+
+/** E13: how a saved model was chosen and on what, and whether the data has
+ *  moved since. */
+export function ModelCardView({ m, dataset }: { m: PredictionModelSummary; dataset?: DatasetSummaryForCard }) {
+  const c = m.card
+  if (!c) {
+    return <p style={{ fontSize: 11, color: 'var(--muted)', margin: 0 }}>
+      This model was saved before model cards were kept, so how it was chosen was not recorded.
+    </p>
+  }
+  const then = c.dataset
+  const changed = !!(then && dataset && (
+    (then.content_sha256 && dataset.content_sha256 && then.content_sha256 !== dataset.content_sha256)
+    || (then.row_count != null && dataset.row_count != null && then.row_count !== dataset.row_count)
+    || (!!then.last_refreshed_at && !!dataset.last_refreshed_at
+        && new Date(then.last_refreshed_at).getTime() !== new Date(dataset.last_refreshed_at).getTime())))
+  const split = c.split?.kind === 'partition' ? `the Training rows of ${c.split.column ?? c.partition}`
+    : c.split ? `a random ${Math.round((1 - (c.split.test_share ?? 0.25)) * 100)}% of rows` : '—'
+  const skipped = (c.predictors_skipped ?? []).map(s => typeof s === 'string' ? s : `${s.column}${s.reason ? ` (${s.reason})` : ''}`)
+  return (
+    <div data-testid="model-card" style={{ fontSize: 11.5, display: 'grid', gap: 6 }}>
+      {changed && (
+        <p role="status" style={{ margin: 0, color: '#b45309' }}>
+          The dataset has changed since this model was trained ({then?.row_count ?? '?'} rows then,
+          {' '}{dataset?.row_count ?? '?'} now). Its score describes the data it saw; retrain to grade it on today's.
+        </p>
+      )}
+      <div>Trained by <b>{c.trained_by ?? 'unknown'}</b> on {c.trained_at?.replace('T', ' ') ?? '—'}, over {c.row_scope ?? 'every row'}.</div>
+      <div>
+        Chosen on {split}: <b>{c.model_family}</b> scored {c.score_name} {fmt(c.score)} on {c.n_test ?? '?'} held-out rows,
+        against {fmt(c.baseline_score)} for a model that always guesses the usual answer
+        {c.beats_baseline === false ? <b> — it does not beat that guess.</b> : '.'} It was then refit on all {c.n_fitted ?? '?'} usable rows.
+      </div>
+      {(c.candidates?.length ?? 0) > 0 && (
+        <table aria-label={`Candidates compared for ${m.name} v${m.version ?? 1}`} style={{ borderCollapse: 'collapse', maxWidth: 360 }}>
+          <thead><tr><th style={{ textAlign: 'start', padding: '2px 8px' }}>Candidate</th>
+            <th style={{ textAlign: 'end', padding: '2px 8px' }}>{c.score_name || 'score'}</th></tr></thead>
+          <tbody>
+            {c.candidates!.map(k => (
+              <tr key={k.model}><td style={{ padding: '2px 8px' }}>{k.model}{k.model === c.model_family ? ' ★' : ''}</td>
+                <td style={{ textAlign: 'end', padding: '2px 8px', fontVariantNumeric: 'tabular-nums' }}>{fmt(k.score)}</td></tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <div>Predictors: {(c.predictors_used ?? m.features).join(', ') || '—'}
+        {skipped.length > 0 && <> · left out: {skipped.join(', ')}</>}</div>
+      {(c.caveats?.length ?? 0) > 0 && <ul style={{ margin: 0, paddingInlineStart: 18 }}>{c.caveats!.map(x => <li key={x}>{x}</li>)}</ul>}
+    </div>
+  )
+}
+
+export default function PredictionModelsPanel({ datasetId, columns, mode, dataset }: {
   datasetId: number
   columns: DatasetColumn[]
   /** The dataset's mode. Training reads every row and stores a derivative, so
    *  it is import-only — and a form that cannot work must say so rather than
    *  fail on the button. */
   mode?: string
+  /** The dataset as it is now, for the card's "changed since training". */
+  dataset?: DatasetSummaryForCard
 }) {
   const t = useT()
   const [models, setModels] = useState<PredictionModelSummary[]>([])
@@ -42,6 +97,7 @@ export default function PredictionModelsPanel({ datasetId, columns, mode }: {
   const [result, setResult] = useState<ScoreResult | null>(null)
   const [scoreError, setScoreError] = useState<string | null>(null)
   const [scoringId, setScoringId] = useState<number | null>(null)
+  const [cardFor, setCardFor] = useState<number | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -98,6 +154,22 @@ export default function PredictionModelsPanel({ datasetId, columns, mode }: {
       setScoringId(null)
     }
   }
+
+  const promote = async (m: PredictionModelSummary) => {
+    try {
+      await predictionModelsApi.promote(datasetId, m.id)
+      toast.success(`v${m.version ?? 1} of "${m.name}" is now the champion`)
+      await load()
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      toast.error(detail || 'Could not make that version the champion')
+    }
+  }
+
+  // Each name's versions together, the champion first, then newest first.
+  const ordered = [...models].sort((a, b) => a.name.localeCompare(b.name)
+    || Number(b.status === 'champion') - Number(a.status === 'champion')
+    || (b.version ?? 1) - (a.version ?? 1))
 
   const remove = async (m: PredictionModelSummary) => {
     try {
@@ -177,17 +249,32 @@ export default function PredictionModelsPanel({ datasetId, columns, mode }: {
             : t('models.emptyBody')} />
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {models.map(m => (
-            <div key={m.id} style={{
+          {ordered.map(m => (
+            <div key={m.id} data-testid={`model-${m.id}`} style={{
               border: '1px solid var(--border)', borderRadius: 8, padding: 10,
               display: 'flex', flexDirection: 'column', gap: 6,
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <strong style={{ fontSize: 12 }}>{m.name}</strong>
+                <span style={{ fontSize: 11, color: 'var(--muted)' }}>v{m.version ?? 1}</span>
+                {m.status === 'champion'
+                  ? <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--accent)', border: '1px solid var(--accent)',
+                      borderRadius: 999, padding: '0 6px' }}>Champion</span>
+                  : <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>candidate</span>}
                 <span style={{ fontSize: 11, color: 'var(--muted)' }}>
                   predicts <code>{m.target}</code> from {m.features.join(', ')}
                 </span>
                 <span style={{ marginInlineStart: 'auto', display: 'flex', gap: 6 }}>
+                  {m.status !== 'champion' && (
+                    <button onClick={() => void promote(m)} className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '3px 8px' }}
+                      title="Dashboards that follow the champion score with this version from now on">
+                      Make champion
+                    </button>
+                  )}
+                  <button onClick={() => setCardFor(cardFor === m.id ? null : m.id)} aria-expanded={cardFor === m.id}
+                    className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '3px 8px' }}>
+                    Model card
+                  </button>
                   <button onClick={() => void score(m)} disabled={scoringId === m.id}
                     className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '3px 8px' }}>
                     {scoringId === m.id ? 'Scoring…' : 'Score this dataset'}
@@ -203,6 +290,7 @@ export default function PredictionModelsPanel({ datasetId, columns, mode }: {
                 {m.model_family}
                 {m.score != null && <> · {m.score_name || 'score'} {m.score}</>}
               </div>
+              {cardFor === m.id && <ModelCardView m={m} dataset={dataset} />}
             </div>
           ))}
         </div>
@@ -215,7 +303,8 @@ export default function PredictionModelsPanel({ datasetId, columns, mode }: {
       {result && (
         <div style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 10 }}>
           <div style={{ fontSize: 12 }}>
-            Scored <strong>{result.n_scored} rows</strong> for <code>{result.target}</code>.
+            Scored <strong>{result.n_scored} rows</strong> for <code>{result.target}</code>
+            {result.model && <> with {result.model.name} v{result.model.version}</>}.
           </div>
           {Object.keys(result.unseen_values).length > 0 && (
             <p style={{ fontSize: 11, color: '#f59e0b', margin: '6px 0 0' }}>

@@ -203,18 +203,27 @@ async def _clear_scoring_model(req: WidgetDataRequest, db: AsyncSession, current
                                dataset_id: int) -> WidgetDataRequest:
     """Security-check a canvas scoring widget's saved model, as the score
     endpoint does (same helper), then hand the shaper a key to it."""
-    from .prediction_models import load_usable_model
+    from .prediction_models import champion_of, load_usable_model
     from ..services.model_widgets import register_scoring_model
     try:
         model_id = int(req.config["prediction_model_id"])
         model, pkg = await load_usable_model(db, current_user, dataset_id, model_id)
+        # E13: a widget set to follow the champion scores with whichever
+        # version of the model's name is champion now, so a promotion or a
+        # rollback reaches the dashboard without editing it.
+        if req.config.get("model_follows") == "champion":
+            champ = await champion_of(db, model.org_id, dataset_id, model.name)
+            if champ is not None and champ.id != model.id:
+                model, pkg = await load_usable_model(db, current_user, dataset_id, champ.id)
     except (TypeError, ValueError):
         raise widget_error(400, "bad_request", "prediction_model_id must be a number")
     except HTTPException as e:
         raise widget_error(e.status_code, "not_found" if e.status_code == 404 else "forbidden", str(e.detail))
     key = f"{model.id}:{model.created_at.isoformat() if model.created_at else ''}"
     register_scoring_model(key, pkg, model.name)
-    return req.model_copy(update={"config": {**req.config, "__model__": key}})
+    return req.model_copy(update={"config": {
+        **req.config, "__model__": key,
+        "__model_meta__": {"id": model.id, "version": model.version or 1}}})
 
 
 async def _resolve_widget_data(

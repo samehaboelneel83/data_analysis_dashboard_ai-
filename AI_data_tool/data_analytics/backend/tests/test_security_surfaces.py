@@ -412,6 +412,7 @@ WRITE_GATES = [
     Gate("hierarchy auto-generate", "POST", "/api/v1/datasets/{ds}/hierarchy/auto-generate"),
     Gate("default filter", "PATCH", "/api/v1/datasets/{ds}/filter", body={"expression": "headcount > 0"}),
     Gate("score model", "POST", "/api/v1/datasets/{ds}/prediction-models/1/score", body={"from_dataset": True}),
+    Gate("promote model", "POST", "/api/v1/datasets/{ds}/prediction-models/1/promote"),
 ]
 
 

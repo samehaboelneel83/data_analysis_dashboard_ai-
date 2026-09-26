@@ -22,7 +22,7 @@ import { predictionModelsApi } from '../../services/api'
 vi.mock('../../services/api', async (orig) => ({
   ...(await orig<Record<string, unknown>>()),
   predictionModelsApi: {
-    list: vi.fn(), train: vi.fn(), score: vi.fn(), remove: vi.fn(),
+    list: vi.fn(), train: vi.fn(), score: vi.fn(), remove: vi.fn(), promote: vi.fn(),
   },
 }))
 
@@ -156,5 +156,79 @@ describe('on a DirectQuery dataset', () => {
     vi.mocked(predictionModelsApi.list).mockResolvedValue([model()])
     dq()
     expect(await screen.findByText('Churn model')).toBeInTheDocument()
+  })
+
+  describe('versions (E13)', () => {
+    const card = {
+      target: 'churn', task: 'classification', model_family: 'random forest', score: 0.91,
+      score_name: 'accuracy', candidates: [{ model: 'random forest', score: 0.91 }, { model: 'logistic', score: 0.84 }],
+      baseline_score: 0.55, beats_baseline: true, predictors_used: ['region', 'spend'], predictors_skipped: [],
+      n_train: 225, n_test: 75, n_fitted: 300, split: { kind: 'random', test_share: 0.25 },
+      row_scope: 'every row', caveats: [], trained_by: 'ana@example.com', trained_at: '2026-09-20T10:00:00',
+      dataset: { id: 1, name: 'Churn', row_count: 300, content_sha256: null, last_refreshed_at: null },
+    }
+    const v1 = model({ id: 7, version: 1, status: 'champion', card })
+    const v2 = model({ id: 8, version: 2, status: 'candidate', model_family: 'logistic', card: { ...card, model_family: 'logistic' } })
+
+    it('shows each version of a name, the champion first and marked', async () => {
+      vi.mocked(predictionModelsApi.list).mockResolvedValue([v2, v1])
+      panel()
+      const first = await screen.findByTestId('model-7')
+      expect(first).toHaveTextContent('v1')
+      expect(first).toHaveTextContent('Champion')
+      expect(screen.getByTestId('model-8')).toHaveTextContent('candidate')
+      const ids = screen.getAllByTestId(/^model-\d+$/).map(e => e.getAttribute('data-testid'))
+      expect(ids).toEqual(['model-7', 'model-8'])
+      // Only a candidate can be made champion.
+      expect(screen.getAllByRole('button', { name: 'Make champion' })).toHaveLength(1)
+    })
+
+    it('makes a candidate the champion and reloads', async () => {
+      vi.mocked(predictionModelsApi.list).mockResolvedValue([v1, v2])
+      vi.mocked(predictionModelsApi.promote).mockResolvedValue({ ...v2, status: 'champion' } as never)
+      panel()
+      fireEvent.click(await screen.findByRole('button', { name: 'Make champion' }))
+      await waitFor(() => expect(predictionModelsApi.promote).toHaveBeenCalledWith(1, 8))
+      await waitFor(() => expect(predictionModelsApi.list).toHaveBeenCalledTimes(2))
+    })
+
+    it('opens the model card: how it was chosen and on what', async () => {
+      vi.mocked(predictionModelsApi.list).mockResolvedValue([v1])
+      render(<PredictionModelsPanel datasetId={1} columns={columns}
+        dataset={{ row_count: 300, content_sha256: null, last_refreshed_at: null }} />)
+      fireEvent.click(await screen.findByRole('button', { name: 'Model card' }))
+      const c = screen.getByTestId('model-card')
+      expect(c).toHaveTextContent('Trained by ana@example.com')
+      expect(c).toHaveTextContent('against 0.550')
+      expect(c).toHaveTextContent('refit on all 300 usable rows')
+      expect(screen.getByRole('table', { name: 'Candidates compared for Churn model v1' })).toHaveTextContent('logistic')
+      expect(c).not.toHaveTextContent('has changed since')
+    })
+
+    it('says when the dataset has changed since the model was trained', async () => {
+      vi.mocked(predictionModelsApi.list).mockResolvedValue([v1])
+      render(<PredictionModelsPanel datasetId={1} columns={columns}
+        dataset={{ row_count: 420, content_sha256: null, last_refreshed_at: null }} />)
+      fireEvent.click(await screen.findByRole('button', { name: 'Model card' }))
+      expect(screen.getByTestId('model-card')).toHaveTextContent('The dataset has changed since this model was trained (300 rows then, 420 now)')
+    })
+
+    it('a model saved before cards says so instead of an empty card', async () => {
+      vi.mocked(predictionModelsApi.list).mockResolvedValue([model({ version: 1, status: 'champion', card: null })])
+      panel()
+      fireEvent.click(await screen.findByRole('button', { name: 'Model card' }))
+      expect(await screen.findByText(/saved before model cards were kept/)).toBeInTheDocument()
+    })
+
+    it('names the version that scored', async () => {
+      vi.mocked(predictionModelsApi.list).mockResolvedValue([v1])
+      vi.mocked(predictionModelsApi.score).mockResolvedValue({
+        predictions: ['yes'], n_scored: 1, unseen_values: {}, target: 'churn', task: 'classification',
+        model_family: 'random forest', model: { id: 7, name: 'Churn model', version: 1, status: 'champion' },
+      })
+      panel()
+      fireEvent.click(await screen.findByRole('button', { name: 'Score this dataset' }))
+      expect(await screen.findByText(/with Churn model v1/)).toBeInTheDocument()
+    })
   })
 })

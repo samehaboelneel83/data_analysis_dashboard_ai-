@@ -681,6 +681,45 @@ export interface PredictionModelSummary {
   score: number | null
   score_name: string | null
   created_at: string | null
+  /** E13: training under an existing name makes its next version; one per
+   *  name is the champion ("use the current champion" means it). */
+  version?: number
+  status?: 'champion' | 'candidate'
+  promoted_at?: string | null
+  card?: ModelCard | null
+}
+
+/** The dataset as it is now, beside the state a model card recorded. */
+export interface DatasetSummaryForCard {
+  row_count: number | null
+  content_sha256?: string | null
+  last_refreshed_at?: string | null
+}
+
+/** E13: how a saved model was chosen and on what. */
+export interface ModelCard {
+  target?: string
+  task?: string
+  model_family?: string
+  score?: number | null
+  score_name?: string
+  candidates?: { model: string; score: number | null }[]
+  baseline_score?: number | null
+  lift_over_baseline?: number | null
+  beats_baseline?: boolean | null
+  predictors_used?: string[]
+  predictors_skipped?: ({ column?: string; reason?: string } | string)[]
+  n_train?: number | null
+  n_test?: number | null
+  n_fitted?: number | null
+  split?: { kind: string; column?: string; test_share?: number } | null
+  partition?: string | null
+  row_scope?: string
+  caveats?: string[]
+  dataset?: { id: number; name: string; row_count: number | null; content_sha256: string | null;
+              last_refreshed_at: string | null }
+  trained_by?: string
+  trained_at?: string
 }
 
 export interface ScoreResult {
@@ -693,6 +732,8 @@ export interface ScoreResult {
   target: string
   task: string
   model_family: string
+  /** The version that made these predictions (E13). */
+  model?: { id: number; name: string; version: number; status: string }
 }
 
 /** Fitted models kept so they can score rows they have never seen — the one
@@ -709,6 +750,8 @@ export const predictionModelsApi = {
     api.post<ScoreResult>(`/datasets/${datasetId}/prediction-models/${modelId}/score`, body).then(r => r.data),
   remove: (datasetId: number, modelId: number) =>
     api.delete(`/datasets/${datasetId}/prediction-models/${modelId}`).then(() => undefined),
+  promote: (datasetId: number, modelId: number) =>
+    api.post<PredictionModelSummary>(`/datasets/${datasetId}/prediction-models/${modelId}/promote`).then(r => r.data),
 }
 
 export interface AggregatePreflight {

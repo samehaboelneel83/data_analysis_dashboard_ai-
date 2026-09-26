@@ -18,11 +18,12 @@ reads every row and column and stores the result -- that is authoring), row
 security applied to any frame read from the dataset, and org scoping throughout.
 """
 import asyncio
+from datetime import datetime
 
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.capability import require_dataset_capability, require_dataset_read
@@ -61,6 +62,9 @@ class ScoreRequest(BaseModel):
     limit: int = 5000
 
 
+CHAMPION, CANDIDATE = "champion", "candidate"
+
+
 def _out(m: PredictionModel) -> dict:
     """The model as JSON. The artifact never travels: it is a pickle, and
     nothing outside this service has any use for it."""
@@ -70,7 +74,19 @@ def _out(m: PredictionModel) -> dict:
         "task": m.task, "model_family": m.model_family,
         "score": m.score, "score_name": m.score_name,
         "created_at": m.created_at.isoformat() if m.created_at else None,
+        # E13
+        "version": m.version or 1, "status": m.status or CHAMPION,
+        "promoted_at": m.promoted_at.isoformat() if m.promoted_at else None,
+        "card": m.card or None,
     }
+
+
+async def champion_of(db: AsyncSession, org_id: int, dataset_id: int, name: str) -> PredictionModel | None:
+    """The version of `name` that "the current champion" means."""
+    return (await db.execute(select(PredictionModel).where(
+        PredictionModel.org_id == org_id, PredictionModel.dataset_id == dataset_id,
+        PredictionModel.name == name, PredictionModel.status == CHAMPION)
+        .order_by(PredictionModel.version.desc()))).scalars().first()
 
 
 async def _dataset_for_read(dataset_id: int, db: AsyncSession, user: User) -> Dataset:
@@ -161,6 +177,29 @@ async def train_model(
     except FileNotFoundError:
         raise HTTPException(404, "Dataset file not found on server — please re-upload the file")
 
+    # E13: an existing name gets its next version, as a candidate beside the
+    # champion a dashboard may be scoring with; a new name starts as champion.
+    latest = (await db.execute(select(func.max(PredictionModel.version)).where(
+        PredictionModel.org_id == current_user.org_id, PredictionModel.dataset_id == dataset_id,
+        PredictionModel.name == req.name))).scalar()
+    version = int(latest or 0) + 1
+    card = {
+        **(pkg.card or {}),
+        "target": pkg.target, "task": pkg.task, "model_family": pkg.model_family,
+        "score": pkg.score, "score_name": pkg.score_name,
+        "partition": req.partition,
+        # Whether a row rule narrowed what it saw -- the rule itself stays
+        # with the administrators who wrote it.
+        "row_scope": "restricted by a row rule" if rls_expr else "every row",
+        # The data as it was: a later refresh makes these differ, which is
+        # how a reader tells the model is older than the dataset.
+        "dataset": {"id": ds.id, "name": ds.name, "row_count": ds.row_count,
+                    "content_sha256": getattr(ds, "content_sha256", None),
+                    "last_refreshed_at": ds.last_refreshed_at.isoformat()
+                    if getattr(ds, "last_refreshed_at", None) else None},
+        "trained_by": current_user.email,
+        "trained_at": datetime.utcnow().isoformat(timespec="seconds"),
+    }
     row = PredictionModel(
         org_id=current_user.org_id, dataset_id=dataset_id, name=req.name,
         target=pkg.target, features=pkg.features, feature_columns=pkg.feature_columns,
@@ -170,11 +209,53 @@ async def train_model(
         # rows than it was fitted on.
         trained_rls=rls_expr,
         created_by=current_user.id,
+        version=version, status=CHAMPION if version == 1 else CANDIDATE, card=card,
+        promoted_at=datetime.utcnow() if version == 1 else None,
+        promoted_by=current_user.id if version == 1 else None,
     )
     db.add(row)
     await db.commit()
     await db.refresh(row)
     return _out(row)
+
+
+@router.post("/{dataset_id}/prediction-models/{model_id}/promote")
+async def promote_model(
+    dataset_id: int, model_id: int,
+    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    """Make this version the champion of its name (E13).
+
+    The champion is what "use the current champion" scores with, so this is
+    both promotion and rollback: promoting an older version is going back to
+    it. The version it replaces stays, as a candidate. Authoring, like
+    training."""
+    await _dataset_for_read(dataset_id, db, current_user)
+    await require_dataset_capability(db, current_user, dataset_id, "data")
+    model = await db.get(PredictionModel, model_id)
+    if not model or model.dataset_id != dataset_id:
+        raise HTTPException(404, "Model not found")
+    check_org(model, current_user, "Model not found")
+    # Promoting is choosing what others' dashboards score with: a version
+    # this person could not use themselves is not theirs to choose.
+    await load_usable_model(db, current_user, dataset_id, model_id)
+    previous = await champion_of(db, current_user.org_id, dataset_id, model.name)
+    if previous is not None and previous.id == model.id:
+        return _out(model)
+    await db.execute(update(PredictionModel).where(
+        PredictionModel.org_id == current_user.org_id, PredictionModel.dataset_id == dataset_id,
+        PredictionModel.name == model.name, PredictionModel.id != model.id)
+        .values(status=CANDIDATE))
+    model.status = CHAMPION
+    model.promoted_at = datetime.utcnow()
+    model.promoted_by = current_user.id
+    from ..services.audit import record
+    await record(db, current_user, "model.promote", "prediction_model", model.id,
+                 f"{model.name} v{model.version} replaces "
+                 f"{'v' + str(previous.version) if previous is not None else 'no champion'}")
+    await db.commit()
+    await db.refresh(model)
+    return _out(model)
 
 
 @router.get("/{dataset_id}/prediction-models")
@@ -236,7 +317,10 @@ async def score_model(
     dataset_id: int, model_id: int, req: ScoreRequest,
     db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
-    """Predictions for rows whose outcome is not known yet."""
+    """Predictions for rows whose outcome is not known yet, from this version.
+
+    The result names the version that scored, so a batch of predictions can
+    be traced to the exact model that made it (E13)."""
     ds = await _dataset_for_read(dataset_id, db, current_user)
     # The denied-feature refusal and the same-rows rule live in one helper,
     # shared with the canvas scoring widget (see load_usable_model).
@@ -277,9 +361,11 @@ async def score_model(
         raise HTTPException(400, "Provide rows to score, or set from_dataset")
 
     try:
-        return await asyncio.to_thread(score_frame, pkg, frame)
+        out = await asyncio.to_thread(score_frame, pkg, frame)
     except ModelStoreError as e:
         raise HTTPException(400, str(e))
+    return {**out, "model": {"id": model.id, "name": model.name, "version": model.version or 1,
+                             "status": model.status or CHAMPION}}
 
 
 @router.delete("/{dataset_id}/prediction-models/{model_id}", status_code=204)
@@ -293,5 +379,17 @@ async def delete_model(
     if not model or model.dataset_id != dataset_id:
         raise HTTPException(404, "Model not found")
     check_org(model, current_user, "Model not found")
+    # Deleting the champion hands the title to the newest remaining version,
+    # so "use the current champion" keeps meaning a model.
+    name, was_champion = model.name, (model.status or CHAMPION) == CHAMPION
     await db.delete(model)
+    await db.flush()
+    if was_champion:
+        heir = (await db.execute(select(PredictionModel).where(
+            PredictionModel.org_id == current_user.org_id, PredictionModel.dataset_id == dataset_id,
+            PredictionModel.name == name).order_by(PredictionModel.version.desc()))).scalars().first()
+        if heir is not None:
+            heir.status = CHAMPION
+            heir.promoted_at = datetime.utcnow()
+            heir.promoted_by = current_user.id
     await db.commit()

@@ -62,6 +62,16 @@ async def _migrate(conn):
         # is a new table, which create_all provisions.
         "ALTER TABLE quotas ADD COLUMN IF NOT EXISTS max_ai_tokens_per_day INTEGER",
         "ALTER TABLE quotas ADD COLUMN IF NOT EXISTS max_ai_tokens_per_month INTEGER",
+        # 0043: model versions (see PredictionModel.version). The unique key
+        # moves from (org, dataset, name) to (..., version).
+        "ALTER TABLE prediction_models ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE prediction_models ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'champion'",
+        "ALTER TABLE prediction_models ADD COLUMN IF NOT EXISTS card JSON",
+        "ALTER TABLE prediction_models ADD COLUMN IF NOT EXISTS promoted_at TIMESTAMP WITH TIME ZONE",
+        "ALTER TABLE prediction_models ADD COLUMN IF NOT EXISTS promoted_by INTEGER REFERENCES users(id) ON DELETE SET NULL",
+        "ALTER TABLE prediction_models DROP CONSTRAINT IF EXISTS uq_prediction_models_org_dataset_name",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_prediction_models_org_dataset_name_version "
+        "ON prediction_models (org_id, dataset_id, name, version)",
         "ALTER TABLE reports ADD COLUMN IF NOT EXISTS theme VARCHAR(20) NOT NULL DEFAULT 'default'",
         "ALTER TABLE reports ADD COLUMN IF NOT EXISTS display_rules JSON DEFAULT '[]'",
         # ── Layer 1 — Connectors & Ingestion ────────────────────────────────

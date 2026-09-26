@@ -30,7 +30,7 @@ denied column's influence inside it.
 from __future__ import annotations
 
 import io
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import pandas as pd
@@ -62,6 +62,10 @@ class PackagedModel:
     model_family: str
     score: float | None
     score_name: str
+    #: E13: how this model was chosen and on what -- the comparison it won,
+    #: the baseline it had to beat, the split, the rows and predictors used.
+    #: The router adds what it knows (the dataset's state, the row scope).
+    card: dict = field(default_factory=dict)
 
 
 def _fit_estimator(task: str, family: str, leaf: int) -> Any:
@@ -167,6 +171,20 @@ def fit_and_package(df: pd.DataFrame, target: str,
         model_family=champion_name,
         score=report["champion"].get("score"),
         score_name=report.get("score_name", ""),
+        card={
+            "candidates": [{"model": c.get("model"), "score": c.get("score")}
+                           for c in report.get("candidates") or []],
+            "baseline_score": report.get("baseline_score"),
+            "lift_over_baseline": report.get("lift_over_baseline"),
+            "beats_baseline": report.get("beats_baseline"),
+            "predictors_used": list(report.get("predictors_used") or used),
+            "predictors_skipped": report.get("predictors_skipped") or [],
+            "n_train": report.get("n_train"), "n_test": report.get("n_test"),
+            "split": report.get("split"),
+            # The kept model is refit on every usable row, not the training share.
+            "n_fitted": int(len(frame)),
+            "caveats": report.get("caveats") or [],
+        },
     )
 
 

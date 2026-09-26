@@ -450,7 +450,18 @@ class PredictionModel(Base):
     trained_rls     = Column(Text, nullable=True)
     created_by      = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     created_at      = Column(DateTime(timezone=True), default=datetime.utcnow)
-    __table_args__ = (UniqueConstraint("org_id", "dataset_id", "name", name="uq_prediction_models_org_dataset_name"),)
+    #: E13: training under an existing name makes its next VERSION, and one
+    #: version per name is the `champion` -- the one "use the current
+    #: champion" means. The others are `candidate`s: kept, scorable by id,
+    #: and promotable, which is how a rollback is done.
+    version         = Column(Integer, nullable=False, default=1, server_default="1")
+    status          = Column(String(20), nullable=False, default="champion", server_default="champion")
+    #: The model card: how it was chosen and on what (see model_store.PackagedModel.card).
+    card            = Column(JSON, nullable=True)
+    promoted_at     = Column(DateTime(timezone=True), nullable=True)
+    promoted_by     = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    __table_args__ = (UniqueConstraint("org_id", "dataset_id", "name", "version",
+                                       name="uq_prediction_models_org_dataset_name_version"),)
 
 
 class OrgReviewSettings(Base):

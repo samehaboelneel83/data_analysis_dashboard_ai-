@@ -349,6 +349,19 @@ The artifact is a joblib pickle, so loading one executes code. Nothing accepts
 an uploaded model: the only writer is `services/analysis/model_store.py`, and
 the artifact never leaves the server — no endpoint serialises it.
 
+**Versions, a card, and one champion (E13).** Training under an existing name
+makes its next `version`; one version per name is the `champion`, the others
+`candidate`s. `POST .../prediction-models/{id}/promote` makes a version the
+champion (authoring, audited as `model.promote`), so a rollback is promoting
+an older one; deleting the champion hands the title to the newest remaining
+version. A scoring widget with `model_follows: "champion"` scores with
+whichever version is champion now; without it, with the version it names.
+Every score names the version that made it. `card` records how the version was
+chosen: the candidates compared and their held-out scores, the baseline it had
+to beat, the split, the rows fitted, the predictors used and left out, whether
+a row rule applied (not the rule), who trained it, and the dataset's row count
+and refresh time then, so the panel can say when the data has moved since.
+
 ### Decomposition tree
 
 `shape_decomposition` in `widget_data.py` breaks one number down a level at a
@@ -1136,7 +1149,7 @@ SQLAlchemy, grouped by concern:
 | Platform | `saml_authn_requests`, `org_mcp_access`, `eval_runs` |
 | Ops | `sync_runs`, `schema_versions`, `column_stats`, `materializations`, `quotas`, `query_runs`, `ai_usage` |
 
-Schema changes go through **Alembic** (`backend/alembic/`, 42 revisions).
+Schema changes go through **Alembic** (`backend/alembic/`, 43 revisions).
 `postgres/init.sql` provides the initial schema and indexes.
 
 ### Cache
@@ -2284,8 +2297,8 @@ Agent pane (7)
 
 | Suite | Scope | Count |
 |-------|-------|-------|
-| Backend | `backend/tests/` | ~5,300 tests across 410 modules |
-| Frontend | colocated `*.test.ts(x)` | ~2,900 tests across 225 files |
+| Backend | `backend/tests/` | ~5,300 tests across 411 modules |
+| Frontend | colocated `*.test.ts(x)` | ~2,950 tests across 226 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |
 | Doc audit | `tests/test_architecture_doc.py` | Enforces the *counts* in this document |

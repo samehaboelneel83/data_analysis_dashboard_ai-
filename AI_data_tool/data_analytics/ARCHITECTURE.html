@@ -414,6 +414,7 @@ STAT_FAMILIES       = {"postgresql"}</code></pre>
   </div>
   <p><strong>And the rows it was trained on.</strong> A model is a derivative of its training rows the way a snapshot is: a tree's leaves and a forest's splits are built from them. <code>materialize</code> refuses a governed dataset outright for the neighbouring reason &mdash; a snapshot written under one person's RLS carries no rules of its own. This can afford to be narrower, because the filter is RECORDED (<code>trained_rls</code>) rather than guessed: a model may be used by anyone who sees exactly those rows, and nobody else. Filters are compared verbatim, so two equivalent rules written differently are refused &mdash; the safe direction.</p>
   <p>The artifact is a joblib pickle, so loading one executes code. Nothing accepts an uploaded model: the only writer is <code>services/analysis/model_store.py</code>, and the artifact never leaves the server &mdash; no endpoint serialises it.</p>
+  <p><strong>Versions, a card, and one champion (E13).</strong> Training under an existing name makes its next <code>version</code>; one version per name is the <code>champion</code>, the others <code>candidate</code>s. <code>POST .../prediction-models/{id}/promote</code> makes a version the champion (authoring, audited as <code>model.promote</code>), so a rollback is promoting an older one; deleting the champion hands the title to the newest remaining version. A scoring widget with <code>model_follows: "champion"</code> scores with whichever version is champion now; without it, with the version it names. Every score names the version that made it. <code>card</code> records how the version was chosen: the candidates compared and their held-out scores, the baseline it had to beat, the split, the rows fitted, the predictors used and left out, whether a row rule applied (not the rule), who trained it, and the dataset's row count and refresh time then, so the panel can say when the data has moved since.</p>
 
   <h3>Decomposition tree</h3>
   <p><code>shape_decomposition</code> breaks one number down a level at a time: total revenue, then by region, then within EMEA by product. The reader drills by clicking a child and climbs by clicking a breadcrumb; the server recomputes each level from the path, so the client holds no analytical logic and a drilled tree survives a refresh, a filter change and a cross-filter.</p>
@@ -644,7 +645,7 @@ STAT_FAMILIES       = {"postgresql"}</code></pre>
       </tbody>
     </table>
   </div>
-  <p>Schema changes go through <strong>Alembic</strong> (<code>backend/alembic/</code>, 42 revisions). <code>postgres/init.sql</code> provides the initial schema and indexes.</p>
+  <p>Schema changes go through <strong>Alembic</strong> (<code>backend/alembic/</code>, 43 revisions). <code>postgres/init.sql</code> provides the initial schema and indexes.</p>
 
   <h3>Cache</h3>
   <p><code>services/cache_backend.py</code> defines a <code>CacheBackend</code> interface with two implementations — <code>InProcessCache</code> for single-process or test runs, and <code>ValkeyCache</code> for the deployed stack. <code>frame_cache.py</code> caches computed result frames; <code>core/rate_limit.py</code> uses the same backend for throttling.</p>
@@ -1153,8 +1154,8 @@ llm_reserved_interactive = 2</code></pre>
     <table>
       <thead><tr><th>Suite</th><th>Scope</th><th>Count</th></tr></thead>
       <tbody>
-        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~5,300 tests · 410 modules</td></tr>
-        <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~2,900 tests · 225 files</td></tr>
+        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~5,300 tests · 411 modules</td></tr>
+        <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~2,950 tests · 226 files</td></tr>
         <tr><th>Evals</th><td><code>backend/evals/</code></td><td>Agent quality gates (<code>run_eval_gate.ps1</code>)</td></tr>
         <tr><th>Conformance</th><td><code>tests/test_layer_conformance.py</code></td><td>Enforces the layer boundaries above</td></tr>
         <tr><th>Doc audit</th><td><code>tests/test_architecture_doc.py</code></td><td>Enforces the <em>counts</em> in this document</td></tr>

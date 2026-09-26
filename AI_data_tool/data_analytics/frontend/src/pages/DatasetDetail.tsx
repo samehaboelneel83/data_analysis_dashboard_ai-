@@ -818,7 +818,9 @@ export default function DatasetDetail() {
           here refits and discards; these are the ones kept so they can score
           rows whose outcome is not known yet. */}
       {tab === 'models' && ds && (
-        <PredictionModelsPanel datasetId={ds.id} columns={ds.columns ?? []} mode={ds.mode} />
+        <PredictionModelsPanel datasetId={ds.id} columns={ds.columns ?? []} mode={ds.mode}
+          dataset={{ row_count: ds.row_count ?? null, content_sha256: (ds as { content_sha256?: string | null }).content_sha256 ?? null,
+                     last_refreshed_at: (ds as { last_refreshed_at?: string | null }).last_refreshed_at ?? null }} />
       )}
 
       {/* Aggregates: a GROUP BY run at the source on a schedule, saved as a

@@ -44,7 +44,7 @@ export const PANEL_KEYS: ReadonlySet<string> = new Set([
   // every type
   'dataset_id', 'drillthroughPageId', 'tooltipPageId', 'hierarchyNodeId',
   'dimension_granularity', 'aggregation2', 'bar_mode', 'centrality_metric', 'method',
-  'event_value', 'max_depth', 'compare', 'prediction_model_id', 'forecast_target',
+  'event_value', 'max_depth', 'compare', 'prediction_model_id', 'model_follows', 'forecast_target',
   'display_rules', 'analytics', 'container_mode', 'background_url', 'container_id', 'z',
   // formatting
   'x_axis_label', 'y_axis_label', 'axis_tick_size', 'axis_tick_color', 'x_axis_angle',

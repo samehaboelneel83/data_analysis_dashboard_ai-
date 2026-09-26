@@ -14,6 +14,8 @@ import {
 
 export interface ModelOpts {
   prediction_model_id?: number
+  /** E13: score with whichever version of the chosen model's name is champion now. */
+  model_follows?: 'champion'
   event_value?: string
   max_depth?: number
   compare?: ModelSpec[]
@@ -23,6 +25,7 @@ export function seedModelOpts(cfg: Record<string, unknown>): ModelOpts {
   const o: ModelOpts = {}
   if (typeof cfg.event_value === 'string' && cfg.event_value) o.event_value = cfg.event_value
   if (typeof cfg.prediction_model_id === 'number') o.prediction_model_id = cfg.prediction_model_id
+  if (cfg.model_follows === 'champion') o.model_follows = 'champion'
   if (typeof cfg.max_depth === 'number') o.max_depth = cfg.max_depth
   if (Array.isArray(cfg.compare)) o.compare = cfg.compare as ModelSpec[]
   return o
@@ -36,6 +39,7 @@ export function modelOptsConfig(wt: string, o: ModelOpts): Record<string, unknow
   if (wt === 'model_score') {
     return {
       ...(o.prediction_model_id ? { prediction_model_id: o.prediction_model_id } : {}),
+      ...(o.prediction_model_id && o.model_follows ? { model_follows: o.model_follows } : {}),
       ...(o.event_value ? { event_value: o.event_value } : {}),
     }
   }
@@ -80,7 +84,9 @@ function SavedModelPicker({ datasetId, value, onChange }: {
           onChange={e => onChange({ ...value, prediction_model_id: e.target.value ? Number(e.target.value) : undefined })}>
           <option value="">{models ? '— choose a model —' : 'Loading…'}</option>
           {(models ?? []).map(m => (
-            <option key={m.id} value={m.id}>{m.name} — predicts {m.target} ({m.model_family})</option>
+            <option key={m.id} value={m.id}>
+              {m.name}{m.version ? ` v${m.version}` : ''}{m.status === 'champion' ? ' (champion)' : ''} — predicts {m.target} ({m.model_family})
+            </option>
           ))}
         </select>
       )}
@@ -95,6 +101,14 @@ function SavedModelPicker({ datasetId, value, onChange }: {
         <div style={hint}>
           Predicts <b>{chosen.target}</b> from {chosen.features.join(', ')}. Re-scores the rows on the page as filters change.
         </div>
+      )}
+      {chosen && (
+        <label style={{ display: 'flex', gap: 6, alignItems: 'flex-start', fontSize: 11.5, marginTop: 8, cursor: 'pointer' }}>
+          <input type="checkbox" checked={value.model_follows === 'champion'}
+            onChange={e => onChange({ ...value, model_follows: e.target.checked ? 'champion' : undefined })} />
+          <span>Always use the current champion of “{chosen.name}”, so a promotion or a rollback reaches this chart
+            without editing it. Unticked, it keeps scoring with v{chosen.version ?? 1}.</span>
+        </label>
       )}
     </div>
   )

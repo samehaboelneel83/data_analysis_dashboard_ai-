@@ -616,8 +616,9 @@ def shape_model_score(df: pd.DataFrame, config: dict) -> dict:
             fit["secondary"]["rows with a known outcome"] = int(known.sum())
     return {
         "type": "model", "status": "ok", "model": "score", "target": pkg.target,
-        "saved": {"id": config.get("prediction_model_id"), "name": name,
-                  "family": pkg.model_family, "task": pkg.task},
+        "saved": {"id": (config.get("__model_meta__") or {}).get("id", config.get("prediction_model_id")),
+                  "version": (config.get("__model_meta__") or {}).get("version"),
+                  "name": name, "family": pkg.model_family, "task": pkg.task},
         "predictors": list(pkg.features), "event": event, "breakdown": by, "measure": measure,
         "value_format": value_format,
         "unseen_values": res.get("unseen_values") or {},
