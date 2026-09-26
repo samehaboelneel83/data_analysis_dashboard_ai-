@@ -2190,7 +2190,9 @@ the ordering rule (files first on backup, database first on restore) that makes 
 stray file the only possible inconsistency. Backup verifies the dump's `PGDMP`
 header before rotating, so a run of failures cannot delete the last good backup.
 
-See `docs/BACKUP_AND_RECOVERY.md` for procedures and the verification drill.
+See `docs/BACKUP_AND_RECOVERY.md` for procedures and the verification drill, and
+`docs/UPGRADE_AND_ROLLBACK.md` for upgrading, the two ways back, and a rehearsal
+of both (clean install, upgrade, downgrade, restore, `kill -9` mid-job).
 
 ---
 

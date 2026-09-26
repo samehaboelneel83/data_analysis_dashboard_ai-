@@ -8,6 +8,9 @@ service to fall back on and no vendor to call.
 > unrecoverable. Back it up on a schedule, and restore it somewhere at least once
 > before you need to.
 
+> **Upgrading?** [`UPGRADE_AND_ROLLBACK.md`](UPGRADE_AND_ROLLBACK.md) has the
+> procedure, the two ways back, and a rehearsal of both.
+
 > **There are scripts for this now.** `.\scripts\backup.ps1` and
 > `.\scripts\restore.ps1` implement exactly the procedure below,
 > including the ordering rule that is easy to get backwards. The manual commands
