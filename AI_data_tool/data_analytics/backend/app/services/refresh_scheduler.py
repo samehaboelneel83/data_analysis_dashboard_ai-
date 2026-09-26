@@ -24,6 +24,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select, text
 
 from sqlalchemy.orm.attributes import flag_modified
+from ..core.config import settings
 from ..models.models import Dataflow, DataSource, Dataset, DatasetColumn
 
 log = logging.getLogger(__name__)
@@ -790,6 +791,44 @@ async def run_items(session_factory, due_ids: list[int], model,
     await asyncio.gather(*[_one(i) for i in due_ids])
 
 
+async def enqueue_deliveries(session_factory, schedule_ids: list[int]) -> None:
+    """Queue each due schedule's delivery as a job (E12). Every process that
+    sees the same due occurrence names the same job, so one is queued. A
+    schedule with no creator to run as is run inline, where it disables
+    itself; one failure never stops the rest."""
+    from ..models.models import ReportSchedule
+    from .delivery import run_schedule
+    from .delivery_jobs import enqueue_due
+    for sid in schedule_ids:
+        try:
+            async with session_factory() as s:
+                sched = await s.get(ReportSchedule, sid)
+                if sched is None:
+                    continue
+                if await enqueue_due(s, sched) is None:
+                    await run_schedule(s, sched)
+        except Exception as e:  # noqa: BLE001 - never-die, per item
+            try:
+                async with session_factory() as s2:
+                    await record_failure(s2, "schedule", sid, str(e))
+            except Exception:  # noqa: BLE001 - bookkeeping must not raise
+                log.warning("Could not queue delivery for schedule %s: %s", sid, e)
+
+
+async def deliver_due(session_factory, schedule_ids: list[int]) -> None:
+    """E12: with a job worker, due deliveries are queued, not sent here -- one
+    job per due occurrence, sent at most once (services/delivery_jobs.py).
+    A deployment that turned the worker off sends inline, as before, rather
+    than queuing deliveries nothing will run."""
+    if settings.job_worker_enabled:
+        await enqueue_deliveries(session_factory, schedule_ids)
+    else:
+        from ..models.models import ReportSchedule
+        from .delivery import run_schedule
+        await run_items(session_factory, schedule_ids, ReportSchedule,
+                        1_000_000_000, run_schedule, "schedule")
+
+
 async def run_scheduler(session_factory) -> None:
     """Wake every TICK_SECONDS; refresh datasets, run deliveries, check alerts.
 
@@ -892,8 +931,8 @@ async def run_scheduler(session_factory) -> None:
 
             # Item execution happens OUTSIDE the tick session's scope, on
             # per-item sessions -- see run_items.
-            await run_items(session_factory, due_sched_ids, ReportSchedule,
-                            1_000_000_000, run_schedule, "schedule")
+            #
+            await deliver_due(session_factory, due_sched_ids)
             await run_items(session_factory, due_alert_ids, DataAlert,
                             2_000_000_000, check_alert, "alert")
 

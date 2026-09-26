@@ -1516,6 +1516,20 @@ the scheduler skips the dataset. The queued refresh fetches without touching
 the file and writes it only after fencing its success, so an attempt that lost
 its lease cannot append the same rows twice.
 
+Scheduled deliveries are the third (E12, `services/delivery_jobs.py`). With a
+job worker the scheduler no longer sends: it queues one `delivery.schedule`
+job per due occurrence, keyed by the schedule, the run the occurrence follows
+and its failure count, so every process that sees the same occurrence names
+the same job. The job claims the occurrence before sending, with a
+compare-and-set on the schedule row (`last_run_at` still the run it follows)
+committed together with a fenced write to its own row; a second job, a racing
+process or an author's Send now in between finds the row moved on and skips.
+Sending is at most once: an attempt resumed after the claim does not send
+again but says on the schedule that it was interrupted and not resent. A
+delivery that cannot be built fails its job and backs off; the next due tick
+queues a new one. With `JOB_WORKER_ENABLED` off the tick sends inline, as
+before.
+
 | Property | How |
 |----------|-----|
 | Claiming | A compare-and-set `UPDATE ... WHERE <still claimable>`; the job is kept only if one row changed. No advisory lock, so several processes share one queue. |
@@ -2270,7 +2284,7 @@ Agent pane (7)
 
 | Suite | Scope | Count |
 |-------|-------|-------|
-| Backend | `backend/tests/` | ~5,300 tests across 408 modules |
+| Backend | `backend/tests/` | ~5,300 tests across 409 modules |
 | Frontend | colocated `*.test.ts(x)` | ~2,900 tests across 225 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |

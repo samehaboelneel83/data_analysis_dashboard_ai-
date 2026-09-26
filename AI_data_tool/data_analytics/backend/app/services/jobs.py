@@ -92,7 +92,8 @@ HANDLERS: dict[str, Handler] = {}
 
 #: Modules whose import registers handlers. Listed here so the worker and
 #: `enqueue` know every kind without depending on import order elsewhere.
-HANDLER_MODULES = ("app.services.source_import", "app.services.refresh_jobs")
+HANDLER_MODULES = ("app.services.source_import", "app.services.refresh_jobs",
+                   "app.services.delivery_jobs")
 
 
 def load_handlers() -> None:
@@ -356,6 +357,20 @@ class JobContext:
             await s.commit()
             if not ok:
                 raise LeaseLost()
+
+    async def mark(self, db, stage: str, **detail) -> None:
+        """Record progress INSIDE the caller's transaction, fenced.
+
+        For a handler whose next step must happen at most once (a delivery
+        claiming the occurrence it sends): the claim and this write commit
+        together, so a worker that lost its lease cannot make the claim.
+        Raises LeaseLost; the caller's transaction must then roll back."""
+        now = _utcnow()
+        ok = await _fenced_update(db, self.job_id, self.token, updated_at=now,
+                                  progress={"stage": stage, **detail},
+                                  lease_expires_at=now + timedelta(seconds=LEASE_SECONDS))
+        if not ok:
+            raise LeaseLost()
 
     async def complete(self, db, result: dict) -> None:
         """Mark the job succeeded INSIDE the caller's transaction, fenced.

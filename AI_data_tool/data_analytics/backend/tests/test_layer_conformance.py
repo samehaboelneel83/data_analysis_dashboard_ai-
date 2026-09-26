@@ -177,6 +177,8 @@ LAYER_MAP: dict[str, int] = {
     # The manual refresh, run now or as a durable job: orchestration with
     # permission checks and audit, beside the scheduler that runs refreshes.
     "services/refresh_jobs": L6_API,
+    # E12: scheduled deliveries as jobs, beside the scheduler that queues them.
+    "services/delivery_jobs": L6_API,
     # Power Pi's automation runner sits beside it for the same reason and
     # shares its tick: sequencing profile -> scan -> propose -> compose is
     # orchestration over layers 2-5, not a member of any of them.
