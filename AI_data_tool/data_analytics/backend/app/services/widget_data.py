@@ -3397,6 +3397,36 @@ RANKED_WIDGETS = tuple(sorted(
     k for k, v in SHAPERS.items()
     if getattr(v, "__name__", "") in _RANKING_SHAPERS and k != "kpi"))
 
+#: E08: which controls of the panel's "Sort & limit" group a widget type's
+#: shaper honours -- DERIVED from the dispatch table like RANKED_WIDGETS, and
+#: mirrored in the panel (widgetCapabilities.ts), so a control is offered
+#: exactly where it does something. The grouped-series shaper (and the ones
+#: that hand their work to it) honour sort, sort column, custom order, HAVING,
+#: quick calculations, suppression and the limit; these others honour only
+#: the limit; every other type none of them (a KPI has one number; a
+#: histogram has bins; a hierarchy caps its own children).
+SORT_LIMIT_OPTIONS = ("sort", "sort_col", "sort_custom", "having", "quick_calc",
+                      "suppress_below", "limit")
+_SORTABLE_SHAPERS = ("shape_series", "shape_geo_points", "shape_slicer", "shape_small_multiples")
+_LIMIT_ONLY_SHAPERS = ("shape_box_plot", "shape_bubble", "shape_bubble_animated", "shape_dual_series",
+                       "shape_geo_clusters", "shape_geo_pies", "shape_network", "shape_xy_numeric",
+                       "shape_parallel_coordinates", "shape_sankey", "shape_gantt",
+                       "shape_vector_plot", "shape_waterfall")
+SORTABLE_WIDGETS = tuple(sorted(
+    k for k, v in SHAPERS.items()
+    if getattr(v, "__name__", "") in _SORTABLE_SHAPERS and k != "kpi"))
+LIMIT_ONLY_WIDGETS = tuple(sorted(
+    k for k, v in SHAPERS.items() if getattr(v, "__name__", "") in _LIMIT_ONLY_SHAPERS))
+
+
+def sort_limit_options(widget_type: str) -> tuple[str, ...]:
+    """The "Sort & limit" options `widget_type` honours (see SORTABLE_WIDGETS)."""
+    if widget_type in SORTABLE_WIDGETS:
+        return SORT_LIMIT_OPTIONS
+    if widget_type in LIMIT_ONLY_WIDGETS:
+        return ("limit",)
+    return ()
+
 
 
 _LEGACY_ROLE_KEYS = {

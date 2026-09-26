@@ -166,3 +166,66 @@ async def test_the_authoring_journey(world, widget_type):
     pd.testing.assert_frame_equal(exported, expected, check_dtype=False)
     if shown.get("totals"):
         assert str(exported.iloc[-1, 0]) == "Total"
+
+
+# --------------------------------------------------------------------------
+# No visible no-op controls: "Sort & limit" is offered exactly where it works
+# --------------------------------------------------------------------------
+
+def _option_frame():
+    rows, i = [], 0
+    for region, n in {"North": 9, "South": 6, "East": 4, "West": 2, "Mid": 1}.items():
+        for k in range(n):
+            rows.append({"region": region, "product": "ABC"[k % 3],
+                         "day": f"2024-{1 + i % 12:02d}-{1 + i % 27:02d}",
+                         "revenue": float(10 + (i * 37) % 90), "cost": float(5 + (i * 13) % 40),
+                         "units": 1 + (i * 7) % 9, "lat": 30 + i % 5, "lon": 31 + i % 3})
+            i += 1
+    frame = pd.DataFrame(rows)
+    frame["day"] = pd.to_datetime(frame["day"])
+    return frame
+
+
+_FILL = {"category": "region", "category2": "product", "measure": "revenue", "measure2": "cost",
+         "size": "units", "measures": ["revenue", "cost"], "start": "day", "animation": "day",
+         "color": "product", "lat": "lat", "lon": "lon"}
+#: Each option, set against a baseline, on a fixture where it must change the answer.
+_OPTION_CASES = {
+    "sort": ({"sort_by": "value", "sort": "asc"}, {"sort_by": "value", "sort": "desc"}),
+    "sort_col": ({"sort_col": "units", "sort": "asc"}, {"sort": "asc"}),
+    "sort_custom": ({"sort_custom": ["West", "Mid"]}, {}),
+    "having": ({"having": [{"op": "gt", "value": 300}]}, {}),
+    "quick_calc": ({"quick_calc": "percent_of_total"}, {}),
+    "suppress_below": ({"suppress_below": 3}, {}),
+    "limit": ({"limit": 2}, {}),
+}
+_NO_DATA = {"script", "text", "button", "image", "shape", "web_content", "container", "custom_visual"}
+
+
+def _data_types():
+    return sorted(t for t in wd.SHAPERS if t not in _NO_DATA and not t.startswith("model_"))
+
+
+@pytest.mark.parametrize("widget_type", _data_types())
+def test_each_sort_and_limit_option_is_offered_exactly_where_it_works(widget_type):
+    """SORTABLE_WIDGETS and LIMIT_ONLY_WIDGETS decide which of these controls
+    the panel shows. An option declared for a type must change its answer;
+    one not declared must not -- otherwise the panel either offers a control
+    that does nothing (as butterflies, heatmaps and KPIs used to get the whole
+    group) or hides one that works."""
+    import json
+    frame = _option_frame()
+    config = {"aggregation": "sum"}
+    for role in REQUIRED_ROLES.get(widget_type, ()):
+        config[config_key_for_role(role)] = _FILL.get(role, "region")
+    config.setdefault("dimension", "region")
+    config.setdefault("measure", "revenue")
+    if widget_type in ("kpi", "card", "gauge", "histogram", "correlation_matrix", "parallel_coordinates"):
+        config.pop("dimension", None)
+    declared = set(wd.sort_limit_options(widget_type))
+    for option, (on, off) in _OPTION_CASES.items():
+        a = wd.get_widget_data_from_df(frame, {**config, **on}, widget_type, None, False)
+        b = wd.get_widget_data_from_df(frame, {**config, **off}, widget_type, None, False)
+        works = json.dumps(a, sort_keys=True, default=str) != json.dumps(b, sort_keys=True, default=str)
+        assert works == (option in declared), \
+            f"{widget_type}: '{option}' {'works but is not offered' if works else 'is offered but does nothing'}"

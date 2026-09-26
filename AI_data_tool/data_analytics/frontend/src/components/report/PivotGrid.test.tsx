@@ -120,4 +120,22 @@ describe('the panel offers only what the grid does', () => {
     expect(config.running).toBeUndefined()
     expect(config.sort_col).toBeUndefined()
   })
+
+  it('offers a KPI no sort, limit or aggregate filter: it has one number', () => {
+    openSort({ ...crosstab(), widget_type: 'kpi', config: { measure: 'revenue' } })
+    for (const label of ['Sort by', 'Row limit', 'Quick calculation', 'Suppress small groups',
+      'Filter aggregated values', 'Custom order (comma-separated)']) {
+      expect(screen.queryByText(label)).not.toBeInTheDocument()
+    }
+    // Auto-reload is the browser's, and works for every widget.
+    expect(screen.getByText('Auto-reload (seconds)')).toBeInTheDocument()
+  })
+
+  it('offers a two-measure chart the row limit alone: its shaper honours nothing else', () => {
+    openSort({ ...crosstab(), widget_type: 'butterfly',
+      config: { dimension: 'region', measure: 'revenue', measure2: 'revenue' } })
+    expect(screen.getByText('Row limit')).toBeInTheDocument()
+    expect(screen.queryByText('Sort by')).not.toBeInTheDocument()
+    expect(screen.queryByText('Quick calculation')).not.toBeInTheDocument()
+  })
 })

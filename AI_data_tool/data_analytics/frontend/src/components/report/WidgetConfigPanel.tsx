@@ -29,7 +29,7 @@ import ExpandableGroup from './ExpandableGroup'
 import type { DisplayRule } from '../../lib/displayRules'
 import { flattenHierarchy } from '../../lib/hierarchyUtils'
 import { isIdLikeColumn } from '../../lib/columnRole'
-import { formattingCapabilities, supportsRanking } from './widgetCapabilities'
+import { formattingCapabilities, sortLimitOptions, supportsRanking } from './widgetCapabilities'
 import { aggregationWarning } from '../../lib/aggregateDisclosure'
 import {
   CUSTOM_SHAPE_WIDGET_TYPES, RUNNING_OPTIONS, readCssVarColor,
@@ -862,6 +862,8 @@ export default function WidgetConfigPanel({ widget, columns, datasets, primaryDa
   const WATERFALL_NUMERIC_COLUMNS = new Set(['start', 'delta', 'end'])
   const dimension  = roleValues.category  || ''
   const dimension2 = roleValues.category2 || ''
+  // E08: the "Sort & limit" controls this widget type actually honours.
+  const sortOpts = sortLimitOptions(wt)
   const measure    = roleValues.measure   || ''
   const ruleColumns = wt === 'waterfall'
     ? WATERFALL_RULE_COLUMNS
@@ -2030,6 +2032,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           <ExpandableGroup id="sort" title="Sort & limit"
             searchTerms={SORT_SEARCH_TERMS} {...groupFilterProps('Sort & limit', SORT_SEARCH_TERMS)}>
           {/* Sort */}
+          {sortOpts === 'all' && (
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:8 }}>
             <div>
               <label htmlFor="cfg-sort-order" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>Sort order</label>
@@ -2052,10 +2055,11 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               )}
             </div>
           </div>
+          )}
           {/* A grid (two dimensions) sorts its ROWS by their subtotal or their
               label; it has no per-row value of another column to sort by, so
               the control would save and do nothing (E08). */}
-          {!dimension2 && fld('Sort column (overrides sort by)',
+          {sortOpts === 'all' && !dimension2 && fld('Sort column (overrides sort by)',
             <select value={sortCol} onChange={e => setSortCol(e.target.value)} style={{ width:'100%' }}>
               <option value="">— use sort by above —</option>
               {colOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -2096,7 +2100,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
             </div>
           )}
 
-          {fld('Row limit',
+          {sortOpts !== 'none' && fld('Row limit',
             <input type="number" value={limit} min={1} max={1000} onChange={e => setLimit(Number(e.target.value))} style={{ width:'100%' }} />
           )}
 
@@ -2109,16 +2113,17 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
             </>
           )}
 
-          {fld('Custom order (comma-separated)',
+          {sortOpts === 'all' && fld('Custom order (comma-separated)',
             <input value={sortCustom} onChange={e => setSortCustom(e.target.value)} style={{ width:'100%' }}
               placeholder="e.g. Low, Medium, High" aria-label="Custom category order" />
           )}
-          {sortCustom.trim() !== '' && (
+          {sortOpts === 'all' && sortCustom.trim() !== '' && (
             <div style={{ fontSize: 11, color:'var(--muted)', marginTop:-8, marginBottom:12 }}>
               Categories listed here come first, in this order; the rest follow. Overrides the sort above.
             </div>
           )}
 
+          {sortOpts === 'all' && (
           <div style={{ marginBottom: 12 }}>
             <label htmlFor="cfg-having-op" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
               Filter aggregated values
@@ -2137,8 +2142,9 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
             </div>
             <span style={{ fontSize: 11, color:'var(--muted)' }}>Applies to the aggregated value of each category — e.g. keep regions whose total exceeds 1000.</span>
           </div>
+          )}
 
-          {fld('Quick calculation',
+          {sortOpts === 'all' && fld('Quick calculation',
             <select value={quickCalc} onChange={e => setQuickCalc(e.target.value)} style={{ width:'100%' }} aria-label="Quick calculation">
               <option value="">— none —</option>
               <option value="percent_of_total">Percent of total</option>
@@ -2148,6 +2154,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
             </select>
           )}
 
+          {sortOpts === 'all' && (
           <div style={{ marginBottom: 12 }}>
             <label htmlFor="cfg-suppress" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
               Suppress small groups
@@ -2161,6 +2168,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
             </label>
             <span style={{ fontSize: 11, color:'var(--muted)' }}>Hides any category aggregated from fewer rows than this — confidentiality suppression for small cells.</span>
           </div>
+          )}
 
           {wt === 'histogram' && fld('Bins',
             <input type="number" value={bins} min={2} max={100} onChange={e => setBins(Number(e.target.value))} style={{ width:'100%' }} />

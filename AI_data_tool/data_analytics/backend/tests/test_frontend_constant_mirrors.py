@@ -116,6 +116,28 @@ class TestRankingCapabilityMirror:
             assert SHAPERS[wt].__name__ in _RANKING_SHAPERS, wt
 
 
+class TestSortLimitMirror:
+    """E08: the "Sort & limit" controls are gated per widget type on both
+    sides, like Ranking. Behaviour is pinned by test_object_families.py."""
+
+    def _frontend_set(self, name: str) -> set[str]:
+        path = os.path.join(os.path.dirname(os.path.dirname(_HERE)),
+                            "frontend", "src", "components", "report",
+                            "widgetCapabilities.ts")
+        if not os.path.exists(path):
+            pytest.skip("widgetCapabilities.ts not reachable")
+        with open(path, encoding="utf-8") as fh:
+            src = fh.read()
+        m = re.search(name + r" = new Set\(\[(.*?)\]\)", src, re.S)
+        assert m, f"{name} is not exported from widgetCapabilities.ts"
+        return set(re.findall(r"'([^']+)'", m.group(1)))
+
+    def test_the_sets_match_exactly(self):
+        from app.services.widget_data import LIMIT_ONLY_WIDGETS, SORTABLE_WIDGETS
+        assert self._frontend_set("SORTABLE_WIDGETS") == set(SORTABLE_WIDGETS)
+        assert self._frontend_set("LIMIT_ONLY_WIDGETS") == set(LIMIT_ONLY_WIDGETS)
+
+
 class TestSmallMultiples:
     def test_panel_cap_matches(self, ts):
         from app.services.widget_data import FACET_MAX_PANELS

@@ -227,3 +227,31 @@ export function supportsRanking(widgetType: string): boolean {
   return RANKING_WIDGETS.has(widgetType)
 }
 
+
+/** E08: which controls of the panel's "Sort & limit" group a widget type
+ *  honours. MIRRORS `SORTABLE_WIDGETS` / `LIMIT_ONLY_WIDGETS` in backend
+ *  services/widget_data.py -- derived there from the dispatch table, pinned
+ *  here by test_frontend_constant_mirrors.py, and each option checked against
+ *  what the shaper actually does by test_object_families.py. Everything else
+ *  (a KPI, a gauge, a histogram, a heatmap, the hierarchy family) gets
+ *  neither: the group used to be offered to every widget type. */
+export const SORTABLE_WIDGETS = new Set([
+  'area', 'bar', 'crosstab', 'donut', 'dot_plot', 'funnel', 'line', 'list',
+  'map_bubbles', 'map_choropleth', 'map_points', 'matrix', 'needle', 'pie',
+  'scatter', 'slicer', 'small_multiples', 'step', 'table', 'treemap', 'word_cloud',
+])
+
+export const LIMIT_ONLY_WIDGETS = new Set([
+  'box_plot', 'bubble', 'bubble_change', 'butterfly', 'comparative_time_series',
+  'dual_axis_bar', 'dual_axis_bar_line', 'dual_axis_line', 'dual_axis_time_series',
+  'map_clusters', 'map_density', 'map_pie', 'network', 'numeric_series',
+  'parallel_coordinates', 'sankey', 'schedule', 'vector_plot', 'waterfall',
+])
+
+/** 'all': sort, sort column, custom order, HAVING, quick calc, suppression
+ *  and the row limit; 'limit': the row limit alone; 'none': neither. */
+export function sortLimitOptions(widgetType: string): 'all' | 'limit' | 'none' {
+  if (SORTABLE_WIDGETS.has(widgetType)) return 'all'
+  if (LIMIT_ONLY_WIDGETS.has(widgetType)) return 'limit'
+  return 'none'
+}
