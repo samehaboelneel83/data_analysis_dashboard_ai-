@@ -206,7 +206,14 @@ _PERCENTILE_FRACTIONS = {"p25": 0.25, "p75": 0.75, "p90": 0.90, "p95": 0.95, "me
 
 
 def _quote(identifier: str) -> str:
-    return f'"{identifier}"'
+    """A double-quoted SQL identifier, with any embedded quote doubled.
+
+    The allowlist (`_validate_columns` and friends) is the real defence: a name
+    that is not a column of the dataset never reaches SQL. Doubling the quote
+    is the second one, so that even a column genuinely named `a"b` -- or a path
+    that forgot the allowlist -- cannot close the identifier and append SQL.
+    """
+    return '"' + str(identifier).replace('"', '""') + '"'
 
 
 #: SQLAlchemy binds, as the builder writes them, and the sentinel they hide
@@ -1251,6 +1258,12 @@ def _run_row_capped(
         raise DirectQueryUnsupported(f"DirectQuery does not yet support '{dialect}' sources")
 
     plan = plan_row_fetch(config, widget_type, allow_any_widget=allow_any_widget)
+    # The filters' column names are spliced into the WHERE clause as
+    # identifiers (values are bound; names cannot be). Every other path checks
+    # them against the dataset's columns first; this one -- tables, KPIs,
+    # cards, every Top-N, every fallback -- did not, so a crafted filter
+    # column could append its own SQL and read any table the connection can.
+    _validate_known_columns(dataset, [], plan.filters)
     rls_where, rls_params = _translate_rls(dataset, rls_filter_expr)
 
     count_sql, count_params = build_count_sql(dataset, plan, dialect, rls_where=rls_where, rls_params=rls_params)
