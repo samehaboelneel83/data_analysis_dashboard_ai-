@@ -127,24 +127,59 @@ def _table_flowable(result: dict, styles):
     Flows across pages, repeating the header. When the row budget binds, the
     table is followed by a line saying how many rows were omitted -- a silently
     truncated table is a wrong answer that looks like a right one.
+
+    The table the reader saw on screen (E08/E10): the subtotal column is
+    "Total", a grouped table is headed by its dimension and measure rather
+    than `name` / `value`, and the totals row is the table's last row. Arabic
+    (or any RTL) text is drawn in a font that has its glyphs -- the cells used
+    to come out as empty boxes -- and a table whose labels are mostly RTL
+    reads right to left, its label column on the right, as it does on screen.
     """
     from .display_rules import result_frame
     frame = result_frame(result)
     if frame is None or frame.empty:
         return None
+    frame = frame.rename(columns={"__total__": "Total"})
+    if list(frame.columns[:2]) == ["name", "value"]:
+        labels = {"name": result.get("dimension"), "value": result.get("measure")}
+        frame = frame.rename(columns={k: v for k, v in labels.items()
+                                      if isinstance(v, str) and v and v not in frame.columns})
     total_rows = len(frame)
     truncated = total_rows > PDF_MAX_TABLE_ROWS
     frame = frame.head(PDF_MAX_TABLE_ROWS)
     header = [str(c) for c in frame.columns]
-    data = [header] + [[_fmt(v) for v in row] for row in frame.itertuples(index=False)]
-    tbl = Table(data, repeatRows=1, hAlign="LEFT")
-    tbl.setStyle(TableStyle([
+    body = [list(row) for row in frame.itertuples(index=False)]
+    # The table reads right to left when its label column does: headed in
+    # an RTL script, or holding mostly RTL labels.
+    labels = [r[0] for r in body if isinstance(r[0], str)]
+    mirror = bool(header) and (rtl_text.has_rtl(header[0]) or (
+        bool(labels) and sum(rtl_text.has_rtl(v) for v in labels) * 2 > len(labels)))
+    totals = result.get("totals")
+    if isinstance(totals, list) and len(totals) == len(header):
+        body.append(["Total" if totals[0] is None else totals[0], *totals[1:]])
+    any_rtl = any(rtl_text.has_rtl(h) for h in header) or any(
+        rtl_text.has_rtl(v) for r in body for v in r)
+    data = [[rtl_text.shape(h) for h in header]] + [[_fmt(v) for v in row] for row in body]
+    if mirror:
+        data = [list(reversed(row)) for row in data]
+    tbl = Table(data, repeatRows=1, hAlign="RIGHT" if mirror else "LEFT")
+    commands = [
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eef1f8")),
         ("FONTSIZE", (0, 0), (-1, -1), 7),
         ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#d0d5e0")),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f7f8fc")]),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
-    ]))
+    ]
+    if any_rtl and rtl_text.ensure_rtl_font():
+        # DejaVu Sans covers Latin as well, so one font serves the whole table.
+        commands.append(("FONTNAME", (0, 0), (-1, -1), rtl_text.RTL_FONT_NAME))
+    if mirror:
+        commands.append(("ALIGN", (0, 0), (-1, -1), "RIGHT"))
+    if isinstance(totals, list) and len(totals) == len(header):
+        commands.append(("LINEABOVE", (0, -1), (-1, -1), 0.9, colors.HexColor("#8890a8")))
+        if not any_rtl:
+            commands.append(("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"))
+    tbl.setStyle(TableStyle(commands))
     if truncated:
         return [tbl, Paragraph(
             f"Showing the first {PDF_MAX_TABLE_ROWS:,} of {total_rows:,} rows.",
@@ -264,9 +299,21 @@ def build_report_pdf(report_name: str, description: str | None,
         story.append(Spacer(1, 1.2 * cm))
         story.append(Paragraph("Contents", ParagraphStyle(
             "toch", parent=styles["Heading2"], fontSize=14)))
+        toc = ParagraphStyle("toc", parent=styles["Normal"], fontSize=10, leftIndent=10)
         for i, sec in enumerate(sections, 1):
-            story.append(Paragraph(f"{i}. {sec['page_name']}  ·  {len(sec['widgets'])} visuals",
-                                   ParagraphStyle("toc", parent=styles["Normal"], fontSize=10, leftIndent=10)))
+            name, count = str(sec["page_name"]), len(sec["widgets"])
+            if rtl_text.has_rtl(name) and rtl_text.ensure_rtl_font():
+                # An Arabic page name drew as empty boxes here while the same
+                # name as the page's own heading rendered. It is shaped on its
+                # own and the line assembled in visual order, number on the
+                # right: run through the bidi algorithm together, the English
+                # count scrambled the name's own brackets.
+                from xml.sax.saxutils import escape
+                visual = f"{count} visuals  ·  {rtl_text.shape(name)}  .{i}"
+                story.append(Paragraph(escape(visual), ParagraphStyle(
+                    "toc-rtl", parent=toc, fontName=rtl_text.RTL_FONT_NAME, alignment=TA_RIGHT)))
+            else:
+                story.append(Paragraph(f"{i}. {name}  ·  {count} visuals", toc))
     story.append(PageBreak())
 
     for sec in sections:

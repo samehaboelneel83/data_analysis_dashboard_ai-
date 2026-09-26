@@ -105,3 +105,65 @@ async def test_pdf_endpoint_takes_page_setup_and_rejects_nonsense(client, auth_h
     assert ok.status_code == 200 and ok.content[:5] == b"%PDF-"
     bad = await client.get(f"/api/v1/reports/{report.id}/pdf", params={"paper": "B5"}, headers=auth_headers["a"])
     assert bad.status_code == 400
+
+
+# --------------------------------------------------------------------------
+# E10: Arabic in the PDF, checked against a rendered export. The tables drew
+# every Arabic cell as an empty box (Helvetica has no Arabic glyphs), headed a
+# grouped table "name" / "value" and a crosstab's total "__total__", dropped
+# the totals row, and the contents page drew Arabic page names as boxes.
+# --------------------------------------------------------------------------
+
+def _cells(tbl):
+    return [list(r) for r in tbl._cellvalues]
+
+
+def test_an_arabic_table_draws_in_a_font_with_arabic_and_reads_right_to_left():
+    from app.services import rtl_text
+    from app.services.pdf_export import _table_flowable
+    from reportlab.lib.styles import getSampleStyleSheet
+    result = {"type": "series", "dimension": "المنطقة", "measure": "الإيرادات",
+              "rows": [{"name": "القاهرة", "value": 1810.5}, {"name": "الجيزة", "value": 1130.0},
+                       {"name": "Luxor", "value": 95.0}],
+              "totals": [None, 3035.5]}
+    tbl = _table_flowable(result, getSampleStyleSheet())
+    cells = _cells(tbl)
+    # Headed by the dimension and the measure, label column on the right.
+    assert cells[0] == [rtl_text.shape("الإيرادات"), rtl_text.shape("المنطقة")]
+    assert cells[1] == ["1,810.5", rtl_text.shape("القاهرة")]
+    assert cells[-1] == ["3,035.5", "Total"]
+    cell_fonts = {tbl._cellStyles[r][c].fontname for r in range(len(cells)) for c in range(2)}
+    assert cell_fonts == {rtl_text.RTL_FONT_NAME}
+    assert {tbl._cellStyles[r][c].alignment for r in range(len(cells)) for c in range(2)} == {"RIGHT"}
+
+
+def test_a_latin_table_is_unchanged_apart_from_its_headers_and_totals():
+    from app.services.pdf_export import _table_flowable
+    from reportlab.lib.styles import getSampleStyleSheet
+    result = {"type": "crosstab", "columns": ["region", "Q1", "Q2", "__total__"],
+              "rows": [["North", 1.0, 2.0, 3.0], ["South", 4.0, 5.0, 9.0]],
+              "totals": [None, 5.0, 7.0, 12.0]}
+    tbl = _table_flowable(result, getSampleStyleSheet())
+    cells = _cells(tbl)
+    assert cells[0] == ["region", "Q1", "Q2", "Total"]
+    assert cells[1][0] == "North"            # not mirrored
+    assert cells[-1] == ["Total", "5", "7", "12"]
+    assert tbl._cellStyles[1][0].fontname == "Helvetica"
+    assert tbl._cellStyles[-1][0].fontname == "Helvetica-Bold"
+
+
+def test_an_arabic_page_name_in_the_contents_is_drawn_with_arabic_glyphs():
+    from app.services import rtl_text
+    from app.services import pdf_export
+    drawn = []
+    real = pdf_export.Paragraph
+
+    def spy(text, style, *a, **k):
+        drawn.append((text, style.fontName))
+        return real(text, style, *a, **k)
+    import unittest.mock as um
+    with um.patch.object(pdf_export, "Paragraph", spy):
+        build_report_pdf("R", None, [{"page_name": "نظرة عامة (Overview)", "widgets": []}])
+    toc = [(t, f) for t, f in drawn if "visuals" in t]
+    assert toc and toc[0][1] == rtl_text.RTL_FONT_NAME
+    assert rtl_text.shape("نظرة عامة (Overview)") in toc[0][0]
