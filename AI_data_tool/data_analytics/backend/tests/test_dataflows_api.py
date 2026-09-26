@@ -199,10 +199,10 @@ class TestItIsNotAWayAroundTheRefusals:
         db_session.add(RowSecurityRule(dataset_id=src.id, role_id=two_orgs["a"]["role"].id,
                                        filter_expr="k = 'v1'"))
         await db_session.commit()
-        fid = (await _create(client, auth_headers["a"], src.id)).json()["id"]
-
-        r = await client.post(f"/api/v1/dataflows/{fid}/run",
-                              json={"output_name": "Out"}, headers=auth_headers["a"])
+        # Refused when it is made, not at its first run: one that could be
+        # created and scheduled but never run was a trap (E12, found in the
+        # browser). Runs still re-check -- see the rules-added-later test.
+        r = await _create(client, auth_headers["a"], src.id)
 
         assert r.status_code == 403
         assert "security" in r.json()["detail"].lower()
@@ -216,10 +216,7 @@ class TestItIsNotAWayAroundTheRefusals:
                                           role_id=two_orgs["a"]["role"].id,
                                           denied_columns=["n"]))
         await db_session.commit()
-        fid = (await _create(client, auth_headers["a"], src.id)).json()["id"]
-
-        r = await client.post(f"/api/v1/dataflows/{fid}/run",
-                              json={"output_name": "Out"}, headers=auth_headers["a"])
+        r = await _create(client, auth_headers["a"], src.id)
 
         assert r.status_code == 403
 

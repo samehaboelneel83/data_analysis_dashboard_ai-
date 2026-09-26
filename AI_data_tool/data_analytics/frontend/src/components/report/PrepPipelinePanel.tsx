@@ -21,6 +21,15 @@ interface Props {
   columns: DatasetColumn[]
   /** For naming a dashboard built on the view. */
   datasetName?: string
+  /** E12: a dataflow's recipe rather than the dataset's view. With these the
+   *  panel edits the given steps (previewed over `datasetId`, the flow's
+   *  source) and Save hands them to `onSave`; the dataset's own view is
+   *  neither read nor written, and "Save as new dataset" is left to the
+   *  dataflow's own Run. */
+  initialSteps?: PrepStep[]
+  onSave?: (steps: PrepStep[]) => Promise<void>
+  saveLabel?: string
+  readOnly?: boolean
 }
 
 function summaryOf(s: PrepStep): string {
@@ -88,7 +97,8 @@ function summaryOf(s: PrepStep): string {
  *  `right_on` came first and is what every pipeline saved before composite
  *  keys still carries, so it is read as a one-pair list rather than migrated.
  */
-export default function PrepPipelinePanel({ datasetId, columns, datasetName }: Props) {
+export default function PrepPipelinePanel({ datasetId, columns, datasetName, initialSteps, onSave, saveLabel, readOnly }: Props) {
+  const controlled = onSave !== undefined
   const [steps, setSteps]     = useState<EditStep[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving]   = useState(false)
@@ -133,9 +143,14 @@ export default function PrepPipelinePanel({ datasetId, columns, datasetName }: P
 
   useEffect(() => {
     let cancelled = false
-    prepApi.get(datasetId).then(saved => {
-      if (!cancelled) setSteps(saved.map(withKey))
-    }).finally(() => !cancelled && setLoading(false))
+    if (controlled) {
+      setSteps((initialSteps ?? []).map(withKey))
+      setLoading(false)
+    } else {
+      prepApi.get(datasetId).then(saved => {
+        if (!cancelled) setSteps(saved.map(withKey))
+      }).finally(() => !cancelled && setLoading(false))
+    }
     // Import datasets only: a join or append runs over loaded data, and a
     // DirectQuery dataset was listed here only to be refused on save.
     datasetsApi.list().then(list => !cancelled && setOtherDatasets(list.filter(d => d.id !== datasetId && d.mode !== 'directquery')))
@@ -143,6 +158,7 @@ export default function PrepPipelinePanel({ datasetId, columns, datasetName }: P
     // this is the first thing that reads its output at join time.
     relationshipsApi.list().then(r => !cancelled && setRels(r)).catch(() => {})
     return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- a new recipe arrives as a remount (key)
   }, [datasetId])
 
   // The full pipeline, disabled steps included -- this is what gets saved AND
@@ -167,6 +183,10 @@ export default function PrepPipelinePanel({ datasetId, columns, datasetName }: P
 
   const save = async () => {
     setSaving(true)
+    if (onSave) {
+      try { await onSave(apiSteps()) } finally { setSaving(false) }
+      return
+    }
     try {
       await prepApi.set(datasetId, apiSteps())
       toast.success('View saved')
@@ -245,7 +265,7 @@ export default function PrepPipelinePanel({ datasetId, columns, datasetName }: P
         </span>
         <div style={{ position: 'relative' }}>
           <button className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '2px 7px' }}
-            onClick={() => setAddMenuOpen(o => !o)}>
+            hidden={readOnly} onClick={() => setAddMenuOpen(o => !o)}>
             + Add step
           </button>
           {addMenuOpen && (
@@ -344,10 +364,10 @@ export default function PrepPipelinePanel({ datasetId, columns, datasetName }: P
           It is applied on every read -- widgets, exports, AI, the quality
           report -- with each viewer's own row and column security, which a
           stored snapshot could not honour. Saying so is most of the feature. */}
-      {steps.length > 0 && (
+      {(steps.length > 0 || controlled) && !readOnly && (
         <button className="btn btn-primary btn-sm" style={{ width: '100%', fontSize: 11, marginTop: 10 }}
           onClick={save} disabled={saving}>
-          {saving ? 'Saving…' : 'Save as this dataset’s view'}
+          {saving ? 'Saving…' : (saveLabel ?? 'Save as this dataset’s view')}
         </button>
       )}
       {viewSaved && (
@@ -375,7 +395,7 @@ export default function PrepPipelinePanel({ datasetId, columns, datasetName }: P
             </span>
             {/* Offered here, beside the result it would keep: this is the moment
                 the author knows the output is what they want. */}
-            <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px' }}
+            {!controlled && <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px' }}
               disabled={savingAs}
               onClick={() => {
                 setSaveErr(null)
@@ -383,7 +403,7 @@ export default function PrepPipelinePanel({ datasetId, columns, datasetName }: P
                 setSaveOpen(true)
               }}>
               Save as new dataset…
-            </button>
+            </button>}
           </div>
 
           {saved && (

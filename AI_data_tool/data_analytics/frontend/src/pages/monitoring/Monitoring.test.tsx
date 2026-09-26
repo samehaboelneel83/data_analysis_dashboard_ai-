@@ -44,10 +44,9 @@ describe('MonitoringJobs', () => {
     expect(screen.getByRole('link', { name: 'Revenue floor' })).toHaveAttribute('href', '/datasets/4')
   })
 
-  it('names a dataflow job without linking it -- the Dataflows page is gone', async () => {
-    // Dataflows still run on their schedule and still belong in this list.
-    // What they no longer have is a page to open, so the row states the job
-    // rather than offering a link into a route that would 404.
+  it('links a dataflow job to the Dataflows page, opened on it (E12)', async () => {
+    // Dataflows run on their schedule and belong in this list; their page
+    // is back, so the row opens it on the dataflow.
     vi.mocked(monitoringApi.jobs).mockResolvedValue([
       { kind: 'dataflow', id: 5, name: 'Nightly rollup', interval_minutes: 1440,
         last_run_at: null, status: null, error: null },
@@ -55,7 +54,7 @@ describe('MonitoringJobs', () => {
     renderIn(<MonitoringJobs />)
     expect(await screen.findByText('Nightly rollup')).toBeInTheDocument()
     expect(screen.getByText('Dataflow')).toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: 'Nightly rollup' })).toBeNull()
+    expect(screen.getByRole('link', { name: 'Nightly rollup' })).toHaveAttribute('href', '/dataflows?flow=5')
   })
 
   it('shows the empty state when nothing is scheduled', async () => {

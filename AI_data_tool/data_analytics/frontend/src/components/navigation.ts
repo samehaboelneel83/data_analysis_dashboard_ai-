@@ -65,6 +65,7 @@ export const NAVIGATION: NavSection[] = [
     items: [
       { to: '/datasets', label: 'Datasets', icon: Database, permission: 'member', end: true },
       { to: '/lineage', label: 'Lineage', icon: Waypoints, permission: 'member' },
+      { to: '/dataflows', label: 'Dataflows', icon: GitBranch, permission: 'member' },
     ],
   },
   {

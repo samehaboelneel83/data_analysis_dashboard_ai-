@@ -177,6 +177,12 @@ async def create_dataflow(req: DataflowIn, db: AsyncSession = Depends(get_db),
     await require_dataset_capability(db, current_user, req.source_dataset_id, "data")
     if src.mode == "directquery" or not src.filename:
         raise HTTPException(400, "Only import-mode datasets can feed a dataflow")
+    # Said at once rather than at the first run: a dataflow over governed or
+    # export-blocked data could be created and scheduled but never run (E12,
+    # found driving the new Dataflows page against the demo's Sales, which has
+    # row rules). Every run still checks again -- rules may be added later.
+    from ..routers.datasets import _refuse_if_ungovernable
+    await _refuse_if_ungovernable(db, [req.source_dataset_id])
 
     steps = req.steps or []
     if not isinstance(steps, list) or len(steps) > MAX_STEPS:

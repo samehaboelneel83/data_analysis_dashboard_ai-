@@ -33,10 +33,8 @@ const KIND_ICON: Record<MonitoringJobRow['kind'], LucideIcon> = {
 function jobLink(j: MonitoringJobRow): string | null {
   switch (j.kind) {
     case 'dataset_refresh': return `/datasets/${j.id}`
-    // Dataflows still run, and still belong in this list. The page that
-    // configured them is gone, so the row names the job and stops there
-    // rather than linking into a route that would 404.
-    case 'dataflow': return null
+    // E12: the Dataflows page is back, opened on this dataflow.
+    case 'dataflow': return `/dataflows?flow=${j.id}`
     case 'report_schedule': return j.report_id != null ? `/reports/${j.report_id}` : '/reports'
     case 'alert': return j.dataset_id != null ? `/datasets/${j.dataset_id}` : '/'
   }

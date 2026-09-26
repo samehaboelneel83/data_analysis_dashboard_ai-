@@ -2083,7 +2083,7 @@ React 18 · TypeScript · Vite · Recharts.
 
 ### Pages
 
-**18 pages** in `frontend/src/pages/`:
+**19 pages** in `frontend/src/pages/`:
 
 | Page | Purpose |
 |------|---------|
@@ -2095,6 +2095,7 @@ React 18 · TypeScript · Vite · Recharts.
 | `Connections.tsx` | Data source management |
 | `SourceReview.tsx` | Metadata review and approval |
 | `Lineage.tsx` | Model lineage graph (`reactflow`) |
+| `Dataflows.tsx` | Dataflows (route `/dataflows`): create one from a dataset, edit its recipe with the pipeline editor, schedule it, run it into new datasets or refresh its outputs; linked from Monitoring → Jobs |
 | `SharedReport.tsx`, `EmbeddedReport.tsx` | Public and embedded views |
 | `ReportPrint.tsx` | Print/PDF layout |
 | `Home.tsx` | Landing page — recents, dashboards, datasets as card sections |
@@ -2335,7 +2336,7 @@ Agent pane (7)
 | Suite | Scope | Count |
 |-------|-------|-------|
 | Backend | `backend/tests/` | ~5,300 tests across 416 modules |
-| Frontend | colocated `*.test.ts(x)` | ~2,950 tests across 230 files |
+| Frontend | colocated `*.test.ts(x)` | ~2,950 tests across 231 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |
 | Doc audit | `tests/test_architecture_doc.py` | Enforces the *counts* in this document |

@@ -255,7 +255,7 @@
     <a class="slab" data-l="4" href="#l4"><span class="sn">04</span><span class="st">Query &amp; Semantic</span><span class="sd">25 aggregations · RLS</span></a>
     <a class="slab" data-l="5" href="#l5"><span class="sn">05</span><span class="st">Analytics &amp; AI</span><span class="sd">stats · forecast · NL→SQL</span></a>
     <a class="slab" data-l="6" href="#l6"><span class="sn">06</span><span class="st">API &amp; Services</span><span class="sd">19 routers · auth · delivery</span></a>
-    <a class="slab" data-l="7" href="#l7"><span class="sn">07</span><span class="st">Presentation</span><span class="sd">57 widgets · 18 pages</span></a>
+    <a class="slab" data-l="7" href="#l7"><span class="sn">07</span><span class="st">Presentation</span><span class="sd">57 widgets · 19 pages</span></a>
   </div>
   <p class="flowhint">↑ data flows upward · dependencies point downward ↓</p>
 
@@ -993,7 +993,7 @@ llm_reserved_interactive = 2</code></pre>
   <p class="owns"><strong>Owns:</strong> authoring and rendering reports. React 18 · TypeScript · Vite · Recharts.</p>
 
   <h3>Pages</h3>
-  <p><strong>18 pages</strong> in <code>frontend/src/pages/</code>.</p>
+  <p><strong>19 pages</strong> in <code>frontend/src/pages/</code>.</p>
   <div class="scroll">
     <table>
       <thead><tr><th>Page</th><th>Purpose</th></tr></thead>
@@ -1005,6 +1005,7 @@ llm_reserved_interactive = 2</code></pre>
         <tr><th><code>Connections.tsx</code></th><td>Data source management</td></tr>
         <tr><th><code>SourceReview.tsx</code></th><td>Metadata review and approval</td></tr>
         <tr><th><code>Lineage.tsx</code></th><td>Model lineage graph (<code>reactflow</code>)</td></tr>
+        <tr><th><code>Dataflows.tsx</code></th><td>Dataflows (route <code>/dataflows</code>): create one from a dataset, edit its recipe with the pipeline editor, schedule it, run it into new datasets or refresh its outputs; linked from Monitoring → Jobs</td></tr>
         <tr><th><code>SharedReport.tsx</code>, <code>EmbeddedReport.tsx</code></th><td>Public and embedded views</td></tr>
         <tr><th><code>ReportPrint.tsx</code></th><td>Print/PDF layout</td></tr>
         <tr><th><code>Home.tsx</code></th><td>Landing page — recents, dashboards, datasets as card sections</td></tr>
@@ -1159,7 +1160,7 @@ llm_reserved_interactive = 2</code></pre>
       <thead><tr><th>Suite</th><th>Scope</th><th>Count</th></tr></thead>
       <tbody>
         <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~5,300 tests · 416 modules</td></tr>
-        <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~2,950 tests · 230 files</td></tr>
+        <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~2,950 tests · 231 files</td></tr>
         <tr><th>Evals</th><td><code>backend/evals/</code></td><td>Agent quality gates (<code>run_eval_gate.ps1</code>)</td></tr>
         <tr><th>Conformance</th><td><code>tests/test_layer_conformance.py</code></td><td>Enforces the layer boundaries above</td></tr>
         <tr><th>Doc audit</th><td><code>tests/test_architecture_doc.py</code></td><td>Enforces the <em>counts</em> in this document</td></tr>

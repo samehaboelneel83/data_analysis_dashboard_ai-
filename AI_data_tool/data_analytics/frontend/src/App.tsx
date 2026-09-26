@@ -23,6 +23,7 @@ const ReportBuilder = lazy(() => import('./pages/ReportBuilder'))
 const ReportPrint = lazy(() => import('./pages/ReportPrint'))
 const Connections = lazy(() => import('./pages/Connections'))
 const Lineage = lazy(() => import('./pages/Lineage'))
+const Dataflows = lazy(() => import('./pages/Dataflows'))
 const SourceReview = lazy(() => import('./pages/SourceReview'))
 const SharedReport = lazy(() => import('./pages/SharedReport'))
 const EmbeddedReport = lazy(() => import('./pages/EmbeddedReport'))
@@ -109,6 +110,7 @@ export default function App() {
               <Route path="reports/:id/print" element={<ReportPrint />} />
               <Route path="connections" element={<Connections />} />
               <Route path="lineage" element={<Lineage />} />
+              <Route path="dataflows" element={<Dataflows />} />
           {/* Layer 1 — confirm the relationships and descriptions that
               metadata inference proposed for one connection. */}
           <Route path="connections/:id/review" element={<SourceReview />} />
