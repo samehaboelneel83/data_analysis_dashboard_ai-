@@ -1210,7 +1210,8 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
             <input id="custom-url-input" value={customUrl} onChange={e => setCustomUrl(e.target.value)} style={{ width:'100%' }} placeholder="https://…" />
             <div style={{ fontSize: 11, color:'var(--muted)', marginTop:4 }}>
               A sandboxed page that receives this widget's data via <code>postMessage</code>
-              (<code>{'{ type: "datalytics:data", data }'}</code>). Bind a dimension/measure below to choose the data.
+              (<code>{'{ type: "datalytics:data", version: 1, data, context }'}</code>). Bind a dimension/measure below to choose the data.
+              Build one with the SDK, <code>/sdk/datalytics-visual-1.js</code>; <code>/sdk/example-bars.html</code> is a working example.
             </div>
           </div>
         )}

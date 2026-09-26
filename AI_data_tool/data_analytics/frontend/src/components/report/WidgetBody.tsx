@@ -267,7 +267,7 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
     // `broadcasts` gates it here too, so a page set to manual interactions
     // hands the frame no handler at all and it never starts listening.
     return <CustomVisual url={url} title={widget.title || 'Custom visual'} data={data}
-      onSelect={broadcasts ? onClickPoint : undefined} />
+      widgetType={wt} onSelect={broadcasts ? onClickPoint : undefined} />
   }
   if (wt === 'shape') {
     const shape = cfg.shape || 'rectangle'

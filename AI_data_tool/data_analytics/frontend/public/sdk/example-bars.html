@@ -1,0 +1,46 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Example visual (SDK v1)</title>
+  <style>
+    body { margin: 0; font: 12px system-ui, "Noto Sans Arabic", sans-serif; }
+    .row { display: flex; align-items: center; gap: 8px; padding: 3px 10px; cursor: pointer; }
+    .row:hover { background: rgba(0,0,0,.04); }
+    .label { width: 35%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bar { height: 10px; border-radius: 4px; }
+    .empty { padding: 16px; opacity: .7; }
+  </style>
+  <script src="/sdk/datalytics-visual-1.js"></script>
+</head>
+<body>
+  <!-- A reference visual built on the SDK: bars you can click to filter the page. -->
+  <div id="root" class="empty">Waiting for data…</div>
+  <script>
+    DatalyticsVisual.onData(function (data, ctx) {
+      var root = document.getElementById('root')
+      document.documentElement.dir = ctx.dir || 'ltr'
+      document.body.style.color = (ctx.theme && ctx.theme.text) || '#1d1f24'
+      var rows = (data && data.rows) || []
+      if (!rows.length) { root.className = 'empty'; root.textContent = 'No data'; return }
+      var max = Math.max.apply(null, rows.map(function (r) { return Math.abs(Number(r.value) || 0) })) || 1
+      var fmt = new Intl.NumberFormat(ctx.locale || 'en')
+      root.className = ''
+      root.innerHTML = ''
+      rows.forEach(function (r) {
+        var div = document.createElement('div')
+        div.className = 'row'
+        div.setAttribute('role', ctx.can_select ? 'button' : 'listitem')
+        var label = document.createElement('span'); label.className = 'label'; label.textContent = String(r.name)
+        var bar = document.createElement('span'); bar.className = 'bar'
+        bar.style.width = Math.round(Math.abs(Number(r.value) || 0) / max * 55) + '%'
+        bar.style.background = (ctx.theme && ctx.theme.accent) || '#3d5afe'
+        var val = document.createElement('span'); val.textContent = fmt.format(Number(r.value) || 0)
+        div.appendChild(label); div.appendChild(bar); div.appendChild(val)
+        if (ctx.can_select) div.addEventListener('click', function () { DatalyticsVisual.select(r.name) })
+        root.appendChild(div)
+      })
+    })
+  </script>
+</body>
+</html>

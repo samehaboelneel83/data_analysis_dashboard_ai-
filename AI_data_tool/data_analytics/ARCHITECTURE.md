@@ -2124,6 +2124,9 @@ in `WIDGET_CATALOG` (the source of truth — do not maintain a parallel list):
 
 Any bar, line, area, scatter, step or dot plot can also be drawn as a
 lattice (small multiples by one or two fields) or animated over a field.
+A custom visual is an author's page in a sandboxed frame, fed by a versioned
+`postMessage` protocol with an SDK (`public/sdk/datalytics-visual-1.js`); see
+`docs/EXTENSIONS.md`.
 
 Rendering is dispatched by `WidgetBody.tsx` (inside `WidgetRenderer.tsx`) to per-type modules in
 `components/report/chartRenderers/`. Maps render through `d3-geo` and
@@ -2337,7 +2340,7 @@ Agent pane (7)
 | Suite | Scope | Count |
 |-------|-------|-------|
 | Backend | `backend/tests/` | ~5,300 tests across 418 modules |
-| Frontend | colocated `*.test.ts(x)` | ~2,950 tests across 232 files |
+| Frontend | colocated `*.test.ts(x)` | ~2,950 tests across 233 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |
 | Doc audit | `tests/test_architecture_doc.py` | Enforces the *counts* in this document |

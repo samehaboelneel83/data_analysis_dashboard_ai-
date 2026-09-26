@@ -1,5 +1,20 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { EmptyState } from './chartUtils'
+import { useDirection } from '../../contexts/DirectionContext'
+
+/** E16: the extension protocol's version. Within a version, changes are
+ *  additive only (a new optional field, a new message type a visual may
+ *  ignore); anything else is a new version. See docs/EXTENSIONS.md. */
+export const VISUAL_PROTOCOL_VERSION = 1
+/** What a visual may send back, announced in the hello reply. */
+export const VISUAL_CAPABILITIES = ['select', 'clear'] as const
+
+function themeColor(name: string, fallback: string): string {
+  try {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+    return v || fallback
+  } catch { return fallback }
+}
 
 /** A data-driven custom visualisation: an author-supplied page in a sandboxed iframe
  *  that receives this widget's shaped data via postMessage (SAS's data-driven content /
@@ -8,6 +23,11 @@ import { EmptyState } from './chartUtils'
  *  to allow-scripts only (opaque origin), so it can render but cannot reach the app or
  *  the parent; targetOrigin must therefore be "*", which is safe because the page is the
  *  one the report author chose. Only http(s) or a same-origin ("/") path is embeddable.
+ *
+ *  E16 made it a versioned protocol (docs/EXTENSIONS.md, and the SDK at
+ *  `/sdk/datalytics-visual-1.js`): data messages carry `version` and a
+ *  `context`, and a visual may open with `{ type: "datalytics:hello" }` to
+ *  learn the host's version and capabilities.
  *
  *  **Selections come back the other way**, when the report supplies `onSelect`:
  *  `{ type: "datalytics:select", value }` and `{ type: "datalytics:clear" }`. Two
@@ -22,24 +42,50 @@ import { EmptyState } from './chartUtils'
  *     custom visual has exactly the power of a click: it cannot filter a column it was
  *     not given, and cannot broadcast on a page whose interaction settings forbid it. A
  *     `column` in the payload is ignored, not honoured. */
-export function CustomVisual({ url, title, data, onSelect }: {
+export function CustomVisual({ url, title, data, onSelect, widgetType = 'custom_visual' }: {
   url: string; title: string; data: unknown
   onSelect?: (value: unknown) => void
+  widgetType?: string
 }) {
   const ref = useRef<HTMLIFrameElement>(null)
+  const { language, direction } = useDirection()
+  // E16: every data message carries the protocol version and the context a
+  // visual needs to fit in -- language, direction, title and the theme's
+  // colours (the frame cannot read the app's CSS). `data` is unchanged, so a
+  // visual written against the first contract keeps working.
   const post = useCallback(() => {
-    ref.current?.contentWindow?.postMessage({ type: 'datalytics:data', data }, '*')
-  }, [data])
+    ref.current?.contentWindow?.postMessage({
+      type: 'datalytics:data', version: VISUAL_PROTOCOL_VERSION, data,
+      context: {
+        title, widget_type: widgetType, locale: language, dir: direction,
+        can_select: !!onSelect,
+        theme: {
+          accent: themeColor('--accent', '#3d5afe'), text: themeColor('--text', '#1d1f24'),
+          muted: themeColor('--muted', '#5d6370'), surface: themeColor('--surface', '#ffffff'),
+        },
+      },
+    }, '*')
+  }, [data, title, widgetType, language, direction, onSelect])
   useEffect(() => { post() }, [post])   // re-post whenever the data changes
 
   useEffect(() => {
-    if (!onSelect) return               // display-only: nothing is listening
     const handler = (event: MessageEvent) => {
       const frame = ref.current
       if (!frame || !event.source || event.source !== frame.contentWindow) return
       const payload = event.data
       if (!payload || typeof payload !== 'object') return
       const type = (payload as { type?: unknown }).type
+      if (type === 'datalytics:hello') {
+        // The handshake: the host's version and what it will act on, then
+        // the data -- a visual that loaded after the first post still gets it.
+        frame.contentWindow?.postMessage({
+          type: 'datalytics:hello', version: VISUAL_PROTOCOL_VERSION,
+          capabilities: onSelect ? [...VISUAL_CAPABILITIES] : [],
+        }, '*')
+        post()
+        return
+      }
+      if (!onSelect) return               // display-only: selections are ignored
       if (type === 'datalytics:select') {
         onSelect((payload as { value?: unknown }).value)
       } else if (type === 'datalytics:clear') {
@@ -48,7 +94,7 @@ export function CustomVisual({ url, title, data, onSelect }: {
     }
     window.addEventListener('message', handler)
     return () => window.removeEventListener('message', handler)
-  }, [onSelect])
+  }, [onSelect, post])
 
   const embeddable = /^https?:\/\//i.test(url) || url.startsWith('/')
   if (!embeddable) return <EmptyState msg={url ? 'Custom visual needs an http(s) URL' : 'No URL set'} />
