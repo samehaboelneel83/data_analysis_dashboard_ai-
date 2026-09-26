@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { withMeasuredTiles } from '../test/measuredTiles'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
@@ -173,5 +173,43 @@ describe('EmbeddedReport accessibility', () => {
     const { container } = mount()
     await screen.findByText('Quarterly')
     expect(await axeViolations(container)).toEqual([])
+  })
+})
+
+describe('the embed tells its host page what it needs (E16)', () => {
+  const host = { postMessage: vi.fn() }
+  const types = () => host.postMessage.mock.calls.map(c => (c[0] as { type: string }).type)
+
+  beforeEach(() => {
+    host.postMessage.mockReset()
+    Object.defineProperty(window, 'parent', { configurable: true, get: () => host })
+  })
+  afterEach(() => {
+    Object.defineProperty(window, 'parent', { configurable: true, get: () => window })
+  })
+
+  it('says it is ready, and how tall it is, versioned, to any origin', async () => {
+    mount()
+    await screen.findByText('Quarterly')
+    await waitFor(() => expect(types()).toContain('datalytics:embed:ready'))
+    const ready = host.postMessage.mock.calls.find(c => c[0].type === 'datalytics:embed:ready')!
+    expect(ready).toEqual([{ type: 'datalytics:embed:ready', version: 1, pages: 1, page: 0 }, '*'])
+    expect(types()).toContain('datalytics:embed:size')
+  })
+
+  it('says when the link cannot be opened', async () => {
+    vi.mocked(embedApi.report).mockRejectedValue(new Error('403'))
+    mount()
+    await waitFor(() => expect(types()).toEqual(['datalytics:embed:error']))
+    expect(host.postMessage.mock.calls[0][0].message).toMatch(/invalid, expired, or not allowed/)
+  })
+
+  it('in a top-level tab it posts nothing', async () => {
+    Object.defineProperty(window, 'parent', { configurable: true, get: () => window })
+    const spy = vi.spyOn(window, 'postMessage')
+    mount()
+    await screen.findByText('Quarterly')
+    expect(spy).not.toHaveBeenCalled()
+    spy.mockRestore()
   })
 })

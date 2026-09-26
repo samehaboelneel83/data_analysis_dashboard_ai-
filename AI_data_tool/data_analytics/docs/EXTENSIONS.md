@@ -1,4 +1,4 @@
-# Custom visuals: the extension protocol (version 1)
+# Extensions: custom visuals and embedding (protocol version 1)
 
 A **custom visual** widget shows a page you host, in a sandboxed frame, fed
 with the widget's data. This page is the contract between that page and the
@@ -66,3 +66,25 @@ in the widget's settings.
 - A page written before the protocol had versions (one that only listens for
   `datalytics:data` and reads `data`) keeps working: the message still carries
   `data` in the same place.
+
+## Embedding: what an embedded report tells its host page
+
+A report embedded with a signed link (`/embed?token=…`) posts three messages
+to the page that embeds it, each with `version: 1`, to any origin (the embed
+cannot know its host's origin, and none of them carries data):
+
+| Type | Fields | When |
+|---|---|---|
+| `datalytics:embed:ready` | `pages`, `page` | The report is drawn; again when the reader changes page. |
+| `datalytics:embed:size` | `height` (pixels) | The content's height, whenever it changes by 2 px or more. |
+| `datalytics:embed:error` | `message` | The link could not be opened (invalid, expired, not allowed from this origin). |
+
+```js
+window.addEventListener('message', function (e) {
+  if (e.source !== frame.contentWindow || !e.data) return
+  if (e.data.type === 'datalytics:embed:size') frame.style.height = e.data.height + 'px'
+})
+```
+
+Nothing the host sends is acted on: what an embed shows -- the report, its
+rows, its filters -- is decided on the server by the host's signed token.

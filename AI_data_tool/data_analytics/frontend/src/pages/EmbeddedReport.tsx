@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { embedApi } from '../services/api'
 import WidgetRenderer from '../components/report/WidgetRenderer'
 import { CrossFilterProvider } from '../components/report/CrossFilterContext'
 import FilterBar from '../components/report/FilterBar'
 import FloatingFilterWindow from '../components/report/FloatingFilterWindow'
+import { postToHost } from '../lib/embedProtocol'
 
 /** Cross-source mappings the server publishes with a report (Phase 6.1): the
  *  relationships among its datasets and, per dataset, only the column names
@@ -37,6 +38,31 @@ export default function EmbeddedReport() {
   const [data, setData] = useState<Record<number, unknown> | null>(null)
   const [pageIdx, setPageIdx] = useState(0)
   const [error, setError] = useState('')
+
+  // E16: tell the host page what it needs to fit the iframe (lib/embedProtocol.ts).
+  const rootRef = useRef<HTMLDivElement>(null)
+  const loaded = !!report && data !== null
+  const pageCount = report ? report.pages.filter(p => p.page_type === 'normal').length : 0
+  useEffect(() => { if (error) postToHost({ type: 'datalytics:embed:error', message: error }) }, [error])
+  useEffect(() => {
+    if (loaded) postToHost({ type: 'datalytics:embed:ready', pages: pageCount, page: pageIdx })
+  }, [loaded, pageCount, pageIdx])
+  useEffect(() => {
+    const el = rootRef.current
+    if (!loaded || !el) return
+    let last: number | null = null
+    const send = () => {
+      const height = Math.ceil(el.scrollHeight)
+      if (last !== null && Math.abs(height - last) < 2) return
+      last = height
+      postToHost({ type: 'datalytics:embed:size', height })
+    }
+    send()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(send)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [loaded, pageIdx])
 
   function fetchWidget(sTok: string, w: Widget) {
     return embedApi.widgetData(sTok, w.id).catch(e => (
@@ -78,7 +104,7 @@ export default function EmbeddedReport() {
   const CELL = 62
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg, var(--surface2))', padding: '0 0 40px' }}>
+    <div ref={rootRef} style={{ minHeight: '100vh', background: 'var(--bg, var(--surface2))', padding: '0 0 40px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 18px',
         borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
         <strong style={{ fontSize: 14 }}>{report.name}</strong>
