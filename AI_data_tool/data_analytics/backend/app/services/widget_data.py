@@ -3419,6 +3419,17 @@ LIMIT_ONLY_WIDGETS = tuple(sorted(
     k for k, v in SHAPERS.items() if getattr(v, "__name__", "") in _LIMIT_ONLY_SHAPERS))
 
 
+#: "Percentage %" (`pct`) is not a reduction of one column like the names in
+#: AGGREGATION_NAMES: the grouped shapers aggregate each group and then turn it
+#: into its share of the total. Only they compute it -- the same shapers that
+#: sort and rank groups. Every other shaper summed and labelled the sum a
+#: percentage; tree and partition charts refuse it. So it is saved, and offered
+#: by the panel (PERCENT_WIDGETS in widgetCapabilities.ts), only for these.
+#: test_object_families.py checks each type against what its shaper does.
+SHARE_AGGREGATIONS = frozenset({"pct"})
+PERCENT_WIDGETS = SORTABLE_WIDGETS
+
+
 def sort_limit_options(widget_type: str) -> tuple[str, ...]:
     """The "Sort & limit" options `widget_type` honours (see SORTABLE_WIDGETS)."""
     if widget_type in SORTABLE_WIDGETS:

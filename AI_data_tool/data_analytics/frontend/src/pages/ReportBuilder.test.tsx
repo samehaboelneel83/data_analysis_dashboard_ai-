@@ -406,6 +406,33 @@ describe('ReportBuilder Fields pane', () => {
     ))
   })
 
+  it('an interaction set in the panel survives the next panel edit (E03)', async () => {
+    // The panel rebuilds the config on every edit and now carries through the
+    // keys it does not manage -- which only works if the builder's copy of the
+    // widget holds the interaction that was just saved.
+    vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue(datasetWithColumns() as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    vi.mocked(reportsApi.updateWidget).mockReset().mockResolvedValue({} as any)
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    fireEvent.click(await screen.findByText('Sales by Region', {}, { timeout: 3000 }))
+    await screen.findByText('Widget: Sales by Region')
+
+    const isolated = screen.queryByRole('button', { name: 'Isolated —' })
+      ?? (fireEvent.click(screen.getByRole('button', { name: /Interactions/ })),
+          await screen.findByRole('button', { name: 'Isolated —' }))
+    fireEvent.click(isolated)
+    await waitFor(() => expect(reportsApi.updateWidget).toHaveBeenLastCalledWith(1, 100, 5,
+      { config: expect.objectContaining({ interaction: expect.objectContaining({ broadcasts: false, receives: false }) }) }))
+
+    fireEvent.change(screen.getByPlaceholderText('Widget title'), { target: { value: 'Sales, isolated' } })
+    await waitFor(() => expect(reportsApi.updateWidget).toHaveBeenLastCalledWith(1, 100, 5,
+      expect.objectContaining({ title: 'Sales, isolated',
+        config: expect.objectContaining({ interaction: expect.objectContaining({ broadcasts: false, receives: false }) }) })),
+      { timeout: 3000 })
+  })
+
   it('a second clicked field is ADDED to the config saved by the first, not swapped for it', async () => {
     // The selection used to be a stale snapshot, so the second click planned
     // from the pre-save config and sent {dimension} alone, wiping the measure.

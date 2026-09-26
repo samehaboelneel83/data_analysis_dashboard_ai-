@@ -1722,9 +1722,18 @@ export default function ReportBuilder() {
     const page = report?.pages.find(pg => (pg.widgets ?? []).some(w => w.id === widgetId))
     const widget = page?.widgets?.find(w => w.id === widgetId)
     if (!page || !widget) return
-    await reportsApi.updateWidget(reportId, page.id, widgetId, {
-      config: { ...(widget.config ?? {}), interaction },
-    } as never)
+    const config = { ...(widget.config ?? {}), interaction }
+    await reportsApi.updateWidget(reportId, page.id, widgetId, { config } as never)
+    // Not a reload (see above), but the local copy must hold it too: the
+    // widget panel carries every key it does not manage through its own
+    // saves (E03), and it would carry the OLD interaction back otherwise.
+    // The report, the active page and the selection are three copies (the
+    // latter two refreshed only on reload): all three get it.
+    const withIt = (pg: ReportPage) => pg.id !== page.id ? pg : {
+      ...pg, widgets: (pg.widgets ?? []).map(w => w.id === widgetId ? { ...w, config } : w) }
+    setReport(r => r ? { ...r, pages: r.pages.map(withIt) } : r)
+    setActivePage(p => p ? withIt(p) : p)
+    setSelectedW(w => w && w.id === widgetId ? { ...w, config } : w)
   }, [report, reportId])
 
   const isNumericRole = (rf: RoleField) => /numeric/i.test(rf.label ?? '') || rf.role.startsWith('measure') || rf.role === 'size'

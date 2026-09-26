@@ -138,6 +138,32 @@ class TestSortLimitMirror:
         assert self._frontend_set("LIMIT_ONLY_WIDGETS") == set(LIMIT_ONLY_WIDGETS)
 
 
+class TestPercentAndLegacyRoleMirrors:
+    """E03: "Percentage %" is offered where it is computed, and the panel's
+    legacy-config migration knows the same flat role keys as the engine."""
+
+    def _src(self, *parts) -> str:
+        path = os.path.join(os.path.dirname(os.path.dirname(_HERE)), "frontend", "src", *parts)
+        if not os.path.exists(path):
+            pytest.skip(f"{parts[-1]} not reachable")
+        with open(path, encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_percent_widgets_are_the_grouped_shapers_on_both_sides(self):
+        from app.services.widget_data import PERCENT_WIDGETS, SORTABLE_WIDGETS
+        assert set(PERCENT_WIDGETS) == set(SORTABLE_WIDGETS)
+        src = self._src("components", "report", "widgetCapabilities.ts")
+        assert re.search(r"export const PERCENT_WIDGETS = SORTABLE_WIDGETS\b", src), \
+            "PERCENT_WIDGETS must be the frontend's SORTABLE_WIDGETS, as on the server"
+
+    def test_flat_role_keys_match_the_engine(self):
+        from app.services.widget_data import _LEGACY_ROLE_KEYS
+        src = self._src("components", "report", "widgetConfigPanel", "configShape.ts")
+        m = re.search(r"FLAT_ROLE_KEYS: readonly string\[\] = \[(.*?)\]", src, re.S)
+        assert m, "FLAT_ROLE_KEYS is not exported from configShape.ts"
+        assert set(re.findall(r"'([^']+)'", m.group(1))) == set(_LEGACY_ROLE_KEYS)
+
+
 class TestSmallMultiples:
     def test_panel_cap_matches(self, ts):
         from app.services.widget_data import FACET_MAX_PANELS
@@ -374,6 +400,19 @@ class TestEveryOfferedAggregationWorks:
         from app.routers.datasets import _VALID_AGGREGATIONS
         missing = [a for a in offered if a not in _VALID_AGGREGATIONS]
         assert not missing, f"offered in the panel, refused on save: {missing}"
+
+    def test_saving_a_widget_accepts_every_one(self, offered):
+        """What a widget save actually checks (validate_widget_payload), not
+        the dataset router's list: "Percentage %" was in that list and refused
+        by this one, so it could be picked and never saved (E03)."""
+        from app.services.widget_roles import InvalidWidget, validate_widget_payload
+        refused = []
+        for a in offered:
+            try:
+                validate_widget_payload("bar", {"aggregation": a})
+            except InvalidWidget:
+                refused.append(a)
+        assert not refused, f"offered in the panel, refused when a bar is saved: {refused}"
 
     def test_the_engine_computes_every_one(self, offered):
         """Not just 'is in the allowlist' -- run it. `_agg_series` falls back to

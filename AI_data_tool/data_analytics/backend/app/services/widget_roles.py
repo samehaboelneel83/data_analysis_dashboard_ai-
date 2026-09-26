@@ -127,6 +127,45 @@ def config_key_for_role(role: str) -> str:
     return _ROLE_CONFIG_KEY.get(role, role)
 
 
+def _blank(v) -> bool:
+    return v is None or v == "" or (isinstance(v, list) and not v)
+
+
+def migrate_widget_config(config: dict | None) -> dict:
+    """A saved config in the current shape (E03). A copy; idempotent.
+
+    Two legacy shapes, both still read by the engine but not by the widget
+    panel, which opened them empty and then saved them away:
+
+    * a `roles` dict (the demo's map and flow widgets) is flattened into the
+      keys the panel edits (`config_key_for_role`). Only when no flat role
+      key disagrees with it: `resolve_roles` uses `roles` alone when it is
+      present, while `shape_series` reads the flat keys, so a config where
+      they differ renders differently per chart and is left as it is;
+    * `agg` becomes `aggregation` (dropped if `aggregation` is set: it is
+      read first, so `agg` beside it was dead).
+
+    Mirrors `migrateWidgetConfig` in the frontend's
+    widgetConfigPanel/configShape.ts; both are pinned to the cases in
+    widgetConfigPanel/widgetConfigMigrations.json."""
+    from .widget_data import _LEGACY_ROLE_KEYS
+    cfg = dict(config or {})
+    if "agg" in cfg:
+        if not _blank(cfg.get("aggregation")):
+            cfg.pop("agg")
+        elif isinstance(cfg["agg"], str) and cfg["agg"]:
+            cfg["aggregation"] = cfg.pop("agg")
+    roles = cfg.get("roles")
+    if isinstance(roles, dict):
+        flat = {config_key_for_role(r): v for r, v in roles.items() if not _blank(v)}
+        keys = set(_LEGACY_ROLE_KEYS) | set(flat)
+        conflict = any(not _blank(cfg.get(k)) and (k not in flat or cfg[k] != flat[k]) for k in keys)
+        if not conflict:
+            cfg.pop("roles")
+            cfg.update(flat)
+    return cfg
+
+
 def missing_roles(widget_type: str, config: dict) -> list[str]:
     """The config keys `widget_type` still needs, in the spec's own order.
 
@@ -256,12 +295,23 @@ def validate_widget_payload(widget_type: str | None, config: dict | None) -> Non
     if not isinstance(config, dict):
         raise InvalidWidget("config must be an object")
 
-    from .widget_data import AGGREGATION_NAMES
+    from .widget_data import AGGREGATION_NAMES, PERCENT_WIDGETS, SHARE_AGGREGATIONS
     for key in ("aggregation", "aggregation2"):
         agg = config.get(key)
         if agg is None or agg == "":
             continue
-        if not isinstance(agg, str) or agg.lower() not in AGGREGATION_NAMES:
+        name = agg.lower() if isinstance(agg, str) else None
+        if name in SHARE_AGGREGATIONS:
+            # Offered by the panel, computed by the grouped shapers only: the
+            # save refused it everywhere, and would otherwise let a KPI or a
+            # heatmap show a sum labelled as a percentage.
+            if widget_type is not None and widget_type not in PERCENT_WIDGETS:
+                raise InvalidWidget(
+                    f"{key} 'pct' (Percentage %) is each group's share of the total; "
+                    f"a {widget_type} does not group rows that way -- use it on a bar, "
+                    f"line, pie or table")
+            continue
+        if name not in AGGREGATION_NAMES:
             raise InvalidWidget(
                 f"{key} {agg!r} is not a supported aggregation "
                 f"(an unknown name would silently be summed)")

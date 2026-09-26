@@ -1,4 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, cloneElement} from 'react'
+import { keepUnmanaged, migrateWidgetConfig } from './widgetConfigPanel/configShape'
 import RelativeDateEditor from './RelativeDateEditor'
 import { LATTICE_WIDGETS } from './chartRenderers/LatticeRenderer'
 import { ANIMATION_WIDGETS } from './chartRenderers/AnimatedRenderer'
@@ -29,7 +30,7 @@ import ExpandableGroup from './ExpandableGroup'
 import type { DisplayRule } from '../../lib/displayRules'
 import { flattenHierarchy } from '../../lib/hierarchyUtils'
 import { isIdLikeColumn } from '../../lib/columnRole'
-import { formattingCapabilities, sortLimitOptions, supportsRanking } from './widgetCapabilities'
+import { aggregationOffered, formattingCapabilities, sortLimitOptions, supportsRanking } from './widgetCapabilities'
 import { aggregationWarning } from '../../lib/aggregateDisclosure'
 import {
   CUSTOM_SHAPE_WIDGET_TYPES, RUNNING_OPTIONS, readCssVarColor,
@@ -68,7 +69,12 @@ interface Props {
 // apply to them. Any WidgetType not in this set is dispatched to shape_series, either
 // explicitly or via SHAPERS' fallback for unregistered types (e.g. 'slicer').
 export default function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages, hierarchy, onHierarchyRefresh, bookmarks, ruleErrors, geography, distinctCounts, onUpdate }: Props) {
-  const cfg = widget.config as any
+  // E03: in the shape the panel edits -- a legacy `roles` dict flattened,
+  // `agg` renamed (widgetConfigPanel/configShape.ts). Keyed on the stored
+  // object, so it is recomputed when the widget or its config changes.
+  const migrated = useMemo(() => migrateWidgetConfig(widget.config as Record<string, unknown>),
+    [widget.config])
+  const cfg = migrated as any
   const wt  = widget.widget_type
 
   // Panel search box — not part of the widget config, so it is never seeded/reset by
@@ -750,6 +756,12 @@ export default function WidgetConfigPanel({ widget, columns, datasets, primaryDa
     if (widgetSkin && widgetSkin !== 'none') config.widget_skin = widgetSkin
     if (altText) config.alt_text = altText
     if (subtitle.trim()) config.subtitle = subtitle.trim()
+
+    // E03: the panel rebuilds only what it manages. Everything else the
+    // stored config holds -- interactions, the hidden flag and tab order set
+    // in other panes, settings only the API writes -- is carried through,
+    // under what the panel wrote.
+    config = { ...keepUnmanaged(migrated), ...config }
 
     // Journal first, so a tab closed inside the 600 ms window leaves a trace the
     // builder can offer to restore (lib/pendingEdits.ts); cleared once sent.
@@ -1846,6 +1858,9 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                     // shaper will refuse.
                     .filter(a => !PARTITION_WIDGETS.includes(wt)
                                  || ADDITIVE_AGGREGATIONS.includes(a.value))
+                    // "Percentage %" only where the chart computes shares; a
+                    // stored one stays visible so it is not silently replaced.
+                    .filter(a => aggregationOffered(wt, a.value) || a.value === agg)
                     .map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
                 </optgroup>
               ))}
@@ -1893,7 +1908,8 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 <option value="">Same as above</option>
                 {Object.entries(aggGroups).map(([group, items]) => (
                   <optgroup key={group} label={`── ${group} ──`}>
-                    {items.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
+                    {items.filter(a => aggregationOffered(wt, a.value) || a.value === agg2)
+                      .map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
                   </optgroup>
                 ))}
               </select>

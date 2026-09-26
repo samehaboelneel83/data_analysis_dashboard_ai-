@@ -250,6 +250,18 @@ export const LIMIT_ONLY_WIDGETS = new Set([
 
 /** 'all': sort, sort column, custom order, HAVING, quick calc, suppression
  *  and the row limit; 'limit': the row limit alone; 'none': neither. */
+/** Where "Percentage %" (`pct`) is computed: each group's share of the total,
+ *  done by the grouped shapers -- the same ones that sort. MIRRORS
+ *  `PERCENT_WIDGETS` in backend services/widget_data.py, which refuses `pct`
+ *  on save for any other type (a KPI summed and called the sum a percentage;
+ *  a sunburst refused it). */
+export const PERCENT_WIDGETS = SORTABLE_WIDGETS
+
+/** Whether the aggregation menu offers `value` for `widgetType`. */
+export function aggregationOffered(widgetType: string, value: string): boolean {
+  return value !== 'pct' || PERCENT_WIDGETS.has(widgetType)
+}
+
 export function sortLimitOptions(widgetType: string): 'all' | 'limit' | 'none' {
   if (SORTABLE_WIDGETS.has(widgetType)) return 'all'
   if (LIMIT_ONLY_WIDGETS.has(widgetType)) return 'limit'

@@ -1357,6 +1357,16 @@ ids exist. Interactions themselves persist in `widget.config.interaction`
 (hydrated by `CrossFilterProvider`); before 2026-09-10 they were React state only
 and were lost on every reload.
 
+One shape for a saved config (E03): `widget_roles.migrate_widget_config` stores
+a legacy `roles` dict flattened into the keys the panel edits and `agg` as
+`aggregation`, on every widget save; the panel opens a stored widget through
+the same migration (`widgetConfigPanel/configShape.ts`), and both are pinned to
+`widgetConfigPanel/widgetConfigMigrations.json`. A `roles` dict that disagrees
+with the flat keys is left alone, because `resolve_roles` and `shape_series`
+would each render a different one. The panel carries every key it does not
+manage (`PANEL_KEYS`, pinned to its save effect) through its saves, so an edit
+there no longer drops interactions, tab order or API-only settings.
+
 Surfaced at `POST /datasets/{id}/suggest-dashboards`, from the dataset row's ⋯
 menu. It proposes only; the browser creates.
 
@@ -2239,8 +2249,8 @@ Agent pane (7)
 
 | Suite | Scope | Count |
 |-------|-------|-------|
-| Backend | `backend/tests/` | ~5,300 tests across 406 modules |
-| Frontend | colocated `*.test.ts(x)` | ~2,800 tests across 221 files |
+| Backend | `backend/tests/` | ~5,300 tests across 407 modules |
+| Frontend | colocated `*.test.ts(x)` | ~2,800 tests across 222 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |
 | Doc audit | `tests/test_architecture_doc.py` | Enforces the *counts* in this document |

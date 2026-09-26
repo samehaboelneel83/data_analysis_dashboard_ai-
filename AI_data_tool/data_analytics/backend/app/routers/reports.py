@@ -870,6 +870,11 @@ async def add_widget(report_id: int, page_id: int, body: WidgetCreate, db: Async
     if not page:
         raise HTTPException(404, "Page not found")
     fields = body.model_dump()
+    if fields.get("config") is not None:
+        # E03: stored in the current shape (a `roles` dict flattened, `agg`
+        # renamed), which is what the widget panel edits.
+        from ..services.widget_roles import migrate_widget_config
+        fields["config"] = migrate_widget_config(fields["config"])
     _validate_widget(fields.get("widget_type"), fields.get("config"))
     _guard_script_authoring(fields.get("widget_type"), fields.get("config"), current_user)
     await _require_readable_datasets(db, current_user, _config_dataset_ids(fields.get("config")))
@@ -901,6 +906,9 @@ async def update_widget(report_id: int, page_id: int, widget_id: int, body: Widg
         raise HTTPException(404, "Widget not found")
     changes = body.model_dump(exclude_none=True)
     base_revision = changes.pop("base_revision", None)
+    if "config" in changes:
+        from ..services.widget_roles import migrate_widget_config
+        changes["config"] = migrate_widget_config(changes["config"])
     if base_revision is not None and ({"widget_type", "title", "config"} & changes.keys()):
         await _refuse_edit_conflict(db, report, widget, int(base_revision), current_user)
     # Only when this PATCH changes the type or the config: a legacy config nobody

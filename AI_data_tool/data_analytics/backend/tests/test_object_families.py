@@ -229,3 +229,35 @@ def test_each_sort_and_limit_option_is_offered_exactly_where_it_works(widget_typ
         works = json.dumps(a, sort_keys=True, default=str) != json.dumps(b, sort_keys=True, default=str)
         assert works == (option in declared), \
             f"{widget_type}: '{option}' {'works but is not offered' if works else 'is offered but does nothing'}"
+
+
+def _values(result):
+    """A result without the aggregation name it echoes back."""
+    if isinstance(result, dict):
+        return {k: _values(v) for k, v in result.items() if k not in ("aggregation", "aggregation2")}
+    if isinstance(result, list):
+        return [_values(v) for v in result]
+    return result
+
+
+@pytest.mark.parametrize("widget_type", _data_types())
+def test_percentage_is_offered_exactly_where_it_is_computed(widget_type):
+    """E03: PERCENT_WIDGETS decides where the panel offers "Percentage %" and
+    where a save accepts it. Declared: it must turn the values into shares,
+    not echo a sum or refuse. Not declared: it must not work there."""
+    import json
+    frame = _option_frame()
+    config = {}
+    for role in REQUIRED_ROLES.get(widget_type, ()):
+        config[config_key_for_role(role)] = _FILL.get(role, "region")
+    config.setdefault("dimension", "region")
+    config.setdefault("measure", "revenue")
+    if widget_type in ("kpi", "card", "gauge", "histogram", "correlation_matrix", "parallel_coordinates"):
+        config.pop("dimension", None)
+    pct = wd.get_widget_data_from_df(frame, {**config, "aggregation": "pct"}, widget_type, None, False)
+    summed = wd.get_widget_data_from_df(frame, {**config, "aggregation": "sum"}, widget_type, None, False)
+    refused = isinstance(pct, dict) and pct.get("type") == "error"
+    works = not refused and (json.dumps(_values(pct), sort_keys=True, default=str)
+                             != json.dumps(_values(summed), sort_keys=True, default=str))
+    assert works == (widget_type in wd.PERCENT_WIDGETS), \
+        f"{widget_type}: 'pct' {'works but is not offered' if works else 'is offered but does not compute shares'}"
