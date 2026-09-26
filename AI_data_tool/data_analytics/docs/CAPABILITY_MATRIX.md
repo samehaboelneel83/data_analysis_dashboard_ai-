@@ -117,7 +117,7 @@ draft deletes it, and a restriction added since applies too. Releasing needs
 | Share link | the signed-in viewer if they are in the same organization, otherwise the link's creator | read, row and column rules on every widget request |
 | Embed | the embed configuration's creator | read, row and column rules on every widget request |
 | Queued import (job) | the person who queued it | still an admin, the connection still exists |
-| Ask AI | the person asking | dataset read (or connection visibility) on every question, not only when the conversation starts |
+| Ask AI | the person asking | dataset read (or connection visibility) on every question, not only when the conversation starts. Over a connection, the SQL it writes carries the reader's object row policies AND the row rule of every dataset built on that connection, on that dataset's table; a rule that cannot be translated, or a dataset defined by a query, lets no row of those tables through |
 
 ## Admin-only
 
@@ -127,10 +127,6 @@ lookup, so the answer says nothing about whether the object exists.
 
 ## Known limits
 
-- **Ask AI over a connection** applies `ObjectRowPolicy` and the column rules
-  of datasets bound to that connection, but not dataset `RowSecurityRule`s.
-  A connection-scoped conversation is therefore an admin-grade tool unless
-  object row policies are set.
 - **Column statistics** are computed over the whole table. For a caller whose
   rows are filtered, the value-bearing figures (top values, minimum, maximum,
   distinct count) are withheld rather than recomputed.
