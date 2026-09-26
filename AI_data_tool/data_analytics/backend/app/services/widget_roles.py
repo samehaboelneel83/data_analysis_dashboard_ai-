@@ -143,7 +143,8 @@ def migrate_widget_config(config: dict | None) -> dict:
       present, while `shape_series` reads the flat keys, so a config where
       they differ renders differently per chart and is left as it is;
     * `agg` becomes `aggregation` (dropped if `aggregation` is set: it is
-      read first, so `agg` beside it was dead).
+      read first, so `agg` beside it was dead);
+    * `interaction.mode`, which nothing reads, is dropped.
 
     Mirrors `migrateWidgetConfig` in the frontend's
     widgetConfigPanel/configShape.ts; both are pinned to the cases in
@@ -155,6 +156,11 @@ def migrate_widget_config(config: dict | None) -> dict:
             cfg.pop("agg")
         elif isinstance(cfg["agg"], str) and cfg["agg"]:
             cfg["aggregation"] = cfg.pop("agg")
+    inter = cfg.get("interaction")
+    if isinstance(inter, dict) and "mode" in inter:
+        # The demo wrote `{"mode": "two_way"}`: read by nothing (page-level
+        # modes live elsewhere), and not an interaction setting.
+        cfg["interaction"] = {k: v for k, v in inter.items() if k != "mode"}
     roles = cfg.get("roles")
     if isinstance(roles, dict):
         flat = {config_key_for_role(r): v for r, v in roles.items() if not _blank(v)}
@@ -273,7 +279,215 @@ def unsupported_options(widget_type: str, config: dict) -> list[str]:
     return out
 
 
-def validate_widget_payload(widget_type: str | None, config: dict | None) -> None:
+# ── E03: the settings nested in a config, and fixed vocabularies ────────────
+# Each is what the engine or the renderer actually reads (see the comments on
+# each); a value outside it was ignored (a filter op that matched everything),
+# misread (`bar_mode: "stack"` drew stacked in the browser while the server
+# computed a clustered axis) or crashed the request (a `sort` that is not a
+# string). Checked on create for the whole config, and on update only for the
+# keys the update changes -- a stored value nobody is editing is not
+# re-litigated, so a legacy widget stays editable.
+
+#: widget_data._apply_filters (pandas); DirectQuery and DuckDB take a subset.
+FILTER_OPS = frozenset({"eq", "neq", "gt", "gte", "lt", "lte", "in", "like", "relative"})
+#: widget_data series/grid HAVING (neq is not implemented).
+HAVING_OPS = frozenset({"gt", "gte", "lt", "lte", "eq"})
+#: The scalar options with a fixed vocabulary, lowercased where the reader
+#: lowercases (sort, sort_by, dimension_granularity).
+VOCABULARIES: dict[str, frozenset] = {
+    "sort": frozenset({"asc", "desc"}),
+    "sort_by": frozenset({"value", "name"}),
+    "quick_calc": frozenset({"percent_of_total", "difference", "percent_change", "rank"}),
+    "totals_position": frozenset({"before", "after"}),
+    "totals_scope": frozenset({"all", "shown"}),
+    "bar_mode": frozenset({"clustered", "stacked", "stacked100"}),
+    "slicer_mode": frozenset({"auto", "buttons", "list", "dropdown", "search", "text"}),
+    "legend_position": frozenset({"top", "bottom", "left", "right"}),
+    "y_scale": frozenset({"linear", "log"}),
+    "gauge_shape": frozenset({"arc", "speedometer", "bullet", "thermometer", "progress"}),
+    "container_mode": frozenset({"group", "tabs", "scroll", "prompt", "precision"}),
+    "dimension_granularity": frozenset({"year", "quarter", "month", "week", "day",
+                                        "hijri_month", "hijri_year"}),
+}
+_CASE_FOLDED = frozenset({"sort", "sort_by", "dimension_granularity"})
+INTERACTION_KEYS = frozenset({"broadcasts", "receives", "syncAllPages", "receiveMode", "actions"})
+INTERACTION_MODES = frozenset({"filter", "highlight"})
+ANALYTICS_KEYS = {"showAverageLine": bool, "referenceValue": (int, float),
+                  "referenceLabel": str, "referenceColor": str}
+RULE_KINDS = frozenset({"expression", "value_map", "interval", "data_bar"})
+RULE_TARGETS = frozenset({"mark", "background", "visibility"})
+MAX_DISPLAY_RULES = 100
+
+
+def _is_number(v) -> bool:
+    if isinstance(v, bool):
+        return False
+    if isinstance(v, (int, float)):
+        return True
+    if isinstance(v, str):
+        try:
+            float(v)
+            return True
+        except ValueError:
+            return False
+    return False
+
+
+def _check_filters(filters) -> None:
+    if not isinstance(filters, list):
+        raise InvalidWidget("filters must be a list")
+    for i, f in enumerate(filters):
+        if not isinstance(f, dict):
+            raise InvalidWidget(f"filters[{i}] must be an object")
+        if f.get("column") is not None and not isinstance(f["column"], str):
+            raise InvalidWidget(f"filters[{i}].column must be a column name")
+        if f.get("column") is None:
+            continue    # names no column: every engine skips it, whatever else it says
+        op = f.get("op", "eq")
+        if op not in FILTER_OPS:
+            raise InvalidWidget(f"filters[{i}].op {op!r} is not a filter operator "
+                                f"({', '.join(sorted(FILTER_OPS))}); an unknown one matched every row")
+        value = f.get("value")
+        if op == "relative":
+            from .relative_dates import RelativeDateError, validate_spec
+            try:
+                validate_spec(value)
+            except RelativeDateError as e:
+                raise InvalidWidget(f"filters[{i}]: {e}")
+        elif op == "in":
+            if isinstance(value, dict):
+                raise InvalidWidget(f"filters[{i}].value must be a list of values for 'in'")
+        elif isinstance(value, (dict, list)):
+            raise InvalidWidget(f"filters[{i}].value must be a single value for {op!r}")
+
+
+def _check_having(having) -> None:
+    if not isinstance(having, list):
+        raise InvalidWidget("having must be a list")
+    for i, h in enumerate(having):
+        if not isinstance(h, dict):
+            raise InvalidWidget(f"having[{i}] must be an object")
+        if h.get("op") not in HAVING_OPS:
+            raise InvalidWidget(f"having[{i}].op must be one of {', '.join(sorted(HAVING_OPS))}")
+        if not _is_number(h.get("value")):
+            raise InvalidWidget(f"having[{i}].value must be a number")
+
+
+def _check_rank(rank) -> None:
+    if not isinstance(rank, dict):
+        raise InvalidWidget("rank must be an object")
+    if rank.get("mode") not in (None, "", "top", "bottom"):
+        raise InvalidWidget("rank.mode must be 'top' or 'bottom'")
+    n = rank.get("n")
+    if isinstance(n, str) and n.startswith("@") and len(n) > 1:
+        pass                                     # a report parameter, typed at render
+    elif not _is_number(n) or float(n) <= 0:
+        raise InvalidWidget("rank.n must be a positive number or a @parameter")
+    for flag in ("percent", "other"):
+        if flag in rank and not isinstance(rank[flag], bool):
+            raise InvalidWidget(f"rank.{flag} must be true or false")
+
+
+def _check_sort_keys(keys) -> None:
+    if not isinstance(keys, list):
+        raise InvalidWidget("sort_keys must be a list")
+    for i, k in enumerate(keys):
+        if not isinstance(k, dict) or not isinstance(k.get("col"), str):
+            raise InvalidWidget(f"sort_keys[{i}] must be an object with a column name in 'col'")
+        d = k.get("dir")
+        if d is not None and (not isinstance(d, str) or d.lower() not in ("asc", "desc")):
+            raise InvalidWidget(f"sort_keys[{i}].dir must be 'asc' or 'desc'")
+
+
+def _check_display_rules(rules) -> None:
+    if not isinstance(rules, list):
+        raise InvalidWidget("display_rules must be a list")
+    if len(rules) > MAX_DISPLAY_RULES:
+        raise InvalidWidget(f"a widget takes at most {MAX_DISPLAY_RULES} display rules")
+    for i, r in enumerate(rules):
+        if not isinstance(r, dict):
+            raise InvalidWidget(f"display_rules[{i}] must be an object")
+        if r.get("kind") not in (None, *RULE_KINDS):
+            raise InvalidWidget(f"display_rules[{i}].kind must be one of {', '.join(sorted(RULE_KINDS))}")
+        if r.get("target") not in (None, *RULE_TARGETS):
+            raise InvalidWidget(f"display_rules[{i}].target must be one of {', '.join(sorted(RULE_TARGETS))}")
+        if r.get("expression") is not None and not isinstance(r["expression"], str):
+            raise InvalidWidget(f"display_rules[{i}].expression must be text")
+        for key in ("bands", "mappings"):
+            if r.get(key) is not None and (not isinstance(r[key], list)
+                                           or not all(isinstance(x, dict) for x in r[key])):
+                raise InvalidWidget(f"display_rules[{i}].{key} must be a list of objects")
+
+
+def _check_interaction(inter) -> None:
+    if not isinstance(inter, dict):
+        raise InvalidWidget("interaction must be an object")
+    unknown = sorted(set(inter) - INTERACTION_KEYS)
+    if unknown:
+        raise InvalidWidget(f"interaction has no setting {', '.join(map(repr, unknown))}")
+    for flag in ("broadcasts", "receives", "syncAllPages"):
+        if flag in inter and not isinstance(inter[flag], bool):
+            raise InvalidWidget(f"interaction.{flag} must be true or false")
+    if inter.get("receiveMode") not in (None, *INTERACTION_MODES):
+        raise InvalidWidget("interaction.receiveMode must be 'filter' or 'highlight'")
+    actions = inter.get("actions")
+    if actions is not None:
+        if not isinstance(actions, list):
+            raise InvalidWidget("interaction.actions must be a list")
+        for i, a in enumerate(actions):
+            if not isinstance(a, dict) or isinstance(a.get("targetId"), bool) \
+                    or not isinstance(a.get("targetId"), int):
+                raise InvalidWidget(f"interaction.actions[{i}] must name a target widget id")
+            if a.get("mode") not in (None, *INTERACTION_MODES):
+                raise InvalidWidget(f"interaction.actions[{i}].mode must be 'filter' or 'highlight'")
+
+
+def _check_analytics(analytics) -> None:
+    if not isinstance(analytics, dict):
+        raise InvalidWidget("analytics must be an object")
+    for k, v in analytics.items():
+        kind = ANALYTICS_KEYS.get(k)
+        if kind is None:
+            raise InvalidWidget(f"analytics has no setting {k!r}")
+        if v is not None and (isinstance(v, bool) and kind is not bool or not isinstance(v, kind)):
+            raise InvalidWidget(f"analytics.{k} has the wrong type")
+
+
+def _check_count(key: str, value) -> None:
+    """limit / suppress_below: a whole number >= 0 (0 or blank = the default)."""
+    if value is None or value == "":
+        return
+    if not _is_number(value) or float(value) < 0 or float(value) != int(float(value)):
+        raise InvalidWidget(f"{key} must be a whole number, 0 or more")
+
+
+_NESTED_CHECKS = {
+    "filters": _check_filters, "having": _check_having, "rank": _check_rank,
+    "sort_keys": _check_sort_keys, "display_rules": _check_display_rules,
+    "interaction": _check_interaction, "analytics": _check_analytics,
+}
+
+
+def _check_settings(config: dict, keys) -> None:
+    for key in keys:
+        if key not in config:
+            continue
+        value = config[key]
+        if key in _NESTED_CHECKS:
+            if value is not None:
+                _NESTED_CHECKS[key](value)
+        elif key in VOCABULARIES:
+            if value is None or value == "":
+                continue
+            probe = value.lower() if isinstance(value, str) and key in _CASE_FOLDED else value
+            if probe not in VOCABULARIES[key]:
+                raise InvalidWidget(f"{key} must be one of {', '.join(sorted(VOCABULARIES[key]))}")
+        elif key in ("limit", "suppress_below"):
+            _check_count(key, value)
+
+
+def validate_widget_payload(widget_type: str | None, config: dict | None, *,
+                            changed_keys=None) -> None:
     """Refuse, when a widget is SAVED, what would otherwise fail silently later.
 
     The server stored any `widget_type` string and any config dict. A typo'd
@@ -286,6 +500,9 @@ def validate_widget_payload(widget_type: str | None, config: dict | None) -> Non
     every engine reads. Unknown extra keys stay allowed -- a config carries
     dozens of renderer options, and declaring those is the next slice.
     `widget_type=None` checks the config alone (a PATCH that keeps the type).
+    `changed_keys`, on an update: the config keys the update changes; the
+    nested and vocabulary checks (slice 3) look only at those, so a legacy
+    value nobody is editing never blocks an edit. None means all of them.
     Raises InvalidWidget naming the field.
     """
     if widget_type is not None and widget_type not in REQUIRED_ROLES:
@@ -316,15 +533,9 @@ def validate_widget_payload(widget_type: str | None, config: dict | None) -> Non
                 f"{key} {agg!r} is not a supported aggregation "
                 f"(an unknown name would silently be summed)")
 
-    filters = config.get("filters")
-    if filters is not None:
-        if not isinstance(filters, list):
-            raise InvalidWidget("filters must be a list")
-        for i, f in enumerate(filters):
-            if not isinstance(f, dict):
-                raise InvalidWidget(f"filters[{i}] must be an object")
-            if f.get("column") is not None and not isinstance(f["column"], str):
-                raise InvalidWidget(f"filters[{i}].column must be a column name")
+    # E03 slice 3: nested settings and fixed vocabularies -- all of them on a
+    # create, only the changed ones on an update (`changed_keys`).
+    _check_settings(config, config.keys() if changed_keys is None else changed_keys)
 
     measures = config.get("measures")
     if measures is not None and not isinstance(measures, list):

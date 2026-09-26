@@ -1365,7 +1365,13 @@ the same migration (`widgetConfigPanel/configShape.ts`), and both are pinned to
 with the flat keys is left alone, because `resolve_roles` and `shape_series`
 would each render a different one. The panel carries every key it does not
 manage (`PANEL_KEYS`, pinned to its save effect) through its saves, so an edit
-there no longer drops interactions, tab order or API-only settings.
+there no longer drops interactions, tab order or API-only settings. Nested settings and fixed vocabularies are checked on save too
+(`widget_roles.VOCABULARIES`, `FILTER_OPS`, and the checks for `having`, `rank`,
+`sort_keys`, `display_rules`, `interaction`, `analytics`, `limit`): a value the
+engine would crash on, ignore or misread is refused with the field named. A
+create is judged whole; an update only on the keys it changes, so a stored
+legacy value never blocks an edit. The panel's options are pinned to the same
+vocabularies (`SETTING_VOCABULARIES`, read from its source by a test).
 
 Surfaced at `POST /datasets/{id}/suggest-dashboards`, from the dataset row's ⋯
 menu. It proposes only; the browser creates.

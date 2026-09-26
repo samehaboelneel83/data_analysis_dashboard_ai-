@@ -4,7 +4,7 @@ import WidgetConfigPanel from '../WidgetConfigPanel'
 import { CrossFilterProvider } from '../CrossFilterContext'
 import type { Widget, ReportPage } from '../../../types/report'
 import type { DatasetColumn } from '../../../services/api'
-import { FLAT_ROLE_KEYS, PANEL_KEYS, keepUnmanaged, migrateWidgetConfig, panelManagedKeys } from './configShape'
+import { FLAT_ROLE_KEYS, PANEL_KEYS, SETTING_VOCABULARIES, keepUnmanaged, migrateWidgetConfig, panelManagedKeys } from './configShape'
 import panelSource from '../WidgetConfigPanel.tsx?raw'
 import modelSource from '../ModelSettings.tsx?raw'
 import migrations from './widgetConfigMigrations.json'
@@ -160,4 +160,46 @@ describe('"Percentage %" is offered where the chart computes it', () => {
     panel(widget('kpi', { measure: 'revenue', aggregation: 'pct' }))
     expect(screen.getByLabelText('Aggregation')).toHaveValue('pct')
   })
+})
+
+describe('the panel offers exactly the values a save accepts', () => {
+  /** The option values of the control whose change handler is `setter`,
+   *  read from the panel's source: a <select> or a `sel(value, setter, [...])`. */
+  function offered(setter: string): string[] {
+    const src = panelSource
+    let block = ''
+    const selAt = src.search(new RegExp(`sel\\(\\w+, ${setter},`))
+    if (selAt >= 0) {
+      block = src.slice(selAt, src.indexOf(']', src.indexOf('[', selAt)))
+    } else {
+      const at = src.indexOf(`${setter}(e.target.value`)
+      expect(at, setter).toBeGreaterThan(0)
+      const open = src.lastIndexOf('<select', at)
+      block = src.slice(open, src.indexOf('</select>', at))
+    }
+    const values = new Set<string>()
+    for (const m of block.matchAll(/value="([^"]*)"|value: '([^']*)'/g)) values.add(m[1] ?? m[2])
+    for (const m of block.matchAll(/\[([^\]]*)\]\.map/g)) {
+      for (const q of m[1].matchAll(/'([^']+)'/g)) values.add(q[1])
+    }
+    values.delete('')
+    return [...values].sort()
+  }
+  const SETTERS: Record<string, string> = {
+    sort: 'setSort', sort_by: 'setSortBy', quick_calc: 'setQuickCalc',
+    totals_position: 'setTotalsPosition', totals_scope: 'setTotalsScope', bar_mode: 'setBarMode',
+    slicer_mode: 'setSlicerMode', legend_position: 'setLegendPosition', y_scale: 'setYScale',
+    gauge_shape: 'setGaugeShape', container_mode: 'setContainerMode',
+    dimension_granularity: 'setDimensionGranularity',
+  }
+
+  it('covers every setting with a vocabulary', () => {
+    expect(Object.keys(SETTERS).sort()).toEqual(Object.keys(SETTING_VOCABULARIES).sort())
+  })
+
+  for (const [key, setter] of Object.entries(SETTERS)) {
+    it(key, () => {
+      expect(offered(setter)).toEqual([...SETTING_VOCABULARIES[key]].sort())
+    })
+  }
 })

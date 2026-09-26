@@ -20,7 +20,8 @@
  *   - a `roles` dict (the demo's map and flow widgets) is flattened into the
  *     keys the panel edits -- the panel read only those, so it opened such a
  *     widget with its roles empty, and its first save dropped them;
- *   - `agg` becomes `aggregation`.
+ *   - `agg` becomes `aggregation`;
+ *   - `interaction.mode`, which nothing reads, is dropped.
  */
 import { configKeyFor, ROLE_SPECS } from '../../../types/report'
 
@@ -66,6 +67,25 @@ export const FLAT_ROLE_KEYS: readonly string[] = [
   'animation', 'end', 'target', 'direction', 'measures', 'lat', 'lon', 'lat2', 'lon2',
 ]
 
+/** The settings with a fixed vocabulary, and the values each accepts.
+ *  MIRRORS `VOCABULARIES` in backend services/widget_roles.py, which refuses
+ *  any other value on save (pinned by test_frontend_constant_mirrors.py);
+ *  configShape.test.tsx checks the panel offers exactly these. */
+export const SETTING_VOCABULARIES: Record<string, readonly string[]> = {
+  sort: ['asc', 'desc'],
+  sort_by: ['value', 'name'],
+  quick_calc: ['percent_of_total', 'difference', 'percent_change', 'rank'],
+  totals_position: ['before', 'after'],
+  totals_scope: ['all', 'shown'],
+  bar_mode: ['clustered', 'stacked', 'stacked100'],
+  slicer_mode: ['auto', 'buttons', 'list', 'dropdown', 'search', 'text'],
+  legend_position: ['top', 'bottom', 'left', 'right'],
+  y_scale: ['linear', 'log'],
+  gauge_shape: ['arc', 'speedometer', 'bullet', 'thermometer', 'progress'],
+  container_mode: ['group', 'tabs', 'scroll', 'prompt', 'precision'],
+  dimension_granularity: ['year', 'quarter', 'month', 'week', 'day', 'hijri_month', 'hijri_year'],
+}
+
 let managed: Set<string> | null = null
 
 /** PANEL_KEYS plus every key a role of any widget type is written under. */
@@ -97,6 +117,12 @@ export function migrateWidgetConfig(stored: Record<string, unknown> | null | und
   if ('agg' in cfg) {
     if (!blank(cfg.aggregation)) delete cfg.agg
     else if (typeof cfg.agg === 'string' && cfg.agg) { cfg.aggregation = cfg.agg; delete cfg.agg }
+  }
+  // The demo wrote `interaction: {mode: 'two_way'}`; nothing reads `mode`.
+  const inter = cfg.interaction
+  if (inter && typeof inter === 'object' && !Array.isArray(inter) && 'mode' in inter) {
+    const { mode: _dead, ...rest } = inter as Record<string, unknown>
+    cfg.interaction = rest
   }
   const roles = cfg.roles
   if (roles && typeof roles === 'object' && !Array.isArray(roles)) {

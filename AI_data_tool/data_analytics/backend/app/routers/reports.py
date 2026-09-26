@@ -846,12 +846,12 @@ def _guard_script_authoring(widget_type: str | None, config: dict | None,
              "admin can create or change one. Ask an admin to review the code.")
 
 
-def _validate_widget(widget_type: str | None, config: dict | None) -> None:
-    """400 on a payload no engine can execute as written (E03 slice 1; see
+def _validate_widget(widget_type: str | None, config: dict | None, changed_keys=None) -> None:
+    """400 on a payload no engine can execute as written (E03; see
     widget_roles.validate_widget_payload)."""
     from ..services.widget_roles import InvalidWidget, validate_widget_payload
     try:
-        validate_widget_payload(widget_type, config)
+        validate_widget_payload(widget_type, config, changed_keys=changed_keys)
     except InvalidWidget as e:
         raise HTTPException(400, str(e))
 
@@ -916,8 +916,12 @@ async def update_widget(report_id: int, page_id: int, widget_id: int, body: Widg
     # does, the widget it ENDS UP as is judged -- a type switch that keeps a
     # bar's y_scale onto a pie is caught even though the config was not sent.
     if "widget_type" in changes or "config" in changes:
-        _validate_widget(changes.get("widget_type") or widget.widget_type,
-                         changes["config"] if "config" in changes else (widget.config or {}))
+        # Nested settings are judged only where this update changes them: a
+        # stored legacy value nobody is editing must not block every edit.
+        stored = widget.config or {}
+        new_cfg = changes["config"] if "config" in changes else stored
+        changed = {k for k, v in new_cfg.items() if stored.get(k) != v}
+        _validate_widget(changes.get("widget_type") or widget.widget_type, new_cfg, changed)
     # The TYPE decides the gate, and it may be the stored one (editing an
     # existing tile) or the incoming one (turning a chart into a script tile).
     _guard_script_authoring(changes.get("widget_type") or widget.widget_type,

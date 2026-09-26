@@ -115,3 +115,152 @@ class TestPercentage:
 
     def test_a_config_without_a_type_is_not_judged_on_it(self):
         validate_widget_payload(None, {"aggregation": "pct"})
+
+
+# ── E03 slice 3: nested settings and fixed vocabularies ─────────────────────
+
+REFUSED = [
+    ({"filters": [{"column": "region", "op": "equals", "value": "N"}]}, "filters[0].op"),
+    ({"filters": [{"column": "region", "op": "eq", "value": {"x": 1}}]}, "filters[0].value"),
+    ({"filters": [{"column": "day", "op": "relative", "value": {"unit": "fortnight"}}]}, "filters[0]"),
+    ({"having": [{"op": "neq", "value": 3}]}, "having[0].op"),
+    ({"having": [{"op": "gt", "value": "lots"}]}, "having[0].value"),
+    ({"having": "gt 3"}, "having"),
+    ({"rank": {"mode": "middle", "n": 5}}, "rank.mode"),
+    ({"rank": {"mode": "top", "n": 0}}, "rank.n"),
+    ({"rank": {"mode": "top", "n": 5, "other": "yes"}}, "rank.other"),
+    ({"sort_keys": [{"col": "region", "dir": "up"}]}, "sort_keys[0].dir"),
+    ({"sort_keys": ["region"]}, "sort_keys[0]"),
+    ({"display_rules": {"kind": "expression"}}, "display_rules"),
+    ({"display_rules": [{"kind": "sparkle"}]}, "display_rules[0].kind"),
+    ({"display_rules": ["value > 3"]}, "display_rules[0]"),
+    ({"interaction": {"broadcasts": "yes"}}, "interaction.broadcasts"),
+    ({"interaction": {"receiveMode": "mirror"}}, "interaction.receiveMode"),
+    ({"interaction": {"actions": [{"targetId": "7"}]}}, "interaction.actions[0]"),
+    ({"interaction": {"twoWay": True}}, "interaction has no setting"),
+    ({"analytics": {"referenceValue": "high"}}, "analytics.referenceValue"),
+    ({"analytics": {"trendLine": True}}, "analytics has no setting"),
+    ({"sort": "ascending"}, "sort must be one of"),
+    ({"sort": 1}, "sort must be one of"),
+    ({"bar_mode": "stack"}, "bar_mode must be one of"),
+    ({"dimension_granularity": "fortnight"}, "dimension_granularity"),
+    ({"limit": -5}, "limit"),
+    ({"limit": "ten"}, "limit"),
+    ({"suppress_below": 2.5}, "suppress_below"),
+]
+
+
+@pytest.mark.parametrize("config,field", REFUSED, ids=[f for _, f in REFUSED])
+def test_an_invalid_nested_setting_is_refused_with_the_field_named(config, field):
+    with pytest.raises(InvalidWidget, match=__import__("re").escape(field)):
+        validate_widget_payload("bar", config)
+
+
+#: What the panel and the other editors write (the E03 inventory), each shape
+#: at least once. None of it may be refused.
+ACCEPTED = [
+    {"filters": [{"column": "region", "op": "eq", "value": "North"},
+                 {"column": "units", "op": "gt", "value": 3},
+                 {"column": "region", "op": "in", "value": ["North", "South"]},
+                 {"column": "region", "op": "like", "value": "Nor"},
+                 {"column": "day", "op": "relative", "value": {"mode": "last", "n": 30, "unit": "day"}},
+                 {"column": "region", "op": "eq", "value": "@region"},
+                 {"op": "and"}]},
+    {"having": [{"op": "gte", "value": 100}]},
+    {"rank": {"mode": "top", "n": 5, "percent": True, "other": True}},
+    {"rank": {"mode": "bottom", "n": "@top_n"}},
+    {"sort_keys": [{"col": "region", "dir": "asc"}, {"col": "units", "dir": "DESC"}]},
+    {"display_rules": [{"id": "r1", "kind": "interval", "target": "mark", "column": "value",
+                        "bands": [{"min": 0, "max": 10, "color": "#f00"}]},
+                       {"id": "r2", "kind": "value_map", "mappings": [{"value": "N", "color": "#0f0"}]},
+                       {"column": "value", "op": "lt", "value": 0, "style": {"color": "#A8443A"}}]},
+    {"interaction": {"broadcasts": False, "receives": True, "syncAllPages": True,
+                     "receiveMode": "highlight", "actions": [{"targetId": 7, "mode": "filter"}]}},
+    {"analytics": {"showAverageLine": True, "referenceValue": 50, "referenceLabel": "Goal",
+                   "referenceColor": "#f59e0b"}},
+    {"sort": "DESC", "sort_by": "value", "quick_calc": "percent_change", "totals_position": "before",
+     "totals_scope": "shown", "bar_mode": "stacked100", "slicer_mode": "dropdown",
+     "legend_position": "left", "y_scale": "log", "gauge_shape": "bullet",
+     "container_mode": "tabs", "dimension_granularity": "Month", "limit": 0, "suppress_below": 3},
+    {"limit": "25", "sort_by": "", "dimension_granularity": ""},
+]
+
+
+@pytest.mark.parametrize("config", ACCEPTED)
+def test_every_shape_the_editors_write_is_accepted(config):
+    validate_widget_payload(None, config)
+
+
+async def test_every_seeded_demo_widget_passes(client, auth_headers, db_session):
+    """The demo is the largest body of configs not written by the panel."""
+    from sqlalchemy import select
+    from app.models.models import ReportWidget
+    r = await client.post("/api/v1/demo/seed", json={}, headers=auth_headers["a"])
+    assert r.status_code == 200, r.text
+    widgets = (await db_session.execute(select(ReportWidget))).scalars().all()
+    assert len(widgets) > 100
+    refused = []
+    for w in widgets:
+        try:
+            validate_widget_payload(w.widget_type, migrate_widget_config(w.config))
+        except InvalidWidget as e:
+            refused.append((w.widget_type, w.title, str(e)))
+    assert refused == []
+
+
+def test_the_panel_vocabularies_are_the_servers():
+    """SETTING_VOCABULARIES in the panel's configShape.ts must be VOCABULARIES."""
+    import re
+    from app.services.widget_roles import VOCABULARIES
+    path = (Path(__file__).resolve().parents[2] / "frontend" / "src" / "components" / "report"
+            / "widgetConfigPanel" / "configShape.ts")
+    if not path.exists():
+        pytest.skip("configShape.ts not reachable")
+    block = re.search(r"SETTING_VOCABULARIES[^=]*=\s*\{(.*?)\n\}", path.read_text(encoding="utf-8"), re.S)
+    assert block, "SETTING_VOCABULARIES is not in configShape.ts"
+    frontend = {k: set(re.findall(r"'([^']+)'", v))
+                for k, v in re.findall(r"(\w+): \[([^\]]*)\]", block.group(1))}
+    assert frontend == {k: set(v) for k, v in VOCABULARIES.items()}
+
+
+class TestAStoredLegacyValueDoesNotBlockEdits:
+    async def _widget(self, db_session, two_orgs, config):
+        from app.models.models import Dataset, Report, ReportPage, ReportWidget
+        org_id = two_orgs["a"]["org"].id
+        ds = Dataset(name="d", filename="x.csv", org_id=org_id)
+        db_session.add(ds)
+        await db_session.flush()
+        rep = Report(name="R", org_id=org_id, dataset_id=ds.id)
+        db_session.add(rep)
+        await db_session.flush()
+        page = ReportPage(report_id=rep.id, name="P", position=0)
+        db_session.add(page)
+        await db_session.flush()
+        # Written directly, as the copilot or an old version could have.
+        w = ReportWidget(page_id=page.id, widget_type="bar", title="t", config=config,
+                         layout={"x": 0, "y": 0, "w": 4, "h": 4})
+        db_session.add(w)
+        await db_session.commit()
+        return f"/api/v1/reports/{rep.id}/pages/{page.id}/widgets/{w.id}"
+
+    async def test_an_edit_that_leaves_it_alone_is_saved(self, client, auth_headers, db_session, two_orgs):
+        url = await self._widget(db_session, two_orgs, {"dimension": "region", "sort": "ascending"})
+        r = await client.patch(url, json={"config": {"dimension": "country", "sort": "ascending"}},
+                               headers=auth_headers["a"])
+        assert r.status_code == 200, r.text
+
+    async def test_an_edit_that_sets_an_invalid_value_is_refused(self, client, auth_headers, db_session, two_orgs):
+        url = await self._widget(db_session, two_orgs, {"dimension": "region", "sort": "desc"})
+        r = await client.patch(url, json={"config": {"dimension": "region", "sort": "ascending"}},
+                               headers=auth_headers["a"])
+        assert r.status_code == 400
+        assert "sort must be one of" in r.json()["detail"]
+
+    async def test_a_create_is_judged_whole(self, client, auth_headers, db_session, two_orgs):
+        url = await self._widget(db_session, two_orgs, {})
+        base = url.rsplit("/", 1)[0]
+        r = await client.post(base, json={"widget_type": "bar", "title": "t",
+                                          "config": {"bar_mode": "stack"},
+                                          "layout": {"x": 0, "y": 0, "w": 4, "h": 4}},
+                              headers=auth_headers["a"])
+        assert r.status_code == 400

@@ -411,7 +411,9 @@ async def _apply_performance_features(db: AsyncSession, report: Report) -> None:
     # Sync the slicer across pages: the interaction the walkthrough drives.
     slicer = by_title.get("Region")
     if slicer is not None:
-        _patch_config(slicer, interaction={"mode": "two_way", "syncAllPages": True})
+        # Two-way is the default (broadcasts and receives both default to
+        # true); `mode: "two_way"` used to be written here and read by nothing.
+        _patch_config(slicer, interaction={"syncAllPages": True})
 
     # Colour the variance. A rule that reads the parameter is what makes the
     # what-if path visible -- move the target, the banding moves.
