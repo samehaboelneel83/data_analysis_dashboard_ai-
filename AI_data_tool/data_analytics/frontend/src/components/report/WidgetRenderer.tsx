@@ -4,7 +4,7 @@ import type { BrushRange } from './chartRenderers/axisOptions'
 import { createPortal } from 'react-dom'
 import { Copy, Trash2, MoreVertical, Link as LinkIcon } from 'lucide-react'
 import { widgetDataApi } from '../../services/api'
-import { svgToPngDataUrl } from '../../lib/widgetImage'
+import { pickChartSvg, svgToPng } from '../../lib/widgetImage'
 import toast from 'react-hot-toast'
 import ActionMenu from '../ActionMenu'
 import { DifferenceDialog, ExplainDialog, ScenarioDialog, WhyDialog, describeFilter, useViewAs, viewAsOptions, type WhySection } from './ViewerKit'
@@ -617,14 +617,17 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
 
   const handleExportImage = async () => {
     setShowContextMenu(false)
-    const svg = widgetRootRef.current?.querySelector('svg')
+    const svg = pickChartSvg(widgetRootRef.current)
     if (!svg) { toast.error('This widget has no chart to export'); return }
     try {
-      const dataUrl = await svgToPngDataUrl(svg as SVGSVGElement, 2)
+      const { dataUrl, dropped } = await svgToPng(svg, 2)
       const a = document.createElement('a')
       a.href = dataUrl
       a.download = `${(widget.title || wt).replace(/[^A-Za-z0-9 _-]/g, '').slice(0, 60) || 'widget'}.png`
       a.click()
+      if (dropped > 0) {
+        toast('The map was saved without its background tiles: the tile server does not allow them to be copied.')
+      }
     } catch {
       toast.error('Could not export this widget as an image')
     }

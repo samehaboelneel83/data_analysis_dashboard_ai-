@@ -2131,6 +2131,11 @@ The choropleth, point and bubble maps are readable without sight
 many places carry a value and the highest and lowest; the values also sit in a
 visually hidden table; and when the map filters the page, each place with data
 is a keyboard stop (Enter or Space filters, focus shows the value).
+"Export as image" (`lib/widgetImage.ts`, shared with the PowerPoint export)
+saves the chart, not the first `<svg>` in the widget (a header icon), and
+inlines a map's basemap tiles, which an SVG drawn as an image cannot fetch; a
+tile server that refuses cross-origin reads leaves the map without its tiles,
+and the reader is told.
 
 ### Interaction model
 
@@ -2329,7 +2334,7 @@ Agent pane (7)
 | Suite | Scope | Count |
 |-------|-------|-------|
 | Backend | `backend/tests/` | ~5,300 tests across 413 modules |
-| Frontend | colocated `*.test.ts(x)` | ~2,950 tests across 228 files |
+| Frontend | colocated `*.test.ts(x)` | ~2,950 tests across 229 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |
 | Doc audit | `tests/test_architecture_doc.py` | Enforces the *counts* in this document |

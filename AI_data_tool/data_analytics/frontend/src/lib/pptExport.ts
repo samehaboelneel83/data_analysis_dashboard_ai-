@@ -1,4 +1,4 @@
-import { svgToPngDataUrl } from './widgetImage'
+import { pickChartSvg, svgToPngDataUrl } from './widgetImage'
 
 /**
  * Export the print view to PowerPoint: one widescreen slide per report page,
@@ -39,10 +39,10 @@ export async function exportPrintViewToPptx(reportName: string, root: HTMLElemen
         w: Math.max(0.3, (r.width / sec.width) * contentW),
         h: Math.max(0.3, (r.height / sec.height) * contentH),
       }
-      const svg = node.querySelector('svg')
+      const svg = pickChartSvg(node)
       if (svg) {
         try {
-          const data = await svgToPngDataUrl(svg as SVGSVGElement, 2)
+          const data = await svgToPngDataUrl(svg, 2)
           slide.addImage({ data, ...geom })
           continue
         } catch { /* fall through to the text rendering below */ }

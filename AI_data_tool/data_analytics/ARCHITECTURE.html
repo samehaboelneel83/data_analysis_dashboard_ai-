@@ -1033,7 +1033,7 @@ llm_reserved_interactive = 2</code></pre>
     </table>
   </div>
   <p>Any bar, line, area, scatter, step or dot plot can also be drawn as a lattice (small multiples by one or two fields) or animated over a field.</p>
-  <p>Rendering is dispatched by <code>WidgetBody.tsx</code> (inside <code>WidgetRenderer.tsx</code>) to per-type modules in <code>components/report/chartRenderers/</code>. Maps render through <code>d3-geo</code> and <code>topojson-client</code> against a bundled <code>world-atlas</code> — a deliberate choice that keeps geospatial working without external tile services, and therefore offline. The choropleth, point and bubble maps are readable without sight (<code>geo/MapDataTable.tsx</code>): the map's accessible name says what it plots, how many places carry a value and the highest and lowest; the values also sit in a visually hidden table; and when the map filters the page, each place with data is a keyboard stop (Enter or Space filters, focus shows the value).</p>
+  <p>Rendering is dispatched by <code>WidgetBody.tsx</code> (inside <code>WidgetRenderer.tsx</code>) to per-type modules in <code>components/report/chartRenderers/</code>. Maps render through <code>d3-geo</code> and <code>topojson-client</code> against a bundled <code>world-atlas</code> — a deliberate choice that keeps geospatial working without external tile services, and therefore offline. The choropleth, point and bubble maps are readable without sight (<code>geo/MapDataTable.tsx</code>): the map's accessible name says what it plots, how many places carry a value and the highest and lowest; the values also sit in a visually hidden table; and when the map filters the page, each place with data is a keyboard stop (Enter or Space filters, focus shows the value). "Export as image" (<code>lib/widgetImage.ts</code>, shared with the PowerPoint export) saves the chart, not the first <code>&lt;svg&gt;</code> in the widget (a header icon), and inlines a map's basemap tiles, which an SVG drawn as an image cannot fetch; a tile server that refuses cross-origin reads leaves the map without its tiles, and the reader is told.</p>
 
   <h3>Interaction model</h3>
   <p><code>CrossFilterContext.tsx</code> holds page-level filter state. Each widget declares an interaction mode.</p>
@@ -1158,7 +1158,7 @@ llm_reserved_interactive = 2</code></pre>
       <thead><tr><th>Suite</th><th>Scope</th><th>Count</th></tr></thead>
       <tbody>
         <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~5,300 tests · 413 modules</td></tr>
-        <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~2,950 tests · 228 files</td></tr>
+        <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~2,950 tests · 229 files</td></tr>
         <tr><th>Evals</th><td><code>backend/evals/</code></td><td>Agent quality gates (<code>run_eval_gate.ps1</code>)</td></tr>
         <tr><th>Conformance</th><td><code>tests/test_layer_conformance.py</code></td><td>Enforces the layer boundaries above</td></tr>
         <tr><th>Doc audit</th><td><code>tests/test_architecture_doc.py</code></td><td>Enforces the <em>counts</em> in this document</td></tr>
