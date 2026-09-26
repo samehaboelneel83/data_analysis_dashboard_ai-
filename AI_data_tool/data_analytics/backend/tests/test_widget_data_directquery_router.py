@@ -167,20 +167,67 @@ async def test_directquery_widget_cross_org_data_source_returns_404(client, db_s
     assert resp.status_code == 404
 
 
-async def test_directquery_widget_rejects_calculated_columns(client, db_session, two_orgs, auth_headers):
+# Calculated columns on DirectQuery (QA 2026-09-26): computed BY THE SOURCE,
+# one SELECT layer per column the widget uses. They used to be refused outright
+# -- every widget on a live dataset with any calculated column showed an error.
+
+async def test_directquery_a_calculated_column_the_widget_does_not_use_does_not_block_it(
+        client, db_session, two_orgs, auth_headers, tmp_path):
     org_id = two_orgs["a"]["org"].id
-    src = await _seed_data_source(db_session, org_id)
+    src = await _seed_data_source(db_session, org_id, config={"filepath": _seed_sqlite_sales_db(tmp_path)})
     ds = await _seed_directquery_dataset(
-        db_session, org_id, src.id, calculated_columns=[{"name": "x", "expression": "1"}],
-    )
+        db_session, org_id, src.id,
+        calculated_columns=[{"name": "broken", "expression": "NO_SUCH_FUNCTION(revenue)"}])
+    resp = await client.post(f"/api/v1/datasets/{ds.id}/widget-data", headers=auth_headers["a"],
+                             json={"config": {"dimension": "region", "measure": "revenue",
+                                              "aggregation": "sum"}, "widget_type": "bar"})
+    assert resp.status_code == 200, resp.text
+    assert {r["name"]: r["value"] for r in resp.json()["rows"]} == {"east": 150, "west": 30}
 
-    resp = await client.post(
-        f"/api/v1/datasets/{ds.id}/widget-data",
-        json={"config": {"dimension": "region", "measure": "revenue"}, "widget_type": "bar"},
-        headers=auth_headers["a"],
-    )
 
+async def test_directquery_a_used_calculated_column_is_computed_by_the_source(
+        client, db_session, two_orgs, auth_headers, tmp_path):
+    org_id = two_orgs["a"]["org"].id
+    src = await _seed_data_source(db_session, org_id, config={"filepath": _seed_sqlite_sales_db(tmp_path)})
+    ds = await _seed_directquery_dataset(
+        db_session, org_id, src.id,
+        calculated_columns=[{"name": "doubled", "expression": "revenue * 2"},
+                            {"name": "plus_one", "expression": "doubled + 1"}])
+    resp = await client.post(f"/api/v1/datasets/{ds.id}/widget-data", headers=auth_headers["a"],
+                             json={"config": {"dimension": "region", "measure": "plus_one",
+                                              "aggregation": "sum"}, "widget_type": "bar"})
+    assert resp.status_code == 200, resp.text
+    # east: (100*2+1) + (50*2+1); a column may build on an earlier one.
+    assert {r["name"]: r["value"] for r in resp.json()["rows"]} == {"east": 302, "west": 61}
+
+
+async def test_directquery_an_untranslatable_calculated_column_is_refused_with_the_reason(
+        client, db_session, two_orgs, auth_headers, tmp_path):
+    org_id = two_orgs["a"]["org"].id
+    src = await _seed_data_source(db_session, org_id, config={"filepath": _seed_sqlite_sales_db(tmp_path)})
+    ds = await _seed_directquery_dataset(
+        db_session, org_id, src.id,
+        calculated_columns=[{"name": "odd", "expression": "NO_SUCH_FUNCTION(revenue)"}])
+    resp = await client.post(f"/api/v1/datasets/{ds.id}/widget-data", headers=auth_headers["a"],
+                             json={"config": {"dimension": "region", "measure": "odd"},
+                                   "widget_type": "bar"})
     assert resp.status_code == 400
+    assert "Calculated column 'odd' can't run on this live (DirectQuery) source" in resp.text
+
+
+async def test_directquery_a_calculated_column_over_a_denied_column_is_refused(
+        client, db_session, two_orgs, tmp_path):
+    """Column security fails closed through a calculated column: the widget
+    names only `doubled`, which reads the denied `revenue`."""
+    org_id = two_orgs["a"]["org"].id
+    src = await _seed_data_source(db_session, org_id, config={"filepath": _seed_sqlite_sales_db(tmp_path)})
+    ds = await _seed_directquery_dataset(
+        db_session, org_id, src.id, calculated_columns=[{"name": "doubled", "expression": "revenue * 2"}])
+    headers = await _seed_column_denied_viewer(db_session, org_id, ds.id, "calc-deny@example.com")
+    resp = await client.post(f"/api/v1/datasets/{ds.id}/widget-data", headers=headers,
+                             json={"config": {"dimension": "region", "measure": "doubled"},
+                                   "widget_type": "bar"})
+    assert resp.status_code == 403, resp.text
 
 
 async def test_directquery_widget_rejects_default_filter_expr(client, db_session, two_orgs, auth_headers):
