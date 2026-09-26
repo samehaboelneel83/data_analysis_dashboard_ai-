@@ -362,6 +362,19 @@ to beat, the split, the rows fitted, the predictors used and left out, whether
 a row rule applied (not the rule), who trained it, and the dataset's row count
 and refresh time then, so the panel can say when the data has moved since.
 
+**Batch scoring and drift (E13).** `POST .../prediction-models/{id}/score-jobs`
+queues a `model.score` job (`services/model_scoring.py`): as its owner, checked
+again when it runs, the version scores every row they may see and the result
+is kept as a new dataset -- the rows plus `predicted_<target>`, named "<dataset>
+scored by <model> v<N>" -- created in the same transaction as the job's fenced
+success. Who may use a model, and on which rows, now lives once in
+`services/model_access.py` (the router, the scoring widget and the job call
+it). Training records each predictor's distribution (`card.feature_profile`:
+decile edges for a number, top values for a category), kept server-side because
+it describes the training rows; `GET .../drift` compares today's secured rows
+with it, a population stability index per predictor (under 0.1 stable, to
+0.25 moderate, over that major), naming new categories.
+
 ### Decomposition tree
 
 `shape_decomposition` in `widget_data.py` breaks one number down a level at a
@@ -2310,7 +2323,7 @@ Agent pane (7)
 
 | Suite | Scope | Count |
 |-------|-------|-------|
-| Backend | `backend/tests/` | ~5,300 tests across 412 modules |
+| Backend | `backend/tests/` | ~5,300 tests across 413 modules |
 | Frontend | colocated `*.test.ts(x)` | ~2,950 tests across 227 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |

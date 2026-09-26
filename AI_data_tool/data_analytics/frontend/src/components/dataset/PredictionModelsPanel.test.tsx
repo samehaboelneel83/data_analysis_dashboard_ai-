@@ -17,12 +17,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import PredictionModelsPanel from './PredictionModelsPanel'
-import { predictionModelsApi } from '../../services/api'
+import { jobsApi, predictionModelsApi } from '../../services/api'
+import { MemoryRouter } from 'react-router-dom'
 
 vi.mock('../../services/api', async (orig) => ({
   ...(await orig<Record<string, unknown>>()),
   predictionModelsApi: {
-    list: vi.fn(), train: vi.fn(), score: vi.fn(), remove: vi.fn(), promote: vi.fn(),
+    list: vi.fn(), train: vi.fn(), score: vi.fn(), remove: vi.fn(), promote: vi.fn(), drift: vi.fn(), scoreJob: vi.fn(),
+  },
+  jobsApi: {
+    get: vi.fn(),
   },
 }))
 
@@ -229,6 +233,48 @@ describe('on a DirectQuery dataset', () => {
       panel()
       fireEvent.click(await screen.findByRole('button', { name: 'Score this dataset' }))
       expect(await screen.findByText(/with Churn model v1/)).toBeInTheDocument()
+    })
+  })
+
+  describe('batch scoring and drift (E13)', () => {
+    const v1 = model({ id: 7, version: 1, status: 'champion', has_training_profile: true, card: {
+      target: 'churn', model_family: 'random forest', score: 0.91, score_name: 'accuracy', n_fitted: 300,
+      candidates: [], predictors_used: ['region', 'spend'], trained_by: 'ana@example.com' } })
+
+    it('scores every row into a new dataset as a job and links to it when done', async () => {
+      vi.mocked(predictionModelsApi.list).mockResolvedValue([v1])
+      vi.mocked(predictionModelsApi.scoreJob).mockResolvedValue({ id: 31, state: 'queued', kind: 'model.score', subject: 's' })
+      vi.mocked(jobsApi.get).mockResolvedValue({ id: 31, state: 'succeeded', kind: 'model.score',
+        result: { dataset_id: 88, rows: 300 } } as never)
+      render(<MemoryRouter><PredictionModelsPanel datasetId={1} columns={columns} /></MemoryRouter>)
+      fireEvent.click(await screen.findByRole('button', { name: 'Save predictions as a dataset' }))
+      await waitFor(() => expect(predictionModelsApi.scoreJob).toHaveBeenCalledWith(1, 7))
+      const link = await screen.findByRole('link', { name: 'open the scored dataset' }, { timeout: 4000 })
+      expect(link).toHaveAttribute('href', '/datasets/88')
+      expect(screen.getByTestId('score-job-7')).toHaveTextContent('Scored 300 rows')
+    })
+
+    it('checks drift from the model card, predictor by predictor', async () => {
+      vi.mocked(predictionModelsApi.list).mockResolvedValue([v1])
+      vi.mocked(predictionModelsApi.drift).mockResolvedValue({
+        overall: 'major', rows: 280, trained_rows: 300, model: { id: 7, name: 'Churn model', version: 1 },
+        features: [{ feature: 'region', psi: 1.25, level: 'major', rows: 280, new_values: ['West'] },
+                   { feature: 'spend', psi: 0.04, level: 'stable', rows: 280 }],
+      })
+      panel()
+      fireEvent.click(await screen.findByRole('button', { name: 'Model card' }))
+      fireEvent.click(screen.getByRole('button', { name: "Check drift against today's rows" }))
+      const table = await screen.findByRole('table', { name: 'Drift for Churn model v1' })
+      expect(table).toHaveTextContent('region1.250major shift (new: West)')
+      expect(screen.getByTestId('model-drift')).toHaveTextContent('no longer describes it; retrain')
+    })
+
+    it('a version without a training profile says drift cannot be checked', async () => {
+      vi.mocked(predictionModelsApi.list).mockResolvedValue([{ ...v1, has_training_profile: false }])
+      panel()
+      fireEvent.click(await screen.findByRole('button', { name: 'Model card' }))
+      expect(screen.getByText(/saved before training profiles were kept/)).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Check drift/ })).not.toBeInTheDocument()
     })
   })
 })

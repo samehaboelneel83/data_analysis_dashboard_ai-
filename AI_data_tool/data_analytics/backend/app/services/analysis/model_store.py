@@ -184,8 +184,91 @@ def fit_and_package(df: pd.DataFrame, target: str,
             # The kept model is refit on every usable row, not the training share.
             "n_fitted": int(len(frame)),
             "caveats": report.get("caveats") or [],
+            # E13: what each predictor looked like in training, for drift.
+            "feature_profile": feature_profile(frame, used),
         },
     )
+
+
+#: Drift bins: deciles for a number, the most common values for a category.
+PROFILE_BINS = 10
+PROFILE_TOP_CATEGORIES = 20
+#: Population stability index thresholds, as usually read.
+PSI_MODERATE, PSI_MAJOR = 0.1, 0.25
+
+
+def feature_profile(frame: pd.DataFrame, features: list[str]) -> dict:
+    """Each predictor's distribution in the training rows, compactly.
+
+    A number: its decile edges and the share of rows in each bin. A category:
+    the share of each of its most common values and of the rest. Enough to
+    compare today's rows against, without keeping any row."""
+    out: dict = {}
+    for col in features:
+        s = frame[col].dropna()
+        if s.empty:
+            continue
+        if pd.api.types.is_numeric_dtype(s):
+            edges = sorted({float(x) for x in s.quantile([i / PROFILE_BINS for i in range(PROFILE_BINS + 1)])})
+            if len(edges) < 2:
+                continue
+            shares = _numeric_shares(pd.to_numeric(s, errors="coerce").dropna(), edges)
+            out[col] = {"kind": "number", "edges": edges, "shares": shares, "rows": int(len(s))}
+        else:
+            vc = s.astype(str).value_counts(normalize=True)
+            top = vc.head(PROFILE_TOP_CATEGORIES)
+            shares = {str(k): float(v) for k, v in top.items()}
+            rest = float(max(0.0, 1.0 - sum(shares.values())))
+            out[col] = {"kind": "category", "shares": shares, "other": rest, "rows": int(len(s))}
+    return out
+
+
+def _numeric_shares(s: pd.Series, edges: list[float]) -> list[float]:
+    """Shares in the training bins; values beyond the edges fall in the end bins."""
+    import numpy as np
+    idx = np.clip(np.searchsorted(edges, s.to_numpy(dtype=float), side="right") - 1, 0, len(edges) - 2)
+    counts = np.bincount(idx, minlength=len(edges) - 1)
+    total = counts.sum() or 1
+    return [float(c) / total for c in counts]
+
+
+def _psi(expected: list[float], actual: list[float]) -> float:
+    import math
+    eps = 1e-4
+    return float(sum((a - e) * math.log((a + eps) / (e + eps)) for e, a in zip(expected, actual)))
+
+
+def drift_report(profile: dict, frame: pd.DataFrame) -> dict:
+    """How far each predictor has moved from training, as a population
+    stability index: under 0.1 stable, 0.1-0.25 moderate, over that major."""
+    features = []
+    for col, p in (profile or {}).items():
+        if col not in frame.columns:
+            features.append({"feature": col, "psi": None, "level": "missing", "rows": 0})
+            continue
+        s = frame[col].dropna()
+        if s.empty:
+            features.append({"feature": col, "psi": None, "level": "missing", "rows": 0})
+            continue
+        if p["kind"] == "number":
+            actual = _numeric_shares(pd.to_numeric(s, errors="coerce").dropna(), p["edges"])
+            psi = _psi(p["shares"], actual)
+            top_change = None
+        else:
+            vc = s.astype(str).value_counts(normalize=True)
+            known = list(p["shares"])
+            actual = [float(vc.get(k, 0.0)) for k in known]
+            actual_other = float(max(0.0, 1.0 - sum(actual)))
+            psi = _psi([*p["shares"].values(), p.get("other", 0.0)], [*actual, actual_other])
+            new = [str(k) for k in vc.index if str(k) not in p["shares"]][:5]
+            top_change = new or None
+        level = "major" if psi >= PSI_MAJOR else "moderate" if psi >= PSI_MODERATE else "stable"
+        features.append({"feature": col, "psi": round(psi, 4), "level": level, "rows": int(len(s)),
+                         **({"new_values": top_change} if top_change else {})})
+    rank = {"major": 0, "moderate": 1, "missing": 2, "stable": 3}
+    features.sort(key=lambda f: (rank[f["level"]], -(f["psi"] or 0)))
+    worst = features[0]["level"] if features else "stable"
+    return {"features": features, "overall": worst, "rows": int(len(frame))}
 
 
 def align_frame(pkg: PackagedModel, df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, list[str]]]:

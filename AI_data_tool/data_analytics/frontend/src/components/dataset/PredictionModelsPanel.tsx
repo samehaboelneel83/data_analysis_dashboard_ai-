@@ -3,8 +3,9 @@ import toast from 'react-hot-toast'
 import { Brain } from 'lucide-react'
 import EmptyState from '../ui/EmptyState'
 import { useT } from '../../i18n'
-import { predictionModelsApi } from '../../services/api'
-import type { DatasetColumn, DatasetSummaryForCard, PredictionModelSummary, ScoreResult } from '../../services/api'
+import { isJobActive, jobsApi, predictionModelsApi } from '../../services/api'
+import { Link } from 'react-router-dom'
+import type { DatasetColumn, DatasetSummaryForCard, Job, ModelDrift, PredictionModelSummary, ScoreResult } from '../../services/api'
 
 /**
  * Models kept so they can score rows they have never seen.
@@ -28,7 +29,67 @@ const fmt = (v: number | null | undefined) => (v == null ? '—' : Number.isInte
 
 /** E13: how a saved model was chosen and on what, and whether the data has
  *  moved since. */
-export function ModelCardView({ m, dataset }: { m: PredictionModelSummary; dataset?: DatasetSummaryForCard }) {
+const DRIFT_WORD: Record<ModelDrift['overall'], string> = {
+  stable: 'stable', moderate: 'moderate shift', major: 'major shift', missing: 'missing now',
+}
+
+/** E13: today's rows against the version's training rows, per predictor. */
+function DriftCheck({ m, datasetId }: { m: PredictionModelSummary; datasetId: number }) {
+  const [drift, setDrift] = useState<ModelDrift | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  if (!m.has_training_profile) {
+    return <p style={{ fontSize: 11, color: 'var(--muted)', margin: 0 }}>
+      This version was saved before training profiles were kept, so drift cannot be checked. Retrain it to compare.
+    </p>
+  }
+  const check = async () => {
+    setBusy(true); setErr(null)
+    try { setDrift(await predictionModelsApi.drift(datasetId, m.id)) }
+    catch (e) { setErr((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Could not check drift') }
+    finally { setBusy(false) }
+  }
+  return (
+    <div data-testid="model-drift" style={{ display: 'grid', gap: 6 }}>
+      <div>
+        <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void check()}
+          style={{ fontSize: 11, padding: '3px 8px' }}>
+          {busy ? 'Checking…' : 'Check drift against today\'s rows'}
+        </button>
+      </div>
+      {err && <p style={{ fontSize: 11, color: 'var(--danger)', margin: 0 }}>{err}</p>}
+      {drift && (
+        <>
+          <div style={{ fontSize: 11.5 }}>
+            Overall: <b>{DRIFT_WORD[drift.overall]}</b> over {drift.rows.toLocaleString()} rows
+            {drift.trained_rows ? <> (trained on {drift.trained_rows.toLocaleString()})</> : null}.
+            {drift.overall === 'major' && ' The data has moved enough that the training score no longer describes it; retrain.'}
+          </div>
+          <table aria-label={`Drift for ${m.name} v${m.version ?? 1}`} style={{ borderCollapse: 'collapse', maxWidth: 420 }}>
+            <thead><tr>
+              <th style={{ textAlign: 'start', padding: '2px 8px' }}>Predictor</th>
+              <th style={{ textAlign: 'end', padding: '2px 8px' }}>Stability index</th>
+              <th style={{ textAlign: 'start', padding: '2px 8px' }}>Reading</th>
+            </tr></thead>
+            <tbody>
+              {drift.features.map(f => (
+                <tr key={f.feature}>
+                  <td style={{ padding: '2px 8px' }}>{f.feature}</td>
+                  <td style={{ textAlign: 'end', padding: '2px 8px', fontVariantNumeric: 'tabular-nums' }}>{f.psi == null ? '—' : f.psi.toFixed(3)}</td>
+                  <td style={{ padding: '2px 8px', color: f.level === 'major' ? 'var(--danger)' : f.level === 'moderate' ? '#b45309' : undefined }}>
+                    {DRIFT_WORD[f.level]}{f.new_values?.length ? ` (new: ${f.new_values.join(', ')})` : ''}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+    </div>
+  )
+}
+
+export function ModelCardView({ m, dataset, datasetId }: { m: PredictionModelSummary; dataset?: DatasetSummaryForCard; datasetId?: number }) {
   const c = m.card
   if (!c) {
     return <p style={{ fontSize: 11, color: 'var(--muted)', margin: 0 }}>
@@ -73,6 +134,7 @@ export function ModelCardView({ m, dataset }: { m: PredictionModelSummary; datas
       <div>Predictors: {(c.predictors_used ?? m.features).join(', ') || '—'}
         {skipped.length > 0 && <> · left out: {skipped.join(', ')}</>}</div>
       {(c.caveats?.length ?? 0) > 0 && <ul style={{ margin: 0, paddingInlineStart: 18 }}>{c.caveats!.map(x => <li key={x}>{x}</li>)}</ul>}
+      {datasetId != null && <DriftCheck m={m} datasetId={datasetId} />}
     </div>
   )
 }
@@ -98,6 +160,31 @@ export default function PredictionModelsPanel({ datasetId, columns, mode, datase
   const [scoreError, setScoreError] = useState<string | null>(null)
   const [scoringId, setScoringId] = useState<number | null>(null)
   const [cardFor, setCardFor] = useState<number | null>(null)
+  // E13: batch scoring jobs, followed until they finish.
+  const [scoreJobs, setScoreJobs] = useState<Record<number, Job>>({})
+  useEffect(() => {
+    const active = Object.values(scoreJobs).filter(isJobActive)
+    if (!active.length) return
+    const id = setInterval(() => {
+      active.forEach(j => {
+        jobsApi.get(j.id).then(next => setScoreJobs(s => {
+          const mid = Number(Object.keys(s).find(k => s[Number(k)].id === j.id))
+          return Number.isNaN(mid) ? s : { ...s, [mid]: next }
+        })).catch(() => {})
+      })
+    }, 2000)
+    return () => clearInterval(id)
+  }, [scoreJobs])
+  const queueScore = async (m: PredictionModelSummary) => {
+    try {
+      const j = await predictionModelsApi.scoreJob(datasetId, m.id)
+      setScoreJobs(s => ({ ...s, [m.id]: { ...(j as unknown as Job), state: j.state as Job['state'] } }))
+      toast.success(`Predicting with ${m.name} v${m.version ?? 1}: the result will be a new dataset`)
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      toast.error(detail || 'Could not start scoring')
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -275,6 +362,13 @@ export default function PredictionModelsPanel({ datasetId, columns, mode, datase
                     className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '3px 8px' }}>
                     Model card
                   </button>
+                  {mode !== 'directquery' && (
+                    <button onClick={() => void queueScore(m)} disabled={!!scoreJobs[m.id] && isJobActive(scoreJobs[m.id])}
+                      className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '3px 8px' }}
+                      title="Predict every row you can see and keep the result as a new dataset">
+                      Save predictions as a dataset
+                    </button>
+                  )}
                   <button onClick={() => void score(m)} disabled={scoringId === m.id}
                     className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '3px 8px' }}>
                     {scoringId === m.id ? 'Scoring…' : 'Score this dataset'}
@@ -290,7 +384,16 @@ export default function PredictionModelsPanel({ datasetId, columns, mode, datase
                 {m.model_family}
                 {m.score != null && <> · {m.score_name || 'score'} {m.score}</>}
               </div>
-              {cardFor === m.id && <ModelCardView m={m} dataset={dataset} />}
+              {scoreJobs[m.id] && (
+                <div data-testid={`score-job-${m.id}`} role="status" style={{ fontSize: 11.5 }}>
+                  {isJobActive(scoreJobs[m.id]) ? <>Scoring… ({String(scoreJobs[m.id].progress?.stage ?? scoreJobs[m.id].state)})</>
+                    : scoreJobs[m.id].state === 'succeeded' && scoreJobs[m.id].result?.dataset_id ? (
+                      <>Scored {Number((scoreJobs[m.id].result as { rows?: number } | null)?.rows ?? 0).toLocaleString()} rows:{' '}
+                        <Link to={`/datasets/${scoreJobs[m.id].result!.dataset_id}`}>open the scored dataset</Link></>
+                    ) : <span style={{ color: 'var(--danger)' }}>Scoring failed: {scoreJobs[m.id].error ?? scoreJobs[m.id].state}</span>}
+                </div>
+              )}
+              {cardFor === m.id && <ModelCardView m={m} dataset={dataset} datasetId={datasetId} />}
             </div>
           ))}
         </div>

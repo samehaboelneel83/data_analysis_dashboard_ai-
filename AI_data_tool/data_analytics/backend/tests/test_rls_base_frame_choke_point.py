@@ -50,6 +50,12 @@ _ALLOWED_FILES = {
     # reader gets predictions for their own rows rather than the table's.
     # REVIEWED.
     "routers/prediction_models.py",
+    # secured_frame: the rows a saved model scores, for the request path and
+    # the batch-scoring job alike (moved out of the router so the job, which
+    # runs outside any request, applies the same rule). The base frame is
+    # filtered on the line after load_file, before prep and calculated
+    # columns; denied columns are dropped before and after them. REVIEWED.
+    "services/model_access.py",
     # _governed_frame: the semantic-layer API (Phase 7.6). Filters the BASE
     # frame inside load_file's own call, drops the caller's denied and
     # classification-redacted columns on the next line -- before prep, author

@@ -687,6 +687,7 @@ export interface PredictionModelSummary {
   status?: 'champion' | 'candidate'
   promoted_at?: string | null
   card?: ModelCard | null
+  has_training_profile?: boolean
 }
 
 /** The dataset as it is now, beside the state a model card recorded. */
@@ -752,6 +753,22 @@ export const predictionModelsApi = {
     api.delete(`/datasets/${datasetId}/prediction-models/${modelId}`).then(() => undefined),
   promote: (datasetId: number, modelId: number) =>
     api.post<PredictionModelSummary>(`/datasets/${datasetId}/prediction-models/${modelId}/promote`).then(r => r.data),
+  /** E13: how far today's rows have moved from this version's training rows. */
+  drift: (datasetId: number, modelId: number) =>
+    api.get<ModelDrift>(`/datasets/${datasetId}/prediction-models/${modelId}/drift`).then(r => r.data),
+  /** E13: score every row into a new dataset, as a durable job. */
+  scoreJob: (datasetId: number, modelId: number) =>
+    api.post<{ id: number; state: string; kind: string; subject: string | null }>(
+      `/datasets/${datasetId}/prediction-models/${modelId}/score-jobs`).then(r => r.data),
+}
+
+export interface ModelDrift {
+  overall: 'stable' | 'moderate' | 'major' | 'missing'
+  rows: number
+  trained_rows?: number | null
+  model: { id: number; name: string; version: number }
+  features: { feature: string; psi: number | null; level: 'stable' | 'moderate' | 'major' | 'missing';
+              rows: number; new_values?: string[] }[]
 }
 
 export interface AggregatePreflight {

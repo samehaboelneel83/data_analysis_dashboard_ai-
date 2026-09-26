@@ -244,6 +244,8 @@ EXCUSED_ROUTES = {
     ("GET", "/api/v1/datasets/{dataset_id}/analysis"): "reads a cached result; 404 for anyone with RLS/CLS (test_analysis_rls.py)",
     ("POST", "/api/v1/datasets/{dataset_id}/suggest-dashboards"): "calls the language model; its frame is the one data-preview uses",
     ("POST", "/api/v1/datasets/{dataset_id}/prediction-models"): "training; covered in test_prediction_models_api.py and below",
+    ("GET", "/api/v1/datasets/{dataset_id}/prediction-models/{model_id}/drift"): "only through a model the caller may use (model_access.usable_model), over their secured frame; test_model_scoring.py",
+    ("POST", "/api/v1/datasets/{dataset_id}/prediction-models/{model_id}/score-jobs"): "queues a job; the job re-checks as its owner and writes their secured rows; test_model_scoring.py",
 }
 
 
@@ -413,6 +415,8 @@ WRITE_GATES = [
     Gate("default filter", "PATCH", "/api/v1/datasets/{ds}/filter", body={"expression": "headcount > 0"}),
     Gate("score model", "POST", "/api/v1/datasets/{ds}/prediction-models/1/score", body={"from_dataset": True}),
     Gate("promote model", "POST", "/api/v1/datasets/{ds}/prediction-models/1/promote"),
+    Gate("model drift", "GET", "/api/v1/datasets/{ds}/prediction-models/1/drift"),
+    Gate("queue model scoring", "POST", "/api/v1/datasets/{ds}/prediction-models/1/score-jobs"),
 ]
 
 

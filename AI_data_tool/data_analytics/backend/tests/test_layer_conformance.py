@@ -179,6 +179,10 @@ LAYER_MAP: dict[str, int] = {
     "services/refresh_jobs": L6_API,
     # E12: scheduled deliveries as jobs, beside the scheduler that queues them.
     "services/delivery_jobs": L6_API,
+    # E13: who may use a saved model (shared by the router and the scoring
+    # job), and batch scoring as a job -- permission checks, like refresh_jobs.
+    "services/model_access": L6_API,
+    "services/model_scoring": L6_API,
     # Power Pi's automation runner sits beside it for the same reason and
     # shares its tick: sequencing profile -> scan -> propose -> compose is
     # orchestration over layers 2-5, not a member of any of them.

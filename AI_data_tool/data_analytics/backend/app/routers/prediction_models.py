@@ -34,6 +34,7 @@ from ..dependencies import get_current_user
 from ..models.models import Dataset, PredictionModel, User
 from ..services.analysis.model_store import (ModelStoreError, PackagedModel,
                                              fit_and_package, score_frame)
+from ..services.model_access import ModelAccessError, secured_frame, usable_model
 from ..services.analytics import load_file
 from ..services.prep import apply_prep_steps, prep_steps_of, resolve_join_frames
 from ..services.widget_data import apply_calculated_columns, apply_rls_filter
@@ -77,7 +78,11 @@ def _out(m: PredictionModel) -> dict:
         # E13
         "version": m.version or 1, "status": m.status or CHAMPION,
         "promoted_at": m.promoted_at.isoformat() if m.promoted_at else None,
-        "card": m.card or None,
+        # The training profile stays server-side: its category shares and
+        # decile edges describe the training rows, and the list reaches people
+        # whose row rule differs. Drift, which uses it, requires the same rows.
+        "card": ({k: v for k, v in m.card.items() if k != "feature_profile"} if m.card else None),
+        "has_training_profile": bool((m.card or {}).get("feature_profile")),
     }
 
 
@@ -94,23 +99,6 @@ async def _dataset_for_read(dataset_id: int, db: AsyncSession, user: User) -> Da
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, user, "Dataset not found")
     return ds
-
-
-def _refuse_denied_features(features: list[str], denied: list[str]) -> None:
-    """A model fitted on a column the caller may not read is not theirs to use.
-
-    Refused by NAME so the caller can act on it. The subtlety worth stating:
-    this is NOT solved by dropping the column from the request, because the
-    model was fitted on it and its influence is inside the estimator. The only
-    correct answer is to refuse the model.
-    """
-    hit = [c for c in features if c in (denied or [])]
-    if hit:
-        raise HTTPException(
-            400,
-            f"This model was trained on '{hit[0]}', which is not available to "
-            f"you. Its predictions are derived from that column, so it cannot "
-            f"be used on your behalf.")
 
 
 @router.post("/{dataset_id}/prediction-models", status_code=201)
@@ -285,31 +273,15 @@ async def load_usable_model(db: AsyncSession, user: User, dataset_id: int,
                             model_id: int) -> tuple[PredictionModel, PackagedModel]:
     """The saved model, packaged -- or the HTTPException that says why not.
 
-    Shared by the score endpoint and the canvas scoring widget, so the two
-    cannot drift: the denied-feature refusal and the same-rows rule below are
-    the whole security story of a saved model, and a second copy is the one
-    that would be forgotten."""
-    model = await db.get(PredictionModel, model_id)
-    if not model or model.dataset_id != dataset_id:
-        raise HTTPException(404, "Model not found")
-    check_org(model, user, "Model not found")
-    denied = await resolve_denied_columns(db, user, dataset_id)
-    _refuse_denied_features(list(model.features or []), denied)
-    caller_rls = await resolve_rls_expr(db, user, dataset_id)
-    if (model.trained_rls or None) != (caller_rls or None):
-        raise HTTPException(
-            400,
-            "This model was trained on a different set of rows than you can "
-            "see, so its answers are not yours to read. Train one under your "
-            "own access instead.")
-    return model, PackagedModel(
-        artifact=bytes(model.artifact), target=model.target,
-        features=list(model.features or []),
-        feature_columns=list(model.feature_columns or []),
-        categories=dict(model.categories or {}), task=model.task,
-        model_family=model.model_family, score=model.score,
-        score_name=model.score_name or "",
-    )
+    Shared by the score endpoint, the canvas scoring widget, promotion, drift
+    and (through services/model_access.py, where the rule lives) the batch
+    scoring job, so none of them can drift: the denied-feature refusal and
+    the same-rows rule are the whole security story of a saved model, and a
+    second copy is the one that would be forgotten."""
+    try:
+        return await usable_model(db, user, dataset_id, model_id)
+    except ModelAccessError as e:
+        raise HTTPException(e.status, e.message)
 
 
 @router.post("/{dataset_id}/prediction-models/{model_id}/score")
@@ -327,34 +299,12 @@ async def score_model(
     model, pkg = await load_usable_model(db, current_user, dataset_id, model_id)
 
     if req.from_dataset:
-        if not ds.filename or ds.mode == "directquery":
-            raise HTTPException(400, "Scoring the dataset is available for import-mode datasets only")
-        rls_expr = await resolve_rls_expr(db, current_user, dataset_id)
-        # Column security too, as training does: a model never sees a column
-        # this caller may not read -- not even through a calculated column or
-        # a prep step derived from one.
-        denied = await resolve_denied_columns(db, current_user, dataset_id) or []
-        _steps = prep_steps_of(ds)
-        _aux = await resolve_join_frames(db, current_user, _steps) if _steps else {}
-
-        def _load() -> pd.DataFrame:
-            df = load_file(ds.filename)
-            # The caller's OWN rows. Scoring the whole table for a restricted
-            # viewer would hand back predictions for rows they cannot read.
-            df = apply_rls_filter(df, rls_expr)
-            df = df.drop(columns=[c for c in denied if c in df.columns])
-            # And the same prep the model was TRAINED on: scoring raw rows
-            # with a model fitted on prepped ones aligns nothing.
-            df = apply_prep_steps(df, _steps, _aux)
-            if ds.calculated_columns:
-                df = apply_calculated_columns(df, ds.calculated_columns, ds.custom_functions)
-            df = df.drop(columns=[c for c in denied if c in df.columns])
-            return df.head(max(1, min(req.limit, 50_000)))
-
+        # The caller's OWN rows, prepared as the model was trained: the same
+        # function the batch scoring job uses.
         try:
-            frame = await asyncio.to_thread(_load)
-        except FileNotFoundError:
-            raise HTTPException(404, "Dataset file not found on server — please re-upload the file")
+            frame = await secured_frame(db, current_user, ds, limit=max(1, min(req.limit, 50_000)))
+        except ModelAccessError as e:
+            raise HTTPException(e.status, e.message)
     elif req.rows:
         frame = pd.DataFrame(req.rows)
     else:
@@ -366,6 +316,52 @@ async def score_model(
         raise HTTPException(400, str(e))
     return {**out, "model": {"id": model.id, "name": model.name, "version": model.version or 1,
                              "status": model.status or CHAMPION}}
+
+
+@router.get("/{dataset_id}/prediction-models/{model_id}/drift")
+async def model_drift(
+    dataset_id: int, model_id: int,
+    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    """How far the dataset's rows have moved from what this version was
+    trained on (E13): a population stability index per predictor, over the
+    rows the caller may see now. A version saved before training profiles
+    were kept cannot be compared, and says so."""
+    ds = await _dataset_for_read(dataset_id, db, current_user)
+    model, pkg = await load_usable_model(db, current_user, dataset_id, model_id)
+    profile = (model.card or {}).get("feature_profile")
+    if not profile:
+        raise HTTPException(409, "This version was saved before training profiles were kept, "
+                                 "so there is nothing to compare today's rows with. Retrain it.")
+    try:
+        frame = await secured_frame(db, current_user, ds)
+    except ModelAccessError as e:
+        raise HTTPException(e.status, e.message)
+    from ..services.analysis.model_store import drift_report
+    report = await asyncio.to_thread(drift_report, profile, frame)
+    return {**report, "model": {"id": model.id, "name": model.name, "version": model.version or 1},
+            "trained_rows": (model.card or {}).get("n_fitted")}
+
+
+@router.post("/{dataset_id}/prediction-models/{model_id}/score-jobs", status_code=202)
+async def queue_score_job(
+    dataset_id: int, model_id: int,
+    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    """Score every row the caller may see with this version, as a durable job
+    that keeps the result as a new dataset (E13). Authoring: it creates one."""
+    ds = await _dataset_for_read(dataset_id, db, current_user)
+    await require_dataset_capability(db, current_user, dataset_id, "data")
+    model, _pkg = await load_usable_model(db, current_user, dataset_id, model_id)
+    if not ds.filename or ds.mode == "directquery":
+        raise HTTPException(400, "Scoring the dataset is available for import-mode datasets only")
+    from ..services import jobs as job_service
+    from ..services.model_scoring import MODEL_SCORE_KIND
+    job, _created = await job_service.enqueue(
+        db, user=current_user, kind=MODEL_SCORE_KIND,
+        inputs={"dataset_id": dataset_id, "model_id": model.id},
+        subject=f"Score {ds.name} with {model.name} v{model.version or 1}")
+    return {"id": job.id, "state": job.state, "kind": job.kind, "subject": job.subject}
 
 
 @router.delete("/{dataset_id}/prediction-models/{model_id}", status_code=204)

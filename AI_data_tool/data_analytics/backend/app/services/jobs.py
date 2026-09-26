@@ -93,7 +93,7 @@ HANDLERS: dict[str, Handler] = {}
 #: Modules whose import registers handlers. Listed here so the worker and
 #: `enqueue` know every kind without depending on import order elsewhere.
 HANDLER_MODULES = ("app.services.source_import", "app.services.refresh_jobs",
-                   "app.services.delivery_jobs")
+                   "app.services.delivery_jobs", "app.services.model_scoring")
 
 
 def load_handlers() -> None:
