@@ -71,7 +71,7 @@ def data(tmp_path):
 def run(engine, data, config, widget_type="bar", monkeypatch=None, measures=None):
     if engine == "directquery":
         return run_direct_query(data["source"], data["dataset"], dict(config),
-                                widget_type=widget_type, cache_ttl_seconds=0)
+                                widget_type=widget_type, cache_ttl_seconds=0, measures=measures)
     monkeypatch.setattr(settings, "widget_duckdb_pushdown", engine == "duckdb")
     wd.clear_widget_data_cache()
     return wd.get_widget_data(data["csv"], dict(config), widget_type=widget_type,
@@ -137,10 +137,12 @@ class TestPlainAggregations:
                       {"North": 200, "South": 100, "East": 0}, total=125)
 
 
-@pytest.mark.parametrize("engine", ["pandas", "duckdb"])
+@pytest.mark.parametrize("engine", ENGINES)
 class TestPostAggregationMeasures:
-    """Named measures run after aggregation. DirectQuery cannot run them; its
-    widget route refuses a config that names one, pinned separately below."""
+    """Named measures run after aggregation, at the widget's grain, and their
+    totals are re-evaluated at no grain. DirectQuery writes Margin and WAvg as
+    SQL (services/measure_sql.py) and fetches the rows for Share, whose
+    TOTAL() SQL cannot express -- the same numbers either way."""
 
     def test_margin_total_is_recomputed_not_averaged(self, engine, data, monkeypatch):
         # North 130/600 = 21.67%; South 15/200 = 7.5%; East 0/0 = blank, never inf.
@@ -167,6 +169,23 @@ class TestPostAggregationMeasures:
                                "filters": [{"column": "region", "op": "neq", "value": "East"}]},
                 monkeypatch=monkeypatch, measures=MEASURES)
         assert_values(r, {"North": 75, "South": 25})
+
+    def test_a_non_zero_numerator_over_zero_is_blank_not_an_error(self, engine, data, monkeypatch):
+        # East has units 2 and revenue 0: 2/0 was inf in pandas, which JSON
+        # cannot carry -- the widget answered 500. Blank, like 0/0, everywhere.
+        measures = MEASURES + [{"name": "PerRevenue", "expression": "SUM(units) / SUM(revenue)"}]
+        r = run(engine, data, {"dimension": "region", "measure": "PerRevenue", "show_totals": True},
+                monkeypatch=monkeypatch, measures=measures)
+        assert_values(r, {"North": 6 / 600, "South": 6 / 200, "East": None}, total=14 / 800)
+        import json
+        json.dumps(r, allow_nan=False)
+
+    def test_a_conditional_measure_counts_only_its_rows(self, engine, data, monkeypatch):
+        # Revenue from customer c1 only: North 100+300, South 50, East 0.
+        measures = MEASURES + [{"name": "C1", "expression": "SUM(IF(customer == 'c1', revenue, 0))"}]
+        r = run(engine, data, {"dimension": "region", "measure": "C1", "show_totals": True},
+                monkeypatch=monkeypatch, measures=measures)
+        assert_values(r, {"North": 400, "South": 50, "East": 0}, total=450)
 
 
 @pytest.mark.parametrize("engine", ENGINES)
@@ -384,10 +403,10 @@ class TestCrosstabRanking:
         assert r["totals_basis"]["truncated"] is False and r["totals_basis"]["of"] == 3
 
 
-async def test_directquery_refuses_a_named_measure_at_the_route(client, db_session, two_orgs, tmp_path):
-    """run_direct_query itself answers a KPI on a measure name with an EMPTY
-    result; the widget route is what turns that into a refusal. Pinned here so
-    the refusal cannot quietly become a blank tile."""
+async def test_directquery_computes_a_named_measure_through_the_route(client, db_session, two_orgs, tmp_path):
+    """Measures on DirectQuery (E04): the route used to refuse a config that
+    named one. It now passes the dataset's measures through, and a KPI of the
+    margin is the ratio of the sums over every row, as on import."""
     from app.models.models import DataSource, Dataset, DatasetColumn
     org = two_orgs["a"]["org"].id
     db = tmp_path / "dq.db"
@@ -410,7 +429,8 @@ async def test_directquery_refuses_a_named_measure_at_the_route(client, db_sessi
     r = await client.post(f"/api/v1/datasets/{ds.id}/widget-data",
                           json={"widget_type": "kpi", "config": {"measure": "Margin"}},
                           headers={"Authorization": f"Bearer {create_access_token(admin.id, org)}"})
-    assert r.status_code == 400 and "Measures are not yet supported" in r.text
+    assert r.status_code == 200, r.text
+    assert r.json()["rows"][0]["value"] == pytest.approx(18.125)
 
 
 @pytest.mark.parametrize("engine", ENGINES)
@@ -502,3 +522,43 @@ class TestAnUnknownFieldIsAnErrorNotACount:
         r = run(engine, data, {"dimension": "region", "measure": "Margin"},
                 monkeypatch=monkeypatch, measures=MEASURES)
         assert r["type"] == "series"
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+class TestMeasuresWithMissingAndRanked:
+    """Two measure cases the engines disagreed on (E04)."""
+
+    def test_a_share_measure_sums_to_100_beside_rows_with_no_region(self, engine, data, monkeypatch, tmp_path):
+        # A row with no region is in no bar and no Total; it must not be in the
+        # measure's TOTAL() either, or the shares sum to less than 100.
+        rows = ROWS + [(None, "c9", 400.0, 1.0, 1.0)]
+        frame = pd.DataFrame(rows, columns=COLS)
+        csv = tmp_path / "with_null.csv"
+        frame.to_csv(csv, index=False)
+        db = tmp_path / "with_null.db"
+        con = sqlite3.connect(db)
+        frame.to_sql("sales", con, index=False)
+        con.close()
+        d = {**data, "csv": str(csv), "source": {"type": "sqlite", "filepath": str(db)}}
+        r = run(engine, d, {"dimension": "region", "measure": "Share"},
+                monkeypatch=monkeypatch, measures=MEASURES)
+        assert sum(v for v in values(r).values()) == pytest.approx(100)
+        assert r["missing_category"] == {"rows": 1}
+
+    def test_the_all_other_bucket_of_a_measure_is_the_measure_over_those_rows(self, engine, data, monkeypatch):
+        # Top 1 by margin: North (21.67%). All Other = South + East rows as one
+        # group: profit 15 / revenue 200 = 7.5% -- not a sum or mean of 7.5 and blank.
+        r = run(engine, data, {"dimension": "region", "measure": "Margin",
+                               "rank": {"mode": "top", "n": 1, "other": True}},
+                monkeypatch=monkeypatch, measures=MEASURES)
+        assert values(r) == {"North": pytest.approx(130 / 6), "All Other": pytest.approx(7.5)}
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+class TestPercentAggregation:
+    def test_pct_is_each_groups_share_of_every_group_before_the_limit(self, engine, data, monkeypatch):
+        # Revenue 600 / 200 / 0 of 800. With limit 1 the page shows North only,
+        # and its share is still of all 800 -- not 100% of the page.
+        r = run(engine, data, {"dimension": "region", "measure": "revenue", "aggregation": "pct",
+                               "limit": 1}, monkeypatch=monkeypatch)
+        assert_values(r, {"North": 75})

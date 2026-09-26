@@ -127,9 +127,15 @@ class QueryPlan:
     limit: int = 50
     sort_desc: bool = True
     sort_by_dim: bool = False
+    #: A named measure written as SQL (services/measure_sql.py). When set, the
+    #: value column is this expression instead of AGG(meas), and `meas` is the
+    #: measure's name, used only as the column alias.
+    meas_sql: str | None = None
+    #: The columns `meas_sql` reads, for the identifier allowlist.
+    meas_cols: tuple = ()
 
 
-def plan_query(config: dict, widget_type: str) -> QueryPlan:
+def plan_query(config: dict, widget_type: str, measure_is_def: bool = False) -> QueryPlan:
     if widget_type not in AGGREGATE_STRATEGY_WIDGET_TYPES:
         raise DirectQueryUnsupported(
             f"widget_type '{widget_type}' is not yet supported for DirectQuery datasets"
@@ -153,7 +159,7 @@ def plan_query(config: dict, widget_type: str) -> QueryPlan:
         raise DirectQueryUnsupported(
             "sort_col on a column other than the dimension is not yet supported for DirectQuery datasets"
         )
-    if meas:
+    if meas and not measure_is_def:
         if agg not in GRAIN_SAFE_AGGREGATIONS:
             raise DirectQueryUnsupported(f"aggregation '{agg}' is not yet supported for DirectQuery datasets")
     elif agg == "pct":
@@ -291,6 +297,13 @@ def _agg_sql(agg: str, meas_sql: str, dialect: str) -> str:
     return f"{_SQL_AGG_FN[agg]}({meas_sql})"
 
 
+def _value_sql(plan: "QueryPlan", dialect: str) -> str:
+    """The per-group value: a translated measure, or AGG(column)."""
+    if plan.meas_sql:
+        return plan.meas_sql
+    return _agg_sql(plan.agg, _quote(plan.meas), dialect)
+
+
 def _limit_clause(dialect: str, limit: int) -> str:
     if dialect == "oracle":
         return f"FETCH FIRST {limit} ROWS ONLY"
@@ -326,7 +339,7 @@ def build_sql(
     this function only wires them into the query shape, it doesn't translate."""
     base = _base_query_sql(dataset, rls_where)
     dim_sql, meas_sql = _quote(plan.dim), _quote(plan.meas)
-    agg_sql = _agg_sql(plan.agg, meas_sql, dialect)
+    agg_sql = _value_sql(plan, dialect)
 
     # NULL dimension rows are excluded here for the same reason the total builders
     # exclude them, plus one specific to this query: it applies the LIMIT in SQL, so a
@@ -431,7 +444,7 @@ def build_group_total_sql(
     does not show, which is the exact failure this builder exists to prevent."""
     base = _base_query_sql(dataset, rls_where)
     dim_sql = _quote(plan.dim)
-    value_sql = "COUNT(*)" if count_only else _agg_sql(plan.agg, _quote(plan.meas), dialect)
+    value_sql = "COUNT(*)" if count_only else _value_sql(plan, dialect)
     where_clause, params = _dim_group_where(plan)
     if only_dims is not None:
         # Bound, never inlined -- the same `:name` binds _build_where writes.
@@ -667,7 +680,8 @@ def _validate_columns(dataset, plan: QueryPlan) -> None:
     Safety" section -- an allowlist, not string-escaping, so a column name
     that isn't real can never reach the database at all."""
     known = {c.name for c in dataset.columns}
-    referenced = {plan.dim, plan.meas, *(f.get("column") for f in plan.filters)}
+    meas_refs = set(plan.meas_cols) if plan.meas_sql else {plan.meas}
+    referenced = {plan.dim, *meas_refs, *(f.get("column") for f in plan.filters)}
     for col in referenced:
         if col and col not in known:
             raise DirectQueryUnsupported(f"unknown column '{col}'")
@@ -702,7 +716,7 @@ def _directquery_cache_key(
     source_cfg: dict, dataset, config: dict, widget_type: str,
     rls_filter_expr: str | None, ttl_seconds: int, now: float | None = None,
     row_cap: int | None = None, cache_epoch: int = 0,
-    drop_columns: list[str] | None = None,
+    drop_columns: list[str] | None = None, measures: list[dict] | None = None,
 ) -> str:
     """Cache key for DirectQuery results, reusing widget_data's own LRU cache
     rather than a second cache structure. `kind` + data_source_id + source_table/
@@ -735,6 +749,9 @@ def _directquery_cache_key(
         # the same guarantee rls_filter_expr gives rows, and the same key
         # import mode folds into its own cache (widget_data "__denied__").
         "denied": sorted(drop_columns or []),
+        # A measure's formula is part of the answer: an edited measure must
+        # not be served its old result for the rest of the TTL.
+        "measures": measures or [],
     }
     return json.dumps(payload, sort_keys=True, default=str)
 
@@ -866,6 +883,7 @@ def _run_direct_query_inner(
     rls_filter_expr: str | None = None, row_cap: int | None = None,
     cache_ttl_seconds: int = 60, cache_epoch: int = 0,
     org_id: int | None = None, drop_columns: list[str] | None = None,
+    measures: list[dict] | None = None,
 ) -> dict:
     # E3: one span per DirectQuery execution. Attributes carry only
     # identifiers/status/timings -- never the built SQL or config values,
@@ -880,6 +898,7 @@ def _run_direct_query_inner(
             cache_key = _directquery_cache_key(
                 source_cfg, dataset, config, widget_type, rls_filter_expr, cache_ttl_seconds,
                 row_cap=row_cap, cache_epoch=cache_epoch, drop_columns=drop_columns,
+                measures=measures,
             )
             cached = _widget_data_cache_get(cache_key)
             if cached is not None:
@@ -897,7 +916,7 @@ def _run_direct_query_inner(
                 return copy.deepcopy(cached)
 
         result = _dispatch_direct_query(source_cfg, dataset, config, widget_type, rls_filter_expr, row_cap,
-                                        drop_columns=drop_columns)
+                                        drop_columns=drop_columns, measures=measures)
         # The one population field, whichever pushdown strategy answered (the
         # stat strategies return without passing through the import shaper).
         if isinstance(result, dict) and "rows_scanned" not in result and isinstance(result.get("total"), int):
@@ -949,7 +968,7 @@ def _run_direct_query_inner(
 def _fetch_and_compute(
     source_cfg: dict, dataset, config: dict, widget_type: str,
     rls_filter_expr: str | None, row_cap: int | None,
-    drop_columns: list[str] | None = None,
+    drop_columns: list[str] | None = None, measures: list[dict] | None = None,
 ) -> dict:
     """Fetch the rows and let the ordinary shaper do the work.
 
@@ -983,19 +1002,67 @@ def _fetch_and_compute(
             pass
     return _run_row_capped(source_cfg, dataset, config, widget_type,
                            rls_filter_expr, effective, allow_any_widget=True,
-                           drop_columns=drop_columns)
+                           drop_columns=drop_columns, measures=measures)
+
+
+#: Config keys whose meaning needs every group, or the raw rows, after
+#: aggregation -- see `_needs_rows`.
+_ROW_LEVEL_KEYS = ("having", "suppress_below", "quick_calc", "sort_custom",
+                   "dimension_levels", "dimension_granularity", "running")
+
+
+def _needs_rows(config: dict) -> bool:
+    """True when the grouped SQL pushdown cannot give the import engine's answer."""
+    if any(config.get(k) not in (None, "", [], {}) for k in _ROW_LEVEL_KEYS):
+        return True
+    return any(isinstance(f, dict) and f.get("granularity") for f in (config.get("filters") or []))
+
+
+def _measure_refs(config: dict, measures: list[dict] | None, known: set[str]) -> dict[str, dict]:
+    """The measure definitions this widget config names, by name. A name that
+    is also a real column is the column (the import shaper's rule)."""
+    defs = {m.get("name"): m for m in (measures or []) if isinstance(m, dict) and m.get("name")}
+    if not defs:
+        return {}
+    names = [config.get("measure"), config.get("measure2"), *(config.get("measures") or [])]
+    roles = config.get("roles") or {}
+    if isinstance(roles, dict):
+        names += [roles.get("measure"), roles.get("measure2"), *(roles.get("measures") or [])]
+    return {n: defs[n] for n in names if isinstance(n, str) and n in defs and n not in known}
 
 
 def _dispatch_direct_query(
     source_cfg: dict, dataset, config: dict, widget_type: str,
     rls_filter_expr: str | None, row_cap: int | None,
-    drop_columns: list[str] | None = None,
+    drop_columns: list[str] | None = None, measures: list[dict] | None = None,
 ) -> dict:
+    # E04: named measures. One measure in the `measure` role, on a grouped
+    # chart or a KPI, is written as SQL and computed by the source -- exact at
+    # any size, totals re-evaluated at no grain. Anything else that names a
+    # measure (a second measure, a crosstab, Top-N, a TOTAL()/CALC() formula
+    # SQL cannot express) fetches the rows and evaluates the measure with the
+    # import engine's own measure_eval: exact under the row cap, `sampled`
+    # above it -- never a different formula.
+    known = {c.name for c in (getattr(dataset, "columns", None) or [])}
+    mrefs = _measure_refs(config, measures, known)
+    if mrefs:
+        return _dispatch_with_measures(source_cfg, dataset, config, widget_type, rls_filter_expr,
+                                       row_cap, drop_columns, measures, mrefs, known)
     if widget_type == "histogram":
         return _run_histogram(source_cfg, dataset, config, rls_filter_expr)
     if widget_type == "correlation_matrix":
         return _run_correlation_matrix(source_cfg, dataset, config, rls_filter_expr)
     if widget_type in ROW_CAPPED_WIDGET_TYPES:
+        return _fetch_and_compute(source_cfg, dataset, config, widget_type,
+                                  rls_filter_expr, row_cap, drop_columns=drop_columns)
+    if _needs_rows(config):
+        # E04: what the shaper does AFTER aggregation over every group -- HAVING,
+        # suppression, quick calcs, custom order, date buckets, hierarchy levels,
+        # a drill filter on a bucket -- is wrong on the SQL-LIMITed page the
+        # pushdown hands it (percent-of-total re-based to the page; suppression
+        # counted one row per group and emptied the chart; dates grouped raw and
+        # re-bucketed as averages of averages). The rows are fetched instead and
+        # the import shaper does all of it, exactly as on an import dataset.
         return _fetch_and_compute(source_cfg, dataset, config, widget_type,
                                   rls_filter_expr, row_cap, drop_columns=drop_columns)
     if config.get("rank"):
@@ -1043,73 +1110,8 @@ def _dispatch_direct_query(
             raise
         return _fetch_and_compute(source_cfg, dataset, config, widget_type,
                                   rls_filter_expr, row_cap, drop_columns=drop_columns)
-    _validate_columns(dataset, plan)
-    rls_where, rls_params = _translate_rls(dataset, rls_filter_expr)
-
-    sql, params = build_sql(dataset, plan, dialect, rls_where=rls_where, rls_params=rls_params)
-    count_sql, count_params = build_count_sql(dataset, plan, dialect, rls_where=rls_where, rls_params=rls_params)
-
-    # `show_totals` is only honoured for the table-shaped widget types, but the frame
-    # the shaper sees here is already LIMITed by build_sql -- so whenever the shaper
-    # would emit a `totals` row, the true grand total has to come from its own
-    # unlimited SQL aggregate, computed in the same connection as everything else.
-    wants_totals = bool(config.get("show_totals"))
-    total_sql = total_params = None
-    if wants_totals:
-        total_sql, total_params = build_group_total_sql(
-            dataset, plan, dialect, rls_where=rls_where, rls_params=rls_params,
-        )
-
-    missing_sql, missing_params = build_missing_dim_count_sql(
-        dataset, plan, dialect, rls_where=rls_where, rls_params=rls_params)
-
-    engine = get_engine(source_cfg)
-    with engine.connect() as conn:
-        df = pd.read_sql(text(sql), conn, params=params)
-        total_rows = conn.execute(text(count_sql), count_params).scalar_one()
-        missing_rows = conn.execute(text(missing_sql), missing_params).scalar_one()
-        grand_total, n_groups = (conn.execute(text(total_sql), total_params).one()
-                                 if wants_totals else (None, None))
-
-    # check_fields off: `df` is the pushed-down GROUP BY (dimension + measure
-    # only), and _validate_columns above already refused an unknown field.
-    result = get_widget_data_from_df(df, config, widget_type, flag_partial=False,
-                                     check_fields=False)
-    if "total" in result:
-        result["total"] = total_rows
-        result["rows_scanned"] = total_rows  # the population, not the pre-aggregated groups
-    if "missing_category" in result:
-        # The shaper saw a frame with the NULL group already excluded, so its
-        # own count is 0; the SQL above measured the rows that were left out.
-        result["missing_category"] = {"rows": int(missing_rows or 0)}
-    # Truncation, measured in SQL. The shaper only ever sees the LIMITed page,
-    # so its own `truncation` would always say "nothing cut" -- a false
-    # all-clear. A page that came back short cannot have been cut; only a FULL
-    # page needs the group count, so the common case costs no extra query.
-    if isinstance(result.get("truncation"), dict) and plan.dim:
-        shown = result["truncation"].get("shown", 0)
-        of = shown
-        if len(df) >= plan.limit:
-            if n_groups is None:
-                gsql, gparams = build_group_total_sql(
-                    dataset, plan, dialect, rls_where=rls_where, rls_params=rls_params)
-                with engine.connect() as conn:
-                    _, n_groups = conn.execute(text(gsql), gparams).one()
-            of = max(int(n_groups or 0), shown)
-        result["truncation"] = {**result["truncation"], "applied": of > shown, "of": of,
-                                "limit": plan.limit, "reason": "limit"}
-    if wants_totals and _totals_need_sql(result, config):
-        shown_total = None
-        shown_dims = _shown_dim_values(df[plan.dim], result)
-        if len(shown_dims) < (n_groups or 0):
-            shown_sql, shown_params = build_group_total_sql(
-                dataset, plan, dialect, rls_where=rls_where, rls_params=rls_params,
-                only_dims=shown_dims,
-            )
-            with engine.connect() as conn:
-                shown_total = conn.execute(text(shown_sql), shown_params).one()[0]
-        _replace_series_grand_total(result, grand_total, n_groups, shown_total)
-    return result
+    return _run_aggregate_plan(source_cfg, dataset, config, config, widget_type,
+                               rls_filter_expr, plan, dialect)
 
 
 def _totals_need_sql(result: dict, config: dict) -> bool:
@@ -1251,13 +1253,18 @@ def _run_correlation_matrix(source_cfg: dict, dataset, config: dict, rls_filter_
 def _run_row_capped(
     source_cfg: dict, dataset, config: dict, widget_type: str,
     rls_filter_expr: str | None, row_cap: int, allow_any_widget: bool = False,
-    drop_columns: list[str] | None = None,
+    drop_columns: list[str] | None = None, measures: list[dict] | None = None,
 ) -> dict:
     dialect = connectors.sql_family_of(source_cfg)
     if dialect not in SUPPORTED_FAMILIES:
         raise DirectQueryUnsupported(f"DirectQuery does not yet support '{dialect}' sources")
 
-    plan = plan_row_fetch(config, widget_type, allow_any_widget=allow_any_widget)
+    # A drill filter on a date BUCKET ("2024-02" at month granularity) compares
+    # a label pandas computes, not the stored value: it stays out of the SQL
+    # and the shaper applies it to the fetched rows with every other filter.
+    sql_config = {**config, "filters": [f for f in (config.get("filters") or [])
+                                        if not (isinstance(f, dict) and f.get("granularity"))]}
+    plan = plan_row_fetch(sql_config, widget_type, allow_any_widget=allow_any_widget)
     # The filters' column names are spliced into the WHERE clause as
     # identifiers (values are bound; names cannot be). Every other path checks
     # them against the dataset's columns first; this one -- tables, KPIs,
@@ -1281,7 +1288,10 @@ def _run_row_capped(
         if drop_columns:
             df = df.drop(columns=[c for c in drop_columns if c in df.columns])
 
-        result = get_widget_data_from_df(df, config, widget_type, flag_partial=False)
+        # Measures travel as definitions and are evaluated here by the same
+        # measure_eval import mode uses, over the fetched (RLS-filtered) rows.
+        result = get_widget_data_from_df(df, config, widget_type, measures=measures,
+                                         flag_partial=False)
 
         # A "Total" must describe the table, never the sample. Below the cap the
         # fetched frame IS every matching row, so the shaper's own sums are already
@@ -1424,4 +1434,149 @@ def _run_count_series(
         of = max(int(n_groups or 0), len(rows))
     result["truncation"] = {"applied": of > len(rows), "shown": len(rows), "of": of,
                             "limit": plan.limit, "reason": "limit"}
+    return result
+
+
+def _dispatch_with_measures(source_cfg: dict, dataset, config: dict, widget_type: str,
+                            rls_filter_expr, row_cap, drop_columns, measures, mrefs, known) -> dict:
+    from .measure_sql import MeasureNotTranslatable, measure_to_sql
+
+    def fetch():
+        return _fetch_and_compute(source_cfg, dataset, config, widget_type, rls_filter_expr,
+                                  row_cap, drop_columns=drop_columns, measures=measures)
+
+    dialect = connectors.sql_family_of(source_cfg)
+    mname = config.get("measure")
+    only_measure = list(mrefs) == [mname] and not config.get("roles")
+    if (dialect not in SUPPORTED_FAMILIES or not only_measure or config.get("rank")
+            or _needs_rows(config)):
+        return fetch()
+    try:
+        msql, mcols = measure_to_sql(mrefs[mname].get("expression") or "", known, dialect)
+    except MeasureNotTranslatable:
+        return fetch()
+
+    if widget_type in ROW_CAPPED_WIDGET_TYPES:
+        if widget_type in ("kpi", "card") and not config.get("dimension"):
+            return _run_measure_scalar(source_cfg, dataset, config, widget_type, rls_filter_expr,
+                                       mname, msql, mcols, dialect)
+        return fetch()
+    try:
+        plan = _time_axis_default(plan_query(config, widget_type, measure_is_def=True), config, dataset)
+    except DirectQueryUnsupported:
+        from .widget_data import SHAPERS
+        if widget_type not in SHAPERS:
+            raise
+        return fetch()
+    plan = dataclasses.replace(plan, meas_sql=msql, meas_cols=tuple(sorted(mcols)))
+    # The pre-aggregated frame holds the measure's value under its name, one
+    # row per group, so the shaper must take it as it is. `max` over one row is
+    # that row -- and, unlike `sum`, keeps a blank blank (sum makes it 0).
+    shaped_config = {**config, "aggregation": "max"}
+    return _run_aggregate_plan(source_cfg, dataset, config, shaped_config, widget_type,
+                               rls_filter_expr, plan, dialect)
+
+
+def _run_measure_scalar(source_cfg: dict, dataset, config: dict, widget_type: str,
+                        rls_filter_expr, mname: str, msql: str, mcols: set, dialect: str) -> dict:
+    """A KPI or card of a measure: the formula at no grain, over every
+    filtered row (null dimension or not -- a KPI has none)."""
+    filters = config.get("filters") or []
+    for f in filters:
+        if f.get("op") not in _SUPPORTED_FILTER_OPS:
+            raise DirectQueryUnsupported(
+                f"filter operator '{f.get('op')}' is not yet supported for DirectQuery datasets")
+    _validate_known_columns(dataset, sorted(mcols), filters)
+    rls_where, rls_params = _translate_rls(dataset, rls_filter_expr)
+    base = _base_query_sql(dataset, rls_where)
+    where_sql, params = _build_where(filters)
+    where_clause = f" WHERE {where_sql}" if where_sql else ""
+    sql = _finalize_for_dialect(
+        f'SELECT {msql} AS "__dq_v__", COUNT(*) AS "__dq_n__" FROM ({base}) AS src{where_clause}',
+        dialect)
+    engine = get_engine(source_cfg)
+    with engine.connect() as conn:
+        value, n = conn.execute(text(sql), {**(rls_params or {}), **params}).one()
+    df = pd.DataFrame({mname: [value]})
+    result = get_widget_data_from_df(df, {**config, "aggregation": "max"}, widget_type,
+                                     flag_partial=False, check_fields=False)
+    if isinstance(result, dict):
+        result["total"] = int(n or 0)
+        result["rows_scanned"] = int(n or 0)
+    return result
+
+
+def _run_aggregate_plan(source_cfg: dict, dataset, config: dict, shaped_config: dict,
+                        widget_type: str, rls_filter_expr, plan: "QueryPlan", dialect: str) -> dict:
+    """The grouped pushdown: one GROUP BY in SQL, the page shaped by the import
+    shaper, and the figures the page cannot know (row count, missing category,
+    truncation, totals) measured in SQL. `shaped_config` is what the shaper
+    sees; it differs from `config` only for a measure, whose value arrives
+    already computed."""
+    _validate_columns(dataset, plan)
+    rls_where, rls_params = _translate_rls(dataset, rls_filter_expr)
+
+    sql, params = build_sql(dataset, plan, dialect, rls_where=rls_where, rls_params=rls_params)
+    count_sql, count_params = build_count_sql(dataset, plan, dialect, rls_where=rls_where, rls_params=rls_params)
+
+    # `show_totals` is only honoured for the table-shaped widget types, but the frame
+    # the shaper sees here is already LIMITed by build_sql -- so whenever the shaper
+    # would emit a `totals` row, the true grand total has to come from its own
+    # unlimited SQL aggregate, computed in the same connection as everything else.
+    wants_totals = bool(config.get("show_totals"))
+    total_sql = total_params = None
+    if wants_totals:
+        total_sql, total_params = build_group_total_sql(
+            dataset, plan, dialect, rls_where=rls_where, rls_params=rls_params,
+        )
+
+    missing_sql, missing_params = build_missing_dim_count_sql(
+        dataset, plan, dialect, rls_where=rls_where, rls_params=rls_params)
+
+    engine = get_engine(source_cfg)
+    with engine.connect() as conn:
+        df = pd.read_sql(text(sql), conn, params=params)
+        total_rows = conn.execute(text(count_sql), count_params).scalar_one()
+        missing_rows = conn.execute(text(missing_sql), missing_params).scalar_one()
+        grand_total, n_groups = (conn.execute(text(total_sql), total_params).one()
+                                 if wants_totals else (None, None))
+
+    # check_fields off: `df` is the pushed-down GROUP BY (dimension + measure
+    # only), and _validate_columns above already refused an unknown field.
+    result = get_widget_data_from_df(df, shaped_config, widget_type, flag_partial=False,
+                                     check_fields=False)
+    if "total" in result:
+        result["total"] = total_rows
+        result["rows_scanned"] = total_rows  # the population, not the pre-aggregated groups
+    if "missing_category" in result:
+        # The shaper saw a frame with the NULL group already excluded, so its
+        # own count is 0; the SQL above measured the rows that were left out.
+        result["missing_category"] = {"rows": int(missing_rows or 0)}
+    # Truncation, measured in SQL. The shaper only ever sees the LIMITed page,
+    # so its own `truncation` would always say "nothing cut" -- a false
+    # all-clear. A page that came back short cannot have been cut; only a FULL
+    # page needs the group count, so the common case costs no extra query.
+    if isinstance(result.get("truncation"), dict) and plan.dim:
+        shown = result["truncation"].get("shown", 0)
+        of = shown
+        if len(df) >= plan.limit:
+            if n_groups is None:
+                gsql, gparams = build_group_total_sql(
+                    dataset, plan, dialect, rls_where=rls_where, rls_params=rls_params)
+                with engine.connect() as conn:
+                    _, n_groups = conn.execute(text(gsql), gparams).one()
+            of = max(int(n_groups or 0), shown)
+        result["truncation"] = {**result["truncation"], "applied": of > shown, "of": of,
+                                "limit": plan.limit, "reason": "limit"}
+    if wants_totals and _totals_need_sql(result, config):
+        shown_total = None
+        shown_dims = _shown_dim_values(df[plan.dim], result)
+        if len(shown_dims) < (n_groups or 0):
+            shown_sql, shown_params = build_group_total_sql(
+                dataset, plan, dialect, rls_where=rls_where, rls_params=rls_params,
+                only_dims=shown_dims,
+            )
+            with engine.connect() as conn:
+                shown_total = conn.execute(text(shown_sql), shown_params).one()[0]
+        _replace_series_grand_total(result, grand_total, n_groups, shown_total)
     return result

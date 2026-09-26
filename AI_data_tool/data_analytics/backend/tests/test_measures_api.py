@@ -158,7 +158,11 @@ async def test_another_orgs_dataset_is_not_reachable(db_session, two_orgs, auth_
     assert r.status_code == 404
 
 
-async def test_directquery_dataset_rejects_a_measure_role(db_session, two_orgs, auth_headers, client, tmp_path):
+async def test_directquery_no_longer_refuses_a_measure_role(db_session, two_orgs, auth_headers, client, tmp_path):
+    """E04: measures run on DirectQuery now (services/measure_sql.py). The
+    route used to refuse any config naming one; it must not any more. The
+    numbers are pinned in test_numeric_goldens.py and
+    test_direct_query_measures.py."""
     ds = await _make_dataset(db_session, two_orgs["a"]["org"].id, tmp_path, mode="directquery", name="dq")
     ds.measures = [{"name": "M", "expression": "SUM(sales)"}]
     await db_session.commit()
@@ -169,8 +173,7 @@ async def test_directquery_dataset_rejects_a_measure_role(db_session, two_orgs, 
         headers=auth_headers["a"],
     )
 
-    assert r.status_code == 400
-    assert "not yet supported for DirectQuery" in r.json()["detail"]
+    assert "Measures are not yet supported" not in r.text
 
 
 class TestMetricVersions:

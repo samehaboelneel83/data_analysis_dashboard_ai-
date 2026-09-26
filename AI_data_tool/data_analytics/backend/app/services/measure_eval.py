@@ -37,6 +37,7 @@ import ast
 import math
 import re as _re
 
+import numpy as np
 import pandas as pd
 
 # Names bound for TOTAL substitution. No leading underscore, so the substituted
@@ -227,7 +228,16 @@ def _agg_namespace(df: pd.DataFrame, group_cols: list[str]) -> dict:
 
     def IF(cond, true_val, false_val):  # noqa: N802
         if isinstance(cond, pd.Series):
-            return cond.map(lambda c: true_val if c else false_val)
+            # Element-wise, and element-wise in the BRANCHES too: in
+            # `SUM(IF(region == 'East', revenue, 0))` the true branch is a
+            # column. `cond.map(...)` put the whole revenue Series into every
+            # matching cell, so the conditional sum -- the most common measure
+            # there is -- failed to evaluate (E04).
+            idx = cond.index
+            t = true_val if isinstance(true_val, pd.Series) else pd.Series(true_val, index=idx)
+            f = false_val if isinstance(false_val, pd.Series) else pd.Series(false_val, index=idx)
+            mask = cond.fillna(False).astype(bool)
+            return t.where(mask, f)
         return true_val if cond else false_val
 
     def SWITCH(value, *pairs):  # noqa: N802
@@ -450,6 +460,16 @@ def evaluate_measure(expr: str, df: pd.DataFrame, group_cols: list[str]):
         subs[f"{_CALC_PREFIX}{i}"] = _eval_calc(inner, filter_expr, df, group_cols)
 
     result = _eval(ast.unparse(rewritten), df, group_cols, subs)
+
+    # A zero denominator is NO VALUE, whatever the numerator: 0/0 was already
+    # NaN, but 5/0 was inf, which JSON cannot carry -- the widget answered 500
+    # for any group with a zero denominator. SQL's `x / NULLIF(0, 0)` is NULL
+    # too, so both engines give the same blank (E04).
+    if isinstance(result, pd.Series):
+        result = result.replace([np.inf, -np.inf], np.nan)
+    elif isinstance(result, (int, float, np.floating)) and not isinstance(result, bool) \
+            and np.isinf(result):
+        result = float("nan")
 
     if group_cols and not isinstance(result, pd.Series):
         # A constant expression (or one using only TOTALs) still needs one value per

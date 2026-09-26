@@ -256,18 +256,28 @@ def test_count_series_reports_the_shown_rows_total(sales_sqlite_source):
     assert result["totals_basis"]["of"] == 5
 
 
-def test_suppression_withholds_the_pushed_down_total(sales_sqlite_source):
-    """The SQL total would include the suppressed groups' rows, so a reader could
-    recover them as (total - visible cells). Withheld, with the reason."""
+def test_suppression_gives_the_import_engines_total(sales_sqlite_source, tmp_path):
+    """Suppression runs over every group, so it takes the rows (E04): on the
+    SQL-LIMITed page the shaper counted one row per group and suppressed them
+    all. The total is then the import engine's: over the groups NOT
+    suppressed, so a reader cannot recover a suppressed cell as
+    (total - visible cells). Every region here has 4 rows, so a threshold of
+    5 suppresses them all and nothing is left to total."""
+    import pandas as pd
+    from app.services.widget_data import get_widget_data
     config = {"dimension": "region", "measure": "sales", "aggregation": "sum",
               "limit": 50, "show_totals": True, "suppress_below": 5}
 
     result = run_direct_query(
         sales_sqlite_source, _dataset(), config, widget_type="crosstab", cache_ttl_seconds=0,
     )
+    csv = tmp_path / "same.csv"
+    pd.DataFrame(ROWS, columns=["region", "sales", "units"]).to_csv(csv, index=False)
+    expected = get_widget_data(str(csv), dict(config), widget_type="crosstab", use_cache=False)
 
-    assert "totals" not in result
-    assert result["totals_unavailable"] == "suppressed"
+    assert result["rows"] == expected["rows"]
+    assert result.get("totals") == expected.get("totals")
+    assert result.get("totals_unavailable") == expected.get("totals_unavailable")
 
 
 def test_pushed_down_count_series_total_covers_every_group(sales_sqlite_source):

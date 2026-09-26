@@ -32,9 +32,9 @@ _NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_ ]{0,120}$")
 
 
 def _ident(name: str) -> str:
-    # Upstream _quote validates names against an allowlist and never sees a quote;
-    # aggregates' names come from the same allowlist, but escaping is added here as defence in depth.
-    return _quote(str(name).replace('"', '""'))
+    # Names come from the dataset's column allowlist; `_quote` itself doubles an
+    # embedded quote (it did not, which is why this function used to).
+    return _quote(str(name))
 
 
 class AggregateSpecError(ValueError):

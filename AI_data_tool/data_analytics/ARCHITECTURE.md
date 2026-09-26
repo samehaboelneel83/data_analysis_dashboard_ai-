@@ -1283,6 +1283,19 @@ groupby over an already-aggregated frame, and only `sum/avg/min/max/median/perce
 survive that second pass unchanged. `count`, `countd`, `std`, `variance` and `range` do
 not, so they are refused rather than silently computed wrong.
 
+**One evaluation order for all three engines** is written down in
+`docs/EVALUATION_ORDER.md`: access, row rule, column rule, prep, dataset filter,
+calculated columns, parameters, relative dates, widget filters, grouping,
+aggregation, measures, then HAVING, suppression, ranking, quick calcs, limit and
+totals over every group. A pushdown engine is used only where it gives the same
+answer; DirectQuery fetches the rows for anything its `GROUP BY` page cannot do
+(HAVING, suppression, quick calcs, date buckets, drill filters on a bucket) and
+runs the import shaper over them. Named measures on DirectQuery are written as SQL
+by `services/measure_sql.py` where the grammar allows (`SUM`, `AVG`, `COUNT`,
+`COUNTD`, `MEDIAN`, arithmetic with `NULLIF` division, `IF`) and evaluated over
+fetched rows otherwise. `tests/test_engine_parity.py` requires the import
+engine's rows from each engine.
+
 The unbounded source load in the import-mode column is the platform's main scale limit;
 see the hardening plan, Phase 2.
 
@@ -2182,7 +2195,7 @@ Agent pane (7)
 
 | Suite | Scope | Count |
 |-------|-------|-------|
-| Backend | `backend/tests/` | ~5,300 tests across 399 modules |
+| Backend | `backend/tests/` | ~5,300 tests across 401 modules |
 | Frontend | colocated `*.test.ts(x)` | ~2,800 tests across 217 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |

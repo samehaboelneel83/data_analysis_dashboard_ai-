@@ -59,6 +59,20 @@ def _work_gate() -> asyncio.Semaphore:
     return gate
 
 
+def _config_names(config: dict, name: str) -> bool:
+    """Whether any string anywhere in the config is exactly `name`."""
+    stack: list = [config]
+    while stack:
+        node = stack.pop()
+        if node == name:
+            return True
+        if isinstance(node, dict):
+            stack.extend(node.values())
+        elif isinstance(node, (list, tuple)):
+            stack.extend(node)
+    return False
+
+
 def _config_uses_measure(config: dict, measures: list[dict]) -> bool:
     """True when any role in the widget config names a dataset measure. Checked so a
     DirectQuery dataset fails loudly rather than silently falling back to a column."""
@@ -218,8 +232,6 @@ async def _resolve_widget_data(
     if ds.mode == "directquery":
         if calc_cols:
             raise widget_error(400, "unsupported", "Calculated columns are not yet supported for DirectQuery datasets")
-        if _config_uses_measure(req.config, measure_defs):
-            raise widget_error(400, "unsupported", "Measures are not yet supported for DirectQuery datasets")
         if ds.default_filter_expr:
             raise widget_error(400, "unsupported", "Report-level filter expressions are not yet supported for DirectQuery datasets")
 
@@ -270,6 +282,15 @@ async def _resolve_widget_data(
                     stack.extend(node)
             if referenced & set(denied):
                 raise widget_error(403, "forbidden_column", "This widget references a column your role cannot access")
+            # A measure the widget names reads columns its config never
+            # mentions: the SQL is built from the measure's formula, so a
+            # formula over a denied column is refused the same way (E04).
+            from ..services.measure_sql import referenced_names
+            for m in measure_defs:
+                if (_config_names(req.config, m.get("name"))
+                        and referenced_names(m.get("expression") or "") & set(denied)):
+                    raise widget_error(403, "forbidden_column",
+                                       "This widget references a column your role cannot access")
 
         try:
             # to_thread keeps the sync SQLAlchemy round-trip off the event loop --
@@ -283,6 +304,7 @@ async def _resolve_widget_data(
                     source_cfg, ds, req.config, widget_type=req.widget_type, rls_filter_expr=rls_filter_expr,
                     cache_ttl_seconds=source.cache_ttl_seconds, cache_epoch=source.cache_epoch,
                     org_id=current_user.org_id, drop_columns=denied or None,
+                    measures=measure_defs or None,
                 )
         except DirectQueryUnsupported as e:
             raise widget_error(400, "unsupported", str(e))

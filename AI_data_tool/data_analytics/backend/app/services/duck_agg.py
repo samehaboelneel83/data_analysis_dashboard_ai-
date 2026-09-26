@@ -200,6 +200,10 @@ def plan(config: dict, columns: list[str], source: str,
         col = f.get("column")
         if op not in _SUPPORTED_FILTER_OPS:
             raise Ineligible(f"filter op '{op}'")
+        if f.get("granularity"):
+            # A drill filter compares the date's BUCKET label ("2024-01"), which
+            # pandas computes; raw SQL equality against the date matched nothing.
+            raise Ineligible("filter on a date bucket (granularity)")
         if col not in columns:
             raise Ineligible(f"filter column '{col}' is not a real column")
         ident = _quote_ident(col)

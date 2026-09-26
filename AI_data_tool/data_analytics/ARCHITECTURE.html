@@ -712,6 +712,7 @@ STAT_FAMILIES       = {"postgresql"}</code></pre>
     </tbody>
   </table></div>
   <p>Both hand their result to the <strong>same shaper</strong>, <code>get_widget_data_from_df</code>, which is why <code>direct_query.py</code> rejects aggregations that are not grain-safe: the shaper re-runs its groupby over an already-aggregated frame, and only <code>sum/avg/min/max/median/percentiles</code> survive that second pass unchanged. <code>count</code>, <code>countd</code>, <code>std</code>, <code>variance</code> and <code>range</code> do not, so they are refused rather than silently computed wrong.</p>
+  <p><strong>One evaluation order for all three engines</strong> is written down in <code>docs/EVALUATION_ORDER.md</code>: access, row rule, column rule, prep, dataset filter, calculated columns, parameters, relative dates, widget filters, grouping, aggregation, measures, then HAVING, suppression, ranking, quick calcs, limit and totals over every group. A pushdown engine is used only where it gives the same answer; DirectQuery fetches the rows for anything its <code>GROUP BY</code> page cannot do (HAVING, suppression, quick calcs, date buckets, drill filters on a bucket) and runs the import shaper over them. Named measures on DirectQuery are written as SQL by <code>services/measure_sql.py</code> where the grammar allows (<code>SUM</code>, <code>AVG</code>, <code>COUNT</code>, <code>COUNTD</code>, <code>MEDIAN</code>, arithmetic with <code>NULLIF</code> division, <code>IF</code>) and evaluated over fetched rows otherwise. <code>tests/test_engine_parity.py</code> requires the import engine's rows from each engine.</p>
   <p><strong>The import path materialises the whole frame</strong>, which is the platform's main scale limit. Measured on 2026-08-28: a 406 MB / 2M-row / 30-column CSV costs <strong>~1.8 GB of RSS</strong> to answer a five-row question — roughly 4.5× the file — and every concurrent render holds its own frame.</p>
   <p><code>settings.import_row_cap</code> bounds it. The cap <strong>refuses</strong> rather than truncating: a truncated frame would produce totals over an arbitrary subset with no way to say so in the result, and a confident wrong number is worse than an error. Over the cap the request returns <strong>413</strong> naming both the dataset size and the limit. It defaults to <strong>2,000,000 rows</strong> - roughly where the measured 1.8 GB-per-render cost stops being survivable on a shared box. An operator with the memory to spare can still set <code>0</code> to disable it.</p>
 
@@ -1141,7 +1142,7 @@ llm_reserved_interactive = 2</code></pre>
     <table>
       <thead><tr><th>Suite</th><th>Scope</th><th>Count</th></tr></thead>
       <tbody>
-        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~5,300 tests · 399 modules</td></tr>
+        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~5,300 tests · 401 modules</td></tr>
         <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~2,800 tests · 217 files</td></tr>
         <tr><th>Evals</th><td><code>backend/evals/</code></td><td>Agent quality gates (<code>run_eval_gate.ps1</code>)</td></tr>
         <tr><th>Conformance</th><td><code>tests/test_layer_conformance.py</code></td><td>Enforces the layer boundaries above</td></tr>

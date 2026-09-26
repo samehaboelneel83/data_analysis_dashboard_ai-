@@ -762,7 +762,12 @@ def shape_series(df: pd.DataFrame, config: dict) -> dict:
         missing_rows = int(df[dim].isna().sum())
         if measure_def is not None:
             # Post-aggregation measure: one value per group, computed at this grain.
-            values = _measure_eval.evaluate_measure(measure_def["expression"], df, [dim])
+            # Over the rows that HAVE a group: a missing-dimension row is in no
+            # group and no total (see `missing_rows`), so it must not be in a
+            # TOTAL() inside the measure either -- shares came out summing to
+            # less than 100 beside a Total that excluded those rows (E04).
+            values = _measure_eval.evaluate_measure(measure_def["expression"],
+                                                    df[df[dim].notna()], [dim])
             # Built column-by-column rather than via reset_index(): pandas names
             # the result Series after the column the expression aggregated, so
             # `COUNT(region)/TOTAL(COUNT(region))` grouped BY region produced a
@@ -868,9 +873,20 @@ def shape_series(df: pd.DataFrame, config: dict) -> dict:
                         # sum to exactly what "the rest" holds.
                         other_val = float(excluded["value"].sum())
                     elif measure_def is not None:
-                        # A measure expression cannot be honestly re-evaluated as an
-                        # aggregate of aggregates; no bucket rather than a wrong one.
-                        other_val = None
+                        # A measure cannot be an aggregate of the excluded groups'
+                        # values -- but it can be EVALUATED for them as one group:
+                        # relabel their rows as a single key and evaluate at the
+                        # same grain, so a ratio is the ratio of their sums and a
+                        # TOTAL() still means the whole (E04; the crosstab already
+                        # had this bucket, the series silently dropped it).
+                        _other_key = "\x00All Other"
+                        keyed = df[df[dim].notna()].copy()
+                        keyed[dim] = keyed[dim].where(~keyed[dim].isin(excluded[dim]), _other_key)
+                        try:
+                            vals = _measure_eval.evaluate_measure(measure_def["expression"], keyed, [dim])
+                            other_val = _safe(vals.get(_other_key))
+                        except Exception:
+                            other_val = None
                     else:
                         raw_other = df[df[dim].isin(excluded[dim])]
                         if meas and meas in df.columns:
@@ -4006,6 +4022,10 @@ def get_widget_data(
     duck_extra, duck_visible, duck_ok = [], None, False
     if (_duck_agg.is_enabled() and not prep_steps and not calculated_columns
             and not measures
+            # Only for widgets drawn by the grouped-series shaper: a box plot,
+            # a histogram or any shaper that reads RAW rows would compute its
+            # quartiles or bins over one pre-aggregated value per group (E04).
+            and SHAPERS.get(widget_type, shape_series) is shape_series
             # a lattice needs the row-level frame to split into panels
             and not (config.get("lattice_rows") or config.get("lattice_columns")
                      or config.get("animate_by"))):
