@@ -1,5 +1,6 @@
 ﻿import axios from 'axios'
 import { sanitizeErrorDetail } from '../lib/friendlyError'
+import { canceledRequest } from '../lib/canceledRequest'
 import type { Report, ReportRelease, ReportPage, Widget, HierarchyNode, Bookmark, BookmarkState, WorkspaceTree, WorkspaceNode } from '../types/report'
 import type { DisplayRule } from '../lib/displayRules'
 
@@ -1834,13 +1835,22 @@ export const WIDGET_DATA_TTL_MS = 30_000
 export const WIDGET_DATA_MAX_CONCURRENT = 6
 const WD_CACHE_MAX = 100
 const wdCache = new Map<string, { at: number; data: unknown }>()
-const wdInflight = new Map<string, Promise<unknown>>()
+const wdInflight = new Map<string, WdEntry>()
 
 let wdActive = 0
 const wdQueue: (() => void)[] = []
-const wdAcquire = () => new Promise<void>(resolve => {
-  if (wdActive < WIDGET_DATA_MAX_CONCURRENT) { wdActive += 1; resolve() }
-  else wdQueue.push(() => { wdActive += 1; resolve() })
+/** A queued request whose signal aborts leaves the queue and is never sent. */
+const wdAcquire = (signal: AbortSignal) => new Promise<void>((resolve, reject) => {
+  if (signal.aborted) { reject(canceledRequest()); return }
+  if (wdActive < WIDGET_DATA_MAX_CONCURRENT) { wdActive += 1; resolve(); return }
+  const turn = () => { signal.removeEventListener('abort', leave); wdActive += 1; resolve() }
+  const leave = () => {
+    const i = wdQueue.indexOf(turn)
+    if (i >= 0) wdQueue.splice(i, 1)
+    reject(canceledRequest())
+  }
+  signal.addEventListener('abort', leave, { once: true })
+  wdQueue.push(turn)
 })
 const wdRelease = () => {
   wdActive -= 1
@@ -1848,12 +1858,41 @@ const wdRelease = () => {
   if (next) next()
 }
 
+/** One POST, shared by every caller that asked for the same body at once.
+ *  It is aborted only when every caller has let go: a caller without a
+ *  signal holds it for good. */
+interface WdEntry { promise: Promise<unknown>; controller: AbortController; holders: number; pinned: boolean; settled: boolean }
+
+/** Join a shared request. Letting go (the signal aborting) rejects this
+ *  caller at once; the POST itself is aborted when the last holder lets go
+ *  -- still queued, it is never sent; in flight, the browser closes it and
+ *  the server drops it if it has not started (E14). */
+function holdWd(entry: WdEntry, key: string, signal?: AbortSignal): Promise<any> {
+  if (!signal) { entry.pinned = true; return entry.promise }
+  if (signal.aborted) return Promise.reject(canceledRequest())
+  entry.holders += 1
+  return new Promise((resolve, reject) => {
+    const letGo = () => {
+      reject(canceledRequest())
+      entry.holders -= 1
+      if (entry.holders <= 0 && !entry.pinned && !entry.settled) {
+        if (wdInflight.get(key) === entry) wdInflight.delete(key)
+        entry.controller.abort()
+      }
+    }
+    signal.addEventListener('abort', letGo, { once: true })
+    entry.promise.then(
+      v => { signal.removeEventListener('abort', letGo); resolve(v) },
+      e => { signal.removeEventListener('abort', letGo); reject(e) })
+  })
+}
+
 /** Test hook + logout hygiene: drop every cached widget result. */
 export const clearWidgetDataClientCache = () => { wdCache.clear() }
 
 export const widgetDataApi = {
   query: (dsId: number, config: Record<string, unknown>, calculatedColumns: CalcColumn[] = [], widgetType = 'bar',
-          opts?: { reportId?: number; parameters?: Record<string, unknown>; fresh?: boolean }) => {
+          opts?: { reportId?: number; parameters?: Record<string, unknown>; fresh?: boolean; signal?: AbortSignal }) => {
     const body = {
       config, calculated_columns: calculatedColumns, widget_type: widgetType,
       // Values travel raw; the server substitutes them against the DECLARED types.
@@ -1867,13 +1906,15 @@ export const widgetDataApi = {
       const hit = wdCache.get(key)
       if (hit && Date.now() - hit.at < WIDGET_DATA_TTL_MS) return Promise.resolve(hit.data)
       const inflight = wdInflight.get(key)
-      if (inflight) return inflight
+      if (inflight) return holdWd(inflight, key, opts?.signal)
     }
 
-    const p = (async () => {
-      await wdAcquire()
+    const controller = new AbortController()
+    const entry: WdEntry = { promise: Promise.resolve(), controller, holders: 0, pinned: false, settled: false }
+    entry.promise = (async () => {
+      await wdAcquire(controller.signal)
       try {
-        const r = await api.post(`/datasets/${dsId}/widget-data`, body)
+        const r = await api.post(`/datasets/${dsId}/widget-data`, body, { signal: controller.signal })
         wdCache.set(key, { at: Date.now(), data: r.data })
         while (wdCache.size > WD_CACHE_MAX) {
           const oldest = wdCache.keys().next().value as string | undefined
@@ -1883,11 +1924,13 @@ export const widgetDataApi = {
         return r.data
       } finally {
         wdRelease()
-        wdInflight.delete(key)
       }
-    })()
-    wdInflight.set(key, p)
-    return p
+    })().finally(() => {
+      entry.settled = true
+      if (wdInflight.get(key) === entry) wdInflight.delete(key)
+    })
+    wdInflight.set(key, entry)
+    return holdWd(entry, key, opts?.signal)
   },
 
   /** Downloads the widget's data. Goes through the same endpoint family as `query`,

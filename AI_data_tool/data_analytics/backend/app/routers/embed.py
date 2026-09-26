@@ -404,6 +404,7 @@ async def embed_widget_data(widget_id: int, request: Request, db: AsyncSession =
         org_id_override=viewer_org if isinstance(viewer_org, int) else None,
         via_report_id=report.id,
         redact_columns=await redacted_columns(db, int(dataset_id), label),
+        request=request,
     )
     cfg.last_used_at = datetime.utcnow()
     await db.commit()

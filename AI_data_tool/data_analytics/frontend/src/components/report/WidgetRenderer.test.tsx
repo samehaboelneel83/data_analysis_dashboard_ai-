@@ -2546,3 +2546,50 @@ describe('rows with no category (E04 missing_category)', () => {
     expect(screen.queryByTestId('missing-category-note')).toBeNull()
   })
 })
+
+describe('letting go of data a widget no longer needs (E14)', () => {
+  const signalOfCall = (i: number) =>
+    (vi.mocked(widgetDataApi.query).mock.calls[i][4] as { signal: AbortSignal }).signal
+
+  it('leaving the page lets go of the request', async () => {
+    vi.mocked(widgetDataApi.query).mockReset().mockImplementation(() => new Promise(() => {}))
+    const { unmount } = renderWidget()
+    await waitFor(() => expect(widgetDataApi.query).toHaveBeenCalledTimes(1))
+    expect(signalOfCall(0).aborted).toBe(false)
+    unmount()
+    expect(signalOfCall(0).aborted).toBe(true)
+  })
+
+  it('a newer request replaces the older, whose late answer is not shown', async () => {
+    let answerOld: (v: unknown) => void = () => {}
+    vi.mocked(widgetDataApi.query).mockReset()
+      .mockImplementationOnce(() => new Promise(r => { answerOld = r }))
+      .mockImplementationOnce(() => Promise.resolve({ rows: [{ name: 'New', value: 2 }] }))
+    const onFetchComplete = vi.fn()
+    const { rerender } = renderWidget({ onFetchComplete })
+    await waitFor(() => expect(widgetDataApi.query).toHaveBeenCalledTimes(1))
+    rerender(
+      <CrossFilterProvider>
+        <WidgetRenderer widget={barWidget({ config: { dimension: 'segment' } })} datasetId={10}
+          onFetchComplete={onFetchComplete} />
+      </CrossFilterProvider>)
+    await waitFor(() => expect(widgetDataApi.query).toHaveBeenCalledTimes(2))
+    expect(signalOfCall(0).aborted).toBe(true)
+    await waitFor(() => expect(onFetchComplete).toHaveBeenCalledTimes(1))
+    // The old answer arrives late (as it could if the server had already
+    // started it): it is dropped, not drawn over the new one.
+    await act(async () => { answerOld({ rows: [{ name: 'Old', value: 1 }, { name: 'Old2', value: 3 }] }) })
+    expect(onFetchComplete).toHaveBeenCalledTimes(1)
+    expect(onFetchComplete.mock.calls[0][1].rowCount).toBe(1)
+  })
+
+  it('an abandoned request shows no error', async () => {
+    vi.mocked(widgetDataApi.query).mockReset()
+      .mockRejectedValueOnce(Object.assign(new Error('canceled'), { code: 'ERR_CANCELED' }))
+    renderWidget()
+    await waitFor(() => expect(widgetDataApi.query).toHaveBeenCalledTimes(1))
+    await act(async () => { await Promise.resolve() })
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.queryByText(/could not|failed|error/i)).not.toBeInTheDocument()
+  })
+})

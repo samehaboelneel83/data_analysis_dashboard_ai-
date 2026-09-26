@@ -2,7 +2,7 @@ import asyncio
 import io
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -57,6 +57,79 @@ def _work_gate() -> asyncio.Semaphore:
         gate = asyncio.Semaphore(settings.widget_work_max_concurrency)
         _widget_work_gates[loop] = gate
     return gate
+
+
+import logging
+
+_log = logging.getLogger(__name__)
+
+#: Requests whose reader left while they waited for a slot: never run (E14).
+#: Per process, like the gate; read by tests and the performance notes.
+abandoned_before_start = 0
+
+
+async def _client_gone(request: Request) -> None:
+    """Returns when the connection closes. The body has been read by now, so
+    the server's next message is the disconnect. Not `is_disconnected()`:
+    that peeks without waiting, and through the app's HTTP middlewares the
+    peek never reaches the server, so it never saw a reader leave (checked
+    against real uvicorn: 0 of 5 closed connections noticed)."""
+    while True:
+        message = await request.receive()
+        if message.get("type") == "http.disconnect":
+            return
+
+
+async def _run_gated(request: Request | None, fn, *args, **kwargs):
+    """Run `fn` on a worker thread once a work slot is free -- unless the
+    person who asked has gone by then (E14).
+
+    A dashboard of thirty widgets queues thirty requests behind the gate;
+    closing the page, or changing a filter that makes them stale, used to
+    leave every one of them to run to the end, holding slots that the next
+    page's readers were waiting for. The browser now aborts what it no
+    longer needs, and a request whose connection closed while it waited is
+    dropped without running. One already running finishes (a pandas
+    pipeline cannot be stopped from outside its thread), and its result
+    lands in the result cache, so it is not wasted if the reader comes back.
+
+    `request=None` (exports, deliveries, the review pane) always runs: a
+    download or a background job has no page to leave.
+    """
+    global abandoned_before_start
+    gate = _work_gate()
+    if request is None:
+        async with gate:
+            return await asyncio.to_thread(fn, *args, **kwargs)
+    acquire = asyncio.ensure_future(gate.acquire())
+    gone = asyncio.ensure_future(_client_gone(request))
+
+    def _give_back(f: asyncio.Future) -> None:
+        # The wait was abandoned; if the slot was granted anyway (in the same
+        # instant), it goes straight back -- a slot kept by nobody would
+        # shrink the gate for the life of the process.
+        if not f.cancelled() and f.exception() is None:
+            gate.release()
+
+    try:
+        done, _ = await asyncio.wait({acquire, gone}, return_when=asyncio.FIRST_COMPLETED)
+    except BaseException:          # this request was cancelled while queued
+        acquire.cancel()
+        acquire.add_done_callback(_give_back)
+        raise
+    finally:
+        gone.cancel()
+    if acquire not in done:
+        acquire.cancel()
+        acquire.add_done_callback(_give_back)
+        abandoned_before_start += 1
+        _log.info("widget request dropped before it ran: the reader left (%d in this process)",
+                  abandoned_before_start)
+        raise widget_error(499, "client_closed", "The page that asked for this data was closed")
+    try:
+        return await asyncio.to_thread(fn, *args, **kwargs)
+    finally:
+        gate.release()
 
 
 def _config_names(config: dict, name: str) -> bool:
@@ -231,6 +304,7 @@ async def _resolve_widget_data(
     *, email_override: str | None = None, org_id_override: int | None = None,
     via_report_id: int | None = None,
     redact_columns: list[str] | None = None,
+    request: Request | None = None,
 ) -> dict:
     """Shape one widget's data for this user.
 
@@ -379,14 +453,13 @@ async def _resolve_widget_data(
             # this worker. Only plain data crosses the thread boundary (dicts,
             # strings, ints pre-read from ORM rows above); never pass `db` or a
             # lazy ORM attribute into the thread.
-            async with _work_gate():
-                return await asyncio.to_thread(
-                    run_direct_query,
-                    source_cfg, dq_ds, req.config, widget_type=req.widget_type, rls_filter_expr=rls_filter_expr,
-                    cache_ttl_seconds=source.cache_ttl_seconds, cache_epoch=source.cache_epoch,
-                    org_id=current_user.org_id, drop_columns=denied or None,
-                    measures=measure_defs or None,
-                )
+            return await _run_gated(
+                request, run_direct_query,
+                source_cfg, dq_ds, req.config, widget_type=req.widget_type, rls_filter_expr=rls_filter_expr,
+                cache_ttl_seconds=source.cache_ttl_seconds, cache_epoch=source.cache_epoch,
+                org_id=current_user.org_id, drop_columns=denied or None,
+                measures=measure_defs or None,
+            )
         except DirectQueryUnsupported as e:
             raise widget_error(400, "unsupported", str(e))
         except SourceUnavailable:
@@ -430,17 +503,16 @@ async def _resolve_widget_data(
         # bounds how many pipelines run at once: the GIL serializes the pandas
         # work regardless, so extra parallelism only starves the loop
         # (measured -- see widget_work_max_concurrency in config.py).
-        async with _work_gate():
-            return await asyncio.to_thread(
-                get_widget_data,
-                ds.filename, req.config, widget_type=req.widget_type,
-                calculated_columns=calc_cols or None, filter_expr=author_filter_expr or None,
-                rls_filter_expr=rls_filter_expr, measures=measure_defs or None,
-                drop_columns=denied or None, prep_steps=steps or None,
-                prep_aux_frames=aux or None,
-                org_id=current_user.org_id, dataset_id=ds.id,
-                custom_functions=ds.custom_functions,
-            )
+        return await _run_gated(
+            request, get_widget_data,
+            ds.filename, req.config, widget_type=req.widget_type,
+            calculated_columns=calc_cols or None, filter_expr=author_filter_expr or None,
+            rls_filter_expr=rls_filter_expr, measures=measure_defs or None,
+            drop_columns=denied or None, prep_steps=steps or None,
+            prep_aux_frames=aux or None,
+            org_id=current_user.org_id, dataset_id=ds.id,
+            custom_functions=ds.custom_functions,
+        )
     except FileNotFoundError:
         raise widget_error(404, "not_found", "Dataset file not found on server — please re-upload the file")
     except ImportRowCapExceeded as e:
@@ -488,11 +560,11 @@ async def _guard_script_execution(db: AsyncSession, current_user: User,
 
 @router.post("/{dataset_id}/widget-data")
 async def query_widget(
-    dataset_id: int, req: WidgetDataRequest,
+    dataset_id: int, req: WidgetDataRequest, request: Request,
     db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
     await _guard_script_execution(db, current_user, req)
-    return await _resolve_widget_data(dataset_id, req, db, current_user)
+    return await _resolve_widget_data(dataset_id, req, db, current_user, request=request)
 
 
 def _export_frame(data: dict, config: dict):

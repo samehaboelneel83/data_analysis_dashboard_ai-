@@ -39,4 +39,5 @@ WIDGET_ERROR_CODES = frozenset({
     "internal",            # ours; the generic 500
     "quota",               # the org's query quota for the day; Retry-After says when
     "semantic_veto",       # arithmetic on a year, coordinate or identifier (constitution rule 3)
+    "client_closed",       # the page that asked left before a work slot freed; nothing ran (E14)
 })

@@ -379,7 +379,7 @@ async def shared_report(token: str, request: Request, db: AsyncSession = Depends
 
 
 @router.post("/{token}/widget-data/{widget_id}")
-async def shared_widget_data(token: str, widget_id: int, db: AsyncSession = Depends(get_db),
+async def shared_widget_data(token: str, widget_id: int, request: Request, db: AsyncSession = Depends(get_db),
                              viewer: User | None = Depends(get_current_user_optional)):
     """One widget's data, resolved from its SAVED config as the effective
     viewer (S3: the requester's own identity when they're an authenticated
@@ -421,4 +421,5 @@ async def shared_widget_data(token: str, widget_id: int, db: AsyncSession = Depe
     from ..services.sensitivity import redacted_columns
     return await _resolve_widget_data(dataset_id, req, db, identity,
                                       via_report_id=report.id,
-                                      redact_columns=await redacted_columns(db, int(dataset_id), label))
+                                      redact_columns=await redacted_columns(db, int(dataset_id), label),
+                                      request=request)

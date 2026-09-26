@@ -4,6 +4,7 @@ import type { BrushRange } from './chartRenderers/axisOptions'
 import { createPortal } from 'react-dom'
 import { Copy, Trash2, MoreVertical, Link as LinkIcon } from 'lucide-react'
 import { widgetDataApi } from '../../services/api'
+import { isCanceledRequest } from '../../lib/canceledRequest'
 import { pickChartSvg, svgToPng } from '../../lib/widgetImage'
 import toast from 'react-hot-toast'
 import ActionMenu from '../ActionMenu'
@@ -321,7 +322,18 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
     ]
   }
 
+  // E14: the request this widget is waiting on. A newer fetch (a filter or
+  // setting changed) or leaving the page lets go of it: still queued, it is
+  // never sent; in flight, the server drops it if it has not started. It
+  // also means a slow old answer can no longer overwrite a newer one.
+  const inflightRef = useRef<AbortController | null>(null)
+  useEffect(() => () => inflightRef.current?.abort(), [])
+
   const fetchData = useCallback(async (fresh = false) => {
+    inflightRef.current?.abort()
+    const ctl = new AbortController()
+    inflightRef.current = ctl
+    const signal = ctl.signal
     if (dataOverride !== undefined) { setData(dataOverride); setLoading(false); return }
     if (!widgetDatasetId) { setLoading(false); return }
     const wt = widget.widget_type
@@ -346,7 +358,8 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
         const results = await Promise.all(pairs.map(pv =>
           widgetDataApi.query(widgetDatasetId,
             { ...mergedConfig, measure: pv.col, aggregation: pv.agg === 'count' ? 'count' : pv.agg },
-            effectiveCalcCols, 'kpi', { reportId, parameters, fresh })))
+            effectiveCalcCols, 'kpi', { reportId, parameters, fresh, signal })))
+        if (signal.aborted) return
         const values: Record<string, unknown> = {}
         const valueStyles: Record<string, { fill?: string; text?: string }> = {}
         pairs.forEach((pv, i) => {
@@ -376,9 +389,10 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
         const baseCfg = { ...mergedConfig,
           filters: (mergedConfig.filters ?? []).filter((f: any) => !translatedCrossFilters.includes(f)) }
         const [full, part] = await Promise.all([
-          widgetDataApi.query(widgetDatasetId, baseCfg, effectiveCalcCols, wt, { reportId, parameters, fresh }),
-          widgetDataApi.query(widgetDatasetId, mergedConfig, effectiveCalcCols, wt, { reportId, parameters, fresh }),
+          widgetDataApi.query(widgetDatasetId, baseCfg, effectiveCalcCols, wt, { reportId, parameters, fresh, signal }),
+          widgetDataApi.query(widgetDatasetId, mergedConfig, effectiveCalcCols, wt, { reportId, parameters, fresh, signal }),
         ])
+        if (signal.aborted) return
         const partMap = new Map((part?.rows ?? []).map((r: any) => [r.name, r.value]))
         setData({ ...full, rows: (full?.rows ?? []).map((r: any) => ({ ...r, highlight: partMap.get(r.name) ?? 0 })) })
         onFetchComplete?.(widget.id, {
@@ -388,7 +402,8 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
         })
         return
       }
-      const result = await widgetDataApi.query(widgetDatasetId, mergedConfig, effectiveCalcCols, wt, { reportId, parameters, fresh })
+      const result = await widgetDataApi.query(widgetDatasetId, mergedConfig, effectiveCalcCols, wt, { reportId, parameters, fresh, signal })
+      if (signal.aborted) return
       setData(result)
       onFetchComplete?.(widget.id, {
         durationMs: performance.now() - startedAt,
@@ -404,6 +419,7 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
         ruleErrors: result?.rule_errors,
       })
     } catch (e: unknown) {
+      if (signal.aborted || isCanceledRequest(e)) return
       setData(null)
       // The backend's own message is the useful one -- "Dataset has 2,400,000
       // rows, above the import row cap of 2,000,000. Raise `import_row_cap`, or
@@ -415,7 +431,7 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
         ?.response?.data
       setFetchError(body?.detail ? { detail: body.detail, code: body.code } : null)
     }
-    finally { setLoading(false) }
+    finally { if (!signal.aborted) setLoading(false) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [widgetDatasetId, widget.widget_type, JSON.stringify(mergedConfig), JSON.stringify(parameters ?? {}), dataOverride, getReceiveMode(widget.id), JSON.stringify(translatedCrossFilters), refreshNonce])
 

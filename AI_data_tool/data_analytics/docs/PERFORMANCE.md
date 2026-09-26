@@ -63,12 +63,40 @@ trivial request stays under half a second, so the event loop is not blocked
 by the heavy work. Widget data dominates a page: it is where more CPU, more
 API processes or caching pay off first.
 
+## Work nobody is waiting for is not done
+
+A dashboard's widgets queue for a few work slots per API process
+(`widget_work_max_concurrency`, 4 by default), behind a client queue of 6
+requests per tab. Closing the page or changing a filter used to leave every
+queued query to run to the end, holding slots the next readers waited for.
+Now:
+
+- **In the browser** (`services/api.ts`, `WidgetRenderer.tsx`): a widget lets
+  go of its request when it unmounts or asks again. A request still in the
+  tab's queue is never sent; one in flight is aborted, which closes its
+  connection. A request shared by two widgets (identical bodies are sent
+  once) is aborted only when both have let go. A late answer can no longer
+  overwrite a newer one.
+- **On the server** (`routers/widget_data.py`, `_run_gated`): a request
+  whose connection closed while it waited for a slot is dropped without
+  running (`499 client_closed`, counted per process). One already running
+  finishes: a pandas pipeline cannot be stopped from outside its thread; its
+  result is cached, so it is not lost if the reader returns. Exports,
+  deliveries and background renders always run. Guest links and embeds drop
+  like the app.
+
+Measured: leaving the 38-widget demo dashboard 2.5 s after opening it, 6
+requests were in flight (all aborted) and the other 32 were never sent.
+Against real uvicorn with one work slot held, five requests whose clients
+closed while queued were dropped and only the reader who stayed was run.
+
 ## Not done yet (E14)
 
 - The same run on the owner's hardware and data, and the targets agreed.
 - Fairness **across** processes: the rate limiter and the AI budgets'
   concurrent-ask counter are per process (documented in `core/rate_limit.py`).
-- Cancellation that frees work: a closed page's widget queries run to the end.
+- Stopping a widget query that is already running (DuckDB could be
+  interrupted; pandas cannot).
 - Larger data: a benchmark over the 1-million-row synthetic set
   (`bench_widget_data.py`, `bench_dashboard.py` exist for single-request
   timings).
