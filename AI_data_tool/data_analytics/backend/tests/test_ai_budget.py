@@ -263,6 +263,22 @@ class TestAsk:
         assert r.status_code == 429 and "this month" in r.json()["detail"]
 
 
+    async def test_the_page_can_read_when_the_budget_resets(
+            self, client, db_session, two_orgs, auth_headers, source, model, agent_that_calls_the_model):
+        """The app and the API are different origins; a header the browser is
+        not told it may expose is invisible to the page's code."""
+        from app.core.config import settings as app_settings
+        org_id = two_orgs["a"]["org"].id
+        await _set_quota(db_session, org_id, max_ai_tokens_per_day=0)
+        cid = await _conversation(client, auth_headers["a"], source)
+        origin = app_settings.origins_list()[0]
+        r = await client.post(f"/api/v1/agent/conversations/{cid}/ask", json={"question": "q"},
+                              headers={**auth_headers["a"], "Origin": origin})
+        assert r.status_code == 429 and r.headers["retry-after"]
+        assert r.headers["access-control-allow-origin"] == origin
+        assert "retry-after" in r.headers["access-control-expose-headers"].lower()
+
+
 async def _source_b(db_session, two_orgs):
     src = DataSource(name="wh-b", type="postgresql", org_id=two_orgs["b"]["org"].id)
     db_session.add(src)

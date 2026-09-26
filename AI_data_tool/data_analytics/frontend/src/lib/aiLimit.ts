@@ -17,9 +17,11 @@ export function aiLimitMessage(err: unknown, t: TranslateFn): string | null {
   if (res?.status !== 429) return null
   const secs = Number(res.headers?.['retry-after'] ?? res.headers?.['Retry-After'])
   if (!Number.isFinite(secs) || secs <= 0) return t('ai.limit.reached')
-  const hours = Math.floor(secs / 3600)
-  const when = hours >= 24 ? t('ai.limit.days', { n: localDigits(String(Math.ceil(secs / 86400))) })
-    : hours >= 1 ? t('ai.limit.hours', { n: localDigits(String(hours)) })
-    : t('ai.limit.minutes', { n: localDigits(String(Math.max(1, Math.ceil(secs / 60)))) })
-  return t('ai.limit.resets', { when })
+  // Intl words the interval in the reader's language, plurals included
+  // ("in 9 hours", "خلال 9 ساعات"), which a template with {n} cannot.
+  const rtf = new Intl.RelativeTimeFormat(t('ai.limit.locale'), { numeric: 'always' })
+  const when = secs >= 86400 ? rtf.format(Math.ceil(secs / 86400), 'day')
+    : secs >= 3600 ? rtf.format(Math.floor(secs / 3600), 'hour')
+    : rtf.format(Math.max(1, Math.ceil(secs / 60)), 'minute')
+  return t('ai.limit.resets', { when: localDigits(when) })
 }

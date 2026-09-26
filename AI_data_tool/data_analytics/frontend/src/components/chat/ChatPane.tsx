@@ -55,7 +55,7 @@ export interface ChatPaneProps {
   datasetColumns?: string[]
 }
 
-type MessageKind = 'answer' | 'clarify' | 'error'
+type MessageKind = 'answer' | 'clarify' | 'error' | 'limit'
 
 interface ChatMessage {
   id: number
@@ -245,10 +245,12 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
       const result = await agentApi.ask(cid, question)
       setMessages(m => [...m, fromAnswer(result)])
     } catch (e) {
-      setMessages(m => [...m, {
-        id: nextId++, role: 'assistant', kind: 'error',
-        text: aiLimitMessage(e, t) ?? 'Could not reach the agent. Try again.',
-      }])
+      // A limit is not a failure to answer: no "rephrase" advice, and the
+      // reason in the open rather than under Technical details (E11).
+      const limit = aiLimitMessage(e, t)
+      setMessages(m => [...m, limit
+        ? { id: nextId++, role: 'assistant', kind: 'limit', text: limit }
+        : { id: nextId++, role: 'assistant', kind: 'error', text: 'Could not reach the agent. Try again.' }])
     } finally {
       setBusy(false)
       setPending(null)
@@ -436,7 +438,14 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
                 <div className="dl-turn__a">
                   <span className="dl-turn__avatar dl-turn__avatar--ai" aria-hidden><Sparkles size={14} /></span>
                   <div className="dl-turn__body">
-                    {msg.kind === 'error' ? (
+                    {msg.kind === 'limit' ? (
+                      <div className="dl-answer-error" role="status" data-testid="ai-limit">
+                        <p className="dl-answer-error__title">
+                          <AlertTriangle size={16} aria-hidden /> {t('ai.limit.title')}
+                        </p>
+                        <p className="dl-answer-error__hint">{msg.text}</p>
+                      </div>
+                    ) : msg.kind === 'error' ? (
                       <div className="dl-answer-error">
                         <p className="dl-answer-error__title">
                           <AlertTriangle size={16} aria-hidden /> {t('ask.err.title')}
@@ -642,7 +651,7 @@ export function answerSource(msg: Pick<ChatMessage, 'intent' | 'results' | 'sql'
 }
 
 function AnswerSource({ msg }: { msg: ChatMessage }) {
-  if (msg.role !== 'assistant' || msg.kind === 'error' || msg.kind === 'clarify') return null
+  if (msg.role !== 'assistant' || msg.kind === 'error' || msg.kind === 'clarify' || msg.kind === 'limit') return null
   return (
     <div data-testid="answer-source" style={{ marginTop: 6, fontSize: 10.5, color: 'var(--muted)' }}>
       <span aria-hidden>ⓘ </span>{answerSource(msg)}

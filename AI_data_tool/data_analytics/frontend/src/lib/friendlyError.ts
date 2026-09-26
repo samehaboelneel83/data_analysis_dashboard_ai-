@@ -69,6 +69,21 @@ export function sanitizeErrorDetail(error: any): void {
   }
 }
 
+/** The server's `detail` as it SENT it, when that was an object.
+ *
+ *  The interceptor above turns every object `detail` into a sentence (a
+ *  React child that is an object crashes the page), keeping the original as
+ *  `detail_raw`. Code that acts on a structured refusal -- an edit conflict's
+ *  code, the versions a merge needs -- must read it here: reading
+ *  `data.detail.code` finds a string, and the edit-conflict banner never
+ *  showed in the real app for exactly that reason while its tests, which
+ *  mocked the API below the interceptor, passed. */
+export function structuredDetail<T = Record<string, unknown>>(error: unknown): T | null {
+  const data = (error as { response?: { data?: { detail?: unknown; detail_raw?: unknown } } })?.response?.data
+  const raw = data?.detail_raw ?? data?.detail
+  return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as T : null
+}
+
 /** Any `detail` shape the server might send, as one sentence. */
 export function detailToText(detail: unknown): string {
   if (typeof detail === 'string') return detail

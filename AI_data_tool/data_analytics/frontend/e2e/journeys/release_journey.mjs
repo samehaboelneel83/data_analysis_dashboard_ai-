@@ -195,6 +195,43 @@ async function main() {
       expect(r.json.detail.changed_by === people.editor.email, `named ${r.json.detail.changed_by}`)
     })
 
+    await step('the author combines their change with the editor\'s instead of choosing one (E09)', async () => {
+      await go(author.page, url)
+      // Exact: the "Object to edit" list also names it, as "Draft title (bar)".
+      await author.page.getByText('Draft title', { exact: true }).first().click({ timeout: 15000 })
+      const titleBox = author.page.getByPlaceholder('Widget title')
+      await titleBox.waitFor({ timeout: 10000 })
+      // The editor changes another setting after the author's page loaded.
+      const other = await api('GET', `/reports/${made.report}`, editorToken)
+      const cfg = other.json.pages[0].widgets.find(x => x.id === widgetId).config
+      const theirs = await api('PATCH', `/reports/${made.report}/pages/${pageId}/widgets/${widgetId}`, editorToken,
+        { config: { ...cfg, data_labels: true } })
+      expect(theirs.status === 200, `editor save: ${theirs.status}`)
+      // The author renames the widget; the autosave is refused as a conflict.
+      const refused = author.page.waitForResponse(r => r.url().includes(`/widgets/${widgetId}`)
+        && r.request().method() === 'PATCH', { timeout: 10000 })
+      await titleBox.fill('Author title')
+      const res = await refused
+      expect(res.status() === 409, `the author's save answered ${res.status()}`)
+      const banner = author.page.getByTestId('edit-conflict')
+      await banner.waitFor({ timeout: 10000 })
+      await author.page.getByRole('button', { name: 'Combine…' }).click()
+      const dialog = author.page.getByRole('dialog', { name: 'Combine your change with theirs' })
+      await dialog.waitFor({ timeout: 5000 })
+      const summary = await dialog.getByTestId('merge-summary').textContent()
+      expect(/Nothing was changed by both of you/.test(summary), `summary: ${summary}`)
+      await author.page.screenshot({ path: path.join(OUT, '05_author_combine.png') })
+      await dialog.getByRole('button', { name: 'Save combined' }).click()
+      await banner.waitFor({ state: 'detached', timeout: 10000 })
+      const after = (await api('GET', `/reports/${made.report}`, adminToken)).json
+        .pages[0].widgets.find(x => x.id === widgetId)
+      expect(after.title === 'Author title', `title: ${after.title}`)
+      expect(after.config.data_labels === true, `the editor's setting was lost: ${JSON.stringify(after.config)}`)
+      // The panel shows the saved widget, not the refused copy.
+      expect(await titleBox.inputValue() === 'Author title', `panel title: ${await titleBox.inputValue()}`)
+      return { summary }
+    })
+
     await step('a viewer can reach every toolbar control from the keyboard', async () => {
       await go(viewer.page, url)
       await viewer.page.getByText('Draft title').first().waitFor({ timeout: 15000 })

@@ -102,9 +102,11 @@ describe('asking a question', () => {
   it('a question refused by the org\'s AI limit says so and when it resets, not "could not reach" (E11)', async () => {
     vi.spyOn(agentApi, 'ask').mockRejectedValue({ response: { status: 429, headers: { 'retry-after': '7300' } } })
     await send('total sales')
-    await waitFor(() => expect(screen.getByText(
-      'Your organization has reached its AI limit for now. It resets in 2 h.')).toBeInTheDocument())
-    expect(screen.queryByText(/could not reach/i)).not.toBeInTheDocument()
+    const card = await screen.findByTestId('ai-limit')
+    expect(card).toHaveTextContent('AI limit reached')
+    // In the open, not folded under "Technical details" beside rephrasing advice.
+    expect(screen.getByText('Your organization has reached its AI limit for now. It resets in 2 hours.')).toBeVisible()
+    expect(screen.queryByText(/could not reach|could not answer that/i)).not.toBeInTheDocument()
   })
 
   it('asking against a set of datasets sends dataset_ids, not a data source', async () => {

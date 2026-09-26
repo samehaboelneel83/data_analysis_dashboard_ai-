@@ -112,6 +112,7 @@ import { SyncSlicersPaneConnected, BookmarksPaneConnected } from './reportBuilde
 import { SchedulePanel } from './reportBuilder/SchedulePanel'
 import { PageTemplateMenu } from './reportBuilder/PageTemplateMenu'
 import ConflictMergeDialog from '../components/report/ConflictMergeDialog'
+import { structuredDetail } from '../lib/friendlyError'
 import type { WidgetEdit } from '../lib/threeWayMerge'
 
 const EMPTY_RULES: DisplayRule[] = []
@@ -1727,9 +1728,10 @@ export default function ReportBuilder() {
         await reportsApi.updateWidget(reportId, activePage.id, selectedW.id,
           { config, title, ...(base != null ? { base_revision: base } : {}) })
       } catch (err) {
-        const detail = (err as { response?: { status?: number; data?: { detail?: { code?: string; message?: string } } } })?.response
-        if (detail?.status === 409 && detail.data?.detail?.code === 'edit_conflict') {
-          setEditConflict(conflictFrom(detail.data.detail as ConflictDetail,
+        const status = (err as { response?: { status?: number } })?.response?.status
+        const detail = structuredDetail<ConflictDetail & { code?: string }>(err)
+        if (status === 409 && detail?.code === 'edit_conflict') {
+          setEditConflict(conflictFrom(detail,
             { widget_type: before.widget_type, title, config }, activePage.id, selectedW.id,
             () => { setEditConflict(null); updateWidgetConfig(config, title, true) }))
           return
@@ -1771,10 +1773,11 @@ export default function ReportBuilder() {
           ...(edit.widget_type !== m.theirs.widget_type ? { widget_type: edit.widget_type as Widget['widget_type'] } : {}),
           base_revision: m.revision })
       } catch (err) {
-        const detail = (err as { response?: { status?: number; data?: { detail?: { code?: string } } } })?.response
-        if (detail?.status === 409 && detail.data?.detail?.code === 'edit_conflict') {
+        const status = (err as { response?: { status?: number } })?.response?.status
+        const detail = structuredDetail<ConflictDetail & { code?: string }>(err)
+        if (status === 409 && detail?.code === 'edit_conflict') {
           setMergeOpen(false)
-          setEditConflict(conflictFrom(detail.data.detail as ConflictDetail, edit, m.pageId, m.widgetId,
+          setEditConflict(conflictFrom(detail, edit, m.pageId, m.widgetId,
             editConflict!.retry))
           return
         }

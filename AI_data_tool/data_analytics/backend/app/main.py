@@ -575,6 +575,11 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # A browser hides every response header outside the safelist from a
+    # cross-origin page unless it is exposed here: the app (3001) and the API
+    # (8000) are different origins, so a 429's Retry-After -- when an AI
+    # budget or a quota resets -- never reached the page that says so (E11).
+    expose_headers=["Retry-After"],
 )
 
 app.include_router(datasets.router,     prefix="/api/v1")

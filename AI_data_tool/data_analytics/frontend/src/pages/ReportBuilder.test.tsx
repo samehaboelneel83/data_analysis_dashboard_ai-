@@ -1,3 +1,4 @@
+import { sanitizeErrorDetail } from '../lib/friendlyError'
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen, fireEvent, within, waitFor, act } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
@@ -58,6 +59,15 @@ function baseReport() {
     my_capability: 'data',
     pages: [{ id: 100, report_id: 1, name: 'Page 1', page_type: 'normal', position: 0, widgets: [], created_at: '2026-01-01', layout_mode: 'free' }],
   }
+}
+
+/** A server error as the app's code receives it: through the response
+ *  interceptor, which turns an object `detail` into a sentence and keeps the
+ *  original as `detail_raw`. Mocking below the interceptor without this hid
+ *  that the edit-conflict banner never showed in the real app. */
+function viaInterceptor<T>(error: T): T {
+  sanitizeErrorDetail(error)
+  return error
 }
 
 function reportWithWidget() {
@@ -464,8 +474,8 @@ describe('ReportBuilder Fields pane', () => {
     vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
     vi.mocked(reportsApi.updateWidget).mockReset()
     vi.mocked(reportsApi.updateWidget)
-      .mockRejectedValueOnce({ response: { status: 409, data: { detail: {
-        code: 'edit_conflict', message: 'sam@example.com changed "Sales by Region" after you opened it. Your change was not saved.' } } } })
+      .mockRejectedValueOnce(viaInterceptor({ response: { status: 409, data: { detail: {
+        code: 'edit_conflict', message: 'sam@example.com changed "Sales by Region" after you opened it. Your change was not saved.' } } } }))
       .mockResolvedValue({} as any)
     renderBuilder()
     await screen.findByTestId('view-strip')
@@ -496,11 +506,11 @@ describe('ReportBuilder Fields pane', () => {
     vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
     vi.mocked(reportsApi.updateWidget).mockReset()
     vi.mocked(reportsApi.updateWidget)
-      .mockRejectedValueOnce({ response: { status: 409, data: { detail: {
+      .mockRejectedValueOnce(viaInterceptor({ response: { status: 409, data: { detail: {
         code: 'edit_conflict', message: 'sam@example.com changed "Sales by Region" after you opened it.',
         changed_by: 'sam@example.com', revision: 9,
         base: { widget_type: 'bar', title: 'Sales by Region', config: { dimension: 'region' } },
-        current: { widget_type: 'bar', title: 'Sales (Sam)', config: { dimension: 'region' } } } } } })
+        current: { widget_type: 'bar', title: 'Sales (Sam)', config: { dimension: 'region' } } } } } }))
       .mockResolvedValue({} as any)
     renderBuilder()
     await screen.findByTestId('view-strip')
@@ -535,8 +545,8 @@ describe('ReportBuilder Fields pane', () => {
     vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
     vi.mocked(reportsApi.updateWidget).mockReset()
     vi.mocked(reportsApi.updateWidget)
-      .mockRejectedValueOnce({ response: { status: 409, data: { detail: {
-        code: 'edit_conflict', message: 'Someone else changed it.' } } } })
+      .mockRejectedValueOnce(viaInterceptor({ response: { status: 409, data: { detail: {
+        code: 'edit_conflict', message: 'Someone else changed it.' } } } }))
       .mockResolvedValue({} as any)
     renderBuilder()
     await screen.findByTestId('view-strip')
