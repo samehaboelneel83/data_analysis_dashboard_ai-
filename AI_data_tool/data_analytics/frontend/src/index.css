@@ -2721,3 +2721,17 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--da
 [dir="rtl"] [data-side="builder-left"] div:not(:has(*)) {
   unicode-bidi: plaintext;
 }
+
+/* A selected (or keyboard-focused) widget shows its header controls over the
+   title's end edge; reserve that room so the title ellipsizes instead of
+   having its first letters painted over (QA 2026-09-26). Hover alone keeps
+   the overlay, so tiles don't reflow as the pointer passes. */
+.dl-widget--selected .dl-whead:has(.dl-whead__ctl:not(:empty)),
+.dl-whead:focus-within:has(.dl-whead__ctl:not(:empty)) {
+  padding-inline-end: 84px !important;
+}
+
+/* The widget title takes its direction from its text (dir="auto") so an
+   English title in the Arabic UI ellipsizes at its END, not its start; it
+   still sits on the page's reading side. */
+[dir="rtl"] .dl-whead [role="heading"][dir="auto"] { text-align: right; }

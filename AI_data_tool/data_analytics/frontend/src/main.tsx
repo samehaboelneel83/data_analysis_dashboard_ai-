@@ -10,6 +10,10 @@ toast.error = ((message, opts) =>
   showError(message, { id: typeof message === 'string' ? `err:${message}` : undefined, ...opts })) as typeof toast.error
 import App from './App'
 import './index.css'
+import { installAutoDir } from './lib/autoDir'
+
+// Latin values in RTL form controls were clipped at their start (QA 2026-09-26).
+installAutoDir()
 
 // Stamp the theme BEFORE first paint, so pages outside the shell (Login, the
 // shared/embed views) render in the product's blue/white light default rather

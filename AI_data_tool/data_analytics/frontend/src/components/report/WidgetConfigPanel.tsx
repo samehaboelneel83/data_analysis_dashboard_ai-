@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef, useMemo, cloneElement} from 'react'
+import { memo, useState, useEffect, useLayoutEffect, useRef, useMemo, cloneElement} from 'react'
 import RelativeDateEditor from './RelativeDateEditor'
 import { LATTICE_WIDGETS } from './chartRenderers/LatticeRenderer'
 import { ANIMATION_WIDGETS } from './chartRenderers/AnimatedRenderer'
@@ -67,7 +67,7 @@ interface Props {
 // dimension-based branching below (which mirrors shape_series specifically) does not
 // apply to them. Any WidgetType not in this set is dispatched to shape_series, either
 // explicitly or via SHAPERS' fallback for unregistered types (e.g. 'slicer').
-export default function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages, hierarchy, onHierarchyRefresh, bookmarks, ruleErrors, geography, distinctCounts, onUpdate }: Props) {
+function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages, hierarchy, onHierarchyRefresh, bookmarks, ruleErrors, geography, distinctCounts, onUpdate }: Props) {
   const cfg = widget.config as any
   const wt  = widget.widget_type
 
@@ -170,7 +170,9 @@ export default function WidgetConfigPanel({ widget, columns, datasets, primaryDa
   // Blank means "same as the first" -- the behaviour every dual-axis chart had
   // before the second axis could aggregate on its own.
   const [agg2,       setAgg2]       = useState((cfg.aggregation2 as string) ?? '')
-  const [limit,      setLimit]      = useState(cfg.limit      ?? 20)
+  // No limit = full data (QA 2026-09-26). The panel used to stamp `limit: 20`
+  // on every widget it saved, silently cutting charts the author never limited.
+  const [limit,      setLimit]      = useState<number | null>(cfg.limit ?? null)
   const [autoReload, setAutoReload] = useState<string>(cfg.auto_reload_seconds != null ? String(cfg.auto_reload_seconds) : '')
   const [sort,       setSort]       = useState(cfg.sort       ?? 'desc')
   // '' means Automatic: write nothing and let the server choose by column type
@@ -378,7 +380,7 @@ export default function WidgetConfigPanel({ widget, columns, datasets, primaryDa
     setModelOpts(seedModelOpts(cfg))
     setAgg(cfg.aggregation ?? 'sum')
     setAgg2((cfg.aggregation2 as string) ?? '')
-    setLimit(cfg.limit ?? 20)
+    setLimit(cfg.limit ?? null)
     setSort(cfg.sort ?? 'desc')
     setSortBy(cfg.sort_by ?? '')
     setSortCustom(Array.isArray(cfg.sort_custom) ? (cfg.sort_custom as unknown[]).join(', ') : '')
@@ -517,7 +519,7 @@ export default function WidgetConfigPanel({ widget, columns, datasets, primaryDa
       // A grid (a second dimension) reads neither a sort column nor a running
       // metric, and the panel hides both there: not written either (E08).
       const isGrid = !!roleValues.category2
-      config = { aggregation: agg, limit, sort, ...(sortBy ? { sort_by: sortBy } : {}), ...(sortCol && !isGrid ? { sort_col: sortCol } : {}), rtl, ...(running && !isGrid ? { running } : {}) }
+      config = { aggregation: agg, ...(limit ? { limit } : {}), sort, ...(sortBy ? { sort_by: sortBy } : {}), ...(sortCol && !isGrid ? { sort_col: sortCol } : {}), rtl, ...(running && !isGrid ? { running } : {}) }
       if (wt === 'slicer' && slicerMode !== 'auto') config.slicer_mode = slicerMode
       // Only when set: an absent key means countries, and writing an explicit
       // null would make "unset" and "countries" two states that look different
@@ -2101,7 +2103,9 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           )}
 
           {sortOpts !== 'none' && fld('Row limit',
-            <input type="number" value={limit} min={1} max={1000} onChange={e => setLimit(Number(e.target.value))} style={{ width:'100%' }} />
+            <input type="number" value={limit ?? ''} min={1} placeholder="All (full data)"
+              onChange={e => setLimit(e.target.value === '' ? null : Math.max(1, Math.round(Number(e.target.value))))}
+              style={{ width:'100%' }} />
           )}
 
           {fld('Auto-reload (seconds)',
@@ -2723,3 +2727,42 @@ function GeoMatchLine({ datasetId, column, setId }: { datasetId: number | null; 
     </div>
   )
 }
+
+
+/**
+ * The panel is the heaviest thing on the builder page (hundreds of controls
+ * and column pickers), and the builder re-renders on every pointer move while
+ * a tile is dragged or resized -- ~400ms a frame, which is what made resizing
+ * feel frozen (QA 2026-09-26). Nothing the panel shows depends on layout, so
+ * it re-renders only when what it DOES show changes.
+ *
+ * Compared by value where the builder rebuilds an equal object each render:
+ * `columns` (a fresh array) and `distinctCounts` / `ruleErrors` (fresh
+ * objects).
+ */
+function sameColumns(a: Props['columns'], b: Props['columns']): boolean {
+  if (a === b) return true
+  if (!a || !b || a.length !== b.length) return false
+  return a.every((c, i) => c.name === b[i].name && c.dtype === b[i].dtype)
+}
+function panelPropsEqual(a: Props, b: Props): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<keyof Props>
+  for (const k of keys) {
+    const va = a[k], vb = b[k]
+    if (va === vb) continue
+    // Only the hierarchy refresher is rebuilt each render and is safe to
+    // keep stale (it reads the report's dataset id, which a new report brings
+    // with new `pages` anyway). `onUpdate` is compared by identity: a stale
+    // saver would write to the wrong widget or page.
+    if (k === 'onHierarchyRefresh' && typeof va === 'function' && typeof vb === 'function') continue
+    if (k === 'columns') { if (sameColumns(va as Props['columns'], vb as Props['columns'])) continue; return false }
+    if (k === 'distinctCounts' || k === 'ruleErrors') {
+      if (JSON.stringify(va ?? null) === JSON.stringify(vb ?? null)) continue
+      return false
+    }
+    return false
+  }
+  return true
+}
+
+export default memo(WidgetConfigPanel, panelPropsEqual)

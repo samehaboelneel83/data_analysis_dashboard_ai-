@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import { TruncationNote, truncationSentence, SHOW_ALL_CEILING } from './TruncationNote'
+import { TruncationNote, truncationSentence, SLIDER_MAX, sliderToCount, countToSlider } from './TruncationNote'
 
 describe('TruncationNote', () => {
   it('says what was cut, in one sentence', () => {
@@ -18,22 +18,35 @@ describe('TruncationNote', () => {
     const { container } = render(<TruncationNote t={{ applied: false, shown: 4, of: 4 }} />)
     expect(container.textContent).toBe('')
   })
-  it('offers "Show all" to an editor and passes the full count', () => {
+  it('gives an editor a slider; dragging to the end and releasing shows all', () => {
     const f = vi.fn()
     render(<TruncationNote t={{ applied: true, shown: 5, of: 14, reason: 'limit' }} dimension="country" onShowMore={f} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Show all' }))
+    const slider = screen.getByRole('slider')
+    fireEvent.change(slider, { target: { value: '1000' } })
+    expect(screen.getByText('All')).toBeTruthy()
+    fireEvent.pointerUp(slider)
     expect(f).toHaveBeenCalledWith(14)
   })
-  it('caps a huge "show all" at a readable page', () => {
+  it('the slider can also show FEWER, and caps a huge series at SLIDER_MAX', () => {
     const f = vi.fn()
-    render(<TruncationNote t={{ applied: true, shown: 20, of: 90000 }} onShowMore={f} />)
-    fireEvent.click(screen.getByRole('button', { name: `Show ${SHOW_ALL_CEILING}` }))
-    expect(f).toHaveBeenCalledWith(SHOW_ALL_CEILING)
+    render(<TruncationNote t={{ applied: true, shown: 500, of: 90000 }} onShowMore={f} />)
+    const slider = screen.getByRole('slider')
+    fireEvent.change(slider, { target: { value: '0' } })
+    fireEvent.pointerUp(slider)
+    expect(f).toHaveBeenCalledWith(1)
+    fireEvent.change(slider, { target: { value: '1000' } })
+    fireEvent.pointerUp(slider)
+    expect(f).toHaveBeenLastCalledWith(SLIDER_MAX)
+  })
+  it('maps slider positions on a log scale, round-tripping the shown count', () => {
+    expect(sliderToCount(0, 5670)).toBe(1)
+    expect(sliderToCount(1000, 5670)).toBe(5670)
+    expect(sliderToCount(countToSlider(250, 5670), 5670)).toBeGreaterThanOrEqual(245)
   })
   it('a reader sees the disclosure but no button', () => {
     render(<TruncationNote t={{ applied: true, shown: 5, of: 14 }} dimension="country" />)
     expect(screen.getByText(/Showing 5 of 14 country values/)).toBeTruthy()
-    expect(screen.queryByRole('button')).toBeNull()
+    expect(screen.queryByRole('slider')).toBeNull()
   })
 })
 

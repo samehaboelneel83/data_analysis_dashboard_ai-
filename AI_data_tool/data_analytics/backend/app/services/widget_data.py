@@ -73,6 +73,12 @@ from .widget_shaping import safe as _safe  # noqa: E402
 _TIME_TEXT = re.compile(r"^\d{4}(?:[-/]\d{2}(?:[-/]\d{2}(?:[ T][\d:.]+)?)?|-Q[1-4]|-W\d{2})$")
 
 
+
+#: A series with no stated `limit` shows ALL its groups (QA 2026-09-26: "the
+#: default should start with the full data"). Bounded only so one chart can
+#: never ship an unbounded payload; the same ceiling DirectQuery reads rows at.
+FULL_DATA_LIMIT = 10_000
+
 def _looks_like_time_text(s: pd.Series) -> bool:
     """True when a text column's values are (almost all) date-like labels."""
     if not (pd.api.types.is_object_dtype(s) or pd.api.types.is_string_dtype(s)):
@@ -801,7 +807,7 @@ def shape_series(df: pd.DataFrame, config: dict) -> dict:
     meas        = config.get("measure") or None
     agg         = (config.get("aggregation") or config.get("agg") or "sum")
     agg         = agg.lower() if isinstance(agg, str) else "sum"
-    limit       = int(config.get("limit") or 50)
+    limit       = int(config.get("limit") or FULL_DATA_LIMIT)
     # measure_defs is injected server-side by get_widget_data_from_df — never trusted
     # from the request body. A measure name shadows nothing: a real column always wins.
     measure_def = None
