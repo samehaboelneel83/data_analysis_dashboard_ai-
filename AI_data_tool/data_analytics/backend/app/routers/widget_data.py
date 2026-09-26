@@ -653,7 +653,8 @@ def _read_reconcile_file(name: str, raw: bytes):
 @router.post("/{dataset_id}/widget-data/reconcile")
 async def reconcile_widget(
     dataset_id: int, widget: str = Form(...), mapping: str | None = Form(None),
-    file: UploadFile = File(...),
+    file: UploadFile = File(...), migration_item: int | None = Form(None),
+    widget_key: str | None = Form(None), widget_title: str | None = Form(None),
     db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
     """E17: compare the widget with the old report's export of the same table.
@@ -663,6 +664,11 @@ async def reconcile_widget(
     the one its CSV export would write. See services/reconcile.py for how
     rows pair and when two numbers agree. Returns nothing the reader could
     not already see on the widget, so it needs read, not the export gate.
+
+    With `migration_item`, the result is also kept on that inventory item as
+    evidence for its sign-off (services/migration.py): the item must link to
+    this report, and only its owner or an admin records against it. Checked
+    before the comparison runs, so a refused recording costs nothing.
     """
     import json
 
@@ -676,6 +682,16 @@ async def reconcile_widget(
     raw = await file.read(_RECONCILE_MAX_BYTES + 1)
     if len(raw) > _RECONCILE_MAX_BYTES:
         raise widget_error(400, "unsupported", "The file is over 10 MB; export the table itself, not the data under it")
+    item = None
+    if migration_item is not None:
+        from ..models.models import MigrationItem
+        item = await db.get(MigrationItem, migration_item)
+        if item is None or item.org_id != current_user.org_id:
+            raise widget_error(404, "not_found", "Item not found")
+        if not (current_user.role and current_user.role.is_org_admin) and item.owner_id != current_user.id:
+            raise widget_error(403, "forbidden", "Only the item's owner or an admin records comparisons on it")
+        if req.report_id is None or item.report_id != req.report_id:
+            raise widget_error(400, "unsupported", "That inventory item is not linked to this report")
     await _guard_script_execution(db, current_user, req)
     data = await _resolve_widget_data(dataset_id, req, db, current_user)
     actual = _export_frame(data, req.config or {})
@@ -695,8 +711,20 @@ async def reconcile_widget(
                 req.report_id or dataset_id,
                 f"{file.filename}: {c['match']} match, {c['mismatch']} differ, "
                 f"{c['missing_in_widget']} only in the file, {c['missing_in_file']} only in the widget")
+    recorded = None
+    if item is not None:
+        from ..services.migration import record_reconcile
+        report = await db.get(Report, req.report_id)
+        recorded = record_reconcile(
+            item, key=(widget_key or widget_title or "widget").strip() or "widget", title=widget_title,
+            counts=c, file=file.filename, user=current_user, revision=report.revision if report else None)
+        await audit(db, current_user, "migration.reconcile", "migration_item", item.id,
+                    f"{item.name[:120]}: {c['match']} match, {c['mismatch']} differ")
+        if recorded.pop("withdrew_sign_off", False):
+            await audit(db, current_user, "migration.sign_off_withdrawn", "migration_item", item.id,
+                        f"{item.name[:120]}: a later comparison differs")
     await db.commit()
-    return {**result, "file": file.filename}
+    return {**result, "file": file.filename, "recorded_on": item.id if recorded else None}
 
 
 @router.post("/{dataset_id}/widget-data/export")

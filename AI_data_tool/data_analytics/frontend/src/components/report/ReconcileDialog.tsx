@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useT } from '../../i18n'
 import { useModalDialog } from '../ui/useModalDialog'
-import { widgetDataApi, type CalcColumn, type ReconcileMapping, type ReconcileResult } from '../../services/api'
+import { migrationApi, widgetDataApi, type CalcColumn, type MigrationItem, type ReconcileMapping, type ReconcileResult } from '../../services/api'
 
 /**
  * E17: does this widget say what the report it replaces said?
@@ -12,9 +12,14 @@ import { widgetDataApi, type CalcColumn, type ReconcileMapping, type ReconcileRe
  * columns identify a row and which to compare are guessed from the names
  * and can be changed. The server decides agreement (services/reconcile.py):
  * to the decimals the file shows.
+ *
+ * On a report that replaces an item in the migration inventory, the owner
+ * can keep the result on that item as the evidence for its sign-off.
  */
-export default function ReconcileDialog({ title, datasetId, body, onClose }: {
+export default function ReconcileDialog({ title, datasetId, body, onClose, widgetKey }: {
   title: string
+  /** Identifies the widget among the report's comparisons (one kept per widget). */
+  widgetKey?: string
   datasetId: number
   body: { config: Record<string, unknown>; widget_type: string; calculated_columns?: CalcColumn[]
           report_id?: number; parameters?: Record<string, unknown> }
@@ -27,11 +32,31 @@ export default function ReconcileDialog({ title, datasetId, body, onClose }: {
   const [mapping, setMapping] = useState<ReconcileMapping | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [items, setItems] = useState<MigrationItem[]>([])
+  const [recordOn, setRecordOn] = useState('')
+
+  const reportId = body.report_id
+  useEffect(() => {
+    if (reportId == null) return
+    let live = true
+    migrationApi.list()
+      .then(r => {
+        if (!live) return
+        const mine = r.items.filter(i => i.report?.id === reportId && i.can_edit)
+        setItems(mine)
+        if (mine.length === 1) setRecordOn(String(mine[0].id))
+      })
+      .catch(() => { /* no inventory to offer; comparing still works */ })
+    return () => { live = false }
+  }, [reportId])
 
   const run = async (f: File, m?: ReconcileMapping) => {
     setBusy(true); setError(null)
     try {
-      const r = await widgetDataApi.reconcile(datasetId, body, f, m)
+      const r = recordOn
+        ? await widgetDataApi.reconcile(datasetId, body, f, m,
+            { itemId: Number(recordOn), widgetKey: widgetKey ?? title, widgetTitle: title })
+        : await widgetDataApi.reconcile(datasetId, body, f, m)
       setResult(r); setMapping(r.mapping)
     } catch (e) {
       setResult(null)
@@ -76,6 +101,15 @@ export default function ReconcileDialog({ title, datasetId, body, onClose }: {
           <button type="button" className="btn btn-sm" aria-label={t('rec.close')} onClick={onClose}>×</button>
         </div>
         <p style={{ margin: 0, color: 'var(--muted)', fontSize: 12.5 }}>{t('rec.lead')}</p>
+        {items.length > 0 && (
+          <label style={{ fontSize: 13 }}>
+            <span style={{ display: 'block', fontWeight: 600, marginBottom: 4 }}>{t('rec.recordOn')}</span>
+            <select value={recordOn} onChange={e => setRecordOn(e.target.value)}>
+              <option value="">{t('rec.recordNone')}</option>
+              {items.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
+            </select>
+          </label>
+        )}
         <label style={{ fontSize: 13 }}>
           <span style={{ display: 'block', fontWeight: 600, marginBottom: 4 }}>{t('rec.file')}</span>
           <input type="file" accept=".csv,.txt,.tsv,.xlsx,.xls,.xlsm"
@@ -102,6 +136,11 @@ export default function ReconcileDialog({ title, datasetId, body, onClose }: {
               {(result.duplicate_keys.file > 0 || result.duplicate_keys.widget > 0) &&
                 <span style={{ fontWeight: 400 }}> {t('rec.duplicates', { n: result.duplicate_keys.file + result.duplicate_keys.widget })}</span>}
             </div>
+            {result.recorded_on != null && (
+              <p style={{ margin: 0, fontSize: 12.5, color: 'var(--muted)' }} data-testid="rec-recorded">
+                {t('rec.recorded', { name: items.find(i => i.id === result.recorded_on)?.name ?? '' })}
+              </p>
+            )}
             <table className="dl-table" data-testid="rec-totals">
               <caption style={{ textAlign: 'start', fontWeight: 600, fontSize: 12 }}>{t('rec.totals')}</caption>
               <thead><tr><th>{t('rec.column')}</th><th className="dl-table__num">{t('rec.inFile')}</th>

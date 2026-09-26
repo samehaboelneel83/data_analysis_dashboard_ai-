@@ -1,11 +1,12 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import ReconcileDialog from './ReconcileDialog'
-import { widgetDataApi } from '../../services/api'
+import { migrationApi, widgetDataApi } from '../../services/api'
 
 vi.mock('../../services/api', async (orig) => ({
   ...(await orig<Record<string, unknown>>()),
   widgetDataApi: { query: vi.fn(), reconcile: vi.fn() },
+  migrationApi: { list: vi.fn() },
 }))
 
 const BODY = { config: { dimension: 'region', measure: 'sales' }, widget_type: 'bar', report_id: 3, parameters: {} }
@@ -27,7 +28,10 @@ const pick = (name = 'sas.csv') => {
   fireEvent.change(input, { target: { files: [new File(['Region,Sales\n'], name, { type: 'text/csv' })] } })
 }
 
-beforeEach(() => { vi.clearAllMocks() })
+beforeEach(() => {
+  vi.clearAllMocks()
+  vi.mocked(migrationApi.list).mockResolvedValue({ items: [], summary: {}, can_manage: false } as never)
+})
 
 describe('reconcile a widget with the old report (E17)', () => {
   it('compares the chosen file and shows what differs, by how much, and the totals', async () => {
@@ -71,5 +75,34 @@ describe('reconcile a widget with the old report (E17)', () => {
     render(<ReconcileDialog title="Sales by region" datasetId={7} body={BODY} onClose={() => {}} />)
     pick('report.pdf')
     expect(await screen.findByRole('alert')).toHaveTextContent('Reconcile with a CSV or Excel file')
+  })
+
+  it('keeps the result on the migration item this report replaces (E17)', async () => {
+    const item = (over = {}) => ({ id: 41, name: 'Sales pack (SAS)', report: { id: 3, name: 'Sales', can_open: true },
+      can_edit: true, ...over })
+    vi.mocked(migrationApi.list).mockResolvedValue({ items: [item(),
+      item({ id: 42, name: 'Another report', report: { id: 9, name: 'X', can_open: true } }),
+      item({ id: 43, name: 'Not mine', can_edit: false })], summary: {}, can_manage: false } as never)
+    vi.mocked(widgetDataApi.reconcile).mockResolvedValue({ ...RESULT, recorded_on: 41 } as never)
+    render(<ReconcileDialog title="Sales by region" datasetId={7} body={BODY} widgetKey="w12" onClose={() => {}} />)
+    const select = await screen.findByRole('combobox', { name: 'Keep the result on the migration item' })
+    // Only this report's items that the reader may record on; the one there is, chosen.
+    expect(within(select).getAllByRole('option').map(o => o.textContent)).toEqual(["Don’t keep it", 'Sales pack (SAS)'])
+    expect(select).toHaveValue('41')
+    pick()
+    await waitFor(() => expect(widgetDataApi.reconcile).toHaveBeenCalledWith(7, BODY, expect.any(File), undefined,
+      { itemId: 41, widgetKey: 'w12', widgetTitle: 'Sales by region' }))
+    expect(await screen.findByTestId('rec-recorded')).toHaveTextContent('Kept on “Sales pack (SAS)” in Migration.')
+  })
+
+  it('compares without keeping when the reader chooses not to', async () => {
+    vi.mocked(migrationApi.list).mockResolvedValue({ items: [{ id: 41, name: 'Sales pack', report: { id: 3 }, can_edit: true }],
+      summary: {}, can_manage: false } as never)
+    vi.mocked(widgetDataApi.reconcile).mockResolvedValue(RESULT as never)
+    render(<ReconcileDialog title="Sales by region" datasetId={7} body={BODY} onClose={() => {}} />)
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Keep the result on the migration item' }), { target: { value: '' } })
+    pick()
+    await waitFor(() => expect(widgetDataApi.reconcile).toHaveBeenCalledWith(7, BODY, expect.any(File), undefined))
+    expect(screen.queryByTestId('rec-recorded')).toBeNull()
   })
 })

@@ -1142,7 +1142,7 @@ relationships, a profile, and no unmasked personal data.
 
 ### Relational store
 
-PostgreSQL 16 Alpine. **84 tables** defined in `models/models.py` via async
+PostgreSQL 16 Alpine. **85 tables** defined in `models/models.py` via async
 SQLAlchemy, grouped by concern:
 
 | Group | Representative tables |
@@ -1164,9 +1164,9 @@ SQLAlchemy, grouped by concern:
 | Workspace | `workspace_nodes`, `workspace_folder_roles`, `workspace_folder_grants` |
 | Pipelines | `dataflows`, `dataflow_capabilities`, `automation_runs`, `automation_steps`, `custom_connectors`, `schedule_failures`, `jobs` |
 | Platform | `saml_authn_requests`, `org_mcp_access`, `eval_runs` |
-| Ops | `sync_runs`, `schema_versions`, `column_stats`, `materializations`, `quotas`, `query_runs`, `ai_usage` |
+| Ops | `sync_runs`, `schema_versions`, `column_stats`, `materializations`, `quotas`, `query_runs`, `ai_usage`, `migration_items` |
 
-Schema changes go through **Alembic** (`backend/alembic/`, 44 revisions).
+Schema changes go through **Alembic** (`backend/alembic/`, 45 revisions).
 Every timestamp column is `TIMESTAMPTZ` and the app writes naive UTC; `core/database.py` marks each bound naive datetime as UTC (asyncpg would read it as the process's local time) and pins the session time zone to UTC, so stored times are right on a server whose clock is not UTC.
 `postgres/init.sql` provides the initial schema and indexes.
 
@@ -1499,7 +1499,7 @@ breaks an org's tokens down by day, feature and person.
 
 ### Routers
 
-**32 router modules**, mounted with 34 `include_router` calls in `main.py` --
+**33 router modules**, mounted with 35 `include_router` calls in `main.py` --
 `analysis` and `metadata` each expose a second router. All under `/api/v1`
 except the agent:
 
@@ -1526,6 +1526,7 @@ except the agent:
 | `prediction_models` | Train, save and score models |
 | `boundary_sets`, `map_settings` | Region boundaries, starter packs, basemap tiles |
 | `calendar_settings` | The org's fiscal year (the month it starts in); charts group dates by fiscal year and quarter (`services/fiscal.py`) |
+| `migration` | The migration inventory (E17): old reports and programs, SAS scans mapped to Datalytics features (`services/sas_inventory.py`), comparisons kept per widget, owner sign-off; status derived from the evidence (`services/migration.py`) |
 | `pins` | Pinned tiles |
 | `dataflows`, `custom_connectors` | Reusable prep flows, admin-defined connectors |
 | `jobs` | Durable background jobs: list, progress, cancel, retry |
@@ -2091,7 +2092,7 @@ React 18 · TypeScript · Vite · Recharts.
 
 ### Pages
 
-**19 pages** in `frontend/src/pages/`:
+**20 pages** in `frontend/src/pages/`:
 
 | Page | Purpose |
 |------|---------|
@@ -2104,6 +2105,7 @@ React 18 · TypeScript · Vite · Recharts.
 | `SourceReview.tsx` | Metadata review and approval |
 | `Lineage.tsx` | Model lineage graph (`reactflow`) |
 | `Dataflows.tsx` | Dataflows (route `/dataflows`): create one from a dataset, edit its recipe with the pipeline editor, schedule it, run it into new datasets or refresh its outputs; linked from Monitoring → Jobs |
+| `Migration.tsx` | Migration (route `/migration`): the inventory by status, import of an inventory CSV and SAS programs, each item's replacement report, program scan, comparisons and owner sign-off; the SAS feature map |
 | `SharedReport.tsx`, `EmbeddedReport.tsx` | Public and embedded views |
 | `ReportPrint.tsx` | Print/PDF layout |
 | `Home.tsx` | Landing page — recents, dashboards, datasets as card sections |
@@ -2346,8 +2348,8 @@ Agent pane (7)
 
 | Suite | Scope | Count |
 |-------|-------|-------|
-| Backend | `backend/tests/` | ~5,300 tests across 421 modules |
-| Frontend | colocated `*.test.ts(x)` | ~2,950 tests across 233 files |
+| Backend | `backend/tests/` | ~5,300 tests across 422 modules |
+| Frontend | colocated `*.test.ts(x)` | ~2,950 tests across 234 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |
 | Doc audit | `tests/test_architecture_doc.py` | Enforces the *counts* in this document |

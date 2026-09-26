@@ -1152,7 +1152,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
       })(), document.body)}
       {reconcileOpen && widgetDatasetId != null && createPortal(
         <Suspense fallback={null}>
-          <ReconcileDialog title={widget.title || wt} datasetId={widgetDatasetId}
+          <ReconcileDialog title={widget.title || wt} datasetId={widgetDatasetId} widgetKey={`w${widget.id}`}
             body={{ config: mergedConfig as Record<string, unknown>, widget_type: wt,
                     calculated_columns: effectiveCalcCols, report_id: reportId, parameters: parameters ?? {} }}
             onClose={() => setReconcileOpen(false)} />

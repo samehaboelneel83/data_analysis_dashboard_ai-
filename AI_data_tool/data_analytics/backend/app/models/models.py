@@ -2302,3 +2302,39 @@ class Job(Base):
     updated_at  = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
     started_at  = Column(DateTime(timezone=True), nullable=True)
     finished_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class MigrationItem(Base):
+    """E17: one thing in the old estate (a SAS report, program, stored process,
+    job, dataset) and what becomes of it.
+
+    The inventory is the migration's ledger: what exists, who owns it, which
+    Datalytics report replaces it, the evidence that the replacement says the
+    same thing (`reconciles`, one entry per widget compared, written by the
+    reconcile endpoint), and the owner's sign-off. `decision` is "migrate" or
+    "retire"; everything else about where an item stands is derived
+    (services/migration.status_of), so the status can never disagree with the
+    evidence. `features` is what a scan of the program found, each mapped to
+    its Datalytics equivalent (services/sas_inventory.py).
+    """
+    __tablename__ = "migration_items"
+    id            = Column(Integer, primary_key=True)
+    org_id        = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_system = Column(String(40), nullable=False, default="SAS", server_default="SAS")
+    name          = Column(String(300), nullable=False)
+    #: report | program | stored_process | job | dataset | other
+    kind          = Column(String(40), nullable=False, default="report", server_default="report")
+    source_path   = Column(String(1000), nullable=True)
+    owner_id      = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    report_id     = Column(Integer, ForeignKey("reports.id", ondelete="SET NULL"), nullable=True, index=True)
+    #: migrate | retire
+    decision      = Column(String(20), nullable=False, default="migrate", server_default="migrate")
+    notes         = Column(Text, nullable=True)
+    features      = Column(JSON, nullable=True)
+    #: {widget_key: {title, counts, file, at, by, by_name, report_id, revision}}
+    reconciles    = Column(JSON, nullable=True)
+    #: {by, by_name, at, basis, note, report_id, revision, reconciles}
+    sign_off      = Column(JSON, nullable=True)
+    created_by    = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at    = Column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at    = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)

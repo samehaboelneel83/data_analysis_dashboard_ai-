@@ -1880,6 +1880,8 @@ export interface ReconcileResult {
   duplicate_keys: { widget: number; file: number }
   reconciled: boolean
   file: string
+  /** The migration item the result was kept on, when one was named. */
+  recorded_on?: number | null
 }
 
 export const WIDGET_DATA_TTL_MS = 30_000
@@ -1990,10 +1992,16 @@ export const widgetDataApi = {
   reconcile: (dsId: number, body: { config: Record<string, unknown>; widget_type: string
                                     calculated_columns?: CalcColumn[]; report_id?: number
                                     parameters?: Record<string, unknown> },
-              file: File, mapping?: ReconcileMapping) => {
+              file: File, mapping?: ReconcileMapping,
+              record?: { itemId: number; widgetKey: string; widgetTitle: string }) => {
     const form = new FormData()
     form.append('widget', JSON.stringify(body))
     if (mapping) form.append('mapping', JSON.stringify(mapping))
+    if (record) {
+      form.append('migration_item', String(record.itemId))
+      form.append('widget_key', record.widgetKey)
+      form.append('widget_title', record.widgetTitle)
+    }
     form.append('file', file)
     return api.post<ReconcileResult>(`/datasets/${dsId}/widget-data/reconcile`, form).then(r => r.data)
   },
@@ -2901,4 +2909,56 @@ export interface QualityReport {
   columns_with_issues: number
   column_report: QualityColumn[]
   rules: { rule: string; failing_rows?: number; examples?: Record<string, unknown>[]; error?: string }[]
+}
+
+// ── E17: the migration inventory ────────────────────────────────────────────
+
+export type MigrationStatus = 'to_map' | 'mapped' | 'differences' | 'reconciled' | 'signed_off' | 'retired'
+export type MigrationFit = 'native' | 'partial' | 'manual'
+export interface MigrationFeature {
+  key: string; label: string; target: string; fit: MigrationFit; note: string; count?: number
+}
+export interface MigrationReconcile {
+  widget_key: string; title: string | null; file: string | null; at: string; by_email: string
+  counts: ReconcileResult['counts']; report_id: number; revision: number | null
+}
+export interface MigrationItem {
+  id: number; name: string; kind: string; source_system: string; source_path: string | null
+  decision: 'migrate' | 'retire'; notes: string | null
+  owner: { id: number; email: string } | null
+  report: { id: number; name: string | null; can_open: boolean } | null
+  features: { features: MigrationFeature[]; unknown_procs: string[]; libnames: string[]; lines: number; file?: string } | null
+  fit: MigrationFit | null
+  reconciles: MigrationReconcile[]
+  sign_off: { by_email: string; at: string; basis: 'reconciled' | 'accepted' | 'no_comparison'; note: string | null } | null
+  report_changed_since_sign_off: boolean
+  status: MigrationStatus
+  can_edit: boolean; can_sign_off: boolean
+}
+export interface MigrationItemIn {
+  name?: string; kind?: string; source_system?: string; source_path?: string | null
+  owner_id?: number | null; report_id?: number | null; decision?: 'migrate' | 'retire'; notes?: string | null
+}
+
+export const migrationApi = {
+  list: () => api.get<{ items: MigrationItem[]; summary: Record<MigrationStatus, number>; can_manage: boolean }>(
+    '/migration/items').then(r => r.data),
+  featureMap: () => api.get<MigrationFeature[]>('/migration/feature-map').then(r => r.data),
+  create: (body: MigrationItemIn) => api.post<MigrationItem>('/migration/items', body).then(r => r.data),
+  update: (id: number, body: MigrationItemIn) => api.patch<MigrationItem>(`/migration/items/${id}`, body).then(r => r.data),
+  remove: (id: number) => api.delete(`/migration/items/${id}`),
+  import: (files: File[]) => {
+    const form = new FormData()
+    files.forEach(f => form.append('files', f))
+    return api.post<{ created: number; updated: number; warnings: string[] }>('/migration/items/import', form)
+      .then(r => r.data)
+  },
+  scan: (id: number, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return api.post<MigrationItem>(`/migration/items/${id}/scan`, form).then(r => r.data)
+  },
+  signOff: (id: number, body: { note?: string; accept_differences?: boolean }) =>
+    api.post<MigrationItem>(`/migration/items/${id}/sign-off`, body).then(r => r.data),
+  withdrawSignOff: (id: number) => api.delete<MigrationItem>(`/migration/items/${id}/sign-off`).then(r => r.data),
 }

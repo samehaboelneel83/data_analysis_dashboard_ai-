@@ -630,6 +630,8 @@ svg.recharts-surface { direction: ltr; }
 .dl-cell-kind, .dl-table-card .dl-fresh { white-space: normal; max-inline-size: 24ch; }
 .dl-fresh--warn { color: var(--warning); }
 .dl-fresh--bad { color: var(--danger); font-weight: 600; }
+/* E17: an item signed off by its owner. */
+.dl-fresh--ok { color: var(--success); font-weight: 600; }
 
 .dl-chip--shared {
   background: var(--surface2);
