@@ -111,6 +111,8 @@ import {
 import { SyncSlicersPaneConnected, BookmarksPaneConnected } from './reportBuilder/BookmarksConnected'
 import { SchedulePanel } from './reportBuilder/SchedulePanel'
 import { PageTemplateMenu } from './reportBuilder/PageTemplateMenu'
+import ConflictMergeDialog from '../components/report/ConflictMergeDialog'
+import type { WidgetEdit } from '../lib/threeWayMerge'
 
 const EMPTY_RULES: DisplayRule[] = []
 
@@ -142,6 +144,35 @@ function stripPickParam() {
   params.delete('pick')
   const qs = params.toString()
   window.history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : ''))
+}
+
+/** The 409 an edit conflict returns (routers/reports.py `_refuse_edit_conflict`). */
+interface ConflictDetail {
+  message?: string
+  changed_by?: string | null
+  revision?: number
+  current?: WidgetEdit
+  base?: WidgetEdit | null
+}
+
+interface EditConflict {
+  message: string
+  retry: () => void
+  /** Present when the server sent both versions a merge needs (E09). */
+  merge?: { base: WidgetEdit; theirs: WidgetEdit; mine: WidgetEdit; changedBy: string | null
+            revision: number; pageId: number; widgetId: number }
+}
+
+function conflictFrom(detail: ConflictDetail, mine: WidgetEdit, pageId: number, widgetId: number,
+                      retry: () => void): EditConflict {
+  const { base, current, revision } = detail
+  return {
+    message: detail.message ?? '',
+    retry,
+    ...(base && current && typeof revision === 'number' ? { merge: {
+      base: { ...base, config: base.config ?? {} }, theirs: { ...current, config: current.config ?? {} },
+      mine, changedBy: detail.changed_by ?? null, revision, pageId, widgetId } } : {}),
+  }
 }
 
 export default function ReportBuilder() {
@@ -349,7 +380,13 @@ export default function ReportBuilder() {
   const loadedRevisionRef = useRef<number | null>(null)
   const [staleRevision, setStaleRevision] = useState<number | null>(null)
   /** E09: a save refused because someone else changed the widget first. */
-  const [editConflict, setEditConflict] = useState<{ message: string; retry: () => void } | null>(null)
+  const [editConflict, setEditConflict] = useState<EditConflict | null>(null)
+  const [mergeOpen, setMergeOpen] = useState(false)
+  // Bumped after a conflict is settled (their version reloaded, or the two
+  // combined) to remount the settings panel: it seeds its fields only when the
+  // selected widget CHANGES, so without this it kept showing the editor's
+  // refused values over the saved ones and its next autosave wrote them back.
+  const [panelEpoch, setPanelEpoch] = useState(0)
   useEffect(() => { loadedRevisionRef.current = loadedRevision }, [loadedRevision])
 
   // Load report
@@ -1692,8 +1729,9 @@ export default function ReportBuilder() {
       } catch (err) {
         const detail = (err as { response?: { status?: number; data?: { detail?: { code?: string; message?: string } } } })?.response
         if (detail?.status === 409 && detail.data?.detail?.code === 'edit_conflict') {
-          setEditConflict({ message: detail.data.detail.message ?? '',
-            retry: () => { setEditConflict(null); updateWidgetConfig(config, title, true) } })
+          setEditConflict(conflictFrom(detail.data.detail as ConflictDetail,
+            { widget_type: before.widget_type, title, config }, activePage.id, selectedW.id,
+            () => { setEditConflict(null); updateWidgetConfig(config, title, true) }))
           return
         }
         throw err
@@ -1718,6 +1756,41 @@ export default function ReportBuilder() {
       setSaving(false)
     }
   }, [selectedW, activePage, reportId, loadReport, pushUndo])
+
+  /** Save the combination of the editor's change and a colleague's (E09).
+   *  Sent against the revision the conflict reported, so a THIRD edit made
+   *  while the merge dialog was open is again a conflict rather than lost. */
+  const saveCombined = useCallback(async (edit: WidgetEdit) => {
+    const m = editConflict?.merge
+    if (!m) return
+    setSaving(true)
+    try {
+      try {
+        await reportsApi.updateWidget(reportId, m.pageId, m.widgetId, {
+          config: edit.config, title: edit.title ?? '',
+          ...(edit.widget_type !== m.theirs.widget_type ? { widget_type: edit.widget_type as Widget['widget_type'] } : {}),
+          base_revision: m.revision })
+      } catch (err) {
+        const detail = (err as { response?: { status?: number; data?: { detail?: { code?: string } } } })?.response
+        if (detail?.status === 409 && detail.data?.detail?.code === 'edit_conflict') {
+          setMergeOpen(false)
+          setEditConflict(conflictFrom(detail.data.detail as ConflictDetail, edit, m.pageId, m.widgetId,
+            editConflict!.retry))
+          return
+        }
+        throw err
+      }
+      setMergeOpen(false)
+      setEditConflict(null)
+      await loadReport()
+      setPanelEpoch(e => e + 1)
+      toast.success(tr('conflict.combined'))
+    } catch {
+      toast.error(tr('conflict.combineFailed'))
+    } finally {
+      setSaving(false)
+    }
+  }, [editConflict, reportId, loadReport, tr])
 
   /** Write one widget's interaction into its own config.
    *
@@ -3002,13 +3075,25 @@ export default function ReportBuilder() {
             background:'rgba(220,80,60,.12)', borderBottom:'1px solid rgba(220,80,60,.4)',
             fontSize:12, color:'var(--text)', flexShrink:0, flexWrap:'wrap' }}>
             <span style={{ flex:1, minWidth:200 }}>{editConflict.message}</span>
-            <button className="btn btn-sm" onClick={() => { setEditConflict(null); loadReport() }}>
+            <button className="btn btn-sm" onClick={async () => {
+              setEditConflict(null); await loadReport(); setPanelEpoch(e => e + 1) }}>
               {tr('conflict.reload')}
             </button>
+            {editConflict.merge && (
+              <button className="btn btn-sm btn-primary" onClick={() => setMergeOpen(true)}>
+                {tr('conflict.combine')}
+              </button>
+            )}
             <button className="btn btn-sm btn-ghost" onClick={editConflict.retry}>
               {tr('conflict.overwrite')}
             </button>
           </div>
+        )}
+
+        {mergeOpen && editConflict?.merge && (
+          <ConflictMergeDialog base={editConflict.merge.base} theirs={editConflict.merge.theirs}
+            mine={editConflict.merge.mine} changedBy={editConflict.merge.changedBy}
+            onSave={saveCombined} onClose={() => setMergeOpen(false)} />
         )}
 
         {staleRevision !== null && canEdit && (
@@ -3725,7 +3810,7 @@ export default function ReportBuilder() {
                   )}
 
                   {selectedW
-                    ? <WidgetConfigPanel geography={geography} widget={selectedW} columns={columns} datasets={datasets} primaryDatasetId={report.dataset_id} pages={report.pages} hierarchy={hierarchy} onHierarchyRefresh={refreshHierarchy} bookmarks={bookmarks} onUpdate={updateWidgetConfig} ruleErrors={perfStats[selectedW.id]?.ruleErrors}
+                    ? <WidgetConfigPanel key={`${selectedW.id}:${panelEpoch}`} geography={geography} widget={selectedW} columns={columns} datasets={datasets} primaryDatasetId={report.dataset_id} pages={report.pages} hierarchy={hierarchy} onHierarchyRefresh={refreshHierarchy} bookmarks={bookmarks} onUpdate={updateWidgetConfig} ruleErrors={perfStats[selectedW.id]?.ruleErrors}
                       distinctCounts={Object.fromEntries(Object.entries(hints).flatMap(([k, h]) => typeof (h as { distinct?: unknown })?.distinct === 'number' ? [[k, (h as { distinct: number }).distinct]] : []))} />
                     : activePage && <PagePropertiesPanel reportId={reportId} page={activePage} columns={columns} onUpdate={updatePageProps}
                         pages={report.pages} bookmarks={bookmarks} onSelectWidget={setSelectedW}

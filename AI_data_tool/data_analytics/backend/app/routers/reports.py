@@ -987,6 +987,9 @@ async def _refuse_edit_conflict(db: AsyncSession, report: Report, widget: Report
                 "revision": current,
                 "current": {"widget_type": widget.widget_type, "title": widget.title,
                             "config": widget.config or {}},
+                # What this editor started from: with `current` and their own
+                # edit, the three versions a merge needs (E09 merge view).
+                "base": dict(zip(_CONFLICT_FIELDS, states[0])),
             })
 
 

@@ -485,6 +485,73 @@ describe('ReportBuilder Fields pane', () => {
     await waitFor(() => expect(screen.queryByTestId('edit-conflict')).not.toBeInTheDocument())
   })
 
+  it('combines the editor\'s change with a colleague\'s and saves against the revision that refused it (E09)', async () => {
+    const r = reportWithWidget(); (r as any).revision = 7
+    const after = reportWithWidget(); (after as any).revision = 10
+    ;(after.pages[0].widgets[0] as any).title = 'Sales (Sam)'
+    ;(after.pages[0].widgets[0] as any).config = { dimension: 'region', measure: 'sales' }
+    vi.mocked(reportsApi.get).mockReset()
+    vi.mocked(reportsApi.get).mockResolvedValue(r as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue(datasetWithColumns() as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    vi.mocked(reportsApi.updateWidget).mockReset()
+    vi.mocked(reportsApi.updateWidget)
+      .mockRejectedValueOnce({ response: { status: 409, data: { detail: {
+        code: 'edit_conflict', message: 'sam@example.com changed "Sales by Region" after you opened it.',
+        changed_by: 'sam@example.com', revision: 9,
+        base: { widget_type: 'bar', title: 'Sales by Region', config: { dimension: 'region' } },
+        current: { widget_type: 'bar', title: 'Sales (Sam)', config: { dimension: 'region' } } } } } })
+      .mockResolvedValue({} as any)
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    fireEvent.click(screen.getByText('Sales by Region'))
+    await screen.findByText('Widget: Sales by Region')
+    fireEvent.click(screen.getByRole('button', { name: /^[#ƒx Aa]* ?sales$/ }))
+    await screen.findByTestId('edit-conflict')
+
+    vi.mocked(reportsApi.get).mockResolvedValue(after as any)
+    fireEvent.click(screen.getByRole('button', { name: 'Combine…' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Combine your change with theirs' })
+    expect(dialog).toHaveTextContent('Nothing was changed by both of you')
+    fireEvent.click(screen.getByRole('button', { name: 'Save combined' }))
+
+    // Their title and my measure, sent against the revision the conflict reported.
+    await waitFor(() => expect(reportsApi.updateWidget).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(reportsApi.updateWidget).mock.calls[1]).toEqual([1, 100, 5, {
+      title: 'Sales (Sam)', config: { dimension: 'region', measure: 'sales' }, base_revision: 9 }])
+    await waitFor(() => expect(screen.queryByTestId('edit-conflict')).not.toBeInTheDocument())
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    // The settings panel shows the saved, combined widget, not the refused copy.
+    expect(await screen.findByDisplayValue('Sales (Sam)')).toBeInTheDocument()
+  })
+
+  it('after "Reload their version" the settings panel shows their values, not the refused ones (E09)', async () => {
+    const r = reportWithWidget(); (r as any).revision = 7
+    const theirs = reportWithWidget(); (theirs as any).revision = 9
+    ;(theirs.pages[0].widgets[0] as any).title = 'Renamed by Sam'
+    vi.mocked(reportsApi.get).mockReset()
+    vi.mocked(reportsApi.get).mockResolvedValue(r as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue(datasetWithColumns() as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    vi.mocked(reportsApi.updateWidget).mockReset()
+    vi.mocked(reportsApi.updateWidget)
+      .mockRejectedValueOnce({ response: { status: 409, data: { detail: {
+        code: 'edit_conflict', message: 'Someone else changed it.' } } } })
+      .mockResolvedValue({} as any)
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    fireEvent.click(screen.getByText('Sales by Region'))
+    await screen.findByText('Widget: Sales by Region')
+    fireEvent.click(screen.getByRole('button', { name: /^[#ƒx Aa]* ?sales$/ }))
+    await screen.findByTestId('edit-conflict')
+    // No merge data in this 409 (an older server): no Combine button.
+    expect(screen.queryByRole('button', { name: 'Combine…' })).not.toBeInTheDocument()
+
+    vi.mocked(reportsApi.get).mockResolvedValue(theirs as any)
+    fireEvent.click(screen.getByRole('button', { name: 'Reload their version' }))
+    expect(await screen.findByDisplayValue('Renamed by Sam')).toBeInTheDocument()
+  })
+
   it('lists dataset measures under their own heading, separate from numeric columns', async () => {
     vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
     vi.mocked(datasetsApi.get).mockResolvedValue({

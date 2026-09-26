@@ -339,6 +339,29 @@ class TestEditConflictsAreVisible:
         r = await c.patch(self._url(world), json={"title": "Mine"}, headers=world["a"])
         assert r.status_code == 200 and _titles(await _get(world, "a")) == ["Mine"]
 
+    async def test_the_conflict_carries_what_you_started_from_for_a_merge(self, world):
+        """E09 merge view: base (what this editor opened), current (theirs),
+        and the editor's own edit are the three versions a merge needs; a
+        save of the merged result against the current revision goes through."""
+        other, o, base = await self._two_editors(world)
+        c = world["client"]
+        opened = next(w for p in (await _get(world, "a"))["pages"] for w in p["widgets"]
+                      if w["id"] == world["widget"])
+        theirs = {**(opened["config"] or {}), "limit": 5}
+        assert (await c.patch(self._url(world), json={"config": theirs}, headers=o)).status_code == 200
+        mine = {**(opened["config"] or {}), "sort": "asc"}
+        r = await c.patch(self._url(world), json={"config": mine, "base_revision": base}, headers=world["a"])
+        assert r.status_code == 409
+        detail = r.json()["detail"]
+        assert detail["base"] == {"widget_type": opened["widget_type"], "title": opened["title"],
+                                  "config": opened["config"]}
+        assert detail["current"]["config"]["limit"] == 5
+        merged = {**opened["config"], "limit": 5, "sort": "asc"}
+        r = await c.patch(self._url(world), json={"config": merged, "base_revision": detail["revision"]},
+                          headers=world["a"])
+        assert r.status_code == 200, r.text
+        assert r.json()["config"]["limit"] == 5 and r.json()["config"]["sort"] == "asc"
+
     async def test_your_own_later_edits_are_not_a_conflict(self, world):
         _, _, base = await self._two_editors(world)
         c, a = world["client"], world["a"]
