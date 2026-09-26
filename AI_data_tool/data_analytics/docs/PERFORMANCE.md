@@ -90,11 +90,25 @@ requests were in flight (all aborted) and the other 32 were never sent.
 Against real uvicorn with one work slot held, five requests whose clients
 closed while queued were dropped and only the reader who stayed was run.
 
+## Fairness across processes
+
+The rate limiter's buckets and the AI concurrent-ask counter were each API
+process's own, so N processes allowed N times the ceiling and one person could
+hold a slot in each. With `VALKEY_URL` set they live in Valkey
+(`core/shared_limits.py`): one token bucket per person, taken atomically by a
+Lua script on Valkey's clock, and one ask counter per organisation, with a TTL
+so a process that dies holding a slot cannot keep it. Without Valkey, or while
+it is unreachable, each process falls back to its own state (logged once,
+retried after 30 s) -- a dead Valkey never turns into 429s.
+
+Measured: two API processes with a limit of 10 requests a minute and one
+Valkey; 16 requests from one person, alternating between the processes: 10
+answered, 6 refused with `Retry-After`. Valkey stopped: requests answered from
+each process's own buckets, in 70 ms for three.
+
 ## Not done yet (E14)
 
 - The same run on the owner's hardware and data, and the targets agreed.
-- Fairness **across** processes: the rate limiter and the AI budgets'
-  concurrent-ask counter are per process (documented in `core/rate_limit.py`).
 - Stopping a widget query that is already running (DuckDB could be
   interrupted; pandas cannot).
 - Larger data: a benchmark over the 1-million-row synthetic set

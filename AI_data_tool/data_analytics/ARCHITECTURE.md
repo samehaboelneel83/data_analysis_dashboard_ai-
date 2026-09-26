@@ -1171,7 +1171,10 @@ Every timestamp column is `TIMESTAMPTZ` and the app writes naive UTC; `core/data
 `services/cache_backend.py` defines a `CacheBackend` interface with two
 implementations — `InProcessCache` for single-process or test runs, and
 `ValkeyCache` for the deployed stack. `services/frame_cache.py` caches computed
-result frames; `core/rate_limit.py` uses the same backend for throttling.
+result frames. With `VALKEY_URL` set, the rate limiter's buckets and the AI
+concurrent-ask counter live in the same Valkey (`core/shared_limits.py`), so
+every API process shares one ceiling; without it, or while Valkey is down,
+each process keeps its own.
 
 The cache is an optimisation, never a source of truth: every cached value is
 reproducible from Postgres and the source systems.
@@ -2339,7 +2342,7 @@ Agent pane (7)
 
 | Suite | Scope | Count |
 |-------|-------|-------|
-| Backend | `backend/tests/` | ~5,300 tests across 418 modules |
+| Backend | `backend/tests/` | ~5,300 tests across 419 modules |
 | Frontend | colocated `*.test.ts(x)` | ~2,950 tests across 233 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |

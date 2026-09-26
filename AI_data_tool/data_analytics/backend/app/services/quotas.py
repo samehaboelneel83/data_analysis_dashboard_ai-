@@ -71,9 +71,9 @@ _QUOTA_CACHE_TTL_SECONDS = 30.0
 # org_id -> (cached Quota row or None, expiry monotonic timestamp)
 _quota_cache: dict[int, tuple[Quota | None, float]] = {}
 
-# In-process concurrent-ask counters, keyed by org_id. Single-worker/per-process
-# like widget_data.py's own work gate -- no cross-process ceiling, documented
-# tradeoff, not a bug (see routers/agent.py concurrent_ask_slot usage).
+# In-process concurrent-ask counters, keyed by org_id: used when Valkey is not
+# configured or not reachable. With it, the count is shared by every process
+# (core/shared_limits.py, E14).
 _concurrent_counts: dict[int, int] = {}
 
 
@@ -172,19 +172,31 @@ async def concurrent_ask_slot(db: AsyncSession, org_id: int):
     release. Once acquired, the release always runs in `finally`, so an
     agent run that raises mid-flight still frees its slot; null quota (no
     row, or a null max_concurrent_asks) skips the counter entirely."""
+    from ..core.shared_limits import acquire_slot, release_slot
     quota = await get_quota(db, org_id)
     limit = quota.max_concurrent_asks if quota is not None else None
+    shared = False
     if limit is not None:
-        current = _concurrent_counts.get(org_id, 0)
-        if current >= limit:
+        # E14: one count for every API process when Valkey is set.
+        taken = await acquire_slot(f"asks:{org_id}", limit)
+        if taken is False:
             raise QuotaExceeded("Too many concurrent agent asks for this organization",
                                 kind="concurrent_asks")
-        _concurrent_counts[org_id] = current + 1
+        shared = taken is True
+        if not shared:
+            current = _concurrent_counts.get(org_id, 0)
+            if current >= limit:
+                raise QuotaExceeded("Too many concurrent agent asks for this organization",
+                                    kind="concurrent_asks")
+            _concurrent_counts[org_id] = current + 1
     try:
         yield
     finally:
         if limit is not None:
-            _concurrent_counts[org_id] = max(0, _concurrent_counts.get(org_id, 0) - 1)
+            if shared:
+                await release_slot(f"asks:{org_id}")
+            else:
+                _concurrent_counts[org_id] = max(0, _concurrent_counts.get(org_id, 0) - 1)
 
 
 # ---------------------------------------------------------------------------

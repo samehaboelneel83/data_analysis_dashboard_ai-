@@ -1,9 +1,10 @@
 """In-process token-bucket rate limiting middleware (S5).
 
-No Valkey/Redis in this stack, so limiting is per-worker and honest about it:
-each uvicorn worker enforces its own buckets in memory, so the effective
-ceiling scales with worker count. Documented, not hidden -- see
-`settings.rate_limit_*`.
+With `settings.valkey_url` set, the buckets live in Valkey and every worker
+and replica shares them (core/shared_limits.py, E14). Without it -- or while
+Valkey is unreachable -- each uvicorn worker enforces its own buckets in
+memory, so the effective ceiling scales with worker count. Documented, not
+hidden -- see `settings.rate_limit_*`.
 
 Two tiers, keyed differently:
   * general authenticated/anonymous traffic -- keyed by user id, decoded
@@ -182,6 +183,16 @@ def _embed_ip_key(request: Request) -> str:
     return f"embed-ip:{ip}"
 
 
+async def _consume(key: str, capacity: int) -> tuple[bool, float]:
+    """One token: from the bucket every process shares when Valkey is set
+    (core/shared_limits.py, E14), else from this process's own."""
+    from .shared_limits import consume_token
+    shared = await consume_token(key, capacity, settings.rate_limit_window_seconds)
+    if shared is not None:
+        return shared
+    return _bucket_for(key, capacity, settings.rate_limit_window_seconds).consume(1.0)
+
+
 async def rate_limit_middleware(request: Request, call_next):
     if not settings.rate_limit_enabled or is_test_mode():
         return await call_next(request)
@@ -198,10 +209,8 @@ async def rate_limit_middleware(request: Request, call_next):
         # that actually catches a garbage-token enumeration sweep (see
         # _embed_ip_key) -- the per-(token, ip) bucket below still applies on
         # top, unchanged, for a legitimate credential's own ceiling.
-        ip_bucket = _bucket_for(_embed_ip_key(request),
-                                settings.rate_limit_requests_per_window,
-                                settings.rate_limit_window_seconds)
-        ip_ok, ip_retry_after = ip_bucket.consume(1.0)
+        ip_ok, ip_retry_after = await _consume(_embed_ip_key(request),
+                                               settings.rate_limit_requests_per_window)
         if not ip_ok:
             wait_s = max(1, int(ip_retry_after) + 1)
             return JSONResponse(
@@ -215,8 +224,7 @@ async def rate_limit_middleware(request: Request, call_next):
         key = _client_key(request)
         capacity = settings.rate_limit_requests_per_window
 
-    bucket = _bucket_for(key, capacity, settings.rate_limit_window_seconds)
-    ok, retry_after = bucket.consume(1.0)
+    ok, retry_after = await _consume(key, capacity)
     if not ok:
         wait_s = max(1, int(retry_after) + 1)
         return JSONResponse(
