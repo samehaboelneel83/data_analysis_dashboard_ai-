@@ -623,6 +623,14 @@ svg.recharts-surface { direction: ltr; }
   color: var(--mc-accent-ink);
 }
 
+/* E06: the Datasets list's "Data" cell -- what it is, then how current. */
+.dl-cell-kind { font-size: var(--dl-text-small, 13px); }
+/* Wraps rather than widening the table: at laptop width a long freshness
+   line pushed the row menu off the card. */
+.dl-cell-kind, .dl-table-card .dl-fresh { white-space: normal; max-inline-size: 24ch; }
+.dl-fresh--warn { color: var(--warning); }
+.dl-fresh--bad { color: var(--danger); font-weight: 600; }
+
 .dl-chip--shared {
   background: var(--surface2);
   color: var(--muted);

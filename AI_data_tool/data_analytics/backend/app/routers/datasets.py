@@ -129,7 +129,32 @@ async def list_datasets(db: AsyncSession = Depends(get_db), current_user: User =
     )).scalars().all())
     for ds in datasets:
         ds.shared = ds.id in shared_ids
+    await _attach_catalog(db, current_user, datasets, readable)
     return [await _without_denied_columns(db, current_user, ds) for ds in datasets]
+
+
+async def _attach_catalog(db: AsyncSession, user: User, datasets: list, readable: set[int] | None) -> None:
+    """E06: each row says what it is and how current it is. Names only what
+    this reader may see: the connection behind a dataset they can read (the
+    Connections page shows it to them too), and a source dataset only if they
+    can read that one as well -- otherwise "another dataset"."""
+    from datetime import datetime, timezone
+
+    from ..models.models import DataSource
+    from ..services.catalog import catalog_entry, origin_ids
+    src_ids = {ds.data_source_id for ds in datasets if ds.data_source_id}
+    sources = dict((await db.execute(select(DataSource.id, DataSource.name).where(
+        DataSource.id.in_(src_ids or {-1}), DataSource.org_id == user.org_id))).all()) if src_ids else {}
+    wanted = {i for ds in datasets for i in origin_ids(ds)}
+    names = dict((await db.execute(select(Dataset.id, Dataset.name).where(
+        Dataset.id.in_(wanted or {-1}), Dataset.org_id == user.org_id))).all()) if wanted else {}
+    now = datetime.now(timezone.utc)
+    for ds in datasets:
+        origins = origin_ids(ds)
+        ds.catalog = catalog_entry(
+            ds, now=now, source_name=sources.get(ds.data_source_id),
+            origin_names=[names[i] if i in names and (readable is None or i in readable) else "another dataset"
+                          for i in origins] if origins else None)
 
 
 @router.get("/{dataset_id}", response_model=DatasetOut)

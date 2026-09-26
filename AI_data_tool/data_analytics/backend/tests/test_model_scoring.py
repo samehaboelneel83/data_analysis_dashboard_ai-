@@ -60,6 +60,8 @@ class TestBatchScoring:
         out = await db_session.get(Dataset, res["dataset_id"])
         assert out.name == "Churn scored by Churn model v1"
         assert out.created_by == two_orgs["a"]["user"].id and out.row_count == 300
+        assert out.column_meta["__scored_by__"] | {"job_id": 0} == {
+            "source_dataset_id": ds.id, "model_id": model["id"], "model_name": "Churn model", "version": 1, "job_id": 0}
         frame = pd.read_csv(out.filename)
         assert list(frame.columns) == ["region", "spend", "churn", "predicted_churn"]
         # A good model on its own training rows: nearly all right.

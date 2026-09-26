@@ -1008,7 +1008,7 @@ llm_reserved_interactive = 2</code></pre>
         <tr><th><code>SharedReport.tsx</code>, <code>EmbeddedReport.tsx</code></th><td>Public and embedded views</td></tr>
         <tr><th><code>ReportPrint.tsx</code></th><td>Print/PDF layout</td></tr>
         <tr><th><code>Home.tsx</code></th><td>Landing page — recents, dashboards, datasets as card sections</td></tr>
-        <tr><th><code>Dashboard.tsx</code></th><td>The dataset list (route <code>/datasets</code>)</td></tr>
+        <tr><th><code>Dashboard.tsx</code></th><td>The dataset list (route <code>/datasets</code>): each row says what the data is (uploaded, copied from a connection, live, built from other datasets, a summary) and how current, from <code>services/catalog.py</code></td></tr>
         <tr><th><code>AskAI.tsx</code></th><td>The agent's own page — scope picker over <code>ChatPane</code></td></tr>
         <tr><th><code>InsightsHub.tsx</code></th><td>One front door to the analysis capabilities (links into <code>DatasetDetail</code> anchors)</td></tr>
         <tr><th><code>Login.tsx</code>, <code>SsoCallback.tsx</code></th><td>Authentication</td></tr>
@@ -1158,7 +1158,7 @@ llm_reserved_interactive = 2</code></pre>
     <table>
       <thead><tr><th>Suite</th><th>Scope</th><th>Count</th></tr></thead>
       <tbody>
-        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~5,300 tests · 415 modules</td></tr>
+        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~5,300 tests · 416 modules</td></tr>
         <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~2,950 tests · 230 files</td></tr>
         <tr><th>Evals</th><td><code>backend/evals/</code></td><td>Agent quality gates (<code>run_eval_gate.ps1</code>)</td></tr>
         <tr><th>Conformance</th><td><code>tests/test_layer_conformance.py</code></td><td>Enforces the layer boundaries above</td></tr>

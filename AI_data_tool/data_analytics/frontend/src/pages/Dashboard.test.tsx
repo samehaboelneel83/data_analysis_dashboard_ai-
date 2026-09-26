@@ -533,3 +533,40 @@ describe("a dataset's Data tab on a narrow screen (BUG-037)", () => {
     expect(css).not.toMatch(/@media \(min-width[^)]*\) \{\s*\.dl-data-tab/)
   })
 })
+
+describe('one catalog: what each dataset is and how current (E06)', () => {
+  const hoursAgo = (h: number) => new Date(Date.now() - h * 3600_000).toISOString()
+
+  it('says where the rows come from and whether their refresh is keeping up', async () => {
+    vi.mocked(datasetsApi.list).mockResolvedValue([
+      dataset({ id: 1, name: 'sales', catalog: { kind: 'upload', freshness: 'fixed', as_of: hoursAgo(48), next_due: null, refresh_every_minutes: null } }),
+      dataset({ id: 2, name: 'orders copy', catalog: { kind: 'connection', freshness: 'overdue', as_of: hoursAgo(3), next_due: null, refresh_every_minutes: 60, source: 'Warehouse' } }),
+      dataset({ id: 3, name: 'orders live', mode: 'directquery', catalog: { kind: 'live', freshness: 'live', as_of: null, next_due: null, refresh_every_minutes: null, source: 'Warehouse' } }),
+      dataset({ id: 4, name: 'by region', catalog: { kind: 'derived', freshness: 'manual', as_of: hoursAgo(1), next_due: null, refresh_every_minutes: null, built_from: ['sales', 'another dataset'] } }),
+      dataset({ id: 5, name: 'nightly', catalog: { kind: 'connection', freshness: 'due', as_of: hoursAgo(25), next_due: null, refresh_every_minutes: 1440, source: 'ERP' } }),
+    ] as never)
+    renderDashboard()
+    await waitFor(() => expect(screen.getByText('orders copy')).toBeInTheDocument())
+    expect(screen.getByRole('columnheader', { name: 'Data' })).toBeInTheDocument()
+    const cell = (id: number) => screen.getByTestId(`catalog-${id}`)
+    expect(cell(1)).toHaveTextContent('Uploaded file')
+    expect(cell(1)).toHaveTextContent('Uploaded 2 days ago')
+    expect(cell(2)).toHaveTextContent('Copied from Warehouse')
+    expect(cell(2)).toHaveTextContent('Overdue: last refreshed 3 hours ago')
+    expect(within(cell(2)).getByText(/Overdue/).className).toContain('dl-fresh--bad')
+    expect(cell(3)).toHaveTextContent('Live from Warehouse')
+    expect(cell(3)).toHaveTextContent('Always current')
+    expect(cell(4)).toHaveTextContent('Built from sales, another dataset')
+    expect(cell(4)).toHaveTextContent('Refreshed on request, 1 hour ago')
+    expect(within(cell(5)).getByText(/Refresh due/).className).toContain('dl-fresh--warn')
+  })
+
+  it('an older server without the catalog shows when the dataset was created', async () => {
+    vi.mocked(datasetsApi.list).mockResolvedValue([dataset()] as never)
+    renderDashboard()
+    await waitFor(() => expect(screen.getByText('sales')).toBeInTheDocument())
+    expect(screen.getByTestId('catalog-1')).toHaveTextContent('Aug 22, 2026')
+    expect(screen.queryByRole('columnheader', { name: 'Created' })).toBeNull()
+    expect(screen.getByTestId('catalog-1').title).toBe('Created: Aug 22, 2026')
+  })
+})

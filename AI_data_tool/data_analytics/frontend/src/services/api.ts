@@ -142,6 +142,16 @@ export interface CustomFunction {
   expression: string
 }
 
+export interface DatasetCatalog {
+  kind: 'upload' | 'connection' | 'live' | 'derived' | 'aggregate'
+  freshness: 'live' | 'on_schedule' | 'due' | 'overdue' | 'manual' | 'fixed'
+  as_of: string | null
+  next_due: string | null
+  refresh_every_minutes: number | null
+  source?: string
+  built_from?: string[]
+}
+
 export interface Dataset {
   id: number
   name: string
@@ -174,6 +184,8 @@ export interface Dataset {
   // SH1: transient, computed per-viewer -- true when the CURRENT user has an
   // explicit share grant on this dataset (never true for org-wide default read).
   shared?:                   boolean
+  /** E06: on the list only -- what the dataset is and how current. */
+  catalog?:                  DatasetCatalog | null
   /** Transient, resolved per read from the SOURCE catalog through each column's
    *  provenance -- never stored on the dataset, so describing a column once
    *  improves every dataset built from the same table.

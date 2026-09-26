@@ -23,6 +23,8 @@ from ..models.models import Dataset, DatasetColumn
 from . import jobs
 
 MODEL_SCORE_KIND = "model.score"
+#: column_meta key on a scored dataset: the dataset and model version it came from.
+SCORED_BY_KEY = "__scored_by__"
 
 
 @jobs.register(MODEL_SCORE_KIND)
@@ -89,7 +91,11 @@ async def run_score_job(ctx: jobs.JobContext) -> None:
                              f"(job {ctx.job_id}), over the rows of \"{ds_name}\" its author could see."),
                 filename=str(path), row_count=len(frame), col_count=len(frame.columns),
                 file_size=Path(path).stat().st_size, org_id=org_id, created_by=user_id,
-                mode="import", last_refreshed_at=datetime.utcnow())
+                mode="import", last_refreshed_at=datetime.utcnow(),
+                # Where the rows came from, for the catalog and lineage (E06).
+                # Not the prep recipe key: a scoring is not replayable by prep.
+                column_meta={SCORED_BY_KEY: {"source_dataset_id": dataset_id, "model_id": model_id,
+                                             "model_name": name, "version": version, "job_id": ctx.job_id}})
             db.add(scored)
             await db.flush()
             for col, dtype in types.items():

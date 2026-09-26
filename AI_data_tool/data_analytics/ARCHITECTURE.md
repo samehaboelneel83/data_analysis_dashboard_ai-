@@ -2098,7 +2098,7 @@ React 18 · TypeScript · Vite · Recharts.
 | `SharedReport.tsx`, `EmbeddedReport.tsx` | Public and embedded views |
 | `ReportPrint.tsx` | Print/PDF layout |
 | `Home.tsx` | Landing page — recents, dashboards, datasets as card sections |
-| `Dashboard.tsx` | The dataset list (route `/datasets`) |
+| `Dashboard.tsx` | The dataset list (route `/datasets`): each row says what the data is (uploaded, copied from a connection, live, built from other datasets, a summary) and how current, from `services/catalog.py` |
 | `AskAI.tsx` | The agent's own page — scope picker over `ChatPane` |
 | `InsightsHub.tsx` | One front door to the analysis capabilities (links into `DatasetDetail` anchors) |
 | `Login.tsx`, `SsoCallback.tsx` | Authentication |
@@ -2334,7 +2334,7 @@ Agent pane (7)
 
 | Suite | Scope | Count |
 |-------|-------|-------|
-| Backend | `backend/tests/` | ~5,300 tests across 415 modules |
+| Backend | `backend/tests/` | ~5,300 tests across 416 modules |
 | Frontend | colocated `*.test.ts(x)` | ~2,950 tests across 230 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |

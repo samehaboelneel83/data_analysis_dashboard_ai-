@@ -197,6 +197,10 @@ class DatasetOut(BaseModel):
     last_refreshed_at:        Optional[datetime] = None
     aggregate_of_dataset_id: int | None = None
     aggregate_spec: dict | None = None
+    # E06: transient, on the list only -- what the dataset is (upload,
+    # connection copy, live, derived, aggregate) and how current. See
+    # services/catalog.py.
+    catalog: dict | None = None
     # F3: transient — set on the response of a manual refresh when the requested
     # mode fell back (e.g. incremental with no/invalid watermark column). Never
     # persisted; absent on every other read of a dataset.

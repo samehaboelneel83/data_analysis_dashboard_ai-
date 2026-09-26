@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { datasetsApi, DatasetSummary } from '../services/api'
+import { datasetsApi, DatasetSummary, type DatasetCatalog } from '../services/api'
 import {
   ChevronLeft, ChevronRight, Database, HardDrive, Link2, Plug, Plus, Rows,
   Sparkles, Trash2,
@@ -12,7 +12,7 @@ import ActionMenu from '../components/ActionMenu'
 import { useListFilter } from '../components/ui/ListFilter'
 import IconLabel from '../components/ui/IconLabel'
 import LoadError from '../components/ui/LoadError'
-import { useT } from '../i18n'
+import { formatTimeAgo, useT, type TranslateFn } from '../i18n'
 import BulkBar from '../components/ui/BulkBar'
 import { useBulkSelection } from '../lib/useBulkSelection'
 import { looksLikeTestData } from '../lib/testData'
@@ -61,6 +61,30 @@ function fmtDate(s: string) {
  * dashing that would hide a failed upload behind tidy punctuation.
  */
 const NOT_APPLICABLE = '—'
+
+/**
+ * E06: what a dataset is and how current it is, in words (services/catalog.py
+ * decides; this only says it). Names come from the server, which names only
+ * what this reader may see.
+ */
+export function catalogWords(c: DatasetCatalog, t: TranslateFn): { what: string; when: string; tone: 'ok' | 'warn' | 'bad' } {
+  const list = (xs?: string[]) => (xs ?? []).join(', ')
+  const what =
+    c.kind === 'upload' ? t('cat.upload')
+    : c.kind === 'connection' ? (c.source ? t('cat.connection', { source: c.source }) : t('cat.connectionAnon'))
+    : c.kind === 'live' ? (c.source ? t('cat.live', { source: c.source }) : t('cat.liveAnon'))
+    : c.kind === 'aggregate' ? t('cat.aggregate', { sources: list(c.built_from) })
+    : c.built_from?.length ? t('cat.derived', { sources: list(c.built_from) }) : t('cat.derivedAnon')
+  const ago = formatTimeAgo(c.as_of ?? undefined, t) ?? t('fresh.never')
+  const when =
+    c.freshness === 'live' ? t('fresh.live')
+    : c.freshness === 'on_schedule' ? t('fresh.onSchedule', { ago })
+    : c.freshness === 'due' ? t('fresh.due', { ago })
+    : c.freshness === 'overdue' ? t('fresh.overdue', { ago })
+    : c.freshness === 'manual' ? t('fresh.manual', { ago })
+    : t('fresh.fixed', { ago })
+  return { what, when, tone: c.freshness === 'overdue' ? 'bad' : c.freshness === 'due' ? 'warn' : 'ok' }
+}
 const storesItsOwnRows = (d: DatasetSummary) => d.mode !== 'directquery'
 
 /**
@@ -259,7 +283,12 @@ export default function Dashboard() {
                     <th className="dl-table__num">{t('datasets.col.rows')}</th>
                     <th className="dl-table__num">{t('datasets.col.columns')}</th>
                     <th className="dl-table__num">{t('datasets.col.size')}</th>
-                    <th>{t('datasets.col.created')}</th>
+                    {/* E06: where the rows came from and how current -- it took
+                        the place of "Created", which it tells better (an upload
+                        says when it arrived) and which pushed the row menu off
+                        a laptop screen once both were there. The creation date
+                        is the cell's tooltip. */}
+                    <th>{t('datasets.col.data')}</th>
                     <th className="dl-table__actions" aria-label="Actions" />
                   </tr>
                 </thead>
@@ -300,7 +329,19 @@ export default function Dashboard() {
                       <td className="dl-table__num">
                         {storesItsOwnRows(ds) ? fmtBytes(ds.file_size) : NOT_APPLICABLE}
                       </td>
-                      <td className="dl-table__date">{fmtDate(ds.created_at)}</td>
+                      <td data-testid={`catalog-${ds.id}`}
+                        title={`${t('datasets.col.created')}: ${fmtDate(ds.created_at)}`}>
+                        {!ds.catalog && <span className="dl-table__date">{fmtDate(ds.created_at)}</span>}
+                        {ds.catalog && (() => {
+                          const w = catalogWords(ds.catalog, t)
+                          return (
+                            <>
+                              <div className="dl-cell-kind">{w.what}</div>
+                              <div className={`dl-cell-sub dl-fresh dl-fresh--${w.tone}`}>{w.when}</div>
+                            </>
+                          )
+                        })()}
+                      </td>
                       <td className="dl-table__actions">
                         {/* One way in. A red trash icon repeated down every row
                             is an alarm the page rings at itself; delete already
