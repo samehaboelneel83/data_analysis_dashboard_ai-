@@ -181,7 +181,9 @@ export function SchemaBrowser({ ds, onClose, onQueued }: {
                   style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', padding: '5px 8px',
                     background: selected === t.name ? 'color-mix(in srgb, var(--accent) 12%, transparent)' : 'transparent',
                     border: 'none', borderRadius: 5, cursor: 'pointer', textAlign: 'start',
-                    color: selected === t.name ? 'var(--accent)' : 'var(--text)', fontSize: 12 }}>
+                    // The accent INK, not the accent: the brand colour on its own
+                    // 12% tint fell below 4.5:1 (axe, E10).
+                    color: selected === t.name ? 'var(--mc-accent-ink, var(--accent))' : 'var(--text)', fontSize: 12 }}>
                   <span style={{ fontSize: 11, color: 'var(--muted)' }}>{t.kind === 'view' ? <Eye size={11} /> : <Clipboard size={11} />}</span>
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</span>
                 </button>
@@ -210,8 +212,10 @@ export function SchemaBrowser({ ds, onClose, onQueued }: {
               </button>
             </div>
 
-            {/* Preview table */}
-            <div style={{ flex: 1, overflow: 'auto', background: 'var(--surface2)',
+            {/* Preview table. Focusable, so a keyboard user can scroll a
+                preview wider or longer than the dialog (axe, E10). */}
+            <div role="region" aria-label="Preview" tabIndex={0}
+              style={{ flex: 1, overflow: 'auto', background: 'var(--surface2)',
               border: '1px solid var(--border)', borderRadius: 8, marginBottom: 10 }}>
               {pvLoad && <div style={{ padding: 20, color: 'var(--muted)', fontSize: 12 }}>Loading preview…</div>}
               {!pvLoad && !preview && pvError && (
