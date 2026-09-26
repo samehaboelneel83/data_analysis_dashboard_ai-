@@ -70,6 +70,8 @@ def _get_engine():
 
                 url = _sync_database_url(settings.database_url)
                 _sync_engine = create_engine(url, poolclass=NullPool, pool_pre_ping=True)
+                from ..core.database import pin_utc_on_connect
+                pin_utc_on_connect(_sync_engine)
     return _sync_engine
 
 

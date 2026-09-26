@@ -297,6 +297,8 @@ def _get_persist_engine():
 
                 url = _sync_database_url(settings.database_url)
                 _PERSIST_ENGINE = create_engine(url, poolclass=NullPool, pool_pre_ping=True)
+                from ..core.database import pin_utc_on_connect
+                pin_utc_on_connect(_PERSIST_ENGINE)
     return _PERSIST_ENGINE
 
 

@@ -77,12 +77,17 @@ def _do_run_migrations(connection) -> None:
 async def run_migrations_online() -> None:
     configuration = config.get_section(config.config_ini_section) or {}
     configuration["sqlalchemy.url"] = _database_url()
+    from app.core.database import utc_connect_args
     connectable = async_engine_from_config(
         configuration,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        # A backfill that writes a timestamp reads it as UTC too.
+        connect_args=utc_connect_args(configuration["sqlalchemy.url"]),
     )
 
+    from app.core.database import utc_bound_datetimes
+    utc_bound_datetimes(connectable)
     async with connectable.connect() as connection:
         await connection.run_sync(_do_run_migrations)
 
