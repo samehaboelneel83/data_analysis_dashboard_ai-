@@ -2,9 +2,15 @@ import { ScatterChart, Scatter, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Resp
 import { TT, fmtStr } from '../chartUtils'
 import type { ChartRendererProps } from './types'
 import { xAxisProps, yAxisProps, gridProps, labelListProps, chartMargin } from './axisOptions'
+import { thinPoints, ANIMATE_MAX_POINTS } from '../../../lib/pointThinning'
 
-export default function ScatterChartRenderer({ rows, cfg, rtl, broadcasts, onClickPoint, measureFmt, allFormats, ruleStyles, plotH }: ChartRendererProps) {
-  const scatterData = rows.map((r: any) => ({ x: r.x ?? r.name, y: r.y ?? r.value }))
+export default function ScatterChartRenderer({ rows, cfg, rtl, broadcasts, onClickPoint, measureFmt, allFormats, ruleStyles, plotW, plotH }: ChartRendererProps) {
+  const allPoints = rows.map((r: any) => ({ x: r.x ?? r.name, y: r.y ?? r.value }))
+  // Every row is data; only points that would overlap on screen are skipped
+  // when DRAWING (lib/pointThinning). Axis ranges use every point.
+  const { points: scatterData, index: drawnIndex } = thinPoints(allPoints, plotW, plotH)
+  const animate = scatterData.length <= ANIMATE_MAX_POINTS
+  const hasRuleFills = !!ruleStyles?.rows
   const xFmt = allFormats?.[cfg.x_axis]
   const yFmt = allFormats?.[cfg.y_axis] ?? measureFmt
   const grid = gridProps(cfg)
@@ -16,14 +22,16 @@ export default function ScatterChartRenderer({ rows, cfg, rtl, broadcasts, onCli
         <XAxis dataKey="x" type="number" {...xAxisProps(cfg, rtl)} tickFormatter={v => fmtStr(v, xFmt)} />
         {/* allowDecimals forced true after the spread: this axis never set it before, so
             Recharts' own default (true) applied, unlike the builder's false default. */}
-        <YAxis dataKey="y" type="number" {...yAxisProps(cfg, rtl, yFmt, scatterData.map(d => d.y), undefined, { height: plotH })} allowDecimals tickFormatter={v => fmtStr(v, yFmt)} />
+        <YAxis dataKey="y" type="number" {...yAxisProps(cfg, rtl, yFmt, allPoints.map(d => d.y), undefined, { height: plotH })} allowDecimals tickFormatter={v => fmtStr(v, yFmt)} />
         <Tooltip contentStyle={TT} formatter={(v: unknown, name: string) => [fmtStr(v, name === 'x' ? xFmt : yFmt), name]} />
-        <Scatter data={scatterData}
+        <Scatter data={scatterData} isAnimationActive={animate} fill="var(--accent)"
           onClick={broadcasts ? (d: any) => onClickPoint(d.x) : undefined}
           style={{ cursor: broadcasts ? 'pointer' : 'default' }}
         >
-          {scatterData.map((_d, i) => (
-            <Cell key={i} fill={ruleStyles?.rows?.[i]?.fill ?? 'var(--accent)'} />
+          {/* A Cell per point only when display rules colour points: thousands
+              of identical Cells cost a component each and draw the same fill. */}
+          {hasRuleFills && drawnIndex.map((rowIdx, i) => (
+            <Cell key={i} fill={ruleStyles?.rows?.[rowIdx]?.fill ?? 'var(--accent)'} />
           ))}
           {labels && <LabelList {...labels} />}
         </Scatter>

@@ -18,6 +18,8 @@ Nothing here computes a statistic. Nothing here imports scipy.
 from pathlib import Path  # noqa: F401  (kept: SUPPORTED consumers type-check paths)
 
 import numpy as np  # noqa: F401  (re-exported for callers that did `from analytics import np`)
+import warnings
+
 import pandas as pd
 
 
@@ -141,7 +143,12 @@ def detect_types(df: pd.DataFrame) -> dict[str, str]:
             type_map[col] = "datetime"
         else:
             try:
-                parsed = pd.to_datetime(s, infer_datetime_format=True)
+                # pandas 2 always infers the format (the old flag is deprecated),
+                # and warns once per column that falls back to per-value
+                # parsing -- expected here, since this IS the type probe.
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", UserWarning)
+                    parsed = pd.to_datetime(s)
                 if parsed.notna().sum() / max(len(s), 1) > 0.8:
                     df[col] = parsed
                     type_map[col] = "datetime"

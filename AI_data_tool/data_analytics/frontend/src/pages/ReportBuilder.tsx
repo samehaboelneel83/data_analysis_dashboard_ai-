@@ -325,6 +325,17 @@ export default function ReportBuilder() {
   // of a drag that is `{}`, so `Object.keys(layouts).length` was 0 and the
   // move was silently dropped instead of saved.
   const commitLocalLayouts = useCallback((next: Record<number, Widget['layout']>) => {
+    // A drag fires on every pointer move, but the grid only changes when the
+    // pointer crosses a cell. Re-rendering the whole builder for an identical
+    // layout made drag/resize stutter (QA 2026-09-26), so an unchanged grid
+    // is not committed.
+    const prev = localLayoutsRef.current
+    const same = prev && Object.keys(prev).length === Object.keys(next).length
+      && Object.entries(next).every(([id, l]) => {
+        const p = (prev as Record<string, Widget['layout']>)[id] as any, n = l as any
+        return p && n && p.x === n.x && p.y === n.y && p.w === n.w && p.h === n.h
+      })
+    if (same) return
     localLayoutsRef.current = next
     setLocalLayouts(next)
   }, [])
@@ -3662,7 +3673,9 @@ export default function ReportBuilder() {
               {rightPanelMode === 'default' && (
                 <>
                   <div style={{ padding:'9px 13px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between', gap:8 }}>
-                    <span style={{ fontSize:12, fontWeight:600, color:'var(--text)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                    <span data-autodir-text
+                      title={selectedW ? (selectedW.title || selectedW.widget_type) : (activePage?.name ?? '')}
+                      style={{ fontSize:12, fontWeight:600, color:'var(--text)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                       {selectedW
                         ? `Widget: ${selectedW.title || WIDGET_CATALOG.find(w => w.type === selectedW.widget_type)?.label || selectedW.widget_type}`
                         : `Page: ${activePage?.name ?? ''}`}

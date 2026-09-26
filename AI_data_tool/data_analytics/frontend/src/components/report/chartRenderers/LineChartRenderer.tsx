@@ -4,6 +4,7 @@ import type { ChartRendererProps } from './types'
 import { computeAnalyticsLines } from './analyticsLines'
 import { xAxisProps, yAxisProps, gridProps, labelListProps, brushProps, chartMargin } from './axisOptions'
 import { seriesName } from './axisOptions'
+import { ANIMATE_MAX_POINTS } from '../../../lib/pointThinning'
 
 export default function LineChartRenderer({ rows, data, cfg, rtl, broadcasts, onClickPoint, measureFmt, plotW, plotH, onBrushChange }: ChartRendererProps) {
   const analyticsLines = computeAnalyticsLines(rows, cfg.analytics)
@@ -22,8 +23,12 @@ export default function LineChartRenderer({ rows, data, cfg, rtl, broadcasts, on
         <Tooltip contentStyle={TT} formatter={(v: unknown) => [fmtStr(v, measureFmt), seriesName(cfg)]}
           labelFormatter={(l: unknown) => data?.partial_period?.label != null && String(l) === data.partial_period.label
             ? `${String(l)} (partial — data to ${data.partial_period.through})` : String(l)} />
+        {/* Past a few hundred points a dot per point is a solid band and a
+            DOM node each; the line alone reads the same, and the hover dot
+            still marks the point under the pointer. */}
         <Line type="monotone" dataKey="value" stroke="var(--accent)" strokeWidth={2}
-          dot={{ fill: 'var(--accent)', r: 3 }}
+          isAnimationActive={rows.length <= ANIMATE_MAX_POINTS}
+          dot={rows.length <= ANIMATE_MAX_POINTS ? { fill: 'var(--accent)', r: 3 } : false}
           activeDot={{ r: 5, fill: 'var(--accent)', stroke: '#fff', strokeWidth: 2 }}
         >
           {labels && <LabelList {...labels} />}

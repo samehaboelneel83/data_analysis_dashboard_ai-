@@ -73,6 +73,63 @@ def _config_names(config: dict, name: str) -> bool:
     return False
 
 
+
+class _DirectQueryCalcView:
+    """Read-only stand-in for a DirectQuery Dataset whose base query carries
+    calculated columns as extra SELECT layers. Everything but `columns` and
+    `source_query` is the real dataset's; nothing is written to the ORM row
+    (appending to `Dataset.columns` would INSERT a dataset_columns row)."""
+
+    def __init__(self, ds, source_query: str, extra_columns: list, calc_reads: set[str]):
+        self._ds = ds
+        self.source_query = source_query
+        self.columns = list(ds.columns) + extra_columns
+        self.calc_reads = calc_reads
+
+    def __getattr__(self, name):
+        return getattr(self._ds, name)
+
+
+def _directquery_calc_view(ds, calc_cols: list, used: list[str]):
+    from types import SimpleNamespace
+    from ..services.direct_query import _base_query_sql, _quote
+    from ..services.sql_expr import ExpressionTranslationError, calc_column_to_sql
+    try:
+        from ..services.custom_functions import expand_custom_functions
+    except ImportError:  # pragma: no cover
+        expand_custom_functions = None
+    known = {c.name for c in ds.columns}
+    by_name = {c.get("name"): c for c in calc_cols if isinstance(c, dict) and c.get("name")}
+    sql = _base_query_sql(ds)
+    extra: list = []
+    reads: set[str] = set()
+    # Declaration order, so a column may build on an earlier one. A calc column
+    # the widget does not need is still layered when a used one depends on it;
+    # a broken unused one is simply left out.
+    needed = set(used)
+    for name, col in reversed(list(by_name.items())):
+        if name in needed:
+            needed |= set(re.findall(r"`([^`]+)`", col.get("expression") or "")) & set(by_name)
+            needed |= {n for n in by_name if re.search(r"\b" + re.escape(n) + r"\b", col.get("expression") or "")}
+    for name, col in by_name.items():
+        if name not in needed or name in known:
+            continue
+        expr = (col.get("expression") or "").strip()
+        if expand_custom_functions and getattr(ds, "custom_functions", None):
+            expr = expand_custom_functions(expr, ds.custom_functions)
+        try:
+            col_sql, used_cols = calc_column_to_sql(expr, known)
+        except ExpressionTranslationError as e:
+            raise widget_error(400, "unsupported",
+                               f"Calculated column '{name}' can't run on this live (DirectQuery) "
+                               f"source yet: {e}. Switch the dataset to Import, or simplify the formula.")
+        reads |= set(used_cols) - set(by_name)
+        sql = f"SELECT calc_src.*, {col_sql} AS {_quote(name)} FROM ({sql}) AS calc_src"
+        is_bool = bool(re.search(r"(==|!=|<|>|\bin\b|\band\b|\bor\b|\bnot\b)", expr, re.I)) and not expr.upper().startswith("IF(")
+        extra.append(SimpleNamespace(name=name, dtype="boolean" if is_bool else "numeric"))
+        known.add(name)
+    return _DirectQueryCalcView(ds, sql, extra, reads)
+
 def _config_uses_measure(config: dict, measures: list[dict]) -> bool:
     """True when any role in the widget config names a dataset measure. Checked so a
     DirectQuery dataset fails loudly rather than silently falling back to a column."""
@@ -234,8 +291,17 @@ async def _resolve_widget_data(
     measure_defs = list(ds.measures or [])
 
     if ds.mode == "directquery":
-        if calc_cols:
-            raise widget_error(400, "unsupported", "Calculated columns are not yet supported for DirectQuery datasets")
+        # Calculated columns the widget uses are computed BY THE SOURCE: each
+        # one becomes a SELECT layer over the dataset's base query (see
+        # services/sql_expr.calc_column_to_sql). Ones the widget never names
+        # are skipped -- they cannot change its SQL (QA 2026-09-26).
+        dq_ds = ds
+        used_calc = sorted({c.get("name") for c in calc_cols
+                            if isinstance(c, dict) and c.get("name")
+                            and (_config_names(req.config or {}, c["name"])
+                                 or _config_names(getattr(req, "filters", None) or [], c["name"]))})
+        if used_calc:
+            dq_ds = _directquery_calc_view(ds, calc_cols, used_calc)
         if ds.default_filter_expr:
             raise widget_error(400, "unsupported", "Report-level filter expressions are not yet supported for DirectQuery datasets")
 
@@ -286,6 +352,8 @@ async def _resolve_widget_data(
                     stack.extend(node)
             if referenced & set(denied):
                 raise widget_error(403, "forbidden_column", "This widget references a column your role cannot access")
+            if getattr(dq_ds, "calc_reads", None) and set(dq_ds.calc_reads) & set(denied):
+                raise widget_error(403, "forbidden_column", "This widget references a column your role cannot access")
             # A measure the widget names reads columns its config never
             # mentions: the SQL is built from the measure's formula, so a
             # formula over a denied column is refused the same way (E04).
@@ -305,7 +373,7 @@ async def _resolve_widget_data(
             async with _work_gate():
                 return await asyncio.to_thread(
                     run_direct_query,
-                    source_cfg, ds, req.config, widget_type=req.widget_type, rls_filter_expr=rls_filter_expr,
+                    source_cfg, dq_ds, req.config, widget_type=req.widget_type, rls_filter_expr=rls_filter_expr,
                     cache_ttl_seconds=source.cache_ttl_seconds, cache_epoch=source.cache_epoch,
                     org_id=current_user.org_id, drop_columns=denied or None,
                     measures=measure_defs or None,

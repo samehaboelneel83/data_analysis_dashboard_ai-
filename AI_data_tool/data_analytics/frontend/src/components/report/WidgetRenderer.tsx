@@ -133,6 +133,14 @@ function widgetFetchesData(widgetType: string, config: unknown, dataOverride: un
 
 type FilterLikeLocal = { column: string; op?: string; value: unknown; granularity?: string }
 
+
+/** True when a pointer event started on an interactive control inside a
+ *  widget header, so the header's drag handler must leave it alone. */
+function isHeaderControl(target: EventTarget | null): boolean {
+  return target instanceof Element
+    && !!target.closest('button, a, input, select, textarea, [role="menu"], [role="menuitem"], .dl-whead__ctl')
+}
+
 function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, geography, datasets, selected, isMultiSelected, onSelect, onDelete, onDuplicate, editMode, promptFilter, onDragStart, onResizeStart, isDragging, onFetchComplete, pages, reportDisplayRules, reportFilters, onDrillthrough, isPreview, hierarchy, bookmarks, onNavigateToPage, onApplyBookmark, reportId, parameters, onSetParameter, dataOverride, relationships, eagerFetch, allowExport = true, refreshNonce }: Props) {
   const { emitFilter, emitMultiFilter, getFiltersFor, canBroadcast, canReceive, activeFilters, clearAllFilters, clearFilter, interactions, getReceiveMode, carryFiltersTo } = useCrossFilter()
   const [data,    setData]    = useState<any>(null)
@@ -881,8 +889,16 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
     >
       {/* Header — drag handle in edit mode */}
       <div
-        onMouseDown={editMode && onDragStart ? e => { e.stopPropagation(); onDragStart(e) } : undefined}
+        // A press that starts on one of the header's own controls (delete, the
+        // ⋮ menu, drill-through, hierarchy arrows) is a click, not a drag. The
+        // pointer capture below otherwise retargets the release -- and so the
+        // click -- to this div, and the buttons never fire (QA 2026-09-26).
+        onMouseDown={editMode && onDragStart ? e => {
+          if (isHeaderControl(e.target)) return
+          e.stopPropagation(); onDragStart(e)
+        } : undefined}
         onPointerDown={editMode && onDragStart ? e => {
+          if (isHeaderControl(e.target)) return
           e.stopPropagation()
           try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* jsdom */ }
           onDragStart(e)
@@ -908,7 +924,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
             wrap to four lines in a quarter-width tile and pushed the chart
             below the fold of its own card. */}
         <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-          <span role="heading" aria-level={3} title={title}
+          <span role="heading" aria-level={3} title={title} dir="auto"
             style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.3, color: 'var(--text)', minWidth: 0,
               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span>
           {typeof cfg.subtitle === 'string' && cfg.subtitle && (

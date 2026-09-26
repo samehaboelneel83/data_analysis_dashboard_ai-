@@ -72,7 +72,7 @@ export default function InsightsPane({ datasetId, columnTypes, onAdd, reportId, 
       // correlation "Chart it" rendered empty until now.
       return { widget_type: 'scatter', title: f.title, reason: '',
         config: { dimension: nums[0], measure: nums[1], aggregation: 'avg',
-                  limit: 250, sort: 'asc', sort_by: 'name' } }
+                  sort: 'asc', sort_by: 'name' } }
     }
     if (nums.length === 1) {
       return { widget_type: 'histogram', title: f.title, reason: '',

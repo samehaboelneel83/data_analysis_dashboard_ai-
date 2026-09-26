@@ -226,3 +226,70 @@ def translate_filter_expr_null_safe(expr: str, known_columns: set[str]) -> tuple
         raise ExpressionTranslationError(
             "negation is not null-safe across engines (!=, not in, not)")
     return sql, translator.params
+
+
+# ---------------------------------------------------------------------------
+# Calculated columns on DirectQuery (QA 2026-09-26)
+# ---------------------------------------------------------------------------
+# A calculated column is a per-row expression -- the same grammar as a row
+# filter, plus arithmetic and IF(). On a DirectQuery dataset there are no rows
+# in this process, so the column is written as SQL and computed by the source,
+# as one more SELECT layer over the dataset's base query. Literals are inlined
+# (numbers via repr, strings with quotes doubled) instead of bound: the layer
+# becomes part of the dataset's source_query, and binds would collide with the
+# RLS and filter parameters the builder adds later. Anything without an exact
+# SQL meaning raises ExpressionTranslationError and the widget is refused with
+# the reason -- never computed by a different formula.
+
+class _CalcTranslator(_Translator):
+    def _param(self, value) -> str:
+        if value is None:
+            return "NULL"
+        if isinstance(value, bool):
+            return "1" if value else "0"
+        if isinstance(value, (int, float)):
+            if value != value or value in (float("inf"), float("-inf")):
+                raise ExpressionTranslationError("a non-finite number")
+            return repr(value)
+        if isinstance(value, str):
+            return "'" + value.replace("'", "''") + "'"
+        raise ExpressionTranslationError(f"a {type(value).__name__} literal")
+
+    def translate(self, node: ast.AST) -> str:
+        # Division: pandas never integer-divides and yields NaN on /0.
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+            return (f"(1.0 * {self.translate(node.left)} / "
+                    f"NULLIF({self.translate(node.right)}, 0))")
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and not node.keywords:
+            name, args = node.func.id, node.args
+            if name.upper() == "IF" and len(args) == 3:
+                c, a, b = (self.translate(x) for x in args)
+                return f"(CASE WHEN {c} THEN {a} ELSE {b} END)"
+            if name.lower() == "abs" and len(args) == 1:
+                return f"ABS({self.translate(args[0])})"
+            if name.lower() == "round" and len(args) in (1, 2):
+                digits = self.translate(args[1]) if len(args) == 2 else "0"
+                return f"ROUND({self.translate(args[0])}, {digits})"
+            raise ExpressionTranslationError(f"{name}() has no SQL translation yet")
+        return super().translate(node)
+
+
+def calc_column_to_sql(expr: str, known_columns: set[str]) -> tuple[str, list[str]]:
+    """`(sql, columns_used)` for a calculated-column expression, or
+    ExpressionTranslationError."""
+    if not expr or not expr.strip():
+        raise ExpressionTranslationError("empty expression")
+    normalized = re.sub(r"\bAND\b", "and", expr, flags=re.IGNORECASE)
+    normalized = re.sub(r"\bOR\b", "or", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\bNOT\b", "not", normalized, flags=re.IGNORECASE)
+    try:
+        _validate_expr_safety(normalized)
+    except ValueError as e:
+        raise ExpressionTranslationError(str(e)) from e
+    processed, backtick_map = _extract_backticked_columns(normalized)
+    try:
+        tree = ast.parse(processed, mode="eval")
+    except SyntaxError as e:
+        raise ExpressionTranslationError(f"expression is not valid: {e}") from e
+    t = _CalcTranslator(known_columns, backtick_map)
+    return t.translate(tree), list(t.used_columns)

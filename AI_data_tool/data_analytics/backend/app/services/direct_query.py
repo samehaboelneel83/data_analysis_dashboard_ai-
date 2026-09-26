@@ -124,7 +124,7 @@ class QueryPlan:
     meas: str
     agg: str
     filters: list[dict] = field(default_factory=list)
-    limit: int = 50
+    limit: int = 10_000  # full data by default; see widget_data.FULL_DATA_LIMIT
     sort_desc: bool = True
     sort_by_dim: bool = False
     #: A named measure written as SQL (services/measure_sql.py). When set, the
@@ -179,7 +179,7 @@ def plan_query(config: dict, widget_type: str, measure_is_def: bool = False) -> 
 
     return QueryPlan(
         dim=dim, meas=meas, agg=agg, filters=filters,
-        limit=int(config.get("limit") or 50),
+        limit=int(config.get("limit") or 10_000),
         sort_desc=(config.get("sort") or "desc").lower() != "asc",
         sort_by_dim=(sort_by == "name") or bool(sort_col),
     )
