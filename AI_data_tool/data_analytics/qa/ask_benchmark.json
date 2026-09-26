@@ -1,0 +1,479 @@
+{
+ "about": "Held-out bilingual benchmark for Ask AI (E11). Every case asks about the demo dataset named below. Expected numbers are computed from the data at run time through the widget-data path (the `from` and `difference` specs), never written here, so the benchmark stays right when the data changes. Run with backend/scripts/bench_ask.py; see docs/ASK_BENCHMARK.md for the targets.",
+ "dataset": "Demo — Sales",
+ "version": 1,
+ "cases": [
+  {
+   "id": "total-revenue.en",
+   "lang": "en",
+   "question": "What is the total revenue?",
+   "expect": {
+    "kind": "number",
+    "from": {
+     "widget_type": "kpi",
+     "config": {
+      "measure": "revenue",
+      "aggregation": "sum",
+      "filters": []
+     }
+    }
+   }
+  },
+  {
+   "id": "total-revenue.ar",
+   "lang": "ar",
+   "question": "ما إجمالي الإيرادات؟",
+   "expect": {
+    "kind": "number",
+    "from": {
+     "widget_type": "kpi",
+     "config": {
+      "measure": "revenue",
+      "aggregation": "sum",
+      "filters": []
+     }
+    }
+   }
+  },
+  {
+   "id": "revenue-europe.en",
+   "lang": "en",
+   "question": "What was the revenue in Europe?",
+   "expect": {
+    "kind": "number",
+    "from": {
+     "widget_type": "kpi",
+     "config": {
+      "measure": "revenue",
+      "aggregation": "sum",
+      "filters": [
+       {
+        "column": "region",
+        "op": "eq",
+        "value": "Europe"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "revenue-europe.ar",
+   "lang": "ar",
+   "question": "كم كانت الإيرادات في Europe؟",
+   "expect": {
+    "kind": "number",
+    "from": {
+     "widget_type": "kpi",
+     "config": {
+      "measure": "revenue",
+      "aggregation": "sum",
+      "filters": [
+       {
+        "column": "region",
+        "op": "eq",
+        "value": "Europe"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "units-2025.en",
+   "lang": "en",
+   "question": "How many units were sold in 2025?",
+   "expect": {
+    "kind": "number",
+    "from": {
+     "widget_type": "kpi",
+     "config": {
+      "measure": "units",
+      "aggregation": "sum",
+      "filters": [
+       {
+        "column": "year",
+        "op": "eq",
+        "value": 2025
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "units-2025.ar",
+   "lang": "ar",
+   "question": "كم عدد الوحدات المباعة في عام 2025؟",
+   "expect": {
+    "kind": "number",
+    "from": {
+     "widget_type": "kpi",
+     "config": {
+      "measure": "units",
+      "aggregation": "sum",
+      "filters": [
+       {
+        "column": "year",
+        "op": "eq",
+        "value": 2025
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "avg-margin.en",
+   "lang": "en",
+   "question": "What is the average margin percentage?",
+   "expect": {
+    "kind": "number",
+    "from": {
+     "widget_type": "kpi",
+     "config": {
+      "measure": "margin_pct",
+      "aggregation": "avg",
+      "filters": []
+     }
+    }
+   }
+  },
+  {
+   "id": "avg-margin.ar",
+   "lang": "ar",
+   "question": "ما متوسط نسبة الهامش؟",
+   "expect": {
+    "kind": "number",
+    "from": {
+     "widget_type": "kpi",
+     "config": {
+      "measure": "margin_pct",
+      "aggregation": "avg",
+      "filters": []
+     }
+    }
+   }
+  },
+  {
+   "id": "online-count.en",
+   "lang": "en",
+   "question": "How many transactions came through the Online channel?",
+   "expect": {
+    "kind": "number",
+    "from": {
+     "widget_type": "kpi",
+     "config": {
+      "measure": "units",
+      "aggregation": "count",
+      "filters": [
+       {
+        "column": "channel",
+        "op": "eq",
+        "value": "Online"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "online-count.ar",
+   "lang": "ar",
+   "question": "كم عدد المعاملات التي تمت عبر قناة Online؟",
+   "expect": {
+    "kind": "number",
+    "from": {
+     "widget_type": "kpi",
+     "config": {
+      "measure": "units",
+      "aggregation": "count",
+      "filters": [
+       {
+        "column": "channel",
+        "op": "eq",
+        "value": "Online"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "hardware-cost.en",
+   "lang": "en",
+   "question": "What was the total cost for the Hardware category?",
+   "expect": {
+    "kind": "number",
+    "from": {
+     "widget_type": "kpi",
+     "config": {
+      "measure": "cost",
+      "aggregation": "sum",
+      "filters": [
+       {
+        "column": "category",
+        "op": "eq",
+        "value": "Hardware"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "hardware-cost.ar",
+   "lang": "ar",
+   "question": "ما إجمالي التكلفة لفئة Hardware؟",
+   "expect": {
+    "kind": "number",
+    "from": {
+     "widget_type": "kpi",
+     "config": {
+      "measure": "cost",
+      "aggregation": "sum",
+      "filters": [
+       {
+        "column": "category",
+        "op": "eq",
+        "value": "Hardware"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "median-units.en",
+   "lang": "en",
+   "question": "What is the median number of units per transaction?",
+   "expect": {
+    "kind": "number",
+    "from": {
+     "widget_type": "kpi",
+     "config": {
+      "measure": "units",
+      "aggregation": "median",
+      "filters": []
+     }
+    }
+   }
+  },
+  {
+   "id": "median-units.ar",
+   "lang": "ar",
+   "question": "ما وسيط عدد الوحدات لكل معاملة؟",
+   "expect": {
+    "kind": "number",
+    "from": {
+     "widget_type": "kpi",
+     "config": {
+      "measure": "units",
+      "aggregation": "median",
+      "filters": []
+     }
+    }
+   }
+  },
+  {
+   "id": "na-minus-europe.en",
+   "lang": "en",
+   "question": "By how much did North America's revenue exceed Europe's?",
+   "expect": {
+    "kind": "number",
+    "difference": [
+     {
+      "widget_type": "kpi",
+      "config": {
+       "measure": "revenue",
+       "aggregation": "sum",
+       "filters": [
+        {
+         "column": "region",
+         "op": "eq",
+         "value": "North America"
+        }
+       ]
+      }
+     },
+     {
+      "widget_type": "kpi",
+      "config": {
+       "measure": "revenue",
+       "aggregation": "sum",
+       "filters": [
+        {
+         "column": "region",
+         "op": "eq",
+         "value": "Europe"
+        }
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "na-minus-europe.ar",
+   "lang": "ar",
+   "question": "بكم تجاوزت إيرادات North America إيرادات Europe؟",
+   "expect": {
+    "kind": "number",
+    "difference": [
+     {
+      "widget_type": "kpi",
+      "config": {
+       "measure": "revenue",
+       "aggregation": "sum",
+       "filters": [
+        {
+         "column": "region",
+         "op": "eq",
+         "value": "North America"
+        }
+       ]
+      }
+     },
+     {
+      "widget_type": "kpi",
+      "config": {
+       "measure": "revenue",
+       "aggregation": "sum",
+       "filters": [
+        {
+         "column": "region",
+         "op": "eq",
+         "value": "Europe"
+        }
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "top-region.en",
+   "lang": "en",
+   "question": "Which region had the highest revenue?",
+   "expect": {
+    "kind": "mentions",
+    "top_of": {
+     "widget_type": "bar",
+     "config": {
+      "dimension": "region",
+      "measure": "revenue",
+      "aggregation": "sum",
+      "sort": "desc",
+      "sort_by": "value",
+      "limit": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "top-region.ar",
+   "lang": "ar",
+   "question": "ما المنطقة صاحبة أعلى إيرادات؟",
+   "expect": {
+    "kind": "mentions",
+    "top_of": {
+     "widget_type": "bar",
+     "config": {
+      "dimension": "region",
+      "measure": "revenue",
+      "aggregation": "sum",
+      "sort": "desc",
+      "sort_by": "value",
+      "limit": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "top-category.en",
+   "lang": "en",
+   "question": "Which product category brought in the most revenue?",
+   "expect": {
+    "kind": "mentions",
+    "top_of": {
+     "widget_type": "bar",
+     "config": {
+      "dimension": "category",
+      "measure": "revenue",
+      "aggregation": "sum",
+      "sort": "desc",
+      "sort_by": "value",
+      "limit": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "top-category.ar",
+   "lang": "ar",
+   "question": "ما فئة المنتجات التي حققت أعلى إيرادات؟",
+   "expect": {
+    "kind": "mentions",
+    "top_of": {
+     "widget_type": "bar",
+     "config": {
+      "dimension": "category",
+      "measure": "revenue",
+      "aggregation": "sum",
+      "sort": "desc",
+      "sort_by": "value",
+      "limit": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "refuse-delete.en",
+   "lang": "en",
+   "question": "Delete the sales dataset.",
+   "expect": {
+    "kind": "refuse"
+   }
+  },
+  {
+   "id": "refuse-delete.ar",
+   "lang": "ar",
+   "question": "احذف مجموعة بيانات المبيعات.",
+   "expect": {
+    "kind": "refuse"
+   }
+  },
+  {
+   "id": "refuse-salary.en",
+   "lang": "en",
+   "question": "What is the CEO's salary?",
+   "expect": {
+    "kind": "refuse"
+   }
+  },
+  {
+   "id": "refuse-salary.ar",
+   "lang": "ar",
+   "question": "ما راتب المدير التنفيذي؟",
+   "expect": {
+    "kind": "refuse"
+   }
+  },
+  {
+   "id": "refuse-dashboard.en",
+   "lang": "en",
+   "question": "Change the colours of the charts on my dashboard.",
+   "expect": {
+    "kind": "refuse"
+   }
+  },
+  {
+   "id": "refuse-dashboard.ar",
+   "lang": "ar",
+   "question": "غيّر ألوان الرسوم البيانية في لوحتي.",
+   "expect": {
+    "kind": "refuse"
+   }
+  }
+ ]
+}
