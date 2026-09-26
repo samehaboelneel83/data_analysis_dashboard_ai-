@@ -414,6 +414,35 @@ async def query_widget(
     return await _resolve_widget_data(dataset_id, req, db, current_user)
 
 
+def _export_frame(data: dict, config: dict):
+    """The widget's table as the reader sees it (E08).
+
+    - the row subtotal column is headed "Total", not its internal name;
+    - the totals row the widget draws is the file's last row, in the scope
+      the widget shows ("shown" or every row), labelled "Total" -- a file
+      without the totals the screen showed is a different table;
+    - a heatmap, which is a grid too, exports as its grid: it had no table
+      the export could find, so it could not be downloaded at all.
+    """
+    import pandas as pd
+    frame = result_frame(data)
+    if frame is None and data.get("type") == "heatmap" and data.get("cells"):
+        label = config.get("dimension") or (config.get("roles") or {}).get("category") or "category"
+        frame = pd.DataFrame([[r, *cells] for r, cells in zip(data.get("rows_axis") or [], data["cells"])],
+                             columns=[str(label), *[str(c) for c in data.get("cols_axis") or []]])
+    if frame is None:
+        return None
+    frame = frame.rename(columns={"__total__": "Total"})
+    totals = data.get("totals_shown") if config.get("totals_scope") == "shown" \
+        and isinstance(data.get("totals_shown"), list) else data.get("totals")
+    if isinstance(totals, list) and len(totals) == len(frame.columns):
+        row = list(totals)
+        if row[0] is None:
+            row[0] = "Total"
+        frame = pd.concat([frame, pd.DataFrame([row], columns=frame.columns)], ignore_index=True)
+    return frame
+
+
 @router.post("/{dataset_id}/widget-data/export")
 async def export_widget(
     dataset_id: int, req: WidgetDataRequest, format: str = "csv",
@@ -447,7 +476,7 @@ async def export_widget(
     # result_frame is the display-rules engine's own lifter, so it already understands
     # every shaped result the app produces -- table, crosstab, gauge, waterfall and the
     # generic {name, value} rows -- rather than a second interpretation that would drift.
-    frame = result_frame(data)
+    frame = _export_frame(data, req.config or {})
     if frame is None or frame.empty:
         raise widget_error(400, "export_no_data", "This widget has no tabular data to export")
 

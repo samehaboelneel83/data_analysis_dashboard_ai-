@@ -1008,7 +1008,10 @@ def _fetch_and_compute(
 #: Config keys whose meaning needs every group, or the raw rows, after
 #: aggregation -- see `_needs_rows`.
 _ROW_LEVEL_KEYS = ("having", "suppress_below", "quick_calc", "sort_custom",
-                   "dimension_levels", "dimension_granularity", "running")
+                   "dimension_levels", "dimension_granularity", "running",
+                   # A crosstab (E08): its grid is the import shaper's. The
+                   # no-measure count path below refused it outright.
+                   "dimension2")
 
 
 def _needs_rows(config: dict) -> bool:

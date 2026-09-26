@@ -29,6 +29,13 @@ export function missingCategorySentence(rows: number, dimension?: string): strin
   return `${rows.toLocaleString()} row${one ? '' : 's'} with no ${dimension || 'category'} ${one ? 'is' : 'are'} not shown`
 }
 
+/** E08: cells a grid left blank because too few rows stand behind them. */
+export function suppressedCellsSentence(cells: number, below: number): string {
+  const one = cells === 1
+  const why = below > 0 ? `: fewer than ${below.toLocaleString()} rows each` : ''
+  return `${cells.toLocaleString()} cell${one ? '' : 's'} hidden${one ? why.replace(' each', '') : why}`
+}
+
 export function TruncationNote({ t, dimension, onShowMore }:
   { t: Truncation; dimension?: string; onShowMore?: (limit: number) => void }) {
   if (!t?.applied) return null

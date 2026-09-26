@@ -675,7 +675,8 @@ function WindowedTable({ rtl, cfg, data, cols: inCols, rows: inRows, ruleStyles,
         <thead>
           <tr>
             {rowNumbers && <th>#</th>}
-            {cols.map((c: string) => <th key={c} style={{ padding: cellPad }}>{c}</th>)}
+            {/* `__total__` is the grid's row subtotal: its name on screen is "Total". */}
+            {cols.map((c: string) => <th key={c} style={{ padding: cellPad }}>{c === '__total__' ? 'Total' : c}</th>)}
             {showSpark && <th style={{ padding: cellPad }}>Trend</th>}
           </tr>
           {totalsBefore && totalsRowEl}

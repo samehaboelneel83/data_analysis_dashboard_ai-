@@ -21,7 +21,7 @@ import { ASSIGN_DATA_EVENT, missingRequiredRoles } from './WidgetPlaceholder'
 
 /** Charts whose bars/points are groups of rows two of which can be tested (Phase 7.2). */
 const DIFFERENCE_TYPES: string[] = ['bar', 'line', 'area', 'pie', 'donut', 'dot_plot', 'step', 'treemap', 'funnel']
-import { TruncationNote, PATCH_WIDGET_EVENT, missingCategorySentence } from './TruncationNote'
+import { TruncationNote, PATCH_WIDGET_EVENT, missingCategorySentence, suppressedCellsSentence } from './TruncationNote'
 export { CustomVisual } from './CustomVisual'
 
 const PREVIEW_W = 320
@@ -1135,7 +1135,16 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
       {!loading && !hiddenByRule && (data?.missing_category?.rows ?? 0) > 0 && missingRequiredRoles(widget).length === 0 && (
         <div data-testid="missing-category-note" role="note"
           style={{ fontSize: 10.5, color: 'var(--muted)', padding: '2px 8px 4px', lineHeight: 1.3 }}>
-          {missingCategorySentence(data.missing_category.rows, data.dimension ?? data.category)}
+          {missingCategorySentence(data.missing_category.rows,
+            Array.isArray(data.missing_category.columns) ? data.missing_category.columns.join(' or ') : (data.dimension ?? data.category))}
+        </div>
+      )}
+
+      {/* E08: a grid's small cells are blank, and the reader is told why. */}
+      {!loading && !hiddenByRule && (data?.suppressed_cells ?? 0) > 0 && (
+        <div data-testid="suppressed-cells-note" role="note"
+          style={{ fontSize: 10.5, color: 'var(--muted)', padding: '2px 8px 4px', lineHeight: 1.3 }}>
+          {suppressedCellsSentence(data.suppressed_cells, Number((widget.config as { suppress_below?: unknown }).suppress_below) || 0)}
         </div>
       )}
 

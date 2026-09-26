@@ -1067,7 +1067,7 @@ describe('WidgetRenderer totals placement and basis', () => {
 
     const totalsRow = await screen.findByTestId('table-totals-row')
     expect(totalsRow.closest('tfoot')).not.toBeNull()
-    expect(container.querySelectorAll('thead th')[3]).toHaveTextContent('__total__')
+    expect(container.querySelectorAll('thead th')[3]).toHaveTextContent(/^Total$/)
   })
 
   it("puts the row subtotal column before the value columns when placement is 'before'", async () => {
@@ -1075,7 +1075,7 @@ describe('WidgetRenderer totals placement and basis', () => {
 
     await screen.findByTestId('table-totals-row')
     const headers = [...container.querySelectorAll('thead th')].map(th => th.textContent)
-    expect(headers).toEqual(['region', '__total__', 'Q1', 'Q2'])
+    expect(headers).toEqual(['region', 'Total', 'Q1', 'Q2'])
     // Cells and totals move with their header, not just the header.
     const firstRow = [...container.querySelectorAll('tbody tr')[0].querySelectorAll('td')].map(td => td.textContent)
     expect(firstRow).toEqual(['A', '30', '15', '60'])

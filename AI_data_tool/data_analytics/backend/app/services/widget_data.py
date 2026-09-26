@@ -481,6 +481,294 @@ def _apply_filters(df: pd.DataFrame, filters: list[dict]) -> pd.DataFrame:
     return df
 
 
+#: Aggregations whose value over no rows is 0: an intersection with no rows
+#: reads 0 for these (a count of nothing, a sum of nothing) and is BLANK for
+#: every other (an average, a median, a ratio of nothing is not zero).
+_GRID_ZERO_WHEN_EMPTY = frozenset({"sum", "count", "frequency", "countd", "distinct", "pct"})
+_GRID_OTHER = -1
+
+
+def _grid_int(value) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _grid_complement(hidden: set, counts: "pd.Series", values: "pd.Series") -> set:
+    """Complementary suppression for a grid: wherever a row or a column has
+    exactly one hidden cell and at least one visible one, its smallest visible
+    cell is hidden too -- otherwise a row or column total from anywhere else
+    on the page, minus the visible cells, gives the hidden value back. Repeated
+    until nothing changes, because each new hidden cell can leave another row
+    or column with exactly one."""
+    hidden = set(hidden)
+    cells = list(counts.index)
+
+    def size(c):
+        v = values.get(c)
+        try:
+            f = abs(float(v))
+            return f if f == f else float("inf")
+        except (TypeError, ValueError):
+            return float("inf")
+
+    changed = True
+    while changed:
+        changed = False
+        for level in (0, 1):
+            by_key: dict = {}
+            for c in cells:
+                by_key.setdefault(c[level], []).append(c)
+            for members in by_key.values():
+                hid = [c for c in members if c in hidden]
+                vis = [c for c in members if c not in hidden]
+                if len(hid) == 1 and vis:
+                    hidden.add(min(vis, key=lambda c: (size(c), str(c))))
+                    changed = True
+    return hidden
+
+
+def _shape_grid(df: pd.DataFrame, config: dict, *, dim: str, dim2: str, meas, measure_def,
+                agg: str, agg_fn, sort: str, sort_by: str, limit: int) -> dict:
+    """A crosstab: `dim` down the side, `dim2` across the top (E08).
+
+    Follows docs/EVALUATION_ORDER.md, with one rule of its own: **suppression
+    is per cell and comes first**, so no later step -- a percentage's base, a
+    measure's TOTAL(), HAVING, ranking, subtotals or totals -- ever reads a
+    suppressed cell. Then, over the rows that are left:
+
+    - rows with no `dim` or no `dim2` are in no cell and no total, and are
+      disclosed as `missing_category`;
+    - each row's value is its aggregate over its own rows -- the number its
+      subtotal shows. HAVING, ranking and "sort by value" all read it;
+    - "All Other" is the aggregation, or the measure, over the rank-excluded
+      rows, per column. A measure is evaluated over every row at once (the
+      excluded rows under one key), so TOTAL() inside it means the whole;
+    - an intersection with no rows is 0 for a sum or a count and blank for
+      anything else; a suppressed cell is always blank;
+    - quick calculations run per column over the rows in display order
+      (percent of total is a share of the whole grid);
+    - `limit` cuts the rows, and says so (`truncation`).
+    """
+    rows_scanned = int(len(df))
+    df = df[df[dim].notna() & df[dim2].notna()]
+    missing_rows = rows_scanned - int(len(df))
+    src_meas = meas if meas and meas in df.columns else None
+    pct = agg == "pct"
+    is_zero_agg = measure_def is None and (agg in _GRID_ZERO_WHEN_EMPTY or src_meas is None)
+
+    def at(frame: pd.DataFrame, keys: list):
+        if measure_def is not None:
+            if frame.empty:
+                return pd.Series(dtype=float) if keys else None
+            # SCOPE() chooses its branch by the NAMES of the grouping columns;
+            # rows are grouped by their code here, which stands for `dim`.
+            expr = _measure_eval.resolve_scope(measure_def["expression"],
+                                               [dim if k == "__grow__" else k for k in keys])
+            return _measure_eval.evaluate_measure(expr, frame, keys)
+        if frame.empty:
+            return pd.Series(dtype=float) if keys else (0 if is_zero_agg else None)
+        return _total_over_rows(frame, keys, src_meas, agg_fn)
+
+    # Suppression, per cell, before anything reads a value.
+    counts = df.groupby([dim, dim2]).size()
+    hidden: set = set()
+    suppress_n = _grid_int(config.get("suppress_below"))
+    if suppress_n > 0:
+        hidden = set(counts.index[counts < suppress_n])
+        if hidden and config.get("suppress_complement"):
+            hidden = _grid_complement(hidden, counts, at(df, [dim, dim2]))
+    if hidden:
+        pair = pd.MultiIndex.from_arrays([df[dim], df[dim2]])
+        vis = df[~pair.isin(list(hidden))]
+    else:
+        vis = df
+    if vis.empty:
+        out = {"type": "empty", "rows": [], "total": 0,
+               "missing_category": {"rows": missing_rows, "columns": [dim, dim2]}}
+        if suppress_n > 0:
+            out["suppressed_cells"] = len(hidden)
+        return out
+
+    # Rows are grouped by a code, not by the label: "All Other" then needs no
+    # label of its own (a string among integer years cannot be sorted).
+    codes, labels = pd.factorize(vis[dim], sort=True)
+    work = vis.assign(__grow__=codes)
+
+    grand = at(work, [])
+
+    def scaled(v):
+        if not pct:
+            return v
+        if not grand:
+            return v * float("nan") if isinstance(v, (pd.Series, pd.DataFrame)) else None
+        return (v.astype(float) / float(grand) * 100).round(2) if isinstance(v, (pd.Series, pd.DataFrame)) \
+            else (round(float(v) / float(grand) * 100, 2) if v is not None else None)
+
+    row_value = scaled(at(work, ["__grow__"]))
+    if not pd.api.types.is_numeric_dtype(row_value):
+        row_value = pd.to_numeric(row_value, errors="coerce")
+
+    # HAVING, on each row's value.
+    keep = pd.Series(True, index=row_value.index)
+    for h in (config.get("having") or []):
+        try:
+            op, val = h.get("op"), float(h.get("value"))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        cond = {"gt": row_value > val, "lt": row_value < val, "gte": row_value >= val,
+                "lte": row_value <= val, "eq": row_value == val}.get(op)
+        if cond is not None:
+            keep &= cond
+    candidates = row_value[keep]
+    groups_of = int(len(candidates))
+
+    # Ranking, on the same value; ties at the boundary kept.
+    rank_keep = _rank_selection(candidates, config)
+    kept = candidates if rank_keep is None else candidates[rank_keep]
+    excluded = [] if rank_keep is None else list(candidates.index[~rank_keep])
+    show_other = bool(excluded) and bool((config.get("rank") or {}).get("other"))
+    if excluded:
+        work = work.assign(__grow__=work["__grow__"].where(~work["__grow__"].isin(excluded), _GRID_OTHER))
+
+    # Display order: stated sort, else by label (the order this grid always had).
+    order = pd.DataFrame({"code": kept.index, "value": kept.values,
+                          "label": [labels[c] for c in kept.index]})
+    if "sort_by" in config and sort_by == "value":
+        order = order.sort_values(["value", "label"], ascending=[sort == "asc", True], kind="mergesort")
+    elif "sort_by" in config and sort_by == "name":
+        order = order.sort_values("label", ascending=(sort == "asc"), kind="mergesort")
+    else:
+        order = order.sort_values("label", kind="mergesort")
+    display = list(order["code"])
+    custom = config.get("sort_custom")
+    if isinstance(custom, list) and custom:
+        pos = {str(v): i for i, v in enumerate(custom)}
+        display.sort(key=lambda c: pos.get(str(labels[c]), len(pos)))  # stable
+    if show_other:
+        display.append(_GRID_OTHER)
+
+    # Cells and subtotals, over every visible row at once.
+    cell_values = at(work, ["__grow__", dim2])
+    grid = cell_values.unstack(dim2) if len(cell_values) else pd.DataFrame(index=pd.Index([], name="__grow__"))
+    grid = scaled(grid.reindex(display))
+    grid = grid.apply(pd.to_numeric, errors="coerce") if not grid.empty else grid
+    grid = grid.loc[:, grid.notna().any(axis=0)] if len(grid.columns) else grid
+    subtotal = scaled(at(work, ["__grow__"]))
+    subtotal = pd.to_numeric(pd.Series(subtotal).reindex(display), errors="coerce")
+
+    # An empty intersection: 0 where that means something, blank where it
+    # does not, and blank for a cell whose rows exist but are suppressed.
+    if is_zero_agg and len(grid.columns) and display:
+        pres = counts.unstack(dim2).notna()
+        real = [c for c in display if c != _GRID_OTHER]
+        has_rows = pres.reindex(index=[labels[c] for c in real], columns=grid.columns).fillna(False).astype(bool)
+        has_rows.index = real
+        if show_other:
+            has_rows.loc[_GRID_OTHER] = pres.reindex(index=[labels[c] for c in excluded],
+                                                     columns=grid.columns).fillna(False).astype(bool).any(axis=0)
+        grid = grid.mask(grid.isna() & ~has_rows.reindex(grid.index).astype(bool), 0)
+
+    # Quick calculation, per column, over the rows in display order.
+    qc = config.get("quick_calc")
+    if qc in ("percent_of_total", "difference", "percent_change", "rank"):
+        def transform(frame):
+            if qc == "percent_of_total":
+                whole = frame.sum(skipna=True).sum() if isinstance(frame, pd.DataFrame) else frame.sum(skipna=True)
+                return (frame / whole * 100).round(2) if whole else frame * float("nan")
+            if qc == "difference":
+                return frame.diff()
+            if qc == "percent_change":
+                prev = frame.shift()
+                return ((frame / prev - 1) * 100).where(prev != 0).round(2)
+            return frame.rank(ascending=False, method="min")
+        grid = transform(grid.astype(float))
+        subtotal = transform(subtotal.astype(float))
+    else:
+        qc = None
+
+    groups_before_limit = len(display)
+    page = display[:limit]
+    show_subtotals = config.get("show_subtotals", True)
+    columns = [dim] + [str(c) for c in grid.columns] + (["__total__"] if show_subtotals else [])
+
+    def row_out(code):
+        label = "All Other" if code == _GRID_OTHER else labels[code]
+        cells = [None if pd.isna(v) else _safe(v) for v in grid.loc[code].tolist()]
+        if hidden and code != _GRID_OTHER:
+            cells = [None if (labels[code], col) in hidden else v
+                     for v, col in zip(cells, grid.columns)]
+        out = [_safe(label)] + cells
+        if show_subtotals:
+            s = subtotal.get(code)
+            out.append(None if s is None or pd.isna(s) else _safe(s))
+        return out
+
+    result = {
+        "type": "crosstab",
+        "dimension": dim,
+        "dimension2": dim2,
+        "columns": columns,
+        "rows": [row_out(c) for c in page],
+        # `total` counts the grid's rows (the renderer's contract); the
+        # POPULATION it describes is the rows scanned, like every other widget.
+        "total": len(page),
+        "rows_scanned": rows_scanned,
+        "missing_category": {"rows": missing_rows, "columns": [dim, dim2]},
+        "truncation": {"applied": groups_before_limit > len(page), "shown": len(page),
+                       "of": groups_before_limit, "limit": limit, "reason": "limit", "unit": "groups"},
+    }
+    if suppress_n > 0:
+        result["suppressed_cells"] = len(hidden)
+
+    if config.get("show_totals"):
+        if qc in _QUICK_CALCS_WITHOUT_TOTAL:
+            result["totals_unavailable"] = "quick_calc"
+            return result
+        on_page = work[work["__grow__"].isin(page)]
+
+        def as_row(col_map: dict, whole) -> list:
+            vals = []
+            for name in columns:
+                if name == dim:
+                    vals.append(None)
+                elif name == "__total__":
+                    vals.append(None if whole is None or pd.isna(whole) else _safe(whole))
+                else:
+                    v = col_map.get(name)
+                    vals.append(None if v is None or pd.isna(v) else _safe(v))
+            return vals
+
+        def share_totals(codes: list) -> list:
+            # Shares are additive by construction: a column's total is the sum
+            # of its cells' shares, and the whole grid is 100.
+            part = grid.loc[codes].sum(skipna=True)
+            return as_row({str(k): round(float(v), 2) for k, v in part.items()},
+                          round(float(part.sum()), 2))
+
+        def row_totals(frame: pd.DataFrame) -> list:
+            col_vals = scaled(at(frame, [dim2]))
+            return as_row({str(k): v for k, v in pd.Series(col_vals, dtype=object).items()},
+                          scaled(at(frame, [])))
+
+        if qc == "percent_of_total":
+            result["totals"] = share_totals(display)
+            truncated = len(page) < len(display)
+            if truncated:
+                result["totals_shown"] = share_totals(page)
+        else:
+            # Every visible row, whatever HAVING, rank or `limit` then kept on
+            # screen (the series' "all"); the page's own rows as "shown".
+            result["totals"] = row_totals(vis)
+            truncated = len(on_page) < len(vis)
+            if truncated:
+                result["totals_shown"] = row_totals(on_page)
+        result["totals_basis"] = {"unit": "groups", "shown": len(page), "of": int(len(labels)),
+                                  "truncated": truncated, "suppressed_excluded": bool(hidden)}
+    return result
+
+
 def shape_series(df: pd.DataFrame, config: dict) -> dict:
     """
     Main query entry point.  config keys:
@@ -625,122 +913,8 @@ def shape_series(df: pd.DataFrame, config: dict) -> dict:
 
     # 3. Crosstab (dim + dim2)
     if dim and dim2 and dim in df.columns and dim2 in df.columns:
-        # Ranking (Top/Bottom N, All Other) on the ROWS: each row ranked by its
-        # own aggregate over its raw rows -- the number its subtotal shows --
-        # through the shared helper, so ties, percent mode and bottom-N are the
-        # bar chart's. The panel offered this on crosstabs and matrices while
-        # this branch had no ranking at all: a control that saved and did
-        # nothing. The heatmap's crosstab-shaped path is the model here.
-        # Totals stay over EVERY source row (`full_df`); the pivot is built from
-        # the kept rows, and the Other row from the excluded raw rows below.
-        full_df = df
-        src_meas = meas if meas in df.columns else None
-        if measure_def is not None:
-            row_rank_vals = _measure_eval.evaluate_measure(measure_def["expression"], df, [dim])
-        else:
-            row_rank_vals = _total_over_rows(df, [dim], src_meas, agg_fn)
-        groups_of = int(len(row_rank_vals))
-        rank_keep = _rank_selection(row_rank_vals, config)
-        other_raw = None
-        if rank_keep is not None:
-            kept_labels = row_rank_vals.index[rank_keep]
-            excluded_raw = df[~df[dim].isin(kept_labels)]
-            df = df[df[dim].isin(kept_labels)]
-            if (config.get("rank") or {}).get("other") and len(excluded_raw) > 0:
-                other_raw = excluded_raw
-
-        if measure_def is not None:
-            # Post-aggregation measure at the INTERSECTION grain: evaluated per
-            # (dim, dim2) cell, which is exactly what SAS's per-crossing
-            # evaluation means. Missing intersections read 0, matching the
-            # column path's fill_value.
-            values = _measure_eval.evaluate_measure(measure_def["expression"], df, [dim, dim2])
-            pivot = values.unstack(fill_value=0).reset_index()
-        elif meas and meas in df.columns:
-            pivot = df.groupby([dim, dim2])[meas].agg(agg_fn).unstack(fill_value=0).reset_index()
-        else:
-            pivot = df.groupby([dim, dim2]).size().unstack(fill_value=0).reset_index()
-
-        # Row subtotals default ON: this column shipped unconditionally before it was
-        # ever configurable, so defaulting it off would silently remove a column from
-        # every existing crosstab. An author can turn it off; nobody loses one by upgrading.
-        if config.get("show_subtotals", True):
-            if measure_def is not None:
-                # A measure's row subtotal is the measure RE-EVALUATED at the row
-                # grain -- summing its per-cell values across columns is wrong for
-                # any non-additive expression (a ratio's row total is not the sum
-                # of its cell ratios).
-                row_vals = _measure_eval.evaluate_measure(measure_def["expression"], df, [dim])
-                pivot["__total__"] = pivot[dim].map(row_vals).fillna(0)
-            else:
-                # Each row's subtotal aggregated from that row's SOURCE rows, never
-                # summed across its cells: for avg the row's cells are averages of
-                # different-sized slices, and for countd a value present in two
-                # columns would be counted twice.
-                row_vals = _total_over_rows(df, [dim], meas if meas in df.columns else None, agg_fn)
-                pivot["__total__"] = pivot[dim].map(row_vals).fillna(0)
-
-        if other_raw is not None:
-            # Every cell of the Other row is the same kind of number as every
-            # other cell: re-aggregated (or, for a measure, re-evaluated) from
-            # the excluded rows' RAW data per column, and its subtotal at no
-            # column grain -- never a sum of the cells it replaces, which for
-            # avg, countd or a ratio would be a different number.
-            if measure_def is not None:
-                other_cells = _measure_eval.evaluate_measure(measure_def["expression"], other_raw, [dim2])
-                other_sub = _measure_eval.evaluate_measure(measure_def["expression"], other_raw, [])
-            else:
-                other_cells = _total_over_rows(other_raw, [dim2], src_meas, agg_fn)
-                other_sub = _total_over_rows(other_raw, [], src_meas, agg_fn)
-            other_row = {c: (other_sub if c == "__total__" else other_cells.get(c, 0))
-                         for c in pivot.columns if c != dim}
-            other_row[dim] = "All Other"
-            pivot = pd.concat([pivot, pd.DataFrame([other_row])[list(pivot.columns)]],
-                              ignore_index=True)
-
-        col_names = [str(c) for c in pivot.columns]
-        result = {
-            "type": "crosstab",
-            "columns": col_names,
-            "rows": [[_safe(v) for v in row] for row in pivot.itertuples(index=False)],
-            "total": len(pivot),
-            # `total` here counts the grid's rows (the renderer's contract); the
-            # POPULATION the grid describes is the rows scanned, like every other
-            # widget -- a crosstab beside a bar must not read "4" against "2,000".
-            "rows_scanned": int(len(full_df)),
-            "truncation": {"applied": False, "shown": int(len(pivot)), "of": int(len(pivot)),
-                           "limit": None, "reason": "none", "unit": "rows"},
-        }
-        if config.get("show_totals"):
-            def _cross_totals(frame: pd.DataFrame) -> list:
-                # Column totals at the column grain and the grand total at no
-                # grain, each aggregated (or, for a measure, re-evaluated) from
-                # the source rows -- the same non-additivity rule as the row
-                # subtotals above.
-                if measure_def is not None:
-                    col_vals = _measure_eval.evaluate_measure(measure_def["expression"], frame, [dim2])
-                    grand = _measure_eval.evaluate_measure(measure_def["expression"], frame, [])
-                    missing = 0
-                else:
-                    col_vals = _total_over_rows(frame, [dim2], src_meas, agg_fn)
-                    grand = _total_over_rows(frame, [], src_meas, agg_fn)
-                    missing = None
-                return [None if c == dim
-                        else _safe(grand) if c == "__total__"
-                        else _safe(col_vals.get(c, missing))
-                        for c in pivot.columns]
-
-            # Over every source row: with an Other row the grid shows them all.
-            result["totals"] = _cross_totals(full_df)
-            # Rows a rank hid WITHOUT a bucket are not on the grid; say so, and
-            # give the visible rows' own totals as well -- the series path's
-            # contract (`totals_shown` / `totals_basis`).
-            hidden = rank_keep is not None and other_raw is None
-            if hidden:
-                result["totals_shown"] = _cross_totals(df)
-            result["totals_basis"] = {"unit": "groups", "shown": len(pivot), "of": groups_of,
-                                      "truncated": hidden, "suppressed_excluded": False}
-        return result
+        return _shape_grid(df, config, dim=dim, dim2=dim2, meas=meas, measure_def=measure_def,
+                           agg=agg, agg_fn=agg_fn, sort=sort, sort_by=sort_by, limit=limit)
 
     # 4. Grouped series
     if dim and dim in df.columns:

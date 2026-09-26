@@ -514,7 +514,10 @@ export default function WidgetConfigPanel({ widget, columns, datasets, primaryDa
     else if (wt === 'web_content') { config = { url: webUrl.trim() } }
     else if (wt === 'shape') { config = { shape: shapeKind, fill: shapeFill, stroke: shapeStroke } }
     else {
-      config = { aggregation: agg, limit, sort, ...(sortBy ? { sort_by: sortBy } : {}), ...(sortCol ? { sort_col: sortCol } : {}), rtl, ...(running ? { running } : {}) }
+      // A grid (a second dimension) reads neither a sort column nor a running
+      // metric, and the panel hides both there: not written either (E08).
+      const isGrid = !!roleValues.category2
+      config = { aggregation: agg, limit, sort, ...(sortBy ? { sort_by: sortBy } : {}), ...(sortCol && !isGrid ? { sort_col: sortCol } : {}), rtl, ...(running && !isGrid ? { running } : {}) }
       if (wt === 'slicer' && slicerMode !== 'auto') config.slicer_mode = slicerMode
       // Only when set: an absent key means countries, and writing an explicit
       // null would make "unset" and "countries" two states that look different
@@ -1900,7 +1903,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           )}
 
           {/* Running metric */}
-          {(wt === 'bar' || wt === 'line' || wt === 'list') && fld('Running metric',
+          {(wt === 'bar' || wt === 'line' || wt === 'list') && !dimension2 && fld('Running metric',
             sel(running, setRunning, RUNNING_OPTIONS)
           )}
 
@@ -2044,12 +2047,15 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               </select>
               {!sortBy && (
                 <div style={{ fontSize: 11, color:'var(--muted)', marginTop:3 }}>
-                  Dates in time order, everything else by value
+                  {dimension2 ? 'Rows in label order' : 'Dates in time order, everything else by value'}
                 </div>
               )}
             </div>
           </div>
-          {fld('Sort column (overrides sort by)',
+          {/* A grid (two dimensions) sorts its ROWS by their subtotal or their
+              label; it has no per-row value of another column to sort by, so
+              the control would save and do nothing (E08). */}
+          {!dimension2 && fld('Sort column (overrides sort by)',
             <select value={sortCol} onChange={e => setSortCol(e.target.value)} style={{ width:'100%' }}>
               <option value="">— use sort by above —</option>
               {colOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}

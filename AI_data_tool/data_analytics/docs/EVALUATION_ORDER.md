@@ -40,10 +40,38 @@ There are three engines:
 | 18 | **Quick calculation** | Percent of total, difference, percent change, rank: over the surviving groups, All Other included, before the limit. | `test_quick_calc_and_suppression.py` |
 | 19 | **Custom order** | `sort_custom` puts the named categories first, in that order. | `test_series_having_and_custom_sort.py` |
 | 20 | **Limit** | The page: `limit` groups (default 50). The result says how many there were (`truncation`). | `test_numeric_goldens.py` (limit does not shrink All Other) |
-| 21 | **Totals** | From the **rows** of every group left after steps 15–16, at no grain. An average total is the average of rows. A measure total is the measure re-evaluated. A "shown" total covers the displayed groups, if fewer. | `test_table_totals.py`, `test_direct_query_totals.py` |
+| 21 | **Totals** | From the **rows**, at no grain: every row with a group, minus suppressed ones (step 16), whatever HAVING, ranking or the limit kept on screen. An average total is the average of rows. A measure total is the measure re-evaluated. A "shown" total covers the displayed groups, if fewer. | `test_table_totals.py`, `test_direct_query_totals.py`, `test_pivot_goldens.py` |
 | 22 | **Running values** | Running sum and average, over the displayed page. | `test_table_totals.py` |
 | 23 | **Display rules** | Conditional styles, over the shaped result. | `test_display_rules*.py` |
 | 24 | **Formatting** | Number, date and currency formats are applied by the browser from the dataset's column formats. The server sends raw numbers, and exports carry raw numbers. | — |
+
+### Grids (crosstab, matrix, a bar with two dimensions)
+
+A grid puts one dimension down the side and one across the top. It follows the
+same order, with one rule of its own: **suppression is per cell and comes
+first**, so no later step reads a suppressed cell. A percentage's base, a
+measure's `TOTAL()`, HAVING, ranking, subtotals and totals all leave its rows
+out, and a suppressed cell is blank. With `suppress_complement`, a row or
+column left with exactly one hidden cell also hides its smallest visible cell.
+Then:
+
+- rows with no value on **either** dimension are in no cell and no total, and
+  are disclosed as `missing_category`;
+- a row's value is its aggregate over its own rows, the number its subtotal
+  shows. HAVING, ranking and "sort by value" read it. Without a stated
+  `sort_by`, rows stay in label order;
+- "All Other" is the aggregation, or the measure, over the rank-excluded rows
+  per column. A measure is evaluated over every row at once, so `TOTAL()` in
+  the Other row means the whole;
+- an intersection with no rows is 0 for a sum or a count and blank for anything
+  else (an average of nothing is not 0);
+- `pct` and "percent of total" are shares of the whole grid; difference,
+  percent change and rank run down each column in display order;
+- `limit` cuts rows and says so, like a series.
+
+`tests/test_pivot_goldens.py` pins each of these on all three engines against a
+hand-computed fixture, and `tests/test_object_families.py` takes 24 widget
+families through role, configuration, a filter, save and reopen, and export.
 
 Results are cached **after** access, with a key that includes the reader's row
 rule text, denied columns, the configuration, and the dataset's calculated
@@ -102,7 +130,5 @@ engine.
 - **A filter on an unknown column.** Import skips it (step 9). DirectQuery
   refuses it (400), because every column name that reaches SQL must be a real
   column of the dataset.
-- **Crosstab All Other with a `TOTAL()` measure** is evaluated over the excluded
-  rows alone, so its share is of those rows, not of the whole.
 - **Series measure totals and `TOTAL()`** exclude missing-key rows. A KPI of the
   same measure includes them, and `missing_category` says how many there were.
