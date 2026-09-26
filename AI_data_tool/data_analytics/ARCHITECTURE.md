@@ -2126,6 +2126,11 @@ Rendering is dispatched by `WidgetBody.tsx` (inside `WidgetRenderer.tsx`) to per
 `components/report/chartRenderers/`. Maps render through `d3-geo` and
 `topojson-client` against a bundled `world-atlas` — a deliberate choice that keeps
 geospatial working without external tile services, and therefore offline.
+The choropleth, point and bubble maps are readable without sight
+(`geo/MapDataTable.tsx`): the map's accessible name says what it plots, how
+many places carry a value and the highest and lowest; the values also sit in a
+visually hidden table; and when the map filters the page, each place with data
+is a keyboard stop (Enter or Space filters, focus shows the value).
 
 ### Interaction model
 
@@ -2324,7 +2329,7 @@ Agent pane (7)
 | Suite | Scope | Count |
 |-------|-------|-------|
 | Backend | `backend/tests/` | ~5,300 tests across 413 modules |
-| Frontend | colocated `*.test.ts(x)` | ~2,950 tests across 227 files |
+| Frontend | colocated `*.test.ts(x)` | ~2,950 tests across 228 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |
 | Doc audit | `tests/test_architecture_doc.py` | Enforces the *counts* in this document |

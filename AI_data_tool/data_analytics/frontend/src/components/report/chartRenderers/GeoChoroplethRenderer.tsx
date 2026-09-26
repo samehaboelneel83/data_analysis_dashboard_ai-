@@ -4,6 +4,7 @@ import { fmtStr, TT } from '../chartUtils'
 import { matchRegion, regionBoundsPoints, regionLabel, fittedProjection } from '../geo/worldGeometry'
 import { MapSvg, MAP_WRAP_STYLE, useMapBox } from '../geo/MapFrame'
 import { useRegionSet } from '../geo/regionSetCache'
+import { MapDataTable, mapSummary } from '../geo/MapDataTable'
 
 /**
  * Choropleth: countries shaded by measure value.
@@ -70,6 +71,17 @@ export default function GeoChoroplethRenderer({ rows, cfg, measureFmt, broadcast
     }
   }, [rows, set])
 
+  // E15: what the map says, in words and as a table; regions a reader can
+  // filter by are reachable from the keyboard.
+  const entries = useMemo(() => set.features.flatMap((f, i) => {
+    const v = byFeature.get(f)
+    return v == null ? [] : [{ label: regionLabel(f, set) || String(i), value: v }]
+  }), [set, byFeature])
+  const measure = (cfg as { measure?: string })?.measure
+  const kind = `Map of ${measure ?? 'value'}${dimension ? ` by ${dimension}` : ''}`
+  const summary = mapSummary(kind, entries, measureFmt)
+  const interactive = !!broadcasts && entries.length > 0
+
   const scale = (v: number) => {
     // Single-hue lightness ramp on the accent colour. A ramp is readable in greyscale
     // (unlike a rainbow) and inherits the report theme.
@@ -79,7 +91,8 @@ export default function GeoChoroplethRenderer({ rows, cfg, measureFmt, broadcast
 
   return (
     <div ref={ref} style={MAP_WRAP_STYLE}>
-      <MapSvg w={w} h={h} projection={projection} tiles={tiles} credit={set.attribution} role="img" aria-label="Choropleth map">
+      <MapSvg w={w} h={h} projection={projection} tiles={tiles} credit={set.attribution}
+        role={interactive ? 'group' : 'img'} aria-label={summary}>
         {set.features.map((f, i) => {
           const v = byFeature.get(f)
           // The set's own naming property, not `name`: an uploaded file may
@@ -107,6 +120,15 @@ export default function GeoChoroplethRenderer({ rows, cfg, measureFmt, broadcast
               data-selected={selected ? 'true' : undefined}
               style={clickable ? { cursor: 'pointer' } : undefined}
               onClick={clickable ? () => onClickPoint(payload) : undefined}
+              {...(clickable ? {
+                tabIndex: 0, role: 'button', 'aria-pressed': selected,
+                'aria-label': `${label}: ${fmtStr(v!, measureFmt)}`,
+                onKeyDown: (e: React.KeyboardEvent) => {
+                  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClickPoint(payload) }
+                },
+                onFocus: () => setHover({ name: label, value: v!, x: 8, y: 8 }),
+                onBlur: () => setHover(null),
+              } : { 'aria-hidden': true })}
               onMouseMove={v != null ? e => {
                 const box = (e.currentTarget.ownerSVGElement as SVGSVGElement).getBoundingClientRect()
                 setHover({ name: label, value: v, x: e.clientX - box.left, y: e.clientY - box.top })
@@ -116,6 +138,7 @@ export default function GeoChoroplethRenderer({ rows, cfg, measureFmt, broadcast
           )
         })}
       </MapSvg>
+      <MapDataTable caption={kind} entries={entries} measureFmt={measureFmt} unmatched={unmatched} />
       {hover && (
         <div style={{ ...TT, position: 'absolute', left: hover.x + 10, top: hover.y + 10,
           padding: '4px 8px', pointerEvents: 'none' }}>

@@ -3,6 +3,7 @@ import type { ChartRendererProps } from './types'
 import { fmtStr, TT } from '../chartUtils'
 import { COUNTRIES, matchCountry, countryCentroid, fittedProjection } from '../geo/worldGeometry'
 import { MapSvg, MAP_WRAP_STYLE, useMapBox } from '../geo/MapFrame'
+import { MapDataTable, mapSummary } from '../geo/MapDataTable'
 
 interface Marker { name: string; value: number; x: number; y: number
                    /** Index in the ORIGINAL rows, so a display rule that
@@ -120,6 +121,18 @@ function GeoPointMapRenderer({ rows, cfg, measureFmt, ruleStyles, variant, broad
     return { markers, maxValue: Math.max(1, ...markers.map(m => m.value)) }
   }, [placed, projection])
 
+  // E15: what the map says, in words and as a table. A point map without a
+  // measure plots presence (every value is 1), so it names places, not values.
+  const hasValues = useMemo(() => (rows as Record<string, unknown>[]).some(r => typeof r.value === 'number'), [rows])
+  const measure = (cfg as { measure?: string })?.measure
+  const dimension = (cfg as { dimension?: string })?.dimension
+  const kind = `${variant === 'bubbles' ? 'Bubble map' : 'Point map'}${hasValues && measure ? ` of ${measure}` : ''}${dimension ? ` by ${dimension}` : ''}`
+  const entries = useMemo(() => markers.map(m => ({ label: m.name, value: m.value })), [markers])
+  const summary = hasValues
+    ? mapSummary(kind, entries, measureFmt)
+    : `${kind}: ${entries.length} ${entries.length === 1 ? 'place' : 'places'}`
+  const interactive = !!broadcasts && markers.length > 0
+
   const radius = (v: number) =>
     variant === 'bubbles' ? 4 + 24 * Math.sqrt(v / maxValue) : 5
 
@@ -134,8 +147,8 @@ function GeoPointMapRenderer({ rows, cfg, measureFmt, ruleStyles, variant, broad
 
   return (
     <div ref={ref} style={MAP_WRAP_STYLE}>
-      <MapSvg w={w} h={h} projection={projection} tiles={tiles} svgRef={svgRef} role="img"
-        aria-label={variant === 'bubbles' ? 'Bubble map' : 'Point map'}
+      <MapSvg w={w} h={h} projection={projection} tiles={tiles} svgRef={svgRef}
+        role={interactive ? 'group' : 'img'} aria-label={summary}
         onMouseDown={broadcasts ? e => {
           // SHIFT-drag, not plain drag: plain dragging is how a reader selects
           // text or scrolls, and taking it over makes the map feel broken.
@@ -186,6 +199,15 @@ function GeoPointMapRenderer({ rows, cfg, measureFmt, ruleStyles, variant, broad
                 data-selected={selected ? 'true' : undefined}
                 style={broadcasts ? { cursor: 'pointer' } : undefined}
                 onClick={broadcasts ? () => onClickPoint(m.name) : undefined}
+                {...(broadcasts ? {
+                  tabIndex: 0, role: 'button', 'aria-pressed': selected,
+                  'aria-label': hasValues ? `${m.name}: ${fmtStr(m.value, measureFmt)}` : m.name,
+                  onKeyDown: (e: React.KeyboardEvent) => {
+                    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClickPoint(m.name) }
+                  },
+                  onFocus: () => setHover(m),
+                  onBlur: () => setHover(null),
+                } : { 'aria-hidden': true })}
                 onMouseMove={hover} onMouseLeave={() => setHover(null)} />
               {style?.icon && (
                 // Centred on the marker and non-interactive, so it never steals
@@ -229,6 +251,11 @@ function GeoPointMapRenderer({ rows, cfg, measureFmt, ruleStyles, variant, broad
             pointerEvents="none" />
         )}
       </MapSvg>
+      {hasValues
+        ? <MapDataTable caption={kind} entries={entries} measureFmt={measureFmt} unmatched={unmatched} />
+        : <ul className="dl-sr-only" data-testid="map-data-table">
+            {entries.slice(0, 200).map((e, i) => <li key={`${e.label}-${i}`}>{e.label}</li>)}
+          </ul>}
       {broadcasts && markers.length > 0 && (
         <div style={{ position: 'absolute', top: 4, right: 8, fontSize: 10,
           color: 'var(--muted)', pointerEvents: 'none' }}>
@@ -238,7 +265,7 @@ function GeoPointMapRenderer({ rows, cfg, measureFmt, ruleStyles, variant, broad
       {hover && (
         <div style={{ ...TT, position: 'absolute', left: hover.x + 10, top: hover.y + 10,
           padding: '4px 8px', pointerEvents: 'none' }}>
-          {hover.name}: {fmtStr(hover.value, measureFmt)}
+          {hasValues ? `${hover.name}: ${fmtStr(hover.value, measureFmt)}` : hover.name}
         </div>
       )}
       {unmatched > 0 && (
