@@ -465,6 +465,14 @@ class ReportOut(BaseModel):
     # Report-level filters applied to every widget. Own table, set transiently by the
     # read endpoint. Each: {id, column, op, value}.
     common_filters: list[dict] = []
+    # E09, set by the read endpoints. `showing`: "live" (no release yet: every
+    # edit is what readers see), "draft" (an editor's working copy) or
+    # "released" (the frozen copy viewers get). `release`: the latest
+    # release's summary, or None. `unreleased_changes`: for an editor, whether
+    # the draft has moved on since it.
+    showing: str = "live"
+    release: Optional[dict] = None
+    unreleased_changes: bool = False
 
 
 class BookmarkCreate(BaseModel):

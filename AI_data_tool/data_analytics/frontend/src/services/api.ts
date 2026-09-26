@@ -1,6 +1,6 @@
 ﻿import axios from 'axios'
 import { sanitizeErrorDetail } from '../lib/friendlyError'
-import type { Report, ReportPage, Widget, HierarchyNode, Bookmark, BookmarkState, WorkspaceTree, WorkspaceNode } from '../types/report'
+import type { Report, ReportRelease, ReportPage, Widget, HierarchyNode, Bookmark, BookmarkState, WorkspaceTree, WorkspaceNode } from '../types/report'
 import type { DisplayRule } from '../lib/displayRules'
 
 /**
@@ -895,6 +895,9 @@ export const reportsApi = {
    *  OPEN it, view-only. Author or admin only; legacy unowned reports 400. */
   setPublished: (id: number, published: boolean) =>
     api.post<{ published: boolean }>(`/reports/${id}/publish`, { published }).then(r => r.data),
+  /** E09: make the draft what viewers see. Editors only. */
+  release: (id: number, note?: string) =>
+    api.post<{ release: ReportRelease; unreleased_changes: boolean }>(`/reports/${id}/release`, note ? { note } : {}).then(r => r.data),
   /** The page copilot: one chat message about the OPEN page, answered by the
    *  same LLM endpoint the agent uses, with any page edits already applied
    *  server-side by the time the reply returns. `history` is the panel's own

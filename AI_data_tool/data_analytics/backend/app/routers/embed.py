@@ -289,18 +289,17 @@ async def embed_report(token: str, request: Request, response: Response, db: Asy
     creator = await _load_creator_or_404(db, cfg)
     await _embed_sensitivity(db, report)
 
-    from ..models.models import CommonFilter, Dataset, ReportClassification
-    from .shared import published_relationships, visible_pages_for_creator
+    from ..models.models import Dataset, ReportClassification
+    from .shared import distributed_fields, published_relationships, visible_pages_for_creator
 
+    # E09: an embed distributes the report, so it shows the latest release
+    # when there is one (pages, theme, primary dataset and filters alike).
     pages = await visible_pages_for_creator(db, report, creator)
-    ds = await db.get(Dataset, report.dataset_id) if report.dataset_id else None
+    fields = await distributed_fields(db, report)
+    ds = await db.get(Dataset, fields["dataset_id"]) if fields["dataset_id"] else None
     classif = (await db.execute(
         select(ReportClassification).where(ReportClassification.report_id == report.id)
     )).scalar_one_or_none()
-    common_filters = (await db.execute(
-        select(CommonFilter).where(CommonFilter.report_id == report.id)
-        .order_by(CommonFilter.position, CommonFilter.id)
-    )).scalars().all()
 
     filters = claims.get("filters") or []
     viewer_email = claims.get("viewer_email")
@@ -325,10 +324,10 @@ async def embed_report(token: str, request: Request, response: Response, db: Asy
 
     return {
         "name": report.name,
-        "theme": report.theme,
+        "theme": fields["theme"],
         "classification": classif.label if classif else None,
-        "common_filters": [{"id": f.id, "column": f.column, "op": f.op, "value": f.value} for f in common_filters],
-        "dataset_id": report.dataset_id,
+        "common_filters": fields["common_filters"],
+        "dataset_id": fields["dataset_id"],
         "column_formats": (ds.column_formats or {}) if ds else {},
         "geography": _published_geography(ds) if ds else {},
         "calculated_columns": (ds.calculated_columns or []) if ds else [],
@@ -379,7 +378,8 @@ async def embed_widget_data(widget_id: int, request: Request, db: AsyncSession =
     if widget is None:
         raise HTTPException(404, "Widget not found")
 
-    dataset_id = (widget["config"] or {}).get("dataset_id") or report.dataset_id
+    from .shared import distributed_fields
+    dataset_id = (widget["config"] or {}).get("dataset_id") or (await distributed_fields(db, report))["dataset_id"]
     if not dataset_id:
         raise HTTPException(404, "Widget has no dataset")
 

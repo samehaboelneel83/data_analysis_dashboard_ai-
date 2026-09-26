@@ -80,6 +80,7 @@ import { nonAdditiveKind, SAFE_AGGREGATION } from '../lib/semanticGuard'
 import { readPending, clearPending, type PendingEdit } from '../lib/pendingEdits'
 import DatasetPickerDialog from '../components/dataset/DatasetPickerDialog'
 import toast from 'react-hot-toast'
+import ReleaseControl from '../components/report/ReleaseControl'
 import SubscribeButton from '../components/report/SubscribeButton'
 import ToolbarMenu from '../components/report/ToolbarMenu'
 import { useConfirm } from '../components/ui/ConfirmDialog'
@@ -2778,6 +2779,10 @@ export default function ReportBuilder() {
               that same export, and it needs only view -- so it must sit OUTSIDE
               the editMode-gated toolbar, which a viewer never sees. */}
           <SubscribeButton reportId={reportId} />
+          {/* E09: whether viewers have this draft yet, and the button that
+              gives it to them. Editors only; nothing for a viewer. */}
+          <ReleaseControl report={report} canEdit={canEdit} revision={loadedRevision}
+            onReleased={() => { loadReport().catch(() => {}) }} />
           <div style={{ marginInlineStart:'auto', display:'flex', alignItems:'center', gap:8 }}>
             {canEdit ? (
               // A two-way segmented switch, not a button labelled with the

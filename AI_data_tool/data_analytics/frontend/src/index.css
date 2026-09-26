@@ -628,6 +628,19 @@ svg.recharts-surface { direction: ltr; }
   color: var(--muted);
 }
 
+/* E09: whether viewers have the editor's changes (ReleaseControl). Its own
+   class: `.dl-chip` is also defined, larger, by the Ask AI page's styles. */
+.dl-release-status {
+  font-size: var(--dl-text-micro);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.dl-release-status--pending {
+  color: var(--mc-accent-ink);
+  font-weight: 600;
+}
+
 /* ---- Pagination ---------------------------------------------------------- */
 
 .dl-pager {

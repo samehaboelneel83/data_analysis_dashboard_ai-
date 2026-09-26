@@ -252,6 +252,39 @@ class ReportVersion(Base):
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
 
 
+class ReportRelease(Base):
+    """The version of a report its viewers see (E09: the draft/published split).
+
+    Before this, every edit to a published dashboard reached every viewer the
+    moment it was made: half-finished pages, a chart mid-rebuild, a filter
+    being tried out. Now an editor works on the DRAFT (the live pages and
+    widgets), and viewers are served the latest release, a frozen copy of the
+    content, until an editor releases again.
+
+    `snapshot` is `services/report_release.content_snapshot`: the report's
+    theme, display rules and datasets, every page in the exact PageOut shape
+    (with its widgets, and the page's role restriction at release time) and
+    the report-level filters. Ids are kept, so bookmarks, drillthrough and
+    widget-data calls still name the same objects.
+
+    `revision` is the report's revision the release describes: the draft has
+    unreleased changes exactly when the report's revision has moved past it.
+    Releases are kept (a release is a record of what was distributed); only
+    the newest is served."""
+    __tablename__ = "report_releases"
+    id          = Column(Integer, primary_key=True)
+    report_id   = Column(Integer, ForeignKey("reports.id", ondelete="CASCADE"), nullable=False, index=True)
+    revision    = Column(Integer, nullable=False, default=0)
+    snapshot    = Column(JSON, nullable=False)
+    note        = Column(String(500), nullable=True)
+    #: "release" (an editor released), "publish" (publishing released the
+    #: current content) or "first_edit" (a published report without a release
+    #: was edited: what its viewers were seeing was kept as its release).
+    reason      = Column(String(20), nullable=False, default="release", server_default="release")
+    released_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    released_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
 class ReportWidget(Base):
     __tablename__ = "report_widgets"
     id          = Column(Integer, primary_key=True)

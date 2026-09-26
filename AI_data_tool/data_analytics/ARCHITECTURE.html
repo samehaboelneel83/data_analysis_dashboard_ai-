@@ -251,7 +251,7 @@
   <div class="stack">
     <a class="slab" data-l="1" href="#l1"><span class="sn">01</span><span class="st">Data Sources &amp; Connectivity</span><span class="sd">45 connectors · DirectQuery</span></a>
     <a class="slab" data-l="2" href="#l2"><span class="sn">02</span><span class="st">Ingestion &amp; Metadata</span><span class="sd">profile · introspect · drift</span></a>
-    <a class="slab" data-l="3" href="#l3"><span class="sn">03</span><span class="st">Storage &amp; Persistence</span><span class="sd">82 tables · Valkey cache</span></a>
+    <a class="slab" data-l="3" href="#l3"><span class="sn">03</span><span class="st">Storage &amp; Persistence</span><span class="sd">83 tables · Valkey cache</span></a>
     <a class="slab" data-l="4" href="#l4"><span class="sn">04</span><span class="st">Query &amp; Semantic</span><span class="sd">25 aggregations · RLS</span></a>
     <a class="slab" data-l="5" href="#l5"><span class="sn">05</span><span class="st">Analytics &amp; AI</span><span class="sd">stats · forecast · NL→SQL</span></a>
     <a class="slab" data-l="6" href="#l6"><span class="sn">06</span><span class="st">API &amp; Services</span><span class="sd">19 routers · auth · delivery</span></a>
@@ -619,7 +619,7 @@ STAT_FAMILIES       = {"postgresql"}</code></pre>
   <p class="owns"><strong>Owns:</strong> durable state, cached state, and schema evolution.</p>
 
   <h3>Relational store</h3>
-  <p>PostgreSQL 16 Alpine. <strong>82 tables</strong> defined in <code>models/models.py</code> via async SQLAlchemy, grouped by concern.</p>
+  <p>PostgreSQL 16 Alpine. <strong>83 tables</strong> defined in <code>models/models.py</code> via async SQLAlchemy, grouped by concern.</p>
   <div class="scroll">
     <table>
       <thead><tr><th>Group</th><th>Representative tables</th></tr></thead>
@@ -634,7 +634,7 @@ STAT_FAMILIES       = {"postgresql"}</code></pre>
         <tr><th>Delivery</th><td><code>report_schedules</code>, <code>deliveries</code>, <code>data_alerts</code>, <code>notifications</code></td></tr>
         <tr><th>Agent</th><td><code>conversations</code>, <code>agent_messages</code>, <code>agent_runs</code>, <code>agent_steps</code>, <code>agent_feedback</code></td></tr>
         <tr><th>Retrieval</th><td><code>retrieval_embeddings</code>, <code>entities</code>, <code>glossary_terms</code>, <code>query_examples</code></td></tr>
-        <tr><th>Authoring</th><td><code>report_versions</code>, <code>report_comments</code>, <code>report_translations</code>, <code>page_templates</code>, <code>page_role_visibility</code>, <code>widget_templates</code>, <code>pinned_tiles</code>, <code>org_review_settings</code>, <code>org_themes</code>, <code>watermarks</code></td></tr>
+        <tr><th>Authoring</th><td><code>report_versions</code>, <code>report_releases</code>, <code>report_comments</code>, <code>report_translations</code>, <code>page_templates</code>, <code>page_role_visibility</code>, <code>widget_templates</code>, <code>pinned_tiles</code>, <code>org_review_settings</code>, <code>org_themes</code>, <code>watermarks</code></td></tr>
         <tr><th>Maps</th><td><code>boundary_sets</code>, <code>org_map_settings</code></td></tr>
         <tr><th>Models</th><td><code>prediction_models</code></td></tr>
         <tr><th>Workspace</th><td><code>workspace_nodes</code>, <code>workspace_folder_roles</code>, <code>workspace_folder_grants</code></td></tr>
@@ -644,7 +644,7 @@ STAT_FAMILIES       = {"postgresql"}</code></pre>
       </tbody>
     </table>
   </div>
-  <p>Schema changes go through <strong>Alembic</strong> (<code>backend/alembic/</code>, 40 revisions). <code>postgres/init.sql</code> provides the initial schema and indexes.</p>
+  <p>Schema changes go through <strong>Alembic</strong> (<code>backend/alembic/</code>, 41 revisions). <code>postgres/init.sql</code> provides the initial schema and indexes.</p>
 
   <h3>Cache</h3>
   <p><code>services/cache_backend.py</code> defines a <code>CacheBackend</code> interface with two implementations — <code>InProcessCache</code> for single-process or test runs, and <code>ValkeyCache</code> for the deployed stack. <code>frame_cache.py</code> caches computed result frames; <code>core/rate_limit.py</code> uses the same backend for throttling.</p>
@@ -926,6 +926,7 @@ llm_reserved_interactive = 2</code></pre>
   <ul class="plain">
     <li><strong><code>pdf_export.py</code></strong> — server-side PDF rendering</li>
     <li><strong><code>delivery.py</code></strong> — scheduled distribution</li>
+    <li><strong><code>services/report_release.py</code></strong> — releases: what a report's viewers are served</li>
     <li><strong><code>alerts.py</code></strong> — data-condition alerts</li>
     <li><strong><code>notifications.py</code></strong> — in-app notifications</li>
     <li><strong><code>eval_schedule.py</code></strong> — scheduled evaluation runs</li>
@@ -935,6 +936,9 @@ llm_reserved_interactive = 2</code></pre>
   <p><code>routers/embed.py</code> issues token-addressed embed configs with <strong>origin allow-listing</strong> (<code>_origin_allowed</code>) and per-widget visibility resolution (<code>_visible_widget</code>), evaluated against the <em>creator's</em> permissions. There is no per-viewer licence concept.</p>
   <p>Both public surfaces shape their pages through <strong>one</strong> function, <code>_shape_page</code> in <code>routers/shared.py</code> — the embed reaches it via <code>visible_pages_for_creator</code>. A page publishes a derived <strong><code>interaction_mode</code></strong> string rather than its <code>mobile_layout</code> blob: the mode is the only part of that JSON a viewer needs, and publishing a whole internal blob to an anonymous surface is how fields leak. Unrecognised values collapse to <code>manual</code>, because <code>mobile_layout</code> is author-written and an unknown mode reaching the frontend's union would silently mean <em>no</em> interactions rather than an error anyone sees.</p>
   <p>This field exists because the viewers previously received no mode at all, so every published page fell back to manual and each widget obeyed its own setting — the exact opposite of what an automatic page mode means. The same omission left saved per-widget interactions unhydrated in both viewers.</p>
+
+  <h3>Drafts and releases</h3>
+  <p>A report's pages and widgets are its <strong>draft</strong>: every edit persists at once. Once a report has a <strong>release</strong> (<code>report_releases</code>, made by <code>services/report_release.py</code> when an editor releases, when the report is published, and on the first edit of a published report that has none), everyone who holds only <code>view</code> is served the release instead: <code>GET /reports/{id}</code>, the list, PDF and offline package; so are guest links, embeds and scheduled deliveries. A release freezes content, never access: page restrictions are those at release time and those of now, both applied, and the dataset rung opens the release's datasets to its viewers, not the draft's. Editors see <code>unreleased_changes</code> and release with <code>POST /reports/{id}/release</code>.</p>
 
   <h3>Middleware</h3>
   <p>CORS is configured in <code>main.py</code>. The global exception handler is registered <strong>after</strong> <code>CORSMiddleware</code> so it sits inside it — otherwise a 500 would carry no <code>Access-Control-Allow-Origin</code> header and the browser would report a misleading CORS violation instead of the real error.</p>
@@ -1142,8 +1146,8 @@ llm_reserved_interactive = 2</code></pre>
     <table>
       <thead><tr><th>Suite</th><th>Scope</th><th>Count</th></tr></thead>
       <tbody>
-        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~5,300 tests · 403 modules</td></tr>
-        <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~2,800 tests · 218 files</td></tr>
+        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~5,300 tests · 404 modules</td></tr>
+        <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~2,800 tests · 219 files</td></tr>
         <tr><th>Evals</th><td><code>backend/evals/</code></td><td>Agent quality gates (<code>run_eval_gate.ps1</code>)</td></tr>
         <tr><th>Conformance</th><td><code>tests/test_layer_conformance.py</code></td><td>Enforces the layer boundaries above</td></tr>
         <tr><th>Doc audit</th><td><code>tests/test_architecture_doc.py</code></td><td>Enforces the <em>counts</em> in this document</td></tr>

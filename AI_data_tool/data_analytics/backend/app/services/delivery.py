@@ -74,18 +74,26 @@ def post_webhook(url: str, title: str, text: str) -> str | None:
 
 
 async def build_digest(db, report: Report, creator: User,
-                       context_label: str | None = None) -> tuple[bytes, int]:
+                       context_label: str | None = None, release=None) -> tuple[bytes, int]:
     """The report's data as an xlsx workbook: one sheet per data widget.
 
     Returns (bytes, sheet_count). Widgets that fail to resolve are skipped rather
     than sinking the whole delivery -- a digest missing one broken widget beats no
     digest, and the sheet count in the status line makes the shortfall visible.
     """
-    pages = (await db.execute(
-        select(ReportPage).options(selectinload(ReportPage.widgets))
-        .where(ReportPage.report_id == report.id)
-        .order_by(ReportPage.position)
-    )).scalars().all()
+    # E09: a delivery distributes the report, so it is of the latest release
+    # when there is one, not of the draft its editors are changing.
+    from .report_release import page_objects, primary_dataset_id
+    if release is not None:
+        pages = page_objects(release.snapshot)
+        primary = primary_dataset_id(release.snapshot)
+    else:
+        pages = (await db.execute(
+            select(ReportPage).options(selectinload(ReportPage.widgets))
+            .where(ReportPage.report_id == report.id)
+            .order_by(ReportPage.position)
+        )).scalars().all()
+        primary = report.dataset_id
 
     buffer = io.BytesIO()
     sheets = 0
@@ -95,7 +103,7 @@ async def build_digest(db, report: Report, creator: User,
             for w in page.widgets:
                 if w.widget_type in _SKIP_TYPES:
                     continue
-                dataset_id = (w.config or {}).get("dataset_id") or report.dataset_id
+                dataset_id = (w.config or {}).get("dataset_id") or primary
                 if not dataset_id:
                     continue
                 ds = await db.get(Dataset, dataset_id)
@@ -245,20 +253,28 @@ async def run_schedule(db, schedule) -> None:
         await db.commit()
         _log("error", schedule.last_status)
         return
+    from .report_release import latest_release
+    release = await latest_release(db, report.id)
     try:
         if fmt == "pdf":
             from .pdf_export import build_report_pdf
             from ..routers.reports import _resolve_report_sections, _visible_page_ids
+            from .report_release import visible_release_pages
             # The creator's page visibility applies to what they send, as it
-            # does to what they can open.
+            # does to what they can open -- over the release, when there is one.
+            if release is not None:
+                allowed = {p["id"] for p in await visible_release_pages(db, release.snapshot, creator)}
+            else:
+                allowed = await _visible_page_ids(db, report, creator)
             sections = await _resolve_report_sections(
-                db, report, creator, allowed_page_ids=await _visible_page_ids(db, report, creator),
-                context_label=label)
+                db, report, creator, allowed_page_ids=allowed,
+                context_label=label, release=release)
             payload = await asyncio.to_thread(build_report_pdf, report.name, report.description, sections)
             attach = (f"{report.name[:40]}.pdf", payload)
             count_note = f"{sum(len(sec['widgets']) for sec in sections)} visuals"
         else:
-            payload, sheets = await build_digest(db, report, creator, context_label=label)
+            payload, sheets = await build_digest(db, report, creator, context_label=label,
+                                                 release=release)
             attach = (f"{report.name[:40]}.xlsx", payload)
             count_note = f"{sheets} data sheet{'s' if sheets != 1 else ''}"
     except Exception as e:  # noqa: BLE001 -- a broken build must not sink the scheduler tick

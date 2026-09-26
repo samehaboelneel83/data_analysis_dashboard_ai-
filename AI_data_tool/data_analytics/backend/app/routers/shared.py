@@ -101,14 +101,42 @@ def _role_visible(p: dict, allowed_by_page: dict[int, set[int]], creator: User) 
     return creator.role_id in allowed
 
 
+async def distributed_fields(db: AsyncSession, report: Report) -> dict:
+    """The theme, primary dataset and report filters a DISTRIBUTED copy of the
+    report shows (a guest link that is not pinned, an embed): the latest
+    release's when the report has one (E09), the live report's otherwise."""
+    from ..services.report_release import latest_release
+    release = await latest_release(db, report.id)
+    if release is not None:
+        rep = release.snapshot.get("report") or {}
+        return {"theme": rep.get("theme") or report.theme, "dataset_id": rep.get("dataset_id"),
+                "common_filters": list(release.snapshot.get("common_filters") or [])}
+    rows = (await db.execute(
+        select(CommonFilter).where(CommonFilter.report_id == report.id)
+        .order_by(CommonFilter.position, CommonFilter.id)
+    )).scalars().all()
+    return {"theme": report.theme, "dataset_id": report.dataset_id,
+            "common_filters": [{"id": f.id, "column": f.column, "op": f.op, "value": f.value} for f in rows]}
+
+
 async def visible_pages_for_creator(db: AsyncSession, report: Report, creator: User) -> list[dict]:
-    """Pages a viewer resolving AS `creator` may see, read LIVE from the
-    report -- role-restricted pages (PageRoleVisibility) are absent from the
-    payload entirely, exactly as they'd be absent from the creator's own
-    builder session. Shared by every surface that renders a report as a
-    fixed creator identity with no snapshot of its own: the live branch of
-    the guest share-link route below, and the embed route
-    (routers/embed.py), which has no pinning/snapshot concept at all."""
+    """Pages a viewer resolving AS `creator` may see -- role-restricted pages
+    (PageRoleVisibility) are absent from the payload entirely, exactly as
+    they'd be absent from the creator's own builder session. Shared by every
+    surface that renders a report as a fixed creator identity with no
+    snapshot of its own: the live branch of the guest share-link route
+    below, and the embed route (routers/embed.py).
+
+    E09: these surfaces DISTRIBUTE the report, so a report with a release is
+    served its latest release, under today's page restrictions
+    (`report_release.allowed_roles_by_page`), never the draft its editors are
+    changing. Without a release, the pages are read live."""
+    from ..services.report_release import allowed_roles_by_page, latest_release
+    release = await latest_release(db, report.id)
+    if release is not None:
+        pages = release.snapshot.get("pages") or []
+        allowed = await allowed_roles_by_page(db, release.snapshot)
+        return [p for p in (_shape_page(x) for x in pages) if _role_visible(p, allowed, creator)]
     rows = (await db.execute(
         select(ReportPage).options(selectinload(ReportPage.widgets))
         .where(ReportPage.report_id == report.id).order_by(ReportPage.position)
@@ -321,20 +349,26 @@ async def shared_report(token: str, request: Request, db: AsyncSession = Depends
     pages = await _visible_pages(db, link, report, creator)
     _log_access(link, viewer, request)
 
-    ds = await db.get(Dataset, report.dataset_id) if report.dataset_id else None
+    # A pinned link keeps its own frozen pages; the rest follows the report
+    # as it is distributed (its release, when it has one).
+    if link.snapshot is None:
+        fields = await distributed_fields(db, report)
+    else:
+        fields = {"theme": report.theme, "dataset_id": report.dataset_id, "common_filters": [
+            {"id": f.id, "column": f.column, "op": f.op, "value": f.value}
+            for f in (await db.execute(
+                select(CommonFilter).where(CommonFilter.report_id == report.id)
+                .order_by(CommonFilter.position, CommonFilter.id))).scalars().all()]}
+    ds = await db.get(Dataset, fields["dataset_id"]) if fields["dataset_id"] else None
     classif = (await db.execute(
         select(ReportClassification).where(ReportClassification.report_id == report.id)
     )).scalar_one_or_none()
-    common_filters = (await db.execute(
-        select(CommonFilter).where(CommonFilter.report_id == report.id)
-        .order_by(CommonFilter.position, CommonFilter.id)
-    )).scalars().all()
     return {
         "name": report.name,
-        "theme": report.theme,
+        "theme": fields["theme"],
         "classification": classif.label if classif else None,
-        "common_filters": [{"id": f.id, "column": f.column, "op": f.op, "value": f.value} for f in common_filters],
-        "dataset_id": report.dataset_id,
+        "common_filters": fields["common_filters"],
+        "dataset_id": fields["dataset_id"],
         "column_formats": (ds.column_formats or {}) if ds else {},
         "geography": _published_geography(ds) if ds else {},
         "calculated_columns": (ds.calculated_columns or []) if ds else [],
@@ -373,7 +407,9 @@ async def shared_widget_data(token: str, widget_id: int, db: AsyncSession = Depe
         raise HTTPException(404, "Widget not found")
 
     cfg = dict(widget["config"] or {})
-    dataset_id = cfg.get("dataset_id") or report.dataset_id
+    primary = (await distributed_fields(db, report))["dataset_id"] if link.snapshot is None \
+        else report.dataset_id
+    dataset_id = cfg.get("dataset_id") or primary
     if not dataset_id:
         raise HTTPException(404, "Widget has no dataset")
     req = WidgetDataRequest(widget_type=widget["widget_type"], config=cfg)

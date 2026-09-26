@@ -83,6 +83,16 @@ export interface CommonFilter {
   value: unknown
 }
 
+/** One release of a report (E09): the version its viewers are served. */
+export interface ReportRelease {
+  id: number
+  revision: number
+  reason: 'release' | 'publish' | 'first_edit'
+  note: string | null
+  released_by: number | null
+  released_at: string | null
+}
+
 export interface Report {
   id: number
   name: string
@@ -111,6 +121,14 @@ export interface Report {
   classification?: string | null
   /** Report-level filters applied to every widget (defined once, propagate everywhere). */
   common_filters?: CommonFilter[]
+  /** E09. What this response holds: 'live' (no release yet -- readers see every
+      edit), 'draft' (an editor's working copy) or 'released' (the frozen copy
+      viewers are served). */
+  showing?: 'live' | 'draft' | 'released'
+  /** The latest release, or null when the report has none. */
+  release?: ReportRelease | null
+  /** For an editor: the draft has changed since the latest release. */
+  unreleased_changes?: boolean
   pages: ReportPage[]
   created_at: string
   updated_at: string

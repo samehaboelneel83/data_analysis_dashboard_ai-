@@ -180,6 +180,8 @@ LAYER_MAP: dict[str, int] = {
     "services/automation_runner": L6_API,
     "services/pdf_export": L6_API,
     "services/delivery": L6_API,
+    # E09: releases -- what a report distributes to its viewers.
+    "services/report_release": L6_API,
     "services/alerts": L6_API,
     "services/notifications": L6_API,
     "services/eval_schedule": L6_API,

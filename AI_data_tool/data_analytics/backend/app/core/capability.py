@@ -365,11 +365,26 @@ def _config_dataset_ids(config: object) -> set[int]:
     return out
 
 
-async def report_dataset_ids(db: AsyncSession, report_ids: list[int]) -> set[int]:
-    """Every dataset these reports draw on: primary, additional, per-widget."""
+async def report_dataset_ids(db: AsyncSession, report_ids: list[int], *,
+                             viewer_ids=frozenset()) -> set[int]:
+    """Every dataset these reports draw on: primary, additional, per-widget.
+
+    E09: a report with a release draws on the release's datasets as well as
+    the draft's -- an editor reads both, and a guest link serves the release.
+    For the reports in `viewer_ids` (the reader holds only 'view') the release
+    REPLACES the draft: a viewer is served the release, so a dataset the draft
+    has added since is not theirs to read, and one the draft has since dropped
+    still is, or the released widget would stop drawing."""
     if not report_ids:
         return set()
+    from ..services.report_release import latest_releases, released_dataset_ids
     ids: set[int] = set()
+    releases = await latest_releases(db, report_ids)
+    for rid, rel in releases.items():
+        ids |= released_dataset_ids(rel.snapshot)
+    report_ids = [r for r in report_ids if not (r in viewer_ids and r in releases)]
+    if not report_ids:
+        return ids
     for primary, extra in (await db.execute(
         select(Report.dataset_id, Report.additional_dataset_ids)
         .where(Report.id.in_(report_ids))
@@ -404,7 +419,8 @@ async def _directly_readable_ids(db: AsyncSession, org_id: int, user_id: int,
     return ids
 
 
-async def _dashboard_rung_ids(db: AsyncSession, report_ids: list[int]) -> set[int]:
+async def _dashboard_rung_ids(db: AsyncSession, report_ids: list[int], *,
+                              viewer_ids=frozenset()) -> set[int]:
     """What the last rung opens: each report's data AS FAR AS ITS AUTHOR MAY
     READ IT DIRECTLY.
 
@@ -430,7 +446,7 @@ async def _dashboard_rung_ids(db: AsyncSession, report_ids: list[int]) -> set[in
         by_author.setdefault((org_id, author, bool(is_admin)), []).append(rid)
     out: set[int] = set()
     for (org_id, author, is_admin), rids in by_author.items():
-        drawn = await report_dataset_ids(db, rids)
+        drawn = await report_dataset_ids(db, rids, viewer_ids=viewer_ids)
         if author is None:
             out |= drawn
             continue
@@ -455,7 +471,8 @@ async def readable_dataset_ids(db: AsyncSession, user: User) -> set[int] | None:
     )).scalars().all())
     caps = await effective_capabilities(db, user, org_report_ids)
     visible = [rid for rid, level in caps.items() if level != "none"]
-    ids |= await _dashboard_rung_ids(db, visible)
+    ids |= await _dashboard_rung_ids(db, visible,
+                                     viewer_ids={rid for rid, level in caps.items() if level == "view"})
     return ids
 
 
@@ -474,9 +491,10 @@ async def can_read_dataset(db: AsyncSession, user: User, dataset_id: int, *,
         return True
     if report_id is not None:
         report = await db.get(Report, report_id)
-        if (report is not None and report.org_id == user.org_id
-                and await effective_capability(db, user, report_id) != "none"
-                and dataset_id in await _dashboard_rung_ids(db, [report_id])):
+        level = await effective_capability(db, user, report_id) \
+            if report is not None and report.org_id == user.org_id else "none"
+        if level != "none" and dataset_id in await _dashboard_rung_ids(
+                db, [report_id], viewer_ids={report_id} if level == "view" else frozenset()):
             return True
     ids = await readable_dataset_ids(db, user)
     return ids is None or dataset_id in ids

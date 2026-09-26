@@ -1112,7 +1112,7 @@ relationships, a profile, and no unmasked personal data.
 
 ### Relational store
 
-PostgreSQL 16 Alpine. **82 tables** defined in `models/models.py` via async
+PostgreSQL 16 Alpine. **83 tables** defined in `models/models.py` via async
 SQLAlchemy, grouped by concern:
 
 | Group | Representative tables |
@@ -1128,7 +1128,7 @@ SQLAlchemy, grouped by concern:
 | Delivery | `report_schedules`, `deliveries`, `data_alerts`, `notifications` |
 | Agent | `conversations`, `agent_messages`, `agent_runs`, `agent_steps`, `agent_feedback` |
 | Retrieval | `retrieval_embeddings`, `entities`, `glossary_terms`, `query_examples` |
-| Authoring | `report_versions`, `report_comments`, `report_translations`, `page_templates`, `page_role_visibility`, `widget_templates`, `pinned_tiles`, `org_review_settings`, `org_themes`, `watermarks` |
+| Authoring | `report_versions`, `report_releases`, `report_comments`, `report_translations`, `page_templates`, `page_role_visibility`, `widget_templates`, `pinned_tiles`, `org_review_settings`, `org_themes`, `watermarks` |
 | Maps | `boundary_sets`, `org_map_settings` |
 | Models | `prediction_models` |
 | Workspace | `workspace_nodes`, `workspace_folder_roles`, `workspace_folder_grants` |
@@ -1136,7 +1136,7 @@ SQLAlchemy, grouped by concern:
 | Platform | `saml_authn_requests`, `org_mcp_access`, `eval_runs` |
 | Ops | `sync_runs`, `schema_versions`, `column_stats`, `materializations`, `quotas`, `query_runs` |
 
-Schema changes go through **Alembic** (`backend/alembic/`, 40 revisions).
+Schema changes go through **Alembic** (`backend/alembic/`, 41 revisions).
 `postgres/init.sql` provides the initial schema and indexes.
 
 ### Cache
@@ -1833,6 +1833,7 @@ fails that suite until it is added to its inventory.
 
 - `services/pdf_export.py` — server-side PDF rendering
 - `services/delivery.py` — scheduled distribution
+- `services/report_release.py` — releases: what a report's viewers are served
 - `services/alerts.py` — data-condition alerts
 - `services/notifications.py` — in-app notifications
 - `services/eval_schedule.py` — scheduled evaluation runs
@@ -1857,6 +1858,20 @@ This field exists because the viewers previously received no mode at all, so
 every published page fell back to manual and each widget obeyed its own
 setting — the exact opposite of what an automatic page mode means. The same
 omission left saved per-widget interactions unhydrated in both viewers.
+
+### Drafts and releases
+
+A report's pages and widgets are its **draft**: every edit persists at once.
+Once a report has a **release** (`report_releases`, made by
+`services/report_release.py` when an editor releases, when the report is
+published, and on the first edit of a published report that has none),
+everyone who holds only `view` is served the release instead: `GET
+/reports/{id}`, the list, PDF and offline package; so are guest links, embeds
+and scheduled deliveries. A release freezes content, never access: page
+restrictions are those at release time and those of now, both applied, and
+the dataset rung opens the release's datasets to its viewers, not the
+draft's. Editors see `unreleased_changes` and release with `POST
+/reports/{id}/release`.
 
 ### Middleware
 
@@ -2195,8 +2210,8 @@ Agent pane (7)
 
 | Suite | Scope | Count |
 |-------|-------|-------|
-| Backend | `backend/tests/` | ~5,300 tests across 403 modules |
-| Frontend | colocated `*.test.ts(x)` | ~2,800 tests across 218 files |
+| Backend | `backend/tests/` | ~5,300 tests across 404 modules |
+| Frontend | colocated `*.test.ts(x)` | ~2,800 tests across 219 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |
 | Doc audit | `tests/test_architecture_doc.py` | Enforces the *counts* in this document |

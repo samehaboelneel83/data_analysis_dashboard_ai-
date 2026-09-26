@@ -105,12 +105,30 @@ async def _bump_revision(report_id: int, db: AsyncSession, current_user: User,
     than a read-modify-write in Python, so two concurrent requests cannot both read
     the same value and write the same increment.
     """
+    await _release_before_first_edit(report_id, db, current_user)
     version = await _capture_version(report_id, db, current_user, via=via, note=note)
     await require_capability(db, current_user, report_id, "edit")
     await db.execute(
         sa_update(Report).where(Report.id == report_id).values(revision=Report.revision + 1)
     )
     return version
+
+
+async def _release_before_first_edit(report_id: int, db: AsyncSession, current_user: User) -> None:
+    """E09: a published report edited for the first time since releases
+    existed keeps what its viewers were seeing as its release, so the edit
+    goes to the draft instead of straight to them. Read from the committed
+    row (core select, autoflush off), like the version snapshot."""
+    from ..services.report_release import has_release, make_release
+    rep_t = Report.__table__
+    with db.sync_session.no_autoflush:
+        row = (await db.execute(select(rep_t.c.published, rep_t.c.created_by)
+                                .where(rep_t.c.id == report_id))).first()
+        if row is None or not row.published or row.created_by is None:
+            return
+        if await has_release(db, report_id):
+            return
+        await make_release(db, report_id, current_user.id, reason="first_edit")
 
 
 #: Restorable snapshots kept per report. Fifty covers a heavy editing day;
@@ -217,7 +235,34 @@ async def list_reports(db: AsyncSession = Depends(get_db), current_user: User = 
     for x in visible:
         x.my_capability = caps[x.id]
         x.is_mine = x.created_by is not None and x.created_by == current_user.id
-    return visible
+    # The list carries every page and widget, so it is held to what GET
+    # /reports/{id} serves: role-restricted pages are absent for a viewer
+    # without the role (the list used to include them), and a viewer of a
+    # released report gets the release, not the draft (E09).
+    from ..services.report_release import latest_releases, summary
+    releases = await latest_releases(db, [x.id for x in visible])
+    restricted: dict[int, set[int]] = {}
+    if not current_user.role.is_org_admin:
+        page_ids = [p.id for x in visible for p in x.pages] or [0]
+        for row in (await db.execute(select(PageRoleVisibility)
+                                     .where(PageRoleVisibility.page_id.in_(page_ids)))).scalars().all():
+            restricted.setdefault(row.page_id, set()).add(row.role_id)
+    outs = []
+    for x in visible:
+        out = ReportOut.model_validate(x)
+        out.pages = [p for p in out.pages
+                     if p.id not in restricted or current_user.role_id in restricted[p.id]]
+        release = releases.get(x.id)
+        if release is not None and x.my_capability == "view":
+            await _serve_release(db, out, release.snapshot, current_user)
+            out.showing = "released"
+        else:
+            out.showing = "draft" if release is not None else "live"
+        out.release = summary(release)
+        out.unreleased_changes = (release is not None and x.my_capability != "view"
+                                  and int(x.revision or 0) != int(release.revision))
+        outs.append(out)
+    return outs
 
 
 async def _require_readable_datasets(db: AsyncSession, user: User, ids, *, already=()) -> None:
@@ -319,7 +364,12 @@ async def _visible_page_ids(db: AsyncSession, report: Report, user: User) -> set
 
 
 @router.get("/{report_id}", response_model=ReportOut)
-async def get_report(report_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def get_report(report_id: int, view: str | None = None,
+                     db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """The report. E09: a viewer (capability 'view') of a report that has a
+    release is served the release, not the draft; an editor gets the draft,
+    or the release with `?view=released` -- to see what viewers see."""
+    from ..services.report_release import latest_release, summary
     report = await _get_report(report_id, db, current_user)
     # Server-side page visibility: a page restricted to roles the viewer lacks is
     # ABSENT from the response, not hidden by the client -- its widgets' configs are
@@ -330,11 +380,36 @@ async def get_report(report_id: int, db: AsyncSession = Depends(get_db), current
     report.is_mine = report.created_by is not None and report.created_by == current_user.id
     report.classification = await _classification_of(report_id, db)
     report.common_filters = await _common_filters_of(report_id, db)
+    release = await latest_release(db, report_id)
     # Serialised BEFORE anything commits, and narrowed on the copy.
     out = ReportOut.model_validate(report)
     out.pages = [p for p in out.pages if p.id in visible]
+    if release is not None and (report.my_capability == "view" or view == "released"):
+        await _serve_release(db, out, release.snapshot, current_user)
+        out.showing = "released"
+    else:
+        out.showing = "draft" if release is not None else "live"
+    out.release = summary(release)
+    out.unreleased_changes = (release is not None and report.my_capability != "view"
+                              and int(report.revision or 0) != int(release.revision))
     await _record_view(db, current_user, report_id)
     return out
+
+
+async def _serve_release(db: AsyncSession, out: ReportOut, snapshot: dict, user: User) -> None:
+    """Replace a serialised report's content with its release's: pages and
+    widgets (under today's page restrictions), theme, display rules, datasets
+    and report filters. Name, owner, publication and classification are the
+    report's own, not part of a release."""
+    from ..schemas.schemas import PageOut as _PageOut
+    from ..services.report_release import visible_release_pages
+    rep = snapshot.get("report") or {}
+    out.theme = rep.get("theme") or out.theme
+    out.display_rules = rep.get("display_rules") or []
+    out.dataset_id = rep.get("dataset_id")
+    out.additional_dataset_ids = list(rep.get("additional_dataset_ids") or [])
+    out.common_filters = list(snapshot.get("common_filters") or [])
+    out.pages = [_PageOut.model_validate(p) for p in await visible_release_pages(db, snapshot, user)]
 
 
 async def _record_view(db: AsyncSession, user: User, report_id: int) -> None:
@@ -544,12 +619,71 @@ async def set_published(report_id: int, body: dict,
                                f"{'s are' if len(open_errors) != 1 else ' is'} open (your organisation's "
                                f"publish gate). Fix them in the Review pane, then publish.",
                     "findings": open_errors})
+    was_published = bool(report.published)
     report.published = bool(body.get("published"))
+    release = None
+    if report.published and not was_published:
+        # E09: publishing distributes what is there now, as its release.
+        from ..services.report_release import make_release
+        release = await make_release(db, report.id, current_user.id, reason="publish")
     await audit(db, current_user,
                 "report.publish" if report.published else "report.unpublish",
                 "report", report.id, report.name)
     await db.commit()
-    return {"published": report.published}
+    from ..services.report_release import summary
+    return {"published": report.published, "release": summary(release)}
+
+
+async def _publish_gate(db: AsyncSession, report: Report) -> None:
+    """The org's publish gate (Phase 7.4): a report with open review errors
+    does not go out to everyone -- by publishing, or by releasing changes to
+    a report that is already out."""
+    from ..services.report_review import high_findings
+    from .review import gate_on, report_pages
+    if await gate_on(db, report.org_id):
+        open_errors = high_findings(await report_pages(db, report.id))
+        if open_errors:
+            raise HTTPException(409, {
+                "message": f"Releasing is blocked while {len(open_errors)} review error"
+                           f"{'s are' if len(open_errors) != 1 else ' is'} open (your organisation's "
+                           f"publish gate). Fix them in the Review pane, then release.",
+                "findings": open_errors})
+
+
+@router.post("/{report_id}/release", status_code=201)
+async def release_report(report_id: int, body: dict | None = None,
+                         db: AsyncSession = Depends(get_db),
+                         current_user: User = Depends(get_current_user)):
+    """E09: make the draft what viewers see. Editors only; the org's publish
+    gate applies to a report that is already published."""
+    from ..services.report_release import make_release, summary
+    report = await db.get(Report, report_id)
+    check_org(report, current_user, "Report not found")
+    await require_capability(db, current_user, report_id, "edit")
+    if report.published:
+        await _publish_gate(db, report)
+    note = (body or {}).get("note")
+    release = await make_release(db, report_id, current_user.id, reason="release",
+                                 note=note if isinstance(note, str) else None)
+    await audit(db, current_user, "report.release", "report", report.id, report.name)
+    await db.commit()
+    await db.refresh(release)
+    return {"release": summary(release), "unreleased_changes": False}
+
+
+@router.get("/{report_id}/releases")
+async def list_releases(report_id: int, db: AsyncSession = Depends(get_db),
+                        current_user: User = Depends(get_current_user)):
+    """Every release of this report, newest first (metadata only). Editors only:
+    a viewer sees the latest one, not the history of what was distributed."""
+    from ..models.models import ReportRelease
+    from ..services.report_release import summary
+    report = await db.get(Report, report_id)
+    check_org(report, current_user, "Report not found")
+    await require_capability(db, current_user, report_id, "edit")
+    rows = (await db.execute(select(ReportRelease).where(ReportRelease.report_id == report_id)
+                             .order_by(ReportRelease.id.desc()).limit(100))).scalars().all()
+    return [summary(r) for r in rows]
 
 
 @router.get("/{report_id}/grants")
@@ -1243,7 +1377,8 @@ from ..services.delivery import valid_recipients as _valid_recipients  # noqa: E
 
 async def _resolve_report_sections(db, report: Report, user: User,
                                    allowed_page_ids: set[int] | None = None,
-                                   context_label: str | None = None) -> list[dict]:
+                                   context_label: str | None = None,
+                                   release=None) -> list[dict]:
     """Resolve every data widget on every page to its shaped result, applying
     row-level security as `user` (the caller for a download, the creator for a
     delivery). Shared by the PDF endpoint and scheduled PDF delivery so the two
@@ -1256,10 +1391,17 @@ async def _resolve_report_sections(db, report: Report, user: User,
     from ..services.prep import prep_steps_of, resolve_join_frames
     from ..services.widget_data import get_widget_data
 
-    pages = (await db.execute(
-        select(ReportPage).options(selectinload(ReportPage.widgets))
-        .where(ReportPage.report_id == report.id).order_by(ReportPage.position)
-    )).scalars().all()
+    # E09: `release` renders what a viewer is served instead of the draft.
+    from ..services.report_release import page_objects, primary_dataset_id
+    if release is not None:
+        pages = page_objects(release.snapshot)
+        primary = primary_dataset_id(release.snapshot)
+    else:
+        pages = (await db.execute(
+            select(ReportPage).options(selectinload(ReportPage.widgets))
+            .where(ReportPage.report_id == report.id).order_by(ReportPage.position)
+        )).scalars().all()
+        primary = report.dataset_id
 
     # Only the pages the caller may see (and chose): re-reading every page
     # here used to put role-restricted pages straight back into the PDF.
@@ -1271,7 +1413,7 @@ async def _resolve_report_sections(db, report: Report, user: User,
         for w in sorted(page.widgets, key=lambda x: ((x.layout or {}).get("y", 0), (x.layout or {}).get("x", 0))):
             if w.widget_type in _SKIP_TYPES or w.widget_type == "text":
                 continue
-            dataset_id = (w.config or {}).get("dataset_id") or report.dataset_id
+            dataset_id = (w.config or {}).get("dataset_id") or primary
             if not dataset_id:
                 continue
             ds = await db.get(Dataset, dataset_id)
@@ -1339,8 +1481,12 @@ async def export_report_pdf(report_id: int, paper: str = "A4", orientation: str 
     from ..services.pdf_export import build_report_pdf
 
     report = await _get_report(report_id, db, current_user)
+    # E09: a viewer's PDF is of the release they are served, not the draft.
+    from ..services.report_release import served_release, visible_release_pages
+    release = await served_release(db, report_id, current_user)
     # Honour page visibility: a viewer's PDF excludes pages hidden from their role.
-    visible = await _visible_page_ids(db, report, current_user)
+    visible = ({p["id"] for p in await visible_release_pages(db, release.snapshot, current_user)}
+               if release is not None else await _visible_page_ids(db, report, current_user))
 
     if paper not in ("A4", "A3", "Letter"):
         raise HTTPException(400, "paper must be A4, A3 or Letter")
@@ -1353,7 +1499,7 @@ async def export_report_pdf(report_id: int, paper: str = "A4", orientation: str 
     from .shared import download_gate
     label = await download_gate(db, current_user, report=report)
     sections = await _resolve_report_sections(db, report, current_user, allowed_page_ids=visible,
-                                              context_label=label)
+                                              context_label=label, release=release)
     classification = await _classification_of(report_id, db)
     pdf = await asyncio.to_thread(build_report_pdf, report.name, report.description, sections, classification,
                                   paper, orientation, contents)
@@ -1396,17 +1542,20 @@ async def export_report_package(report_id: int, db: AsyncSession = Depends(get_d
     from ..services.sensitivity import redacted_columns
     from .shared import download_gate
     label = await download_gate(db, current_user, report=report)
-    visible_ids = {p.id for p in report.pages}
-    if not current_user.role.is_org_admin and visible_ids:
-        rows = (await db.execute(
-            select(PageRoleVisibility).where(PageRoleVisibility.page_id.in_(visible_ids)))).scalars().all()
-        restricted: dict[int, set[int]] = {}
-        for row in rows:
-            restricted.setdefault(row.page_id, set()).add(row.role_id)
-        visible_ids = {pid for pid in visible_ids if pid not in restricted or current_user.role_id in restricted[pid]}
-    pages = (await db.execute(
-        select(ReportPage).options(selectinload(ReportPage.widgets))
-        .where(ReportPage.report_id == report.id).order_by(ReportPage.position))).scalars().all()
+    # E09: a viewer's package is of the release they are served.
+    from ..services.report_release import (page_objects, primary_dataset_id, served_release,
+                                           visible_release_pages)
+    release = await served_release(db, report_id, current_user)
+    if release is not None:
+        visible_ids = {p["id"] for p in await visible_release_pages(db, release.snapshot, current_user)}
+        pages = page_objects(release.snapshot)
+        primary = primary_dataset_id(release.snapshot)
+    else:
+        visible_ids = await _visible_page_ids(db, report, current_user)
+        pages = (await db.execute(
+            select(ReportPage).options(selectinload(ReportPage.widgets))
+            .where(ReportPage.report_id == report.id).order_by(ReportPage.position))).scalars().all()
+        primary = report.dataset_id
 
     policy_cache: dict[int, bool] = {}
     out_pages = []
@@ -1423,7 +1572,7 @@ async def export_report_package(report_id: int, db: AsyncSession = Depends(get_d
                 continue
             if w.widget_type in ("button", "image", "shape", "slicer", "container", "web_content", "script"):
                 continue
-            ds_id = cfg.get("dataset_id") or report.dataset_id
+            ds_id = cfg.get("dataset_id") or primary
             if not ds_id:
                 continue
             if ds_id not in policy_cache:

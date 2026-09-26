@@ -63,6 +63,10 @@ How to read it:
 4. A report you can open (capability other than `none`) that draws the
    dataset (as its primary dataset, an additional dataset, or a widget's own
    `dataset_id`), limited to what that report's author can read directly.
+   When the report has a release (E09), a reader who holds only `view` is
+   served the release, so it is the RELEASE's datasets this rung opens to
+   them, not ones the draft has added since; editors read the draft's and the
+   release's.
 5. An unowned dataset (`created_by` is NULL): readable by every member. Only
    rows from before ownership existed, and seeded demo content, are unowned.
    Everything the app creates is owned by the person who created it: uploads,
@@ -82,6 +86,14 @@ How to read it:
 **Dataflows** (`effective_dataflow_capability`): admin `data`; otherwise your
 role's row; with no row, `view` if the flow has any grants and `data` if it has
 none.
+
+**Releases** (E09, `services/report_release.py`): a reader with `view` on a
+report that has a release is served the release -- in `GET /reports/{id}`,
+the report list, a PDF and the offline package -- and so are guest links,
+embeds and scheduled deliveries. A release is frozen content, never frozen
+access: a page restricted when it was released stays restricted after the
+draft deletes it, and a restriction added since applies too. Releasing needs
+`edit`; on a published report, the organization's publish gate applies.
 
 ## Connections and imports
 
