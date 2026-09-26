@@ -444,10 +444,13 @@ operating on what a pipeline produced cannot route around the pipeline's own
 permissions.
 
 **Authoring is gated; reading is not.** Edit, schedule, run, delete and grant all
-require capability. An output is an ordinary dataset, readable org-wide with RLS
-narrowing rows per identity -- which is what `DatasetShare` already records as the
-platform's model. Gating reads here would contradict every other read path rather
-than extend one, and a test proves a `view` user still reads every output row.
+require capability. An output is an ordinary dataset, read by the ordinary rule
+(`docs/CAPABILITY_MATRIX.md`): it is owned by whoever ran the flow, and others
+read it through a `DatasetShare` or a dashboard, with RLS narrowing rows per
+identity. Outputs used to be created unowned, which made them readable by the
+whole org -- a run by an admin published every source row past any member's row
+rule. Dataflow grants never gate reading, and a test proves a `view` user who was
+given the output still reads every row.
 
 **Default-open, with one deliberate difference from `ReportCapability`.** No rows
 at all means every role has full access, so nothing existing breaks on the day it
@@ -1804,6 +1807,15 @@ would make the response itself the leak.
 Authorisation is layered: **organisation scope** (Layer 6) constrains which rows
 are reachable at all; **RLS** (Layer 4) constrains which of those the user may see.
 
+The rule for who may open, read and change each object is written down in
+`docs/CAPABILITY_MATRIX.md`, and its main table is checked cell by cell against
+`core/capability.py` by `tests/test_capability_matrix.py`. Every surface that
+returns dataset content is walked by one suite, `tests/test_security_surfaces.py`,
+with one fixture: another organization gets 404, a colleague who cannot read the
+dataset gets 404, and a reader with a row rule and a column rule never receives a
+filtered row or a denied column's value. A new `/datasets/{dataset_id}/...` route
+fails that suite until it is added to its inventory.
+
 ### Outbound
 
 - `services/pdf_export.py` — server-side PDF rendering
@@ -2170,7 +2182,7 @@ Agent pane (7)
 
 | Suite | Scope | Count |
 |-------|-------|-------|
-| Backend | `backend/tests/` | ~5,300 tests across 396 modules |
+| Backend | `backend/tests/` | ~5,300 tests across 398 modules |
 | Frontend | colocated `*.test.ts(x)` | ~2,800 tests across 217 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |

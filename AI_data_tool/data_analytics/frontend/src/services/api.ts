@@ -2279,6 +2279,9 @@ export interface ColumnStats {
   /** False means these are the engine's estimates, not measured values. */
   exact?: boolean
   computed_at?: string
+  /** True when the caller's rows are filtered by a row rule: the figures are
+   *  whole-table, so the value-bearing ones are left out. */
+  restricted?: boolean
 }
 
 /** Task R3 / spec section 5 (E2): a named business object this source

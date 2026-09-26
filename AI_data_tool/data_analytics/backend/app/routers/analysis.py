@@ -306,6 +306,7 @@ async def run_key_influencers(
     result = await db.execute(select(Dataset).options(selectinload(Dataset.columns)).where(Dataset.id == dataset_id))
     ds = result.scalar_one_or_none()
     check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
 
     rls_expr = await resolve_rls_expr(db, current_user, dataset_id)
     denied = await resolve_denied_columns(db, current_user, dataset_id)
@@ -368,6 +369,7 @@ async def _secured_frame(dataset_id: int, db: AsyncSession, current_user: User
         select(Dataset).options(selectinload(Dataset.columns)).where(Dataset.id == dataset_id))
     ds = result.scalar_one_or_none()
     check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
 
     rls_expr = await resolve_rls_expr(db, current_user, dataset_id)
     denied = await resolve_denied_columns(db, current_user, dataset_id)

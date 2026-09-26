@@ -1235,7 +1235,10 @@ async def export_dataset(
     df = await asyncio.to_thread(load_file, ds.filename)
     rls_expr = await resolve_rls_expr(db, current_user, dataset_id)
     if rls_expr:
-        df = apply_filter_expr(df, rls_expr, silent=True)
+        # Fails CLOSED, like every other read: a rule that cannot be evaluated
+        # exports no rows. `apply_filter_expr(silent=True)` exported them ALL.
+        from ..services.widget_data import apply_rls_filter
+        df = apply_rls_filter(df, rls_expr)
     denied = await resolve_denied_columns(db, current_user, dataset_id)
     if denied:
         df = df.drop(columns=[c for c in denied if c in df.columns])
@@ -1264,6 +1267,7 @@ async def export_dataset(
 async def list_calculated_columns(dataset_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
     return ds.calculated_columns or []
 
 
@@ -1358,14 +1362,20 @@ async def delete_calculated_column(dataset_id: int, col_name: str, force: bool =
 async def preview_calculated_column(dataset_id: int, req: CalcColumnPreviewRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
     if not ds.filename:
         raise HTTPException(404, "Dataset not found")
     rls_expr = await resolve_rls_expr(db, current_user, dataset_id)
     from ..services.prep import prep_steps_of, resolve_join_frames
     _cp_steps = prep_steps_of(ds)
     _cp_aux = await resolve_join_frames(db, current_user, _cp_steps) if _cp_steps else {}
+    # Column security as well as row security: without it, previewing
+    # `<denied column> * 1` returned the column's values -- the one thing
+    # the rule exists to hide (E01 cross-surface suite).
+    denied = await resolve_denied_columns(db, current_user, dataset_id)
     return await asyncio.to_thread(preview_expression, ds.filename, req.expression, 8, rls_expr,
-                                   _cp_steps, _cp_aux, custom_functions=ds.custom_functions)
+                                   _cp_steps, _cp_aux, denied_columns=denied,
+                                   custom_functions=ds.custom_functions)
 
 
 # ── Measures (post-aggregation) ───────────────────────────────────────────────
@@ -1406,6 +1416,7 @@ async def _validate_measure(measure: MeasureDef, ds: Dataset, db: AsyncSession) 
 async def list_measures(dataset_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
     return ds.measures or []
 
 
@@ -1523,6 +1534,7 @@ async def delete_measure(dataset_id: int, measure_name: str, force: bool = False
 async def preview_measure_expr(dataset_id: int, req: MeasurePreviewRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
     if not ds.filename:
         raise HTTPException(404, "Dataset not found")
     rls_expr = await resolve_rls_expr(db, current_user, dataset_id)
@@ -1560,6 +1572,7 @@ async def preview_measure_expr(dataset_id: int, req: MeasurePreviewRequest, db: 
 async def list_custom_functions(dataset_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
     return ds.custom_functions or []
 
 
@@ -1610,6 +1623,7 @@ async def preview_custom_function(dataset_id: int, req: CustomFunctionPreviewReq
 
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
 
     try:
         validate_custom_function_def("__preview__", req.params, req.expression, set(), set(), set(), {})
@@ -1796,6 +1810,7 @@ async def set_column_description(dataset_id: int, column: str,
 async def get_column_meta(dataset_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
     return ds.column_meta or {}
 
 
@@ -2062,6 +2077,7 @@ async def dataset_insights(dataset_id: int, db: AsyncSession = Depends(get_db),
     the numbers its sentence states, plus a one-paragraph narrative."""
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
     # A DirectQuery dataset is read live, bounded by `analysis_row_cap`; an
     # import dataset is read from its file. Both end as a frame, which is all
     # any detector has ever wanted. What is still refused is a dataset with
@@ -2209,6 +2225,7 @@ async def goal_seek(dataset_id: int, x_column: str, y_column: str, target_y: flo
 
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
     if not ds.filename or ds.mode == "directquery":
         raise HTTPException(400, "Goal seek is available for import-mode datasets only")
     denied = await resolve_denied_columns(db, current_user, dataset_id)
@@ -2223,6 +2240,11 @@ async def goal_seek(dataset_id: int, x_column: str, y_column: str, target_y: flo
         from ..services.widget_data import apply_calculated_columns, apply_rls_filter
         df = load_file(ds.filename)
         df = apply_rls_filter(df, rls_expr)
+        # Denied columns leave BEFORE calculated columns: a calculated column
+        # over one (`salary * 1`) otherwise carried its values straight into
+        # the fit (E01 cross-surface suite).
+        if denied:
+            df = df.drop(columns=[c for c in denied if c in df.columns])
         df = apply_prep_steps(df, _steps, _aux)
         if ds.calculated_columns:
             df = apply_calculated_columns(df, ds.calculated_columns, ds.custom_functions)
@@ -2251,6 +2273,7 @@ async def explain_column(dataset_id: int, column: str, body: dict | None = None,
     as every widget; a denied response column fails closed."""
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
     if not ds.filename or ds.mode == "directquery":
         raise HTTPException(400, "Explanation is available for import-mode datasets only")
     denied = await resolve_denied_columns(db, current_user, dataset_id)
@@ -2345,6 +2368,7 @@ async def outlier_details(dataset_id: int, column: str, detector: str = "iqr",
     the flagged-row set and its downstream impact numbers change."""
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
     if not ds.filename or ds.mode == "directquery":
         raise HTTPException(400, "Outlier details are available for import-mode datasets only")
     denied = await resolve_denied_columns(db, current_user, dataset_id)
@@ -2565,6 +2589,7 @@ async def save_data_view(dataset_id: int, name: str,
     from ..services.data_views import snapshot_dataset
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
     name = (name or "").strip()[:255]
     if not name:
         raise HTTPException(400, "A data view needs a name")
@@ -2648,6 +2673,7 @@ async def get_prep_steps(dataset_id: int, db: AsyncSession = Depends(get_db), cu
     from ..services.prep import prep_steps_of
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
     return prep_steps_of(ds)
 
 
@@ -3083,6 +3109,10 @@ async def materialize_dataset(
         row_count=len(out), col_count=len(out.columns), file_size=size,
         org_id=current_user.org_id, mode="import",
         last_refreshed_at=datetime.utcnow(),
+        # Owned by whoever made it. Left NULL it was readable by the whole org
+        # -- and it holds the rows AS THIS CALLER SAW THEM, so a colleague with
+        # a stricter row rule on the source read past it through the copy.
+        created_by=current_user.id,
         column_meta={
             **inherited,
             DERIVED_FROM_KEY: {
@@ -3505,6 +3535,7 @@ async def rebuild_dataset(
 async def get_column_formats(dataset_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
     return ds.column_formats or {}
 
 
@@ -3665,6 +3696,7 @@ async def update_filter_expr(dataset_id: int, body: FilterExprUpdate, db: AsyncS
     from sqlalchemy.orm import selectinload
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
+    await require_dataset_capability(db, current_user, dataset_id, "data")
     ds.default_filter_expr = body.expression or None
     await db.commit()
     result = await db.execute(select(Dataset).options(selectinload(Dataset.columns)).where(Dataset.id == dataset_id))
@@ -3675,6 +3707,7 @@ async def update_filter_expr(dataset_id: int, body: FilterExprUpdate, db: AsyncS
 async def preview_filter_expr(dataset_id: int, req: FilterPreviewRequest, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
     if not ds.filename:
         raise HTTPException(404, "Dataset not found")
     rls_expr = await resolve_rls_expr(db, current_user, dataset_id)

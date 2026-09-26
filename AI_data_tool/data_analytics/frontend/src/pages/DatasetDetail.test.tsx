@@ -413,11 +413,20 @@ describe('DatasetDetail "Edit query" (D1)', () => {
     expect(screen.queryByRole('button', { name: /Edit query/ })).not.toBeInTheDocument()
   })
 
-  it('shows "Edit query" for a builder-created dataset and opens it hydrated', async () => {
+  it('hides "Edit query" from a non-admin: the builder reads the source directly, which is admin-only', async () => {
     vi.mocked(datasetsApi.get).mockResolvedValue({
       ...importDataset(), query_model: { table: 'orders', columns: [{ column: 'region' }] },
     })
     renderDetail(29)
+    await screen.findByText('CSV Upload')
+    expect(screen.queryByRole('button', { name: /Edit query/ })).not.toBeInTheDocument()
+  })
+
+  it('shows "Edit query" for a builder-created dataset and opens it hydrated', async () => {
+    vi.mocked(datasetsApi.get).mockResolvedValue({
+      ...importDataset(), query_model: { table: 'orders', columns: [{ column: 'region' }] },
+    })
+    renderDetailAsAdmin(29)
     const btn = await screen.findByRole('button', { name: /Edit query/ })
     fireEvent.click(btn)
     expect(await screen.findByTestId('qb-dialog')).toHaveTextContent('editing CSV Upload')

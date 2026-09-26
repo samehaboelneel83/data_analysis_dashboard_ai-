@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 from ..core.database import get_db
+from ..core.capability import require_dataset_capability, require_dataset_read
 from ..core.org_scope import check_org
 from ..dependencies import get_current_user
 from ..models.models import Dataset, DatasetColumn, HierarchyNode, User
@@ -14,9 +15,16 @@ router = APIRouter(prefix="/datasets", tags=["hierarchy"])
 DATE_DRILL_LEVELS = [("Year", "year"), ("Quarter", "quarter"), ("Month", "month"), ("Day", "day")]
 
 
-async def _get_dataset(dataset_id: int, db: AsyncSession, current_user: User) -> Dataset:
+async def _get_dataset(dataset_id: int, db: AsyncSession, current_user: User,
+                       *, write: bool = False) -> Dataset:
+    """Reading the tree needs read access to the dataset; changing it is
+    authoring, which needs the same capability as the rest of the model."""
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
+    if write:
+        await require_dataset_capability(db, current_user, dataset_id, "data")
+    else:
+        await require_dataset_read(db, current_user, dataset_id)
     return ds
 
 
@@ -31,7 +39,7 @@ async def get_hierarchy(dataset_id: int, db: AsyncSession = Depends(get_db), cur
 
 @router.post("/{dataset_id}/hierarchy", response_model=HierarchyNodeOut, status_code=201)
 async def create_node(dataset_id: int, body: HierarchyNodeCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    await _get_dataset(dataset_id, db, current_user)
+    await _get_dataset(dataset_id, db, current_user, write=True)
     node = HierarchyNode(dataset_id=dataset_id, **body.model_dump())
     db.add(node)
     await db.commit()
@@ -41,7 +49,7 @@ async def create_node(dataset_id: int, body: HierarchyNodeCreate, db: AsyncSessi
 
 @router.patch("/{dataset_id}/hierarchy/{node_id}", response_model=HierarchyNodeOut)
 async def update_node(dataset_id: int, node_id: int, body: HierarchyNodeUpdate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    await _get_dataset(dataset_id, db, current_user)
+    await _get_dataset(dataset_id, db, current_user, write=True)
     r = await db.execute(select(HierarchyNode).where(HierarchyNode.id == node_id, HierarchyNode.dataset_id == dataset_id))
     node = r.scalar_one_or_none()
     if not node:
@@ -55,7 +63,7 @@ async def update_node(dataset_id: int, node_id: int, body: HierarchyNodeUpdate, 
 
 @router.delete("/{dataset_id}/hierarchy/{node_id}", status_code=204)
 async def delete_node(dataset_id: int, node_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    await _get_dataset(dataset_id, db, current_user)
+    await _get_dataset(dataset_id, db, current_user, write=True)
     r = await db.execute(select(HierarchyNode).where(HierarchyNode.id == node_id, HierarchyNode.dataset_id == dataset_id))
     node = r.scalar_one_or_none()
     if not node:
@@ -77,7 +85,7 @@ async def delete_node(dataset_id: int, node_id: int, db: AsyncSession = Depends(
 
 @router.post("/{dataset_id}/hierarchy/auto-generate", response_model=list[HierarchyNodeOut])
 async def auto_generate(dataset_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    ds = await _get_dataset(dataset_id, db, current_user)
+    ds = await _get_dataset(dataset_id, db, current_user, write=True)
 
     if ds.mode == "directquery":
         # No file to load -- DatasetColumn already carries the dtype detected

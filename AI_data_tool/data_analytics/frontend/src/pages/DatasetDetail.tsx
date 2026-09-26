@@ -668,7 +668,9 @@ export default function DatasetDetail() {
             )}
           </div>
         )}
-        {ds.data_source_id && ds.query_model && (
+        {/* Admins only: the builder previews and re-imports straight from the
+            source, and both are admin-only on the server (E01). */}
+        {isAdmin && ds.data_source_id && ds.query_model && (
           <button onClick={openEditQuery} disabled={queryEditLoading} className="btn btn-ghost btn-sm">
             {queryEditLoading ? 'Loading…' : '✎ Edit query'}
           </button>

@@ -268,6 +268,17 @@ async def ask(cid: int, body: AskIn, db: AsyncSession = Depends(get_db),
               user: User = Depends(get_current_user)):
     conv = await _owned_conversation(db, cid, user)
 
+    # E01: the scope is checked again on every question, not only when the
+    # conversation was created. A share revoked, an owner who made a dataset
+    # private, a connection taken off someone's list -- each must end what
+    # the agent will read for them from the next question on.
+    for did in conv.dataset_ids or []:
+        await require_dataset_read(db, user, did)
+    if conv.data_source_id is not None:
+        visible = await _visible_source_ids(db, user)
+        if visible is not None and conv.data_source_id not in visible:
+            raise HTTPException(404, "Data source not found")
+
     # Task E2: daily cap first (cheap, no in-process state), then the
     # concurrent-asks slot wraps the actual run so it's held for the run's
     # whole lifetime and released even if run_agent raises.

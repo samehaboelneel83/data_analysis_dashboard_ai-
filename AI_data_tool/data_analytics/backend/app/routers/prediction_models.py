@@ -129,14 +129,17 @@ async def train_model(
         # and a renamed one would be the old name.
         df = load_file(ds.filename)
         df = apply_rls_filter(df, rls_expr)
-        df = apply_prep_steps(df, _steps, _aux)
-        if ds.calculated_columns:
-            df = apply_calculated_columns(df, ds.calculated_columns, ds.custom_functions)
         # A denied column must not become a predictor: the resulting model
         # would carry it, and every future caller would inherit the leak.
+        # Dropped BEFORE prep and calculated columns, as every other read
+        # does: dropped after, a calculated column over it (`salary * 1`)
+        # survived as a feature carrying the same values (E01).
         for column in (denied or []):
             if column in df.columns:
                 df = df.drop(columns=[column])
+        df = apply_prep_steps(df, _steps, _aux)
+        if ds.calculated_columns:
+            df = apply_calculated_columns(df, ds.calculated_columns, ds.custom_functions)
         if req.partition:
             if req.partition not in df.columns:
                 raise ModelStoreError(f"Partition column '{req.partition}' is not in this dataset.")

@@ -600,9 +600,14 @@ async def compile_query(ds_id: int, model: dict, db: AsyncSession = Depends(get_
 
 @router.post("/{ds_id}/build-query/preview")
 async def preview_built_query(ds_id: int, model: dict, db: AsyncSession = Depends(get_db),
-                              current_user: User = Depends(get_current_user)):
+                              current_user: User = Depends(require_org_admin)):
     """Compile then run with a hard preview cap, returning rows + the SQL --
-    what the builder's data pane shows."""
+    what the builder's data pane shows.
+
+    Admin-only, like `POST /{ds_id}/preview` and the import itself: this runs
+    SQL against the source and returns its rows, with no dataset between them
+    and the caller for row or column rules to attach to. It checked the org
+    only, so any member could read any table the connection reaches (E01)."""
     from ..services.connections import preview_table
     from ..services.query_builder import build_sql, introspect_tables, referenced_tables
     ds = await db.get(DataSource, ds_id)

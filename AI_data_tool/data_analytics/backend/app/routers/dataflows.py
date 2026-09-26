@@ -343,6 +343,9 @@ async def run_dataflow(flow_id: int, req: RunRequest,
             name=req.output_name.strip()[:255], filename=str(path),
             row_count=len(out), col_count=len(out.columns), file_size=size,
             org_id=current_user.org_id, mode="import", last_refreshed_at=now,
+            # Owned by whoever ran the flow, like an upload: NULL is org-wide
+            # readable, and this output carries the runner's row filter.
+            created_by=current_user.id,
             column_meta={**inherited, DERIVED_FROM_KEY: _provenance()})
         db.add(new)
         await db.flush()

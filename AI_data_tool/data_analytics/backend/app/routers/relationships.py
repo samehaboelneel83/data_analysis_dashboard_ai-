@@ -62,8 +62,12 @@ async def check_relationship(body: dict, db: AsyncSession = Depends(get_db),
     fcol, tcol = str(body.get("from_column") or ""), str(body.get("to_column") or "")
     if not fcol or not tcol:
         raise HTTPException(400, "Both columns are required")
+    from ..core.capability import require_dataset_read
     for did in (fid, tid):
         check_org(await db.get(Dataset, did), current_user, "Dataset not found")
+        # Both sides as the caller: a mapping check reports the other side's
+        # unmatched VALUES, so a dataset you cannot open is not one to check.
+        await require_dataset_read(db, current_user, did)
     frames = await resolve_join_frames(db, current_user, [{"kind": "join", "dataset_id": fid},
                                                           {"kind": "join", "dataset_id": tid}])
     left, right = frames.get(fid), frames.get(tid)

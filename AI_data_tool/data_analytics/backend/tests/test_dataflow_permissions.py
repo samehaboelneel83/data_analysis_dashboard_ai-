@@ -71,6 +71,12 @@ async def _flow(db, org_id, src_id, creator_id, steps=None):
     return flow
 
 
+async def _share(db, dataset_id, user_id):
+    from app.models.models import DatasetShare
+    db.add(DatasetShare(dataset_id=dataset_id, user_id=user_id))
+    await db.commit()
+
+
 async def _grant(db, flow_id, role_id, level):
     db.add(DataflowCapability(dataflow_id=flow_id, role_id=role_id, level=level))
     await db.commit()
@@ -229,7 +235,7 @@ class TestReadingIsNotGated:
         user who cannot touch the recipe still sees every row it produced."""
         org = two_orgs["a"]["org"]
         src = await _source(db_session, org.id, _uploads)
-        role, _, hdr = await _member(db_session, org.id)
+        role, member, hdr = await _member(db_session, org.id)
         flow = await _flow(db_session, org.id, src.id, two_orgs["a"]["user"].id)
         await db_session.commit()
 
@@ -238,6 +244,9 @@ class TestReadingIsNotGated:
                                  headers=auth_headers["a"])
         assert made.status_code == 200, made.text
         out_id = made.json()["outputs"][0]["id"]
+        # The output is owned by whoever ran the flow, like any dataset they
+        # create (E01), so the reader is given it the ordinary way.
+        await _share(db_session, out_id, member.id)
         await _grant(db_session, flow.id, role.id, "view")
 
         seen = await client.post(
@@ -269,7 +278,9 @@ class TestTheOutputCannotRouteAroundTheDataflow:
         org = two_orgs["a"]["org"]
         flow, out_id = await self._flow_with_output(
             client, db_session, org, auth_headers, _uploads)
-        role, _, hdr = await _member(db_session, org.id)
+        role, member, hdr = await _member(db_session, org.id)
+        # Readable (shared), so the refusal below is about the dataflow.
+        await _share(db_session, out_id, member.id)
         await _grant(db_session, flow.id, role.id, "view")
 
         r = await client.delete(f"/api/v1/datasets/{out_id}", headers=hdr)
@@ -282,7 +293,9 @@ class TestTheOutputCannotRouteAroundTheDataflow:
         org = two_orgs["a"]["org"]
         flow, out_id = await self._flow_with_output(
             client, db_session, org, auth_headers, _uploads)
-        role, _, hdr = await _member(db_session, org.id)
+        role, member, hdr = await _member(db_session, org.id)
+        # Readable (shared), so the refusal below is about the dataflow.
+        await _share(db_session, out_id, member.id)
         await _grant(db_session, flow.id, role.id, "view")
 
         r = await client.patch(f"/api/v1/datasets/{out_id}/refresh-schedule",

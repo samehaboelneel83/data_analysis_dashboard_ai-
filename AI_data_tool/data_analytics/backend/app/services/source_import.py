@@ -167,6 +167,9 @@ async def import_from_source(db: AsyncSession, current_user: User, ds: DataSourc
             filename=None, row_count=0, col_count=len(preview['columns']), file_size=0,
             data_source_id=ds.id, source_table=req.table, source_query=req.query,
             query_model=req.query_model, mode="directquery", org_id=current_user.org_id,
+            # Owned by the importer, like an upload (NULL means readable by
+            # the whole org, which is for pre-ownership rows only).
+            created_by=current_user.id,
         )
         db.add(dataset)
         await db.flush()
@@ -314,6 +317,8 @@ async def import_from_source(db: AsyncSession, current_user: User, ds: DataSourc
         source_query=req.query,
         query_model=req.query_model,
         org_id=current_user.org_id,
+        # Owned by the importer, like an upload (see the DirectQuery branch).
+        created_by=current_user.id,
     )
     db.add(dataset)
     await db.flush()

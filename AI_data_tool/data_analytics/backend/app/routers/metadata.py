@@ -620,8 +620,23 @@ async def column_statistics(
     `exact` tells the caller whether these are measured or estimated. A UI
     showing a distinct count as fact should check it.
     """
+    from ..core.capability import require_dataset_read
+    from ..core.rls import resolve_denied_columns, resolve_rls_expr
+
     dataset = await db.get(Dataset, dataset_id)
     check_org(dataset, current_user, "Dataset not found")
+    # E01: these are the column's real values (`top_k`, min, max), so they
+    # answer to the same three rules as the rows themselves. This endpoint
+    # checked the org only: a colleague could read a private dataset's values,
+    # and a column rule's denied column showed its top values to the role it
+    # hides them from.
+    await require_dataset_read(db, current_user, dataset_id)
+    if column_name in (await resolve_denied_columns(db, current_user, dataset_id) or []):
+        raise HTTPException(404, "Column not found")
+    # The statistics describe the WHOLE table. For a caller whose rows are
+    # filtered, a top value or an extreme may come from a row they cannot see,
+    # so the value-bearing fields are withheld rather than recomputed here.
+    rows_filtered = bool(await resolve_rls_expr(db, current_user, dataset_id))
 
     column = (await db.execute(
         select(DatasetColumn).where(
@@ -643,6 +658,18 @@ async def column_statistics(
             "column": column_name, "dtype": column.dtype,
             "semantic_type": column.semantic_type,
             "profiled": False,
+        }
+
+    if rows_filtered:
+        return {
+            "column": column_name,
+            "dtype": column.dtype,
+            "semantic_type": column.semantic_type,
+            "description": column.description,
+            "description_source": column.description_source,
+            "profiled": True,
+            # Whole-table figures, withheld: see above.
+            "restricted": True,
         }
 
     return {

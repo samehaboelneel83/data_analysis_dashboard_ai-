@@ -7,8 +7,8 @@ from sqlalchemy import select, update as sa_update
 from sqlalchemy.orm import selectinload
 from ..core.database import get_db
 from ..core.org_scope import check_org
-from ..core.capability import (_config_dataset_ids, effective_capabilities, effective_capability,
-                               require_capability, require_dataset_read)
+from ..core.capability import (_config_dataset_ids, can_read_dataset, effective_capabilities,
+                               effective_capability, require_capability, require_dataset_read)
 from ..dependencies import get_current_user
 from ..services.audit import record as audit
 from ..models.models import CommonFilter, DataAlert, OrgTheme, PageRoleVisibility, PageTemplate, Report, ReportClassification, ReportParameter, ReportSchedule, ReportPage, ReportUserGrant, ReportVersion, ReportWidget, Bookmark, RecentView, Role, User
@@ -1277,6 +1277,12 @@ async def _resolve_report_sections(db, report: Report, user: User,
             ds = await db.get(Dataset, dataset_id)
             if ds is None or ds.org_id != report.org_id or not ds.filename:
                 continue
+            # The dataset read rule, through this report -- exactly what the
+            # widget endpoint asks. The org match alone let a PDF (or a
+            # scheduled delivery, resolved as its creator) draw a widget whose
+            # dataset the reader was never given (E01).
+            if not await can_read_dataset(db, user, ds.id, report_id=report.id):
+                continue
             try:
                 steps = prep_steps_of(ds)
                 aux = await resolve_join_frames(db, user, steps) if steps else {}
@@ -1469,6 +1475,9 @@ async def suggest_widgets(report_id: int, db: AsyncSession = Depends(get_db),
     ds = await db.get(Dataset, report.dataset_id)
     if ds is None or ds.org_id != report.org_id or not ds.filename or ds.mode == "directquery":
         raise HTTPException(400, "Suggestions run over import-mode datasets")
+    # Read through THIS report, as a widget on it would: the report being
+    # viewable is not by itself licence to its dataset (E01).
+    await require_dataset_read(db, current_user, ds.id, report_id=report_id)
 
     denied = await resolve_denied_columns(db, current_user, ds.id)
     rls_expr = await resolve_rls_expr(db, current_user, ds.id)
@@ -1539,11 +1548,15 @@ async def auto_compose(report_id: int, db: AsyncSession = Depends(get_db),
 
     report = await db.get(Report, report_id)
     check_org(report, current_user, "Report not found")
+    # It adds a page: authoring, so edit -- the router gate only asked for
+    # view, and a viewer could append pages to someone else's dashboard (E01).
+    await require_capability(db, current_user, report_id, "edit")
     if not report.dataset_id:
         raise HTTPException(400, "Attach a dataset to this report first")
     ds = await db.get(Dataset, report.dataset_id)
     if ds is None or ds.org_id != report.org_id or not ds.filename or ds.mode == "directquery":
         raise HTTPException(400, "Auto-compose runs over import-mode datasets")
+    await require_dataset_read(db, current_user, ds.id, report_id=report_id)
 
     denied = await resolve_denied_columns(db, current_user, ds.id)
     rls_expr = await resolve_rls_expr(db, current_user, ds.id)
@@ -1875,6 +1888,11 @@ async def unsubscribe_from_report(report_id: int, db: AsyncSession = Depends(get
 async def delete_schedule(report_id: int, schedule_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     sched = await db.get(ReportSchedule, schedule_id)
     check_org(sched, current_user, "Schedule not found")
+    # The schedule must belong to the report named in the path: the edit
+    # check below is on THAT report, so without this, editing one report
+    # let you delete another report's schedules (E01).
+    if sched.report_id != report_id:
+        raise HTTPException(404, "Schedule not found")
     await require_capability(db, current_user, report_id, "edit")
     await db.delete(sched)
     await db.commit()
@@ -1887,6 +1905,12 @@ async def run_schedule_now(report_id: int, schedule_id: int, db: AsyncSession = 
     from ..services.delivery import run_schedule
     sched = await db.get(ReportSchedule, schedule_id)
     check_org(sched, current_user, "Schedule not found")
+    # Sending is an author's action, and only for this report's schedules:
+    # it checked the org alone, so anyone who could view any report could
+    # fire any schedule's emails in the org (E01).
+    if sched.report_id != report_id:
+        raise HTTPException(404, "Schedule not found")
+    await require_capability(db, current_user, report_id, "edit")
     await run_schedule(db, sched)
     return {"last_status": sched.last_status}
 

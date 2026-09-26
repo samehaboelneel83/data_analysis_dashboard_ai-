@@ -445,7 +445,7 @@ STAT_FAMILIES       = {"postgresql"}</code></pre>
     <span class="ct">The hole this closes</span>
     <p><code>max_dataset_capability</code> ends with &ldquo;a dataset no report uses is unrestricted&rdquo; &mdash; and a materialized result is used by no report the moment it is created, so every org member could author a freshly built transformation. <code>DELETE /datasets/{id}</code> and <code>PATCH /{id}/refresh-schedule</code> were worse: no capability check at all. Both now call <code>require_dataset_write</code>, which resolves a dataflow's grants first, so operating on what a pipeline produced cannot route around the pipeline's permissions.</p>
   </div>
-  <p><strong>Authoring is gated; reading is not.</strong> An output is an ordinary dataset, readable org-wide with RLS narrowing rows per identity &mdash; the model <code>DatasetShare</code> already records. A test proves a <code>view</code> user still reads every output row, so the restriction cannot quietly become a read control.</p>
+  <p><strong>Authoring is gated; reading is not.</strong> An output is an ordinary dataset, read by the ordinary rule (<code>docs/CAPABILITY_MATRIX.md</code>): it is owned by whoever ran the flow, and others read it through a <code>DatasetShare</code> or a dashboard, with RLS narrowing rows per identity. Outputs used to be created unowned, which made them readable by the whole org &mdash; a run by an admin published every source row past any member's row rule. Dataflow grants never gate reading, and a test proves a <code>view</code> user who was given the output still reads every row.</p>
   <p><strong>Default-open, with one deliberate difference from <code>ReportCapability</code>.</strong> No rows at all means full access for every role, so nothing existing breaks. But once any grant exists the dataflow is governed and an unlisted role falls to <code>view</code> &mdash; otherwise granting one team <code>edit</code> would restrict nobody and mean nothing.</p>
   <p>The schedule lives on the dataflow, not its outputs, which is why the scheduler needs a second pass: the dataset query filters on <code>Dataset.refresh_interval_minutes</code> and an output's own interval is normally None. <code>refresh_dataflow</code> runs as the dataflow's creator, for the same reason <code>_rebuild_derived</code> runs as the recorded builder. Both materialization refusals carry over and are re-checked on <em>every</em> run &mdash; otherwise &ldquo;make a dataflow instead&rdquo; would be the bypass for two security controls.</p>
 
@@ -918,6 +918,7 @@ llm_reserved_interactive = 2</code></pre>
   <div class="callout">
     <span class="ct">Two-stage authorisation</span>
     <p><strong>Organisation scope</strong> (Layer 6) constrains which rows are reachable at all; <strong>RLS</strong> (Layer 4) constrains which of those the user may see.</p>
+    <p>The rule for who may open, read and change each object is written down in <code>docs/CAPABILITY_MATRIX.md</code>, and its main table is checked cell by cell against <code>core/capability.py</code> by <code>tests/test_capability_matrix.py</code>. Every surface that returns dataset content is walked by one suite, <code>tests/test_security_surfaces.py</code>, with one fixture: another organization gets 404, a colleague who cannot read the dataset gets 404, and a reader with a row rule and a column rule never receives a filtered row or a denied column's value. A new <code>/datasets/{dataset_id}/...</code> route fails that suite until it is added to its inventory.</p>
   </div>
 
   <h3>Outbound</h3>
@@ -1140,7 +1141,7 @@ llm_reserved_interactive = 2</code></pre>
     <table>
       <thead><tr><th>Suite</th><th>Scope</th><th>Count</th></tr></thead>
       <tbody>
-        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~5,300 tests · 396 modules</td></tr>
+        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~5,300 tests · 398 modules</td></tr>
         <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~2,800 tests · 217 files</td></tr>
         <tr><th>Evals</th><td><code>backend/evals/</code></td><td>Agent quality gates (<code>run_eval_gate.ps1</code>)</td></tr>
         <tr><th>Conformance</th><td><code>tests/test_layer_conformance.py</code></td><td>Enforces the layer boundaries above</td></tr>
