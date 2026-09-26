@@ -3,8 +3,9 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKe
 import { ArrowUp, ArrowUpRight, BookOpen, Check, Lightbulb, Minus, MoreHorizontal, PencilLine,
   RotateCcw, Sparkles, TrendingUp, X } from 'lucide-react'
 import { insightsApi, reportsApi } from '../../services/api'
-import type { AgentResult } from '../../services/api'
-import ResultView from '../chat/ResultView'
+import type { AgentResult, AnswerEvidence } from '../../services/api'
+import ResultView, { focusFor, type EvidenceFocus } from '../chat/ResultView'
+import AnswerText from '../chat/AnswerText'
 import AiMascot from '../ai/AiMascot'
 import { useT } from '../../i18n'
 import { localDigits } from '../../lib/arabicFormats'
@@ -64,6 +65,8 @@ interface Turn {
   applied?: string[]
   /** Rows, when the message was a data question the agent answered. */
   results?: AgentResult[]
+  /** The reply's numbers, traced to those rows (E11). */
+  evidence?: AnswerEvidence | null
 }
 
 interface Insight { key: string; title: string; detail: string }
@@ -97,6 +100,8 @@ export default function CopilotChat({
   const t = useT()
   const [open, setOpen] = useState(false)
   const [turns, setTurns] = useState<Turn[]>([])
+  // The number of a reply whose source the reader asked to see (E11).
+  const [evidenceFocus, setEvidenceFocus] = useState<{ turn: number; at: EvidenceFocus } | null>(null)
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -217,6 +222,8 @@ export default function CopilotChat({
         id: nextId++, role: 'assistant',
         text: [got.reply, ...(got.notes ?? [])].filter(Boolean).join('\n'),
         applied, results: got.results ?? [],
+        // Traced against the reply alone: notes are the copilot's own.
+        evidence: got.notes?.length ? null : got.evidence ?? null,
       }])
       if (got.applied.length > 0) await onApplied({ beforeVersionId: got.before_version_id ?? null, summary: got.summary ?? null })
     } catch (e) {
@@ -410,9 +417,22 @@ export default function CopilotChat({
               <div key={x.id} className={`dl-askai__msg dl-askai__msg--ai${x.kind === 'error' ? ' is-error' : ''}`}>
                 <span className="dl-askai__avatar dl-askai__avatar--sm" aria-hidden><AiMascot size={16} /></span>
                 <div className="dl-askai__msg-body">
-                  <div className="dl-askai__msg-text" dir="auto">{x.text}</div>
+                  {x.evidence && x.results?.length ? (
+                    <div className="dl-askai__msg-text">
+                      <AnswerText text={x.text} evidence={x.evidence}
+                        onShow={c => setEvidenceFocus(f => {
+                          const at = focusFor(c, f?.at)
+                          return at ? { turn: x.id, at } : f
+                        })} />
+                    </div>
+                  ) : (
+                    <div className="dl-askai__msg-text" dir="auto">{x.text}</div>
+                  )}
                   {x.results && x.results.length > 0 && (
-                    <div className="dl-askai__result"><ResultView results={x.results} /></div>
+                    <div className="dl-askai__result">
+                      <ResultView results={x.results}
+                        focus={evidenceFocus?.turn === x.id ? evidenceFocus.at : null} />
+                    </div>
                   )}
                   {x.applied && x.applied.length > 0 && (
                     <ul className="dl-askai__applied">

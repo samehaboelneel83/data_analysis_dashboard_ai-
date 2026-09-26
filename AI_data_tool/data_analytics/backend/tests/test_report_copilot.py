@@ -411,6 +411,31 @@ class TestDataQuestions:
         assert seen == {"question": "total revenue by region",
                         "datasets": [world["dataset"].id]}
 
+    async def test_the_reply_carries_its_numbers_traced_to_the_rows(
+            self, client, auth_headers, world, columns, model, monkeypatch):
+        """E11: the copilot's data reply is traced like an Ask AI answer."""
+        model.append({"reply": "Looking it up.",
+                      "data_question": "total revenue by region", "actions": []})
+
+        async def fake_run(db, *, question, datasets, user, client, history=None, **kw):
+            run = AgentRun(org_id=user.org_id, question=question, status="ok",
+                           answer="Europe made 2,199,376.97, about 3 million.")
+            db.add(run)
+            await db.flush()
+            db.add(AgentStep(agent_run_id=run.id, node="s1", status="ok",
+                             sql="SELECT 1", rows_returned=1,
+                             result_rows={"columns": ["region", "revenue"],
+                                          "rows": [["Europe", 2199376.97]],
+                                          "total": 1, "truncated": False}))
+            await db.flush()
+            return run
+        monkeypatch.setattr("app.routers.report_copilot.run_agent", fake_run)
+
+        got = (await call(client, auth_headers["a"], world, "revenue by region?")).json()
+        assert [(c["text"], c["status"]) for c in got["evidence"]["claims"]] == [
+            ("2,199,376.97", "traced"), ("3 million", "untraced")]
+        assert got["evidence"]["claims"][0]["source"]["column"] == "revenue"
+
     async def test_a_directquery_backed_report_asks_the_live_source(
             self, client, auth_headers, world, columns, model, monkeypatch,
             db_session, two_orgs):

@@ -1,0 +1,27 @@
+/* The numbers of an AI answer (AnswerText). Owned here rather than by the Ask
+   page's stylesheet because the dashboard copilot shows answers too. */
+.dl-num {
+  unicode-bidi: isolate; padding: 0 3px; border-radius: 4px; font-weight: 700; font-variant-numeric: tabular-nums;
+  background: color-mix(in oklab, var(--accent) 16%, transparent); color: var(--text);
+}
+
+/* E11: a number the server found in the result rows is a button to its
+   cell; one it found nowhere gets a dotted underline and a note, never
+   hidden -- the reader decides what to make of it. */
+.dl-num--traced {
+  border: 0; font: inherit; font-weight: 700; cursor: pointer; line-height: inherit;
+  text-decoration: underline; text-decoration-style: solid; text-underline-offset: 3px;
+  text-decoration-color: color-mix(in oklab, var(--accent) 60%, transparent);
+}
+.dl-num--traced:hover { background: color-mix(in oklab, var(--accent) 28%, transparent); }
+.dl-num--traced:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dl-num--untraced {
+  background: color-mix(in oklab, var(--warning, #b45309) 14%, transparent);
+  text-decoration: underline dotted; text-underline-offset: 3px;
+}
+.dl-answer-untraced {
+  display: flex; gap: 6px; align-items: flex-start; margin: 8px 0 0; font-size: 12.5px; line-height: 1.5;
+  color: var(--text);
+}
+.dl-answer-untraced svg { flex: none; margin-top: 3px; color: var(--warning, #b45309); }
+.dl-cell--evidence { background: color-mix(in oklab, var(--accent) 22%, transparent) !important; outline: 2px solid var(--accent); outline-offset: -2px; }

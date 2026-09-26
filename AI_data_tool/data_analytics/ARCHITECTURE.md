@@ -1385,6 +1385,7 @@ classify → (clarify) → context → plan → DAG[ generate → ladder → pol
 | `policy.py` | Enforce what the generated SQL may do |
 | `validate.py` | Structural and semantic validation |
 | `explain.py` | Render the answer |
+| `evidence.py` | Trace each number of the answer to the result rows |
 | `memory.py`, `state.py` | Conversation state |
 
 Two design decisions are worth stating explicitly:
@@ -1397,6 +1398,15 @@ Two design decisions are worth stating explicitly:
 2. **The agent inherits RLS.** `graph.py` imports `resolve_rls_expr` from
    `core.rls` directly, so generated SQL is filtered by the same rules as a
    hand-built widget. A user cannot ask the agent for data their account cannot see.
+
+3. **The model writes the words; the query supplies the numbers, and each one
+   is checked.** `evidence.py` reads every number the answer states and looks
+   for it in the result rows the reader is shown, at the precision it was
+   written with (a cell, the row count, or a column's sum, average, a named
+   row's share, or the difference between two named rows). The chat and the
+   dashboard copilot link each found number to its cell; a number found
+   nowhere is marked and noted under the answer. Deterministic and computed
+   when the payload is built, so a reopened conversation traces the same way.
 
 ### Model client
 
@@ -2217,8 +2227,8 @@ Agent pane (7)
 
 | Suite | Scope | Count |
 |-------|-------|-------|
-| Backend | `backend/tests/` | ~5,300 tests across 404 modules |
-| Frontend | colocated `*.test.ts(x)` | ~2,800 tests across 220 files |
+| Backend | `backend/tests/` | ~5,300 tests across 405 modules |
+| Frontend | colocated `*.test.ts(x)` | ~2,800 tests across 221 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |
 | Doc audit | `tests/test_architecture_doc.py` | Enforces the *counts* in this document |

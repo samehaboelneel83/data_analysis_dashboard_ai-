@@ -1,11 +1,12 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useDirection } from '../../contexts/DirectionContext'
 import { useT } from '../../i18n'
 import { localDigits } from '../../lib/arabicFormats'
 import BarChartRenderer from '../report/chartRenderers/BarChartRenderer'
 import LineChartRenderer from '../report/chartRenderers/LineChartRenderer'
 import PieChartRenderer from '../report/chartRenderers/PieChartRenderer'
-import type { AgentPresentation, AgentResult } from '../../services/api'
+import type { AgentPresentation, AgentResult, EvidenceClaim } from '../../services/api'
+import './answerEvidence.css'
 
 /**
  * A sink step's rows, drawn in the chat.
@@ -19,6 +20,25 @@ import type { AgentPresentation, AgentResult } from '../../services/api'
  */
 
 type Cell = string | number | boolean | null
+
+/** Where an answer's number came from, to point at in the grid (E11): the
+ *  result, its rows (none for a whole-column figure: a total, an average)
+ *  and its column (none for a row count). `seq` re-fires the same target. */
+export interface EvidenceFocus {
+  result: number
+  rows: number[]
+  column: string | null
+  seq: number
+}
+
+/** Where to point for a traced number of an answer; `seq` follows `prev` so
+ *  selecting the same number again scrolls to it again. */
+export function focusFor(claim: EvidenceClaim, prev?: EvidenceFocus | null): EvidenceFocus | null {
+  const s = claim.source
+  if (!s) return null
+  return { result: s.result, rows: s.rows ?? (s.row != null ? [s.row] : []),
+           column: s.column, seq: (prev?.seq ?? 0) + 1 }
+}
 
 const isNumberish = (v: Cell) =>
   typeof v === 'number' || (typeof v === 'string' && v.trim() !== '' && !isNaN(Number(v)))
@@ -134,19 +154,31 @@ function Caption({ result }: { result: AgentResult }) {
   )
 }
 
-export function ResultGrid({ result }: { result: AgentResult }) {
+export function ResultGrid({ result, focus }: {
+  result: AgentResult
+  focus?: Omit<EvidenceFocus, 'result'> | null
+}) {
+  const box = useRef<HTMLDivElement>(null)
+  const col = focus?.column != null ? result.columns.indexOf(focus.column) : -1
+  const marked = (i: number, j: number) => !!focus && j === col
+    && (focus.rows.length === 0 || focus.rows.includes(i))
+  useEffect(() => {
+    if (!focus) return
+    const hit = box.current?.querySelector<HTMLElement>('[data-evidence-focus]')
+    hit?.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
+  }, [focus])
   if (result.total === 0 || result.columns.length === 0) {
     return <span style={{ fontSize: 12, color: 'var(--muted)' }}>No rows.</span>
   }
   return (
     <div>
-      <div style={{ maxHeight: 260, overflow: 'auto', border: '1px solid var(--border)',
+      <div ref={box} style={{ maxHeight: 260, overflow: 'auto', border: '1px solid var(--border)',
         borderRadius: 6, background: 'var(--surface)' }}>
         <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
           <thead>
             <tr>
-              {result.columns.map(c => (
-                <th key={c} style={{ position: 'sticky', top: 0, background: 'var(--surface2)',
+              {result.columns.map((c, j) => (
+                <th key={c} className={focus && j === col ? 'dl-cell--evidence' : undefined} style={{ position: 'sticky', top: 0, background: 'var(--surface2)',
                   textAlign: 'start', padding: '5px 8px', fontWeight: 600, fontSize: 11,
                   color: 'var(--muted)', borderBottom: '1px solid var(--border)',
                   whiteSpace: 'nowrap' }}>{c}</th>
@@ -157,7 +189,10 @@ export function ResultGrid({ result }: { result: AgentResult }) {
             {result.rows.map((row, i) => (
               <tr key={i}>
                 {row.map((v, j) => (
-                  <td key={j} style={{ padding: '4px 8px', borderBottom: '1px solid var(--border)',
+                  <td key={j}
+                    className={marked(i, j) ? 'dl-cell--evidence' : undefined}
+                    data-evidence-focus={marked(i, j) && (focus!.rows.length === 0 ? i === 0 : i === focus!.rows[0]) ? '' : undefined}
+                    style={{ padding: '4px 8px', borderBottom: '1px solid var(--border)',
                     whiteSpace: 'nowrap', textAlign: typeof v === 'number' ? 'end' : 'start',
                     fontVariantNumeric: 'tabular-nums' }}>
                     {cellText(v)}
@@ -168,7 +203,9 @@ export function ResultGrid({ result }: { result: AgentResult }) {
           </tbody>
         </table>
       </div>
-      <div style={{ marginTop: 4 }}><Caption result={result} /></div>
+      <div style={{ marginTop: 4 }}
+        className={focus && col < 0 ? 'dl-cell--evidence' : undefined}
+        data-evidence-focus={focus && col < 0 ? '' : undefined}><Caption result={result} /></div>
     </div>
   )
 }
@@ -219,24 +256,28 @@ export function autoChart(result: AgentResult): 'kpi' | 'bar' | 'line' | null {
   return dated ? 'line' : 'bar'
 }
 
-function Kpi({ result }: { result: AgentResult }) {
+function Kpi({ result, focused }: { result: AgentResult; focused?: boolean }) {
   const v = Number(result.rows[0][0])
   const shown = Number.isInteger(v) ? v.toLocaleString('en-US')
     : v.toLocaleString('en-US', { maximumFractionDigits: 2 })
   return (
-    <div className="dl-kpi" data-testid="result-kpi">
+    <div className={focused ? 'dl-kpi dl-cell--evidence' : 'dl-kpi'} data-testid="result-kpi">
       <span className="dl-kpi__label">{result.columns[0].replace(/_/g, ' ')}</span>
       <span className="dl-kpi__value" dir="ltr">{localDigits(shown)}</span>
     </div>
   )
 }
 
-export default function ResultView({ results, presentation }: {
+export default function ResultView({ results, presentation, focus }: {
   results: AgentResult[]
   presentation?: AgentPresentation | null
+  /** A number of the answer to point at (E11). */
+  focus?: EvidenceFocus | null
 }) {
   const t = useT()
   const [rowsOpen, setRowsOpen] = useState(false)
+  // A number in a charted result lives in the rows under the chart: open them.
+  useEffect(() => { if (focus) setRowsOpen(true) }, [focus])
   const format = presentation?.format
   const chartable = (format === 'bar' || format === 'line' || format === 'pie') ? format : null
   return (
@@ -245,9 +286,10 @@ export default function ResultView({ results, presentation }: {
         const auto = chartable ? null : autoChart(r)
         const drawn = chartable ?? (auto === 'bar' || auto === 'line' ? auto : null)
         const showChart = !!drawn && r.total > 0
+        const here = focus && focus.result === i ? focus : null
         return (
           <div key={`${r.step}-${i}`}>
-            {auto === 'kpi' && <Kpi result={r} />}
+            {auto === 'kpi' && <Kpi result={r} focused={!!here} />}
             {showChart ? (
               <>
                 <div className="dl-result__chart">
@@ -258,10 +300,10 @@ export default function ResultView({ results, presentation }: {
                   onClick={() => setRowsOpen(o => !o)}>
                   {rowsOpen ? t('ask.hideRows') : t('ask.showRows', { n: localDigits(String(r.total)) })}
                 </button>
-                {rowsOpen && <ResultGrid result={r} />}
+                {rowsOpen && <ResultGrid result={r} focus={here} />}
               </>
             ) : auto === 'kpi' ? null : (
-              <ResultGrid result={r} />
+              <ResultGrid result={r} focus={here} />
             )}
           </div>
         )

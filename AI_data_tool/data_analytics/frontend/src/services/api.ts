@@ -943,6 +943,9 @@ export const reportsApi = {
                /** Present when the message was a DATA question: the copilot
                 *  delegated to the agent and these are the result rows. */
                results: AgentResult[]
+               /** The reply's numbers traced to those rows (E11); null when
+                *  nothing was queried. */
+               evidence?: AnswerEvidence | null
                /** The version captured BEFORE the copilot's change (restoring it undoes the change). */
                before_version_id?: number | null
                summary?: string | null }>(
@@ -2363,6 +2366,32 @@ export interface AgentResult {
   source?: 'query' | 'catalog'
 }
 
+/** One number the answer states, traced by the server (services/agent/
+ *  evidence.py). `traced` points at where it came from: a cell (`row` and
+ *  `column` of `results[result]`), the row count, or arithmetic over the rows
+ *  (a column's sum or average, a row's share, the difference or change between
+ *  `rows`). `untraced` is a number found nowhere in the rows; `context` is one
+ *  the question or the SQL stated ("top 5", LIMIT 10), not a finding. */
+export interface EvidenceClaim {
+  start: number
+  end: number
+  text: string
+  status: 'traced' | 'untraced' | 'context'
+  source?: {
+    result: number
+    row: number | null
+    column: string | null
+    value: number | string | null
+    kind: 'cell' | 'count' | 'sum' | 'average' | 'share' | 'difference' | 'change'
+    rows?: number[]
+  }
+}
+
+export interface AnswerEvidence {
+  claims: EvidenceClaim[]
+  untraced: number
+}
+
 /** Set on a run that only re-shows an earlier result ("as a bar chart"). */
 export interface AgentPresentation {
   format: 'table' | 'bar' | 'line' | 'pie' | 'csv'
@@ -2384,6 +2413,7 @@ export interface AgentAnswer {
   sql?: string[]
   presentation?: AgentPresentation | null
   context_objects?: string[] | null
+  evidence?: AnswerEvidence | null
 }
 
 export interface AgentConversation {
@@ -2409,6 +2439,7 @@ export interface AgentMessage {
     sql: string[]
     presentation: AgentPresentation | null
     context_objects: string[] | null
+    evidence?: AnswerEvidence | null
   } | null
 }
 

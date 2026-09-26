@@ -292,11 +292,6 @@
 .dl-turn .dl-pending { margin-inline-start: 38px; }
 
 .dl-answer-text { margin: 0; font-size: 14.5px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
-.dl-num {
-  unicode-bidi: isolate; padding: 0 3px; border-radius: 4px; font-weight: 700; font-variant-numeric: tabular-nums;
-  background: color-mix(in oklab, var(--accent) 16%, transparent); color: var(--text);
-}
-
 .dl-result { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
 .dl-result__chart { padding: 8px 4px 0; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
 .dl-result__rows-toggle {

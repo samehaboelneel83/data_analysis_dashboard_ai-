@@ -27,6 +27,7 @@ from ..models.models import (AgentFeedback, AgentMessage, AgentRun, AgentStep,
                              ObjectRowPolicy, Role, SourceObject, User)
 from ..services import llm as llm_service
 from ..services import quotas
+from ..services.agent.evidence import trace_claims
 from ..services.agent.export import build_result_pdf, build_result_xlsx
 from ..services.agent.graph import run_agent
 from ..services.agent.validate import _dialect
@@ -110,12 +111,20 @@ def _run_payload(run: AgentRun, steps: list[AgentStep]) -> dict:
     # answer is "catalog" -- real metadata, but not query output, and rows
     # with no SQL behind them are exactly the shape a fabricated answer has.
     # The chat captions it so nobody has to wonder which they are reading.
-    return {"results": [{"step": s.node,
-                         "source": "catalog" if s.node == "catalog" else "query",
-                         **s.result_rows} for s in sinks],
-            "sql": [s.sql for s in sql_steps if s.sql],
+    results = [{"step": s.node,
+                "source": "catalog" if s.node == "catalog" else "query",
+                **s.result_rows} for s in sinks]
+    sql = [s.sql for s in sql_steps if s.sql]
+    # E11: each number the answer states, traced to the cell it came from or
+    # marked as not found in these rows. Computed here, not stored, so a
+    # conversation reopened later is traced exactly as it was when asked.
+    evidence = (trace_claims(run.answer, run.question, results, sql)
+                if run.status == "ok" and run.intent != "chat" else None)
+    return {"results": results,
+            "sql": sql,
             "presentation": run.presentation,
-            "context_objects": run.context_objects}
+            "context_objects": run.context_objects,
+            "evidence": evidence}
 
 
 async def _runs_and_steps(db: AsyncSession, run_ids: list[int]):

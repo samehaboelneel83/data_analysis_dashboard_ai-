@@ -802,6 +802,7 @@ STAT_FAMILIES       = {"postgresql"}</code></pre>
         <tr><th><code>policy.py</code></th><td>Enforce what the generated SQL may do</td></tr>
         <tr><th><code>validate.py</code></th><td>Structural and semantic validation</td></tr>
         <tr><th><code>explain.py</code></th><td>Render the answer</td></tr>
+        <tr><th><code>evidence.py</code></th><td>Trace each number of the answer to the result rows</td></tr>
         <tr><th><code>memory.py</code>, <code>state.py</code></th><td>Conversation state</td></tr>
       </tbody>
     </table>
@@ -810,6 +811,7 @@ STAT_FAMILIES       = {"postgresql"}</code></pre>
   <ol class="steps">
     <li><strong>The repair loop lives inside a node</strong>, not as a graph edge. At most <code>MAX_ATTEMPTS</code> generations, each retry fed the specific validation rung that rejected the previous attempt. This keeps the graph acyclic and the executor small.</li>
     <li><strong>The agent inherits RLS.</strong> <code>graph.py</code> imports <code>resolve_rls_expr</code> from <code>core.rls</code> directly, so generated SQL is filtered by the same rules as a hand-built widget.</li>
+    <li><strong>The model writes the words; the query supplies the numbers, and each one is checked.</strong> <code>evidence.py</code> reads every number the answer states and looks for it in the result rows the reader is shown, at the precision it was written with (a cell, the row count, or a column's sum, average, a named row's share, or the difference between two named rows). The chat and the dashboard copilot link each found number to its cell; a number found nowhere is marked and noted under the answer. Deterministic and computed when the payload is built, so a reopened conversation traces the same way.</li>
   </ol>
 
   <h3>Model client</h3>
@@ -1147,8 +1149,8 @@ llm_reserved_interactive = 2</code></pre>
     <table>
       <thead><tr><th>Suite</th><th>Scope</th><th>Count</th></tr></thead>
       <tbody>
-        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~5,300 tests · 404 modules</td></tr>
-        <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~2,800 tests · 220 files</td></tr>
+        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~5,300 tests · 405 modules</td></tr>
+        <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~2,800 tests · 221 files</td></tr>
         <tr><th>Evals</th><td><code>backend/evals/</code></td><td>Agent quality gates (<code>run_eval_gate.ps1</code>)</td></tr>
         <tr><th>Conformance</th><td><code>tests/test_layer_conformance.py</code></td><td>Enforces the layer boundaries above</td></tr>
         <tr><th>Doc audit</th><td><code>tests/test_architecture_doc.py</code></td><td>Enforces the <em>counts</em> in this document</td></tr>

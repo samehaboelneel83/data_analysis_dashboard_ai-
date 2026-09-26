@@ -210,6 +210,7 @@
 }
 .dl-askai__msg-body { flex: 1; min-width: 0; }
 .dl-askai__msg-text { white-space: pre-wrap; }
+.dl-askai__msg-text .dl-answer-text { margin: 0; }
 .dl-askai__msg--ai.is-error {
   background: var(--dl-error-bg, color-mix(in oklab, var(--danger) 10%, var(--surface)));
   border-color: var(--dl-error-line, color-mix(in oklab, var(--danger) 40%, var(--border)));

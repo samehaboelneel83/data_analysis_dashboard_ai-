@@ -260,7 +260,8 @@ async def page_copilot(report_id: int, page_id: int, body: CopilotIn,
             AgentStep.agent_run_id == run.id).order_by(AgentStep.id))).scalars().all()
         payload = _run_payload(run, steps)
         return {"reply": run.answer or run.error or "", "applied": [],
-                "notes": [], "results": payload["results"]}
+                "notes": [], "results": payload["results"],
+                "evidence": payload["evidence"]}
 
     # ── Page actions, applied like the GUI would ────────────────────────────
     by_id = {w.id: w for w in widgets}

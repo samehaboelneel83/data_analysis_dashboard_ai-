@@ -3,9 +3,9 @@ import toast from 'react-hot-toast'
 import { usePrompt } from '../ui/PromptDialog'
 import { AlertTriangle, Code2, Copy, Database, Download, RotateCcw, Sparkles, ThumbsDown, ThumbsUp, User } from 'lucide-react'
 import { agentApi, dataSourcesApi } from '../../services/api'
-import type { AgentAnswer, AgentMessage, AgentPresentation, AgentResult } from '../../services/api'
+import type { AgentAnswer, AgentMessage, AgentPresentation, AgentResult, AnswerEvidence } from '../../services/api'
 import Pending from './Pending'
-import ResultView, { downloadCsv } from './ResultView'
+import ResultView, { downloadCsv, focusFor, type EvidenceFocus } from './ResultView'
 import AnalysisResult, { isAnalysisResult } from './AnalysisResult'
 import ChoiceOptions, { isChoices } from './ChoiceOptions'
 import DashboardProposals, { type DashboardProposalsPresentation }
@@ -69,6 +69,8 @@ interface ChatMessage {
   /** The run's intent, kept for one reason: `chat` is a reply with no query
    *  behind it, and the SQL controls must not be offered on one. */
   intent?: string | null
+  /** The answer's numbers, traced to the rows by the server (E11). */
+  evidence?: AnswerEvidence | null
 }
 
 /** Same target as this pane's: same data source id, or the same set of
@@ -98,7 +100,7 @@ function fromAnswer(result: AgentAnswer): ChatMessage {
     text: kind === 'error' ? (result.error ?? 'Something went wrong.') : (result.answer ?? ''),
     results: result.results ?? [], sql: result.sql ?? [],
     presentation: result.presentation ?? null, contextObjects: result.context_objects ?? null,
-    intent: result.intent ?? null,
+    intent: result.intent ?? null, evidence: result.evidence ?? null,
   }
 }
 
@@ -111,7 +113,7 @@ function fromStored(m: AgentMessage): ChatMessage {
     text: kind === 'error' ? (run?.error ?? m.content) : m.content,
     results: run?.results ?? [], sql: run?.sql ?? [],
     presentation: run?.presentation ?? null, contextObjects: run?.context_objects ?? null,
-    intent: run?.intent ?? null,
+    intent: run?.intent ?? null, evidence: run?.evidence ?? null,
   }
 }
 
@@ -148,6 +150,8 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
   // What the user already clicked, per run -- so a 👍/👎 shows as pressed
   // and a second click on the same one still upserts (the backend already
   // handles the dedupe; this just keeps the button state honest).
+  // The number of an answer whose source the reader asked to see (E11).
+  const [evidenceFocus, setEvidenceFocus] = useState<{ msg: number; at: EvidenceFocus } | null>(null)
   const [feedbackByRun, setFeedbackByRun] = useState<Record<number, 'up' | 'down'>>({})
 
   // Legacy mount: resume the newest matching thread WITH its history. The
@@ -468,7 +472,11 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
                       </div>
                     ) : (
                       <>
-                        <AnswerText text={msg.text} />
+                        <AnswerText text={msg.text} evidence={msg.evidence}
+                          onShow={msg.results?.length ? c => setEvidenceFocus(f => {
+                            const at = focusFor(c, f?.at)
+                            return at ? { msg: msg.id, at } : f
+                          }) : undefined} />
                         {/* A dashboard proposal has no rows to show -- it rides the same
                             `presentation` channel, so it is dispatched by kind here rather
                             than pushed through ResultView, which exists to draw results. */}
@@ -479,7 +487,8 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
                              there are no rows -- same channel, dispatched by kind. */
                           <AnalysisResult presentation={msg.presentation} />
                         ) : msg.results && msg.results.length > 0 && (
-                          <ResultView results={msg.results} presentation={msg.presentation} />
+                          <ResultView results={msg.results} presentation={msg.presentation}
+                            focus={evidenceFocus?.msg === msg.id ? evidenceFocus.at : null} />
                         )}
                         {/* Where this answer came from (Part IV criterion 10). The
                             words above are the AI's; the numbers are the query's or
