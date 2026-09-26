@@ -373,7 +373,11 @@ it). Training records each predictor's distribution (`card.feature_profile`:
 decile edges for a number, top values for a category), kept server-side because
 it describes the training rows; `GET .../drift` compares today's secured rows
 with it, a population stability index per predictor (under 0.1 stable, to
-0.25 moderate, over that major), naming new categories.
+0.25 moderate, over that major), naming new categories. Checks are kept
+(`services/model_drift.py`): `POST .../drift-checks` records one, and the
+scheduler queues a daily `model.drift` job per champion, run as its trainer;
+the last 90 sit on the card (`drift_history`, off the list) and
+`GET .../drift-history` returns them.
 
 ### Decomposition tree
 
@@ -2342,7 +2346,7 @@ Agent pane (7)
 
 | Suite | Scope | Count |
 |-------|-------|-------|
-| Backend | `backend/tests/` | ~5,300 tests across 420 modules |
+| Backend | `backend/tests/` | ~5,300 tests across 421 modules |
 | Frontend | colocated `*.test.ts(x)` | ~2,950 tests across 233 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |

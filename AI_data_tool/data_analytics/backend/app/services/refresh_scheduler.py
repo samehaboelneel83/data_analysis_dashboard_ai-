@@ -886,6 +886,15 @@ async def run_scheduler(session_factory) -> None:
                         await session.rollback()
                         await record_failure(session, "dataset", ds_id, str(e), now)
 
+                # E13: each champion's daily drift check, queued as a job
+                # (services/model_drift.py); the worker runs it.
+                if settings.job_worker_enabled:
+                    try:
+                        from .model_drift import enqueue_daily
+                        await enqueue_daily(session_factory, now)
+                    except Exception as e:  # noqa: BLE001 - never-die
+                        log.warning("Could not queue drift checks: %s", e)
+
                 # Dataflows carry their own interval, so the dataset query above
                 # cannot see them: an output's own refresh_interval_minutes is
                 # normally None.

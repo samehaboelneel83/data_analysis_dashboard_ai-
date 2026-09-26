@@ -5,7 +5,7 @@ import EmptyState from '../ui/EmptyState'
 import { useT } from '../../i18n'
 import { isJobActive, jobsApi, predictionModelsApi } from '../../services/api'
 import { Link } from 'react-router-dom'
-import type { DatasetColumn, DatasetSummaryForCard, Job, ModelDrift, PredictionModelSummary, ScoreResult } from '../../services/api'
+import type { DatasetColumn, DatasetSummaryForCard, DriftSnapshot, Job, ModelDrift, PredictionModelSummary, ScoreResult } from '../../services/api'
 
 /**
  * Models kept so they can score rows they have never seen.
@@ -36,8 +36,17 @@ const DRIFT_WORD: Record<ModelDrift['overall'], string> = {
 /** E13: today's rows against the version's training rows, per predictor. */
 function DriftCheck({ m, datasetId }: { m: PredictionModelSummary; datasetId: number }) {
   const [drift, setDrift] = useState<ModelDrift | null>(null)
+  const [history, setHistory] = useState<DriftSnapshot[]>([])
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    if (!m.has_training_profile) return
+    let live = true
+    predictionModelsApi.driftHistory(datasetId, m.id)
+      .then(h => { if (live) setHistory(h ?? []) })
+      .catch(() => { /* a reader who may not use the version sees no history */ })
+    return () => { live = false }
+  }, [datasetId, m.id, m.has_training_profile])
   if (!m.has_training_profile) {
     return <p style={{ fontSize: 11, color: 'var(--muted)', margin: 0 }}>
       This version was saved before training profiles were kept, so drift cannot be checked. Retrain it to compare.
@@ -45,10 +54,14 @@ function DriftCheck({ m, datasetId }: { m: PredictionModelSummary; datasetId: nu
   }
   const check = async () => {
     setBusy(true); setErr(null)
-    try { setDrift(await predictionModelsApi.drift(datasetId, m.id)) }
+    try {
+      const r = await predictionModelsApi.checkDrift(datasetId, m.id)
+      setDrift(r); setHistory(r.history ?? [])
+    }
     catch (e) { setErr((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Could not check drift') }
     finally { setBusy(false) }
   }
+  const recent = [...history].reverse().slice(0, 10)
   return (
     <div data-testid="model-drift" style={{ display: 'grid', gap: 6 }}>
       <div>
@@ -58,6 +71,31 @@ function DriftCheck({ m, datasetId }: { m: PredictionModelSummary; datasetId: nu
         </button>
       </div>
       {err && <p style={{ fontSize: 11, color: 'var(--danger)', margin: 0 }}>{err}</p>}
+      {recent.length > 0 && (
+        // E13: the checks kept -- the daily one for the champion, and each one
+        // asked for -- newest first, so a creeping predictor shows as a trend.
+        <table aria-label={`Drift over time for ${m.name} v${m.version ?? 1}`} data-testid="drift-history"
+          style={{ borderCollapse: 'collapse', maxWidth: 420, fontSize: 11 }}>
+          <thead><tr>
+            <th style={{ textAlign: 'start', padding: '2px 8px' }}>Checked</th>
+            <th style={{ textAlign: 'start', padding: '2px 8px' }}>Overall</th>
+            <th style={{ textAlign: 'end', padding: '2px 8px' }}>Largest index</th>
+            <th style={{ textAlign: 'end', padding: '2px 8px' }}>Rows</th>
+          </tr></thead>
+          <tbody>{recent.map(h => (
+            <tr key={h.at}>
+              <td style={{ padding: '2px 8px' }}>{new Date(h.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</td>
+              <td style={{ padding: '2px 8px', color: h.overall === 'major' ? 'var(--danger)' : h.overall === 'moderate' ? '#b45309' : undefined }}>
+                {DRIFT_WORD[h.overall] ?? h.overall}</td>
+              <td style={{ textAlign: 'end', padding: '2px 8px', fontVariantNumeric: 'tabular-nums' }}>{h.max_psi == null ? '—' : h.max_psi.toFixed(3)}</td>
+              <td style={{ textAlign: 'end', padding: '2px 8px', fontVariantNumeric: 'tabular-nums' }}>{h.rows?.toLocaleString() ?? '—'}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      )}
+      {m.status === 'champion' && (
+        <p style={{ fontSize: 10.5, color: 'var(--muted)', margin: 0 }}>The champion is checked every day; each check is kept.</p>
+      )}
       {drift && (
         <>
           <div style={{ fontSize: 11.5 }}>

@@ -15,7 +15,7 @@
  *   as "no results" would send them looking for a bug.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import PredictionModelsPanel from './PredictionModelsPanel'
 import { jobsApi, predictionModelsApi } from '../../services/api'
 import { MemoryRouter } from 'react-router-dom'
@@ -24,6 +24,7 @@ vi.mock('../../services/api', async (orig) => ({
   ...(await orig<Record<string, unknown>>()),
   predictionModelsApi: {
     list: vi.fn(), train: vi.fn(), score: vi.fn(), remove: vi.fn(), promote: vi.fn(), drift: vi.fn(), scoreJob: vi.fn(),
+    checkDrift: vi.fn(), driftHistory: vi.fn().mockResolvedValue([]),
   },
   jobsApi: {
     get: vi.fn(),
@@ -256,10 +257,14 @@ describe('on a DirectQuery dataset', () => {
 
     it('checks drift from the model card, predictor by predictor', async () => {
       vi.mocked(predictionModelsApi.list).mockResolvedValue([v1])
-      vi.mocked(predictionModelsApi.drift).mockResolvedValue({
+      vi.mocked(predictionModelsApi.checkDrift).mockResolvedValue({
         overall: 'major', rows: 280, trained_rows: 300, model: { id: 7, name: 'Churn model', version: 1 },
         features: [{ feature: 'region', psi: 1.25, level: 'major', rows: 280, new_values: ['West'] },
                    { feature: 'spend', psi: 0.04, level: 'stable', rows: 280 }],
+        history: [
+          { at: '2026-09-24T06:00:00Z', overall: 'stable', rows: 300, max_psi: 0.02, features: {} },
+          { at: '2026-09-26T09:00:00Z', overall: 'major', rows: 280, max_psi: 1.25, features: {} },
+        ],
       })
       panel()
       fireEvent.click(await screen.findByRole('button', { name: 'Model card' }))
@@ -267,6 +272,21 @@ describe('on a DirectQuery dataset', () => {
       const table = await screen.findByRole('table', { name: 'Drift for Churn model v1' })
       expect(table).toHaveTextContent('region1.250major shift (new: West)')
       expect(screen.getByTestId('model-drift')).toHaveTextContent('no longer describes it; retrain')
+      // The check is kept: the history lists it newest first, after the earlier one.
+      const rows = within(screen.getByRole('table', { name: 'Drift over time for Churn model v1' })).getAllByRole('row')
+      expect(rows[1]).toHaveTextContent('major shift1.250280')
+      expect(rows[2]).toHaveTextContent('stable0.020300')
+      expect(screen.getByText('The champion is checked every day; each check is kept.')).toBeInTheDocument()
+    })
+
+    it('shows the kept checks when the card opens', async () => {
+      vi.mocked(predictionModelsApi.list).mockResolvedValue([v1])
+      vi.mocked(predictionModelsApi.driftHistory).mockResolvedValue([
+        { at: '2026-09-25T06:00:00Z', overall: 'moderate', rows: 290, max_psi: 0.14, features: {} }])
+      panel()
+      fireEvent.click(await screen.findByRole('button', { name: 'Model card' }))
+      expect(await screen.findByTestId('drift-history')).toHaveTextContent('moderate shift0.140290')
+      expect(predictionModelsApi.driftHistory).toHaveBeenCalledWith(1, 7)
     })
 
     it('a version without a training profile says drift cannot be checked', async () => {

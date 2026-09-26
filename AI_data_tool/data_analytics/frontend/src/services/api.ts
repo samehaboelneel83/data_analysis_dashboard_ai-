@@ -709,6 +709,8 @@ export interface PredictionModelSummary {
   promoted_at?: string | null
   card?: ModelCard | null
   has_training_profile?: boolean
+  /** E13: the latest kept drift check, as a level. */
+  last_drift?: { at: string; overall: ModelDrift['overall'] } | null
 }
 
 /** The dataset as it is now, beside the state a model card recorded. */
@@ -777,10 +779,26 @@ export const predictionModelsApi = {
   /** E13: how far today's rows have moved from this version's training rows. */
   drift: (datasetId: number, modelId: number) =>
     api.get<ModelDrift>(`/datasets/${datasetId}/prediction-models/${modelId}/drift`).then(r => r.data),
+  /** E13: check drift now and keep the check in the version's history. */
+  checkDrift: (datasetId: number, modelId: number) =>
+    api.post<ModelDrift & { history: DriftSnapshot[] }>(
+      `/datasets/${datasetId}/prediction-models/${modelId}/drift-checks`).then(r => r.data),
+  driftHistory: (datasetId: number, modelId: number) =>
+    api.get<{ history: DriftSnapshot[] }>(
+      `/datasets/${datasetId}/prediction-models/${modelId}/drift-history`).then(r => r.data.history),
   /** E13: score every row into a new dataset, as a durable job. */
   scoreJob: (datasetId: number, modelId: number) =>
     api.post<{ id: number; state: string; kind: string; subject: string | null }>(
       `/datasets/${datasetId}/prediction-models/${modelId}/score-jobs`).then(r => r.data),
+}
+
+/** E13: one kept drift check (the scheduler's daily one, or one asked for). */
+export interface DriftSnapshot {
+  at: string
+  overall: ModelDrift['overall']
+  rows: number | null
+  max_psi: number | null
+  features: Record<string, number | null>
 }
 
 export interface ModelDrift {

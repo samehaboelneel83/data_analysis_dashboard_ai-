@@ -81,9 +81,18 @@ def _out(m: PredictionModel) -> dict:
         # The training profile stays server-side: its category shares and
         # decile edges describe the training rows, and the list reaches people
         # whose row rule differs. Drift, which uses it, requires the same rows.
-        "card": ({k: v for k, v in m.card.items() if k != "feature_profile"} if m.card else None),
+        "card": ({k: v for k, v in m.card.items() if k not in ("feature_profile", "drift_history")}
+                 if m.card else None),
         "has_training_profile": bool((m.card or {}).get("feature_profile")),
+        # E13: the latest kept drift check, as a level; the checks themselves
+        # (per-predictor PSI) come from /drift-history, which needs the rows.
+        "last_drift": _last_drift(m),
     }
+
+
+def _last_drift(m: PredictionModel) -> dict | None:
+    h = (m.card or {}).get("drift_history") or []
+    return {"at": h[-1].get("at"), "overall": h[-1].get("overall")} if h else None
 
 
 async def champion_of(db: AsyncSession, org_id: int, dataset_id: int, name: str) -> PredictionModel | None:
@@ -341,6 +350,35 @@ async def model_drift(
     report = await asyncio.to_thread(drift_report, profile, frame)
     return {**report, "model": {"id": model.id, "name": model.name, "version": model.version or 1},
             "trained_rows": (model.card or {}).get("n_fitted")}
+
+
+@router.post("/{dataset_id}/prediction-models/{model_id}/drift-checks", status_code=201)
+async def record_drift_check(
+    dataset_id: int, model_id: int,
+    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    """Check drift now and keep the check in the version's history (E13).
+    Anyone who may use the version may check it: the rows it compares are
+    the ones the version was trained on, whoever asks."""
+    report = await model_drift(dataset_id, model_id, db, current_user)
+    from ..services.model_drift import record, snapshot
+    model = await db.get(PredictionModel, model_id)
+    history = record(model, snapshot(report))
+    await db.commit()
+    return {**report, "history": history}
+
+
+@router.get("/{dataset_id}/prediction-models/{model_id}/drift-history")
+async def drift_history(
+    dataset_id: int, model_id: int,
+    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    """The kept checks, newest last: the daily one the scheduler runs for each
+    champion, and each one someone asked for."""
+    await _dataset_for_read(dataset_id, db, current_user)
+    model, _pkg = await load_usable_model(db, current_user, dataset_id, model_id)
+    from ..services.model_drift import history_of
+    return {"history": history_of(model)}
 
 
 @router.post("/{dataset_id}/prediction-models/{model_id}/score-jobs", status_code=202)
