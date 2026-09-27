@@ -6,6 +6,7 @@ import type { Dataset, CalcColumn, CalcColumnFormat } from '../services/api'
 import type { Report, ReportPage } from '../types/report'
 import WidgetRenderer from '../components/report/WidgetRenderer'
 import { CrossFilterProvider } from '../components/report/CrossFilterContext'
+import { StaticChartsContext } from '../components/report/chartRenderers/useChartViewport'
 import LoadError from '../components/ui/LoadError'
 import LoadingState from '../components/ui/LoadingState'
 
@@ -81,6 +82,8 @@ export default function ReportPrint() {
           style={{ padding: 24 }}>
           <h2 style={{ fontSize: 16, margin: '0 0 14px' }}>{page.title || page.name}</h2>
           <CrossFilterProvider>
+            {/* Paper shows every point: no slider to drag, no window to leave data out. */}
+            <StaticChartsContext.Provider value={true}>
             <div data-print-canvas style={{ position: 'relative' }}>
               {page.widgets.map(w => {
                 const l = w.layout ?? { x: 0, y: 0, w: 6, h: 4 }
@@ -108,6 +111,7 @@ export default function ReportPrint() {
               <div style={{ height: Math.max(200,
                 ...page.widgets.map(w => ((w.layout?.y ?? 0) + (w.layout?.h ?? 4)) * 66 + 20)) }} />
             </div>
+            </StaticChartsContext.Provider>
           </CrossFilterProvider>
         </section>
       ))}

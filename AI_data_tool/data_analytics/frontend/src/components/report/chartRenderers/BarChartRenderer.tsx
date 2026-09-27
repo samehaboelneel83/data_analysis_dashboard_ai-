@@ -3,7 +3,8 @@ import { TT, fmtStr, getFillFactory, COLORS, fillPattern, PatternDefs } from '..
 import type { ChartRendererProps } from './types'
 import { toBarSeries } from './barSeries'
 import { computeAnalyticsLines } from './analyticsLines'
-import { xAxisProps, yAxisProps, gridProps, legendProps, labelListProps, brushProps, chartMargin } from './axisOptions'
+import { xAxisProps, yAxisProps, gridProps, legendProps, labelListProps, chartMargin } from './axisOptions'
+import { useChartViewport } from './useChartViewport'
 import { seriesName } from './axisOptions'
 
 function minOf(values: number[]): number | undefined {
@@ -48,9 +49,13 @@ export default function BarChartRenderer({ rows, data, cfg, rtl, broadcasts, loc
   const { rows: seriesRows, series } = toBarSeries(data, mode)
   const analyticsLines = computeAnalyticsLines(rows, cfg.analytics)
   const grid = gridProps(cfg)
-  const brush = series.length > 0
-    ? brushProps(cfg, { rows: seriesRows, onChange: onBrushChange })
-    : brushProps(cfg, { rows, dataKey: 'value', onChange: onBrushChange })
+  // A congested axis opens on a readable window with a slider under it
+  // (useChartViewport). Recharts draws only the window, and it hands Cells
+  // and overlays the WINDOW's bars -- so everything laid out per bar below
+  // walks `view.visible` and offsets back to the full rows with `view.start`.
+  const view = useChartViewport(cfg, series.length > 0 ? seriesRows : rows, plotW,
+    { dataKey: series.length > 0 ? undefined : 'value', onChange: onBrushChange })
+  const brush = view.brush
 
   if (series.length > 0) {
     const isPercent = mode === 'stacked100'
@@ -77,7 +82,7 @@ export default function BarChartRenderer({ rows, data, cfg, rtl, broadcasts, loc
           onClick={broadcasts ? (d: any) => d?.activePayload?.[0] && onClickPoint(d.activePayload[0].payload.name) : undefined}>
           <Customized component={() => <PatternDefs colors={series.map((_, i) => COLORS[i % COLORS.length])} enabled={!!cfg.series_patterns} />} />
           {grid && <CartesianGrid {...grid} />}
-          <XAxis dataKey="name" {...xAxisProps(look.xCfg, rtl, seriesRows.map((r: any) => String(r.name)), plotW, look.xOpts)}
+          <XAxis dataKey="name" {...xAxisProps(look.xCfg, rtl, view.visible.map((r: any) => String(r.name)), plotW, look.xOpts)}
             axisLine={look.axisLine} />
           {(() => {
             const y = yAxisProps(cfg, rtl, measureFmt, isPercent ? undefined : axisValues, observedMin, { height: plotH, ...look.yOpts })
@@ -91,13 +96,13 @@ export default function BarChartRenderer({ rows, data, cfg, rtl, broadcasts, loc
             [isPercent ? `${Number(v).toFixed(1)}%` : fmtStr(v, measureFmt), String(name ?? '')]} />
           {legend && <Legend {...legend} wrapperStyle={{ fontSize: 10 }} />}
           {series.map((s, i) => {
-            const labels = labelListProps(cfg, measureFmt, s, seriesRows.length)
+            const labels = labelListProps(cfg, measureFmt, s, view.visible.length)
             return (
               <Bar key={s} dataKey={s} stackId={stackId} fill={fillPattern(i, COLORS[i % COLORS.length], !!cfg.series_patterns)}
                 radius={stackId ? (i === series.length - 1 ? [4, 4, 0, 0] : undefined) : [4, 4, 0, 0]}>
                 {/* The selected category stays solid and the rest dim, as on
                     an unsplit bar: the click has to show what it did. */}
-                {broadcasts && localSelected != null && seriesRows.map((r: any, j: number) => (
+                {broadcasts && localSelected != null && view.visible.map((r: any, j: number) => (
                   <Cell key={j} fillOpacity={r.name === localSelected
                     || (Array.isArray(localSelected) && (localSelected as unknown[]).includes(r.name)) ? 1 : 0.3} />
                 ))}
@@ -116,8 +121,8 @@ export default function BarChartRenderer({ rows, data, cfg, rtl, broadcasts, loc
   // otherwise: with a dozen bars or fewer the number IS the reading, and the
   // axis becomes a guide rather than the only way to get it. Past twelve the
   // labels start to crowd, so it stays opt-in there.
-  const autoLabels = cfg.data_labels === undefined && rows.length > 0 && rows.length <= 12
-  const baseLabels = labelListProps(autoLabels ? { ...cfg, data_labels: true } : cfg, measureFmt, 'value', rows.length)
+  const autoLabels = cfg.data_labels === undefined && view.visible.length > 0 && view.visible.length <= 12
+  const baseLabels = labelListProps(autoLabels ? { ...cfg, data_labels: true } : cfg, measureFmt, 'value', view.visible.length)
   const labels = baseLabels
     ? { ...baseLabels, offset: 6, style: { fill: 'var(--text)', fillOpacity: 0.8, fontSize: 11, fontWeight: 500, ...MONO },
         // One line, always. Recharts wraps a label at spaces once it is wider
@@ -151,14 +156,15 @@ export default function BarChartRenderer({ rows, data, cfg, rtl, broadcasts, loc
         style={{ cursor: broadcasts ? 'pointer' : 'default' }}
       >
         {grid && <CartesianGrid {...grid} />}
-        <XAxis dataKey="name" {...xAxisProps(look.xCfg, rtl, rows.map((r: any) => String(r.name)), plotW, look.xOpts)}
+        <XAxis dataKey="name" {...xAxisProps(look.xCfg, rtl, view.visible.map((r: any) => String(r.name)), plotW, look.xOpts)}
           axisLine={look.axisLine} />
         <YAxis {...y} tick={monoTick(y.tick as Record<string, unknown>)} tickFormatter={v => fmtStr(v, measureFmt)} />
         <Tooltip contentStyle={TT} cursor={{ fill: 'var(--surface2)' }} formatter={(v: unknown) => [fmtStr(v, measureFmt), seriesName(cfg)]}
           labelFormatter={(l: unknown) => partialLabel != null && String(l) === partialLabel
             ? `${String(l)} (partial — data to ${data.partial_period.through})` : String(l)} />
         <Bar dataKey="value" radius={[6, 6, 0, 0]}>
-          {rows.map((r: any, i: number) => {
+          {view.visible.map((r: any, j: number) => {
+            const i = view.start + j
             const s = getFill(r.name, i)
             const attainment = hasTargets && !ruleStyles?.rows?.[i]?.fill && typeof r.target === 'number'
               ? (r.value >= r.target ? 'var(--success)' : 'var(--danger)')
@@ -184,12 +190,12 @@ export default function BarChartRenderer({ rows, data, cfg, rtl, broadcasts, loc
             return (
               <g data-testid="highlight-overlays">
                 {bars.map((b: any, i: number) => {
-                  const hv = rows[i]?.highlight
+                  const hv = rows[view.start + i]?.highlight
                   if (typeof hv !== 'number' || hv <= 0 || b?.x == null) return null
                   const yTop = yScale(hv)
                   const yBase = b.y + b.height
                   const h = Math.max(0, yBase - yTop)
-                  const s = getFill(rows[i].name, i)
+                  const s = getFill(rows[view.start + i].name, view.start + i)
                   return <rect key={i} data-testid="highlight-portion" x={b.x} y={yBase - h}
                     width={b.width} height={h} fill={s.fill} rx={2} pointerEvents="none" />
                 })}
@@ -209,7 +215,7 @@ export default function BarChartRenderer({ rows, data, cfg, rtl, broadcasts, loc
             return (
               <g data-testid="target-ticks">
                 {bars.map((b: any, i: number) => {
-                  const t = rows[i]?.target
+                  const t = rows[view.start + i]?.target
                   if (typeof t !== 'number' || b?.x == null) return null
                   const y = yScale(t)
                   return <line key={i} x1={b.x - 2} x2={b.x + b.width + 2} y1={y} y2={y}

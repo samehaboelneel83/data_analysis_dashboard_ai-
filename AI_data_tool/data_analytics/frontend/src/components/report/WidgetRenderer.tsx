@@ -278,7 +278,10 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
   const [brushRange, setBrushRange] = useState<BrushRange | null>(null)
   const [brushNonce, setBrushNonce] = useState(0)
   const [animFrame, setAnimFrame] = useState<string | null>(null)
-  useEffect(() => { setBrushRange(null) }, [data])
+  // No clearing on new data here: the chart owns its window (useChartViewport)
+  // and reports it for every series it draws, then null when it unmounts. A
+  // parent effect runs AFTER the child's, so clearing here wiped the window
+  // the chart had just opened on.
   const relNotes: RelativeNote[] = Array.isArray((data as { relative_dates?: unknown } | null)?.relative_dates)
     ? (data as { relative_dates: RelativeNote[] }).relative_dates : []
   const partial = ((data as { partial_period?: PartialPeriod } | null)?.partial_period) ?? null
@@ -313,7 +316,9 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
         ...(partial ? [partial.text] : []),
       ] }] : []),
       ...(brushRange || (data as { type?: string } | null)?.type === 'animated' ? [{ title: 'Your view of this chart', empty: '', items: [
-        ...(brushRange ? [`Zoomed with the overview axis to ${brushRange.start} – ${brushRange.end} (${brushRange.endIndex - brushRange.startIndex + 1} of ${brushRange.of} points); the rest is hidden, not filtered out of any total`] : []),
+        ...(brushRange ? [brushRange.auto
+          ? `Showing ${brushRange.start} – ${brushRange.end} (${brushRange.endIndex - brushRange.startIndex + 1} of ${brushRange.of} points): too many to read at this size, so the chart opened on a window. Drag the slider under the chart to see the rest; nothing is filtered out of any total`
+          : `Zoomed with the overview axis to ${brushRange.start} – ${brushRange.end} (${brushRange.endIndex - brushRange.startIndex + 1} of ${brushRange.of} points); the rest is hidden, not filtered out of any total`] : []),
         ...((data as { type?: string } | null)?.type === 'animated' && animFrame ? [`Showing the frame ${String((data as { animate_by?: string }).animate_by)} = ${animFrame} of an animation`] : []),
       ] }] : []),
       { title: 'Ranking and limits', empty: 'Every group is shown.', items: [
@@ -963,13 +968,19 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
           </span>
         )}
         {brushRange && (
-          <span data-testid="brush-chip" title={`Zoomed with the overview axis: ${brushRange.start} – ${brushRange.end} of ${brushRange.of} points`}
+          <span data-testid="brush-chip" title={brushRange.auto
+            ? `Showing ${brushRange.start} – ${brushRange.end} of ${brushRange.of} points. Drag the slider under the chart to see the rest.`
+            : `Zoomed with the overview axis: ${brushRange.start} – ${brushRange.end} of ${brushRange.of} points`}
             style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 9, padding: '1px 4px 1px 5px', borderRadius: 99,
               background: 'color-mix(in srgb, var(--accent) 14%, transparent)', color: 'var(--accent)', whiteSpace: 'nowrap' }}>
-            zoomed {brushRange.endIndex - brushRange.startIndex + 1}/{brushRange.of}
-            <button aria-label="Reset the overview zoom" title="Show the whole series"
+            {brushRange.auto ? 'showing' : 'zoomed'} {brushRange.endIndex - brushRange.startIndex + 1}/{brushRange.of}
+            {/* An automatic window has nothing to reset: the slider is the
+                control. A dragged one goes back to how the chart opened. */}
+            {!brushRange.auto && (
+            <button aria-label="Reset the overview zoom" title="Back to how the chart opened"
               onClick={e => { e.stopPropagation(); setBrushRange(null); setBrushNonce(n => n + 1) }}
               style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', font: 'inherit', lineHeight: 1, padding: 0 }}>×</button>
+            )}
           </span>
         )}
         {relNotes.length > 0 && (

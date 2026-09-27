@@ -308,6 +308,86 @@ export function xAxisPlan(
   }
 }
 
+// ── Auto-pinned viewport ───────────────────────────────────────────────────
+// When a category axis has more points than its width can show legibly, the
+// chart opens on a readable WINDOW of them with a range slider (Recharts'
+// <Brush>) underneath, rather than squeezing every point into the plot and
+// thinning labels until most categories are unnamed. Nothing is dropped: the
+// rows are all still there, and the slider reaches every one of them.
+
+/** A window never shows fewer points than this: two or three bars read as a
+ *  fragment, not a chart. */
+export const MIN_WINDOW = 4
+
+/** The narrowest slot a point may have before the axis counts as congested,
+ *  in px. Below this a bar is a hairline and a line's points merge. */
+const MIN_POINT_SLOT = 22
+
+/** The steepest tilt still read without turning the head. -90 is in
+ *  xAxisPlan's ladder as a last resort; it is not "readable". */
+const READABLE_TILT = 45
+
+/**
+ * How many categories this axis can show legibly in `width` px: every label
+ * drawn, upright or at most 45 degrees, none skipped, and no slot narrower
+ * than MIN_POINT_SLOT. Measured with the same per-script widths as
+ * xAxisPlan, so Arabic labels (wider glyphs) get fewer per window.
+ */
+export function readableCapacity(
+  labels: readonly string[],
+  opts: { fontSize?: number; width?: number } = {},
+): number {
+  const fontSize = opts.fontSize ?? DEFAULT_TICK_SIZE
+  const plot = opts.width && opts.width > 0
+    ? Math.max(120, opts.width - X_GUTTER_ALLOWANCE)
+    : NOMINAL_PLOT_W
+  const lineH = fontSize + 2
+  const upright = widestLabel(labels, fontSize) + 6
+  const tilted = lineH / Math.sin(READABLE_TILT * Math.PI / 180) + 2
+  const perPoint = Math.max(MIN_POINT_SLOT, Math.min(upright, tilted))
+  return Math.max(1, Math.floor(plot / perPoint))
+}
+
+/** Does this axis run through time? Then the window opens on the NEWEST
+ *  points -- the end a reader of a time series came for, and the end this
+ *  module already refuses to lose (keepLabel, endpointTicks). A ranked or
+ *  categorical axis opens at its start: its first bars are its top ones. */
+export function isTemporalAxis(cfg: FormatConfig & Record<string, unknown>, labels: readonly string[]): boolean {
+  if (cfg.start || cfg.dimension_granularity) return true
+  if (labels.length === 0) return false
+  const dated = labels.filter(l => /^\d{4}([-/.]\d{1,2}){0,2}([T ]\d|$)/.test(l) || /^(FY)?\d{4}(\/\d{2})?(-?Q\d)?$/.test(l))
+  return dated.length / labels.length >= 0.8
+}
+
+export interface AutoViewport {
+  /** More points than the width shows legibly: open on a window. */
+  congested: boolean
+  startIndex: number
+  endIndex: number
+  /** Points in the window. */
+  size: number
+}
+
+/**
+ * The window a chart opens on. Not congested: the whole series. Congested:
+ * as many points as `readableCapacity` allows (never fewer than MIN_WINDOW),
+ * pinned to the newest end of a time axis or the start of any other.
+ */
+export function autoViewport(
+  labels: readonly string[],
+  opts: { fontSize?: number; width?: number; anchor?: 'start' | 'end' } = {},
+): AutoViewport {
+  const n = labels.length
+  const cap = readableCapacity(labels, opts)
+  if (n <= Math.max(cap, MIN_WINDOW)) {
+    return { congested: false, startIndex: 0, endIndex: Math.max(0, n - 1), size: n }
+  }
+  const size = Math.max(MIN_WINDOW, cap)
+  return opts.anchor === 'end'
+    ? { congested: true, startIndex: n - size, endIndex: n - 1, size }
+    : { congested: true, startIndex: 0, endIndex: size - 1, size }
+}
+
 /** Ellipsise to `max` characters, or return the string unchanged. */
 export function clipLabel(s: string, max: number): string {
   if (!Number.isFinite(max) || s.length <= max) return s
@@ -851,7 +931,12 @@ export function legendProps(cfg: FormatConfig, rtl = false) {
  * five-point chart is chrome, not signal -- and null (not hidden-but-mounted)
  * when off so untouched widgets render byte-identically to before.
  */
-export interface BrushRange { start: string; end: string; startIndex: number; endIndex: number; of: number }
+export interface BrushRange {
+  start: string; end: string; startIndex: number; endIndex: number; of: number
+  /** The window the chart opened on by itself (a congested axis), not one the
+   *  reader dragged to. */
+  auto?: boolean
+}
 
 export function brushProps(cfg: FormatConfig, overview?: {
   /** The plotted rows; with them the brush carries a mini chart of the whole series. */
