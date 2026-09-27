@@ -674,6 +674,38 @@ export const mapSettingsApi = {
   set: (body: MapSettings) => api.put<MapSettings>('/map-settings', body).then(r => r.data),
 }
 
+/** One install-wide setting, as Admin -> Settings shows it. A secret's value
+ *  is never sent: `value` is null and `is_set` says whether it has one. */
+export interface PlatformSetting {
+  key: string
+  label: string
+  help: string
+  type: 'bool' | 'int' | 'float' | 'str'
+  bounds: { ge?: number; gt?: number; le?: number; lt?: number }
+  editable: boolean
+  secret: boolean
+  restart: boolean
+  options: string[]
+  value: string | number | boolean | null
+  is_set: boolean
+  default: string | number | boolean | null
+  source: 'saved' | 'environment'
+  updated_by: string | null
+  updated_at: string | null
+}
+export interface PlatformSettingsCategory { id: string; label: string; settings: PlatformSetting[] }
+export interface PlatformSettingsOut { categories: PlatformSettingsCategory[]; restart_required?: string[] }
+export interface LlmTestResult { ok: boolean; latency_ms: number; model: string; detail: string }
+
+export const platformSettingsApi = {
+  get: () => api.get<PlatformSettingsOut>('/platform/settings').then(r => r.data),
+  /** null for a key removes its saved value (back to the environment). */
+  save: (values: Record<string, string | number | boolean | null>) =>
+    api.put<PlatformSettingsOut>('/platform/settings', { values }).then(r => r.data),
+  testLlm: (body: { llm_base_url?: string; llm_model?: string; llm_api_key?: string }) =>
+    api.post<LlmTestResult>('/platform/settings/test-llm', body).then(r => r.data),
+}
+
 export interface BoundaryPack {
   id: string
   name: string

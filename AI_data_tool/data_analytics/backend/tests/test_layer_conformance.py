@@ -201,6 +201,7 @@ LAYER_MAP: dict[str, int] = {
     "services/audit": L6_API,
     "services/admin_audit": L6_API,
     "services/quotas": L6_API,
+    "services/app_settings": L6_API,
     "services/demo_content": L6_API,
     "services/page_templates": L6_API,
     "core/security": L6_API,

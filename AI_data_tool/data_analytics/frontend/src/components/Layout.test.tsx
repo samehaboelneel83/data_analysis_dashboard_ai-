@@ -65,7 +65,7 @@ describe('Layout', () => {
     const { unmount } = renderLayout()
     const admin = screen.getByRole('button', { name: /^Admin/ })
     expect(admin).toHaveAttribute('aria-expanded', 'false')
-    expect(within(admin).getByText('12 pages')).toBeInTheDocument()
+    expect(within(admin).getByText('13 pages')).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /^Users$/i })).not.toBeInTheDocument()
     fireEvent.click(admin)
     expect(admin).toHaveAttribute('aria-expanded', 'true')

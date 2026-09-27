@@ -92,3 +92,35 @@ class TestTls:
         for key in ("postgresql", "redshift", "mysql", "mariadb"):
             assert {"ssl_mode", "ssl_root_cert"} <= fields(key), key
         assert "ssl_mode" not in fields("sqlite")
+
+
+class TestConnectTimeout:
+    """SQL Server and Oracle had no connect timeout at all: an unreachable
+    server held "Test connection" for the driver's default (a minute, for
+    pymssql's login). Every family now takes one configurable value."""
+
+    @pytest.fixture(autouse=True)
+    def _connect(self, monkeypatch):
+        monkeypatch.setattr(settings, "source_connect_timeout_s", 5)
+        monkeypatch.setattr(settings, "source_statement_timeout_s", 0)
+
+    def test_every_networked_family_gets_it_in_its_drivers_words(self):
+        assert C.connect_args(PG)["connect_timeout"] == 5
+        assert C.connect_args(MY)["connect_timeout"] == 5
+        assert C.connect_args({"type": "clickhouse"})["connect_timeout"] == 5
+        assert C.connect_args({"type": "sqlserver"}) == {"login_timeout": 5}
+        assert C.connect_args({"type": "oracle"}) == {"tcp_connect_timeout": 5.0}
+        odbc = {"type": "generic", "url": "mssql+pyodbc://u:p@h/db?driver=ODBC+Driver+18+for+SQL+Server"}
+        assert C.connect_args(odbc) == {"timeout": 5}
+
+    def test_the_drivers_accept_those_keywords(self):
+        """A keyword the driver does not know fails every connection."""
+        import inspect
+        pymssql = pytest.importorskip("pymssql")
+        assert "login_timeout" in inspect.signature(pymssql.connect).parameters
+        oracledb = pytest.importorskip("oracledb")
+        assert hasattr(oracledb.ConnectParams(), "tcp_connect_timeout")
+
+    def test_it_is_on_the_settings_page(self):
+        from app.services.app_settings import BY_KEY
+        assert BY_KEY["source_connect_timeout_s"].editable

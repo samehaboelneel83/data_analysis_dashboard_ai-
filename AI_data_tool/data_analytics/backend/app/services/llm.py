@@ -153,8 +153,10 @@ class LLMClient:
         enabled: bool = True,
         timeout: float = 180.0,
         transport: httpx.BaseTransport | None = None,
+        api_key: str = "",
     ) -> None:
         self.base_url = base_url.rstrip("/")
+        self.api_key = api_key or ""
         self.model = model
         self.enabled = enabled
         self.timeout = timeout
@@ -166,6 +168,12 @@ class LLMClient:
         self.tokens_out = 0
         self.call_count = 0
         self.last_error: str | None = None
+
+    def _headers(self) -> dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
 
     @property
     def _url(self) -> str:
@@ -227,7 +235,7 @@ class LLMClient:
                 timeout=self.timeout, transport=self._transport
             ) as http:
                 response = await http.post(
-                    self._url, json=payload, headers={"Content-Type": "application/json"}
+                    self._url, json=payload, headers=self._headers()
                 )
                 if response.status_code >= 400:
                     self.last_error = f"HTTP {response.status_code}: {response.text[:300]}"
@@ -438,4 +446,5 @@ def get_client() -> LLMClient:
         model=settings.llm_model,
         enabled=settings.llm_enabled,
         timeout=settings.llm_timeout_s,
+        api_key=settings.llm_api_key,
     )

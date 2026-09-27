@@ -42,6 +42,7 @@ const AdminSso = lazy(() => import('./pages/admin/AdminSso'))
 const AdminAudit = lazy(() => import('./pages/admin/AdminAudit'))
 const AdminColumnSecurityRules = lazy(() => import('./pages/admin/AdminColumnSecurityRules'))
 const AdminOrgUnits = lazy(() => import('./pages/admin/AdminOrgUnits'))
+const Settings = lazy(() => import('./pages/admin/Settings'))
 const AskAI = lazy(() => import('./pages/AskAI'))
 const InsightsHub = lazy(() => import('./pages/InsightsHub'))
 const Automations = lazy(() => import('./pages/Automations'))
@@ -138,9 +139,11 @@ export default function App() {
                 <Route path="admin/maps" element={<AdminMaps />} />
                 <Route path="admin/calendar" element={<AdminCalendar />} />
                 <Route path="admin/audit" element={<AdminAudit />} />
+                <Route path="admin/settings" element={<Settings />} />
               </Route>
               <Route element={<RequireSuperAdmin />}>
                 <Route path="platform/organizations" element={<PlatformOrgs />} />
+                <Route path="platform/settings" element={<Settings scope="platform" />} />
               </Route>
               {/* Anything else: a 404 INSIDE the shell. A blank page for a
                   mistyped link read as a crash. */}

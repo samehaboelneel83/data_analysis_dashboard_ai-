@@ -73,7 +73,7 @@ def test_connect_timeout_only_for_networked_drivers(monkeypatch):
     assert C.connect_args({"type": "mysql"}) == {"connect_timeout": 8}
     assert C.connect_args({"type": "duckdb", "filepath": ":memory:"}) == {}
     assert C.connect_args({"type": "sqlite", "filepath": "/x.db"}) == {}
-    assert C.connect_args({"type": "oracle"}) == {}
+    assert C.connect_args({"type": "oracle"}) == {"tcp_connect_timeout": 8.0}
     assert C.connect_args({"type": "generic", "url": "postgresql+psycopg2://a:b@h/d"}) == {"connect_timeout": 8}
     assert C.connect_args({"type": "generic", "url": "duckdb:///:memory:"}) == {}
 

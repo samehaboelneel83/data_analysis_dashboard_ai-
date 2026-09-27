@@ -1,4 +1,4 @@
-import { Home, Bot, Database, GitBranch, Waypoints, LayoutDashboard, Sparkles, RefreshCw, Mail, Activity, Users, Shield, Lock, EyeOff, Download, Key, Fingerprint, ScrollText, Building2, Network, Upload, Plug, Map as MapIcon, Workflow, CalendarDays, ArrowRightLeft, type LucideIcon } from 'lucide-react'
+import { Home, Bot, Database, GitBranch, Waypoints, LayoutDashboard, Sparkles, RefreshCw, Mail, Activity, Users, Shield, Lock, EyeOff, Download, Key, Fingerprint, ScrollText, Building2, Network, Upload, Plug, Map as MapIcon, Workflow, CalendarDays, ArrowRightLeft, Settings as SettingsIcon, SlidersHorizontal, type LucideIcon } from 'lucide-react'
 
 /**
  * The navigation tree, as data.
@@ -104,6 +104,8 @@ export const NAVIGATION: NavSection[] = [
     title: 'Admin',
     permission: 'org_admin',
     items: [
+      // Every setting in one place; the pages below stay for their full detail.
+      { to: '/admin/settings', label: 'Settings', icon: SettingsIcon, permission: 'org_admin' },
       { to: '/admin/users', label: 'Users', icon: Users, permission: 'org_admin' },
       { to: '/admin/roles', label: 'Roles', icon: Shield, permission: 'org_admin' },
       // Directly above Row security: the chart is what a hierarchical rule
@@ -125,6 +127,7 @@ export const NAVIGATION: NavSection[] = [
     permission: 'super_admin',
     items: [
       { to: '/platform/organizations', label: 'Organizations', icon: Building2, permission: 'super_admin' },
+      { to: '/platform/settings', label: 'Platform settings', icon: SlidersHorizontal, permission: 'super_admin' },
     ],
   },
 ]

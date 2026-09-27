@@ -35,12 +35,14 @@ export const PATH_MESSAGE: [string, MessageKey][] = [
   ['/admin/maps', 'nav.maps'],
   ['/admin/calendar', 'nav.calendar'],
   ['/admin/audit', 'nav.audit'],
+  ['/admin/settings', 'nav.settings'],
   // Admin pages that are reachable but not in the rail still need a title:
   // without an entry here the bar falls back to "Home", which reads as if
   // the navigation had failed. `titles.test.ts` pins that every route has one.
   ['/admin/custom-connectors', 'nav.customConnectors'],
   ['/admin/connection-rules', 'nav.connectionRules'],
   ['/platform/organizations', 'nav.organizations'],
+  ['/platform/settings', 'nav.platformSettings'],
 ]
 
 export const NAV_ITEM_MESSAGE: Record<string, MessageKey> = {
@@ -69,8 +71,10 @@ export const NAV_ITEM_MESSAGE: Record<string, MessageKey> = {
   '/admin/maps': 'nav.maps',
   '/admin/calendar': 'nav.calendar',
   '/admin/audit': 'nav.audit',
+  '/admin/settings': 'nav.settings',
   '/admin/custom-connectors': 'nav.customConnectors',
   '/platform/organizations': 'nav.organizations',
+  '/platform/settings': 'nav.platformSettings',
 }
 
 export const SECTION_MESSAGE: Record<string, MessageKey> = {

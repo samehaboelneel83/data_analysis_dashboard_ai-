@@ -88,6 +88,10 @@ class Settings(BaseSettings):
     # Set llm_enabled=False to keep the platform entirely offline.
     llm_base_url: str = "http://10.125.18.189:8000/v1"
     llm_model: str = "qwen3.5"
+    # Optional bearer token for an OpenAI-compatible endpoint that requires one
+    # (sent as "Authorization: Bearer ..."). Empty = no header, which is what
+    # the self-hosted vLLM this was written against expects.
+    llm_api_key: str = ""
     llm_timeout_s: float = Field(default=180.0, gt=0)
     llm_enabled: bool = True
 
@@ -173,6 +177,10 @@ class Settings(BaseSettings):
     # a worker (and the source) until someone restarted something. Generous,
     # because a large import is legitimately slow; 0 turns it off. Postgres
     # enforces it server-side; MySQL and ClickHouse as a socket read timeout.
+    # How long to wait for a connected database to ACCEPT a connection, before
+    # "Test connection", an import or a DirectQuery widget gives up. Applies to
+    # every database family (SQL Server and Oracle had none).
+    source_connect_timeout_s: int = Field(default=8, ge=1, le=300)
     source_statement_timeout_s: int = Field(default=900, ge=0)
 
     # E07/E12: run the durable job worker (services/jobs.py) in this process.

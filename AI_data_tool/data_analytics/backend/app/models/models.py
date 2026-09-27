@@ -2338,3 +2338,19 @@ class MigrationItem(Base):
     created_by    = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at    = Column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at    = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AppSetting(Base):
+    """A platform setting changed from Admin -> Settings (services/app_settings.py).
+
+    One row per overridden setting; no row means the environment variable (or
+    the built-in default) applies. Install-wide, not per org: these are the
+    LLM endpoint, mail server, limits and timeouts every organization shares.
+    A secret's value is stored encrypted (services/secrets.py) and is never
+    sent back to a browser.
+    """
+    __tablename__ = "app_settings"
+    key        = Column(String(100), primary_key=True)
+    value      = Column(JSON, nullable=True)
+    updated_by = Column(String(255))           # email, denormalised like the audit log
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)

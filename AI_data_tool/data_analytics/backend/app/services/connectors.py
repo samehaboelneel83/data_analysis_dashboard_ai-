@@ -423,17 +423,30 @@ def connect_args(cfg: dict) -> dict:
     """
     backend = _backend_of(cfg)
     limit = _statement_limit_s()
+    connect = _connect_timeout_s()
     # clickhouse-driver takes connect_timeout as well, and an unreachable
     # warehouse must fail in seconds rather than hold a worker open. It has no
     # search_path, so it returns before the schema branch below.
     if backend == "clickhouse":
-        args = {"connect_timeout": 8}
+        args = {"connect_timeout": connect}
         if limit:
             args["send_receive_timeout"] = limit
         return args
+    # SQL Server and Oracle had NO connect timeout: an unreachable server held
+    # "Test connection" (and a worker) for the driver's default -- a minute for
+    # pymssql's login. Each driver names it differently.
+    if backend == "mssql":
+        driver = _driver_of(cfg)
+        if driver == "pymssql":
+            return {"login_timeout": connect}
+        if driver == "pyodbc":
+            return {"timeout": connect}
+        return {}
+    if backend == "oracle":
+        return {"tcp_connect_timeout": float(connect)} if _driver_of(cfg) == "oracledb" else {}
     if backend not in ("postgresql", "mysql"):
         return {}
-    args: dict = {"connect_timeout": 8}
+    args: dict = {"connect_timeout": connect}
     options: list[str] = []
     # E07: no source query may hold a worker (and the source) forever. Postgres
     # enforces it server-side, so the source stops working too; a session that
@@ -457,6 +470,26 @@ def connect_args(cfg: dict) -> dict:
         args["options"] = " ".join(options)
     args.update(_tls_args(cfg, backend))
     return args
+
+
+def _connect_timeout_s() -> int:
+    from ..core.config import settings
+    return max(1, int(getattr(settings, "source_connect_timeout_s", 8) or 8))
+
+
+def _driver_of(cfg: dict) -> str | None:
+    """The DBAPI driver ('pymssql', 'pyodbc', 'oracledb'): the part of the
+    dialect after '+', which decides the connect keyword's name."""
+    spec = _REGISTRY.get(cfg.get("type"))
+    if spec is None:
+        return None
+    if spec.url_kind == "generic":
+        from sqlalchemy.engine.url import make_url
+        try:
+            return make_url((cfg.get("url") or "").strip()).get_driver_name()
+        except Exception:
+            return None
+    return spec.dialect.split("+", 1)[1] if spec.dialect and "+" in spec.dialect else None
 
 
 def _statement_limit_s() -> int:

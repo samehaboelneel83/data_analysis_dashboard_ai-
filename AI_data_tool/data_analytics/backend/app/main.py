@@ -409,6 +409,15 @@ async def lifespan(app: FastAPI):
                 await _backfill_default_org(session)
             async with AsyncSessionLocal() as session:
                 await _run_secrets_migration(session)
+            # Platform settings saved from Admin -> Settings override the
+            # environment. Before anything below reads them (the job worker,
+            # the LLM probe). A failure keeps the environment values.
+            try:
+                from .services import app_settings
+                async with AsyncSessionLocal() as session:
+                    await app_settings.load(session)
+            except Exception:
+                logging.getLogger(__name__).exception("saved platform settings not applied")
             # A metadata sync is a detached task; if the previous process died
             # mid-run its SyncRun row still says "running", and nothing ever
             # corrected it. Inside the startup lock, where no such task can
@@ -433,6 +442,9 @@ async def lifespan(app: FastAPI):
     import asyncio
     from .services.refresh_scheduler import run_scheduler
     scheduler = asyncio.create_task(run_scheduler(AsyncSessionLocal))
+    # Settings saved by another worker or replica reach this one within 30s.
+    from .services.app_settings import run_reloader
+    settings_reloader = asyncio.create_task(run_reloader(AsyncSessionLocal))
 
     # E07/E12: the durable job worker (services/jobs.py). One per process,
     # like the scheduler; claims are compare-and-set on the jobs row, so
@@ -494,6 +506,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         _STARTUP_COMPLETE = False
+        settings_reloader.cancel()
         scheduler.cancel()
         try:
             await scheduler
@@ -613,6 +626,8 @@ app.include_router(widget_templates.router, prefix="/api/v1")
 app.include_router(workspace.router,     prefix="/api/v1")
 app.include_router(dataflows.router,     prefix="/api/v1")
 app.include_router(platform.router,      prefix="/api/v1")
+from .routers import platform_settings  # noqa: E402
+app.include_router(platform_settings.router, prefix="/api/v1")
 app.include_router(sso.router,           prefix="/api/v1")
 app.include_router(pins.router,          prefix="/api/v1")
 app.include_router(jobs_router.router,   prefix="/api/v1")

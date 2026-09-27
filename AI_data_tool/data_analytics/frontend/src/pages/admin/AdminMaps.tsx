@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useT } from '../../i18n'
 import toast from 'react-hot-toast'
-import { boundarySetsApi, mapSettingsApi, type BoundaryPack, type BoundarySetSummary, type MapSettings } from '../../services/api'
-import { setTileSettings } from '../../components/report/geo/tiles'
+import { boundarySetsApi, type BoundaryPack, type BoundarySetSummary } from '../../services/api'
+import BasemapSettings from '../../components/admin/BasemapSettings'
 import LoadError from '../../components/ui/LoadError'
 import LoadingState from '../../components/ui/LoadingState'
 import PackTermsConfirm from '../../components/report/PackTermsConfirm'
@@ -17,36 +17,19 @@ import PackTermsConfirm from '../../components/report/PackTermsConfirm'
  */
 export default function AdminMaps() {
   const t = useT()
-  const [form, setForm] = useState<MapSettings>({ tile_url: '', attribution: '', contrast_tile_url: '' })
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<unknown>(null)
-  const [saving, setSaving] = useState(false)
   const [sets, setSets] = useState<BoundarySetSummary[]>([])
   const [packs, setPacks] = useState<BoundaryPack[]>([])
 
   const load = () => {
     setLoading(true); setLoadError(null)
-    Promise.all([mapSettingsApi.get(), boundarySetsApi.list(), boundarySetsApi.packs().catch(() => [])])
-      .then(([s, bs, p]) => {
-        setForm({ tile_url: s.tile_url ?? '', attribution: s.attribution ?? '', contrast_tile_url: s.contrast_tile_url ?? '' })
-        setSets(bs); setPacks(p)
-      })
+    Promise.all([boundarySetsApi.list(), boundarySetsApi.packs().catch(() => [])])
+      .then(([bs, p]) => { setSets(bs); setPacks(p) })
       .catch(setLoadError)
       .finally(() => setLoading(false))
   }
   useEffect(load, [])
-
-  const save = async (next: MapSettings) => {
-    setSaving(true)
-    try {
-      const saved = await mapSettingsApi.set(next)
-      setForm({ tile_url: saved.tile_url ?? '', attribution: saved.attribution ?? '', contrast_tile_url: saved.contrast_tile_url ?? '' })
-      setTileSettings(saved)
-      toast.success(saved.tile_url ? 'Basemap saved' : 'Basemap turned off')
-    } catch (e) {
-      toast.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Could not save')
-    } finally { setSaving(false) }
-  }
 
   const [pendingTerms, setPendingTerms] = useState<string | null>(null)
   const install = async (p: BoundaryPack, accepted = false) => {
@@ -63,14 +46,6 @@ export default function AdminMaps() {
 
   if (loading) return <LoadingState />
   if (loadError) return <LoadError what="the map settings" error={loadError} onRetry={load} />
-  const field = (key: keyof MapSettings, label: string, placeholder: string, hint: string) => (
-    <label style={{ display: 'block', marginBottom: 12, fontSize: 13 }}>
-      <span style={{ display: 'block', fontWeight: 600, marginBottom: 4 }}>{label}</span>
-      <input value={form[key] ?? ''} placeholder={placeholder} style={{ width: '100%', maxWidth: 560 }}
-        onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))} />
-      <span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)', marginTop: 3 }}>{hint}</span>
-    </label>
-  )
   const installable = packs.filter(p => !sets.some(s => s.name === p.name))
   return (
     <div style={{ maxWidth: 820 }}>
@@ -79,29 +54,7 @@ export default function AdminMaps() {
         Basemap tiles and region boundaries for every map in the organisation.
       </p>
 
-      <section className="card" style={{ padding: 16, marginTop: 16 }}>
-        <h2 style={{ fontSize: 15, marginTop: 0 }}>Basemap</h2>
-        <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-          Off by default: maps draw country outlines only. Point this at your own XYZ tile server to draw
-          streets and terrain under every map; maps then use the tiles' Web Mercator projection.
-        </p>
-        {field('tile_url', 'Tile address', 'https://tiles.example.local/{z}/{x}/{y}.png',
-          'Must contain {z}, {x} and {y}. {s} rotates a/b/c subdomains. Tiles are fetched by each viewer’s browser. '
-          + 'Image tiles (.png/.jpg) or vector tiles (.pbf/.mvt, e.g. TileServer GL’s /data/<name>/{z}/{x}/{y}.pbf).')}
-        {field('attribution', 'Attribution', '© OpenStreetMap contributors',
-          'Shown in the corner of every map with tiles. Required by almost every tile licence.')}
-        {field('contrast_tile_url', 'High-contrast tile address (optional)', 'https://tiles.example.local/contrast/{z}/{x}/{y}.png',
-          'Used instead for viewers whose system asks for more contrast.')}
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-primary btn-sm" disabled={saving} onClick={() => void save(form)}>
-            {saving ? 'Saving…' : 'Save'}
-          </button>
-          {form.tile_url && (
-            <button className="btn btn-sm" disabled={saving}
-              onClick={() => void save({ tile_url: '', attribution: '', contrast_tile_url: '' })}>Turn basemap off</button>
-          )}
-        </div>
-      </section>
+      <BasemapSettings />
 
       <section className="card" style={{ padding: 16, marginTop: 16 }}>
         <h2 style={{ fontSize: 15, marginTop: 0 }}>Boundary sets</h2>
