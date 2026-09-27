@@ -9,6 +9,11 @@ import type { DisplayRule } from '../lib/displayRules'
  *
  *   VITE_API_URL set      use it. A split deployment (app and API on
  *                         different hosts), or the dev override below.
+ *   'same-origin'         relative `/api/v1/...` in dev too; the Vite dev
+ *                         server proxies it to the backend (docker compose
+ *                         does this), so a browser on ANOTHER machine that
+ *                         opened http://<host-ip>:3001 reaches the API instead
+ *                         of calling its own localhost:8000.
  *   production, unset     SAME ORIGIN -- the bundle calls `/api/v1/...`
  *                         relative to wherever nginx served it, so one built
  *                         image runs on any hostname with no rebuild and no
@@ -17,7 +22,9 @@ import type { DisplayRule } from '../lib/displayRules'
  *                         backend is on :8000, so they need the absolute one.
  */
 const CONFIGURED_ORIGIN = (import.meta.env.VITE_API_URL ?? '').trim()
-const API_ORIGIN = CONFIGURED_ORIGIN || (import.meta.env.PROD ? '' : 'http://localhost:8000')
+const API_ORIGIN = CONFIGURED_ORIGIN === 'same-origin'
+  ? ''
+  : CONFIGURED_ORIGIN || (import.meta.env.PROD ? '' : 'http://localhost:8000')
 const BASE = API_ORIGIN + '/api/v1'
 // T6: the session is an httpOnly cookie the server sets at login -- no script
 // can read it, which is the point. `withCredentials` sends it (dev is

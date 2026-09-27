@@ -154,7 +154,11 @@ services:
     container_name: datalytics_frontend
     restart: unless-stopped
     environment:
-      VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+      # same-origin: the browser calls /api on the host it opened (localhost or
+      # this PC's LAN IP) and Vite proxies it to the backend, so other machines
+      # on the network can sign in. Set a full URL to call the API directly.
+      VITE_API_URL: ${VITE_API_URL:-same-origin}
+      API_PROXY_TARGET: http://backend:8000
     volumes:
       - ./frontend/src:/app/src
       - ./frontend/public:/app/public
