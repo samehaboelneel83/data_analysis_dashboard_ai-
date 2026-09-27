@@ -35,3 +35,9 @@ export function closeOpen(id: number): OpenReport[] {
   write(next)
   return next
 }
+
+/** "Close all reports": nothing stays open in this tab. */
+export function closeAll(): OpenReport[] {
+  write([])
+  return []
+}

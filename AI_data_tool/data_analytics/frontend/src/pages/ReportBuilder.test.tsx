@@ -3,7 +3,7 @@ import { describe, it, expect, vi, afterEach, beforeEach, beforeAll } from 'vite
 import { render, screen, fireEvent, within, waitFor, act } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import ReportBuilder from './ReportBuilder'
-import { analysisApi, authzApi, reportsApi, datasetsApi, widgetDataApi, dataPreviewApi, dataSourcesApi } from '../services/api'
+import { analysisApi, authzApi, reportsApi, datasetsApi, widgetDataApi, dataPreviewApi, dataSourcesApi, columnMetaApi } from '../services/api'
 import { ConfirmProvider } from '../components/ui/ConfirmDialog'
 import { axeViolations } from '../test/axe'
 
@@ -641,7 +641,7 @@ describe('ReportBuilder Fields pane', () => {
     await screen.findByTestId('view-strip')
     await screen.findByText('Fields')
 
-    expect(screen.getByRole('button', { name: /Net Revenue/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^[#ƒx Aa]* ?Net Revenue$/ })).toBeInTheDocument()
   })
 
   it('applies the column_meta default aggregation when assigning a field', async () => {
@@ -1589,7 +1589,7 @@ describe('dropping several fields on the canvas', () => {
     await builderWithFields()
     fireEvent.click(await fieldButton('region'), { ctrlKey: true })
     fireEvent.click(await fieldButton('revenue'), { ctrlKey: true })
-    expect(await screen.findByText(/^2 selected$/i)).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Clear selection (2)' })).toBeInTheDocument()
   })
 
   it('ticking fields stages them: the bar says which chart they make, and Add chart builds it', async () => {
@@ -1597,9 +1597,9 @@ describe('dropping several fields on the canvas', () => {
     fireEvent.click(await screen.findByRole('checkbox', { name: 'Select region' }))
     fireEvent.click(screen.getByRole('checkbox', { name: 'Select revenue' }))
     const bar = await screen.findByTestId('fields-staging')
-    expect(within(bar).getByText(/^2 selected$/)).toBeInTheDocument()
+    expect(within(bar).getByRole('button', { name: 'Clear selection (2)' })).toBeInTheDocument()
     expect(within(bar).getByText(/Will draw a Bar/)).toBeInTheDocument()
-    fireEvent.click(within(bar).getByRole('button', { name: /Add chart/ }))
+    fireEvent.click(within(bar).getByRole('button', { name: /Auto chart/ }))
     await waitFor(() => expect(reportsApi.addWidget).toHaveBeenCalledTimes(1))
     expect(reportsApi.addWidget).toHaveBeenCalledWith(1, 100, expect.objectContaining({
       widget_type: 'bar',
@@ -1608,6 +1608,32 @@ describe('dropping several fields on the canvas', () => {
     // Staged and charted: the ticks clear.
     await waitFor(() => expect(screen.queryByTestId('fields-staging')).toBeNull())
     expect((screen.getByRole('checkbox', { name: 'Select region' }) as HTMLInputElement).checked).toBe(false)
+  })
+
+  it("a field's properties: name, classification, format and aggregation, each saved to the dataset", async () => {
+    await builderWithFields()
+    vi.mocked(columnMetaApi.set).mockClear()
+    vi.mocked(columnMetaApi.set).mockImplementation(async (_id: number, meta: any) => meta)
+    fireEvent.click(await screen.findByRole('button', { name: 'Properties of revenue' }))
+    const props = screen.getByRole('group', { name: 'Properties of revenue' })
+    expect(within(props).getByLabelText('Classification:')).toHaveValue('measure')
+    fireEvent.change(within(props).getByLabelText('Aggregation:'), { target: { value: 'avg' } })
+    await waitFor(() => expect(columnMetaApi.set).toHaveBeenCalledWith(10,
+      expect.objectContaining({ revenue: expect.objectContaining({ aggregation: 'avg' }) })), { timeout: 5000 })
+    const name = within(props).getByLabelText('Name:')
+    fireEvent.change(name, { target: { value: 'Net revenue' } })
+    fireEvent.blur(name)
+    await waitFor(() => expect(columnMetaApi.set).toHaveBeenLastCalledWith(10,
+      expect.objectContaining({ revenue: expect.objectContaining({ label: 'Net revenue' }) })), { timeout: 5000 })
+  })
+
+  it('a group folds away under its heading', async () => {
+    await builderWithFields()
+    const heading = await screen.findByRole('button', { name: /Dimensions/ })
+    expect(screen.getByRole('checkbox', { name: 'Select region' })).toBeInTheDocument()
+    fireEvent.click(heading)
+    expect(heading).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('checkbox', { name: 'Select region' })).toBeNull()
   })
 
   it('a date column is grouped under Dates, and a date with a measure stages as a line', async () => {

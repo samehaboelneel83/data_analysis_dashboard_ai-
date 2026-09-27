@@ -60,7 +60,7 @@ describe('communities are visible', () => {
     expect(screen.getByText(/2 communities/i)).toBeInTheDocument()
   })
 
-  it('falls back to the report palette's first colour when the shaper sends no community', () => {
+  it("falls back to the report palette's first colour when the shaper sends no community", () => {
     // Older saved widgets and any future shaper that omits the field must keep
     // rendering rather than colouring by `undefined`.
     const { container } = draw({

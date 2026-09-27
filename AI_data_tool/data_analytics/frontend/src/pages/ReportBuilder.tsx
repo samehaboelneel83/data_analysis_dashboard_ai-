@@ -2,7 +2,8 @@ import PdfOptionsDialog from '../components/report/PdfOptionsDialog'
 import RelativeDateEditor from '../components/report/RelativeDateEditor'
 import AccessExplainer from '../components/report/AccessExplainer'
 import { DEFAULT_SPEC, PRESETS, describeSpec, parseSpec, specProblem, type RelativeSpec } from '../lib/relativeDates'
-import { closeOpen, markOpen, readOpen, type OpenReport } from '../lib/openReports'
+import { closeAll, closeOpen, markOpen, readOpen, type OpenReport } from '../lib/openReports'
+import OpenReportsMenu from '../components/report/OpenReportsMenu'
 import { useEffect, useState, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
 import LoadError from '../components/ui/LoadError'
 import { useParams, Link, useNavigate } from 'react-router-dom'
@@ -10,12 +11,12 @@ import { useCrumbTitle } from '../lib/crumb'
 import NotFound from './NotFound'
 import { useDirection } from '../contexts/DirectionContext'
 import { useT, type MessageKey } from '../i18n'
-import { authzApi, type AuthzDecision, measuresApi, relationshipsApi, translationsApi, columnMetaApi, parametersApi, themesApi, reportsApi, datasetsApi, hierarchyApi, analysisApi, widgetTemplatesApi, dataSourcesApi } from '../services/api'
+import { authzApi, type AuthzDecision, measuresApi, relationshipsApi, translationsApi, columnMetaApi, parametersApi, themesApi, reportsApi, datasetsApi, hierarchyApi, analysisApi, widgetTemplatesApi, dataSourcesApi, columnFormatsApi } from '../services/api'
 import type { Dataset, DatasetColumn, CalcColumn, CalcColumnFormat, MeasureDef, ColumnMeta, WidgetTemplate } from '../services/api'
 import CalcColumnsPanel from '../components/report/CalcColumnsPanel'
 import ColumnFormatsPanel from '../components/report/ColumnFormatsPanel'
 import type { Report, ReportPage, Widget, WidgetType, PageType, Bookmark, BookmarkState } from '../types/report'
-import { WIDGET_CATALOG, ROLE_SPECS, configKeyFor } from '../types/report'
+import { WIDGET_CATALOG, ROLE_SPECS, configKeyFor, AGGREGATIONS } from '../types/report'
 import type { HierarchyNode, RoleField } from '../types/report'
 import WidgetRenderer from '../components/report/WidgetRenderer'
 import WidgetConfigPanel from '../components/report/WidgetConfigPanel'
@@ -1106,6 +1107,13 @@ export default function ReportBuilder() {
    *  click still assigns a single field to the selected widget, because that is
    *  what the field list has always done and is what most clicks mean. */
   const [gatheredFields, setGatheredFields] = useState<string[]>([])
+  /** The field whose properties are open in the Data pane (one at a time). */
+  const [fieldProps, setFieldProps] = useState<string | null>(null)
+  /** Data-pane groups the author folded away. */
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set())
+  const toggleGroup = (g: string) => setCollapsedGroups(prev => {
+    const next = new Set(prev); if (next.has(g)) next.delete(g); else next.add(g); return next
+  })
   const toggleGathered = (name: string) =>
     setGatheredFields(g => g.includes(name) ? g.filter(n => n !== name) : [...g, name])
 
@@ -1875,6 +1883,121 @@ export default function ReportBuilder() {
   // is an OVERRIDE stored in column_meta, so flipping back to the detected
   // default removes the key rather than pinning it. Only numeric columns can
   // become measures -- there is no sum of a text column.
+  /** One field's column_meta changed as one undoable step; a key set to
+   *  undefined is removed, and an entry left empty is dropped. */
+  const setFieldMeta = async (name: string, patch: Partial<ColumnMeta>, label: string) => {
+    if (!report?.dataset_id) return
+    const meta: Record<string, ColumnMeta> = {}
+    for (const [k, v] of Object.entries(columnMeta)) if (!k.startsWith('__')) meta[k] = { ...(v as ColumnMeta) }
+    const entry: Record<string, unknown> = { ...(meta[name] ?? {}), ...patch }
+    for (const k of Object.keys(entry)) if (entry[k] === undefined || entry[k] === '') delete entry[k]
+    if (Object.keys(entry).length === 0) delete meta[name]
+    else meta[name] = entry as ColumnMeta
+    await setColumnMetaUndoable(report.dataset_id, meta, label)
+  }
+  /** A field's number format -- the same per-column formats the Data view
+   *  edits and every chart reads -- as one undoable step. */
+  const setFieldFormat = async (name: string, fmt: CalcColumnFormat | null) => {
+    const dsId = report?.dataset_id
+    if (!dsId) return
+    const prev = (columnFormats as Record<string, CalcColumnFormat>)[name] ?? null
+    setColumnFormats(await columnFormatsApi.set(dsId, name, fmt))
+    pushUndo({ label: `Format ${name}`,
+      undo: async () => { setColumnFormats(await columnFormatsApi.set(dsId, name, prev)) },
+      redo: async () => { setColumnFormats(await columnFormatsApi.set(dsId, name, fmt)) } })
+  }
+
+  /** Open (or close) a field's geography classification menu, loading the
+   *  boundary sets and starter packs the first time. */
+  const openGeoMenu = (name: string) => {
+                                    setGeoField(f => f === name ? null : name)
+                                    if (boundarySets.length === 0) {
+                                      boundarySetsApi.list().then(sets => {
+                                        setBoundarySets(sets)
+                                        Promise.resolve().then(() => boundarySetsApi.packs?.())
+                                          .then(p => setBoundaryPacks((Array.isArray(p) ? p : [])
+                                            .filter(pk => !sets.some(s => s.name === pk.name))))
+                                          .catch(() => {})
+                                      }).catch(() => {})
+                                    }
+                                    }
+
+  /** SAS-style format presets over the per-column formats. */
+  const FORMAT_PRESETS: { key: string; label: string; fmt: CalcColumnFormat | null }[] = [
+    { key: '', label: 'Default', fmt: null },
+    { key: 'comma', label: 'Comma (1,234)', fmt: { type: 'number', decimals: 0 } },
+    { key: 'number2', label: 'Number (1,234.56)', fmt: { type: 'number', decimals: 2 } },
+    { key: 'integer', label: 'Integer (1234)', fmt: { type: 'integer' } },
+    { key: 'currency', label: 'Currency ($1,234)', fmt: { type: 'currency', symbol: '$', decimals: 0 } },
+    { key: 'percent', label: 'Percent (12.3%)', fmt: { type: 'percent', decimals: 1 } },
+  ]
+  const presetOf = (f: CalcColumnFormat | undefined): string => {
+    if (!f || f.type === 'none') return ''
+    const hit = FORMAT_PRESETS.find(p => p.fmt && p.fmt.type === f.type
+      && (p.fmt.decimals ?? null) === (f.decimals ?? null) && (p.fmt.symbol ?? null) === (f.symbol ?? null))
+    return hit ? hit.key : 'custom'
+  }
+  /** Name, Classification, Format and Aggregation for one field -- SAS's
+   *  data-item properties. Every change is one undoable step, saved to the
+   *  dataset, so every widget and report on it sees the same field. */
+  const fieldProperties = (c: DatasetColumn) => {
+    const meta = (columnMeta[c.name] ?? {}) as ColumnMeta
+    const group = fieldGroupOf(c)
+    const numeric = isNumericField(c)
+    const cls = group === 'Measures' ? 'measure' : group === 'Geography' ? 'geography' : group === 'Dates' ? 'date' : 'category'
+    const clsOptions: [string, string][] = c.dtype === 'datetime' ? [['date', tr('fields.Dates')]]
+      : c.dtype === 'numeric' ? [['measure', 'Measure'], ['category', 'Category']]
+      : [['category', 'Category'], ['geography', 'Geography']]
+    const lab = { display: 'block', fontSize: 10.5, color: 'var(--muted)', margin: '6px 0 2px' } as const
+    const fmtNow = (columnFormats as Record<string, CalcColumnFormat>)[c.name]
+    const preset = presetOf(fmtNow)
+    const commitName = (v: string) => {
+      const next = v.trim()
+      if (next === (meta.label ?? '') || (next === c.name && !meta.label)) return
+      void setFieldMeta(c.name, { label: next === c.name ? undefined : next }, `Rename ${c.name} to "${next || c.name}"`)
+    }
+    return (
+      <div role="group" aria-label={`Properties of ${meta.label || c.name}`} data-testid="field-properties"
+        style={{ margin: '4px 0 8px 22px', padding: '6px 8px', borderInlineStart: '2px solid var(--border)', fontSize: 11.5 }}>
+        <label style={lab} htmlFor={`fp-name-${c.name}`}>Name:</label>
+        <input id={`fp-name-${c.name}`} defaultValue={meta.label || c.name} key={`n-${meta.label ?? ''}`}
+          onBlur={e => commitName(e.currentTarget.value)}
+          onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+          style={{ width: '100%', fontSize: 11.5, padding: '3px 6px' }} />
+        <label style={lab} htmlFor={`fp-cls-${c.name}`}>Classification:</label>
+        <select id={`fp-cls-${c.name}`} value={cls} disabled={clsOptions.length < 2} style={{ width: '100%', fontSize: 11.5 }}
+          onChange={e => {
+            const v = e.target.value
+            if (v === cls) return
+            if (v === 'geography') { openGeoMenu(c.name); return }
+            if (cls === 'geography' && v === 'category') { void classifyGeography(c.name, null); return }
+            void flipFieldRole(c)
+          }}>
+          {clsOptions.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+        {numeric && (<>
+          <label style={lab} htmlFor={`fp-fmt-${c.name}`}>Format:</label>
+          <select id={`fp-fmt-${c.name}`} value={preset} style={{ width: '100%', fontSize: 11.5 }}
+            onChange={e => {
+              if (e.target.value === 'custom') return
+              void setFieldFormat(c.name, FORMAT_PRESETS.find(p => p.key === e.target.value)?.fmt ?? null)
+            }}>
+            {FORMAT_PRESETS.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
+            {preset === 'custom' && <option value="custom">Custom (set in the Data view)</option>}
+          </select>
+          <label style={lab} htmlFor={`fp-agg-${c.name}`}>Aggregation:</label>
+          <select id={`fp-agg-${c.name}`} value={meta.aggregation ?? ''} style={{ width: '100%', fontSize: 11.5 }}
+            onChange={e => void setFieldMeta(c.name, { aggregation: e.target.value || undefined },
+              `Aggregate ${c.name} by ${e.target.value || 'default'}`)}>
+            <option value="">Default (Sum)</option>
+            {AGGREGATIONS.filter(a => a.value !== 'none' && a.value !== 'pct').map(a =>
+              <option key={a.value} value={a.value}>{a.label}</option>)}
+          </select>
+        </>)}
+      </div>
+    )
+  }
+
   const flipFieldRole = async (c: DatasetColumn) => {
     if (!report?.dataset_id) return
     const next = isNumericField(c) ? 'category' : 'measure'
@@ -2397,45 +2520,24 @@ export default function ReportBuilder() {
                     style={{ width:'100%', fontSize:11, padding:'4px 7px', marginBottom:6,
                       background:'var(--surface2)', border:'1px solid var(--border)',
                       borderRadius:6, color:'var(--text)', boxSizing:'border-box' }} />
-                  {/* The staging bar: what is ticked, the chart it makes (the same
-                      rule table a drop uses, lib/autoChart), and the button that
-                      puts it on the page. Fields the rule cannot place are named. */}
-                  {gatheredFields.length > 0 && (() => {
-                    const choice = chartForFields(gatheredFields.map(toAutoField).filter(Boolean) as AutoField[])
-                    return (
-                      <div role="region" aria-label={tr('fields.staged')} data-testid="fields-staging"
-                        style={{ position: 'sticky', top: 0, zIndex: 2, display: 'flex', flexWrap: 'wrap', alignItems: 'center',
-                          gap: 6, marginBottom: 8, padding: '6px 8px', borderRadius: 8, fontSize: 11.5,
-                          background: 'color-mix(in srgb, var(--accent) 12%, var(--surface))', border: '1px solid var(--accent)' }}>
-                        <span style={{ fontWeight: 600 }}>{tr('fields.selectedCount', { n: gatheredFields.length })}</span>
-                        {choice && (
-                          <span style={{ color: 'var(--muted)', flexBasis: '100%' }}>
-                            {tr('fields.willDraw', { chart: chartLabel(choice.suggestion.widget_type), title: choice.suggestion.title })}
-                            {choice.ignored.length > 0 && ` · ${tr('fields.notUsed', { fields: choice.ignored.join(', ') })}`}
-                          </span>
-                        )}
-                        <button type="button" className="btn btn-primary btn-sm" disabled={!choice}
-                          onClick={() => void addWidgetFromFields(gatheredFields)}>
-                          <Plus size={11} aria-hidden /> {tr('fields.addChart')}
-                        </button>
-                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setGatheredFields([])}>
-                          {tr('fields.clear')}
-                        </button>
-                      </div>
-                    )
-                  })()}
-                  {(['Dimensions', 'Measures', 'Dates', 'Hierarchies', 'Geography'] as const).map(group => {
+                  {(['Dimensions', 'Dates', 'Geography', 'Hierarchies', 'Measures', 'Aggregated'] as const).map(group => {
                     const needle = fieldFilter.trim().toLowerCase()
+                    const folded = collapsedGroups.has(group)
                     const heading = (
-                      <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase',
-                        letterSpacing: '.06em', margin: '2px 0 4px' }}>{tr(`fields.${group}` as MessageKey)}</div>
+                      <button type="button" aria-expanded={!folded} onClick={() => toggleGroup(group)}
+                        style={{ display: 'flex', alignItems: 'center', gap: 4, width: '100%', background: 'none', border: 'none',
+                          padding: 0, margin: '2px 0 4px', cursor: 'pointer', fontSize: 10.5, fontWeight: 700,
+                          color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', textAlign: 'start' }}>
+                        <span aria-hidden style={{ display: 'inline-block', transform: folded ? 'rotate(-90deg)' : 'none', fontSize: 9 }}>▾</span>
+                        {tr(`fields.${group}` as MessageKey)}
+                      </button>
                     )
                     if (group === 'Hierarchies') {
                       if (hierarchy.filter(n => n.parent_id == null).length === 0) return null
                       return (
                         <div key={group} style={{ marginBottom: 8 }}>
                           {heading}
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                          {!folded && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                         {hierarchy.filter(n => n.parent_id == null).map(root => (
                           <button key={root.id}
                             onClick={() => assignHierarchyToWidget(root.id)}
@@ -2449,7 +2551,7 @@ export default function ReportBuilder() {
                             {root.name}
                           </button>
                         ))}
-                          </div>
+                          </div>}
                         </div>
                       )
                     }
@@ -2461,14 +2563,14 @@ export default function ReportBuilder() {
                       // searched by its label, not by the name in the file.
                       .filter(c => !needle
                         || (columnMeta[c.name]?.label || c.name).toLowerCase().includes(needle))
-                    // Defined measures (post-aggregation expressions) lead the
-                    // Measures group, marked ƒx: they compute at the widget's grain.
-                    const defined = group === 'Measures' && measures.length > 0
+                    // Defined measures (post-aggregation expressions) are SAS's
+                    // "Aggregated measures": they compute at the widget's grain.
+                    const defined = group === 'Aggregated' && measures.length > 0
                     if (cols.length === 0 && !defined) return null
                     return (
                       <div key={group} style={{ marginBottom: 8 }}>
                         {heading}
-                        {defined && (
+                        {!folded && defined && (
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 4 }}>
                         {measures.filter(m => !fieldFilter.trim()
                           || m.name.toLowerCase().includes(fieldFilter.trim().toLowerCase())).map(m => (
@@ -2484,9 +2586,10 @@ export default function ReportBuilder() {
                         ))}
                           </div>
                         )}
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                        {!folded && <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                           {cols.map(c => (
-                            <span key={c.name} data-field-row={c.name} style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+                            <div key={c.name}>
+                            <span data-field-row={c.name} style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
                             {/* Tick several and stage them as one chart (the bar above). */}
                             <input type="checkbox" aria-label={`Select ${columnMeta[c.name]?.label || c.name}`}
                               checked={gatheredFields.includes(c.name)} onChange={() => toggleGathered(c.name)}
@@ -2554,18 +2657,7 @@ export default function ReportBuilder() {
                                   aria-label={`Classify ${c.name}`}
                                   title={columnMeta[c.name]?.role === 'geography'
                                     ? `${c.name} is geography` : `Classify ${c.name}`}
-                                  onClick={() => {
-                                    setGeoField(f => f === c.name ? null : c.name)
-                                    if (boundarySets.length === 0) {
-                                      boundarySetsApi.list().then(sets => {
-                                        setBoundarySets(sets)
-                                        Promise.resolve().then(() => boundarySetsApi.packs?.())
-                                          .then(p => setBoundaryPacks((Array.isArray(p) ? p : [])
-                                            .filter(pk => !sets.some(s => s.name === pk.name))))
-                                          .catch(() => {})
-                                      }).catch(() => {})
-                                    }
-                                  }}
+                                  onClick={() => openGeoMenu(c.name)}
                                   style={{ background: 'none', border: 'none', cursor: 'pointer',
                                     color: columnMeta[c.name]?.role === 'geography'
                                       ? 'var(--accent)' : 'var(--muted)',
@@ -2686,9 +2778,19 @@ export default function ReportBuilder() {
                                 onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); setOutlierColumn(c.name) } }}
                                 style={{ color: '#e6a03c', fontSize: 11, cursor: 'pointer' }}>⚠</span>
                             )}
+                            {/* The field's properties, as SAS's data pane opens them. */}
+                            <button type="button" aria-expanded={fieldProps === c.name}
+                              aria-label={`Properties of ${columnMeta[c.name]?.label || c.name}`}
+                              title="Name, classification, format and aggregation"
+                              onClick={() => setFieldProps(p => p === c.name ? null : c.name)}
+                              style={{ marginInlineStart: 'auto', background: 'none', border: 'none', cursor: 'pointer',
+                                color: 'var(--muted)', fontSize: 12, padding: '0 2px', flex: 'none',
+                                transform: fieldProps === c.name ? 'rotate(180deg)' : 'none' }}>⌄</button>
                             </span>
+                            {fieldProps === c.name && fieldProperties(c)}
+                            </div>
                           ))}
-                        </div>
+                        </div>}
                       </div>
                     )
                   })}
@@ -2699,6 +2801,33 @@ export default function ReportBuilder() {
                       No fields match “{fieldFilter.trim()}”
                     </div>
                   )}
+                  {/* The selection bar, at the foot of the pane as SAS keeps it: the
+                      chart the ticked fields make (the same
+                      rule table a drop uses, lib/autoChart), and the button that
+                      puts it on the page. Fields the rule cannot place are named. */}
+                  {gatheredFields.length > 0 && (() => {
+                    const choice = chartForFields(gatheredFields.map(toAutoField).filter(Boolean) as AutoField[])
+                    return (
+                      <div role="region" aria-label={tr('fields.staged')} data-testid="fields-staging"
+                        style={{ position: 'sticky', bottom: 0, zIndex: 2, display: 'flex', flexWrap: 'wrap', alignItems: 'center',
+                          gap: 6, margin: '8px 0 0', padding: '6px 8px', borderRadius: 8, fontSize: 11.5,
+                          background: 'color-mix(in srgb, var(--accent) 12%, var(--surface))', border: '1px solid var(--accent)' }}>
+                                                {choice && (
+                          <span style={{ color: 'var(--muted)', flexBasis: '100%' }}>
+                            {tr('fields.willDraw', { chart: chartLabel(choice.suggestion.widget_type), title: choice.suggestion.title })}
+                            {choice.ignored.length > 0 && ` · ${tr('fields.notUsed', { fields: choice.ignored.join(', ') })}`}
+                          </span>
+                        )}
+                        <button type="button" className="btn btn-primary btn-sm" disabled={!choice}
+                          onClick={() => void addWidgetFromFields(gatheredFields)}>
+                          <Plus size={11} aria-hidden /> {tr('fields.addChart')}
+                        </button>
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setGatheredFields([])}>
+                          {tr('fields.clearSelection', { n: gatheredFields.length })}
+                        </button>
+                      </div>
+                    )
+                  })()}
                 </div>
               )}
 
@@ -2996,6 +3125,18 @@ export default function ReportBuilder() {
           <ReleaseControl report={report} canEdit={canEdit} revision={loadedRevision}
             onReleased={() => { loadReport().catch(() => {}) }} />
           <div style={{ marginInlineStart:'auto', display:'flex', alignItems:'center', gap:8 }}>
+            {/* The reports open in this tab, as SAS lists them: one button and a
+                menu, not a strip of tabs above the page. */}
+            {!kiosk && (
+              <OpenReportsMenu reports={openReports} currentId={reportId}
+                onOpen={id => navigate(`/reports/${id}`)}
+                onClose={id => {
+                  const next = closeOpen(id)
+                  setOpenReports(next)
+                  if (id === reportId) navigate(next.length ? `/reports/${next[next.length - 1].id}` : '/reports')
+                }}
+                onCloseAll={() => { setOpenReports(closeAll()); navigate('/reports') }} />
+            )}
             {/* How View mode looks: the original, or Claude Design's Modern
                 view. Only while reading; the builder has one look. */}
             {!editMode && !kiosk && (
@@ -3040,44 +3181,6 @@ export default function ReportBuilder() {
             )}
           </div>
         </div>
-
-        {!kiosk && openReports.length > 1 && (
-          // Navigation, not tabs: each entry opens another report (a new URL),
-          // and a tablist may hold only tabs -- the close buttons made it invalid.
-          <div role="navigation" aria-label={`Opened reports (${openReports.length})`} data-testid="open-reports"
-            style={{ display: 'flex', gap: 2, padding: '4px 12px 0', overflowX: 'auto', borderBottom: '1px solid var(--border)' }}>
-            {openReports.map(r => {
-              const current = r.id === reportId
-              return (
-                // The name is a BUTTON with the close button beside it, not inside
-                // it: a control nested in another is unreachable to a screen
-                // reader (axe: nested-interactive), and the old span could not be
-                // reached from the keyboard at all.
-                <span key={r.id} role="presentation"
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', fontSize: 11.5,
-                    borderRadius: '6px 6px 0 0', whiteSpace: 'nowrap',
-                    background: current ? 'var(--surface)' : 'transparent', border: '1px solid var(--border)',
-                    borderBottom: current ? '1px solid var(--surface)' : '1px solid var(--border)', marginBottom: -1,
-                    color: current ? 'var(--text)' : 'var(--muted)' }}>
-                  <button type="button" aria-current={current ? 'page' : undefined}
-                    onClick={() => { if (!current) navigate(`/reports/${r.id}`) }}
-                    style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', color: 'inherit',
-                      cursor: current ? 'default' : 'pointer' }}>
-                    {r.name}
-                  </button>
-                  <button type="button" aria-label={`Close ${r.name}`} title="Close this tab (the report is not deleted)"
-                    onClick={e => {
-                      e.stopPropagation()
-                      const next = closeOpen(r.id)
-                      setOpenReports(next)
-                      if (current) navigate(next.length ? `/reports/${next[next.length - 1].id}` : '/reports')
-                    }}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 0, fontSize: 12, lineHeight: 1 }}>×</button>
-                </span>
-              )
-            })}
-          </div>
-        )}
 
         {/* Report / Data / Model view strip — authors only. A viewer has one
             surface (the dashboard); these tabs are the studio. */}
