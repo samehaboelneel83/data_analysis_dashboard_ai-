@@ -308,6 +308,9 @@ export function roleAccepts(role: string): RoleColumnKind {
  */
 export const BOUNDARY_SET_WIDGETS = new Set<string>([
   'map_choropleth',
+  // Point and bubble maps draw the chosen set's OUTLINES under their markers
+  // (Egypt's governorates under the sites), rather than colouring regions.
+  'map_points', 'map_bubbles',
 ])
 
 /** Maps that accept author-placed pins.

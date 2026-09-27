@@ -2075,15 +2075,50 @@ def shape_geo_points(df: pd.DataFrame, config: dict) -> dict:
     lon_v = pd.to_numeric(df[lon], errors="coerce")
     valid = lat_v.between(-90, 90) & lon_v.between(-180, 180)
     dropped = int((~valid).sum())
-    sub = df[valid].head(limit)
+
+    # One marker per LOCATION, not per row. Raw rows capped at `limit` drew
+    # whichever 1,000 came first: on a 2,464-row call log that was 41 of its 88
+    # sites, and nothing said so (live QA 2026-09-28). Grouped, every site is a
+    # marker carrying how many rows stand at it (and the measure, aggregated),
+    # and a cap -- now on locations, keeping the largest -- is disclosed.
+    sub = pd.DataFrame({"__lat": lat_v[valid].astype(float), "__lon": lon_v[valid].astype(float)})
+    has_name = bool(name_col and name_col in df.columns)
+    has_meas = bool(meas and meas in df.columns)
+    if has_name:
+        sub["__name"] = df.loc[valid, name_col]
+    if has_meas:
+        sub["__v"] = pd.to_numeric(df.loc[valid, meas], errors="coerce")
+    groups = sub.groupby(["__lat", "__lon"], sort=False)
+    loc = groups.size().rename("count").to_frame()
+    if has_meas:
+        agg = str(config.get("aggregation") or "sum").lower()
+        how = {"avg": "mean", "mean": "mean", "min": "min", "max": "max", "median": "median",
+               "count": "count", "distinct": "nunique", "count_distinct": "nunique"}.get(agg, "sum")
+        loc["value"] = groups["__v"].agg(how)
+    if has_name:
+        # The place's name: what most of its rows say (a site's rows can carry
+        # several SERVICE values; the marker is the site, not one service).
+        loc["name"] = groups["__name"].agg(lambda s: s.mode().iloc[0] if s.notna().any() else None)
+    of = len(loc)
+    applied = of > limit
+    if applied:
+        ranked = loc["value"] if has_meas else loc["count"]
+        keep = ranked.sort_values(ascending=False, kind="stable").head(limit).index
+        loc = loc.loc[loc.index.isin(keep)]
 
     rows = []
-    for _, row in sub.iterrows():
-        r: dict = {"lat": float(row[lat]), "lon": float(row[lon])}
-        if name_col and name_col in df.columns: r["name"] = _safe(row[name_col])
-        if meas and meas in df.columns: r["value"] = _safe(row[meas])
+    for (la, lo), rec in loc.iterrows():
+        r: dict = {"lat": float(la), "lon": float(lo)}
+        if has_name: r["name"] = _safe(rec["name"])
+        r["value"] = _safe(rec["value"]) if has_meas else int(rec["count"])
+        r["count"] = int(rec["count"])
         rows.append(r)
-    return {"type": "geo_points", "rows": rows, "dropped": dropped, "total": len(df)}
+    out = {"type": "geo_points", "rows": rows, "dropped": dropped, "total": len(df),
+           "locations": of, "rows_mapped": int(valid.sum())}
+    if applied:
+        out["truncation"] = {"applied": True, "shown": len(rows), "of": of, "limit": limit,
+                             "reason": "limit", "unit": "locations"}
+    return out
 
 
 def shape_geo_lines(df: pd.DataFrame, config: dict) -> dict:
@@ -2129,16 +2164,23 @@ def shape_geo_clusters(df: pd.DataFrame, config: dict) -> dict:
         return {"type": "empty", "rows": [], "total": 0}
     df = _apply_filters(df, config.get("filters", []))
     meas = roles.get("measure")
-    try:
-        cell = float(config.get("cluster_cell_degrees") or 5.0)
-    except (TypeError, ValueError):
-        cell = 5.0
-    cell = min(max(cell, 0.1), 45.0)
-
     lat_v = pd.to_numeric(df[lat], errors="coerce")
     lon_v = pd.to_numeric(df[lon], errors="coerce")
     valid = lat_v.between(-90, 90) & lon_v.between(-180, 180)
     dropped = int((~valid).sum())
+
+    try:
+        cell = float(config.get("cluster_cell_degrees") or 0) or None
+    except (TypeError, ValueError):
+        cell = None
+    if cell is None:
+        # Unset: about a dozen cells across the data's own extent. A fixed 5°
+        # grid put every site between Cairo and Alexandria in ONE cluster
+        # (live QA 2026-09-28); world-wide data still gets continent-sized cells.
+        extent = max(float(lat_v[valid].max() - lat_v[valid].min()),
+                     float(lon_v[valid].max() - lon_v[valid].min())) if valid.any() else 0.0
+        cell = extent / 12 if extent > 0 else 5.0
+    cell = min(max(cell, 0.005), 45.0)
     sub = pd.DataFrame({"lat": lat_v[valid], "lon": lon_v[valid]})
     if meas and meas in df.columns:
         sub["value"] = pd.to_numeric(df[meas][valid], errors="coerce")

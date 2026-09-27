@@ -26,10 +26,10 @@ export function nextShowLimit(t: Pick<Truncation, 'shown' | 'of'>): number | nul
   return Math.min(t.of, step)
 }
 
-export interface Truncation { applied: boolean; shown: number; of: number; limit?: number; reason?: string; unit?: 'rows' | 'groups' | 'categories' | 'points' }
+export interface Truncation { applied: boolean; shown: number; of: number; limit?: number; reason?: string; unit?: 'rows' | 'groups' | 'categories' | 'points' | 'locations' }
 
 export function truncationSentence(t: Truncation, dimension?: string): string {
-  const what = t.unit === 'rows' ? 'rows' : t.unit === 'points' ? 'points'
+  const what = t.unit === 'rows' ? 'rows' : t.unit === 'points' ? 'points' : t.unit === 'locations' ? 'locations'
     : dimension ? `${dimension} values` : t.unit === 'categories' ? 'categories' : 'groups'
   return `Showing ${t.shown.toLocaleString()} of ${t.of.toLocaleString()} ${what}`
 }

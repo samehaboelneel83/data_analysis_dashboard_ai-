@@ -1,11 +1,14 @@
 import { useMemo, useRef, useState } from 'react'
 import type { ChartRendererProps } from './types'
 import { fmtStr, TT, seriesColor } from '../chartUtils'
-import { COUNTRIES, matchCountry, countryCentroid, fittedProjection } from '../geo/worldGeometry'
+import { COUNTRIES, COUNTRY_SET, matchCountry, countryCentroid, fittedProjection } from '../geo/worldGeometry'
 import { MapSvg, MAP_WRAP_STYLE, useMapBox } from '../geo/MapFrame'
 import { MapDataTable, mapSummary } from '../geo/MapDataTable'
+import { useRegionSet } from '../geo/regionSetCache'
 
 interface Marker { name: string; value: number; x: number; y: number
+                   /** [lon, lat] of the place, for an area selection. */
+                   coord?: [number, number]
                    /** Index in the ORIGINAL rows, so a display rule that
                     *  colours the third bar colours the third marker.
                     *  Markers skip unmatched rows, so marker position and
@@ -46,6 +49,10 @@ export function markersWithin(markers: { name: string; x: number; y: number }[],
 function GeoPointMapRenderer({ rows, cfg, measureFmt, ruleStyles, variant, broadcasts,
                               localSelected, onClickPoint, plotW, plotH }: ChartRendererProps & { variant: 'points' | 'bubbles' }) {
   const { ref, w, h, tiles } = useMapBox(plotW, plotH)
+  // The author's boundary set (Egypt's governorates), drawn as outlines over
+  // the country base so a reader can tell which governorate a site sits in.
+  const outlineSetId = (cfg as { boundary_set_id?: number | null })?.boundary_set_id ?? null
+  const { set: outlineSet } = useRegionSet(outlineSetId)
   const [hover, setHover] = useState<Marker | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   //: The circle being drawn, in viewBox units. Null when no drag is in flight.
@@ -54,6 +61,8 @@ function GeoPointMapRenderer({ rows, cfg, measureFmt, ruleStyles, variant, broad
   // Resolved BEFORE the projection, because the projection is now fitted to
   // these coordinates: a map of one governorate should show that governorate,
   // not the globe with a dot on it.
+  const coordinateMode = useMemo(() => (rows as Record<string, unknown>[]).some(
+    r => typeof r.lat === 'number' && typeof r.lon === 'number'), [rows])
   const { placed, unmatched } = useMemo(() => {
     const placed: { name: string; value: number; coord: [number, number]; row: number }[] = []
     let unmatched = 0
@@ -116,7 +125,7 @@ function GeoPointMapRenderer({ rows, cfg, measureFmt, ruleStyles, variant, broad
     const markers: Marker[] = []
     for (const p of placed) {
       const pt = projection(p.coord)
-      if (pt) markers.push({ name: p.name, value: p.value, x: pt[0], y: pt[1], row: p.row })
+      if (pt) markers.push({ name: p.name, value: p.value, x: pt[0], y: pt[1], row: p.row, coord: p.coord })
     }
     return { markers, maxValue: Math.max(1, ...markers.map(m => m.value)) }
   }, [placed, projection])
@@ -163,16 +172,30 @@ function GeoPointMapRenderer({ rows, cfg, measureFmt, ruleStyles, variant, broad
         } : undefined}
         onMouseUp={circle ? () => {
           const names = markersWithin(markers, circle)
+          const inside = markers.filter(m => (m.x - circle.cx) ** 2 + (m.y - circle.cy) ** 2 <= circle.r ** 2)
           setCircle(null)
           // An empty circle emits nothing. Filtering to an empty set would
           // answer every widget on the page with "no rows", which is a worse
           // outcome than the user's aim being slightly off.
-          if (names.length) onClickPoint(names)
+          if (!inside.length) return
+          // Coordinate markers select a PLACE: the extent of the sites inside
+          // the circle, as latitude/longitude ranges. Emitting their names
+          // instead filtered the page to every row of those services anywhere
+          // (live QA 2026-09-28). Country-centroid markers keep their names.
+          const coords = inside.map(m => m.coord).filter((c): c is [number, number] => !!c)
+          if (coordinateMode && coords.length === inside.length) {
+            const lats = coords.map(c => c[1]), lons = coords.map(c => c[0])
+            onClickPoint({ area: { lat: [Math.min(...lats), Math.max(...lats)], lon: [Math.min(...lons), Math.max(...lons)] } })
+          } else if (names.length) onClickPoint(names)
         } : undefined}
         onMouseLeave={circle ? () => setCircle(null) : undefined}>
         {COUNTRIES.map(f => (
           <path key={f.properties.name} d={path(f) ?? undefined}
             fill="var(--surface2)" stroke="var(--border)" strokeWidth={0.5} />
+        ))}
+        {outlineSetId != null && outlineSet !== COUNTRY_SET && outlineSet.features.map((f, i) => (
+          <path key={`outline-${i}`} data-boundary-outline d={path(f as never) ?? undefined}
+            fill="none" stroke="var(--muted)" strokeWidth={0.6} strokeOpacity={0.8} pointerEvents="none" />
         ))}
         {/* Display rules reach the markers: colour everywhere else in the app,
             and an ICON here, which is the one thing a map does that a bar chart

@@ -224,6 +224,22 @@ describe('a choropleth drawn on uploaded boundaries', () => {
     } as never)
   })
 
+  it('a point map draws the chosen boundaries under its sites', async () => {
+    const { container } = render(<GeoPointsRenderer {...base} cfg={{ boundary_set_id: 7 }}
+      rows={[{ name: 'Site 1', lat: 30.04, lon: 31.4, value: 853, count: 853 }]} />)
+    await waitFor(() => expect(container.querySelectorAll('[data-boundary-outline]')).toHaveLength(3))
+    expect(boundarySetsApi.get).toHaveBeenCalledWith(7)
+    // Outlines never take a click or a hover from the markers above them.
+    expect(container.querySelector('[data-boundary-outline]')!.getAttribute('pointer-events')).toBe('none')
+  })
+
+  it('a point map without a boundary set draws no outlines and fetches nothing', () => {
+    const { container } = render(<GeoPointsRenderer {...base}
+      rows={[{ name: 'Site 1', lat: 30.04, lon: 31.4, value: 1 }]} />)
+    expect(container.querySelectorAll('[data-boundary-outline]')).toHaveLength(0)
+    expect(boundarySetsApi.get).not.toHaveBeenCalled()
+  })
+
   const GOV_ROWS = [
     { name: 'Cairo', value: 900 },
     { name: 'Giza', value: 400 },
@@ -522,9 +538,25 @@ describe('selecting an area of a map', () => {
     fireEvent.mouseMove(svg, { clientX: 960, clientY: 540, shiftKey: true })
     fireEvent.mouseUp(svg, { clientX: 960, clientY: 540, shiftKey: true })
 
+    // Coordinate markers select a PLACE, as latitude/longitude ranges spanning
+    // what was circled. Their names filtered every row of those names anywhere
+    // (live QA 2026-09-28: a circle round Cairo became "SERVICE in [...]").
     expect(onClickPoint).toHaveBeenCalledTimes(1)
-    const [payload] = onClickPoint.mock.calls[0]
-    expect(new Set(payload as string[])).toEqual(new Set(['Paris', 'Berlin']))
+    expect(onClickPoint.mock.calls[0][0]).toEqual({ area: { lat: [48.85, 52.52], lon: [2.35, 13.4] } })
+  })
+
+  it('a map of country centroids still selects by name', () => {
+    const onClickPoint = vi.fn()
+    const { container } = render(<GeoPointsRenderer {...base}
+      rows={[{ name: 'France', value: 1 }, { name: 'Germany', value: 2 }]}
+      broadcasts onClickPoint={onClickPoint} />)
+    const svg = container.querySelector('svg')!
+    svg.getBoundingClientRect = () => ({ left: 0, top: 0, width: 960, height: 540,
+      right: 960, bottom: 540, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect
+    fireEvent.mouseDown(svg, { clientX: 480, clientY: 270, shiftKey: true })
+    fireEvent.mouseMove(svg, { clientX: 960, clientY: 540, shiftKey: true })
+    fireEvent.mouseUp(svg, { clientX: 960, clientY: 540, shiftKey: true })
+    expect(new Set(onClickPoint.mock.calls[0][0] as string[])).toEqual(new Set(['France', 'Germany']))
   })
 
   it('an ordinary drag without shift does not select an area', () => {

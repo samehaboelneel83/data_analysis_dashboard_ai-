@@ -59,5 +59,6 @@ def test_clusters_merge_nearby_points_and_keep_far_ones_apart():
 
 def test_cluster_measure_sums_within_cells():
     pts = pd.DataFrame({"la": [40.0, 40.1], "lo": [-74.0, -74.1], "v": [3.0, 4.0]})
-    r = shape_geo_clusters(pts, {"roles": {"lat": "la", "lon": "lo", "measure": "v"}})
+    r = shape_geo_clusters(pts, {"roles": {"lat": "la", "lon": "lo", "measure": "v"},
+                                 "cluster_cell_degrees": 5})
     assert r["rows"][0]["value"] == pytest.approx(7.0)

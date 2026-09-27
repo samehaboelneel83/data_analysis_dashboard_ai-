@@ -2293,6 +2293,55 @@ describe('a multi-value map selection toggles like any other', () => {
   }, 30000)
 })
 
+describe('circling sites on a point map filters the page to that place', () => {
+  /**
+   * Live QA 2026-09-28: a circle round Cairo's sites became
+   * "SERVICE in [Mobile Telephony, GPRS Basic Service]" -- every row of those
+   * services anywhere in the country. The selection is a place now: one range
+   * per coordinate axis, which every receiving widget queries as >= and <=.
+   */
+  withMeasuredTiles()
+  it('emits a latitude and a longitude range, and a bar re-queries with them', async () => {
+    vi.mocked(widgetDataApi.query).mockImplementation(async (_ds: number, cfg: any) => (
+      cfg.lat
+        ? { type: 'geo_points', rows: [{ lat: 30.04, lon: 31.4, value: 853, count: 853 },
+                                     { lat: 30.2, lon: 31.1, value: 20, count: 20 }], sampled: false }
+        : { type: 'series', rows: [{ name: 'voice', value: 1 }], sampled: false }) as never)
+    const { container } = render(
+      <CrossFilterProvider>
+        <WidgetRenderer widget={barWidget({ id: 41, widget_type: 'map_points', title: 'Sites',
+          config: { lat: 'LATITUDE', lon: 'LONGITUDE' } })} datasetId={10} />
+        <WidgetRenderer widget={barWidget({ id: 42, config: { dimension: 'SERVICE' } })} datasetId={10} />
+        <FilterReader />
+      </CrossFilterProvider>
+    )
+    const svg = await waitFor(() => {
+      const m = container.querySelector('[data-marker]')
+      expect(m).not.toBeNull()
+      return m!.closest('svg') as SVGSVGElement
+    }, { timeout: 20000 })
+    const [, , vbw, vbh] = (svg.getAttribute('viewBox') ?? '0 0 960 540').split(/\s+/).map(Number)
+    const vb = { width: vbw, height: vbh }
+    svg.getBoundingClientRect = () => ({ left: 0, top: 0, width: vb.width, height: vb.height,
+      right: vb.width, bottom: vb.height, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect
+    fireEvent.mouseDown(svg, { clientX: vb.width / 2, clientY: vb.height / 2, shiftKey: true })
+    fireEvent.mouseMove(svg, { clientX: vb.width, clientY: vb.height, shiftKey: true })
+    fireEvent.mouseUp(svg, { clientX: vb.width, clientY: vb.height, shiftKey: true })
+
+    await waitFor(() => expect(JSON.parse(screen.getByTestId('filters').textContent!)).toEqual([
+      { column: 'LATITUDE', value: { between: [30.04, 30.2] } },
+      { column: 'LONGITUDE', value: { between: [31.1, 31.4] } },
+    ]))
+    await waitFor(() => {
+      const bar = vi.mocked(widgetDataApi.query).mock.calls.filter(c => (c[1] as any).dimension === 'SERVICE').at(-1)!
+      expect((bar[1] as any).filters).toEqual(expect.arrayContaining([
+        { column: 'LATITUDE', op: 'gte', value: 30.04 }, { column: 'LATITUDE', op: 'lte', value: 30.2 },
+        { column: 'LONGITUDE', op: 'gte', value: 31.1 }, { column: 'LONGITUDE', op: 'lte', value: 31.4 },
+      ]))
+    })
+  }, 30000)
+})
+
 describe('an object that lets the page show through', () => {
   /**
    * The SAS page this was measured against is a photograph with a bar chart,

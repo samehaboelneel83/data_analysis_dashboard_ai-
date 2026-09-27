@@ -231,7 +231,15 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
       }
       return column
     }
-    const crossFilters = incomingFilters.map(f => ({ column: translate(f.column), op: Array.isArray(f.value) ? 'in' : 'eq', value: f.value }))
+    const crossFilters = incomingFilters.flatMap(f => {
+      const between = (f.value as { between?: [number, number] } | null)?.between
+      // A map area arrives as a range on each coordinate axis.
+      if (Array.isArray(between) && between.length === 2) {
+        return [{ column: translate(f.column), op: 'gte', value: between[0] },
+                { column: translate(f.column), op: 'lte', value: between[1] }]
+      }
+      return [{ column: translate(f.column), op: Array.isArray(f.value) ? 'in' : 'eq', value: f.value }]
+    })
     const pagePrompt   = (promptFilter?.column && promptFilter?.value)
       ? [{ column: promptFilter.column, op: 'eq', value: promptFilter.value }]
       : []
@@ -509,6 +517,21 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
       const p = name as { path: { field: string; value: string }[]; split_by: string | null }
       setDecompPath(p.path ?? [])
       setDecompSplit(p.split_by ?? null)
+      return
+    }
+    // A map area: the extent of the sites a reader circled, as latitude and
+    // longitude ranges. One filter per axis, each a `{ between }` value the
+    // receiving widgets turn into >= and <= (see mergedPair). Two emits, so
+    // each axis has its own chip and clears on its own.
+    if (name && typeof name === 'object' && (name as any).area) {
+      if (!canBroadcast(widget.id)) return
+      const { lat, lon } = (name as { area: { lat: [number, number]; lon: [number, number] } }).area
+      const c = widget.config as any
+      const latCol = c.lat ?? c.roles?.lat, lonCol = c.lon ?? c.roles?.lon
+      if (!latCol || !lonCol) return
+      const fmt = (v: number) => String(Math.round(v * 10000) / 10000)
+      emitFilter(widget.id, widget.page_id, latCol, { between: lat }, `${latCol} ${fmt(lat[0])} – ${fmt(lat[1])}`)
+      emitFilter(widget.id, widget.page_id, lonCol, { between: lon }, `${lonCol} ${fmt(lon[0])} – ${fmt(lon[1])}`)
       return
     }
     if (!canBroadcast(widget.id)) return

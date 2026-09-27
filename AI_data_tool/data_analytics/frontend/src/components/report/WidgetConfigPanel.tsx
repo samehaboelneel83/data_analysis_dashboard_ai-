@@ -1752,7 +1752,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
             <BoundarySetPicker value={boundarySetId} onChange={setBoundarySetId}
               inheritedName={inheritedBoundaryName} />
           )}
-          {BOUNDARY_SET_WIDGETS.has(wt) && roleValues.category && (
+          {wt === 'map_choropleth' && roleValues.category && (
             <Suspense fallback={(Number(datasetId) || primaryDatasetId)
               ? <GeoMatchStatus>{`Checking ${roleValues.category} against the map…`}</GeoMatchStatus> : null}>
               <GeoMatchLine datasetId={Number(datasetId) || primaryDatasetId || null} column={roleValues.category}
