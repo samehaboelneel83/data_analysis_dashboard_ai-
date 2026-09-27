@@ -458,6 +458,52 @@ def _bucket_dimension(series: pd.Series, granularity: str) -> pd.Series:
     return series if labels.isna().all() else labels
 
 
+#: The bucket labels `_dimension_granularity_label` draws, by grain: what a
+#: click on a date axis sends back as the filter value.
+_BUCKET_LABEL_GRAINS = (
+    (re.compile(r"\d{4}"), "year"),
+    (re.compile(r"\d{4}-Q[1-4]"), "quarter"),
+    (re.compile(r"\d{4}-W\d{2}"), "week"),
+    (re.compile(r"\d{4}-\d{2}"), "month"),
+    (re.compile(r"\d{4}-\d{2}-\d{2}"), "day"),
+)
+
+
+def _bucket_grain(value) -> str | None:
+    if isinstance(value, bool):
+        return None
+    text = str(value).strip()
+    return next((g for pattern, g in _BUCKET_LABEL_GRAINS if pattern.fullmatch(text)), None)
+
+
+def infer_date_filter_grains(filters: list | None, date_columns: set[str]) -> list | None:
+    """Give a grain-less `eq`/`in` filter on a date column the grain its value
+    is labelled in ("2026-08-20" -> day, "2026-Q2" -> quarter, 2026 -> year).
+
+    A click on a date axis, a drill step and a restored bookmark all send the
+    label the chart drew, without saying which grain drew it. Compared with the
+    stored timestamps as it stands, "2026-08-20" matched no row, and every
+    other visual on the dashboard went blank (live QA 2026-09-28). Every engine
+    already treats a filter WITH a grain as a bucket comparison, so naming the
+    grain once, here, fixes pandas, DuckDB and DirectQuery alike. A filter that
+    already names a grain, and a value that is not a bucket label (a full
+    timestamp), is left exactly as it is."""
+    if not filters or not date_columns:
+        return filters
+    out = []
+    for f in filters:
+        if (isinstance(f, dict) and not f.get("granularity") and f.get("column") in date_columns
+                and f.get("op") in ("eq", "in")):
+            values = f.get("value") if f.get("op") == "in" else [f.get("value")]
+            if isinstance(values, (list, tuple)) and values:
+                grains = {_bucket_grain(v) for v in values}
+                if len(grains) == 1 and None not in grains:
+                    f = {**f, "granularity": grains.pop(),
+                         "value": [str(v) for v in values] if f.get("op") == "in" else str(f.get("value"))}
+        out.append(f)
+    return out
+
+
 def _apply_filters(df: pd.DataFrame, filters: list[dict]) -> pd.DataFrame:
     # Relative date filters ("last 30 days") resolve against the frame as it
     # arrives -- before any other filter narrows it -- so a data_max anchor is
@@ -486,6 +532,9 @@ def _apply_filters(df: pd.DataFrame, filters: list[dict]) -> pd.DataFrame:
             elif op == "lt":   df = df[df[col] < val]
             elif op == "gte":  df = df[df[col] >= val]
             elif op == "lte":  df = df[df[col] <= val]
+            elif op == "in" and f.get("granularity"):
+                wanted = {str(v) for v in (val if isinstance(val, list) else [val])}
+                df = df[_dimension_granularity_label(df[col], f["granularity"]).astype(str).isin(wanted)]
             elif op == "in":   df = df[df[col].isin(val if isinstance(val, list) else [val])]
             elif op == "like": df = df[df[col].astype(str).str.contains(str(val), case=False, na=False)]
         except Exception:

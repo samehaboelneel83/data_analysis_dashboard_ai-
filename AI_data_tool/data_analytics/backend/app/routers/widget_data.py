@@ -37,7 +37,7 @@ from ..core.widget_errors import CodedHTTPException, widget_error
 from ..services.direct_query import DirectQueryUnsupported, SourceUnavailable, run_direct_query
 from ..services.prep import prep_steps_of, resolve_join_frames
 from ..services.widget_data import (ImportRowCapExceeded, sums_measure_by_default,
-                                    get_widget_data)
+                                    get_widget_data, infer_date_filter_grains)
 
 router = APIRouter(prefix="/datasets", tags=["widget-data"])
 
@@ -313,6 +313,18 @@ async def _apply_fiscal_start(req: WidgetDataRequest, db: AsyncSession, org_id: 
         config, org.fiscal_year_start_month if org else 1)})
 
 
+def _infer_date_filter_grains(req: WidgetDataRequest, ds) -> WidgetDataRequest:
+    """A clicked date bucket names its grain before any engine sees the filter
+    (see services.widget_data.infer_date_filter_grains)."""
+    config = req.config or {}
+    dates = {c.name for c in (ds.columns or []) if c.dtype == "datetime"}
+    filters = config.get("filters")
+    inferred = infer_date_filter_grains(filters, dates)
+    if inferred is filters or inferred == filters:
+        return req
+    return req.model_copy(update={"config": {**config, "filters": inferred}})
+
+
 async def _resolve_widget_data(
     dataset_id: int, req: WidgetDataRequest, db: AsyncSession, current_user: User,
     *, email_override: str | None = None, org_id_override: int | None = None,
@@ -397,6 +409,7 @@ async def _resolve_widget_data(
 
     req = await _apply_report_parameters(req, db, current_user)
     req = await _apply_fiscal_start(req, db, current_user.org_id)
+    req = _infer_date_filter_grains(req, ds)
 
     calc_cols = list(req.calculated_columns or []) + list(ds.calculated_columns or [])
     measure_defs = list(ds.measures or [])
