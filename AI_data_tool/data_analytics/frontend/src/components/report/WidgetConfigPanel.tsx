@@ -26,6 +26,7 @@ import { semanticAggregationWarning, nonAdditiveKind, SAFE_AGGREGATION } from '.
 import { savePending, clearPending } from '../../lib/pendingEdits'
 import type { DatasetColumn, Dataset } from '../../services/api'
 import InteractionSettings from './InteractionSettings'
+import DataRolesList, { AssignDataDialog, type FieldKind } from './DataRolesList'
 import HierarchyTree from './HierarchyTree'
 import DisplayRulesPanel from './DisplayRulesPanel'
 import ExpandableGroup from './ExpandableGroup'
@@ -87,13 +88,22 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
   // one tab that can finish it -- SAS opens Assign data straight into the roles
   // pane. Only on that request: selecting an existing widget keeps the tab the
   // author was on, and hides nothing.
+  // The Assign data dialog, and the role it was opened on ("+ Add" beside a
+  // role scrolls to that role). The request also opens the dialog unless it
+  // says `open: false` -- the pane's object picker only switches objects.
+  const [assignOpen, setAssignOpen] = useState(false)
+  const [assignRole, setAssignRole] = useState<string | null>(null)
   useEffect(() => {
     const onAssign = (e: Event) => {
-      if ((e as CustomEvent<{ widgetId: number }>).detail?.widgetId === widget.id) setSettingsTab('Data roles')
+      const detail = (e as CustomEvent<{ widgetId: number; open?: boolean }>).detail
+      if (detail?.widgetId !== widget.id) return
+      setSettingsTab('Data roles')
+      if (detail.open !== false) { setAssignRole(null); setAssignOpen(true) }
     }
     window.addEventListener(ASSIGN_DATA_EVENT, onAssign)
     return () => window.removeEventListener(ASSIGN_DATA_EVENT, onAssign)
   }, [widget.id])
+  useEffect(() => { setAssignOpen(false) }, [widget.id])
 
   // Which shapes a map draws. Empty = the built-in countries, which is what
   // every map did before boundary sets existed.
@@ -826,6 +836,19 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
     ;(acc[a.group] ??= []).push(a)
     return acc
   }, {})
+  /** The aggregations this widget type may use, grouped; `current` stays
+   *  listed even when it would not be offered, so it is never silently
+   *  replaced. A partition chart (sunburst, icicle) offers only additive ones:
+   *  a wedge is a share of its parent. */
+  const aggOptionGroups = (current: string, partitionRule: boolean) =>
+    Object.entries(aggGroups).map(([group, items]) => (
+      <optgroup key={group} label={`── ${group} ──`}>
+        {items
+          .filter(a => !partitionRule || !PARTITION_WIDGETS.includes(wt) || ADDITIVE_AGGREGATIONS.includes(a.value))
+          .filter(a => aggregationOffered(wt, a.value) || a.value === current)
+          .map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
+      </optgroup>
+    ))
 
   // The label is a SIBLING of the control, so it needs htmlFor to be associated with
   // it -- without that the control has no accessible name at all, and a screen reader
@@ -1059,6 +1082,212 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
     const n = bodyRef.current?.querySelectorAll('[data-group-id]').length ?? 0
     setTabEmpty(n === 0)
   })
+
+  // ── Data roles, laid out as SAS VA does ─────────────────────────────────
+  // The pickers themselves (roleControls) live in the Assign data dialog; the
+  // pane lists what each role holds, opens a field's own settings, and sends
+  // "+ Add" to the dialog on that role. One set of assignment rules, not two.
+  const roleSpecs = ROLE_SPECS[wt] ?? []
+  const assignedFields: Record<string, string[]> = Object.fromEntries(roleSpecs.map(rf => [rf.role,
+    rf.multi ? (multiRoleValues[rf.role] ?? []) : (roleValues[rf.role] ? [roleValues[rf.role]] : [])]))
+  const fieldKind = (f: string): FieldKind => {
+    const dtype = effectiveCols.find(c => c.name === f)?.dtype
+    return dtype === 'datetime' ? 'date' : dtype === 'numeric' ? 'measure' : 'category'
+  }
+  const pageWidgets = (pages?.find(pg => pg.id === widget.page_id)?.widgets ?? [])
+    .filter(w => (ROLE_SPECS[w.widget_type] ?? []).length > 0)
+  const objectLabel = (w: { title?: string | null; widget_type: string; id: number }) =>
+    w.title || `${w.widget_type.charAt(0).toUpperCase()}${w.widget_type.slice(1).replace(/_/g, ' ')} ${w.id}`
+  const openAssign = (role: string | null) => { setAssignRole(role); setAssignOpen(true) }
+  const removeField = (role: string, f: string) => {
+    if (roleSpecs.find(rf => rf.role === role)?.multi) { toggleMultiRole(role, f); return }
+    setRole(role, '')
+    if (role === 'category') { setHierarchyNodeId(''); setDimensionGranularity('') }
+  }
+  const detailLabel = { display:'block', fontSize: 12, color:'var(--muted)', marginBottom:3 } as const
+  const nameField = (id: string, value: string, set: (v: string) => void, placeholder: string) => (
+    <div style={{ marginBottom: 8 }}>
+      <label htmlFor={id} style={detailLabel}>Name:</label>
+      <input id={id} value={value} placeholder={placeholder} onChange={e => set(e.target.value)} style={{ width:'100%' }} />
+    </div>
+  )
+  // What a field opens with. Name is the title the chart shows for it (its
+  // axis), so it exists only where this type draws axes; Aggregation is the
+  // widget's own aggregation of that measure.
+  const fieldDetails = (role: string, f: string) => {
+    const axes = formatCaps.includes('axes')
+    if (role === 'measure' && !isModel) return (<>
+      {axes && nameField('data-role-name-measure', yAxisLabel, setYAxisLabel, f)}
+      <label htmlFor="data-role-aggregation" style={detailLabel}>Aggregation:</label>
+      <select id="data-role-aggregation" value={agg} onChange={e => setAgg(e.target.value)} style={{ width:'100%' }}>
+        {aggOptionGroups(agg, true)}
+      </select>
+    </>)
+    if (role === 'measure2' && DUAL_MEASURE_WIDGETS.includes(wt)) return (<>
+      {axes && nameField('data-role-name-measure2', y2AxisLabel, setY2AxisLabel, f)}
+      <label htmlFor="data-role-aggregation2" style={detailLabel}>Aggregation:</label>
+      <select id="data-role-aggregation2" value={agg2} onChange={e => setAgg2(e.target.value)} style={{ width:'100%' }}>
+        <option value="">Same as first measure</option>
+        {aggOptionGroups(agg2, false)}
+      </select>
+    </>)
+    if (role === 'category') {
+      const isDate = !hierarchyNodeId && fieldKind(f) === 'date'
+      if (!axes && !isDate) return null
+      return (<>
+        {axes && nameField('data-role-name-category', xAxisLabel, setXAxisLabel, f)}
+        {/* The dialog carries the same control while it is open. */}
+        {isDate && !assignOpen && dateGrouping()}
+      </>)
+    }
+    return null
+  }
+  const dataRolesPane = (
+    <div data-testid="data-roles-pane" style={{ marginBottom: 8 }}>
+      {pageWidgets.length > 1 && (
+        <select aria-label="Object" value={widget.id} style={{ width:'100%', marginBottom:10 }}
+          onChange={e => window.dispatchEvent(new CustomEvent(ASSIGN_DATA_EVENT,
+            { detail: { widgetId: Number(e.target.value), open: false } }))}>
+          {pageWidgets.map(w => <option key={w.id} value={w.id}>{objectLabel(w)}</option>)}
+        </select>
+      )}
+      <button type="button" onClick={() => openAssign(null)}
+        style={{ display:'flex', alignItems:'center', gap:6, background:'none', border:'none', padding:'4px 0',
+          margin:'0 0 8px', cursor:'pointer', font:'inherit', fontSize:13, color:'var(--text)' }}>
+        <span aria-hidden style={{ fontSize:17, lineHeight:1 }}>+</span> Assign data
+      </button>
+      <DataRolesList specs={roleSpecs} values={assignedFields} kindOf={fieldKind}
+        displayName={(role, f) => role === 'category' && hierarchyNodeId ? `${f} (hierarchy)` : f}
+        onAdd={role => openAssign(role)} onRemove={removeField} renderDetails={fieldDetails} />
+    </div>
+  )
+  const roleControls = (<>
+          {/* Role fields — driven by ROLE_SPECS so each widget type declares its own fields
+              instead of this component hardcoding a conditional per type. */}
+          {(ROLE_SPECS[wt] ?? []).map(rf => {
+            if (rf.role === 'category' && hierarchy && hierarchy.length > 0) {
+              const hOptions = flattenHierarchy(hierarchy)
+              const currentValue = hierarchyNodeId ? `h:${hierarchyNodeId}` : (roleValues[rf.role] ?? '')
+              return (
+                <div key={rf.role} data-role={rf.role} style={{ marginBottom: 12 }}>
+                  <label htmlFor="dimension-select" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
+                    {rf.label ?? rf.role}
+                  </label>
+                  <select id="dimension-select" value={currentValue} onChange={e => {
+                    const v = e.target.value
+                    if (v.startsWith('h:')) {
+                      const picked = hOptions.find(o => `h:${o.id}` === v)
+                      if (picked) {
+                        setRole('category', picked.column_name)
+                        setHierarchyNodeId(String(picked.id))
+                        setDimensionGranularity(picked.format ?? '')
+                      }
+                    } else {
+                      setRole('category', v)
+                      setHierarchyNodeId('')
+                      setDimensionGranularity('')
+                    }
+                  }} style={{ width:'100%' }}>
+                    <option value="">— select column —</option>
+                    <optgroup label="Columns">
+                      {colOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </optgroup>
+                    <optgroup label="Hierarchies">
+                      {hOptions.map(o => <option key={o.id} value={`h:${o.id}`}>{o.label}</option>)}
+                    </optgroup>
+                  </select>
+                  {!hierarchyNodeId && !!roleValues[rf.role]
+                    && effectiveCols.find(c => c.name === roleValues[rf.role])?.dtype === 'datetime'
+                    && dateGrouping()}
+                  {hierarchyNodeId && (
+                    <button type="button" onClick={() => setShowHierarchyEditor(s => !s)}
+                      style={{ marginTop:4, background:'none', border:'none', color:'var(--accent)', cursor:'pointer', fontSize:11, padding:0 }}>
+                      ✎ Edit hierarchy
+                    </button>
+                  )}
+                  {hierarchyNodeId && showHierarchyEditor && (
+                    <div style={{ marginTop:8, border:'1px solid var(--border)', borderRadius:6, padding:8, maxHeight:220, overflowY:'auto' }}>
+                      <HierarchyTree nodes={hierarchy} datasetId={datasetId || (primaryDatasetId ?? 0)}
+                        onRefresh={() => onHierarchyRefresh?.()} />
+                    </div>
+                  )}
+                </div>
+              )
+            }
+            if (rf.multi) {
+              const selected = multiRoleValues[rf.role] ?? []
+              // A numeric role lists numbers; any other multi role (a decision
+              // tree's predictors) takes every column the dataset has.
+              // A model's response is never one of its own predictors.
+              const responseCol = isModel ? (roleValues.response || roleValues.measure) : undefined
+              const options = (roleAccepts(rf.role) === 'numeric'
+                ? measureOptions(selected)
+                : colOptions
+              ).filter(o => !responseCol || o.value !== responseCol || selected.includes(o.value))
+              return (
+                <div key={rf.role} data-role={rf.role}>
+                  {fld(`${rf.label ?? rf.role}${rf.required ? ' *' : ''}`, (
+                    <div style={{ maxHeight:130, overflowY:'auto', display:'flex', flexDirection:'column', gap:3, background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:6, padding:'6px 8px' }}>
+                      {options.map(o => {
+                        const idx = selected.indexOf(o.value)
+                        return (
+                          <label key={o.value} style={{ display:'flex', alignItems:'center', gap:6, fontSize:12, cursor:'pointer' }}>
+                            <input type="checkbox" checked={idx !== -1} onChange={() => toggleMultiRole(rf.role, o.value)} />
+                            <span style={{ color: idx !== -1 ? 'var(--text)' : 'var(--muted)' }}>{o.label}</span>
+                            {idx !== -1 && <span style={{ marginInlineStart:'auto', fontSize: 10.5, color:'var(--accent)' }}>#{idx + 1}</span>}
+                          </label>
+                        )
+                      })}
+                    </div>
+                  ))}
+                </div>
+              )
+            }
+            // Offer only what the field can use. A value already stored is always
+            // kept in the list, whatever its type: a widget saved before this
+            // rule existed must not have its field silently blanked -- and then
+            // saved blank by the next unrelated edit.
+            const kind = roleAccepts(rf.role)
+            const chosen = roleValues[rf.role]
+            const narrowed =
+              kind === 'numeric'  ? measureOptions([chosen])
+            : kind === 'datetime' ? colOptions.filter(o =>
+                effectiveCols.find(c => c.name === o.value)?.dtype === 'datetime')
+            : colOptions
+            // Whatever is already stored stays on the list even if it would not
+            // be offered today. A widget saved before this rule existed must not
+            // open with its field blanked -- the next unrelated edit would then
+            // save the blank, losing a setting the author never touched.
+            const options = (chosen && !narrowed.some(o => o.value === chosen))
+              ? [...narrowed, { value: chosen,
+                                label: `${chosen} (current)` }]
+              : narrowed
+            const placeholder = rf.role === 'measure' && !wt.startsWith('model_') ? '— count rows —' : rf.role === 'category2' ? '— none —' : '— select column —'
+            // Required roles say so, as SAS marks them: the author can see what
+            // the chart still needs without trying to render it first.
+            const label = `${rf.label ?? rf.role}${rf.required ? ' *' : ''}`
+            const emptyWhy = options.length === 0 ? emptyPickerReason(effectiveCols.length > 0, kind) : null
+            const isDateCategory = rf.role === 'category' && !hierarchyNodeId && !!chosen
+              && effectiveCols.find(c => c.name === chosen)?.dtype === 'datetime'
+            return (
+              <div key={rf.role} data-role={rf.role}>
+                {fld(label, sel(roleValues[rf.role] ?? '', v => setRole(rf.role, v), options, placeholder))}
+                {isDateCategory && dateGrouping()}
+                {emptyWhy && (
+                  <div data-testid="empty-picker-reason" style={{ fontSize:11, color:'var(--muted)', margin:'-6px 0 10px', display:'flex', gap:6, alignItems:'baseline', flexWrap:'wrap' }}>
+                    <span>{emptyWhy}</span>
+                    {effectiveCols.length === 0 && (
+                      <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize:11, padding:'1px 6px' }}
+                        onClick={() => window.dispatchEvent(new CustomEvent(ADD_DATASET_EVENT))}>
+                        Add data
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+  </>)
 
   return (
     <div ref={bodyRef} style={{ fontSize:13 }}>
@@ -1490,131 +1719,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
         {wt !== 'text' && wt !== 'button' && wt !== 'image' && wt !== 'shape' && (<>
           <ExpandableGroup id="roles" title="Fields" defaultOpen
             searchTerms={FIELDS_SEARCH_TERMS} {...groupFilterProps('Fields', FIELDS_SEARCH_TERMS)}>
-          {/* Role fields — driven by ROLE_SPECS so each widget type declares its own fields
-              instead of this component hardcoding a conditional per type. */}
-          {(ROLE_SPECS[wt] ?? []).map(rf => {
-            if (rf.role === 'category' && hierarchy && hierarchy.length > 0) {
-              const hOptions = flattenHierarchy(hierarchy)
-              const currentValue = hierarchyNodeId ? `h:${hierarchyNodeId}` : (roleValues[rf.role] ?? '')
-              return (
-                <div key={rf.role} data-role={rf.role} style={{ marginBottom: 12 }}>
-                  <label htmlFor="dimension-select" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                    {rf.label ?? rf.role}
-                  </label>
-                  <select id="dimension-select" value={currentValue} onChange={e => {
-                    const v = e.target.value
-                    if (v.startsWith('h:')) {
-                      const picked = hOptions.find(o => `h:${o.id}` === v)
-                      if (picked) {
-                        setRole('category', picked.column_name)
-                        setHierarchyNodeId(String(picked.id))
-                        setDimensionGranularity(picked.format ?? '')
-                      }
-                    } else {
-                      setRole('category', v)
-                      setHierarchyNodeId('')
-                      setDimensionGranularity('')
-                    }
-                  }} style={{ width:'100%' }}>
-                    <option value="">— select column —</option>
-                    <optgroup label="Columns">
-                      {colOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                    </optgroup>
-                    <optgroup label="Hierarchies">
-                      {hOptions.map(o => <option key={o.id} value={`h:${o.id}`}>{o.label}</option>)}
-                    </optgroup>
-                  </select>
-                  {!hierarchyNodeId && !!roleValues[rf.role]
-                    && effectiveCols.find(c => c.name === roleValues[rf.role])?.dtype === 'datetime'
-                    && dateGrouping()}
-                  {hierarchyNodeId && (
-                    <button type="button" onClick={() => setShowHierarchyEditor(s => !s)}
-                      style={{ marginTop:4, background:'none', border:'none', color:'var(--accent)', cursor:'pointer', fontSize:11, padding:0 }}>
-                      ✎ Edit hierarchy
-                    </button>
-                  )}
-                  {hierarchyNodeId && showHierarchyEditor && (
-                    <div style={{ marginTop:8, border:'1px solid var(--border)', borderRadius:6, padding:8, maxHeight:220, overflowY:'auto' }}>
-                      <HierarchyTree nodes={hierarchy} datasetId={datasetId || (primaryDatasetId ?? 0)}
-                        onRefresh={() => onHierarchyRefresh?.()} />
-                    </div>
-                  )}
-                </div>
-              )
-            }
-            if (rf.multi) {
-              const selected = multiRoleValues[rf.role] ?? []
-              // A numeric role lists numbers; any other multi role (a decision
-              // tree's predictors) takes every column the dataset has.
-              // A model's response is never one of its own predictors.
-              const responseCol = isModel ? (roleValues.response || roleValues.measure) : undefined
-              const options = (roleAccepts(rf.role) === 'numeric'
-                ? measureOptions(selected)
-                : colOptions
-              ).filter(o => !responseCol || o.value !== responseCol || selected.includes(o.value))
-              return (
-                <div key={rf.role} data-role={rf.role}>
-                  {fld(`${rf.label ?? rf.role}${rf.required ? ' *' : ''}`, (
-                    <div style={{ maxHeight:130, overflowY:'auto', display:'flex', flexDirection:'column', gap:3, background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:6, padding:'6px 8px' }}>
-                      {options.map(o => {
-                        const idx = selected.indexOf(o.value)
-                        return (
-                          <label key={o.value} style={{ display:'flex', alignItems:'center', gap:6, fontSize:12, cursor:'pointer' }}>
-                            <input type="checkbox" checked={idx !== -1} onChange={() => toggleMultiRole(rf.role, o.value)} />
-                            <span style={{ color: idx !== -1 ? 'var(--text)' : 'var(--muted)' }}>{o.label}</span>
-                            {idx !== -1 && <span style={{ marginInlineStart:'auto', fontSize: 10.5, color:'var(--accent)' }}>#{idx + 1}</span>}
-                          </label>
-                        )
-                      })}
-                    </div>
-                  ))}
-                </div>
-              )
-            }
-            // Offer only what the field can use. A value already stored is always
-            // kept in the list, whatever its type: a widget saved before this
-            // rule existed must not have its field silently blanked -- and then
-            // saved blank by the next unrelated edit.
-            const kind = roleAccepts(rf.role)
-            const chosen = roleValues[rf.role]
-            const narrowed =
-              kind === 'numeric'  ? measureOptions([chosen])
-            : kind === 'datetime' ? colOptions.filter(o =>
-                effectiveCols.find(c => c.name === o.value)?.dtype === 'datetime')
-            : colOptions
-            // Whatever is already stored stays on the list even if it would not
-            // be offered today. A widget saved before this rule existed must not
-            // open with its field blanked -- the next unrelated edit would then
-            // save the blank, losing a setting the author never touched.
-            const options = (chosen && !narrowed.some(o => o.value === chosen))
-              ? [...narrowed, { value: chosen,
-                                label: `${chosen} (current)` }]
-              : narrowed
-            const placeholder = rf.role === 'measure' && !wt.startsWith('model_') ? '— count rows —' : rf.role === 'category2' ? '— none —' : '— select column —'
-            // Required roles say so, as SAS marks them: the author can see what
-            // the chart still needs without trying to render it first.
-            const label = `${rf.label ?? rf.role}${rf.required ? ' *' : ''}`
-            const emptyWhy = options.length === 0 ? emptyPickerReason(effectiveCols.length > 0, kind) : null
-            const isDateCategory = rf.role === 'category' && !hierarchyNodeId && !!chosen
-              && effectiveCols.find(c => c.name === chosen)?.dtype === 'datetime'
-            return (
-              <div key={rf.role} data-role={rf.role}>
-                {fld(label, sel(roleValues[rf.role] ?? '', v => setRole(rf.role, v), options, placeholder))}
-                {isDateCategory && dateGrouping()}
-                {emptyWhy && (
-                  <div data-testid="empty-picker-reason" style={{ fontSize:11, color:'var(--muted)', margin:'-6px 0 10px', display:'flex', gap:6, alignItems:'baseline', flexWrap:'wrap' }}>
-                    <span>{emptyWhy}</span>
-                    {effectiveCols.length === 0 && (
-                      <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize:11, padding:'1px 6px' }}
-                        onClick={() => window.dispatchEvent(new CustomEvent(ADD_DATASET_EVENT))}>
-                        Add data
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            )
-          })}
+          {dataRolesPane}
           {/* A model's own options (event level, depth, which models to compare)
               sit with its roles: together they ARE the model specification. */}
           {isModel && (
@@ -2777,6 +2882,12 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
         <InteractionSettings widget={widget}
           pageWidgets={pages?.find(pg => pg.id === widget.page_id)?.widgets ?? []} />
       </ExpandableGroup>
+      {assignOpen && (
+        <AssignDataDialog objectName={objectLabel({ title, widget_type: wt, id: widget.id })}
+          focusRole={assignRole} onClose={() => setAssignOpen(false)}>
+          {roleControls}
+        </AssignDataDialog>
+      )}
     </div>
   )
 }

@@ -1005,6 +1005,7 @@ describe('WidgetConfigPanel hierarchy binding', () => {
     render(<CrossFilterProvider><WidgetConfigPanel widget={widget()} columns={columns} onUpdate={onUpdate}
       hierarchy={hierarchy} /></CrossFilterProvider>)
 
+    fireEvent.click(screen.getByRole('button', { name: /^Assign data$/ }))
     fireEvent.change(screen.getByLabelText('Dimension (Group / X-axis)'), { target: { value: 'h:3' } })
     act(() => { vi.advanceTimersByTime(700) })
 
@@ -1026,6 +1027,7 @@ describe('WidgetConfigPanel hierarchy binding', () => {
     render(<CrossFilterProvider><WidgetConfigPanel widget={widget({ config: { hierarchyNodeId: 3, dimension: 'order_date', dimension_granularity: 'year' } })}
       columns={columns} onUpdate={onUpdate} hierarchy={hierarchy} /></CrossFilterProvider>)
 
+    fireEvent.click(screen.getByRole('button', { name: /^Assign data$/ }))
     fireEvent.change(screen.getByLabelText('Dimension (Group / X-axis)'), { target: { value: 'region' } })
     act(() => { vi.advanceTimersByTime(700) })
 
@@ -1114,6 +1116,7 @@ describe('measure dropdown excludes id-like numeric columns', () => {
     render(<CrossFilterProvider><WidgetConfigPanel
       widget={widget({ widget_type: 'bar', config: { dimension: 'region' } })}
       columns={colsWithId} onUpdate={vi.fn()} /></CrossFilterProvider>)
+    fireEvent.click(screen.getByRole('button', { name: /^Assign data$/ }))
     const options = Array.from((screen.getByLabelText('Measure (numeric column)') as HTMLSelectElement).options)
       .map(o => o.value)
     expect(options).toContain('amount')
@@ -1124,6 +1127,7 @@ describe('measure dropdown excludes id-like numeric columns', () => {
     render(<CrossFilterProvider><WidgetConfigPanel
       widget={widget({ widget_type: 'bar', config: { dimension: 'region', measure: 'state_id' } })}
       columns={colsWithId} onUpdate={vi.fn()} /></CrossFilterProvider>)
+    fireEvent.click(screen.getByRole('button', { name: /^Assign data$/ }))
     const select = screen.getByLabelText('Measure (numeric column)') as HTMLSelectElement
     const options = Array.from(select.options).map(o => o.value)
     expect(options).toContain('state_id')
@@ -1144,6 +1148,7 @@ describe('measure dropdown excludes id-like numeric columns', () => {
     render(<CrossFilterProvider><WidgetConfigPanel
       widget={widget({ widget_type: 'kpi', config: {} })}
       columns={cols} onUpdate={vi.fn()} /></CrossFilterProvider>)
+    fireEvent.click(screen.getByRole('button', { name: /^Assign data$/ }))
     const options = Array.from((screen.getByLabelText(/^Measure \(numeric column\)/) as HTMLSelectElement).options)
       .map(o => o.value)
     expect(options).toContain('all_employee_count')

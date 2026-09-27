@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import WidgetConfigPanel from './WidgetConfigPanel'
 import { CrossFilterProvider } from './CrossFilterContext'
 import { roleAccepts } from '../../types/report'
@@ -38,7 +38,9 @@ function widget(widget_type: string): Widget {
 function optionsOf(labelPattern: RegExp, widget_type: string): string[] {
   render(<CrossFilterProvider><WidgetConfigPanel widget={widget(widget_type)}
     columns={COLUMNS} onUpdate={vi.fn()} pages={PAGES} /></CrossFilterProvider>)
-  const select = screen.getByLabelText(labelPattern) as HTMLSelectElement
+  // The role pickers live in the Assign data dialog.
+  fireEvent.click(screen.getByRole('button', { name: /^Assign data$/ }))
+  const select = within(screen.getByRole('dialog')).getByLabelText(labelPattern) as HTMLSelectElement
   return [...select.querySelectorAll('option')]
     .map(o => (o as HTMLOptionElement).value).filter(Boolean)
 }
@@ -123,7 +125,8 @@ describe('a column already chosen is never hidden', () => {
                                             target: 'department' } } as Widget
     render(<CrossFilterProvider><WidgetConfigPanel widget={w} columns={COLUMNS}
       onUpdate={vi.fn()} pages={PAGES} /></CrossFilterProvider>)
-    const select = screen.getByLabelText(/target/i) as HTMLSelectElement
+    fireEvent.click(screen.getByRole('button', { name: /^Assign data$/ }))
+    const select = within(screen.getByRole('dialog')).getByLabelText(/target/i) as HTMLSelectElement
     expect(select.value).toBe('department')
   })
 })

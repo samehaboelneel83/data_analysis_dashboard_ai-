@@ -146,23 +146,29 @@ async function main() {
           }
           expect(id, 'no widget was created')
         })
-        // 2. roles and aggregation, in the panel
+        // 2. roles in the Assign data dialog, then aggregation in the panel
         await at('assign roles', async () => {
+          // An inserted chart that still needs data opens the dialog by itself;
+          // one that needs nothing is given its data from the pane's button.
+          const dialog = page.getByRole('dialog', { name: /^Assign data/ })
+          const opened = await dialog.waitFor({ timeout: 4000 }).then(() => true, () => false)
+          if (!opened) await page.getByRole('button', { name: /^Assign data$/ }).click()
           for (const [role, col] of Object.entries(spec.roles ?? {})) {
-            const field = page.locator(`[data-role="${role}"] select`)
+            const field = dialog.locator(`[data-role="${role}"] select`)
             await field.waitFor({ timeout: 10000 })
             await field.selectOption(col)
           }
           for (const [role, cols] of Object.entries(spec.multi ?? {})) {
             for (const col of cols) {
-              await page.locator(`[data-role="${role}"] label`, { hasText: new RegExp(`^${col}`) })
+              await dialog.locator(`[data-role="${role}"] label`, { hasText: new RegExp(`^${col}`) })
                 .locator('input[type="checkbox"]').check()
             }
           }
+          if (spec.granularity) await dialog.locator('#date-granularity').selectOption(spec.granularity)
+          await dialog.getByRole('button', { name: 'Done' }).click()
           // The panel opens on "Data roles" after an insert; the rest is under "All".
           await page.getByRole('tablist', { name: 'Settings sections' }).getByRole('tab', { name: 'All', exact: true }).click()
           if (spec.agg) await page.locator('#cfg-aggregation').selectOption(spec.agg)
-          if (spec.granularity) await page.locator('#date-granularity').selectOption(spec.granularity)
           await page.waitForTimeout(1200)                        // the panel saves after 600 ms
           const cfg = (await widgetsNow()).find(w => w.id === id)?.config ?? {}
           for (const [role, col] of Object.entries(spec.roles ?? {})) {
@@ -183,7 +189,9 @@ async function main() {
           await page.getByLabel('Filter 1 value').fill(region)
           await page.waitForTimeout(1200)
           const cfg = (await widgetsNow()).find(w => w.id === id)?.config ?? {}
-          expect(JSON.stringify(cfg.filters) === JSON.stringify([{ column: 'region', op: 'eq', value: region }]),
+          // By value, not by JSON text: the panel writes the keys in its own order.
+          const f0 = Array.isArray(cfg.filters) && cfg.filters.length === 1 ? cfg.filters[0] : {}
+          expect(f0.column === 'region' && f0.op === 'eq' && f0.value === region,
             `filters saved as ${JSON.stringify(cfg.filters)}`)
           const { filters, ...unfiltered } = cfg
           const a = await api('POST', `/datasets/${ds.id}/widget-data`, token, { widget_type: type, config: cfg, report_id: reportId })
