@@ -41,7 +41,10 @@ pytest-asyncio==0.23.7
 pytest-timeout==2.3.1
 freezegun==1.5.1
 statsmodels==0.14.6
-pyarrow==16.1.0
+# 23.0.1 (was 16.1.0): 17.0.0 fixed CVE-2024-52338, arbitrary code execution
+# when reading untrusted IPC/Parquet -- and uploads ARE untrusted Parquet.
+# 23.0.1 clears the later advisory too. pandas 2.2.2 / numpy 1.26.4 unchanged.
+pyarrow==23.0.1
 reportlab==4.2.2
 matplotlib==3.9.2
 duckdb-engine==0.13.2
@@ -70,7 +73,10 @@ opentelemetry-exporter-otlp-proto-http==1.27.0
 # bundle it, which turns FastAPIInstrumentor's import into a bare
 # ModuleNotFoundError. Pinned here (not just a transitive resolve) so the
 # base image's default setuptools can never silently drop it again.
-setuptools==75.6.0
+# 80.10.2 is the newest release that still ships pkg_resources, and clears the
+# path-traversal advisory (fixed in 78.1.1). The remaining one needs >=83,
+# which waits on an OpenTelemetry release that no longer imports pkg_resources.
+setuptools==80.10.2
 # O2: optional shared result-cache backend (services/cache_backend.py). redis
 # is the client used against Valkey (wire-compatible) when settings.valkey_url
 # is set; the platform runs fine without either configured or reachable --
@@ -84,7 +90,7 @@ fakeredis==2.23.2
 # test_anomaly.py -- numba's JIT warmup costs real seconds and must never run
 # at app startup. Pins verified via `pip install --dry-run` resolver against
 # this file's EXISTING pins (numpy==1.26.4, pandas==2.2.2, scipy==1.13.0,
-# scikit-learn==1.5.1, statsmodels==0.14.6, pyarrow==16.1.0): the resolver
+# scikit-learn==1.5.1, statsmodels==0.14.6, pyarrow==23.0.1): the resolver
 # keeps every one of them unchanged -- statsforecast's numba/llvmlite chain
 # (numba==0.67.0, llvmlite==0.49.0) supports numpy 1.26.4 without forcing a
 # bump. Do not upgrade numpy to satisfy a future statsforecast/pyod bump;
