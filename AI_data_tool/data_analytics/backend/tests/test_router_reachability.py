@@ -26,6 +26,7 @@ import re
 import pytest
 
 from app.main import app
+from tests._routes import served_paths
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _API_TS = os.path.join(os.path.dirname(os.path.dirname(_HERE)),
@@ -57,7 +58,7 @@ _RESOLVED_AT_RUNTIME: set[str] = set()
 
 
 def _served_paths() -> set[str]:
-    return {r.path for r in app.routes if getattr(r, "path", None)}
+    return served_paths(app)
 
 
 @pytest.fixture(scope="module")
