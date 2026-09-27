@@ -3,7 +3,7 @@ import { describe, it, expect, vi, afterEach, beforeEach, beforeAll } from 'vite
 import { render, screen, fireEvent, within, waitFor, act } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import ReportBuilder from './ReportBuilder'
-import { analysisApi, authzApi, reportsApi, datasetsApi, widgetDataApi, dataPreviewApi, dataSourcesApi, columnMetaApi } from '../services/api'
+import { analysisApi, authzApi, reportsApi, datasetsApi, widgetDataApi, dataPreviewApi, dataSourcesApi, columnMetaApi, hierarchyApi } from '../services/api'
 import { ConfirmProvider } from '../components/ui/ConfirmDialog'
 import { axeViolations } from '../test/axe'
 
@@ -25,7 +25,7 @@ vi.mock('../services/api', () => ({
   },
   datasetsApi: { get: vi.fn(), list: vi.fn() },
   dataSourcesApi: { list: vi.fn().mockResolvedValue([]) },
-  hierarchyApi: { get: vi.fn().mockResolvedValue([]) },
+  hierarchyApi: { get: vi.fn().mockResolvedValue([]), autoGenerate: vi.fn().mockResolvedValue([]), reorder: vi.fn() },
   analysisApi: { get: vi.fn().mockResolvedValue(null), run: vi.fn() },
   calcColumnsApi: { list: vi.fn().mockResolvedValue([]), save: vi.fn(), delete: vi.fn(), preview: vi.fn() },
   measuresApi: { list: vi.fn().mockResolvedValue([]), save: vi.fn(), delete: vi.fn(), preview: vi.fn() },
@@ -1625,6 +1625,29 @@ describe('dropping several fields on the canvas', () => {
     fireEvent.blur(name)
     await waitFor(() => expect(columnMetaApi.set).toHaveBeenLastCalledWith(10,
       expect.objectContaining({ revenue: expect.objectContaining({ label: 'Net revenue' }) })), { timeout: 5000 })
+  })
+
+  it('a dataset with no hierarchy gets the default chains: tick Month with a measure, and the line keeps the grain', async () => {
+    const lvl = (id: number, parent_id: number | null, name: string, format: string | null) =>
+      ({ id, dataset_id: 10, parent_id, name, node_type: parent_id == null ? 'folder' : 'date',
+         column_name: parent_id == null ? null : 'order_date', format, position: 0 })
+    const tree = [lvl(1, null, 'Dates', null), lvl(2, 1, 'order_date', null), lvl(3, 2, 'Year', 'year'),
+      lvl(4, 3, 'Quarter', 'quarter'), lvl(5, 4, 'Month', 'month'), lvl(6, 5, 'Week', 'week'), lvl(7, 6, 'Date', 'day')]
+    vi.mocked(hierarchyApi.get).mockResolvedValueOnce([])
+    vi.mocked(hierarchyApi.autoGenerate).mockResolvedValueOnce(tree as any)
+    vi.mocked(hierarchyApi.reorder).mockResolvedValueOnce(tree as any)
+    await builderWithFields()
+    const month = await screen.findByRole('checkbox', { name: 'Select order_date Month' })
+    expect(hierarchyApi.autoGenerate).toHaveBeenCalledWith(10)
+    fireEvent.click(within(screen.getByTestId('hierarchy-chains')).getByRole('button', { name: 'Move Week up' }))
+    await waitFor(() => expect(hierarchyApi.reorder).toHaveBeenCalledWith(10, [3, 4, 6, 5, 7]))
+    fireEvent.click(month)
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select revenue' }))
+    fireEvent.click(within(await screen.findByTestId('fields-staging')).getByRole('button', { name: /Auto chart/ }))
+    await waitFor(() => expect(reportsApi.addWidget).toHaveBeenCalledTimes(1))
+    expect(reportsApi.addWidget).toHaveBeenCalledWith(1, 100, expect.objectContaining({
+      config: expect.objectContaining({ dimension: 'order_date', dimension_granularity: 'month', hierarchyNodeId: 5 }),
+    }))
   })
 
   it('a group folds away under its heading', async () => {

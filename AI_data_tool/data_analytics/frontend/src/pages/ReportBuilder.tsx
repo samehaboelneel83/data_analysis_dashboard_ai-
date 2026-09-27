@@ -1,4 +1,5 @@
 import PdfOptionsDialog from '../components/report/PdfOptionsDialog'
+import HierarchyChains from '../components/report/HierarchyChains'
 import RelativeDateEditor from '../components/report/RelativeDateEditor'
 import AccessExplainer from '../components/report/AccessExplainer'
 import { DEFAULT_SPEC, PRESETS, describeSpec, parseSpec, specProblem, type RelativeSpec } from '../lib/relativeDates'
@@ -638,7 +639,15 @@ export default function ReportBuilder() {
     if (!report) return
     void reloadAttachedDatasets(report)
     if (report.dataset_id) {
-      hierarchyApi.get(report.dataset_id).then(setHierarchy)
+      const dsId = report.dataset_id
+      hierarchyApi.get(dsId).then(nodes => {
+        setHierarchy(nodes)
+        // The default drill chains (each date: Year > Quarter > Month > Week >
+        // Date; geography: Continent > Country > City), built once for a
+        // dataset that has none. A viewer cannot write them; the refusal is
+        // ignored and the pane simply shows no hierarchies.
+        if (nodes.length === 0) hierarchyApi.autoGenerate(dsId).then(setHierarchy).catch(() => {})
+      }).catch(() => {})
       // Read-only: never triggers a run, so a dataset with no analysis yet simply
       // shows no hints rather than paying for one on every report open.
       analysisApi.get(report.dataset_id).then(setAnalysis).catch(() => setAnalysis(null))
@@ -980,9 +989,13 @@ export default function ReportBuilder() {
   }
 
   const assignHierarchyToWidget = (folderId: number) => {
-    if (!selectedW || !activePage) return
     const node = firstHierarchyNode(folderId)
-    if (!node) return
+    if (node) bindHierarchyNode(node)
+  }
+  /** Set the selected widget's dimension to one hierarchy level (its column,
+   *  its date grain), as one undoable step. */
+  const bindHierarchyNode = (node: HierarchyNode) => {
+    if (!selectedW || !activePage || !node.column_name) return
     const config = { ...(selectedW.config as Record<string, unknown>),
       dimension: node.column_name, hierarchyNodeId: node.id,
       ...(node.format ? { dimension_granularity: node.format } : {}) }
@@ -1171,6 +1184,11 @@ export default function ReportBuilder() {
     : isNumericField(c) ? 'Measures' : 'Dimensions'
 
   const toAutoField = (name: string): AutoField | null => {
+    // A ticked hierarchy level ("h:<id>") stages as its column.
+    if (name.startsWith('h:')) {
+      const node = hierarchy.find(n => n.id === Number(name.slice(2)))
+      return node?.column_name ? toAutoField(node.column_name) : null
+    }
     const col = columns.find(c => c.name === name)
     // `geography` comes from the same classification the renderers read, so a
     // column an author marked as geography drops as a map instead of a bar --
@@ -1190,6 +1208,17 @@ export default function ReportBuilder() {
     const choice = chartForFields(fields)
     setGatheredFields([])
     if (!choice) return
+    // A ticked date level keeps its grain on the axis it became (Month, Week),
+    // and the chart drills along its hierarchy from there.
+    const cfg = choice.suggestion.config as Record<string, unknown>
+    for (const n of names) {
+      if (!n.startsWith('h:')) continue
+      const node = hierarchy.find(h => h.id === Number(n.slice(2)))
+      if (node?.column_name && cfg.dimension === node.column_name) {
+        cfg.hierarchyNodeId = node.id
+        if (node.format) cfg.dimension_granularity = node.format
+      }
+    }
     await addSuggestedWidget(choice.suggestion as Suggestion)
     if (choice.ignored.length) {
       toast(`${choice.ignored.join(', ')} could not be used in this chart`)
@@ -2533,25 +2562,26 @@ export default function ReportBuilder() {
                       </button>
                     )
                     if (group === 'Hierarchies') {
-                      if (hierarchy.filter(n => n.parent_id == null).length === 0) return null
+                      if (!hierarchy.some(n => n.node_type !== 'folder' && hierarchy.some(c => c.parent_id === n.id))) return null
                       return (
                         <div key={group} style={{ marginBottom: 8 }}>
                           {heading}
-                          {!folded && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                        {hierarchy.filter(n => n.parent_id == null).map(root => (
-                          <button key={root.id}
-                            onClick={() => assignHierarchyToWidget(root.id)}
-                            draggable
-                            onDragStart={e => { e.dataTransfer.setData('application/x-hierarchy', String(root.id)); e.dataTransfer.effectAllowed = 'copy' }}
-                            title={selectedW ? `Bind the ${root.name} hierarchy to ${selectedW.title}` : 'Drag onto the canvas to chart the first level, or select a widget first'}
-                            style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '4px 7px',
-                              background: 'var(--surface2)', border: '1px solid var(--accent)', borderRadius: 6,
-                              cursor: 'pointer', fontSize: 11, color: 'var(--text)', fontFamily: 'var(--sans)', whiteSpace: 'nowrap' }}>
-                            <span aria-hidden style={{ fontSize: 11 }}>⛓</span>
-                            {root.name}
-                          </button>
-                        ))}
-                          </div>}
+                          {!folded && (
+                            <HierarchyChains nodes={hierarchy} canEdit={canEdit}
+                              isChecked={t => gatheredFields.includes(t)} onToggle={toggleGathered}
+                              onPick={selectedW ? bindHierarchyNode : undefined}
+                              onReorder={async ids => {
+                                const dsId = report?.dataset_id
+                                if (!dsId) return
+                                const before = hierarchy
+                                try {
+                                  setHierarchy(await hierarchyApi.reorder(dsId, ids))
+                                } catch (e) {
+                                  setHierarchy(before)
+                                  toast.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Could not reorder the levels')
+                                }
+                              }} />
+                          )}
                         </div>
                       )
                     }

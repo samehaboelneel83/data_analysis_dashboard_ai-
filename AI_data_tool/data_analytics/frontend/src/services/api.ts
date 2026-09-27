@@ -1190,6 +1190,8 @@ export const hierarchyApi = {
   update:       (dsId: number, nid: number, data: Partial<HierarchyNode>) => api.patch<HierarchyNode>(`/datasets/${dsId}/hierarchy/${nid}`, data).then(r => r.data),
   delete:       (dsId: number, nid: number)                 => api.delete(`/datasets/${dsId}/hierarchy/${nid}`),
   autoGenerate: (dsId: number)                              => api.post<HierarchyNode[]>(`/datasets/${dsId}/hierarchy/auto-generate`).then(r => r.data),
+  /** A drill chain's levels in a new order, outermost first -- one step. */
+  reorder:      (dsId: number, ids: number[])               => api.put<HierarchyNode[]>(`/datasets/${dsId}/hierarchy/order`, { ids }).then(r => r.data),
 }
 
 export const columnFormatsApi = {

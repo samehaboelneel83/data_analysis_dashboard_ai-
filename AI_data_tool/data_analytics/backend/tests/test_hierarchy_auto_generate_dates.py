@@ -35,10 +35,12 @@ async def test_auto_generate_creates_year_quarter_month_day_chain_for_date_colum
     assert quarter_node["name"] == "Quarter" and quarter_node["format"] == "quarter"
     month_node = next(n for n in nodes.values() if n["parent_id"] == quarter_node["id"])
     assert month_node["name"] == "Month" and month_node["format"] == "month"
-    day_node = next(n for n in nodes.values() if n["parent_id"] == month_node["id"])
-    assert day_node["name"] == "Day" and day_node["format"] == "day"
+    week_node = next(n for n in nodes.values() if n["parent_id"] == month_node["id"])
+    assert week_node["name"] == "Week" and week_node["format"] == "week"
+    day_node = next(n for n in nodes.values() if n["parent_id"] == week_node["id"])
+    assert day_node["name"] == "Date" and day_node["format"] == "day"
     # every drill level points back at the same raw column, none has its own aggregation
-    for n in (year_node, quarter_node, month_node, day_node):
+    for n in (year_node, quarter_node, month_node, week_node, day_node):
         assert n["column_name"] == "order_date"
         assert n["aggregation"] is None
 
@@ -56,3 +58,13 @@ async def test_auto_generate_leaves_non_date_columns_flat(client, db_session, tw
     assert not any(n["parent_id"] == region_node["id"] for n in nodes)  # still a flat leaf
     assert not any(n["parent_id"] == sales_node["id"] for n in nodes)
     assert sales_node["aggregation"] == "sum"
+
+
+def test_the_default_geography_chain_takes_the_place_columns_present():
+    from app.routers.hierarchy import geography_chain
+    assert geography_chain(["City Name", "Continent Name", "Country", "sales"]) == [
+        ("Continent", "Continent Name"), ("Country", "Country"), ("City", "City Name")]
+    # A region column stands in for a continent.
+    assert geography_chain(["region", "country", "revenue"]) == [("Continent", "region"), ("Country", "country")]
+    # One level is not a chain.
+    assert geography_chain(["country", "sales"]) == []

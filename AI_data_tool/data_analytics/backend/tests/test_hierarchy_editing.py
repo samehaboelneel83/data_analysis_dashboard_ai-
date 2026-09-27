@@ -47,7 +47,7 @@ async def test_deleting_a_middle_level_heals_the_chain(client, auth_headers, db_
     assert r.status_code == 200, r.text
     chain = await _chain(client, auth_headers["a"], ds.id)
     formats = [n["format"] for n in chain]
-    assert formats == ["year", "quarter", "month", "day"]
+    assert formats == ["year", "quarter", "month", "week", "day"]
 
     quarter = chain[1]
     r = await client.delete(f"/api/v1/datasets/{ds.id}/hierarchy/{quarter['id']}",
@@ -56,7 +56,7 @@ async def test_deleting_a_middle_level_heals_the_chain(client, auth_headers, db_
 
     chain = await _chain(client, auth_headers["a"], ds.id)
     # the regression this test exists for: month and day used to CASCADE away
-    assert [n["format"] for n in chain] == ["year", "month", "day"]
+    assert [n["format"] for n in chain] == ["year", "month", "week", "day"]
 
 
 @pytest.mark.asyncio
@@ -79,15 +79,43 @@ async def test_levels_reorder_by_swapping_with_parent(client, auth_headers, db_s
     ds = await _dataset(db_session, two_orgs["a"]["org"], dated)
     await client.post(f"/api/v1/datasets/{ds.id}/hierarchy/auto-generate", headers=auth_headers["a"])
     chain = await _chain(client, auth_headers["a"], ds.id)
-    year, quarter, month, day = chain
+    year, quarter, month, week, day = chain
 
     h = auth_headers["a"]
     await client.patch(f"/api/v1/datasets/{ds.id}/hierarchy/{month['id']}",
                        json={"parent_id": year["id"]}, headers=h)
     await client.patch(f"/api/v1/datasets/{ds.id}/hierarchy/{quarter['id']}",
                        json={"parent_id": month["id"]}, headers=h)
-    await client.patch(f"/api/v1/datasets/{ds.id}/hierarchy/{day['id']}",
+    await client.patch(f"/api/v1/datasets/{ds.id}/hierarchy/{week['id']}",
                        json={"parent_id": quarter["id"]}, headers=h)
 
     chain = await _chain(client, auth_headers["a"], ds.id)
-    assert [n["format"] for n in chain] == ["year", "month", "quarter", "day"]
+    assert [n["format"] for n in chain] == ["year", "month", "quarter", "week", "day"]
+
+
+@pytest.mark.asyncio
+async def test_a_dragged_order_is_applied_in_one_step(client, auth_headers, db_session, two_orgs, dated):
+    """PUT /hierarchy/order: the chain as the author dragged it, outermost
+    first -- the whole order at once, nothing outside the chain moved."""
+    ds = await _dataset(db_session, two_orgs["a"]["org"], dated)
+    await client.post(f"/api/v1/datasets/{ds.id}/hierarchy/auto-generate", headers=auth_headers["a"])
+    year, quarter, month, week, day = await _chain(client, auth_headers["a"], ds.id)
+    r = await client.put(f"/api/v1/datasets/{ds.id}/hierarchy/order", headers=auth_headers["a"],
+                         json={"ids": [year["id"], month["id"], week["id"], quarter["id"], day["id"]]})
+    assert r.status_code == 200, r.text
+    chain = await _chain(client, auth_headers["a"], ds.id)
+    assert [n["format"] for n in chain] == ["year", "month", "week", "quarter", "day"]
+    # Still under the date column it hung from.
+    assert chain[0]["parent_id"] == year["parent_id"]
+
+
+@pytest.mark.asyncio
+async def test_an_order_that_is_not_one_chain_is_refused(client, auth_headers, db_session, two_orgs, dated):
+    ds = await _dataset(db_session, two_orgs["a"]["org"], dated)
+    await client.post(f"/api/v1/datasets/{ds.id}/hierarchy/auto-generate", headers=auth_headers["a"])
+    year, quarter, month, week, day = await _chain(client, auth_headers["a"], ds.id)
+    for ids in ([year["id"], month["id"]], [year["id"]], [year["id"], year["id"]], "x"):
+        r = await client.put(f"/api/v1/datasets/{ds.id}/hierarchy/order", headers=auth_headers["a"], json={"ids": ids})
+        assert r.status_code == 400, (ids, r.text)
+    before = [n["format"] for n in await _chain(client, auth_headers["a"], ds.id)]
+    assert before == ["year", "quarter", "month", "week", "day"]

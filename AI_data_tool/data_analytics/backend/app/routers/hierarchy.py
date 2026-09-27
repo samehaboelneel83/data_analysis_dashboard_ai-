@@ -12,7 +12,40 @@ from ..services.analytics import load_file, detect_types
 
 router = APIRouter(prefix="/datasets", tags=["hierarchy"])
 
-DATE_DRILL_LEVELS = [("Year", "year"), ("Quarter", "quarter"), ("Month", "month"), ("Day", "day")]
+#: The default drill chain under every date column, as SAS's: year > quarter >
+#: month > week > the date itself. `format` is the grain each level groups by.
+DATE_DRILL_LEVELS = [("Year", "year"), ("Quarter", "quarter"), ("Month", "month"),
+                     ("Week", "week"), ("Date", "day")]
+
+#: The default geography chain, outermost first: each level is the first
+#: column whose name matches one of its spellings. Built when two or more
+#: levels are present (Continent > Country > City; a "region" column stands in
+#: for a continent in data that groups countries that way).
+GEO_DRILL_LEVELS = [
+    ("Continent", ("continent", "continentname", "region", "regionname")),
+    ("Country", ("country", "countryname", "nation", "countrycode")),
+    ("State", ("state", "statename", "province", "governorate", "county")),
+    ("City", ("city", "cityname", "town")),
+]
+
+
+def _norm(name: str) -> str:
+    return "".join(ch for ch in name.lower() if ch.isalnum())
+
+
+def geography_chain(columns: list[str]) -> list[tuple[str, str]]:
+    """(level label, column) for each default geography level these columns have."""
+    by_norm = {}
+    for c in columns:
+        by_norm.setdefault(_norm(c), c)
+    chain = []
+    used: set[str] = set()
+    for label, spellings in GEO_DRILL_LEVELS:
+        col = next((by_norm[s] for s in spellings if s in by_norm and by_norm[s] not in used), None)
+        if col:
+            chain.append((label, col))
+            used.add(col)
+    return chain if len(chain) >= 2 else []
 
 
 async def _get_dataset(dataset_id: int, db: AsyncSession, current_user: User,
@@ -152,6 +185,73 @@ async def auto_generate(dataset_id: int, db: AsyncSession = Depends(get_db), cur
                 await db.flush()
                 parent_id = level_node.id
 
+    # Geography: one chain of the place columns this data has.
+    chain = geography_chain(list(type_map))
+    if chain:
+        folder = HierarchyNode(dataset_id=dataset_id, name="Geography", node_type="folder",
+                               position=len(folder_info))
+        db.add(folder)
+        await db.flush()
+        parent_id = folder.id
+        for pos, (label, col) in enumerate(chain):
+            level = HierarchyNode(dataset_id=dataset_id, parent_id=parent_id, name=label,
+                                  node_type="dimension", column_name=col, position=pos)
+            db.add(level)
+            await db.flush()
+            parent_id = level.id
+
+    await db.commit()
+    r = await db.execute(
+        select(HierarchyNode).where(HierarchyNode.dataset_id == dataset_id).order_by(HierarchyNode.position)
+    )
+    return r.scalars().all()
+
+
+@router.put("/{dataset_id}/hierarchy/order", response_model=list[HierarchyNodeOut])
+async def reorder_chain(dataset_id: int, body: dict, db: AsyncSession = Depends(get_db),
+                        current_user: User = Depends(get_current_user)):
+    """Put a drill chain's levels in a new order: `{"ids": [...]}`, outermost
+    first -- the order the author dragged them into. The ids must be exactly
+    one chain as it stands (each level the parent of the next), so nothing
+    outside it moves; the chain keeps its place under its parent, and
+    anything hanging below its old last level hangs below its new one."""
+    await _get_dataset(dataset_id, db, current_user, write=True)
+    ids = body.get("ids") if isinstance(body, dict) else None
+    if not isinstance(ids, list) or len(ids) < 2 or not all(isinstance(i, int) for i in ids) or len(set(ids)) != len(ids):
+        raise HTTPException(400, "ids must list two or more distinct levels")
+    rows = (await db.execute(select(HierarchyNode).where(HierarchyNode.dataset_id == dataset_id))).scalars().all()
+    by_id = {n.id: n for n in rows}
+    if any(i not in by_id for i in ids):
+        raise HTTPException(404, "Level not found")
+    wanted = set(ids)
+    # The chain as it stands: one level whose parent is outside, then each
+    # level's single child inside the set.
+    tops = [by_id[i] for i in ids if by_id[i].parent_id not in wanted]
+    if len(tops) != 1:
+        raise HTTPException(400, "These levels are not one drill chain")
+    current = [tops[0]]
+    while True:
+        kids = [n for n in rows if n.parent_id == current[-1].id and n.id in wanted]
+        if not kids:
+            break
+        if len(kids) > 1:
+            raise HTTPException(400, "These levels are not one drill chain")
+        current.append(kids[0])
+    if len(current) != len(ids):
+        raise HTTPException(400, "These levels are not one drill chain")
+    outside_parent = tops[0].parent_id
+    below = [n for n in rows if n.parent_id == current[-1].id and n.id not in wanted]
+    # Detach first, so no level is ever its own ancestor mid-way.
+    for n in current:
+        n.parent_id = None
+    await db.flush()
+    prev = outside_parent
+    for pos, i in enumerate(ids):
+        by_id[i].parent_id = prev
+        by_id[i].position = pos if prev == outside_parent else 0
+        prev = i
+    for n in below:
+        n.parent_id = ids[-1]
     await db.commit()
     r = await db.execute(
         select(HierarchyNode).where(HierarchyNode.dataset_id == dataset_id).order_by(HierarchyNode.position)
