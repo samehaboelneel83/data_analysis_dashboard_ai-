@@ -541,6 +541,21 @@ def validate_widget_payload(widget_type: str | None, config: dict | None, *,
     measures = config.get("measures")
     if measures is not None and not isinstance(measures, list):
         raise InvalidWidget("measures must be a list")
+
+    # Several measures on one value axis (services/multi_measure.py).
+    extra = config.get("extra_measures")
+    if extra is not None:
+        from .multi_measure import MULTI_MEASURE_WIDGETS
+        if not isinstance(extra, list) or not all(isinstance(m, str) for m in extra):
+            raise InvalidWidget("extra_measures must be a list of field names")
+        if extra and widget_type is not None and widget_type not in MULTI_MEASURE_WIDGETS:
+            raise InvalidWidget(
+                f"a {widget_type} widget takes one measure; more than one is for "
+                f"{', '.join(sorted(MULTI_MEASURE_WIDGETS))} charts")
+        if extra and config.get("dimension2"):
+            raise InvalidWidget(
+                "several measures and a series split cannot be drawn together: "
+                "remove the Series field or the extra measures")
     roles = config.get("roles")
     if roles is not None and not isinstance(roles, dict):
         raise InvalidWidget("roles must be an object")

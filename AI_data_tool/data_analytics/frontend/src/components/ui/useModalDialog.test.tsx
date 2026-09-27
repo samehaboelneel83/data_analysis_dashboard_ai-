@@ -104,3 +104,37 @@ describe('useModalDialog', () => {
     expect(document.activeElement).toBe(opener)
   })
 })
+
+describe('a dialog opened on top of another', () => {
+  function Stack({ outer, inner, showInner }: { outer: () => void; inner: () => void; showInner: boolean }) {
+    const ref = useModalDialog<HTMLDivElement>(outer)
+    return (
+      <div ref={ref} role="dialog" aria-label="Outer">
+        <button>outer button</button>
+        {showInner && <Inner onClose={inner} />}
+      </div>
+    )
+  }
+  function Inner({ onClose }: { onClose: () => void }) {
+    const ref = useModalDialog<HTMLDivElement>(onClose)
+    return <div ref={ref} role="dialog" aria-label="Inner"><button>inner button</button></div>
+  }
+
+  it('one Escape closes only the top one; the next closes the one under it', () => {
+    const outer = vi.fn(), inner = vi.fn()
+    const { rerender } = render(<Stack outer={outer} inner={inner} showInner />)
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(inner).toHaveBeenCalledTimes(1)
+    expect(outer).not.toHaveBeenCalled()
+    rerender(<Stack outer={outer} inner={inner} showInner={false} />)
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(outer).toHaveBeenCalledTimes(1)
+  })
+
+  it('Tab stays inside the top one', () => {
+    render(<Stack outer={vi.fn()} inner={vi.fn()} showInner />)
+    screen.getByRole('button', { name: 'inner button' }).focus()
+    fireEvent.keyDown(window, { key: 'Tab' })
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'inner button' }))
+  })
+})

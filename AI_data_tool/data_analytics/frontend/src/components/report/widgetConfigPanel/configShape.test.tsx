@@ -212,6 +212,9 @@ describe('the panel offers exactly the values a save accepts', () => {
 })
 
 describe('dates can be grouped on a dataset that has a drill hierarchy', () => {
+  // "Group dates by" is the date field's own setting: open the Dimension's field.
+  const openDimensionField = () => fireEvent.click(document.querySelector<HTMLElement>(
+    '[data-roles-section="category"] [data-role-field] button')!)
   // Found by the families browser journey: with a hierarchy, the dimension
   // field is drawn as the hierarchy picker, which left out "Group dates by" --
   // a line chart over dates could not be grouped by month.
@@ -227,7 +230,7 @@ describe('dates can be grouped on a dataset that has a drill hierarchy', () => {
     const onUpdate = vi.fn()
     render(<CrossFilterProvider><WidgetConfigPanel widget={widget('line', { dimension: 'order_date', measure: 'revenue' })}
       columns={withDate} hierarchy={hierarchy} onUpdate={onUpdate} pages={pages} /></CrossFilterProvider>)
-    fireEvent.click(screen.getByRole('button', { name: /^Assign data$/ }))
+    openDimensionField()
     fireEvent.change(screen.getByLabelText('Group dates by'), { target: { value: 'month' } })
     act(() => { vi.advanceTimersByTime(700) })
     expect(onUpdate.mock.calls.at(-1)![0]).toMatchObject({ dimension: 'order_date', dimension_granularity: 'month' })
@@ -237,7 +240,7 @@ describe('dates can be grouped on a dataset that has a drill hierarchy', () => {
     const onUpdate = vi.fn()
     render(<CrossFilterProvider><WidgetConfigPanel widget={widget('line', { dimension: 'order_date', measure: 'revenue' })}
       columns={withDate} hierarchy={hierarchy} onUpdate={onUpdate} pages={pages} /></CrossFilterProvider>)
-    fireEvent.click(screen.getByRole('button', { name: /^Assign data$/ }))
+    openDimensionField()
     fireEvent.change(screen.getByLabelText('Group dates by'), { target: { value: 'fiscal_year' } })
     act(() => { vi.advanceTimersByTime(700) })
     const followsOrg = onUpdate.mock.calls.at(-1)![0]
@@ -257,7 +260,7 @@ describe('dates can be grouped on a dataset that has a drill hierarchy', () => {
   it('a forecast is not offered fiscal periods it cannot continue', () => {
     render(<CrossFilterProvider><WidgetConfigPanel widget={widget('forecast', { dimension: 'order_date', measure: 'revenue' })}
       columns={withDate} hierarchy={hierarchy} onUpdate={vi.fn()} pages={pages} /></CrossFilterProvider>)
-    fireEvent.click(screen.getByRole('button', { name: /^Assign data$/ }))
+    openDimensionField()
     const select = screen.queryByLabelText('Group dates by') as HTMLSelectElement | null
     if (select) expect([...select.options].map(o => o.value)).not.toContain('fiscal_year')
   })
@@ -265,7 +268,7 @@ describe('dates can be grouped on a dataset that has a drill hierarchy', () => {
   it('not under a text dimension', () => {
     render(<CrossFilterProvider><WidgetConfigPanel widget={widget('line', { dimension: 'region', measure: 'revenue' })}
       columns={withDate} hierarchy={hierarchy} onUpdate={vi.fn()} pages={pages} /></CrossFilterProvider>)
-    fireEvent.click(screen.getByRole('button', { name: /^Assign data$/ }))
+    openDimensionField()
     expect(screen.queryByLabelText('Group dates by')).toBeNull()
   })
 })

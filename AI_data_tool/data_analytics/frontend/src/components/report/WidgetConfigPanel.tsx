@@ -20,7 +20,7 @@ import type { GraphLayer } from './GraphLayersEditor'
 import { toDraftPin, toStoredPin } from './MapPinsEditor'
 import type { MapPin, StoredPin } from './MapPinsEditor'
 import { ADDITIVE_AGGREGATIONS, BOUNDARY_SET_WIDGETS, PIN_WIDGETS, FACETABLE_WIDGETS, FACET_MAX_PANELS, FORECAST_DEFAULT_PERIODS, FORECAST_MAX_PERIODS, FORECAST_MIN_PERIODS, HIERARCHY_WIDGETS, HIER_MAX_DEPTH, PARTITION_WIDGETS } from '../../types/report'
-import { AGGREGATIONS, DUAL_MEASURE_WIDGETS, ROLE_SPECS, configKeyFor, roleAccepts } from '../../types/report'
+import { AGGREGATIONS, DUAL_MEASURE_WIDGETS, MULTI_MEASURE_WIDGETS, ROLE_SPECS, configKeyFor, roleAccepts } from '../../types/report'
 import { ASSIGN_DATA_EVENT, ADD_DATASET_EVENT, emptyPickerReason } from './WidgetPlaceholder'
 import { semanticAggregationWarning, nonAdditiveKind, SAFE_AGGREGATION } from '../../lib/semanticGuard'
 import { savePending, clearPending } from '../../lib/pendingEdits'
@@ -71,6 +71,11 @@ interface Props {
 // dimension-based branching below (which mirrors shape_series specifically) does not
 // apply to them. Any WidgetType not in this set is dispatched to shape_series, either
 // explicitly or via SHAPERS' fallback for unregistered types (e.g. 'slicer').
+/** A stored list of field names, whatever was actually stored. */
+function stringList(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x !== '') : []
+}
+
 function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages, hierarchy, onHierarchyRefresh, bookmarks, ruleErrors, geography, distinctCounts, onUpdate }: Props) {
   // E03: in the shape the panel edits -- a legacy `roles` dict flattened,
   // `agg` renamed (widgetConfigPanel/configShape.ts). Keyed on the stored
@@ -190,6 +195,8 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
   // Blank means "same as the first" -- the behaviour every dual-axis chart had
   // before the second axis could aggregate on its own.
   const [agg2,       setAgg2]       = useState((cfg.aggregation2 as string) ?? '')
+  // The Measure role's second and later fields (bar, line, area): one series each.
+  const [extraMeasures, setExtraMeasures] = useState<string[]>(() => stringList(cfg.extra_measures))
   // No limit = full data (QA 2026-09-26). The panel used to stamp `limit: 20`
   // on every widget it saved, silently cutting charts the author never limited.
   const [limit,      setLimit]      = useState<number | null>(cfg.limit ?? null)
@@ -414,6 +421,7 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
     setModelOpts(seedModelOpts(cfg))
     setAgg(cfg.aggregation ?? 'sum')
     setAgg2((cfg.aggregation2 as string) ?? '')
+    setExtraMeasures(stringList(cfg.extra_measures))
     setLimit(cfg.limit ?? null)
     setSort(cfg.sort ?? 'desc')
     setSortBy(cfg.sort_by ?? '')
@@ -752,6 +760,12 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
     if (caps.includes('overview')) {
       if (overviewAxis !== undefined) config.overview_axis = overviewAxis
     }
+    // Several measures: only beside a first one, and never with a series split
+    // (the server refuses the pair; the pane never offers it).
+    if (MULTI_MEASURE_WIDGETS.includes(wt) && roleValues.measure && !roleValues.category2) {
+      const extra = extraMeasures.filter(m => m && m !== roleValues.measure)
+      if (extra.length) config.extra_measures = extra
+    }
     if ((LATTICE_WIDGETS as readonly string[]).includes(wt)) {
       if (latticeRows) config.lattice_rows = latticeRows
       if (latticeCols) config.lattice_columns = latticeCols
@@ -802,7 +816,7 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
     const timer = setTimeout(() => { onUpdate(config, title); clearPending(pendingId) }, 600)
     return () => clearTimeout(timer)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [title, datasetId, JSON.stringify(roleValues), JSON.stringify(multiRoleValues), JSON.stringify(modelOpts), agg, limit, sort, sortBy, sortCol, sortCustom, agg2, havingOp, havingValue, JSON.stringify(objFilters), rankMode, rankN, rankPercent, rankOther, quickCalc, suppressBelow, suppressComplement, running, content, label, rtl, tableCols.join(','), JSON.stringify(sortKeys), bins, baseline, fitLine, targetValue, gaugeShape, animPos, animOrder, animSize, animStyle, animOpacity, animBox, autoReload, drillthroughPageId, tooltipPageId, hierarchyNodeId, dimensionGranularity, fiscalStart, action, actionPageId, carryFilters, actionBookmarkId, actionUrl, actionReportId, actionParamName, actionParamValue, barMode, forecastMethod, imageUrl, imageAlt, imageFit, webUrl, customUrl, shapeKind, shapeFill, shapeStroke, showAverageLine, referenceValue, referenceLabel, referenceColor, JSON.stringify(displayRules), xAxisLabel, yAxisLabel, axisTickSize, axisTickColor, axisLine, tickLine, xAxisAngle, yAxisAngle, yScale, yMin, yMax, showGrid, gridStyle, gridColor, wallColor, showAsTable, overviewAxis, latticeRows, latticeCols, animateBy, animateGran, slicerMode, containerMode, containerId, showLegend, legendPosition, dataLabels, seriesPatterns, showTotals, showSubtotals, totalsPosition, totalsScope, tableRowNumbers, tableRowLines, tableBanding, tableCondensed, tableSparkline, widgetBackground, widgetBorderColor, widgetBorderWidth, widgetRadius, widgetPadding, widgetSkin, altText, subtitle, boundarySetId, forecastTarget, centralityMetric,
+  }, [title, datasetId, JSON.stringify(roleValues), JSON.stringify(multiRoleValues), JSON.stringify(modelOpts), agg, limit, sort, sortBy, sortCol, sortCustom, agg2, extraMeasures.join('\u0000'), havingOp, havingValue, JSON.stringify(objFilters), rankMode, rankN, rankPercent, rankOther, quickCalc, suppressBelow, suppressComplement, running, content, label, rtl, tableCols.join(','), JSON.stringify(sortKeys), bins, baseline, fitLine, targetValue, gaugeShape, animPos, animOrder, animSize, animStyle, animOpacity, animBox, autoReload, drillthroughPageId, tooltipPageId, hierarchyNodeId, dimensionGranularity, fiscalStart, action, actionPageId, carryFilters, actionBookmarkId, actionUrl, actionReportId, actionParamName, actionParamValue, barMode, forecastMethod, imageUrl, imageAlt, imageFit, webUrl, customUrl, shapeKind, shapeFill, shapeStroke, showAverageLine, referenceValue, referenceLabel, referenceColor, JSON.stringify(displayRules), xAxisLabel, yAxisLabel, axisTickSize, axisTickColor, axisLine, tickLine, xAxisAngle, yAxisAngle, yScale, yMin, yMax, showGrid, gridStyle, gridColor, wallColor, showAsTable, overviewAxis, latticeRows, latticeCols, animateBy, animateGran, slicerMode, containerMode, containerId, showLegend, legendPosition, dataLabels, seriesPatterns, showTotals, showSubtotals, totalsPosition, totalsScope, tableRowNumbers, tableRowLines, tableBanding, tableCondensed, tableSparkline, widgetBackground, widgetBorderColor, widgetBorderWidth, widgetRadius, widgetPadding, widgetSkin, altText, subtitle, boundarySetId, forecastTarget, centralityMetric,
       containerBackground, layer, scriptCode, transparent, legendTitle,
       y2AxisLabel, donutTotal, donutTotalLabel,
     // Hierarchy / faceting / forecast state. Omitting these would let the
@@ -1086,13 +1100,28 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
   })
 
   // ── Data roles, laid out as SAS VA does ─────────────────────────────────
-  // The pickers themselves (roleControls) live in the Assign data dialog; the
-  // pane lists what each role holds and opens a field's own settings. "+ Add"
-  // opens a picker of the fields that role accepts. Both read roleChoices:
-  // one set of assignment rules, not two.
-  const roleSpecs = ROLE_SPECS[wt] ?? []
-  const assignedFields: Record<string, string[]> = Object.fromEntries(roleSpecs.map(rf => [rf.role,
-    rf.multi ? (multiRoleValues[rf.role] ?? []) : (roleValues[rf.role] ? [roleValues[rf.role]] : [])]))
+  // Two levels, as SAS draws them: this pane and the Assign data dialog list
+  // the object's roles and what each holds; "+ Add" on a role opens a picker
+  // of the fields that role accepts (roleChoices -- one set of rules).
+  //
+  // A bar, line or area chart's Measure takes several fields, one series
+  // each: the first is `measure`, the rest `extra_measures`. Not beside a
+  // series split, which fills the series slot already.
+  const multiMeasure = MULTI_MEASURE_WIDGETS.includes(wt) && !roleValues.category2
+  const extendable = (role: string) => role === 'measure' && multiMeasure
+  const roleSpecs = (ROLE_SPECS[wt] ?? []).map(rf => extendable(rf.role) ? { ...rf, multi: true } : rf)
+  type RoleSpec = (typeof roleSpecs)[number]
+  const fieldsOf = (rf: RoleSpec): string[] =>
+    extendable(rf.role) ? [roleValues.measure, ...extraMeasures].filter((m): m is string => !!m)
+    : rf.multi ? (multiRoleValues[rf.role] ?? [])
+    : (roleValues[rf.role] ? [roleValues[rf.role]] : [])
+  const setFields = (rf: RoleSpec, values: string[]) => {
+    if (extendable(rf.role)) { setRole('measure', values[0] ?? ''); setExtraMeasures(values.slice(1)); return }
+    if (rf.multi) { setMultiRoleValues(prev => ({ ...prev, [rf.role]: values })); return }
+    if (rf.role === 'category') { pickCategory(values[0] ?? ''); return }
+    setRole(rf.role, values[0] ?? '')
+  }
+  const assignedFields: Record<string, string[]> = Object.fromEntries(roleSpecs.map(rf => [rf.role, fieldsOf(rf)]))
   const fieldKind = (f: string): FieldKind => {
     const dtype = effectiveCols.find(c => c.name === f)?.dtype
     return dtype === 'datetime' ? 'date' : dtype === 'numeric' ? 'measure' : 'category'
@@ -1103,10 +1132,19 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
     w.title || `${w.widget_type.charAt(0).toUpperCase()}${w.widget_type.slice(1).replace(/_/g, ' ')} ${w.id}`
   const openAssign = (role: string | null) => { setAssignRole(role); setAssignOpen(true) }
   const removeField = (role: string, f: string) => {
-    if (roleSpecs.find(rf => rf.role === role)?.multi) { toggleMultiRole(role, f); return }
+    const rf = roleSpecs.find(r => r.role === role)
+    if (!rf) return
+    if (rf.multi) { setFields(rf, fieldsOf(rf).filter(v => v !== f)); return }
     setRole(role, '')
     if (role === 'category') { setHierarchyNodeId(''); setDimensionGranularity('') }
   }
+  // A series split and several measures cannot both be drawn: each role says
+  // why it is closed while the other is in use.
+  const addBlocked = (role: string): string | null =>
+    role === 'category2' && MULTI_MEASURE_WIDGETS.includes(wt) && extraMeasures.length > 0
+      ? 'A series split and several measures cannot be drawn together. Keep one measure to split it by a series.'
+      : null
+  const displayName = (role: string, f: string) => role === 'category' && hierarchyNodeId ? `${f} (hierarchy)` : f
   const detailLabel = { display:'block', fontSize: 12, color:'var(--muted)', marginBottom:3 } as const
   const nameField = (id: string, value: string, set: (v: string) => void, placeholder: string) => (
     <div style={{ marginBottom: 8 }}>
@@ -1116,16 +1154,22 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
   )
   // What a field opens with. Name is the title the chart shows for it (its
   // axis), so it exists only where this type draws axes; Aggregation is the
-  // widget's own aggregation of that measure.
+  // widget's own aggregation of its measures.
   const fieldDetails = (role: string, f: string) => {
     const axes = formatCaps.includes('axes')
-    if (role === 'measure' && !isModel) return (<>
-      {axes && nameField('data-role-name-measure', yAxisLabel, setYAxisLabel, f)}
-      <label htmlFor="data-role-aggregation" style={detailLabel}>Aggregation:</label>
-      <select id="data-role-aggregation" value={agg} onChange={e => setAgg(e.target.value)} style={{ width:'100%' }}>
-        {aggOptionGroups(agg, true)}
-      </select>
-    </>)
+    if (role === 'measure' && !isModel) {
+      const first = f === roleValues.measure
+      return (<>
+        {axes && first && nameField('data-role-name-measure', yAxisLabel, setYAxisLabel, f)}
+        <label htmlFor="data-role-aggregation" style={detailLabel}>Aggregation:</label>
+        <select id="data-role-aggregation" value={agg} onChange={e => setAgg(e.target.value)} style={{ width:'100%' }}>
+          {aggOptionGroups(agg, true)}
+        </select>
+        {extraMeasures.length > 0 && multiMeasure && (
+          <div style={{ fontSize: 11, color:'var(--muted)', marginTop: 4 }}>Every measure on this chart uses it.</div>
+        )}
+      </>)
+    }
     if (role === 'measure2' && DUAL_MEASURE_WIDGETS.includes(wt)) return (<>
       {axes && nameField('data-role-name-measure2', y2AxisLabel, setY2AxisLabel, f)}
       <label htmlFor="data-role-aggregation2" style={detailLabel}>Aggregation:</label>
@@ -1136,11 +1180,22 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
     </>)
     if (role === 'category') {
       const isDate = !hierarchyNodeId && fieldKind(f) === 'date'
-      if (!axes && !isDate) return null
+      if (!axes && !isDate && !hierarchyNodeId) return null
       return (<>
         {axes && nameField('data-role-name-category', xAxisLabel, setXAxisLabel, f)}
-        {/* The dialog carries the same control while it is open. */}
-        {isDate && !assignOpen && dateGrouping()}
+        {isDate && dateGrouping()}
+        {hierarchyNodeId && (
+          <button type="button" onClick={() => setShowHierarchyEditor(s => !s)}
+            style={{ marginTop:4, background:'none', border:'none', color:'var(--accent)', cursor:'pointer', fontSize:11, padding:0 }}>
+            ✎ Edit hierarchy
+          </button>
+        )}
+        {hierarchyNodeId && showHierarchyEditor && (
+          <div style={{ marginTop:8, border:'1px solid var(--border)', borderRadius:6, padding:8, maxHeight:220, overflowY:'auto' }}>
+            <HierarchyTree nodes={hierarchy ?? []} datasetId={datasetId || (primaryDatasetId ?? 0)}
+              onRefresh={() => onHierarchyRefresh?.()} />
+          </div>
+        )}
       </>)
     }
     return null
@@ -1159,9 +1214,8 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           margin:'0 0 8px', cursor:'pointer', font:'inherit', fontSize:13, color:'var(--text)' }}>
         <span aria-hidden style={{ fontSize:17, lineHeight:1 }}>+</span> Assign data
       </button>
-      <DataRolesList specs={roleSpecs} values={assignedFields} kindOf={fieldKind}
-        displayName={(role, f) => role === 'category' && hierarchyNodeId ? `${f} (hierarchy)` : f}
-        onAdd={role => setAddRole(role)} onRemove={removeField} renderDetails={fieldDetails} />
+      <DataRolesList specs={roleSpecs} values={assignedFields} kindOf={fieldKind} displayName={displayName}
+        onAdd={role => setAddRole(role)} onRemove={removeField} renderDetails={fieldDetails} addBlocked={addBlocked} />
     </div>
   )
   // Which fields a role may be given -- the ONE rule both the dialog's pickers
@@ -1204,98 +1258,6 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
       setDimensionGranularity('')
     }
   }
-  const roleControls = (<>
-          {/* Role fields — driven by ROLE_SPECS so each widget type declares its own fields
-              instead of this component hardcoding a conditional per type. */}
-          {(ROLE_SPECS[wt] ?? []).map(rf => {
-            if (rf.role === 'category' && hierarchyOptions.length > 0) {
-              const hOptions = hierarchyOptions
-              const currentValue = hierarchyNodeId ? `h:${hierarchyNodeId}` : (roleValues[rf.role] ?? '')
-              return (
-                <div key={rf.role} data-role={rf.role} style={{ marginBottom: 12 }}>
-                  <label htmlFor="dimension-select" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                    {rf.label ?? rf.role}
-                  </label>
-                  <select id="dimension-select" value={currentValue} onChange={e => pickCategory(e.target.value)} style={{ width:'100%' }}>
-                    <option value="">— select column —</option>
-                    <optgroup label="Columns">
-                      {colOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                    </optgroup>
-                    <optgroup label="Hierarchies">
-                      {hOptions.map(o => <option key={o.id} value={`h:${o.id}`}>{o.label}</option>)}
-                    </optgroup>
-                  </select>
-                  {!hierarchyNodeId && !!roleValues[rf.role]
-                    && effectiveCols.find(c => c.name === roleValues[rf.role])?.dtype === 'datetime'
-                    && dateGrouping()}
-                  {hierarchyNodeId && (
-                    <button type="button" onClick={() => setShowHierarchyEditor(s => !s)}
-                      style={{ marginTop:4, background:'none', border:'none', color:'var(--accent)', cursor:'pointer', fontSize:11, padding:0 }}>
-                      ✎ Edit hierarchy
-                    </button>
-                  )}
-                  {hierarchyNodeId && showHierarchyEditor && (
-                    <div style={{ marginTop:8, border:'1px solid var(--border)', borderRadius:6, padding:8, maxHeight:220, overflowY:'auto' }}>
-                      <HierarchyTree nodes={hierarchy ?? []} datasetId={datasetId || (primaryDatasetId ?? 0)}
-                        onRefresh={() => onHierarchyRefresh?.()} />
-                    </div>
-                  )}
-                </div>
-              )
-            }
-            if (rf.multi) {
-              const selected = multiRoleValues[rf.role] ?? []
-              const options = roleChoices(rf, selected)
-              return (
-                <div key={rf.role} data-role={rf.role}>
-                  {fld(`${rf.label ?? rf.role}${rf.required ? ' *' : ''}`, (
-                    <div style={{ maxHeight:130, overflowY:'auto', display:'flex', flexDirection:'column', gap:3, background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:6, padding:'6px 8px' }}>
-                      {options.map(o => {
-                        const idx = selected.indexOf(o.value)
-                        return (
-                          <label key={o.value} style={{ display:'flex', alignItems:'center', gap:6, fontSize:12, cursor:'pointer' }}>
-                            <input type="checkbox" checked={idx !== -1} onChange={() => toggleMultiRole(rf.role, o.value)} />
-                            <span style={{ color: idx !== -1 ? 'var(--text)' : 'var(--muted)' }}>{o.label}</span>
-                            {idx !== -1 && <span style={{ marginInlineStart:'auto', fontSize: 10.5, color:'var(--accent)' }}>#{idx + 1}</span>}
-                          </label>
-                        )
-                      })}
-                    </div>
-                  ))}
-                </div>
-              )
-            }
-            // Offer only what the field can use (roleChoices keeps a stored
-            // value on the list whatever its type).
-            const kind = roleAccepts(rf.role)
-            const chosen = roleValues[rf.role]
-            const options = roleChoices(rf, chosen ? [chosen] : [])
-            const placeholder = rf.role === 'measure' && !wt.startsWith('model_') ? '— count rows —' : rf.role === 'category2' ? '— none —' : '— select column —'
-            // Required roles say so, as SAS marks them: the author can see what
-            // the chart still needs without trying to render it first.
-            const label = `${rf.label ?? rf.role}${rf.required ? ' *' : ''}`
-            const emptyWhy = options.length === 0 ? emptyPickerReason(effectiveCols.length > 0, kind) : null
-            const isDateCategory = rf.role === 'category' && !hierarchyNodeId && !!chosen
-              && effectiveCols.find(c => c.name === chosen)?.dtype === 'datetime'
-            return (
-              <div key={rf.role} data-role={rf.role}>
-                {fld(label, sel(roleValues[rf.role] ?? '', v => setRole(rf.role, v), options, placeholder))}
-                {isDateCategory && dateGrouping()}
-                {emptyWhy && (
-                  <div data-testid="empty-picker-reason" style={{ fontSize:11, color:'var(--muted)', margin:'-6px 0 10px', display:'flex', gap:6, alignItems:'baseline', flexWrap:'wrap' }}>
-                    <span>{emptyWhy}</span>
-                    {effectiveCols.length === 0 && (
-                      <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize:11, padding:'1px 6px' }}
-                        onClick={() => window.dispatchEvent(new CustomEvent(ADD_DATASET_EVENT))}>
-                        Add data
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-  </>)
 
   return (
     <div ref={bodyRef} style={{ fontSize:13 }}>
@@ -2890,32 +2852,29 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
         <InteractionSettings widget={widget}
           pageWidgets={pages?.find(pg => pg.id === widget.page_id)?.widgets ?? []} />
       </ExpandableGroup>
+      {assignOpen && (
+        <AssignDataDialog objectName={objectLabel({ title, widget_type: wt, id: widget.id })}
+          focusRole={assignRole} onClose={() => setAssignOpen(false)}>
+          <DataRolesList specs={roleSpecs} values={assignedFields} kindOf={fieldKind} displayName={displayName}
+            onAdd={role => setAddRole(role)} onRemove={removeField} addBlocked={addBlocked} />
+        </AssignDataDialog>
+      )}
       {addRole && (() => {
         const rf = roleSpecs.find(r => r.role === addRole)
         if (!rf) return null
         const heading = (rf.label ?? rf.role).replace(/\s*\(.*\)\s*$/, '')
         const withHierarchy = rf.role === 'category' && hierarchyOptions.length > 0
-        const selected = rf.multi ? (multiRoleValues[rf.role] ?? [])
-          : withHierarchy && hierarchyNodeId ? [`h:${hierarchyNodeId}`]
-          : (roleValues[rf.role] ? [roleValues[rf.role]] : [])
-        const choices = [...roleChoices(rf, rf.multi ? selected : assignedFields[rf.role] ?? []),
+        const current = fieldsOf(rf)
+        const selected = withHierarchy && hierarchyNodeId ? [`h:${hierarchyNodeId}`] : current
+        const choices = [...roleChoices(rf, current),
           ...(withHierarchy ? hierarchyOptions.map(o => ({ value: `h:${o.id}`, label: o.label, group: 'Hierarchies' })) : [])]
         return (
           <AddFieldDialog heading={heading} multi={!!rf.multi} choices={choices} selected={selected}
+            emptyText={emptyPickerReason(effectiveCols.length > 0, roleAccepts(rf.role)) ?? undefined}
             onClose={() => setAddRole(null)}
-            onApply={values => {
-              if (rf.multi) setMultiRoleValues(prev => ({ ...prev, [rf.role]: values }))
-              else if (rf.role === 'category') pickCategory(values[0] ?? '')
-              else setRole(rf.role, values[0] ?? '')
-            }} />
+            onApply={values => setFields(rf, values)} />
         )
       })()}
-      {assignOpen && (
-        <AssignDataDialog objectName={objectLabel({ title, widget_type: wt, id: widget.id })}
-          focusRole={assignRole} onClose={() => setAssignOpen(false)}>
-          {roleControls}
-        </AssignDataDialog>
-      )}
     </div>
   )
 }

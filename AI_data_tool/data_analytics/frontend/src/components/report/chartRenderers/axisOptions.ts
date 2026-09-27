@@ -474,6 +474,13 @@ export function axisTitles(cfg: FormatConfig): {
     // rather than stay blank on the one aggregation that has nothing to name.
     ?? (agg === 'count' ? 'count' : undefined)
   const measure2 = applied(text(cfg.measure2), text(cfg.aggregation2) ?? agg)
+  // Several measures on one axis (extra_measures): no single field names it,
+  // and "sum(revenue)" over revenue, cost and profit would say something false.
+  // The legend names each series; an author's own title still wins.
+  const extra = (cfg as { extra_measures?: unknown }).extra_measures
+  if (Array.isArray(extra) && extra.length > 0 && !text(cfg.dimension2)) {
+    return { category, measure: undefined, measure2 }
+  }
   return { category, measure, measure2 }
 }
 

@@ -153,19 +153,30 @@ async function main() {
           const dialog = page.getByRole('dialog', { name: /^Assign data/ })
           const opened = await dialog.waitFor({ timeout: 4000 }).then(() => true, () => false)
           if (!opened) await page.getByRole('button', { name: /^Assign data$/ }).click()
-          for (const [role, col] of Object.entries(spec.roles ?? {})) {
-            const field = dialog.locator(`[data-role="${role}"] select`)
-            await field.waitFor({ timeout: 10000 })
-            await field.selectOption(col)
-          }
-          for (const [role, cols] of Object.entries(spec.multi ?? {})) {
-            for (const col of cols) {
-              await dialog.locator(`[data-role="${role}"] label`, { hasText: new RegExp(`^${col}`) })
-                .locator('input[type="checkbox"]').check()
+          // Level one lists the roles; a role's "+ Add" opens level two, the
+          // fields that role accepts: a checklist where it takes several.
+          const pick = async (role, cols) => {
+            await dialog.locator(`[data-roles-section="${role}"]`).getByRole('button', { name: /^Add / }).click()
+            const picker = page.getByRole('dialog', { name: /^Add / })
+            await picker.waitFor({ timeout: 10000 })
+            if (await picker.getByRole('checkbox').count()) {
+              for (const col of cols) {
+                await picker.locator('label', { hasText: new RegExp(`^${col}(?![\\w])`) }).locator('input[type="checkbox"]').check()
+              }
+              await picker.getByRole('button', { name: 'Add', exact: true }).click()
+            } else {
+              await picker.getByRole('option').filter({ hasText: new RegExp(`(^|\\s)${cols[0]}(\\s|$)`) }).first().click()
             }
+            await picker.waitFor({ state: 'detached', timeout: 10000 })
           }
-          if (spec.granularity) await dialog.locator('#date-granularity').selectOption(spec.granularity)
+          for (const [role, col] of Object.entries(spec.roles ?? {})) await pick(role, [col])
+          for (const [role, cols] of Object.entries(spec.multi ?? {})) await pick(role, cols)
           await dialog.getByRole('button', { name: 'Done' }).click()
+          // A date dimension's grouping is that field's own setting, in the pane.
+          if (spec.granularity) {
+            await page.locator('[data-roles-section="category"] [data-role-field] button').first().click()
+            await page.locator('#date-granularity').selectOption(spec.granularity)
+          }
           // The panel opens on "Data roles" after an insert; the rest is under "All".
           await page.getByRole('tablist', { name: 'Settings sections' }).getByRole('tab', { name: 'All', exact: true }).click()
           if (spec.agg) await page.locator('#cfg-aggregation').selectOption(spec.agg)

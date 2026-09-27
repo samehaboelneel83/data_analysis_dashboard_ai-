@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, act, within, cleanup } from '@testing-library/react'
 import WidgetConfigPanel from './WidgetConfigPanel'
 import { CrossFilterProvider } from './CrossFilterContext'
-import { ROLE_SPECS, roleAccepts, configKeyFor } from '../../types/report'
+import { ROLE_SPECS, MULTI_MEASURE_WIDGETS, roleAccepts, configKeyFor } from '../../types/report'
 import type { Widget, ReportPage, WidgetType } from '../../types/report'
 import type { DatasetColumn } from '../../services/api'
 
@@ -11,7 +11,8 @@ import type { DatasetColumn } from '../../services/api'
 // can use -- a Y axis / measure numbers only, a start or end date dates only,
 // an X axis / category anything -- and what is picked must land in the config
 // key that role is saved under. A role that takes several fields (a card's
-// fields, a model's predictors) takes several, in the order ticked.
+// fields, a model's predictors, the value axis of a bar, line or area chart)
+// takes several, in the order ticked.
 //
 // Walks ROLE_SPECS itself, so a widget type or role added later is covered
 // the day it lands, with no list here to forget to extend.
@@ -60,6 +61,10 @@ function openAdd(role: string) {
 beforeEach(() => { localStorage.clear(); vi.useFakeTimers() })
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks() })
 
+/** Does this role take several fields on this widget type? */
+const takesSeveral = (type: string, rf: { role: string; multi?: boolean }) =>
+  !!rf.multi || (rf.role === 'measure' && MULTI_MEASURE_WIDGETS.includes(type))
+
 const FAMILIES = (Object.entries(ROLE_SPECS) as [WidgetType, typeof ROLE_SPECS[WidgetType]][])
   .filter(([, specs]) => specs.length > 0)
 
@@ -79,7 +84,7 @@ describe('+ Add offers the fields each role can use, for every object family', (
           const onUpdate = renderPanel(type)
           const dialog = openAdd(rf.role)
 
-          if (rf.multi) {
+          if (takesSeveral(type, rf)) {
             const boxes = within(dialog).getAllByRole('checkbox') as HTMLInputElement[]
             const offered = boxes.map(b => fieldOf(b.closest('label')!.textContent ?? '')).sort()
             expect(offered).toEqual([...want].sort())
@@ -91,7 +96,10 @@ describe('+ Add offers the fields each role can use, for every object family', (
             fireEvent.click(first); fireEvent.click(second)
             fireEvent.click(within(dialog).getByRole('button', { name: 'Add' }))
             act(() => { vi.advanceTimersByTime(700) })
-            expect(onUpdate.mock.calls.at(-1)![0][configKeyFor(rf.role)]).toEqual(order)
+            const saved = onUpdate.mock.calls.at(-1)![0]
+            if (rf.multi) expect(saved[configKeyFor(rf.role)]).toEqual(order)
+            // A chart's value axis: the first measure, then one more series each.
+            else expect([saved.measure, ...(saved.extra_measures ?? [])]).toEqual(order)
           } else {
             const options = within(dialog).getAllByRole('option')
             const offered = options.map(o => fieldOf(o.textContent ?? '')).sort()
@@ -116,7 +124,7 @@ describe('+ Add offers the fields each role can use, for every object family', (
 describe('roles that take one field vs several', () => {
   it('only the multi roles are checklists; every other role is a single choice', () => {
     for (const [type, specs] of FAMILIES) {
-      for (const rf of specs.filter(r => r.multi)) {
+      for (const rf of specs.filter(r => takesSeveral(type, r))) {
         renderPanel(type)
         expect(within(openAdd(rf.role)).queryAllByRole('option')).toHaveLength(0)
         cleanup()

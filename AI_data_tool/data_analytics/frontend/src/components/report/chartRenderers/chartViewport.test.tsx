@@ -5,6 +5,7 @@ import { autoViewport, readableCapacity, isTemporalAxis, MIN_WINDOW } from './ax
 import { useChartViewport, StaticChartsContext } from './useChartViewport'
 import BarChartRenderer from './BarChartRenderer'
 import LineChartRenderer from './LineChartRenderer'
+import AreaChartRenderer from './AreaChartRenderer'
 
 // A congested category axis opens on a readable WINDOW with a range slider,
 // instead of squeezing every point into the plot. These pin the three layers:
@@ -191,6 +192,21 @@ describe('what Recharts draws', () => {
     expect(new Set(fills)).toEqual(new Set(['var(--success)']))
   })
 
+  it('several measures draw one line and one area each, with a legend', () => {
+    // The server's merged shape (services/multi_measure.py): one column per measure.
+    const data = { type: 'crosstab', columns: ['region', 'revenue', 'cost', '__total__'],
+      rows: [['N', 30, 3, null], ['S', 300, 30, null], ['E', 7, 0.5, null]] }
+    for (const R of [LineChartRenderer, AreaChartRenderer]) {
+      const { container, unmount } = render(<div style={{ width: 600, height: 400 }}>
+        <R {...base} rows={data.rows} data={data} /></div>)
+      const cls = R === LineChartRenderer ? '.recharts-line' : '.recharts-area'
+      expect(container.querySelectorAll(cls)).toHaveLength(2)
+      const legend = [...container.querySelectorAll('.recharts-legend-item-text')].map(e => e.textContent)
+      expect(legend).toEqual(['revenue', 'cost'])
+      unmount()
+    }
+  })
+
   it('a congested line chart opens on its newest points', () => {
     const labels = months(72)
     const { container } = render(<div style={{ width: 600, height: 400 }}><LineChartRenderer {...base} rows={rowsOf(labels)} /></div>)
@@ -198,5 +214,14 @@ describe('what Recharts draws', () => {
     const ticks = [...container.querySelectorAll('.recharts-xAxis .recharts-cartesian-axis-tick-value')].map(t => t.textContent)
     expect(ticks).toContain('2025-12')
     expect(ticks).not.toContain('2020-01')
+  })
+})
+
+describe('the value axis of a chart with several measures', () => {
+  it('is not titled after the first measure alone; the legend names each series', async () => {
+    const { axisTitles } = await import('./axisOptions')
+    expect(axisTitles({ dimension: 'region', measure: 'revenue', aggregation: 'sum' } as never).measure).toBe('sum(revenue)')
+    expect(axisTitles({ dimension: 'region', measure: 'revenue', aggregation: 'sum',
+      extra_measures: ['cost'] } as never).measure).toBeUndefined()
   })
 })

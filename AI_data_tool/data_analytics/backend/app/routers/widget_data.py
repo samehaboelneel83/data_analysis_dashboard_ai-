@@ -18,6 +18,7 @@ from ..services.display_rules import result_frame
 from ..services.parameters import ParameterError, apply_report_parameters
 from ..services import quotas
 from ..services.semantic_guard import config_refusal
+from ..services.multi_measure import measure_list, merge_measure_series
 
 _EXPORT_FORMATS = {"csv": "csv", "tsv": "tsv", "xlsx": "xlsx"}
 
@@ -333,6 +334,19 @@ async def _resolve_widget_data(
     above always keys strictly on `current_user.org_id`), only for what a
     host-signed embed JWT declared as its viewer's identity. None for every
     other caller (unchanged behaviour)."""
+    # Several measures on one axis: each resolved through THIS function (so
+    # security, engines, parameters and caching are the single-measure ones),
+    # then merged into the split-series shape the renderers already draw.
+    measures = measure_list(req.widget_type, req.config)
+    if measures is not None:
+        parts = []
+        for m in measures:
+            one = req.model_copy(update={"config": {**req.config, "measure": m, "extra_measures": []}})
+            parts.append(await _resolve_widget_data(
+                dataset_id, one, db, current_user, email_override=email_override,
+                org_id_override=org_id_override, via_report_id=via_report_id,
+                redact_columns=redact_columns, request=request))
+        return merge_measure_series(parts, measures)
     result = await db.execute(
         select(Dataset).options(selectinload(Dataset.columns)).where(Dataset.id == dataset_id)
     )

@@ -13,6 +13,13 @@ export function applyTheme(name: string, customPalettes?: Record<string, string[
   COLORS.length = 0
   COLORS.push(...next)
 }
+/** The report palette's i-th colour, wrapping round. Every data mark reads
+ *  its colour here (or from COLORS), never a fixed hex or the app's accent,
+ *  so a report's chosen palette reaches every object on it. */
+export function seriesColor(i = 0): string {
+  return COLORS.length ? COLORS[((i % COLORS.length) + COLORS.length) % COLORS.length] : 'var(--accent)'
+}
+
 export const SELECTED_STROKE = '#fff'
 
 /**

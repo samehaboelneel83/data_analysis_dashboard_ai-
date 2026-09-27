@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, act } from '@testing-library/react'
+import { render, screen, fireEvent, act, within } from '@testing-library/react'
 import WidgetConfigPanel from './WidgetConfigPanel'
 import { CrossFilterProvider } from './CrossFilterContext'
 import type { Widget } from '../../types/report'
@@ -1005,8 +1005,12 @@ describe('WidgetConfigPanel hierarchy binding', () => {
     render(<CrossFilterProvider><WidgetConfigPanel widget={widget()} columns={columns} onUpdate={onUpdate}
       hierarchy={hierarchy} /></CrossFilterProvider>)
 
-    fireEvent.click(screen.getByRole('button', { name: /^Assign data$/ }))
-    fireEvent.change(screen.getByLabelText('Dimension (Group / X-axis)'), { target: { value: 'h:3' } })
+    // "+ Add" on Dimension lists the hierarchy levels beside the columns. The
+    // widget already holds region there, and a one-field role is full: remove it first.
+    fireEvent.click(screen.getByRole('button', { name: 'Remove region from Dimension' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add Dimension' }))
+    const picker = screen.getByRole('dialog', { name: 'Add Dimension' })
+    fireEvent.click(within(picker).getAllByRole('option').find(o => /Year/.test(o.textContent ?? ''))!)
     act(() => { vi.advanceTimersByTime(700) })
 
     expect(onUpdate).toHaveBeenCalled()
@@ -1027,8 +1031,11 @@ describe('WidgetConfigPanel hierarchy binding', () => {
     render(<CrossFilterProvider><WidgetConfigPanel widget={widget({ config: { hierarchyNodeId: 3, dimension: 'order_date', dimension_granularity: 'year' } })}
       columns={columns} onUpdate={onUpdate} hierarchy={hierarchy} /></CrossFilterProvider>)
 
-    fireEvent.click(screen.getByRole('button', { name: /^Assign data$/ }))
-    fireEvent.change(screen.getByLabelText('Dimension (Group / X-axis)'), { target: { value: 'region' } })
+    // A one-field role is changed by removing its field, then adding another.
+    fireEvent.click(screen.getByRole('button', { name: 'Remove order_date from Dimension' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add Dimension' }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Add Dimension' }))
+      .getAllByRole('option').find(o => (o.textContent ?? '').includes('region'))!)
     act(() => { vi.advanceTimersByTime(700) })
 
     const [config] = onUpdate.mock.calls[onUpdate.mock.calls.length - 1]
@@ -1116,9 +1123,9 @@ describe('measure dropdown excludes id-like numeric columns', () => {
     render(<CrossFilterProvider><WidgetConfigPanel
       widget={widget({ widget_type: 'bar', config: { dimension: 'region' } })}
       columns={colsWithId} onUpdate={vi.fn()} /></CrossFilterProvider>)
-    fireEvent.click(screen.getByRole('button', { name: /^Assign data$/ }))
-    const options = Array.from((screen.getByLabelText('Measure (numeric column)') as HTMLSelectElement).options)
-      .map(o => o.value)
+    fireEvent.click(screen.getByRole('button', { name: 'Add Measure' }))
+    const options = within(screen.getByRole('dialog', { name: 'Add Measure' })).getAllByRole('checkbox')
+      .map(b => (b.closest('label')!.textContent ?? '').replace(/#\d+$/, '').trim())
     expect(options).toContain('amount')
     expect(options).not.toContain('state_id')
   })
@@ -1127,13 +1134,11 @@ describe('measure dropdown excludes id-like numeric columns', () => {
     render(<CrossFilterProvider><WidgetConfigPanel
       widget={widget({ widget_type: 'bar', config: { dimension: 'region', measure: 'state_id' } })}
       columns={colsWithId} onUpdate={vi.fn()} /></CrossFilterProvider>)
-    fireEvent.click(screen.getByRole('button', { name: /^Assign data$/ }))
-    const select = screen.getByLabelText('Measure (numeric column)') as HTMLSelectElement
-    const options = Array.from(select.options).map(o => o.value)
-    expect(options).toContain('state_id')
-    expect(select.value).toBe('state_id')
-    const idOption = Array.from(select.options).find(o => o.value === 'state_id')!
-    expect(idOption.label).toBe('state_id (id)')
+    fireEvent.click(screen.getByRole('button', { name: 'Add Measure' }))
+    const boxes = within(screen.getByRole('dialog', { name: 'Add Measure' })).getAllByRole('checkbox') as HTMLInputElement[]
+    const idBox = boxes.find(b => (b.closest('label')!.textContent ?? '').startsWith('state_id'))!
+    expect(idBox.checked).toBe(true)
+    expect((idBox.closest('label')!.textContent ?? '').replace(/#\d+$/, '').trim()).toBe('state_id (id)')
   })
 
   it('offers a calculated column (fx) as a measure', () => {
@@ -1148,9 +1153,9 @@ describe('measure dropdown excludes id-like numeric columns', () => {
     render(<CrossFilterProvider><WidgetConfigPanel
       widget={widget({ widget_type: 'kpi', config: {} })}
       columns={cols} onUpdate={vi.fn()} /></CrossFilterProvider>)
-    fireEvent.click(screen.getByRole('button', { name: /^Assign data$/ }))
-    const options = Array.from((screen.getByLabelText(/^Measure \(numeric column\)/) as HTMLSelectElement).options)
-      .map(o => o.value)
+    fireEvent.click(screen.getByRole('button', { name: 'Add Measure' }))
+    const options = within(screen.getByRole('dialog', { name: 'Add Measure' })).getAllByRole('option')
+      .map(o => (o.textContent ?? '').trim())
     expect(options).toContain('all_employee_count')
     expect(options).toContain('employee_count')
   })

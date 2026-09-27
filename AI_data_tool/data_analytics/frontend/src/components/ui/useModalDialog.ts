@@ -24,6 +24,29 @@ import { useEffect, useRef } from 'react'
  * knows whether it is a `dialog` or an `alertdialog`, and what to call it.
  */
 
+/** Open dialogs, innermost last. Only the innermost handles keys: with a
+ *  picker open on top of Assign data, one Escape closes the picker, not both,
+ *  and Tab cycles inside the picker, not the dialog under it. */
+interface OpenDialog { el: () => HTMLElement | null }
+const openDialogs: OpenDialog[] = []
+
+/** The dialog keys belong to: the most recently opened one that has no other
+ *  open dialog inside it. Opening order alone is not enough -- a dialog
+ *  nested in another's markup and mounted in the same render registers
+ *  FIRST (React runs a child's effects before its parent's).
+ *
+ *  Only dialogs actually on the page count. Some callers keep the hook
+ *  mounted while nothing is showing (the rail attaches its ref only while it
+ *  is a drawer; the command palette while it is open), and an empty
+ *  registration must not take the keys from a real dialog. With no dialog on
+ *  the page at all, every registration handles keys, as before stacking. */
+function topDialog(): OpenDialog | 'any' {
+  const live = openDialogs.filter(d => d.el()?.isConnected)
+  if (live.length === 0) return 'any'
+  const leaves = live.filter(d => !live.some(o => o !== d && d.el()!.contains(o.el()!)))
+  return leaves[leaves.length - 1]
+}
+
 /** Everything focusable by default, minus what cannot currently take focus. */
 const FOCUSABLE = [
   'a[href]',
@@ -57,7 +80,11 @@ export function useModalDialog<T extends HTMLElement>(
       ;(first ?? ref.current)?.focus()
     }
 
+    const token: OpenDialog = { el: () => ref.current }
+    openDialogs.push(token)
     const onKey = (e: KeyboardEvent) => {
+      const top = topDialog()
+      if (top !== 'any' && top !== token) return
       if (e.key === 'Escape') {
         e.preventDefault()
         closeRef.current()
@@ -86,6 +113,7 @@ export function useModalDialog<T extends HTMLElement>(
     window.addEventListener('keydown', onKey)
     return () => {
       window.removeEventListener('keydown', onKey)
+      openDialogs.splice(openDialogs.indexOf(token), 1)
       if (restore instanceof HTMLElement) restore.focus()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

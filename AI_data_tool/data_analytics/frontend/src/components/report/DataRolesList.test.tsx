@@ -80,15 +80,46 @@ describe('the pane', () => {
 
 describe('+ Add', () => {
   it('offers only the fields the role accepts, and a click assigns a one-field role', () => {
-    const onUpdate = renderPanel(bar({ dimension: 'region' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Add Measure' }))
-    const dialog = screen.getByRole('dialog', { name: 'Add Measure' })
-    const offered = within(dialog).getAllByRole('option').map(o => o.textContent)
-    expect(offered).toEqual(['sales'])                      // numbers only
-    fireEvent.click(within(dialog).getByRole('option', { name: 'sales' }))
+    const onUpdate = renderPanel(bar({ measure: 'sales' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add Dimension' }))
+    const dialog = screen.getByRole('dialog', { name: 'Add Dimension' })
+    expect(within(dialog).getAllByRole('option')).toHaveLength(3)   // a dimension takes any field
+    fireEvent.click(within(dialog).getAllByRole('option').find(o => (o.textContent ?? '').includes('region'))!)
     expect(screen.queryByRole('dialog')).toBeNull()
     act(() => { vi.advanceTimersByTime(700) })
     expect(lastConfig(onUpdate)).toMatchObject({ dimension: 'region', measure: 'sales' })
+  })
+
+  it('a bar chart takes several measures on its value axis, one series each', () => {
+    const cols: DatasetColumn[] = [...COLUMNS,
+      { id: 4, name: 'cost', dtype: 'numeric', missing_pct: 0, stats: {} }]
+    const onUpdate = vi.fn()
+    const w = bar({ dimension: 'region', measure: 'sales' })
+    render(<CrossFilterProvider><WidgetConfigPanel widget={w} columns={cols}
+      onUpdate={onUpdate} pages={page([w])} /></CrossFilterProvider>)
+    const add = screen.getByRole('button', { name: 'Add Measure' }) as HTMLButtonElement
+    expect(add.disabled).toBe(false)                        // not full with one measure
+    fireEvent.click(add)
+    const dialog = screen.getByRole('dialog', { name: 'Add Measure' })
+    const box = (n: string) => within(dialog).getByRole('checkbox', { name: new RegExp(`^${n}`) }) as HTMLInputElement
+    expect(box('sales').checked).toBe(true)
+    expect(within(dialog).queryByRole('checkbox', { name: /region/ })).toBeNull()   // numbers only
+    fireEvent.click(box('cost'))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add' }))
+    act(() => { vi.advanceTimersByTime(700) })
+    expect(lastConfig(onUpdate)).toMatchObject({ measure: 'sales', extra_measures: ['cost'] })
+    expect(screen.getByRole('button', { name: 'cost, Measure' })).toBeTruthy()
+
+    // A series split cannot sit beside several measures: Series says why.
+    const series = screen.getByRole('button', { name: 'Add Series' }) as HTMLButtonElement
+    expect(series.disabled).toBe(true)
+    expect(series.title).toMatch(/cannot be drawn together/)
+
+    // Removing the first measure promotes the next one.
+    fireEvent.click(screen.getByRole('button', { name: 'Remove sales from Measure' }))
+    act(() => { vi.advanceTimersByTime(700) })
+    expect(lastConfig(onUpdate).measure).toBe('cost')
+    expect(lastConfig(onUpdate).extra_measures).toBeUndefined()
   })
 
   it('a role that takes several fields is a checklist, appended in the order ticked', () => {
@@ -113,16 +144,32 @@ describe('+ Add', () => {
 })
 
 describe('Assign data', () => {
-  it('opens a dialog holding every role picker, and Done closes it', () => {
+  it('two levels: the roles, then "+ Add" opens the fields that role accepts on top', () => {
     const onUpdate = renderPanel(bar())
     fireEvent.click(screen.getByRole('button', { name: /^Assign data$/ }))
-    const dialog = screen.getByRole('dialog', { name: /Assign data/ })
-    fireEvent.change(within(dialog).getByLabelText(/^Dimension/), { target: { value: 'region' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Done' }))
+    const roles = screen.getByRole('dialog', { name: /^Assign data/ })
+    // Level one lists every role of the object.
+    expect(roles.querySelectorAll('[data-roles-section]').length).toBeGreaterThanOrEqual(3)
+    fireEvent.click(within(roles).getByRole('button', { name: 'Add Dimension' }))
+    const fields = screen.getByRole('dialog', { name: 'Add Dimension' })
+    fireEvent.click(within(fields).getAllByRole('option').find(o => (o.textContent ?? '').includes('region'))!)
+    // Level two closes; level one stays, now showing the field under its role.
+    expect(screen.queryByRole('dialog', { name: 'Add Dimension' })).toBeNull()
+    expect(within(roles).getByRole('button', { name: 'region, Dimension' })).toBeTruthy()
+    fireEvent.click(within(roles).getByRole('button', { name: 'Done' }))
     expect(screen.queryByRole('dialog')).toBeNull()
     act(() => { vi.advanceTimersByTime(700) })
     expect(lastConfig(onUpdate)).toMatchObject({ dimension: 'region' })
-    expect(screen.getByRole('button', { name: 'region, Dimension' })).toBeTruthy()
+  })
+
+  it('Escape in level two closes only level two', () => {
+    renderPanel(bar())
+    fireEvent.click(screen.getByRole('button', { name: /^Assign data$/ }))
+    const roles = screen.getByRole('dialog', { name: /^Assign data/ })
+    fireEvent.click(within(roles).getByRole('button', { name: 'Add Dimension' }))
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByRole('dialog', { name: 'Add Dimension' })).toBeNull()
+    expect(screen.getByRole('dialog', { name: /^Assign data/ })).toBeTruthy()
   })
 
 

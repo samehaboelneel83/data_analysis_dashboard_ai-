@@ -26,6 +26,9 @@ export interface DataRolesListProps {
   onRemove: (role: string, field: string) => void
   /** The settings a field opens with; null = the field has none to open. */
   renderDetails?: (role: string, field: string) => ReactNode | null
+  /** Why a role cannot take a field just now (another role's choice rules
+   *  it out), or null. Its "+ Add" is greyed and says so. */
+  addBlocked?: (role: string) => string | null
 }
 
 /** "Dimension (Group / X-axis)" -> heading "Dimension", hint "Group / X-axis". */
@@ -51,7 +54,7 @@ export function FieldIcon({ kind }: { kind: FieldKind }) {
   return (<svg {...common}><path d="M3 13V6M6.3 13V3M9.6 13V8M13 13V5" /><path d="M2 13.5h12" /></svg>)
 }
 
-export default function DataRolesList({ specs, values, kindOf, displayName, onAdd, onRemove, renderDetails }: DataRolesListProps) {
+export default function DataRolesList({ specs, values, kindOf, displayName, onAdd, onRemove, renderDetails, addBlocked }: DataRolesListProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [open, setOpen] = useState<string | null>(null)
   const toggleRole = (role: string) => setCollapsed(prev => {
@@ -69,7 +72,8 @@ export default function DataRolesList({ specs, values, kindOf, displayName, onAd
         // A single-field role is full once it has its field. SAS still shows
         // its "+ Add", greyed; replacing is done from the field's × or from
         // Assign data.
-        const canAdd = rf.multi || fields.length === 0
+        const blocked = addBlocked?.(rf.role) ?? null
+        const canAdd = !blocked && (rf.multi || fields.length === 0)
         const sectionId = `data-role-section-${rf.role}`
         return (
           <section key={rf.role} data-roles-section={rf.role} style={{ marginBottom: 6 }}>
@@ -88,7 +92,7 @@ export default function DataRolesList({ specs, values, kindOf, displayName, onAd
               </button>
               <button type="button" onClick={() => onAdd(rf.role)} aria-label={`Add ${heading}`}
                 disabled={!canAdd}
-                title={canAdd ? undefined : `${heading} takes one field. Remove it to choose another.`}
+                title={blocked ?? (canAdd ? undefined : `${heading} takes one field. Remove it to choose another.`)}
                 style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none',
                   cursor: canAdd ? 'pointer' : 'default', font: 'inherit', fontSize: 13, padding: '2px 4px',
                   color: canAdd ? 'var(--text)' : 'var(--muted)', opacity: canAdd ? 1 : 0.55 }}>
@@ -146,10 +150,10 @@ export default function DataRolesList({ specs, values, kindOf, displayName, onAd
 }
 
 /**
- * "Assign data": every role of the object and its picker, in one dialog.
- * Opened from the pane's button, from a role's "+ Add" (scrolled to that
- * role), and on its own right after a chart is inserted -- a new chart's first
- * job is to be given its data. `children` are the panel's own role pickers.
+ * "Assign data", level one: every role of the object and what it holds. Each
+ * role's "+ Add" opens level two, AddFieldDialog, on top of it. Opened from
+ * the pane's button and on its own right after a chart is inserted -- a new
+ * chart's first job is to be given its data. `children` is the role list.
  */
 export function AssignDataDialog({ objectName, focusRole, onClose, children }: {
   objectName: string
@@ -160,9 +164,9 @@ export function AssignDataDialog({ objectName, focusRole, onClose, children }: {
   const ref = useModalDialog<HTMLDivElement>(onClose)
   useEffect(() => {
     if (!focusRole) return
-    const row = ref.current?.querySelector<HTMLElement>(`[data-role="${focusRole}"]`)
+    const row = ref.current?.querySelector<HTMLElement>(`[data-roles-section="${focusRole}"]`)
     row?.scrollIntoView?.({ block: 'nearest' })
-    row?.querySelector<HTMLElement>('select, input')?.focus()
+    row?.querySelector<HTMLElement>('button:not([disabled])')?.focus()
   }, [focusRole, ref])
   return (
     <div onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}
@@ -201,11 +205,13 @@ export interface FieldChoice { value: string; label: string; group?: string }
  * it holds already ticked, new ones appended in the order ticked -- applied
  * with Add; a one-field role applies on the click.
  */
-export function AddFieldDialog({ heading, multi, choices, selected, onApply, onClose }: {
+export function AddFieldDialog({ heading, multi, choices, selected, onApply, onClose, emptyText }: {
   heading: string
   multi: boolean
   choices: FieldChoice[]
   selected: string[]
+  /** What to say when no field fits this role at all. */
+  emptyText?: string
   onApply: (values: string[]) => void
   onClose: () => void
 }) {
@@ -238,7 +244,7 @@ export function AddFieldDialog({ heading, multi, choices, selected, onApply, onC
           style={{ overflowY: 'auto', padding: '6px 8px', fontSize: 13 }}>
           {shown.length === 0 && (
             <div style={{ padding: '10px 8px', color: 'var(--muted)', fontSize: 12 }}>
-              {choices.length === 0 ? 'No field in this data fits this role.' : 'No field matches.'}
+              {choices.length === 0 ? (emptyText ?? 'No field in this data fits this role.') : 'No field matches.'}
             </div>
           )}
           {groups.map(g => (

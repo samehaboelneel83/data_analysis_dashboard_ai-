@@ -432,3 +432,10 @@ class TestEveryOfferedAggregationWorks:
             assert got != summed, (
                 f"'{agg}' returned the sum -- it fell through to the default "
                 f"instead of being implemented")
+
+
+def test_multi_measure_widgets(ts):
+    """The panel offers a second measure exactly where the server draws one
+    series per measure; anywhere else save would refuse it."""
+    from app.services.multi_measure import MULTI_MEASURE_WIDGETS
+    assert _string_list(ts, "MULTI_MEASURE_WIDGETS") == set(MULTI_MEASURE_WIDGETS)

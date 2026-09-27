@@ -35,14 +35,24 @@ function widget(widget_type: string): Widget {
            layout: { x: 0, y: 0, w: 6, h: 4 }, created_at: '2026-01-01' } as Widget
 }
 
+/** "Aa department · 4 values" / "# wait_minutes" -> the field name. */
+const fieldOf = (label: string) => label.replace(/^(ƒx|#|◷|Aa)\s+/, '').replace(/\s+·.*$/, '').replace(/#\d+$/, '').trim()
+
+/** What a role offers, the way an author gets there: Assign data (level
+ *  one: the roles), then that role's "+ Add" (level two: its fields). */
 function optionsOf(labelPattern: RegExp, widget_type: string): string[] {
   render(<CrossFilterProvider><WidgetConfigPanel widget={widget(widget_type)}
     columns={COLUMNS} onUpdate={vi.fn()} pages={PAGES} /></CrossFilterProvider>)
-  // The role pickers live in the Assign data dialog.
   fireEvent.click(screen.getByRole('button', { name: /^Assign data$/ }))
-  const select = within(screen.getByRole('dialog')).getByLabelText(labelPattern) as HTMLSelectElement
-  return [...select.querySelectorAll('option')]
-    .map(o => (o as HTMLOptionElement).value).filter(Boolean)
+  const assign = screen.getByRole('dialog', { name: /^Assign data/ })
+  const section = [...assign.querySelectorAll<HTMLElement>('[data-roles-section]')]
+    .find(sec => labelPattern.test(sec.querySelector('button')?.textContent ?? ''))
+  expect(section, `no role matching ${labelPattern} on ${widget_type}`).toBeTruthy()
+  fireEvent.click(within(section!).getByRole('button', { name: /^Add / }))
+  const picker = screen.getByRole('dialog', { name: /^Add / })
+  const items = [...within(picker).queryAllByRole('option'),
+                 ...within(picker).queryAllByRole('checkbox').map(b => b.closest('label')!)]
+  return items.map(i => fieldOf(i.textContent ?? ''))
 }
 
 beforeEach(() => localStorage.clear())
@@ -125,8 +135,10 @@ describe('a column already chosen is never hidden', () => {
                                             target: 'department' } } as Widget
     render(<CrossFilterProvider><WidgetConfigPanel widget={w} columns={COLUMNS}
       onUpdate={vi.fn()} pages={PAGES} /></CrossFilterProvider>)
+    // Listed under its role, where the author can see it and remove it --
+    // never blanked because a rule arrived after it was saved.
     fireEvent.click(screen.getByRole('button', { name: /^Assign data$/ }))
-    const select = within(screen.getByRole('dialog')).getByLabelText(/target/i) as HTMLSelectElement
-    expect(select.value).toBe('department')
+    const assign = screen.getByRole('dialog', { name: /^Assign data/ })
+    expect(within(assign).getByRole('button', { name: /^department, Target/ })).toBeTruthy()
   })
 })

@@ -256,6 +256,12 @@ export const DUAL_MEASURE_WIDGETS: readonly string[] = [
   'dual_axis_time_series', 'comparative_time_series',
 ]
 
+/** The widget types whose Measure (value axis) takes several fields, one
+ *  series each: the first is saved as `measure`, the rest as
+ *  `extra_measures`. MIRRORS MULTI_MEASURE_WIDGETS in backend
+ *  services/multi_measure.py (pinned by test_frontend_constant_mirrors.py). */
+export const MULTI_MEASURE_WIDGETS: readonly string[] = ['bar', 'line', 'area']
+
 /** What kind of column a field role can actually use.
  *
  *  Only `measure` and `measure2` were ever filtered, so a bar chart's per-bar
