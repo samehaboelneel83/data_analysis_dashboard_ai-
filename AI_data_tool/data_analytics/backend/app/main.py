@@ -763,7 +763,7 @@ async def health_ready(response: Response):
 
             backend = _get_cache_backend()
             probe_key = "__readiness__"
-            backend.set(probe_key, {"v": 1}, ttl_seconds=5)
+            backend.set(probe_key, {"v": 1}, ttl_s=5)
             backend.get(probe_key)
             checks["valkey"] = {
                 "status": "ok",

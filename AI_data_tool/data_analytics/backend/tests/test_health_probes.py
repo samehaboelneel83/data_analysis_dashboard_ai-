@@ -174,3 +174,18 @@ class TestValkeyIsOptional:
         assert r.status_code == 200, "a degraded optional cache must not fail readiness"
         assert r.json()["status"] == "ready"
         assert r.json()["checks"]["valkey"]["status"] == "degraded"
+
+    @pytest.mark.asyncio
+    async def test_working_valkey_reports_ok(self, monkeypatch):
+        """The probe once called set(..., ttl_seconds=5) while every backend
+        takes `ttl_s`, so a perfectly healthy Valkey always read "degraded:
+        TypeError". A real backend class, not a lenient fake, catches that."""
+        monkeypatch.setattr(settings, "valkey_url", "redis://valkey:6379/0")
+
+        import app.services.widget_data as wd
+        from app.services.cache_backend import InProcessCache
+
+        monkeypatch.setattr(wd, "_get_cache_backend", lambda: InProcessCache())
+
+        r = await _get("/health/ready")
+        assert r.json()["checks"]["valkey"]["status"] == "ok", r.json()["checks"]["valkey"]
