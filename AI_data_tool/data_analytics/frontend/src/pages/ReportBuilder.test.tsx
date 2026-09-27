@@ -2341,3 +2341,33 @@ describe('ReportBuilder accessibility', () => {
     expect(await axeViolations(container)).toEqual([])
   }, 20000)
 })
+
+describe('ReportBuilder Modern view style', () => {
+  beforeEach(() => { try { localStorage.removeItem('datalytics.viewStyle') } catch { /* */ } })
+
+  it('reads a report in the Modern layout, remembers the choice, and never applies while editing', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    // The switch is a reading choice: the builder has one look.
+    expect(screen.queryByRole('group', { name: 'View style' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'View mode' }))
+    const styles = screen.getByRole('group', { name: 'View style' })
+    fireEvent.click(within(styles).getByRole('button', { name: 'Modern' }))
+
+    // One header row, pill page tabs with the filters beside them; no studio strip.
+    expect(screen.queryByTestId('view-strip')).toBeNull()
+    const pages = screen.getByRole('tablist', { name: 'Pages' })
+    expect(within(pages).getByRole('tab', { name: 'Page 1' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByText('No filters applied')).toBeInTheDocument()
+    expect(await screen.findByText('Sales by Region')).toBeInTheDocument()
+    expect(localStorage.getItem('datalytics.viewStyle')).toBe('modern')
+
+    // Edit is the primary action, and editing is the builder as always.
+    fireEvent.click(screen.getByRole('button', { name: 'Edit mode' }))
+    expect(await screen.findByTestId('view-strip')).toBeInTheDocument()
+    expect(screen.queryByRole('tablist', { name: 'Pages' })).toBeNull()
+  })
+})

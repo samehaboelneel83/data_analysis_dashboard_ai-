@@ -1,5 +1,6 @@
 import { useT } from '../../i18n'
 import { useEffect } from 'react'
+import { ListFilter } from 'lucide-react'
 import { useCrossFilter } from './CrossFilterContext'
 
 /**
@@ -13,11 +14,13 @@ import { useCrossFilter } from './CrossFilterContext'
  * every map widget cross-filters and a map selection is easy to make by
  * accident.
  */
-export default function FilterBar({ keyboard = false }: {
+export default function FilterBar({ keyboard = false, variant = 'strip' }: {
   /** Bind Ctrl+Z / Ctrl+Shift+Z to the reader's selection history. Only where
    *  nothing else owns those keys (the share and embed viewers; the builder's
    *  Ctrl+Z is the author's undo). */
   keyboard?: boolean
+  /** 'chips': the Modern view style's filter row, beside the page tabs. */
+  variant?: 'strip' | 'chips'
 } = {}) {
   const tr = useT()
   const { activeFilters, clearFilter, clearAllFilters, undoSelection, redoSelection, undoLabel, redoLabel } = useCrossFilter()
@@ -33,6 +36,39 @@ export default function FilterBar({ keyboard = false }: {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [keyboard, undoSelection, redoSelection])
+
+  if (variant === 'chips') {
+    // Same state, same actions; drawn as the Modern view's chip row. Still
+    // says so when nothing is filtering, for the reason given above.
+    return (
+      <div className="dl-vw-flt" role="group" aria-label={tr('filters.label')}>
+        <ListFilter size={14} aria-hidden className="dl-vw-flt__ic" />
+        {activeFilters.length === 0 && <span className="dl-vw-flt__none">{tr('view.noFilters')}</span>}
+        {activeFilters.map(f => (
+          <span key={`${f.sourceWidgetId}-${f.column}`} className="dl-vw-fc dl-vw-fc--on">
+            <span>{f.label}</span>
+            <button type="button" onClick={() => clearFilter(f.column, f.sourceWidgetId)}
+              aria-label={`Remove filter ${f.label}`} title={`Remove filter ${f.label}`}>×</button>
+          </span>
+        ))}
+        {activeFilters.length > 0 && (
+          <button type="button" className="dl-vw-rst" onClick={clearAllFilters}>{tr('view.resetFilters')}</button>
+        )}
+        {(undoLabel || redoLabel) && (
+          <span style={{ display: 'inline-flex', gap: 2 }}>
+            <button className="btn btn-ghost btn-sm" aria-label="Undo selection" aria-disabled={!undoLabel}
+              title={undoLabel ? `Back to: ${undoLabel}` : 'No earlier selection'}
+              onClick={() => { if (undoLabel) undoSelection() }}
+              style={{ padding: '2px 6px', opacity: undoLabel ? 1 : 0.4 }}>↶</button>
+            <button className="btn btn-ghost btn-sm" aria-label="Redo selection" aria-disabled={!redoLabel}
+              title={redoLabel ? `Forward to: ${redoLabel}` : 'Nothing to redo'}
+              onClick={() => { if (redoLabel) redoSelection() }}
+              style={{ padding: '2px 6px', opacity: redoLabel ? 1 : 0.4 }}>↷</button>
+          </span>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 0', marginBottom: 8, flexWrap: 'wrap' }}>

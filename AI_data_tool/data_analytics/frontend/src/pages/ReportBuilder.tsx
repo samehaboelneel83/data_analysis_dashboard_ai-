@@ -71,7 +71,8 @@ import CollapsibleSide from '../components/report/CollapsibleSide'
 import ReviewPane from '../components/report/ReviewPane'
 import PopupOverlay from '../components/report/PopupOverlay'
 import TooltipPageOverlay from '../components/report/TooltipPageOverlay'
-import { ArrowLeft, Plus, Settings, Eye, Undo2, Redo2, KeyRound, ShieldCheck, Pause, Play, FileDown, Printer, FileText, Package } from 'lucide-react'
+import { ArrowLeft, Plus, Settings, Eye, Undo2, Redo2, KeyRound, ShieldCheck, Pause, Play, FileDown, Printer, FileText, Package, Pencil, RefreshCw } from 'lucide-react'
+import { useViewStyle, updatedAgo } from '../lib/viewStyle'
 import { useUndoStack, IdAliases, describeConfigChange, changedKeys } from './reportBuilder/undo'
 import { ASSIGN_DATA_EVENT, ADD_DATASET_EVENT, missingRequiredRoles } from '../components/report/WidgetPlaceholder'
 import { PATCH_WIDGET_EVENT } from '../components/report/TruncationNote'
@@ -279,6 +280,10 @@ export default function ReportBuilder() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   // Kiosk playback: pages auto-advance on an interval; any key or click exits.
   const [kiosk, setKiosk] = useState(false)
+  // View mode's look: Default, or Modern (lib/viewStyle.ts). Per viewer.
+  const [viewStyle, setViewStyle] = useViewStyle()
+  // Refresh in the Modern header remounts the canvas, so every widget asks again.
+  const [refreshNonce, setRefreshNonce] = useState(0)
 
   // Report parameters: definitions from the report, values from this viewer --
   // seeded from ?p.<name>= so a shared link can preset them (URL parameter presets).
@@ -2184,6 +2189,12 @@ export default function ReportBuilder() {
   const visibleColumns = columns.filter(c => !columnMeta[c.name]?.hidden)
   const hints = fieldHints(analysis)
   const pageWidgets = activePage?.widgets ?? []
+  // The Modern view style applies to a report being READ: never while
+  // editing, presenting, or on the Data / Model views.
+  const modern = viewStyle === 'modern' && !editMode && !kiosk && activeView === 'report'
+  const viewPages = report.pages.filter(page => page.page_type !== 'hidden' && page.page_type !== 'popup'
+    && page.page_type !== 'tooltip' && page.page_type !== 'drillthrough')
+  const updated = updatedAgo(dataset?.last_refreshed_at, tr('ai.limit.locale'))
 
   return (
     // Negative margin cancels Layout's <main> padding so the editor stays edge-to-edge, and
@@ -2710,7 +2721,7 @@ export default function ReportBuilder() {
       )}
 
       {/* Right section: top bar + page tabs + canvas */}
-      <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
+      <div className={modern ? 'dl-vw' : undefined} style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
 
         {/* Top bar */}
         {/* flexWrap is load-bearing, not cosmetic. This row sits inside a parent
@@ -2723,10 +2734,15 @@ export default function ReportBuilder() {
             control. */}
         <div data-testid="builder-header"
           style={{ display:'flex', alignItems:'center', flexWrap:'wrap', gap:10, padding:'10px 20px', borderBottom:'1px solid var(--border)', flexShrink:0, background:'var(--surface)' }}>
+          {modern ? (<>
+            <Link to="/reports" className="dl-vw-back"><ArrowLeft size={14} className="flip-rtl" /> Reports</Link>
+            <span className="dl-vw-vr" aria-hidden />
+          </>) : (<>
           <Link to="/reports" style={{ color:'var(--muted)', display:'flex', alignItems:'center', gap:4, fontSize:12, textDecoration:'none' }}>
             <ArrowLeft size={13} /> Reports
           </Link>
           <span style={{ color:'var(--border)' }}>|</span>
+          </>)}
           {editMode && renaming ? (
             <input autoFocus aria-label="Dashboard name" defaultValue={report.name} maxLength={120}
               style={{ fontWeight:700, fontSize:16, padding:'1px 6px', minWidth:220 }}
@@ -2749,10 +2765,22 @@ export default function ReportBuilder() {
               {report.name}
             </button>
             </>
+          ) : modern ? (
+            <div className="dl-vw-tt">
+              <h1>{report.name}</h1>
+              <div className="dl-vw-meta">
+                {!canEdit && <span className="dl-vw-chip"><Eye size={11} aria-hidden /> {tr('view.viewOnly')}</span>}
+                {updated && (<>
+                  {!canEdit && <span aria-hidden>·</span>}
+                  <span className="ok"><RefreshCw size={12} aria-hidden /></span>
+                  <span>{tr('view.updated', { when: updated })}</span>
+                </>)}
+              </div>
+            </div>
           ) : (
             <h1 style={{ fontWeight:700, fontSize:16, margin:0 }}>{report.name}</h1>
           )}
-          {dataset && canEdit && (
+          {dataset && canEdit && !modern && (
             <nav aria-label="Breadcrumb" style={{ display:'flex', alignItems:'center', gap:4 }}>
               <span aria-hidden style={{ color:'var(--muted)', fontSize:12 }}>▸</span>
               {[dataset, ...(report.additional_dataset_ids ?? []).map(id => datasets[id]).filter((d): d is Dataset => !!d)]
@@ -2788,6 +2816,13 @@ export default function ReportBuilder() {
               </span>
             )
           })()}
+          {modern && <span className="dl-vw-sp" />}
+          {modern && (
+            <button type="button" className="btn btn-ghost btn-sm" aria-label={tr('view.refresh')} title={tr('view.refresh')}
+              onClick={() => { loadReport().catch(() => {}); setRefreshNonce(n => n + 1) }}>
+              <RefreshCw size={14} aria-hidden />
+            </button>
+          )}
           {editMode && (
             <span style={{ display: 'inline-flex', gap: 2 }}>
               {/* aria-disabled, not disabled: a disabled button shows no tooltip,
@@ -2900,7 +2935,25 @@ export default function ReportBuilder() {
           <ReleaseControl report={report} canEdit={canEdit} revision={loadedRevision}
             onReleased={() => { loadReport().catch(() => {}) }} />
           <div style={{ marginInlineStart:'auto', display:'flex', alignItems:'center', gap:8 }}>
-            {canEdit ? (
+            {/* How View mode looks: the original, or Claude Design's Modern
+                view. Only while reading; the builder has one look. */}
+            {!editMode && !kiosk && (
+              <div role="group" aria-label={tr('view.style')} className="dl-seg dl-vw-style">
+                {(['default', 'modern'] as const).map(v => (
+                  <button key={v} type="button" aria-pressed={viewStyle === v}
+                    className={`dl-seg__btn${viewStyle === v ? ' dl-seg__btn--on' : ''}`}
+                    onClick={() => setViewStyle(v)}>
+                    {tr(v === 'modern' ? 'view.style.modern' : 'view.style.default')}
+                  </button>
+                ))}
+              </div>
+            )}
+            {canEdit && modern ? (
+              <button type="button" aria-label="Edit mode" aria-pressed={false} className="btn btn-primary btn-sm"
+                onClick={() => setEditMode(true)}>
+                <Pencil size={13} aria-hidden /> {tr('builder.edit')}
+              </button>
+            ) : canEdit ? (
               // A two-way segmented switch, not a button labelled with the
               // CURRENT state: "Edit mode" on a button read as the action it
               // would take, so people clicked it to start editing and left.
@@ -2967,7 +3020,7 @@ export default function ReportBuilder() {
 
         {/* Report / Data / Model view strip — authors only. A viewer has one
             surface (the dashboard); these tabs are the studio. */}
-        {canEdit && !kiosk && (
+        {canEdit && !kiosk && !modern && (
         <div className="dl-panebar">
           {/* Scoped to just these three: other tests use `within(view-strip)` to look
               for a button named /Report/i, and "Report rules" below would otherwise
@@ -3165,6 +3218,7 @@ export default function ReportBuilder() {
         )}
 
         {/* Page tabs */}
+        {!modern && (
         <div style={{ display:'flex', alignItems:'center', gap:3, padding:'0 16px', borderBottom:'1px solid var(--border)', flexShrink:0, background:'var(--surface)' }}>
           {report.pages
             .filter(page => (editMode || (page.page_type !== 'hidden' && page.page_type !== 'popup')) && page.page_type !== 'tooltip' && page.page_type !== 'drillthrough')
@@ -3258,6 +3312,7 @@ export default function ReportBuilder() {
             </div>
           )}
         </div>
+        )}
 
         {editMode && multiSelectedIds.size >= 2 && (
           <div style={{ display: 'flex', gap: 4, alignItems: 'center', padding: '6px 16px', borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
@@ -3277,10 +3332,24 @@ export default function ReportBuilder() {
           pageMode={(activePage?.mobile_layout as { interaction_mode?: 'manual' | 'linked' | 'oneway' | 'twoway' } | null)?.interaction_mode ?? 'manual'}
           widgets={activePage?.widgets ?? []}
           onPersistInteraction={persistInteraction}>
+        {modern && (
+          <div className="dl-vw-bar">
+            <div className="dl-vw-pages" role="tablist" aria-label={tr('view.pages')}>
+              {viewPages.map(page => (
+                <button key={page.id} type="button" role="tab" className="dl-vw-pg"
+                  aria-selected={page.id === activePage?.id}
+                  onClick={() => { setActivePage(page); setSelectedW(null) }}>
+                  {page.name}
+                </button>
+              ))}
+            </div>
+            <FilterBar variant="chips" />
+          </div>
+        )}
         <div style={{ display:'flex', flex:1, gap:10, padding:'10px 16px', overflow:'hidden', minHeight:0 }}>
 
           {/* Canvas */}
-          <div style={{ flex:1, overflowY:'auto', overflowX:'auto' }}>
+          <div key={refreshNonce} style={{ flex:1, overflowY:'auto', overflowX:'auto' }}>
             {/* Report (h1) > page (h2) > widget titles (level 3), the outline
                 ReportPrint draws too; without it the widgets skip a level. */}
             {activePage && <h2 className="dl-sr-only">{activePage.title || activePage.name}</h2>}
@@ -3297,7 +3366,7 @@ export default function ReportBuilder() {
                 <button className="btn btn-ghost btn-sm" onClick={discardPending}>{tr('builder.discard')}</button>
               </div>
             )}
-            <FilterBar />
+            {!modern && <FilterBar />}
             {/* The same filters, reachable after scrolling: the strip above is
                 at the top of the canvas and a tall dashboard scrolls it away. */}
             <FloatingFilterWindow />

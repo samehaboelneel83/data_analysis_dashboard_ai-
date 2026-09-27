@@ -978,6 +978,15 @@ export const en = {
 
   'filters.label': 'Filters:',
   'filters.none': 'No selections',
+  'view.style': 'View style',
+  'view.style.default': 'Default',
+  'view.style.modern': 'Modern',
+  'view.viewOnly': 'View only',
+  'view.updated': 'Updated {when}',
+  'view.refresh': 'Refresh',
+  'view.resetFilters': 'Reset filters',
+  'view.noFilters': 'No filters applied',
+  'view.pages': 'Pages',
 
   'status.page': 'Page {n} of {total}',
   'status.saving': 'Saving…',

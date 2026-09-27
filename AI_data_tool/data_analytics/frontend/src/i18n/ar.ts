@@ -980,6 +980,15 @@ export const ar: Record<MessageKey, string> = {
 
   'filters.label': 'المرشحات:',
   'filters.none': 'لا توجد تحديدات',
+  'view.style': 'نمط العرض',
+  'view.style.default': 'الافتراضي',
+  'view.style.modern': 'حديث',
+  'view.viewOnly': 'عرض فقط',
+  'view.updated': 'تم التحديث {when}',
+  'view.refresh': 'تحديث',
+  'view.resetFilters': 'إعادة ضبط عوامل التصفية',
+  'view.noFilters': 'لا توجد عوامل تصفية',
+  'view.pages': 'الصفحات',
 
   'status.page': 'صفحة {n} من {total}',
   'status.saving': 'جارٍ الحفظ…',
