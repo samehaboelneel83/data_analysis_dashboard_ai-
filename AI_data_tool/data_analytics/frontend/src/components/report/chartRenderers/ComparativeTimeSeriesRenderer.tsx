@@ -1,5 +1,5 @@
 import { ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LabelList } from 'recharts'
-import { TT, fmtStr, seriesDash} from '../chartUtils'
+import { TT, fmtStr, seriesDash, seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
 import { xAxisProps, yAxisProps, gridProps, legendProps, labelListProps, chartMargin } from './axisOptions'
 
@@ -31,10 +31,10 @@ export default function ComparativeTimeSeriesRenderer({ rows, cfg, rtl, measureF
         {hasSecond && <YAxis yAxisId="right" {...yAxisProps(cfg, rtl, measure2Fmt, rows.map((r: any) => r.value2), undefined, { height: plotH, title: cfg.y2_axis_label ?? '' })} orientation={rtl ? 'left' : 'right'} tickFormatter={v => fmtStr(v, measure2Fmt)} />}
         <Tooltip contentStyle={TT} formatter={(v: unknown, name: string) => [fmtStr(v, name === (cfg.measure2 ?? 'series B') ? measure2Fmt : measureFmt), name]} />
         {legend && <Legend {...legend} wrapperStyle={{ fontSize: 11, ...(rtl ? { direction: 'ltr' as const } : {}) }} />}
-        <Line yAxisId="left" type="monotone" dataKey="value" name={cfg.measure ?? 'series A'} stroke="var(--accent)" strokeWidth={2} strokeDasharray={seriesDash(0, cfg.series_patterns)} dot={false}>
+        <Line yAxisId="left" type="monotone" dataKey="value" name={cfg.measure ?? 'series A'} stroke={seriesColor(0)} strokeWidth={2} strokeDasharray={seriesDash(0, cfg.series_patterns)} dot={false}>
           {labels1 && <LabelList {...labels1} />}
         </Line>
-        {hasSecond && (<Line yAxisId="right" type="monotone" dataKey="value2" name={cfg.measure2 ?? 'series B'} stroke="#f87171" strokeWidth={2} strokeDasharray={seriesDash(1, cfg.series_patterns)} dot={false}>
+        {hasSecond && (<Line yAxisId="right" type="monotone" dataKey="value2" name={cfg.measure2 ?? 'series B'} stroke={seriesColor(1)} strokeWidth={2} strokeDasharray={seriesDash(1, cfg.series_patterns)} dot={false}>
           {labels2 && <LabelList {...labels2} />}
         </Line>)}
       </ComposedChart>

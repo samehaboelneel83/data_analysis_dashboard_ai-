@@ -1,4 +1,5 @@
 import type { ChartRendererProps } from './types'
+import { seriesColor } from '../chartUtils'
 
 const W = 1000
 const H = 500
@@ -28,7 +29,7 @@ export default function VectorPlotRenderer({ data, rtl }: ChartRendererProps) {
       <svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ display: 'block' }}>
         <defs>
           <marker id="vec-arrowhead" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-            <path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)" />
+            <path d="M0,0 L6,3 L0,6 Z" fill={seriesColor(0)} />
           </marker>
         </defs>
         {rows.map((r, i) => {
@@ -38,7 +39,7 @@ export default function VectorPlotRenderer({ data, rtl }: ChartRendererProps) {
           const dx = Math.cos(rad) * len, dy = -Math.sin(rad) * len
           return (
             <g key={i}>
-              <line x1={cx} y1={cy} x2={cx + dx} y2={cy + dy} stroke="var(--accent)" strokeWidth={1.5} markerEnd="url(#vec-arrowhead)" />
+              <line x1={cx} y1={cy} x2={cx + dx} y2={cy + dy} stroke={seriesColor(0)} strokeWidth={1.5} markerEnd="url(#vec-arrowhead)" />
               <title>{`(${r.x}, ${r.y}) size ${r.size} @ ${r.direction}°`}</title>
             </g>
           )

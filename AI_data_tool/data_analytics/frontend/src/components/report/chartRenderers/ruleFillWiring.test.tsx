@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest'
+import { seriesColor } from '../chartUtils'
 import { render, waitFor } from '@testing-library/react'
 import DotPlotRenderer from './DotPlotRenderer'
 import GaugeRenderer from './GaugeRenderer'
@@ -37,7 +38,7 @@ describe('rule-fill wiring on renderers the review found unwired', () => {
     const symbols = container.querySelectorAll('.recharts-scatter-symbol path')
     expect(symbols.length).toBe(2)
     expect(symbols[0]).toHaveAttribute('fill', '#f87171')
-    expect(symbols[1]).toHaveAttribute('fill', 'var(--accent)')
+    expect(symbols[1]).toHaveAttribute('fill', seriesColor(0))   // the report palette's first colour
   })
 
   it('GaugeRenderer paints its bar from an interval rule instead of the hardcoded target-comparison colour', () => {
@@ -94,7 +95,7 @@ describe('rule-fill wiring on the remaining mark-shaped renderers (task 7)', () 
       expect(container.querySelectorAll('.recharts-rectangle').length).toBeGreaterThan(0)
     })
     const fills = [...container.querySelectorAll('.recharts-rectangle')].map(r => r.getAttribute('fill'))
-    expect(fills.every(f => f === 'var(--accent)')).toBe(true)
+    expect(fills.every(f => f === seriesColor(0))).toBe(true)
   })
 
   // Ribbon's mark is one stacked segment per (rows_axis, cols_axis) cell. This proves the
@@ -235,7 +236,7 @@ describe('rule-fill wiring on the remaining mark-shaped renderers (task 7)', () 
     }, { timeout: 2000 })
     const dots = [...container.querySelectorAll('.recharts-dot')]
     expect(dots.length).toBeGreaterThan(0)
-    expect(dots.every(d => d.getAttribute('stroke') === 'var(--accent)')).toBe(true)
+    expect(dots.every(d => d.getAttribute('stroke') === seriesColor(0))).toBe(true)
   })
 })
 

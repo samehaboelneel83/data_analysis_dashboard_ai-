@@ -9,6 +9,7 @@
  * number; this file only draws them, and draws the refusals in words.
  */
 import { useState } from 'react'
+import { seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
 
 type Tab = { key: string; label: string }
@@ -58,7 +59,7 @@ function MiniScatter({ points, xLabel, yLabel, refLine }: {
   const sy = (v: number) => H - P + 6 - ((v - y0) / ((y1 - y0) || 1)) * (H - P)
   return (
     <svg viewBox={`0 0 ${W} ${H + 12}`} role="img" aria-label={`${yLabel} against ${xLabel}, ${pts.length} points`}
-      style={{ width: '100%', maxHeight: 220, color: 'var(--accent)' }}>
+      style={{ width: '100%', maxHeight: 220, color: seriesColor(0) }}>
       <line x1={P} y1={H - P + 6} x2={W - 6} y2={H - P + 6} stroke="var(--border)" />
       <line x1={P} y1={6} x2={P} y2={H - P + 6} stroke="var(--border)" />
       {refLine === 'zero' && <line x1={P} x2={W - 6} y1={sy(0)} y2={sy(0)} stroke="var(--muted)" strokeDasharray="4 3" />}
@@ -74,7 +75,6 @@ function MiniScatter({ points, xLabel, yLabel, refLine }: {
   )
 }
 
-const ROC_COLORS = ['var(--accent)', '#e67e22', '#8e44ad', '#16a085', '#c0392b', '#2c3e50']
 
 /** Every compared model's ROC on the same held-out rows, one line each, the
  *  winner drawn heavier, AUC in the legend beside its colour -- the overlay the
@@ -93,7 +93,7 @@ function RocOverlay({ models, winner }: { models: any[]; winner?: unknown }) {
         <line x1={P} y1={6} x2={P} y2={H - P + 6} stroke="var(--border)" />
         <line x1={sx(0)} y1={sy(0)} x2={sx(1)} y2={sy(1)} stroke="var(--muted)" strokeDasharray="4 3" />
         {models.map((m, i) => (
-          <polyline key={m.id ?? i} fill="none" stroke={ROC_COLORS[i % ROC_COLORS.length]}
+          <polyline key={m.id ?? i} fill="none" stroke={seriesColor(i)}
             strokeWidth={m.id === winner ? 2.4 : 1.4}
             points={(m.roc as [number, number][]).filter(p => p[0] != null && p[1] != null)
               .map(([x, y]) => `${sx(x)},${sy(y)}`).join(' ')} />
@@ -104,7 +104,7 @@ function RocOverlay({ models, winner }: { models: any[]; winner?: unknown }) {
       <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 11 }}>
         {models.map((m, i) => (
           <li key={m.id ?? i} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: m.id === winner ? 700 : 400 }}>
-            <span aria-hidden style={{ width: 14, height: 3, background: ROC_COLORS[i % ROC_COLORS.length], display: 'inline-block' }} />
+            <span aria-hidden style={{ width: 14, height: 3, background: seriesColor(i), display: 'inline-block' }} />
             {m.title} — AUC {fmt(m.score, 3)}
           </li>
         ))}

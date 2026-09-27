@@ -3,6 +3,7 @@
  * estimates from coordinates, shaded, with its isolines on top.
  */
 import { useMemo } from 'react'
+import { seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
 import { COUNTRIES, fittedProjection } from '../geo/worldGeometry'
 import { MapSvg, MAP_WRAP_STYLE, useMapBox } from '../geo/MapFrame'
@@ -56,10 +57,10 @@ export default function GeoContourRenderer({ data, plotW, plotH }: ChartRenderer
         aria-label={`Density contours of ${d.points_used?.toLocaleString()} located rows`}>
         {COUNTRIES.map(f => <path key={f.properties.name} d={path(f) ?? undefined} fill="var(--surface2)" stroke="var(--border)" strokeWidth={0.4} />)}
         <g data-testid="contour-surface">
-          {cells.map((c, i) => <path key={i} d={c.d} fill="var(--accent)" fillOpacity={0.08 + 0.55 * c.v} stroke="none" />)}
+          {cells.map((c, i) => <path key={i} d={c.d} fill={seriesColor(0)} fillOpacity={0.08 + 0.55 * c.v} stroke="none" />)}
         </g>
         <g data-testid="contour-lines" fill="none">
-          {lines.map(l => <path key={l.level} d={l.d} stroke="var(--accent)" strokeOpacity={0.35 + 0.6 * l.level} strokeWidth={0.6 + l.level} />)}
+          {lines.map(l => <path key={l.level} d={l.d} stroke={seriesColor(0)} strokeOpacity={0.35 + 0.6 * l.level} strokeWidth={0.6 + l.level} />)}
         </g>
       </MapSvg>
       <div style={{ position: 'absolute', bottom: 4, left: 8, fontSize: 10, color: 'var(--muted)' }}>

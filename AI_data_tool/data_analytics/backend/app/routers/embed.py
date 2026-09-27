@@ -290,7 +290,7 @@ async def embed_report(token: str, request: Request, response: Response, db: Asy
     await _embed_sensitivity(db, report)
 
     from ..models.models import Dataset, ReportClassification
-    from .shared import distributed_fields, published_relationships, visible_pages_for_creator
+    from .shared import theme_colors, distributed_fields, published_relationships, visible_pages_for_creator
 
     # E09: an embed distributes the report, so it shows the latest release
     # when there is one (pages, theme, primary dataset and filters alike).
@@ -325,6 +325,7 @@ async def embed_report(token: str, request: Request, response: Response, db: Asy
     return {
         "name": report.name,
         "theme": fields["theme"],
+        "theme_colors": await theme_colors(db, report, fields["theme"]),
         "classification": classif.label if classif else None,
         "common_filters": fields["common_filters"],
         "dataset_id": fields["dataset_id"],

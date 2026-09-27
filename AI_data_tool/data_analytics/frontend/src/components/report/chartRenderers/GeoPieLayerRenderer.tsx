@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { ChartRendererProps } from './types'
-import { fmtStr } from '../chartUtils'
+import { fmtStr, seriesColor } from '../chartUtils'
 import { COLORS } from '../chartUtils'
 import { COUNTRIES, matchCountry, countryCentroid, countryBoundsPoints, fittedProjection } from '../geo/worldGeometry'
 import { MapSvg, MAP_WRAP_STYLE, useMapBox } from '../geo/MapFrame'
@@ -168,7 +168,7 @@ function TwoLayerMap({ data, measureFmt, broadcasts, localSelected,
           const t = v != null ? 0.15 + 0.85 * (v / maxR) : 0
           return (
             <path key={f.properties.name} d={path(f) ?? undefined} data-region={v != null ? f.properties.name : undefined}
-              fill={v != null ? `color-mix(in srgb, var(--accent) ${Math.round(t * 100)}%, var(--surface2))` : 'var(--surface2)'}
+              fill={v != null ? `color-mix(in srgb, ${seriesColor(0)} ${Math.round(t * 100)}%, var(--surface2))` : 'var(--surface2)'}
               stroke={source != null && localSelected === source ? 'var(--accent)' : 'var(--border)'}
               strokeWidth={source != null && localSelected === source ? 2.5 : 0.5}
               data-selected={source != null && localSelected === source ? 'true' : undefined}
@@ -223,7 +223,7 @@ export function GeoDensityRenderer({ rows, data, plotW, plotH }: ChartRendererPr
         const t = 0.25 + 0.75 * (c.count / maxC)
         return (
           <rect key={i} x={tl[0]} y={tl[1]} width={Math.max(1, br[0] - tl[0])} height={Math.max(1, br[1] - tl[1])}
-            data-density-cell={c.count} fill="var(--accent)" opacity={t * 0.8} rx={1}>
+            data-density-cell={c.count} fill={seriesColor(0)} opacity={t * 0.8} rx={1}>
             <title>{c.count.toLocaleString()} points</title>
           </rect>
         )

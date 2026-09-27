@@ -1,5 +1,5 @@
 import { ComposedChart, Bar, Cell, ReferenceLine, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList } from 'recharts'
-import { TT, fmtStr } from '../chartUtils'
+import { TT, fmtStr, seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
 import { xAxisProps, yAxisProps, gridProps, labelListProps, chartMargin } from './axisOptions'
 import { seriesName } from './axisOptions'
@@ -23,7 +23,7 @@ export default function NeedlePlotRenderer({ rows, cfg, rtl, broadcasts, onClick
         <ReferenceLine y={baseline} stroke="var(--muted)" strokeDasharray="3 3" />
         <Bar dataKey="value" barSize={3}>
           {rows.map((_r: any, i: number) => (
-            <Cell key={i} fill={ruleStyles?.rows?.[i]?.fill ?? 'var(--accent)'} />
+            <Cell key={i} fill={ruleStyles?.rows?.[i]?.fill ?? seriesColor(0)} />
           ))}
           {labels && <LabelList {...labels} />}
         </Bar>

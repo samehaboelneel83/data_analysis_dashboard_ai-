@@ -1,5 +1,5 @@
 import { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer, LabelList } from 'recharts'
-import { fmtStr, TT } from '../chartUtils'
+import { fmtStr, TT, seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
 import { axisTitles, xAxisProps, yAxisProps, gridProps, labelListProps } from './axisOptions'
 
@@ -45,14 +45,14 @@ export default function ButterflyChartRenderer({ data, cfg, rtl, measureFmt, mea
         } />
         <ReferenceLine x={0} stroke="var(--border)" />
         <Bar dataKey="left" isAnimationActive={false} radius={3}>
-          {chartData.map((_d, i) => <Cell key={i} fill={ruleStyles?.rows?.[i]?.fill ?? '#f87171'} />)}
+          {chartData.map((_d, i) => <Cell key={i} fill={ruleStyles?.rows?.[i]?.fill ?? seriesColor(0)} />)}
           {/* left is stored negative purely to draw the bar leftward (see chartData above);
               the tooltip (line 28) and XAxis tickFormatter both display Math.abs, so the
               label must match rather than leak the sign encoding. */}
           {leftLabels && <LabelList {...leftLabels} formatter={(v: unknown) => fmtStr(Math.abs(Number(v)), measureFmt)} />}
         </Bar>
         <Bar dataKey="right" isAnimationActive={false} radius={3}>
-          {chartData.map((_d, i) => <Cell key={i} fill={ruleStyles?.rows?.[i]?.fill ?? '#6c8fff'} />)}
+          {chartData.map((_d, i) => <Cell key={i} fill={ruleStyles?.rows?.[i]?.fill ?? seriesColor(1)} />)}
           {rightLabels && <LabelList {...rightLabels} />}
         </Bar>
       </BarChart>

@@ -1,5 +1,5 @@
 import type { ChartRendererProps } from './types'
-import { fmtStr } from '../chartUtils'
+import { fmtStr, seriesColor } from '../chartUtils'
 
 /**
  * A decomposition tree: one number, broken down a level at a time.
@@ -96,7 +96,7 @@ export default function DecompositionRenderer(
             {c.value !== null && (
               <div style={{ height: 3, marginTop: 4, background: 'var(--border)', borderRadius: 2 }}>
                 <div style={{
-                  height: '100%', borderRadius: 2, background: 'var(--accent)',
+                  height: '100%', borderRadius: 2, background: seriesColor(0),
                   width: `${Math.max(1, (Math.abs(value) / widest) * 100)}%`,
                 }} />
               </div>

@@ -1,5 +1,5 @@
 import { ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
-import { TT, fmtStr } from '../chartUtils'
+import { TT, fmtStr, seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
 import { gridProps, xAxisProps, yAxisProps, chartMargin } from './axisOptions'
 
@@ -65,9 +65,9 @@ export default function ForecastChartRenderer({ data, cfg, rtl, measureFmt, plot
           [fmtStr(v, measureFmt), name === 'yhat' ? 'forecast' : name === 'band' ? 'interval' : name]} />
         {/* The interval band: an invisible base to `lo`, then the lo->hi delta. */}
         <Area dataKey="lo" stackId="band" stroke="none" fill="transparent" isAnimationActive={false} />
-        <Area dataKey="band" stackId="band" stroke="none" fill="var(--accent)" fillOpacity={0.12} isAnimationActive={false} />
-        <Line dataKey="value" stroke="var(--accent)" strokeWidth={2} dot={false} isAnimationActive={false} />
-        <Line dataKey="yhat" stroke="var(--accent)" strokeWidth={2} strokeDasharray="6 3" dot={false} isAnimationActive={false} />
+        <Area dataKey="band" stackId="band" stroke="none" fill={seriesColor(0)} fillOpacity={0.12} isAnimationActive={false} />
+        <Line dataKey="value" stroke={seriesColor(0)} strokeWidth={2} dot={false} isAnimationActive={false} />
+        <Line dataKey="yhat" stroke={seriesColor(0)} strokeWidth={2} strokeDasharray="6 3" dot={false} isAnimationActive={false} />
         {boundary && <ReferenceLine x={boundary} stroke="var(--muted)" strokeDasharray="2 3"
           label={{ value: 'now', position: 'insideTopRight', fill: 'var(--muted)', fontSize: 10 }} />}
         {/* The target as a level, and the period it is met. Both drawn only

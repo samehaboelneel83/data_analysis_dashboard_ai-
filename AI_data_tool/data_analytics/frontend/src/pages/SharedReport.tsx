@@ -5,6 +5,7 @@ import WidgetRenderer from '../components/report/WidgetRenderer'
 import { CrossFilterProvider } from '../components/report/CrossFilterContext'
 import FilterBar from '../components/report/FilterBar'
 import FloatingFilterWindow from '../components/report/FloatingFilterWindow'
+import { applyTheme } from '../components/report/chartUtils'
 
 /** Cross-source mappings the server publishes with a report (Phase 6.1): the
  *  relationships among its datasets and, per dataset, only the column names
@@ -64,6 +65,9 @@ export default function SharedReport() {
     if (!token || loadedToken.current === token) return
     loadedToken.current = token
     sharedApi.report(token).then(async r => {
+      // The report's palette, before any widget draws (its colours travel with
+      // the response when it is an org palette this viewer cannot list).
+      applyTheme(r.theme ?? 'default', r.theme && r.theme_colors ? { [r.theme]: r.theme_colors } : undefined)
       // Widgets render only after every override is resolved: a WidgetRenderer
       // mounted without its override would fetch through the authed API, and
       // the anonymous 401 would bounce this whole page to /login -- exactly

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { ChartRendererProps } from './types'
-import { fmtStr } from '../chartUtils'
+import { fmtStr, seriesColor } from '../chartUtils'
 import type { CalcColumnFormat } from '../../../services/api'
 
 /**
@@ -134,7 +134,7 @@ function Icicle({ node, fmt }: { node: Node; fmt?: CalcColumnFormat | null }) {
             return (
               <div key={i} title={`${n.name}: ${fmtStr(n.value, fmt)}`}
                 style={{
-                  width: `${pct}%`, background: 'var(--accent)',
+                  width: `${pct}%`, background: seriesColor(0),
                   opacity: 1 - d * 0.13, borderRadius: 2, overflow: 'hidden',
                   display: 'flex', alignItems: 'center', paddingInline: 4,
                   fontSize: 10, color: '#fff', whiteSpace: 'nowrap',
@@ -181,7 +181,7 @@ function Sunburst({ node, fmt }: { node: Node; fmt?: CalcColumnFormat | null }) 
       segments.push(
         <path key={`${n.name}-${depth}-${a0.toFixed(3)}`}
           d={arc(cx, cy, depth * ring, (depth + 1) * ring, a0, a1)}
-          fill="var(--accent)" opacity={1 - depth * 0.15}
+          fill={seriesColor(0)} opacity={1 - depth * 0.15}
           stroke="var(--surface)" strokeWidth={1}>
           <title>{`${n.name}: ${fmtStr(n.value, fmt)}`}</title>
         </path>)
@@ -281,8 +281,8 @@ function CirclePack({ node, fmt }: { node: Node; fmt?: CalcColumnFormat | null }
         {circles.map((c, i) => (
           <circle key={`${c.node.name}-${c.depth}-${i}`}
             cx={c.cx} cy={c.cy} r={Math.max(c.r, 0)}
-            fill="var(--accent)" fillOpacity={0.1 + c.depth * 0.18}
-            stroke="var(--accent)" strokeWidth={0.75}>
+            fill={seriesColor(0)} fillOpacity={0.1 + c.depth * 0.18}
+            stroke={seriesColor(0)} strokeWidth={0.75}>
             {/* Depth 0 is the synthetic root the shaper always returns; naming
                 it would put a label on a circle the user never chose. */}
             {c.depth > 0 && <title>{`${c.node.name}: ${fmtStr(c.node.value, fmt)}`}</title>}

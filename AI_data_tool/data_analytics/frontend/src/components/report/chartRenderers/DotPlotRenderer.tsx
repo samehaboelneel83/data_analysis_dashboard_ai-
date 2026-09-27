@@ -1,5 +1,5 @@
 import { ScatterChart, Scatter, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList } from 'recharts'
-import { TT, fmtStr } from '../chartUtils'
+import { TT, fmtStr, seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
 import { axisTitles, xAxisProps, yAxisProps, gridProps, labelListProps } from './axisOptions'
 import { seriesName } from './axisOptions'
@@ -25,7 +25,7 @@ export default function DotPlotRenderer({ rows, cfg, rtl, broadcasts, onClickPoi
           style={{ cursor: broadcasts ? 'pointer' : 'default' }}
         >
           {rows.map((_r: any, i: number) => (
-            <Cell key={i} fill={ruleStyles?.rows?.[i]?.fill ?? 'var(--accent)'} />
+            <Cell key={i} fill={ruleStyles?.rows?.[i]?.fill ?? seriesColor(0)} />
           ))}
           {labels && <LabelList {...labels} />}
         </Scatter>

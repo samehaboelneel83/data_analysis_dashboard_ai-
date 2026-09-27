@@ -389,3 +389,37 @@ async def test_the_acceptance_criteria_hold_on_the_share_link_too(client, auth_h
     refused = await client.post(f"/api/v1/shared/{token}/widget-data/{bad.id}")
     assert refused.status_code == 422
     assert refused.json()["code"] == "semantic_veto" and "adds up years" in refused.json()["detail"]
+
+
+class TestThemeColoursTravelWithTheReport:
+    """A guest link or an embed has no way to list the org's palettes, so an
+    org palette's colours are sent with the report; otherwise a report in a
+    custom palette opened in the default one."""
+
+    async def _report(self, db, org, theme):
+        from app.models.models import Report
+        r = Report(name="Palette", org_id=org.id, theme=theme)
+        db.add(r)
+        await db.commit()
+        return r
+
+    async def test_an_org_palette_s_colours(self, db_session, two_orgs):
+        from app.models.models import OrgTheme
+        from app.routers.shared import theme_colors
+        org = two_orgs["a"]["org"]
+        t = OrgTheme(org_id=org.id, name="Brand", colors=["#112233", "#445566"])
+        db_session.add(t)
+        await db_session.commit()
+        r = await self._report(db_session, org, f"custom:{t.id}")
+        assert await theme_colors(db_session, r, r.theme) == ["#112233", "#445566"]
+
+    async def test_nothing_for_a_built_in_theme_or_another_org_s_palette(self, db_session, two_orgs):
+        from app.models.models import OrgTheme
+        from app.routers.shared import theme_colors
+        other = OrgTheme(org_id=two_orgs["b"]["org"].id, name="Theirs", colors=["#abcdef"])
+        db_session.add(other)
+        await db_session.commit()
+        r = await self._report(db_session, two_orgs["a"]["org"], f"custom:{other.id}")
+        assert await theme_colors(db_session, r, r.theme) is None
+        assert await theme_colors(db_session, r, "default") is None
+        assert await theme_colors(db_session, r, "custom:not-a-number") is None

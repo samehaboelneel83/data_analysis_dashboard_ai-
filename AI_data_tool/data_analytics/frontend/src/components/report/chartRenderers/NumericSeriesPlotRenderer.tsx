@@ -1,5 +1,5 @@
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Dot, ResponsiveContainer, LabelList } from 'recharts'
-import { TT, fmtStr } from '../chartUtils'
+import { TT, fmtStr, seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
 import { axisTitles, xAxisProps, yAxisProps, gridProps, labelListProps, chartMargin } from './axisOptions'
 
@@ -28,12 +28,12 @@ export default function NumericSeriesPlotRenderer({ rows, cfg, rtl, measureFmt, 
             renderer) rather than hardcoded, so an unruled dot keeps the same ring the
             old `{ fill, r }` object form got for free -- dropping them left every
             unruled dot's stroke missing. */}
-        <Line type="monotone" dataKey="y" stroke="var(--accent)" strokeWidth={2}
+        <Line type="monotone" dataKey="y" stroke={seriesColor(0)} strokeWidth={2}
           dot={(props: any) => {
             const { key, cx, cy, index, stroke, strokeWidth } = props
             return (
               <Dot key={key ?? index} cx={cx} cy={cy} r={3} stroke={stroke} strokeWidth={strokeWidth}
-                fill={ruleStyles?.rows?.[index]?.fill ?? 'var(--accent)'} />
+                fill={ruleStyles?.rows?.[index]?.fill ?? seriesColor(0)} />
             )
           }}
         >

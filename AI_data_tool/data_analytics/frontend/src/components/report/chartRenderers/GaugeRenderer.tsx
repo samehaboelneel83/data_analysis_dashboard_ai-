@@ -1,5 +1,5 @@
 import { RadialBarChart, RadialBar, PolarAngleAxis, ResponsiveContainer } from 'recharts'
-import { fmtStr } from '../chartUtils'
+import { fmtStr, seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
 
 /**
@@ -27,7 +27,7 @@ export default function GaugeRenderer({ data, measureFmt, ruleStyles, cfg }: Cha
   // ({value, target}), so an interval rule (bands keyed on the `value` column) paints
   // ruleStyles.rows[0] -- the only row that exists for a gauge.
   const ruleFill = ruleStyles?.rows?.[0]?.fill
-  const fill = ruleFill ?? (target != null && value >= target ? '#34d399' : '#6c8fff')
+  const fill = ruleFill ?? (target != null && value >= target ? '#34d399' : seriesColor(0))
   const valueLabel = fmtStr(value, measureFmt)
   const targetLabel = target != null ? fmtStr(target, measureFmt) : null
 

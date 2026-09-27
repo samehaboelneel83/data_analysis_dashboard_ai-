@@ -1,4 +1,4 @@
-import { fmtStr } from '../chartUtils'
+import { fmtStr, seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
 
 const MARGIN_TOP = 20
@@ -46,12 +46,12 @@ export default function BoxPlotRenderer({ data, rtl, measureFmt }: ChartRenderer
           const yMinPx = yToPx(r.min), yQ1Px = yToPx(r.q1), yMedPx = yToPx(r.median), yQ3Px = yToPx(r.q3), yMaxPx = yToPx(r.max)
           return (
             <g key={r.name}>
-              <line x1={cx} y1={yMaxPx} x2={cx} y2={yQ3Px} stroke="var(--accent)" strokeWidth={1.5} />
-              <line x1={cx} y1={yQ1Px} x2={cx} y2={yMinPx} stroke="var(--accent)" strokeWidth={1.5} />
-              <line x1={cx - boxW / 4} y1={yMaxPx} x2={cx + boxW / 4} y2={yMaxPx} stroke="var(--accent)" strokeWidth={1.5} />
-              <line x1={cx - boxW / 4} y1={yMinPx} x2={cx + boxW / 4} y2={yMinPx} stroke="var(--accent)" strokeWidth={1.5} />
-              <rect x={cx - boxW / 2} y={yQ3Px} width={boxW} height={Math.max(1, yQ1Px - yQ3Px)} fill="var(--accent)" fillOpacity={0.25} stroke="var(--accent)" strokeWidth={1.5} />
-              <line x1={cx - boxW / 2} y1={yMedPx} x2={cx + boxW / 2} y2={yMedPx} stroke="var(--accent)" strokeWidth={2} />
+              <line x1={cx} y1={yMaxPx} x2={cx} y2={yQ3Px} stroke={seriesColor(0)} strokeWidth={1.5} />
+              <line x1={cx} y1={yQ1Px} x2={cx} y2={yMinPx} stroke={seriesColor(0)} strokeWidth={1.5} />
+              <line x1={cx - boxW / 4} y1={yMaxPx} x2={cx + boxW / 4} y2={yMaxPx} stroke={seriesColor(0)} strokeWidth={1.5} />
+              <line x1={cx - boxW / 4} y1={yMinPx} x2={cx + boxW / 4} y2={yMinPx} stroke={seriesColor(0)} strokeWidth={1.5} />
+              <rect x={cx - boxW / 2} y={yQ3Px} width={boxW} height={Math.max(1, yQ1Px - yQ3Px)} fill={seriesColor(0)} fillOpacity={0.25} stroke={seriesColor(0)} strokeWidth={1.5} />
+              <line x1={cx - boxW / 2} y1={yMedPx} x2={cx + boxW / 2} y2={yMedPx} stroke={seriesColor(0)} strokeWidth={2} />
               {(r.outliers ?? []).map((o, oi) => (
                 <circle key={oi} cx={cx} cy={yToPx(o)} r={2.5} fill="var(--muted)" fillOpacity={0.7} />
               ))}

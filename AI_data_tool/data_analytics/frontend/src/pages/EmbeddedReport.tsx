@@ -6,6 +6,7 @@ import { CrossFilterProvider } from '../components/report/CrossFilterContext'
 import FilterBar from '../components/report/FilterBar'
 import FloatingFilterWindow from '../components/report/FloatingFilterWindow'
 import { postToHost } from '../lib/embedProtocol'
+import { applyTheme } from '../components/report/chartUtils'
 
 /** Cross-source mappings the server publishes with a report (Phase 6.1): the
  *  relationships among its datasets and, per dataset, only the column names
@@ -73,6 +74,9 @@ export default function EmbeddedReport() {
   useEffect(() => {
     if (!token) { setError('This embed link is missing its token.'); return }
     embedApi.report(token).then(async r => {
+      // The report's palette, before any widget draws (its colours travel with
+      // the response when it is an org palette this viewer cannot list).
+      applyTheme(r.theme ?? 'default', r.theme && r.theme_colors ? { [r.theme]: r.theme_colors } : undefined)
       const sTok = r.embed_session_token as string
       const widgets: Widget[] = r.pages.flatMap((p: ReportPage) => p.widgets ?? [])
       const STATIC = new Set(['text', 'button', 'image', 'shape', 'container', 'web_content'])

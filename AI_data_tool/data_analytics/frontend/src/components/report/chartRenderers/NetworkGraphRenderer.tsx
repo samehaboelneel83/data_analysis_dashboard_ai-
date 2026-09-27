@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
 
 interface NetNode { id: string; x: number; y: number; degree: number; closeness: number; betweenness: number; reach: number; community?: number }
@@ -9,10 +10,6 @@ const METRICS = ['degree', 'closeness', 'betweenness', 'reach'] as const
 
 /** Community colours. Distinct hues rather than a sequential ramp: community
  *  ids are nominal, and a ramp would imply an order they do not have. */
-const COMMUNITY_COLORS = [
-  '#6c8fff', '#f0883e', '#3fb950', '#d29922', '#bc8cff', '#39c5cf',
-  '#f778ba', '#8b949e',
-]
 
 /**
  * Link-analysis graph. Positions and centralities arrive from shape_network
@@ -73,8 +70,8 @@ export default function NetworkGraphRenderer({ data, cfg }: ChartRendererProps) 
           <g key={n.id} data-node={n.id}
             onMouseEnter={() => setHover(n.id)} onMouseLeave={() => setHover(null)}>
             <circle cx={pos[n.id].x} cy={pos[n.id].y} r={radius(n)}
-              fill={n.community == null ? 'var(--accent)'
-                : COMMUNITY_COLORS[n.community % COMMUNITY_COLORS.length]}
+              fill={n.community == null ? seriesColor(0)
+                : seriesColor(n.community)}
               fillOpacity={hover == null || hover === n.id ? 0.8 : 0.25}
               stroke="var(--surface)" strokeWidth={1.5} />
             <text x={pos[n.id].x} y={pos[n.id].y - radius(n) - 4} textAnchor="middle"
@@ -112,7 +109,7 @@ export default function NetworkGraphRenderer({ data, cfg }: ChartRendererProps) 
             </div>
           ))}
           {hovered.community != null && (
-            <div style={{ color: COMMUNITY_COLORS[hovered.community % COMMUNITY_COLORS.length] }}>
+            <div style={{ color: seriesColor(hovered.community) }}>
               community: {hovered.community} ← colour
             </div>
           )}

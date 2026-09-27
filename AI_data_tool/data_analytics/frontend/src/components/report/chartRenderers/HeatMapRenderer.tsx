@@ -1,4 +1,4 @@
-import { fmtStr } from '../chartUtils'
+import { fmtStr, seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
 
 function cellColor(v: number, min: number, max: number): string {
@@ -7,7 +7,7 @@ function cellColor(v: number, min: number, max: number): string {
   // follows the product palette in both themes instead of freezing the blue
   // this file was written under.
   const pct = Math.round((0.1 + t * 0.85) * 100)
-  return `color-mix(in srgb, var(--accent) ${pct}%, transparent)`
+  return `color-mix(in srgb, ${seriesColor(0)} ${pct}%, transparent)`
 }
 
 export default function HeatMapRenderer({ data, rtl, measureFmt }: ChartRendererProps) {

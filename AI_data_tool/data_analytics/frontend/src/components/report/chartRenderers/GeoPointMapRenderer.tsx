@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import type { ChartRendererProps } from './types'
-import { fmtStr, TT } from '../chartUtils'
+import { fmtStr, TT, seriesColor } from '../chartUtils'
 import { COUNTRIES, matchCountry, countryCentroid, fittedProjection } from '../geo/worldGeometry'
 import { MapSvg, MAP_WRAP_STYLE, useMapBox } from '../geo/MapFrame'
 import { MapDataTable, mapSummary } from '../geo/MapDataTable'
@@ -192,8 +192,8 @@ function GeoPointMapRenderer({ rows, cfg, measureFmt, ruleStyles, variant, broad
           return (
             <g key={i}>
               <circle cx={m.x} cy={m.y} r={r}
-                fill={style?.fill ?? 'var(--accent)'} fillOpacity={style?.fill ? 0.85 : 0.6}
-                stroke={selected ? 'var(--text)' : (style?.fill ?? 'var(--accent)')}
+                fill={style?.fill ?? seriesColor(0)} fillOpacity={style?.fill ? 0.85 : 0.6}
+                stroke={selected ? 'var(--text)' : (style?.fill ?? seriesColor(0))}
                 strokeWidth={selected ? 3 : 1}
                 data-marker={m.name} data-value={m.value}
                 data-selected={selected ? 'true' : undefined}

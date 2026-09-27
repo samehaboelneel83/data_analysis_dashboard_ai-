@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { ChartRendererProps } from './types'
-import { fmtStr } from '../chartUtils'
+import { fmtStr, seriesColor } from '../chartUtils'
 import { COUNTRIES, fittedProjection } from '../geo/worldGeometry'
 import { MapSvg, MAP_WRAP_STYLE, useMapBox } from '../geo/MapFrame'
 import { placeLabels } from '../geo/labelPlacement'
@@ -60,7 +60,7 @@ export default function GeoNetworkRenderer({ data, measureFmt, broadcasts,
           if (!a || !b) return null
           return (
             <line key={i} x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} data-geolink={`${l.source}→${l.target}`}
-              stroke="var(--accent)" strokeOpacity={hover == null ? 0.45 : touches(l) ? 0.95 : 0.08}
+              stroke={seriesColor(0)} strokeOpacity={hover == null ? 0.45 : touches(l) ? 0.95 : 0.08}
               strokeWidth={0.75 + 3.5 * Math.sqrt(l.value / maxW)} strokeLinecap="round" />
           )
         })}
@@ -71,7 +71,7 @@ export default function GeoNetworkRenderer({ data, measureFmt, broadcasts,
             onClick={broadcasts ? () => onClickPoint(n.id) : undefined}
             onMouseEnter={() => setHover(n.id)} onMouseLeave={() => setHover(null)}>
             <circle cx={pos[n.id][0]} cy={pos[n.id][1]} r={4 + 9 * Math.sqrt(n.degree / maxD)}
-              fill="var(--accent)" fillOpacity={hover == null || hover === n.id ? 0.85 : 0.3}
+              fill={seriesColor(0)} fillOpacity={hover == null || hover === n.id ? 0.85 : 0.3}
               stroke={localSelected === n.id ? 'var(--text)' : 'var(--surface)'}
               strokeWidth={localSelected === n.id ? 3 : 1.5} />
             <text x={labelPos[n.id]?.x ?? pos[n.id][0]}

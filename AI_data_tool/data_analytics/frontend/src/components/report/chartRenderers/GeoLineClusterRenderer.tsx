@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { ChartRendererProps } from './types'
-import { fmtStr } from '../chartUtils'
+import { fmtStr, seriesColor } from '../chartUtils'
 import { COUNTRIES, fittedProjection } from '../geo/worldGeometry'
 import { MapSvg, MAP_WRAP_STYLE, useMapBox } from '../geo/MapFrame'
 
@@ -58,7 +58,7 @@ export function GeoLinesRenderer({ rows, measureFmt, broadcasts, localSelected,
         ))}
         {lines.map((l, i) => (
           <path key={i} d={l.d} fill="none" data-line={l.name}
-            stroke={localSelected === l.name ? 'var(--text)' : 'var(--accent)'}
+            stroke={localSelected === l.name ? 'var(--text)' : seriesColor(0)}
             strokeOpacity={hover === l.name || localSelected === l.name ? 1 : 0.65}
             strokeWidth={(localSelected === l.name ? 2 : 0) + 1 + 4 * Math.sqrt(l.value / maxV)}
             strokeLinecap="round"
@@ -126,7 +126,7 @@ export function GeoClustersRenderer({ rows, measureFmt, plotW, plotH }: ChartRen
             onMouseEnter={() => setHover(`${m.count.toLocaleString()} points${m.value != null ? ` — ${fmtStr(m.value, measureFmt)}` : ''}`)}
             onMouseLeave={() => setHover(null)}>
             <circle cx={m.x} cy={m.y} r={radius(m.count)}
-              fill="var(--accent)" fillOpacity={0.55} stroke="var(--accent)" strokeWidth={1.5} />
+              fill={seriesColor(0)} fillOpacity={0.55} stroke={seriesColor(0)} strokeWidth={1.5} />
             {radius(m.count) > 11 && (
               <text x={m.x} y={m.y + 3} textAnchor="middle" fontSize={10} fontWeight={700} fill="#fff">
                 {m.count > 999 ? `${(m.count / 1000).toFixed(1)}k` : m.count}

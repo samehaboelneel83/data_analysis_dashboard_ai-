@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { reportsApi, datasetsApi } from '../services/api'
+import { reportsApi, datasetsApi, themesApi } from '../services/api'
 import { exportPrintViewToPptx } from '../lib/pptExport'
 import type { Dataset, CalcColumn, CalcColumnFormat } from '../services/api'
 import type { Report, ReportPage } from '../types/report'
@@ -9,6 +9,7 @@ import { CrossFilterProvider } from '../components/report/CrossFilterContext'
 import { StaticChartsContext } from '../components/report/chartRenderers/useChartViewport'
 import LoadError from '../components/ui/LoadError'
 import LoadingState from '../components/ui/LoadingState'
+import { applyTheme } from '../components/report/chartUtils'
 
 /**
  * Print layout: every page of the report laid out linearly, one report page per
@@ -31,6 +32,11 @@ export default function ReportPrint() {
     setError(null)
     try {
       const r = await reportsApi.get(reportId)
+      // Printed in the report's own palette, an org palette included.
+      const customs = r.theme?.startsWith('custom:')
+        ? Object.fromEntries((await themesApi.list().catch(() => [])).map(t => [`custom:${t.id}`, t.colors]))
+        : undefined
+      applyTheme(r.theme ?? 'default', customs)
       setReport(r)
       if (r.dataset_id) setDataset(await datasetsApi.get(r.dataset_id))
     } catch (e) {

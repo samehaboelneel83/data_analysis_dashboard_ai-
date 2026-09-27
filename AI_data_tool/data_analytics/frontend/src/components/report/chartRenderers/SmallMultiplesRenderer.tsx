@@ -1,5 +1,5 @@
 import type { ChartRendererProps } from './types'
-import { fmtStr } from '../chartUtils'
+import { fmtStr, seriesColor } from '../chartUtils'
 
 /**
  * Small multiples: the same chart repeated once per facet value.
@@ -59,7 +59,7 @@ export default function SmallMultiplesRenderer(
                   </div>
                   <div style={{ height: 4, background: 'var(--border)', borderRadius: 2 }}>
                     <div style={{
-                      height: '100%', borderRadius: 2, background: 'var(--accent)',
+                      height: '100%', borderRadius: 2, background: seriesColor(0),
                       width: `${Math.max(1, (Math.abs(Number(r.value) || 0) / scale) * 100)}%`,
                     }} />
                   </div>

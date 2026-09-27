@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { seriesColor } from '../chartUtils'
 import { render, screen, fireEvent } from '@testing-library/react'
 import NetworkGraphRenderer from './NetworkGraphRenderer'
 import type { ChartRendererProps } from './types'
@@ -59,14 +60,14 @@ describe('communities are visible', () => {
     expect(screen.getByText(/2 communities/i)).toBeInTheDocument()
   })
 
-  it('falls back to the accent colour when the shaper sends no community', () => {
+  it('falls back to the report palette's first colour when the shaper sends no community', () => {
     // Older saved widgets and any future shaper that omits the field must keep
     // rendering rather than colouring by `undefined`.
     const { container } = draw({
       nodes: [{ id: 'x', x: 0.5, y: 0.5, degree: 1, closeness: 1, betweenness: 0, reach: 1 }],
       links: [],
     })
-    expect(container.querySelector('circle')?.getAttribute('fill')).toBe('var(--accent)')
+    expect(container.querySelector('circle')?.getAttribute('fill')).toBe(seriesColor(0))
   })
 })
 

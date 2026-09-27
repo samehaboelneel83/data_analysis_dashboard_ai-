@@ -1,5 +1,5 @@
 import { ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LabelList } from 'recharts'
-import { TT, fmtStr, seriesDash} from '../chartUtils'
+import { TT, fmtStr, seriesDash, seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
 import { axisTitles, xAxisProps, yAxisProps, gridProps, legendProps, labelListProps, chartMargin } from './axisOptions'
 import { seriesName } from './axisOptions'
@@ -37,10 +37,10 @@ export default function DualAxisTimeSeriesRenderer({ rows, cfg, rtl, measureFmt,
         {hasSecond && <YAxis yAxisId="right" {...yAxisProps(cfg, rtl, measure2Fmt, rows.map((r: any) => r.value2), undefined, { height: plotH, title: cfg.y2_axis_label ?? titles.measure2 ?? '' })} orientation={rtl ? 'left' : 'right'} tickFormatter={v => fmtStr(v, measure2Fmt)} />}
         <Tooltip contentStyle={TT} formatter={(v: unknown, name: string) => [fmtStr(v, name === (cfg.measure2 ?? 'value2') ? measure2Fmt : measureFmt), name]} />
         {legend && <Legend {...legend} wrapperStyle={{ fontSize: 11, ...(rtl ? { direction: 'ltr' as const } : {}) }} />}
-        <Line yAxisId="left" type="monotone" dataKey="value" name={seriesName(cfg)} stroke="var(--accent)" strokeWidth={2} strokeDasharray={seriesDash(0, cfg.series_patterns)} dot={false}>
+        <Line yAxisId="left" type="monotone" dataKey="value" name={seriesName(cfg)} stroke={seriesColor(0)} strokeWidth={2} strokeDasharray={seriesDash(0, cfg.series_patterns)} dot={false}>
           {labels1 && <LabelList {...labels1} />}
         </Line>
-        {hasSecond && (<Line yAxisId="right" type="monotone" dataKey="value2" name={cfg.measure2 ?? 'value2'} stroke="#a78bfa" strokeWidth={2} strokeDasharray={seriesDash(1, cfg.series_patterns)} dot={false}>
+        {hasSecond && (<Line yAxisId="right" type="monotone" dataKey="value2" name={cfg.measure2 ?? 'value2'} stroke={seriesColor(1)} strokeWidth={2} strokeDasharray={seriesDash(1, cfg.series_patterns)} dot={false}>
           {labels2 && <LabelList {...labels2} />}
         </Line>)}
       </ComposedChart>

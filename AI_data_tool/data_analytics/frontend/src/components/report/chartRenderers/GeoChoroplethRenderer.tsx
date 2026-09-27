@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { ChartRendererProps } from './types'
-import { fmtStr, TT } from '../chartUtils'
+import { fmtStr, TT, seriesColor } from '../chartUtils'
 import { matchRegion, regionBoundsPoints, regionLabel, fittedProjection } from '../geo/worldGeometry'
 import { MapSvg, MAP_WRAP_STYLE, useMapBox } from '../geo/MapFrame'
 import { useRegionSet } from '../geo/regionSetCache'
@@ -86,7 +86,7 @@ export default function GeoChoroplethRenderer({ rows, cfg, measureFmt, broadcast
     // Single-hue lightness ramp on the accent colour. A ramp is readable in greyscale
     // (unlike a rainbow) and inherits the report theme.
     const t = max > min ? (v - min) / (max - min) : 0.5
-    return `color-mix(in srgb, var(--accent) ${Math.round(15 + t * 85)}%, var(--surface2))`
+    return `color-mix(in srgb, ${seriesColor(0)} ${Math.round(15 + t * 85)}%, var(--surface2))`
   }
 
   return (

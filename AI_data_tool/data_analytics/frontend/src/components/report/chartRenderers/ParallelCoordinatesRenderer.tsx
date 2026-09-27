@@ -1,4 +1,4 @@
-import { fmtStr } from '../chartUtils'
+import { fmtStr, seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
 
 const MARGIN_TOP = 24
@@ -37,7 +37,7 @@ export default function ParallelCoordinatesRenderer({ data, rtl, measureFmt }: C
             return `${x},${y}`
           }).join(' ')
           return (
-            <polyline key={li} points={points} fill="none" stroke="var(--accent)" strokeWidth={1} strokeOpacity={0.35} />
+            <polyline key={li} points={points} fill="none" stroke={seriesColor(0)} strokeWidth={1} strokeOpacity={0.35} />
           )
         })}
       </svg>

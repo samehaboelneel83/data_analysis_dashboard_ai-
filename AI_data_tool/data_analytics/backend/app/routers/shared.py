@@ -101,6 +101,23 @@ def _role_visible(p: dict, allowed_by_page: dict[int, set[int]], creator: User) 
     return creator.role_id in allowed
 
 
+async def theme_colors(db: AsyncSession, report: Report, theme: str | None) -> list[str] | None:
+    """The colours of an org-defined palette ("custom:<id>"), so a viewer who
+    cannot list the org's palettes still draws the report in them. None for a
+    built-in theme (the client has those) or a palette of another org."""
+    if not theme or not theme.startswith("custom:"):
+        return None
+    try:
+        theme_id = int(theme.split(":", 1)[1])
+    except ValueError:
+        return None
+    from ..models.models import OrgTheme
+    row = await db.get(OrgTheme, theme_id)
+    if row is None or row.org_id != report.org_id:
+        return None
+    return [c for c in (row.colors or []) if isinstance(c, str)]
+
+
 async def distributed_fields(db: AsyncSession, report: Report) -> dict:
     """The theme, primary dataset and report filters a DISTRIBUTED copy of the
     report shows (a guest link that is not pinned, an embed): the latest
@@ -366,6 +383,7 @@ async def shared_report(token: str, request: Request, db: AsyncSession = Depends
     return {
         "name": report.name,
         "theme": fields["theme"],
+        "theme_colors": await theme_colors(db, report, fields["theme"]),
         "classification": classif.label if classif else None,
         "common_filters": fields["common_filters"],
         "dataset_id": fields["dataset_id"],

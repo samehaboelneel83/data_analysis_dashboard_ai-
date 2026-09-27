@@ -1,4 +1,5 @@
 import type { ChartRendererProps } from './types'
+import { seriesColor } from '../chartUtils'
 
 // Diverging color scale: strong negative -> red, 0 -> neutral surface, strong positive -> accent blue.
 function cellColor(v: number): string {
@@ -7,7 +8,7 @@ function cellColor(v: number): string {
     // Theme accent, not a baked-in rgb -- the positive side of the scale
     // follows the product palette in both themes.
     const pct = Math.round((0.12 + t * 0.75) * 100)
-    return `color-mix(in srgb, var(--accent) ${pct}%, transparent)`
+    return `color-mix(in srgb, ${seriesColor(0)} ${pct}%, transparent)`
   }
   const alpha = 0.12 + -t * 0.75
   return `rgba(248,113,113,${alpha})`

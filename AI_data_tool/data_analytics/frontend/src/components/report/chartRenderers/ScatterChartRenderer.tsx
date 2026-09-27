@@ -1,5 +1,5 @@
 import { ScatterChart, Scatter, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList } from 'recharts'
-import { TT, fmtStr } from '../chartUtils'
+import { TT, fmtStr, seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
 import { xAxisProps, yAxisProps, gridProps, labelListProps, chartMargin } from './axisOptions'
 import { thinPoints, ANIMATE_MAX_POINTS } from '../../../lib/pointThinning'
@@ -24,14 +24,14 @@ export default function ScatterChartRenderer({ rows, cfg, rtl, broadcasts, onCli
             Recharts' own default (true) applied, unlike the builder's false default. */}
         <YAxis dataKey="y" type="number" {...yAxisProps(cfg, rtl, yFmt, allPoints.map(d => d.y), undefined, { height: plotH })} allowDecimals tickFormatter={v => fmtStr(v, yFmt)} />
         <Tooltip contentStyle={TT} formatter={(v: unknown, name: string) => [fmtStr(v, name === 'x' ? xFmt : yFmt), name]} />
-        <Scatter data={scatterData} isAnimationActive={animate} fill="var(--accent)"
+        <Scatter data={scatterData} isAnimationActive={animate} fill={seriesColor(0)}
           onClick={broadcasts ? (d: any) => onClickPoint(d.x) : undefined}
           style={{ cursor: broadcasts ? 'pointer' : 'default' }}
         >
           {/* A Cell per point only when display rules colour points: thousands
               of identical Cells cost a component each and draw the same fill. */}
           {hasRuleFills && drawnIndex.map((rowIdx, i) => (
-            <Cell key={i} fill={ruleStyles?.rows?.[rowIdx]?.fill ?? 'var(--accent)'} />
+            <Cell key={i} fill={ruleStyles?.rows?.[rowIdx]?.fill ?? seriesColor(0)} />
           ))}
           {labels && <LabelList {...labels} />}
         </Scatter>

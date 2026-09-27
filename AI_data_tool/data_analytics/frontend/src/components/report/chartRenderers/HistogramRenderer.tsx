@@ -1,5 +1,5 @@
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell, ResponsiveContainer, LabelList } from 'recharts'
-import { TT } from '../chartUtils'
+import { TT, seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
 import { axisTitles, xAxisProps, yAxisProps, gridProps, labelListProps, chartMargin } from './axisOptions'
 
@@ -27,7 +27,7 @@ export default function HistogramRenderer({ rows, cfg, rtl, ruleStyles, plotW }:
         <Tooltip contentStyle={TT} formatter={(v: unknown) => [String(v), 'count']} labelFormatter={(l: unknown) => `Bin: ${l}`} />
         <Bar dataKey="value" radius={[2, 2, 0, 0]}>
           {rows.map((_: any, i: number) => (
-            <Cell key={i} fill={ruleStyles?.rows?.[i]?.fill ?? 'var(--accent)'} />
+            <Cell key={i} fill={ruleStyles?.rows?.[i]?.fill ?? seriesColor(0)} />
           ))}
           {labels && <LabelList {...labels} />}
         </Bar>
