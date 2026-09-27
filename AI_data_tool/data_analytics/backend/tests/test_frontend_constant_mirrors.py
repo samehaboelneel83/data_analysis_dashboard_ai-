@@ -439,3 +439,10 @@ def test_multi_measure_widgets(ts):
     series per measure; anywhere else save would refuse it."""
     from app.services.multi_measure import MULTI_MEASURE_WIDGETS
     assert _string_list(ts, "MULTI_MEASURE_WIDGETS") == set(MULTI_MEASURE_WIDGETS)
+
+
+def test_pivot_widgets(ts):
+    """The panel offers more Rows / Columns / Measures exactly where the server
+    draws the nested crosstab."""
+    from app.services.pivot import PIVOT_WIDGETS
+    assert _string_list(ts, "PIVOT_WIDGETS") == set(PIVOT_WIDGETS)

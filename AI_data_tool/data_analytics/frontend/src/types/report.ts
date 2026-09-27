@@ -262,6 +262,12 @@ export const DUAL_MEASURE_WIDGETS: readonly string[] = [
  *  services/multi_measure.py (pinned by test_frontend_constant_mirrors.py). */
 export const MULTI_MEASURE_WIDGETS: readonly string[] = ['bar', 'line', 'area']
 
+/** The crosstab types: several fields on Rows (`rows_extra` after
+ *  `dimension`), Columns (`columns_extra` after `dimension2`) and Measures
+ *  (`extra_measures`) draw a nested pivot. MIRRORS PIVOT_WIDGETS in backend
+ *  services/pivot.py (pinned by test_frontend_constant_mirrors.py). */
+export const PIVOT_WIDGETS: readonly string[] = ['crosstab', 'matrix']
+
 /** What kind of column a field role can actually use.
  *
  *  Only `measure` and `measure2` were ever filtered, so a bar chart's per-bar
@@ -402,9 +408,10 @@ export const ROLE_SPECS: Record<WidgetType, RoleField[]> = {
              { role: 'measure',  label: 'Measure (numeric column)',   required: true }],
   table:    [{ role: 'category', label: 'Dimension (Group / X-axis)', required: true },
              { role: 'measure',  label: 'Measure (numeric column)',   required: false }],
-  crosstab: [{ role: 'category',  label: 'Dimension (Group / X-axis)', required: true },
-             { role: 'category2', label: 'Column Pivot',               required: false },
-             { role: 'measure',   label: 'Measure (numeric column)',   required: false }],
+  // Named as SAS names a crosstab's roles; each takes several fields (a nested pivot).
+  crosstab: [{ role: 'category',  label: 'Rows',                       required: true },
+             { role: 'category2', label: 'Columns',                    required: false },
+             { role: 'measure',   label: 'Measures (numeric columns)', required: false }],
   matrix:   [{ role: 'category',  label: 'Rows',                       required: true },
              { role: 'category2', label: 'Columns',                    required: false },
              { role: 'measure',   label: 'Values (numeric column)',    required: false }],

@@ -20,7 +20,7 @@ import type { GraphLayer } from './GraphLayersEditor'
 import { toDraftPin, toStoredPin } from './MapPinsEditor'
 import type { MapPin, StoredPin } from './MapPinsEditor'
 import { ADDITIVE_AGGREGATIONS, BOUNDARY_SET_WIDGETS, PIN_WIDGETS, FACETABLE_WIDGETS, FACET_MAX_PANELS, FORECAST_DEFAULT_PERIODS, FORECAST_MAX_PERIODS, FORECAST_MIN_PERIODS, HIERARCHY_WIDGETS, HIER_MAX_DEPTH, PARTITION_WIDGETS } from '../../types/report'
-import { AGGREGATIONS, DUAL_MEASURE_WIDGETS, MULTI_MEASURE_WIDGETS, ROLE_SPECS, configKeyFor, roleAccepts } from '../../types/report'
+import { AGGREGATIONS, DUAL_MEASURE_WIDGETS, MULTI_MEASURE_WIDGETS, PIVOT_WIDGETS, ROLE_SPECS, configKeyFor, roleAccepts } from '../../types/report'
 import { ASSIGN_DATA_EVENT, ADD_DATASET_EVENT, emptyPickerReason } from './WidgetPlaceholder'
 import { semanticAggregationWarning, nonAdditiveKind, SAFE_AGGREGATION } from '../../lib/semanticGuard'
 import { savePending, clearPending } from '../../lib/pendingEdits'
@@ -75,6 +75,18 @@ interface Props {
 function stringList(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x !== '') : []
 }
+
+/** Where a role's second and later fields are saved. A crosstab or matrix
+ *  takes several on Rows, Columns and Measures (a nested pivot); a bar, line
+ *  or area several measures (one series each), never beside a series split. */
+const EXTRA_KEY_OF: Record<string, string> = { category: 'rows_extra', category2: 'columns_extra', measure: 'extra_measures' }
+function extraKeyFor(wt: string, role: string, roleValues: Record<string, string>): string | undefined {
+  if (PIVOT_WIDGETS.includes(wt)) return EXTRA_KEY_OF[role]
+  if (role === 'measure' && MULTI_MEASURE_WIDGETS.includes(wt) && !roleValues.category2) return 'extra_measures'
+  return undefined
+}
+const seedExtras = (cfg: Record<string, unknown>): Record<string, string[]> =>
+  Object.fromEntries(Object.values(EXTRA_KEY_OF).map(k => [k, stringList(cfg[k])]))
 
 function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages, hierarchy, onHierarchyRefresh, bookmarks, ruleErrors, geography, distinctCounts, onUpdate }: Props) {
   // E03: in the shape the panel edits -- a legacy `roles` dict flattened,
@@ -195,8 +207,10 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
   // Blank means "same as the first" -- the behaviour every dual-axis chart had
   // before the second axis could aggregate on its own.
   const [agg2,       setAgg2]       = useState((cfg.aggregation2 as string) ?? '')
-  // The Measure role's second and later fields (bar, line, area): one series each.
-  const [extraMeasures, setExtraMeasures] = useState<string[]>(() => stringList(cfg.extra_measures))
+  // A role's second and later fields, by the key they are saved under
+  // (extra_measures, rows_extra, columns_extra -- see extraKeyFor).
+  const [extraFields, setExtraFields] = useState<Record<string, string[]>>(() => seedExtras(cfg))
+  const extraMeasures = extraFields.extra_measures ?? []
   // No limit = full data (QA 2026-09-26). The panel used to stamp `limit: 20`
   // on every widget it saved, silently cutting charts the author never limited.
   const [limit,      setLimit]      = useState<number | null>(cfg.limit ?? null)
@@ -421,7 +435,7 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
     setModelOpts(seedModelOpts(cfg))
     setAgg(cfg.aggregation ?? 'sum')
     setAgg2((cfg.aggregation2 as string) ?? '')
-    setExtraMeasures(stringList(cfg.extra_measures))
+    setExtraFields(seedExtras(cfg))
     setLimit(cfg.limit ?? null)
     setSort(cfg.sort ?? 'desc')
     setSortBy(cfg.sort_by ?? '')
@@ -760,11 +774,14 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
     if (caps.includes('overview')) {
       if (overviewAxis !== undefined) config.overview_axis = overviewAxis
     }
-    // Several measures: only beside a first one, and never with a series split
-    // (the server refuses the pair; the pane never offers it).
-    if (MULTI_MEASURE_WIDGETS.includes(wt) && roleValues.measure && !roleValues.category2) {
-      const extra = extraMeasures.filter(m => m && m !== roleValues.measure)
-      if (extra.length) config.extra_measures = extra
+    // A role's further fields, only beside its first one (extraKeyFor says
+    // where each type keeps them; the server refuses them anywhere else).
+    for (const role of Object.keys(EXTRA_KEY_OF)) {
+      const key = extraKeyFor(wt, role, roleValues)
+      const main = roleValues[role]
+      if (!key || !main) continue
+      const extra = (extraFields[key] ?? []).filter(v => v && v !== main)
+      if (extra.length) config[key] = extra
     }
     if ((LATTICE_WIDGETS as readonly string[]).includes(wt)) {
       if (latticeRows) config.lattice_rows = latticeRows
@@ -816,7 +833,7 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
     const timer = setTimeout(() => { onUpdate(config, title); clearPending(pendingId) }, 600)
     return () => clearTimeout(timer)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [title, datasetId, JSON.stringify(roleValues), JSON.stringify(multiRoleValues), JSON.stringify(modelOpts), agg, limit, sort, sortBy, sortCol, sortCustom, agg2, extraMeasures.join('\u0000'), havingOp, havingValue, JSON.stringify(objFilters), rankMode, rankN, rankPercent, rankOther, quickCalc, suppressBelow, suppressComplement, running, content, label, rtl, tableCols.join(','), JSON.stringify(sortKeys), bins, baseline, fitLine, targetValue, gaugeShape, animPos, animOrder, animSize, animStyle, animOpacity, animBox, autoReload, drillthroughPageId, tooltipPageId, hierarchyNodeId, dimensionGranularity, fiscalStart, action, actionPageId, carryFilters, actionBookmarkId, actionUrl, actionReportId, actionParamName, actionParamValue, barMode, forecastMethod, imageUrl, imageAlt, imageFit, webUrl, customUrl, shapeKind, shapeFill, shapeStroke, showAverageLine, referenceValue, referenceLabel, referenceColor, JSON.stringify(displayRules), xAxisLabel, yAxisLabel, axisTickSize, axisTickColor, axisLine, tickLine, xAxisAngle, yAxisAngle, yScale, yMin, yMax, showGrid, gridStyle, gridColor, wallColor, showAsTable, overviewAxis, latticeRows, latticeCols, animateBy, animateGran, slicerMode, containerMode, containerId, showLegend, legendPosition, dataLabels, seriesPatterns, showTotals, showSubtotals, totalsPosition, totalsScope, tableRowNumbers, tableRowLines, tableBanding, tableCondensed, tableSparkline, widgetBackground, widgetBorderColor, widgetBorderWidth, widgetRadius, widgetPadding, widgetSkin, altText, subtitle, boundarySetId, forecastTarget, centralityMetric,
+  }, [title, datasetId, JSON.stringify(roleValues), JSON.stringify(multiRoleValues), JSON.stringify(modelOpts), agg, limit, sort, sortBy, sortCol, sortCustom, agg2, JSON.stringify(extraFields), havingOp, havingValue, JSON.stringify(objFilters), rankMode, rankN, rankPercent, rankOther, quickCalc, suppressBelow, suppressComplement, running, content, label, rtl, tableCols.join(','), JSON.stringify(sortKeys), bins, baseline, fitLine, targetValue, gaugeShape, animPos, animOrder, animSize, animStyle, animOpacity, animBox, autoReload, drillthroughPageId, tooltipPageId, hierarchyNodeId, dimensionGranularity, fiscalStart, action, actionPageId, carryFilters, actionBookmarkId, actionUrl, actionReportId, actionParamName, actionParamValue, barMode, forecastMethod, imageUrl, imageAlt, imageFit, webUrl, customUrl, shapeKind, shapeFill, shapeStroke, showAverageLine, referenceValue, referenceLabel, referenceColor, JSON.stringify(displayRules), xAxisLabel, yAxisLabel, axisTickSize, axisTickColor, axisLine, tickLine, xAxisAngle, yAxisAngle, yScale, yMin, yMax, showGrid, gridStyle, gridColor, wallColor, showAsTable, overviewAxis, latticeRows, latticeCols, animateBy, animateGran, slicerMode, containerMode, containerId, showLegend, legendPosition, dataLabels, seriesPatterns, showTotals, showSubtotals, totalsPosition, totalsScope, tableRowNumbers, tableRowLines, tableBanding, tableCondensed, tableSparkline, widgetBackground, widgetBorderColor, widgetBorderWidth, widgetRadius, widgetPadding, widgetSkin, altText, subtitle, boundarySetId, forecastTarget, centralityMetric,
       containerBackground, layer, scriptCode, transparent, legendTitle,
       y2AxisLabel, donutTotal, donutTotalLabel,
     // Hierarchy / faceting / forecast state. Omitting these would let the
@@ -1108,15 +1125,21 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
   // each: the first is `measure`, the rest `extra_measures`. Not beside a
   // series split, which fills the series slot already.
   const multiMeasure = MULTI_MEASURE_WIDGETS.includes(wt) && !roleValues.category2
-  const extendable = (role: string) => role === 'measure' && multiMeasure
+  const extendable = (role: string) => !!extraKeyFor(wt, role, roleValues)
   const roleSpecs = (ROLE_SPECS[wt] ?? []).map(rf => extendable(rf.role) ? { ...rf, multi: true } : rf)
   type RoleSpec = (typeof roleSpecs)[number]
   const fieldsOf = (rf: RoleSpec): string[] =>
-    extendable(rf.role) ? [roleValues.measure, ...extraMeasures].filter((m): m is string => !!m)
+    extendable(rf.role) ? [roleValues[rf.role], ...(extraFields[extraKeyFor(wt, rf.role, roleValues)!] ?? [])].filter((m): m is string => !!m)
     : rf.multi ? (multiRoleValues[rf.role] ?? [])
     : (roleValues[rf.role] ? [roleValues[rf.role]] : [])
   const setFields = (rf: RoleSpec, values: string[]) => {
-    if (extendable(rf.role)) { setRole('measure', values[0] ?? ''); setExtraMeasures(values.slice(1)); return }
+    if (extendable(rf.role)) {
+      const key = extraKeyFor(wt, rf.role, roleValues)!
+      if (rf.role === 'category') pickCategory(values[0] ?? '')
+      else setRole(rf.role, values[0] ?? '')
+      setExtraFields(prev => ({ ...prev, [key]: values.slice(1) }))
+      return
+    }
     if (rf.multi) { setMultiRoleValues(prev => ({ ...prev, [rf.role]: values })); return }
     if (rf.role === 'category') { pickCategory(values[0] ?? ''); return }
     setRole(rf.role, values[0] ?? '')

@@ -546,16 +546,28 @@ def validate_widget_payload(widget_type: str | None, config: dict | None, *,
     extra = config.get("extra_measures")
     if extra is not None:
         from .multi_measure import MULTI_MEASURE_WIDGETS
+        from .pivot import PIVOT_WIDGETS
         if not isinstance(extra, list) or not all(isinstance(m, str) for m in extra):
             raise InvalidWidget("extra_measures must be a list of field names")
-        if extra and widget_type is not None and widget_type not in MULTI_MEASURE_WIDGETS:
+        if extra and widget_type is not None and widget_type not in MULTI_MEASURE_WIDGETS | PIVOT_WIDGETS:
             raise InvalidWidget(
                 f"a {widget_type} widget takes one measure; more than one is for "
                 f"{', '.join(sorted(MULTI_MEASURE_WIDGETS))} charts")
-        if extra and config.get("dimension2"):
+        if extra and config.get("dimension2") and widget_type not in PIVOT_WIDGETS:
             raise InvalidWidget(
                 "several measures and a series split cannot be drawn together: "
                 "remove the Series field or the extra measures")
+    # More row / column levels on a crosstab (services/pivot.py).
+    for key in ("rows_extra", "columns_extra"):
+        v = config.get(key)
+        if v is None:
+            continue
+        from .pivot import PIVOT_WIDGETS
+        if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
+            raise InvalidWidget(f"{key} must be a list of field names")
+        if v and widget_type is not None and widget_type not in PIVOT_WIDGETS:
+            raise InvalidWidget(f"{key} is for a crosstab or matrix, not a {widget_type} widget")
+
     roles = config.get("roles")
     if roles is not None and not isinstance(roles, dict):
         raise InvalidWidget("roles must be an object")

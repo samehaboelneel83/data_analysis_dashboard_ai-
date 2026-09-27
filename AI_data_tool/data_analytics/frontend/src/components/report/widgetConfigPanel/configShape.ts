@@ -33,7 +33,7 @@ export const PANEL_KEYS: ReadonlySet<string> = new Set([
   'actionUrl', 'actionReportId', 'actionParamName', 'actionParamValue', 'url', 'alt', 'fit',
   'shape', 'fill', 'stroke',
   // data widgets
-  'aggregation', 'extra_measures', 'limit', 'sort', 'sort_by', 'sort_col', 'running', 'slicer_mode',
+  'aggregation', 'extra_measures', 'rows_extra', 'columns_extra', 'limit', 'sort', 'sort_by', 'sort_col', 'running', 'slicer_mode',
   'boundary_set_id', 'pins', 'layers', 'id_col', 'parent_col', 'label_col', 'levels',
   'facet_by', 'inner_widget_type', 'facet_limit', 'forecast_periods', 'code', 'transparent',
   'legend_title', 'y2_axis_label', 'donut_total', 'donut_total_label', 'sort_custom',

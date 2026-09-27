@@ -3545,6 +3545,11 @@ def get_widget_data_from_df(
         if relative_notes:
             lattice["relative_dates"] = relative_notes
         return lattice
+    # A crosstab with more than one field on Rows, Columns or Measures is the
+    # nested pivot (services/pivot.py); one field each way keeps _shape_grid.
+    from .pivot import is_multilevel, shape_pivot
+    if is_multilevel(widget_type, config):
+        shaper = shape_pivot
     try:
         result = shaper(df, config)
     except ValueError as e:

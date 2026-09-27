@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, act, within, cleanup } from '@testing-library/react'
 import WidgetConfigPanel from './WidgetConfigPanel'
 import { CrossFilterProvider } from './CrossFilterContext'
-import { ROLE_SPECS, MULTI_MEASURE_WIDGETS, roleAccepts, configKeyFor } from '../../types/report'
+import { ROLE_SPECS, MULTI_MEASURE_WIDGETS, PIVOT_WIDGETS, roleAccepts, configKeyFor } from '../../types/report'
 import type { Widget, ReportPage, WidgetType } from '../../types/report'
 import type { DatasetColumn } from '../../services/api'
 
@@ -62,8 +62,13 @@ beforeEach(() => { localStorage.clear(); vi.useFakeTimers() })
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks() })
 
 /** Does this role take several fields on this widget type? */
-const takesSeveral = (type: string, rf: { role: string; multi?: boolean }) =>
-  !!rf.multi || (rf.role === 'measure' && MULTI_MEASURE_WIDGETS.includes(type))
+const EXTRA_KEY: Record<string, string> = { category: 'rows_extra', category2: 'columns_extra', measure: 'extra_measures' }
+/** Where a role's second and later fields are saved, when it takes several
+ *  beyond its first (a crosstab's Rows / Columns / Measures, a chart's value axis). */
+const extraKey = (type: string, role: string) =>
+  PIVOT_WIDGETS.includes(type) ? EXTRA_KEY[role]
+  : role === 'measure' && MULTI_MEASURE_WIDGETS.includes(type) ? 'extra_measures' : undefined
+const takesSeveral = (type: string, rf: { role: string; multi?: boolean }) => !!rf.multi || !!extraKey(type, rf.role)
 
 const FAMILIES = (Object.entries(ROLE_SPECS) as [WidgetType, typeof ROLE_SPECS[WidgetType]][])
   .filter(([, specs]) => specs.length > 0)
@@ -98,8 +103,8 @@ describe('+ Add offers the fields each role can use, for every object family', (
             act(() => { vi.advanceTimersByTime(700) })
             const saved = onUpdate.mock.calls.at(-1)![0]
             if (rf.multi) expect(saved[configKeyFor(rf.role)]).toEqual(order)
-            // A chart's value axis: the first measure, then one more series each.
-            else expect([saved.measure, ...(saved.extra_measures ?? [])]).toEqual(order)
+            // The first field in the role's own key, the rest in its extra key.
+            else expect([saved[configKeyFor(rf.role)], ...(saved[extraKey(type, rf.role)!] ?? [])]).toEqual(order)
           } else {
             const options = within(dialog).getAllByRole('option')
             const offered = options.map(o => fieldOf(o.textContent ?? '')).sort()

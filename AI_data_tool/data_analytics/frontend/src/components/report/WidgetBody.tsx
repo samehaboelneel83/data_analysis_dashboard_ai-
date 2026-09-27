@@ -1,4 +1,5 @@
 import { semanticAggregationWarning, nonAdditiveKind, SAFE_AGGREGATION } from '../../lib/semanticGuard'
+import PivotTable, { type PivotData } from './PivotTable'
 import { Suspense, useMemo, useState, type ReactNode } from 'react'
 import { useDirection, widgetIsRtl } from '../../contexts/DirectionContext'
 import type { CalcColumnFormat } from '../../services/api'
@@ -455,6 +456,12 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
         ))}
       </div>
     )
+  }
+
+  // A crosstab with more than one field on Rows, Columns or Measures: the
+  // nested pivot (backend services/pivot.py).
+  if ((wt === 'crosstab' || wt === 'matrix') && data?.type === 'pivot') {
+    return <PivotTable data={data as PivotData} rtl={rtl} formats={allFormats} />
   }
 
   // Table / Crosstab / Matrix (a labeled alias of crosstab — same pivoted-row shaper and layout)
