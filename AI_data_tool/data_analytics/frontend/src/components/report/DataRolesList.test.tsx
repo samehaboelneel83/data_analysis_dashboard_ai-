@@ -34,14 +34,14 @@ beforeEach(() => { localStorage.clear(); vi.useFakeTimers() })
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('the pane', () => {
-  it('lists each role with what it holds, and offers + Add only where a field can go', () => {
+  it('lists each role with what it holds; + Add is greyed where the role is full', () => {
     renderPanel(bar({ dimension: 'region', measure: 'sales' }))
     const pane = screen.getByTestId('data-roles-list')
     expect(within(pane).getByRole('button', { name: 'region, Dimension' })).toBeTruthy()
     expect(within(pane).getByRole('button', { name: 'sales, Measure' })).toBeTruthy()
     // Dimension and Measure are single-field roles and full; Series is empty.
-    expect(within(pane).queryByRole('button', { name: 'Add Dimension' })).toBeNull()
-    expect(within(pane).getByRole('button', { name: 'Add Series' })).toBeTruthy()
+    expect((within(pane).getByRole('button', { name: 'Add Dimension' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((within(pane).getByRole('button', { name: 'Add Series' }) as HTMLButtonElement).disabled).toBe(false)
   })
 
   it('a measure opens Name and Aggregation, and the aggregation is saved', () => {
@@ -78,6 +78,40 @@ describe('the pane', () => {
   })
 })
 
+describe('+ Add', () => {
+  it('offers only the fields the role accepts, and a click assigns a one-field role', () => {
+    const onUpdate = renderPanel(bar({ dimension: 'region' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add Measure' }))
+    const dialog = screen.getByRole('dialog', { name: 'Add Measure' })
+    const offered = within(dialog).getAllByRole('option').map(o => o.textContent)
+    expect(offered).toEqual(['sales'])                      // numbers only
+    fireEvent.click(within(dialog).getByRole('option', { name: 'sales' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    act(() => { vi.advanceTimersByTime(700) })
+    expect(lastConfig(onUpdate)).toMatchObject({ dimension: 'region', measure: 'sales' })
+  })
+
+  it('a role that takes several fields is a checklist, appended in the order ticked', () => {
+    const cols: DatasetColumn[] = [...COLUMNS,
+      { id: 4, name: 'cost', dtype: 'numeric', missing_pct: 0, stats: {} },
+      { id: 5, name: 'units', dtype: 'numeric', missing_pct: 0, stats: {} }]
+    const w = { ...bar({ measures: ['sales'] }), widget_type: 'card' } as Widget
+    const onUpdate = vi.fn()
+    render(<CrossFilterProvider><WidgetConfigPanel widget={w} columns={cols}
+      onUpdate={onUpdate} pages={page([w])} /></CrossFilterProvider>)
+    fireEvent.click(screen.getByRole('button', { name: 'Add Fields' }))
+    const dialog = screen.getByRole('dialog', { name: 'Add Fields' })
+    const box = (name: string) => within(dialog).getByRole('checkbox', { name: new RegExp(`^${name}`) }) as HTMLInputElement
+    expect(box('sales').checked).toBe(true)                 // what it holds, ticked
+    expect(within(dialog).queryByRole('checkbox', { name: /region/ })).toBeNull()
+    fireEvent.click(box('units'))
+    fireEvent.click(box('cost'))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add' }))
+    act(() => { vi.advanceTimersByTime(700) })
+    expect(lastConfig(onUpdate).measures).toEqual(['sales', 'units', 'cost'])
+  })
+})
+
 describe('Assign data', () => {
   it('opens a dialog holding every role picker, and Done closes it', () => {
     const onUpdate = renderPanel(bar())
@@ -91,12 +125,6 @@ describe('Assign data', () => {
     expect(screen.getByRole('button', { name: 'region, Dimension' })).toBeTruthy()
   })
 
-  it('+ Add opens it on that role', () => {
-    renderPanel(bar({ dimension: 'region' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Add Measure' }))
-    const dialog = screen.getByRole('dialog', { name: /Assign data/ })
-    expect(document.activeElement).toBe(within(dialog).getByLabelText(/^Measure/))
-  })
 
   it('opens by itself when a chart is inserted', () => {
     renderPanel(bar())

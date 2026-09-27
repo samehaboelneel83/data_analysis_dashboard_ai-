@@ -66,8 +66,9 @@ export default function DataRolesList({ specs, values, kindOf, displayName, onAd
         const { heading, hint } = splitLabel(rf)
         const fields = values[rf.role] ?? []
         const isCollapsed = collapsed.has(rf.role)
-        // A single-field role is full once it has its field: SAS offers "+ Add"
-        // only where another field can go. Replacing is done from the dialog.
+        // A single-field role is full once it has its field. SAS still shows
+        // its "+ Add", greyed; replacing is done from the field's × or from
+        // Assign data.
         const canAdd = rf.multi || fields.length === 0
         const sectionId = `data-role-section-${rf.role}`
         return (
@@ -85,13 +86,14 @@ export default function DataRolesList({ specs, values, kindOf, displayName, onAd
                   <span style={{ fontSize: 11, color: 'var(--danger, #c0392b)' }} title="Required">*</span>
                 )}
               </button>
-              {canAdd && (
-                <button type="button" onClick={() => onAdd(rf.role)} aria-label={`Add ${heading}`}
-                  style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none',
-                    cursor: 'pointer', font: 'inherit', fontSize: 13, color: 'var(--text)', padding: '2px 4px' }}>
-                  <span aria-hidden style={{ fontSize: 16, lineHeight: 1 }}>+</span> Add
-                </button>
-              )}
+              <button type="button" onClick={() => onAdd(rf.role)} aria-label={`Add ${heading}`}
+                disabled={!canAdd}
+                title={canAdd ? undefined : `${heading} takes one field. Remove it to choose another.`}
+                style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none',
+                  cursor: canAdd ? 'pointer' : 'default', font: 'inherit', fontSize: 13, padding: '2px 4px',
+                  color: canAdd ? 'var(--text)' : 'var(--muted)', opacity: canAdd ? 1 : 0.55 }}>
+                <span aria-hidden style={{ fontSize: 16, lineHeight: 1 }}>+</span> Add
+              </button>
             </div>
             {!isCollapsed && (
               <ul id={sectionId} style={{ listStyle: 'none', margin: 0, padding: '0 0 0 18px' }}>
@@ -185,6 +187,92 @@ export function AssignDataDialog({ objectName, focusRole, onClose, children }: {
         <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '10px 16px',
           borderTop: '1px solid var(--border)' }}>
           <button type="button" className="btn btn-primary btn-sm" onClick={onClose}>Done</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export interface FieldChoice { value: string; label: string; group?: string }
+
+/**
+ * "+ Add" on a role: only the fields that role accepts, grouped (Categories,
+ * Dates, Numbers...). A role that takes several fields is a checklist -- what
+ * it holds already ticked, new ones appended in the order ticked -- applied
+ * with Add; a one-field role applies on the click.
+ */
+export function AddFieldDialog({ heading, multi, choices, selected, onApply, onClose }: {
+  heading: string
+  multi: boolean
+  choices: FieldChoice[]
+  selected: string[]
+  onApply: (values: string[]) => void
+  onClose: () => void
+}) {
+  const ref = useModalDialog<HTMLDivElement>(onClose)
+  const [picked, setPicked] = useState<string[]>(selected)
+  const [q, setQ] = useState('')
+  const needle = q.trim().toLowerCase()
+  const shown = choices.filter(c => !needle || c.label.toLowerCase().includes(needle))
+  const groups = [...new Set(shown.map(c => c.group ?? ''))]
+  const toggle = (v: string) => setPicked(p => p.includes(v) ? p.filter(x => x !== v) : [...p, v])
+  const choose = (v: string) => { onApply([v]); onClose() }
+  const changed = picked.length !== selected.length || picked.some((v, i) => v !== selected[i])
+  return (
+    <div onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}
+      style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center',
+        justifyContent: 'center', background: 'rgba(0,0,0,.45)', padding: 16 }}>
+      <div ref={ref} role="dialog" aria-modal="true" aria-label={`Add ${heading}`}
+        style={{ width: 'min(380px, 100%)', maxHeight: 'min(560px, calc(100vh - 32px))', display: 'flex',
+          flexDirection: 'column', background: 'var(--surface)', border: '1px solid var(--border)',
+          borderRadius: 'var(--radius)', boxShadow: '0 16px 48px rgba(0,0,0,.35)', color: 'var(--text)' }}>
+        <div style={{ padding: '14px 16px 10px', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ fontWeight: 650, fontSize: 15, marginBottom: 2 }}>Add {heading}</div>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+            {multi ? 'Choose one or more fields.' : 'Choose a field.'}
+          </div>
+          <input type="search" value={q} onChange={e => setQ(e.target.value)} aria-label="Search fields"
+            placeholder="Search fields…" style={{ width: '100%' }} />
+        </div>
+        <div role={multi ? 'group' : 'listbox'} aria-label={`${heading} fields`}
+          style={{ overflowY: 'auto', padding: '6px 8px', fontSize: 13 }}>
+          {shown.length === 0 && (
+            <div style={{ padding: '10px 8px', color: 'var(--muted)', fontSize: 12 }}>
+              {choices.length === 0 ? 'No field in this data fits this role.' : 'No field matches.'}
+            </div>
+          )}
+          {groups.map(g => (
+            <div key={g || '_'}>
+              {g && <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase',
+                letterSpacing: '.06em', padding: '8px 8px 4px' }}>{g}</div>}
+              {shown.filter(c => (c.group ?? '') === g).map(c => {
+                const on = picked.includes(c.value)
+                return multi ? (
+                  <label key={c.value} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px',
+                    borderRadius: 6, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={on} onChange={() => toggle(c.value)} />
+                    <span style={{ flex: 1 }}>{c.label}</span>
+                    {on && <span style={{ fontSize: 11, color: 'var(--accent)' }}>#{picked.indexOf(c.value) + 1}</span>}
+                  </label>
+                ) : (
+                  <button key={c.value} type="button" role="option" aria-selected={on} onClick={() => choose(c.value)}
+                    style={{ display: 'block', width: '100%', textAlign: 'start', padding: '6px 8px', borderRadius: 6,
+                      border: 'none', font: 'inherit', fontSize: 13, cursor: 'pointer', color: 'var(--text)',
+                      background: on ? 'var(--surface2)' : 'transparent' }}>
+                    {c.label}
+                  </button>
+                )
+              })}
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, padding: '10px 16px',
+          borderTop: '1px solid var(--border)' }}>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>Cancel</button>
+          {multi && (
+            <button type="button" className="btn btn-primary btn-sm" disabled={!changed}
+              onClick={() => { onApply(picked); onClose() }}>Add</button>
+          )}
         </div>
       </div>
     </div>
