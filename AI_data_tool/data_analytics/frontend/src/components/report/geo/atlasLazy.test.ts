@@ -40,7 +40,7 @@ function chainToAtlas(entry: string): string[] | null {
     const file = queue.shift()!
     if (file === ATLAS) {
       const chain: string[] = []
-      for (let f: string | null = file; f; f = parent.get(f) ?? null) chain.unshift(path.relative(srcRoot, f))
+      for (let f: string | null = file; f; f = parent.get(f) ?? null) chain.unshift(path.relative(srcRoot, f).split(path.sep).join("/"))
       return chain
     }
     if (!/\.tsx?$/.test(file)) continue

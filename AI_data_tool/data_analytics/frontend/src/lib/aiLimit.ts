@@ -19,7 +19,9 @@ export function aiLimitMessage(err: unknown, t: TranslateFn): string | null {
   if (!Number.isFinite(secs) || secs <= 0) return t('ai.limit.reached')
   // Intl words the interval in the reader's language, plurals included
   // ("in 9 hours", "خلال 9 ساعات"), which a template with {n} cannot.
-  const rtf = new Intl.RelativeTimeFormat(t('ai.limit.locale'), { numeric: 'always' })
+  // Latin digits pinned: some ICU builds give 'ar' Arabic-Indic digits by
+  // default, which ignored the reader's digit setting. localDigits applies it.
+  const rtf = new Intl.RelativeTimeFormat(`${t('ai.limit.locale')}-u-nu-latn`, { numeric: 'always' })
   const when = secs >= 86400 ? rtf.format(Math.ceil(secs / 86400), 'day')
     : secs >= 3600 ? rtf.format(Math.floor(secs / 3600), 'hour')
     : rtf.format(Math.max(1, Math.ceil(secs / 60)), 'minute')
