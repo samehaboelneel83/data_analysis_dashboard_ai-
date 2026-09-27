@@ -129,14 +129,54 @@ async def test_embed_token_never_reaches_exported_span_attributes(client, memory
                 assert "abc" not in value, f"{key}={value!r} leaked the embed token"
     # The specific attributes the ASGI layer records the raw URL/path onto
     # must have their query string stripped entirely (not merely the token).
-    url_spans = [s for s in spans
-                if s.attributes.get("http.url") or s.attributes.get("http.target")]
-    assert url_spans, "no span carried http.url/http.target to check"
+    # Old HTTP semantic conventions name them http.url/http.target; the stable
+    # ones (OTEL_SEMCONV_STABILITY_OPT_IN=http) url.full/url.path, plus
+    # url.query, which holds nothing but the query and must not survive.
+    url_keys = ("http.url", "http.target", "url.full", "url.path")
+    url_spans = [s for s in spans if any(s.attributes.get(k) for k in url_keys)]
+    assert url_spans, f"no span carried any of {url_keys} to check"
     for span in url_spans:
-        for key in ("http.url", "http.target"):
+        for key in url_keys:
             value = span.attributes.get(key)
             if isinstance(value, str):
                 assert "?" not in value, f"{key}={value!r} still carries a query string"
+        assert "url.query" not in span.attributes, "url.query survived the scrub"
+
+
+def test_scrubber_strips_old_and_stable_url_attributes_on_a_frozen_span():
+    """Newer SDKs (1.3x+) freeze a span's attributes before any end-of-span
+    hook, so a plain write raises TypeError; and the stable HTTP conventions
+    carry the query under url.full/url.query rather than http.url/http.target.
+    Both are pinned here directly, whichever convention the instrumentation
+    in this environment happens to emit."""
+    from opentelemetry.attributes import BoundedAttributes
+
+    attrs = BoundedAttributes(attributes={
+        "http.url": "http://h/api/v1/embed/report?token=abc",
+        "http.target": "/api/v1/embed/report?token=abc",
+        "url.full": "http://h/api/v1/embed/report?token=abc",
+        "url.path": "/api/v1/embed/report",
+        "url.query": "token=abc",
+        "http.route": "/api/v1/embed/report",
+    }, immutable=True)
+
+    class _Span:
+        _attributes = attrs
+
+    scrubber = telemetry._QuerystringScrubber()
+    scrubber._on_ending(_Span())
+    scrubber.on_end(_Span())
+
+    assert dict(attrs) == {
+        "http.url": "http://h/api/v1/embed/report",
+        "http.target": "/api/v1/embed/report",
+        "url.full": "http://h/api/v1/embed/report",
+        "url.path": "/api/v1/embed/report",
+        "http.route": "/api/v1/embed/report",
+    }
+    # Frozen again afterwards: the scrub is the only write let through.
+    with pytest.raises(TypeError):
+        attrs["http.url"] = "x"
 
 
 @pytest.fixture
