@@ -382,18 +382,19 @@ describe('ReportBuilder Fields pane', () => {
     }
   }
 
-  it('lists dataset columns grouped into Columns and Dimensions', async () => {
+  it('lists dataset columns grouped into Dimensions and Measures, each with a checkbox', async () => {
     vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
     vi.mocked(datasetsApi.get).mockResolvedValue(datasetWithColumns() as any)
     renderBuilder()
     await screen.findByTestId('view-strip')
 
     expect(await screen.findByText('Fields')).toBeInTheDocument()
-    // Numeric columns sit under "Columns"; "Measures" is reserved for dataset measures,
-    // which are post-aggregation expressions rather than aggregatable columns.
-    expect(screen.getByText('Columns')).toBeInTheDocument()
-    expect(screen.queryByText('Measures')).not.toBeInTheDocument()
+    // As SAS's data pane groups them: numeric columns are Measures (defined
+    // measures lead that group, marked ƒx), text columns are Dimensions.
+    expect(screen.getByText('Measures')).toBeInTheDocument()
     expect(screen.getByText('Dimensions')).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: 'Select sales' })).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: 'Select region' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^[#ƒx Aa]* ?sales$/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^[#ƒx Aa]* ?region$/ })).toBeInTheDocument()
   })
@@ -625,8 +626,8 @@ describe('ReportBuilder Fields pane', () => {
     await screen.findByTestId('view-strip')
     await screen.findByText('Fields')
 
-    // No numeric columns remain, so the Columns group should not render at all.
-    expect(screen.queryByText('Columns')).not.toBeInTheDocument()
+    // No numeric columns remain, so the Measures group should not render at all.
+    expect(screen.queryByText('Measures')).not.toBeInTheDocument()
     expect(screen.getByText('Dimensions')).toBeInTheDocument()
   })
 
@@ -1541,6 +1542,7 @@ describe('dropping several fields on the canvas', () => {
     { id: 1, name: 'region', dtype: 'categorical', missing_pct: 0, stats: {} },
     { id: 2, name: 'revenue', dtype: 'numeric', missing_pct: 0, stats: {} },
     { id: 3, name: 'cost', dtype: 'numeric', missing_pct: 0, stats: {} },
+    { id: 4, name: 'order_date', dtype: 'datetime', missing_pct: 0, stats: {} },
   ]
 
   async function builderWithFields() {
@@ -1587,7 +1589,34 @@ describe('dropping several fields on the canvas', () => {
     await builderWithFields()
     fireEvent.click(await fieldButton('region'), { ctrlKey: true })
     fireEvent.click(await fieldButton('revenue'), { ctrlKey: true })
-    expect(await screen.findByText(/2 fields selected/i)).toBeInTheDocument()
+    expect(await screen.findByText(/^2 selected$/i)).toBeInTheDocument()
+  })
+
+  it('ticking fields stages them: the bar says which chart they make, and Add chart builds it', async () => {
+    await builderWithFields()
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Select region' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select revenue' }))
+    const bar = await screen.findByTestId('fields-staging')
+    expect(within(bar).getByText(/^2 selected$/)).toBeInTheDocument()
+    expect(within(bar).getByText(/Will draw a Bar/)).toBeInTheDocument()
+    fireEvent.click(within(bar).getByRole('button', { name: /Add chart/ }))
+    await waitFor(() => expect(reportsApi.addWidget).toHaveBeenCalledTimes(1))
+    expect(reportsApi.addWidget).toHaveBeenCalledWith(1, 100, expect.objectContaining({
+      widget_type: 'bar',
+      config: expect.objectContaining({ dimension: 'region', measure: 'revenue' }),
+    }))
+    // Staged and charted: the ticks clear.
+    await waitFor(() => expect(screen.queryByTestId('fields-staging')).toBeNull())
+    expect((screen.getByRole('checkbox', { name: 'Select region' }) as HTMLInputElement).checked).toBe(false)
+  })
+
+  it('a date column is grouped under Dates, and a date with a measure stages as a line', async () => {
+    await builderWithFields()
+    const date = await screen.findByRole('checkbox', { name: 'Select order_date' })
+    expect(screen.getByText('Dates')).toBeInTheDocument()
+    fireEvent.click(date)
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select revenue' }))
+    expect(within(await screen.findByTestId('fields-staging')).getByText(/Will draw a Line/)).toBeInTheDocument()
   })
 
   it('dropping the gathered fields builds ONE chart from all of them', async () => {
@@ -2369,5 +2398,27 @@ describe('ReportBuilder Modern view style', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Edit mode' }))
     expect(await screen.findByTestId('view-strip')).toBeInTheDocument()
     expect(screen.queryByRole('tablist', { name: 'Pages' })).toBeNull()
+  })
+})
+
+describe('ReportBuilder Convert to', () => {
+  it('saves the new type and its rebuilt config as one undoable step', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(reportsApi.updateWidget).mockClear()
+    vi.mocked(reportsApi.updateWidget).mockResolvedValue({} as any)
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    const { CONVERT_WIDGET_EVENT } = await import('../components/report/ConvertToMenu')
+    act(() => {
+      window.dispatchEvent(new CustomEvent(CONVERT_WIDGET_EVENT, { detail: {
+        widgetId: 5, widget_type: 'line', config: { dimension: 'region' }, label: 'Convert "Sales by Region" to Line Chart' } }))
+    })
+    await waitFor(() => expect(reportsApi.updateWidget).toHaveBeenCalledWith(1, 100, 5,
+      { widget_type: 'line', config: { dimension: 'region' } }), { timeout: 5000 })
+    // One step back restores the type AND the config it had.
+    fireEvent.click(await screen.findByRole('button', { name: 'Undo' }))
+    await waitFor(() => expect(reportsApi.updateWidget).toHaveBeenLastCalledWith(1, 100, 5,
+      { widget_type: 'bar', config: { dimension: 'region' } }), { timeout: 5000 })
   })
 })

@@ -173,3 +173,21 @@ describe('CollapsibleSide resizing', () => {
     expect(sep()).toHaveAttribute('aria-valuemax', String(MAX_PANEL_W))
   })
 })
+
+describe('a width floor while the content needs room', () => {
+  it('is at least minWidth, and back to the author\'s own width once lifted', () => {
+    const { container, rerender } = render(
+      <CollapsibleSide id="cfg" side="right" width={245} title="Settings" minWidth={340}><p>x</p></CollapsibleSide>)
+    const shell = container.firstElementChild as HTMLElement
+    expect(shell).toHaveStyle({ width: '340px' })
+    rerender(<CollapsibleSide id="cfg" side="right" width={245} title="Settings"><p>x</p></CollapsibleSide>)
+    expect(shell).toHaveStyle({ width: '245px' })
+  })
+
+  it('never narrows a panel the author made wider', () => {
+    localStorage.setItem('datalytics.builderPanelWidths', JSON.stringify({ cfg: 420 }))
+    const { container } = render(
+      <CollapsibleSide id="cfg" side="right" width={245} title="Settings" minWidth={340}><p>x</p></CollapsibleSide>)
+    expect(container.firstElementChild as HTMLElement).toHaveStyle({ width: '420px' })
+  })
+})

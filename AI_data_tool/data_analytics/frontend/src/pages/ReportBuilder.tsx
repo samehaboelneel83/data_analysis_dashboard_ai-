@@ -59,6 +59,7 @@ import { useMediaQuery, MOBILE_QUERY } from '../hooks/useMediaQuery'
 import { Z_DROPDOWN, Z_DRAG } from '../lib/zIndex'
 import { alignWidgets, distributeWidgets } from '../lib/alignment'
 import { chartForFields, type AutoField } from '../lib/autoChart'
+import { chartLabel } from '../components/report/ChartGallery'
 import { quickCalcsFor, uniqueMeasureName } from '../lib/quickCalcs'
 import { countLabel } from '../lib/fieldHints'
 import { boundarySetsApi, type BoundaryPack } from '../services/api'
@@ -76,6 +77,7 @@ import { useViewStyle, updatedAgo } from '../lib/viewStyle'
 import { useUndoStack, IdAliases, describeConfigChange, changedKeys } from './reportBuilder/undo'
 import { ASSIGN_DATA_EVENT, ADD_DATASET_EVENT, missingRequiredRoles } from '../components/report/WidgetPlaceholder'
 import { PATCH_WIDGET_EVENT } from '../components/report/TruncationNote'
+import { CONVERT_WIDGET_EVENT } from '../components/report/ConvertToMenu'
 import { nonAdditiveKind, SAFE_AGGREGATION } from '../lib/semanticGuard'
 import { readPending, clearPending, type PendingEdit } from '../lib/pendingEdits'
 import DatasetPickerDialog from '../components/dataset/DatasetPickerDialog'
@@ -105,7 +107,7 @@ import {
 } from '../lib/dashboardLayout'
 
 import {
-  COLS, ROW_H, GAP, LEFT_SIDEBAR_W, RIGHT_PANEL_W, MIN_CANVAS_W,
+  COLS, ROW_H, GAP, LEFT_SIDEBAR_W, RIGHT_PANEL_W, SUGGEST_PANEL_W, MIN_CANVAS_W,
   CLASSIFICATION_LABELS, CLASSIFICATION_COLORS, gridStyle, canvasH,
 } from './reportBuilder/grid'
 import { SyncSlicersPaneConnected, BookmarksPaneConnected } from './reportBuilder/BookmarksConnected'
@@ -1104,6 +1106,8 @@ export default function ReportBuilder() {
    *  click still assigns a single field to the selected widget, because that is
    *  what the field list has always done and is what most clicks mean. */
   const [gatheredFields, setGatheredFields] = useState<string[]>([])
+  const toggleGathered = (name: string) =>
+    setGatheredFields(g => g.includes(name) ? g.filter(n => n !== name) : [...g, name])
 
   /** Which field's one-click calculation menu is open. SAS offers these from
    *  the data item, and the honest result is a MEASURE: it evaluates at the
@@ -1149,6 +1153,14 @@ export default function ReportBuilder() {
       toast.error(detail || 'Could not add the calculation')
     }
   }
+
+  /** Which group of the Fields tab a column sits in. Geography first: a
+   *  classified region is what it is whatever it is stored as; then dates;
+   *  then numbers (column_meta may say a numeric ZIP is a category). */
+  const fieldGroupOf = (c: DatasetColumn): 'Dimensions' | 'Measures' | 'Dates' | 'Geography' =>
+    geography[c.name] != null || columnMeta[c.name]?.role === 'geography' ? 'Geography'
+    : c.dtype === 'datetime' ? 'Dates'
+    : isNumericField(c) ? 'Measures' : 'Dimensions'
 
   const toAutoField = (name: string): AutoField | null => {
     const col = columns.find(c => c.name === name)
@@ -1437,6 +1449,32 @@ export default function ReportBuilder() {
     }
     window.addEventListener(PATCH_WIDGET_EVENT, onPatch)
     return () => window.removeEventListener(PATCH_WIDGET_EVENT, onPatch)
+  }, [report, reportId, pushUndo, loadReport])
+  // "Convert to" from a widget's menu: its type and a config rebuilt for that
+  // type (lib/convertWidget.ts), as one undoable step. The server validates
+  // the result like any save; a refusal says why and changes nothing.
+  useEffect(() => {
+    const onConvert = async (e: Event) => {
+      const d = (e as CustomEvent<{ widgetId: number; widget_type: string; config: Record<string, unknown>; label: string }>).detail
+      const page = report?.pages.find(pg => (pg.widgets ?? []).some(w => w.id === d?.widgetId))
+      const w = page?.widgets?.find(x => x.id === d.widgetId)
+      if (!page || !w) return
+      const before = { widget_type: w.widget_type, config: (w.config ?? {}) as Record<string, unknown> }
+      const after = { widget_type: d.widget_type as WidgetType, config: d.config }
+      const write = (v: { widget_type: WidgetType; config: Record<string, unknown> }) =>
+        reportsApi.updateWidget(reportId, pid(page.id), widgetIds.current.resolve(w.id), v).then(() => {})
+      try {
+        await write(after)
+      } catch (err) {
+        toast.error((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Could not convert this object')
+        return
+      }
+      pushUndo({ label: d.label, undo: () => write(before), redo: () => write(after) })
+      toast.success(d.label)
+      await loadReport()
+    }
+    window.addEventListener(CONVERT_WIDGET_EVENT, onConvert)
+    return () => window.removeEventListener(CONVERT_WIDGET_EVENT, onConvert)
   }, [report, reportId, pushUndo, loadReport])
   // Session recovery: settings-panel edits still in the journal when the
   // report opens never reached the server (the tab closed inside the panel's
@@ -2359,13 +2397,79 @@ export default function ReportBuilder() {
                     style={{ width:'100%', fontSize:11, padding:'4px 7px', marginBottom:6,
                       background:'var(--surface2)', border:'1px solid var(--border)',
                       borderRadius:6, color:'var(--text)', boxSizing:'border-box' }} />
-                  {/* Dataset measures — post-aggregation expressions. Listed first and
-                      separately from numeric columns because they are a different thing:
-                      they compute at the widget's grain rather than being aggregated. */}
-                  {measures.length > 0 && (
-                    <div style={{ marginBottom: 6 }}>
-                      <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>{tr('fields.Measures')}</div>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                  {/* The staging bar: what is ticked, the chart it makes (the same
+                      rule table a drop uses, lib/autoChart), and the button that
+                      puts it on the page. Fields the rule cannot place are named. */}
+                  {gatheredFields.length > 0 && (() => {
+                    const choice = chartForFields(gatheredFields.map(toAutoField).filter(Boolean) as AutoField[])
+                    return (
+                      <div role="region" aria-label={tr('fields.staged')} data-testid="fields-staging"
+                        style={{ position: 'sticky', top: 0, zIndex: 2, display: 'flex', flexWrap: 'wrap', alignItems: 'center',
+                          gap: 6, marginBottom: 8, padding: '6px 8px', borderRadius: 8, fontSize: 11.5,
+                          background: 'color-mix(in srgb, var(--accent) 12%, var(--surface))', border: '1px solid var(--accent)' }}>
+                        <span style={{ fontWeight: 600 }}>{tr('fields.selectedCount', { n: gatheredFields.length })}</span>
+                        {choice && (
+                          <span style={{ color: 'var(--muted)', flexBasis: '100%' }}>
+                            {tr('fields.willDraw', { chart: chartLabel(choice.suggestion.widget_type), title: choice.suggestion.title })}
+                            {choice.ignored.length > 0 && ` · ${tr('fields.notUsed', { fields: choice.ignored.join(', ') })}`}
+                          </span>
+                        )}
+                        <button type="button" className="btn btn-primary btn-sm" disabled={!choice}
+                          onClick={() => void addWidgetFromFields(gatheredFields)}>
+                          <Plus size={11} aria-hidden /> {tr('fields.addChart')}
+                        </button>
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setGatheredFields([])}>
+                          {tr('fields.clear')}
+                        </button>
+                      </div>
+                    )
+                  })()}
+                  {(['Dimensions', 'Measures', 'Dates', 'Hierarchies', 'Geography'] as const).map(group => {
+                    const needle = fieldFilter.trim().toLowerCase()
+                    const heading = (
+                      <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase',
+                        letterSpacing: '.06em', margin: '2px 0 4px' }}>{tr(`fields.${group}` as MessageKey)}</div>
+                    )
+                    if (group === 'Hierarchies') {
+                      if (hierarchy.filter(n => n.parent_id == null).length === 0) return null
+                      return (
+                        <div key={group} style={{ marginBottom: 8 }}>
+                          {heading}
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                        {hierarchy.filter(n => n.parent_id == null).map(root => (
+                          <button key={root.id}
+                            onClick={() => assignHierarchyToWidget(root.id)}
+                            draggable
+                            onDragStart={e => { e.dataTransfer.setData('application/x-hierarchy', String(root.id)); e.dataTransfer.effectAllowed = 'copy' }}
+                            title={selectedW ? `Bind the ${root.name} hierarchy to ${selectedW.title}` : 'Drag onto the canvas to chart the first level, or select a widget first'}
+                            style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '4px 7px',
+                              background: 'var(--surface2)', border: '1px solid var(--accent)', borderRadius: 6,
+                              cursor: 'pointer', fontSize: 11, color: 'var(--text)', fontFamily: 'var(--sans)', whiteSpace: 'nowrap' }}>
+                            <span aria-hidden style={{ fontSize: 11 }}>⛓</span>
+                            {root.name}
+                          </button>
+                        ))}
+                          </div>
+                        </div>
+                      )
+                    }
+                    // column_meta can hide a column and override which group it lands
+                    // in — a ZIP code is stored numeric but is really a category.
+                    const cols = visibleColumns
+                      .filter(c => fieldGroupOf(c) === group)
+                      // Matched on what the reader SEES: a renamed column is
+                      // searched by its label, not by the name in the file.
+                      .filter(c => !needle
+                        || (columnMeta[c.name]?.label || c.name).toLowerCase().includes(needle))
+                    // Defined measures (post-aggregation expressions) lead the
+                    // Measures group, marked ƒx: they compute at the widget's grain.
+                    const defined = group === 'Measures' && measures.length > 0
+                    if (cols.length === 0 && !defined) return null
+                    return (
+                      <div key={group} style={{ marginBottom: 8 }}>
+                        {heading}
+                        {defined && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 4 }}>
                         {measures.filter(m => !fieldFilter.trim()
                           || m.name.toLowerCase().includes(fieldFilter.trim().toLowerCase())).map(m => (
                           <button key={m.name} onClick={() => assignMeasureToWidget(m.name)}
@@ -2378,45 +2482,22 @@ export default function ReportBuilder() {
                             <span style={{ fontSize: 11, color: 'var(--accent)' }}>ƒx</span>{m.name}
                           </button>
                         ))}
-                      </div>
-                    </div>
-                  )}
-                  {gatheredFields.length > 0 && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6,
-                      padding: '4px 6px', borderRadius: 6, fontSize: 11,
-                      background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
-                      border: '1px solid var(--accent)' }}>
-                      <span>{gatheredFields.length} field{gatheredFields.length === 1 ? '' : 's'} selected — drag onto the canvas to chart them together</span>
-                      <button onClick={() => setGatheredFields([])}
-                        style={{ marginInlineStart: 'auto', background: 'none', border: 'none',
-                          color: 'var(--muted)', cursor: 'pointer', fontSize: 11 }}>Clear</button>
-                    </div>
-                  )}
-                  {(['Columns', 'Dimensions'] as const).map(group => {
-                    // column_meta can hide a column and override which group it lands
-                    // in — a ZIP code is stored numeric but is really a category.
-                    const needle = fieldFilter.trim().toLowerCase()
-                    const cols = visibleColumns
-                      .filter(c => isNumericField(c) === (group === 'Columns'))
-                      // Matched on what the reader SEES: a renamed column is
-                      // searched by its label, not by the name in the file.
-                      .filter(c => !needle
-                        || (columnMeta[c.name]?.label || c.name).toLowerCase().includes(needle))
-                    if (cols.length === 0) return null
-                    return (
-                      <div key={group} style={{ marginBottom: 6 }}>
-                        <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>{tr(`fields.${group}` as MessageKey)}</div>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                           {cols.map(c => (
-                            <span key={c.name} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                            <span key={c.name} data-field-row={c.name} style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+                            {/* Tick several and stage them as one chart (the bar above). */}
+                            <input type="checkbox" aria-label={`Select ${columnMeta[c.name]?.label || c.name}`}
+                              checked={gatheredFields.includes(c.name)} onChange={() => toggleGathered(c.name)}
+                              style={{ margin: 0, flex: 'none' }} />
                             <button onClick={e => {
                                 // Ctrl/cmd-click gathers instead of assigning:
                                 // charting several fields together is a
                                 // different intent from "add this one here".
                                 if (e.ctrlKey || e.metaKey) {
                                   e.preventDefault()
-                                  setGatheredFields(g => g.includes(c.name)
-                                    ? g.filter(n => n !== c.name) : [...g, c.name])
+                                  toggleGathered(c.name)
                                   return
                                 }
                                 // With a widget selected the field joins it; with
@@ -2616,26 +2697,6 @@ export default function ReportBuilder() {
                       .includes(fieldFilter.trim().toLowerCase())) && (
                     <div style={{ fontSize: 11, color: 'var(--muted)', padding: '6px 2px' }}>
                       No fields match “{fieldFilter.trim()}”
-                    </div>
-                  )}
-                  {hierarchy.filter(n => n.parent_id == null).length > 0 && (
-                    <div style={{ marginBottom: 6 }}>
-                      <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>Hierarchies</div>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                        {hierarchy.filter(n => n.parent_id == null).map(root => (
-                          <button key={root.id}
-                            onClick={() => assignHierarchyToWidget(root.id)}
-                            draggable
-                            onDragStart={e => { e.dataTransfer.setData('application/x-hierarchy', String(root.id)); e.dataTransfer.effectAllowed = 'copy' }}
-                            title={selectedW ? `Bind the ${root.name} hierarchy to ${selectedW.title}` : 'Drag onto the canvas to chart the first level, or select a widget first'}
-                            style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '4px 7px',
-                              background: 'var(--surface2)', border: '1px solid var(--accent)', borderRadius: 6,
-                              cursor: 'pointer', fontSize: 11, color: 'var(--text)', fontFamily: 'var(--sans)', whiteSpace: 'nowrap' }}>
-                            <span aria-hidden style={{ fontSize: 11 }}>⛓</span>
-                            {root.name}
-                          </button>
-                        ))}
-                      </div>
                     </div>
                   )}
                 </div>
@@ -3584,6 +3645,7 @@ export default function ReportBuilder() {
               id="builder-right"
               side="right"
               width={RIGHT_PANEL_W}
+              minWidth={rightPanelMode === 'suggestions' ? SUGGEST_PANEL_W : undefined}
               title="Settings"
               openSignal={rightOpenSignal}
               style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)' }}

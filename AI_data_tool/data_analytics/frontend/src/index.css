@@ -2547,10 +2547,15 @@ html[data-presenting="1"] .dl-bleed { margin: 0; block-size: 100%; }
 .dl-sug__star { color: var(--accent); flex: none; }
 .dl-sug__why { font-size: 11.5px; color: var(--muted); margin-block-start: 2px; line-height: 1.35; }
 .dl-sug__add { flex: none; padding: 3px 8px; font-size: 11.5px; }
+/* A suggested chart has to be READ to be chosen: never smaller than a chart
+   with axes and labels can draw clearly in. Wider than the panel on a narrow
+   screen, the card scrolls sideways rather than squeezing the chart. */
 .dl-sug__preview {
-  block-size: 118px; pointer-events: none; margin-block-start: 8px;
+  block-size: clamp(200px, 26vh, 260px); min-block-size: 200px; min-inline-size: 260px;
+  pointer-events: none; margin-block-start: 8px;
   border-radius: 8px; background: var(--surface2); overflow: hidden;
 }
+.dl-sug__card { overflow-x: auto; }
 .dl-sug__none { font-size: 12px; color: var(--muted); }
 
 /* ============================================================

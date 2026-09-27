@@ -95,6 +95,13 @@ export const chartLabel = (type: string): string =>
 
 const groupOf = (w: CatalogEntry) => GROUP_OF[w.type] ?? w.category
 
+/** The gallery family a type belongs to ("Basic", "Trend"...), and the order
+ *  the families appear in -- for anything else that lists types by family
+ *  (the widget menu's Convert to). */
+export const chartGroup = (type: string): string =>
+  GROUP_OF[type] ?? WIDGET_CATALOG.find(w => w.type === type)?.category ?? 'Other'
+export const CHART_GROUP_ORDER: readonly string[] = GROUP_ORDER
+
 /** The order a group's tiles appear in when it matters (the basics lead with
  *  the charts people reach for first); anything unlisted keeps catalog order. */
 const TILE_ORDER = ['bar', 'line', 'area', 'pie', 'donut', 'table', 'kpi', 'treemap',

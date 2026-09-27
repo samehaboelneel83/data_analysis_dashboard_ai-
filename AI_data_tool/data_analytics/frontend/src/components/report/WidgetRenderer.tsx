@@ -6,6 +6,7 @@ import { Copy, Trash2, MoreVertical, Link as LinkIcon } from 'lucide-react'
 import { widgetDataApi } from '../../services/api'
 import { isCanceledRequest } from '../../lib/canceledRequest'
 import { useT } from '../../i18n'
+import ConvertToMenu from './ConvertToMenu'
 import { pickChartSvg, svgToPng } from '../../lib/widgetImage'
 import toast from 'react-hot-toast'
 import ActionMenu from '../ActionMenu'
@@ -1346,6 +1347,10 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
             if (!items.length) return null
             return <>{items}<div role="separator" style={{ height: 1, background: 'var(--border)', margin: '4px 2px' }} /></>
           })()}
+          {/* Convert to another object type the widget's fields can fill. */}
+          {editMode && (
+            <ConvertToMenu widget={widget} itemStyle={menuItemStyle} onDone={() => setShowContextMenu(false)} />
+          )}
           {/* Object-level link: encodes page AND widget, so the recipient lands on
               the right page scrolled to this visual with a brief highlight. */}
           <button role="menuitem"

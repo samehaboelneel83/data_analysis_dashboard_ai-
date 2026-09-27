@@ -62,6 +62,10 @@ interface Props {
   /** Each change re-opens a collapsed panel -- e.g. "Assign data" on a widget
    *  must land the author in its settings even if they had folded them away. */
   openSignal?: number
+  /** A floor on the expanded width while the content needs it (the right
+   *  panel's Suggestions draw live charts). The author's own width is kept
+   *  and comes back once the floor is lifted. */
+  minWidth?: number
 }
 
 /**
@@ -73,7 +77,7 @@ interface Props {
  * mid-edit in -- the children stay mounted and merely hidden, so an open dropdown or a
  * half-typed field survives a collapse.
  */
-export default function CollapsibleSide({ id, side, width, title, style, children, scrollResetKey, openSignal }: Props) {
+export default function CollapsibleSide({ id, side, width, title, style, children, scrollResetKey, openSignal, minWidth }: Props) {
   const [open, setOpen] = useState(() => readMap<boolean>(STORAGE_KEY)[id] ?? true)
   useEffect(() => { if (openSignal) setOpen(true) }, [openSignal])
   const [panelW, setPanelW] = useState(() => {
@@ -150,7 +154,7 @@ export default function CollapsibleSide({ id, side, width, title, style, childre
       ref={shellRef}
       data-side={id}
       style={{
-        width: open ? panelW : RAIL_W,
+        width: open ? Math.max(panelW, minWidth ?? 0) : RAIL_W,
         flexShrink: 0,
         display: 'flex',
         flexDirection: 'column',
