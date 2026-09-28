@@ -11,7 +11,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ChartRendererProps } from './types'
 import { COLORS, fmtStr } from '../chartUtils'
-import { COUNTRIES, COUNTRY_SET, fittedProjection, matchRegion, regionBoundsPoints, regionCentroid,
+import { COUNTRIES, COUNTRY_SET, matchRegion, regionBoundsPoints, regionCentroid,
   regionLabel, type RegionFeature, type RegionSet } from '../geo/worldGeometry'
 import { loadRegionSet } from '../geo/regionSetCache'
 import { MapSvg, MAP_WRAP_STYLE, useMapBox } from '../geo/MapFrame'
@@ -50,7 +50,7 @@ function useSets(ids: number[]) {
 
 export default function GeoLayerStackRenderer({ data, measureFmt, broadcasts, localSelected,
                                                 onClickPoint, plotW, plotH }: ChartRendererProps) {
-  const { ref, w, h, tiles } = useMapBox(plotW, plotH)
+  const { ref, w, h, tiles, view } = useMapBox(plotW, plotH)
   const [hover, setHover] = useState<string | null>(null)
   const layers: StackLayer[] = (data as { layers?: StackLayer[] })?.layers ?? []
   const sets = useSets(layers.flatMap(l => (l.boundary_set_id != null && !l.error ? [l.boundary_set_id] : [])))
@@ -73,19 +73,19 @@ export default function GeoLayerStackRenderer({ data, measureFmt, broadcasts, lo
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [layers, sets])
 
-  const { projection, path } = useMemo(() => fittedProjection(w, h, resolved.flatMap(({ l, regions }) => [
+  const { projection, path } = useMemo(() => view.fit(w, h, resolved.flatMap(({ l, regions }) => [
     ...(l.kind === 'regions' ? regions.flatMap(r => regionBoundsPoints(r.f)) : []),
     ...(l.kind === 'bubbles' ? regions.map(r => regionCentroid(r.f)) : []),
     ...(l.points ?? []).map(p => [p.lon, p.lat] as [number, number]),
     ...(l.lines ?? []).flatMap(p => [[p.lon, p.lat], [p.lon2!, p.lat2!]] as [number, number][]),
-  ])), [resolved, w, h, tiles])
+  ])), [resolved, w, h, tiles, view])
 
   const hoverOn = (text: string) => () => setHover(text)
   const off = () => setHover(null)
 
   return (
     <div ref={ref} style={MAP_WRAP_STYLE}>
-      <MapSvg w={w} h={h} projection={projection} tiles={tiles}
+      <MapSvg view={view} w={w} h={h} projection={projection} tiles={tiles}
         credit={[...new Set(layers.flatMap(l => {
           const c = !l.error ? setOf(l)?.attribution : undefined
           return c ? [c] : []

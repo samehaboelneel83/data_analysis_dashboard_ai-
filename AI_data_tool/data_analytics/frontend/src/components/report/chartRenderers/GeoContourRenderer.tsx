@@ -5,22 +5,22 @@
 import { useMemo } from 'react'
 import { seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
-import { COUNTRIES, fittedProjection } from '../geo/worldGeometry'
+import { COUNTRIES } from '../geo/worldGeometry'
 import { MapSvg, MAP_WRAP_STYLE, useMapBox } from '../geo/MapFrame'
 import { isolines } from '../../../lib/contours'
 
 interface Grid { west: number; east: number; south: number; north: number; nx: number; ny: number; values: number[] }
 
 export default function GeoContourRenderer({ data, plotW, plotH }: ChartRendererProps) {
-  const { ref, w, h, tiles } = useMapBox(plotW, plotH)
+  const { ref, w, h, tiles, view } = useMapBox(plotW, plotH)
   const d = data as { grid?: Grid | null; levels?: number[]; reason?: string; points_used?: number; dropped?: number;
     sampled_from?: number | null; weighted_by?: string | null }
   const g = d?.grid ?? null
   const toLonLat = (x: number, y: number): [number, number] => g
     ? [g.west + (x / (g.nx - 1)) * (g.east - g.west), g.south + (y / (g.ny - 1)) * (g.north - g.south)]
     : [0, 0]
-  const { projection, path } = useMemo(() => fittedProjection(w, h,
-    g ? [[g.west, g.south], [g.east, g.north]] : []), [g, w, h, tiles])
+  const { projection, path } = useMemo(() => view.fit(w, h,
+    g ? [[g.west, g.south], [g.east, g.north]] : []), [g, w, h, tiles, view])
 
   const cells = useMemo(() => {
     if (!g) return []
@@ -53,7 +53,7 @@ export default function GeoContourRenderer({ data, plotW, plotH }: ChartRenderer
   }
   return (
     <div ref={ref} style={MAP_WRAP_STYLE}>
-      <MapSvg w={w} h={h} projection={projection} tiles={tiles} role="img"
+      <MapSvg view={view} w={w} h={h} projection={projection} tiles={tiles} role="img"
         aria-label={`Density contours of ${d.points_used?.toLocaleString()} located rows`}>
         {COUNTRIES.map(f => <path key={f.properties.name} d={path(f) ?? undefined} fill="var(--surface2)" stroke="var(--border)" strokeWidth={0.4} />)}
         <g data-testid="contour-surface">

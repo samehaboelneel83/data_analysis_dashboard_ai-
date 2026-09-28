@@ -67,6 +67,8 @@ describe('the density map frames its own cells', () => {
   it('draws one cell per row', () => {
     const { container } = render(
       <GeoDensityRenderer {...base} rows={CELLS} data={{ cell_degrees: 1 }} />)
-    expect(container.querySelectorAll('rect').length).toBe(CELLS.length)
+    // The map's own zoom buttons are rects too; count the data cells.
+    const cells = [...container.querySelectorAll('rect')].filter(r => !r.closest('[data-testid="map-zoom-controls"]'))
+    expect(cells.length).toBe(CELLS.length)
   })
 })

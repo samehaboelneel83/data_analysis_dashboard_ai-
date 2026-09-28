@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { ChartRendererProps } from './types'
 import { fmtStr, seriesColor } from '../chartUtils'
-import { COUNTRIES, fittedProjection } from '../geo/worldGeometry'
+import { COUNTRIES } from '../geo/worldGeometry'
 import { MapSvg, MAP_WRAP_STYLE, useMapBox } from '../geo/MapFrame'
 import { placeLabels } from '../geo/labelPlacement'
 
@@ -14,7 +14,7 @@ import { placeLabels } from '../geo/labelPlacement'
 export default function GeoNetworkRenderer({ data, measureFmt, broadcasts,
                                             localSelected, onClickPoint, plotW, plotH }: ChartRendererProps) {
   const [hover, setHover] = useState<string | null>(null)
-  const { ref, w, h, tiles } = useMapBox(plotW, plotH)
+  const { ref, w, h, tiles, view } = useMapBox(plotW, plotH)
   const nodes = (data as { nodes?: { id: string; lat: number; lon: number; degree: number }[] })?.nodes ?? []
   const links = (data as { links?: { source: string; target: string; value: number }[] })?.links ?? []
   // Labels sit above the node (up to ~40px). Without pad, London on a world
@@ -22,7 +22,7 @@ export default function GeoNetworkRenderer({ data, measureFmt, broadcasts,
   const padPx = Math.max(40, Math.min(w, h) * 0.12)
   // Framed on the nodes, so a referral network inside one country fills the tile.
   const { projection, path } = useMemo(
-    () => fittedProjection(w, h, nodes.map(n => [n.lon, n.lat] as [number, number]), padPx), [nodes, w, h, padPx, tiles])
+    () => view.fit(w, h, nodes.map(n => [n.lon, n.lat] as [number, number]), padPx), [nodes, w, h, padPx, tiles, view])
 
   const pos = useMemo(() => {
     const m: Record<string, [number, number]> = {}
@@ -50,7 +50,7 @@ export default function GeoNetworkRenderer({ data, measureFmt, broadcasts,
 
   return (
     <div ref={ref} style={MAP_WRAP_STYLE}>
-      <MapSvg w={w} h={h} projection={projection} tiles={tiles} role="img" aria-label="Geographic network">
+      <MapSvg view={view} w={w} h={h} projection={projection} tiles={tiles} role="img" aria-label="Geographic network">
         {COUNTRIES.map(f => (
           <path key={f.properties.name} d={path(f) ?? undefined}
             fill="var(--surface2)" stroke="var(--border)" strokeWidth={0.5} />

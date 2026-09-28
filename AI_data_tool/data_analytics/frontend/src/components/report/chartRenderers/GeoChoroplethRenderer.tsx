@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { ChartRendererProps } from './types'
 import { fmtStr, TT, seriesColor } from '../chartUtils'
-import { matchRegion, regionBoundsPoints, regionLabel, fittedProjection } from '../geo/worldGeometry'
+import { matchRegion, regionBoundsPoints, regionLabel } from '../geo/worldGeometry'
 import { MapSvg, MAP_WRAP_STYLE, useMapBox } from '../geo/MapFrame'
 import { useRegionSet } from '../geo/regionSetCache'
 import { MapDataTable, mapSummary } from '../geo/MapDataTable'
@@ -24,7 +24,7 @@ import { MapDataTable, mapSummary } from '../geo/MapDataTable'
 export default function GeoChoroplethRenderer({ rows, cfg, measureFmt, broadcasts,
                                                localSelected, onClickPoint,
                                                geography, plotW, plotH }: ChartRendererProps) {
-  const { ref, w, h, tiles } = useMapBox(plotW, plotH)
+  const { ref, w, h, tiles, view } = useMapBox(plotW, plotH)
   // Precedence, and the order matters: the widget's own setting is a DELIBERATE
   // override and must beat the dataset's classification, which in turn beats
   // the world. Without the middle term a column classified as geography drew a
@@ -37,11 +37,11 @@ export default function GeoChoroplethRenderer({ rows, cfg, measureFmt, broadcast
 
   // Framed on the countries that actually matched, so a national choropleth
   // fills the tile instead of sitting as a speck on a world map.
-  const { projection, path } = useMemo(() => fittedProjection(w, h,
+  const { projection, path } = useMemo(() => view.fit(w, h,
     (rows as { name: unknown }[]).flatMap(r => {
       const f = matchRegion(r.name, set)
       return f ? regionBoundsPoints(f) : []
-    })), [rows, set, w, h, tiles])
+    })), [rows, set, w, h, tiles, view])
 
   const { byFeature, sourceNames, unmatched, unmatchedNames, min, max } = useMemo(() => {
     // Keyed by the FEATURE, not by its name. An uploaded boundary file need not
@@ -91,7 +91,7 @@ export default function GeoChoroplethRenderer({ rows, cfg, measureFmt, broadcast
 
   return (
     <div ref={ref} style={MAP_WRAP_STYLE}>
-      <MapSvg w={w} h={h} projection={projection} tiles={tiles} credit={set.attribution}
+      <MapSvg view={view} w={w} h={h} projection={projection} tiles={tiles} credit={set.attribution}
         role={interactive ? 'group' : 'img'} aria-label={summary}>
         {set.features.map((f, i) => {
           const v = byFeature.get(f)

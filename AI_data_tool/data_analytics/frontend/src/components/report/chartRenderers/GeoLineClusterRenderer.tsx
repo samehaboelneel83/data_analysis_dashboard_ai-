@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { ChartRendererProps } from './types'
 import { fmtStr, seriesColor } from '../chartUtils'
-import { COUNTRIES, fittedProjection } from '../geo/worldGeometry'
+import { COUNTRIES } from '../geo/worldGeometry'
 import { MapSvg, MAP_WRAP_STYLE, useMapBox } from '../geo/MapFrame'
 
 /**
@@ -14,7 +14,7 @@ import { MapSvg, MAP_WRAP_STYLE, useMapBox } from '../geo/MapFrame'
 export function GeoLinesRenderer({ rows, measureFmt, broadcasts, localSelected,
                                   onClickPoint, plotW, plotH }: ChartRendererProps) {
   const [hover, setHover] = useState<string | null>(null)
-  const { ref, w, h, tiles } = useMapBox(plotW, plotH)
+  const { ref, w, h, tiles, view } = useMapBox(plotW, plotH)
   const padPx = Math.max(16, Math.min(w, h) * 0.1)
   // BOTH ends frame the map -- a route is only visible if its origin and its
   // destination are both on screen.
@@ -24,8 +24,8 @@ export function GeoLinesRenderer({ rows, measureFmt, broadcasts, localSelected,
       if (typeof r.lat === 'number' && typeof r.lon === 'number') pts.push([r.lon, r.lat])
       if (typeof r.lat2 === 'number' && typeof r.lon2 === 'number') pts.push([r.lon2, r.lat2])
     }
-    return fittedProjection(w, h, pts, padPx)
-  }, [rows, w, h, padPx, tiles])
+    return view.fit(w, h, pts, padPx)
+  }, [rows, w, h, padPx, tiles, view])
 
   const lines = useMemo(() => {
     const out: { d: string; name: string; value: number }[] = []
@@ -51,7 +51,7 @@ export function GeoLinesRenderer({ rows, measureFmt, broadcasts, localSelected,
 
   return (
     <div ref={ref} style={MAP_WRAP_STYLE}>
-      <MapSvg w={w} h={h} projection={projection} tiles={tiles} role="img" aria-label="Line map">
+      <MapSvg view={view} w={w} h={h} projection={projection} tiles={tiles} role="img" aria-label="Line map">
         {COUNTRIES.map(f => (
           <path key={f.properties.name} d={path(f) ?? undefined}
             fill="var(--surface2)" stroke="var(--border)" strokeWidth={0.5} />
@@ -91,14 +91,14 @@ export function GeoLinesRenderer({ rows, measureFmt, broadcasts, localSelected,
    feature; pinned by a test in geoRenderers.test.tsx. */
 export function GeoClustersRenderer({ rows, measureFmt, plotW, plotH }: ChartRendererProps) {
   const [hover, setHover] = useState<string | null>(null)
-  const { ref, w, h, tiles } = useMapBox(plotW, plotH)
+  const { ref, w, h, tiles, view } = useMapBox(plotW, plotH)
   // Largest bubble is r=30; without that much pad the eastmost cluster (Tokyo
   // in the demo) is drawn on the viewBox edge and the tile clips it.
   const padPx = Math.max(32, Math.min(w, h) * 0.12)
-  const { projection, path } = useMemo(() => fittedProjection(w, h,
+  const { projection, path } = useMemo(() => view.fit(w, h,
     (rows as Record<string, unknown>[])
       .filter(r => typeof r.lat === 'number' && typeof r.lon === 'number')
-      .map(r => [r.lon as number, r.lat as number] as [number, number]), padPx), [rows, w, h, padPx, tiles])
+      .map(r => [r.lon as number, r.lat as number] as [number, number]), padPx), [rows, w, h, padPx, tiles, view])
 
   const markers = useMemo(() => {
     const out: { x: number; y: number; count: number; value?: number }[] = []
@@ -116,7 +116,7 @@ export function GeoClustersRenderer({ rows, measureFmt, plotW, plotH }: ChartRen
 
   return (
     <div ref={ref} style={MAP_WRAP_STYLE}>
-      <MapSvg w={w} h={h} projection={projection} tiles={tiles} role="img" aria-label="Cluster map">
+      <MapSvg view={view} w={w} h={h} projection={projection} tiles={tiles} role="img" aria-label="Cluster map">
         {COUNTRIES.map(f => (
           <path key={f.properties.name} d={path(f) ?? undefined}
             fill="var(--surface2)" stroke="var(--border)" strokeWidth={0.5} />

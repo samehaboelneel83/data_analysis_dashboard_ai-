@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import type { ChartRendererProps } from './types'
 import { fmtStr, TT, seriesColor } from '../chartUtils'
-import { COUNTRIES, COUNTRY_SET, matchCountry, countryCentroid, fittedProjection } from '../geo/worldGeometry'
+import { COUNTRIES, COUNTRY_SET, matchCountry, countryCentroid } from '../geo/worldGeometry'
 import { MapSvg, MAP_WRAP_STYLE, useMapBox } from '../geo/MapFrame'
 import { MapDataTable, mapSummary } from '../geo/MapDataTable'
 import { useRegionSet } from '../geo/regionSetCache'
@@ -48,7 +48,7 @@ export function markersWithin(markers: { name: string; x: number; y: number }[],
  */
 function GeoPointMapRenderer({ rows, cfg, measureFmt, ruleStyles, variant, broadcasts,
                               localSelected, onClickPoint, plotW, plotH }: ChartRendererProps & { variant: 'points' | 'bubbles' }) {
-  const { ref, w, h, tiles } = useMapBox(plotW, plotH)
+  const { ref, w, h, tiles, view } = useMapBox(plotW, plotH)
   // The author's boundary set (Egypt's governorates), drawn as outlines over
   // the country base so a reader can tell which governorate a site sits in.
   const outlineSetId = (cfg as { boundary_set_id?: number | null })?.boundary_set_id ?? null
@@ -113,8 +113,8 @@ function GeoPointMapRenderer({ rows, cfg, measureFmt, ruleStyles, variant, broad
   // and an author who placed a pin plainly meant to see it.
   const padPx = Math.max(36, Math.min(w, h) * 0.14)
   const { projection, path } = useMemo(
-    () => fittedProjection(w, h, [...placed.map(p => p.coord), ...pins.map(p => p.coord)], padPx),
-    [placed, pins, w, h, padPx, tiles])
+    () => view.fit(w, h, [...placed.map(p => p.coord), ...pins.map(p => p.coord)], padPx),
+    [placed, pins, w, h, padPx, tiles, view])
 
   const placedPins = useMemo(() => pins.flatMap(p => {
     const pt = projection(p.coord)
@@ -156,7 +156,7 @@ function GeoPointMapRenderer({ rows, cfg, measureFmt, ruleStyles, variant, broad
 
   return (
     <div ref={ref} style={MAP_WRAP_STYLE}>
-      <MapSvg w={w} h={h} projection={projection} tiles={tiles} svgRef={svgRef}
+      <MapSvg view={view} w={w} h={h} projection={projection} tiles={tiles} svgRef={svgRef}
         role={interactive ? 'group' : 'img'} aria-label={summary}
         onMouseDown={broadcasts ? e => {
           // SHIFT-drag, not plain drag: plain dragging is how a reader selects

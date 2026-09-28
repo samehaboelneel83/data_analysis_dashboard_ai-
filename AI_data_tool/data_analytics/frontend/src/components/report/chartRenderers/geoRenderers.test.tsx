@@ -769,3 +769,42 @@ describe('geography classification drives the boundary set', () => {
     expect(boundarySetsApi.get).not.toHaveBeenCalled()
   })
 })
+
+describe('zooming a map', () => {
+  // Requested 2026-09-28: "zoom in or zoom out on the geographical objects".
+  const SITES = [{ name: 'Cairo', lat: 30.04, lon: 31.4, value: 853 },
+                 { name: 'Alexandria', lat: 31.09, lon: 29.72, value: 13 }]
+  const dist = (c: Element) => {
+    const [a, b] = [...c.querySelectorAll('[data-marker]')]
+    return Math.hypot(Number(a.getAttribute('cx')) - Number(b.getAttribute('cx')),
+                      Number(a.getAttribute('cy')) - Number(b.getAttribute('cy')))
+  }
+
+  it('the + button spreads the map out and keeps markers their size; reset puts it back', () => {
+    const { container } = render(<GeoPointsRenderer {...base} rows={SITES} />)
+    const before = dist(container)
+    const r0 = container.querySelector('[data-marker]')!.getAttribute('r')
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }))
+    expect(container.querySelector('svg')!.getAttribute('data-zoom')).toBe('2')
+    expect(dist(container)).toBeCloseTo(before * 2, 0)
+    expect(container.querySelector('[data-marker]')!.getAttribute('r')).toBe(r0)
+    fireEvent.click(screen.getByRole('button', { name: 'Reset zoom' }))
+    expect(dist(container)).toBeCloseTo(before, 3)
+  })
+
+  it('cannot zoom out past the fitted frame', () => {
+    render(<GeoPointsRenderer {...base} rows={SITES} />)
+    expect(screen.getByRole('button', { name: 'Zoom out' })).toHaveAttribute('aria-disabled', 'true')
+  })
+
+  it('the wheel zooms, and every map type offers the controls', () => {
+    const { container } = render(<GeoPointsRenderer {...base} rows={SITES} />)
+    const svg = container.querySelector('svg')!
+    svg.getBoundingClientRect = () => ({ left: 0, top: 0, width: 960, height: 540,
+      right: 960, bottom: 540, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect
+    fireEvent.wheel(svg, { deltaY: -100, clientX: 480, clientY: 270 })
+    expect(Number(svg.getAttribute('data-zoom'))).toBeCloseTo(1.25)
+    const { container: c2 } = render(<GeoChoroplethRenderer {...base} rows={[{ name: 'Egypt', value: 5 }]} />)
+    expect(c2.querySelector('[data-testid="map-zoom-controls"]')).not.toBeNull()
+  })
+})

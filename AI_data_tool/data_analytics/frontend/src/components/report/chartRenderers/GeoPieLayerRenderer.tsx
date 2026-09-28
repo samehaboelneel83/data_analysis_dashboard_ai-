@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import type { ChartRendererProps } from './types'
 import { fmtStr, seriesColor } from '../chartUtils'
 import { COLORS } from '../chartUtils'
-import { COUNTRIES, matchCountry, countryCentroid, countryBoundsPoints, fittedProjection } from '../geo/worldGeometry'
+import { COUNTRIES, matchCountry, countryCentroid, countryBoundsPoints } from '../geo/worldGeometry'
 import { MapSvg, MAP_WRAP_STYLE, useMapBox } from '../geo/MapFrame'
 import GeoLayerStackRenderer from './GeoLayerStackRenderer'
 
@@ -21,16 +21,16 @@ function arcPath(cx: number, cy: number, r: number, a0: number, a1: number): str
 export function GeoPiesRenderer({ data, measureFmt, broadcasts, localSelected,
                                  onClickPoint, plotW, plotH }: ChartRendererProps) {
   const [hover, setHover] = useState<string | null>(null)
-  const { ref, w, h, tiles } = useMapBox(plotW, plotH)
+  const { ref, w, h, tiles, view } = useMapBox(plotW, plotH)
   const rows = (data as { rows?: { name: string; total: number; slices: { label: string; value: number }[] }[] })?.rows ?? []
   const padPx = Math.max(32, Math.min(w, h) * 0.12)
   // Framed on the regions that matched, so pies over one country are legible
   // instead of overlapping in a speck.
-  const { projection, path } = useMemo(() => fittedProjection(w, h,
+  const { projection, path } = useMemo(() => view.fit(w, h,
     rows.flatMap(r => {
       const f = matchCountry(r.name)
       return f ? countryBoundsPoints(f) : []
-    }), padPx), [rows, w, h, padPx, tiles])
+    }), padPx), [rows, w, h, padPx, tiles, view])
 
   const { pies, unmatched } = useMemo(() => {
     const out: { name: string; total: number; x: number; y: number; slices: { label: string; value: number }[] }[] = []
@@ -52,7 +52,7 @@ export function GeoPiesRenderer({ data, measureFmt, broadcasts, localSelected,
 
   return (
     <div ref={ref} style={MAP_WRAP_STYLE}>
-      <MapSvg w={w} h={h} projection={projection} tiles={tiles} role="img" aria-label="Pie map">
+      <MapSvg view={view} w={w} h={h} projection={projection} tiles={tiles} role="img" aria-label="Pie map">
         {COUNTRIES.map(f => (
           <path key={f.properties.name} d={path(f) ?? undefined}
             fill="var(--surface2)" stroke="var(--border)" strokeWidth={0.5} />
@@ -122,17 +122,17 @@ export function GeoLayersRenderer(props: ChartRendererProps) {
 function TwoLayerMap({ data, measureFmt, broadcasts, localSelected,
                        onClickPoint, plotW, plotH }: ChartRendererProps) {
   const [hover, setHover] = useState<string | null>(null)
-  const { ref, w, h, tiles } = useMapBox(plotW, plotH)
+  const { ref, w, h, tiles, view } = useMapBox(plotW, plotH)
   const regions = (data as { regions?: { name: string; value: number }[] })?.regions ?? []
   const points = (data as { points?: { lat: number; lon: number; value?: number }[] })?.points ?? []
   // Both layers frame the map: whichever of them the author assigned should fit.
-  const { projection, path } = useMemo(() => fittedProjection(w, h, [
+  const { projection, path } = useMemo(() => view.fit(w, h, [
     ...regions.flatMap(r => {
       const f = matchCountry(r.name)
       return f ? countryBoundsPoints(f) : []
     }),
     ...points.map(p => [p.lon, p.lat] as [number, number]),
-  ]), [regions, points, w, h, tiles])
+  ]), [regions, points, w, h, tiles, view])
 
   const valueByCountry = useMemo(() => {
     const m = new Map<string, number>()
@@ -161,7 +161,7 @@ function TwoLayerMap({ data, measureFmt, broadcasts, localSelected,
 
   return (
     <div ref={ref} style={MAP_WRAP_STYLE}>
-      <MapSvg w={w} h={h} projection={projection} tiles={tiles} role="img" aria-label="Layered map">
+      <MapSvg view={view} w={w} h={h} projection={projection} tiles={tiles} role="img" aria-label="Layered map">
         {COUNTRIES.map(f => {
           const v = valueByCountry.get(f.properties.name)
           const source = sourceByCountry.get(f.properties.name)
@@ -199,19 +199,19 @@ function TwoLayerMap({ data, measureFmt, broadcasts, localSelected,
  * cluster map sizes bubbles with.
  */
 export function GeoDensityRenderer({ rows, data, plotW, plotH }: ChartRendererProps) {
-  const { ref, w, h, tiles } = useMapBox(plotW, plotH)
+  const { ref, w, h, tiles, view } = useMapBox(plotW, plotH)
   const cell = (data as { cell_degrees?: number })?.cell_degrees ?? 5
   const cells = (rows as { lat: number; lon: number; count: number }[]).filter(
     r => typeof r.lat === 'number' && typeof r.lon === 'number')
   // The cells are resolved first so the projection can be fitted to them; the
   // grid is what this map is, and it was previously framed on the whole world.
-  const { projection, path } = useMemo(() => fittedProjection(w, h,
-    cells.map(c => [c.lon, c.lat] as [number, number])), [rows, w, h, tiles])
+  const { projection, path } = useMemo(() => view.fit(w, h,
+    cells.map(c => [c.lon, c.lat] as [number, number])), [rows, w, h, tiles, view])
   const maxC = Math.max(1, ...cells.map(c => c.count))
 
   return (
     <div ref={ref} style={MAP_WRAP_STYLE}>
-      <MapSvg w={w} h={h} projection={projection} tiles={tiles} role="img" aria-label="Density map">
+      <MapSvg view={view} w={w} h={h} projection={projection} tiles={tiles} role="img" aria-label="Density map">
       {COUNTRIES.map(f => (
         <path key={f.properties.name} d={path(f) ?? undefined}
           fill="var(--surface2)" stroke="var(--border)" strokeWidth={0.5} />

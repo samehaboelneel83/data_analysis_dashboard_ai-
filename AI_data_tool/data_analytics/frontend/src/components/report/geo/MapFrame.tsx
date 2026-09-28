@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type Ref, type SVGProps } from 'react'
 import { geoPath, type GeoProjection } from 'd3-geo'
-import { mapViewSize, MAP_SVG_STYLE, MAP_WRAP_STYLE } from './worldGeometry'
+import { fittedProjection, mapViewSize, MAP_SVG_STYLE, MAP_WRAP_STYLE } from './worldGeometry'
 import { tilesFor, useTileSettings, type TileImage } from './tiles'
 import { isVectorTemplate, loadVectorTile, VECTOR_MAX_ZOOM, type BasemapFeature, type BasemapKind } from './vectorTiles'
 import type { MapSettings } from '../../../services/api'
@@ -72,6 +72,7 @@ function VectorBasemap({ tiles, projection }: { tiles: TileImage[]; projection: 
 export function useMapBox(plotW?: number, plotH?: number) {
   const ref = useRef<HTMLDivElement>(null)
   const [box, setBox] = useState({ w: 0, h: 0 })
+  const view = useMapView()
   useLayoutEffect(() => {
     const el = ref.current
     if (!el) return
@@ -95,9 +96,81 @@ export function useMapBox(plotW?: number, plotH?: number) {
   return {
     ref,
     tiles,
+    view,
     w: box.w > 8 ? box.w : fallback.w,
     h: box.h > 8 ? box.h : fallback.h,
   }
+}
+
+/** Zoom of 1 is the fitted frame; past this the map is street scale. */
+const MAX_ZOOM = 64
+
+/**
+ * The reader's zoom and pan over a map, as one transform on its projection:
+ * every screen point s of the fitted frame is drawn at k*s + (x, y).
+ *
+ * Applied to the PROJECTION rather than as an SVG scale, so shapes re-project
+ * crisply, markers and lines keep their size, and the basemap fetches tiles
+ * at the zoom the reader is looking at. Requested 2026-09-28: "zoom in or
+ * zoom out on the geographical objects".
+ */
+export interface MapView {
+  k: number
+  x: number
+  y: number
+  /** `fittedProjection`, with the reader's zoom applied. */
+  fit: typeof fittedProjection
+  /** Zoom by `factor`, keeping the point `at` (viewBox units) where it is. */
+  zoomBy: (factor: number, at: [number, number]) => void
+  panBy: (dx: number, dy: number) => void
+  reset: () => void
+}
+
+export function useMapView(): MapView {
+  const [t, setT] = useState({ k: 1, x: 0, y: 0 })
+  return useMemo(() => ({
+    ...t,
+    fit: ((...args: Parameters<typeof fittedProjection>) => {
+      const fitted = fittedProjection(...args)
+      if (t.k === 1 && t.x === 0 && t.y === 0) return fitted
+      const p = fitted.projection
+      const [tx, ty] = p.translate()
+      p.scale(p.scale() * t.k).translate([tx * t.k + t.x, ty * t.k + t.y])
+      return { projection: p, path: geoPath(p) }
+    }) as typeof fittedProjection,
+    zoomBy: (factor: number, [px, py]: [number, number]) => setT(prev => {
+      const k = Math.min(MAX_ZOOM, Math.max(1, prev.k * factor))
+      if (k === 1) return { k: 1, x: 0, y: 0 }
+      const f = k / prev.k
+      return { k, x: px - (px - prev.x) * f, y: py - (py - prev.y) * f }
+    }),
+    panBy: (dx: number, dy: number) => setT(prev => (prev.k === 1 ? prev : { ...prev, x: prev.x + dx, y: prev.y + dy })),
+    reset: () => setT({ k: 1, x: 0, y: 0 }),
+  }), [t])
+}
+
+/** The +, - and reset buttons, drawn in the map's own corner. */
+function ZoomControls({ view, w, h }: { view: MapView; w: number; h: number }) {
+  const centre: [number, number] = [w / 2, h / 2]
+  const btn = (label: string, glyph: string, y: number, act: () => void, disabled: boolean) => (
+    <g key={label} role="button" aria-label={label} tabIndex={disabled ? -1 : 0} aria-disabled={disabled || undefined}
+      transform={`translate(8, ${y})`} style={{ cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.45 : 1 }}
+      onClick={e => { e.stopPropagation(); if (!disabled) act() }}
+      onPointerDown={e => e.stopPropagation()}
+      onDoubleClick={e => e.stopPropagation()}
+      onKeyDown={e => { if (!disabled && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); act() } }}>
+      <rect width={24} height={24} rx={4} fill="var(--surface)" stroke="var(--border)" />
+      <text x={12} y={12.5} textAnchor="middle" dominantBaseline="central" fontSize={15}
+        fill="var(--text)" style={{ userSelect: 'none' }}>{glyph}</text>
+    </g>
+  )
+  return (
+    <g data-testid="map-zoom-controls">
+      {btn('Zoom in', '+', 8, () => view.zoomBy(2, centre), view.k >= MAX_ZOOM)}
+      {btn('Zoom out', '−', 36, () => view.zoomBy(0.5, centre), view.k <= 1)}
+      {btn('Reset zoom', '⟲', 64, view.reset, view.k === 1 && view.x === 0 && view.y === 0)}
+    </g>
+  )
 }
 
 export { MAP_WRAP_STYLE }
@@ -108,7 +181,10 @@ function prefersContrast(): boolean {
   try { return typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-contrast: more)').matches } catch { return false }
 }
 
-export function MapSvg({ w, h, svgRef, children, projection, tiles, credit, ...rest }: {
+export function MapSvg({ w, h, svgRef, children, projection, tiles, credit, view, ...rest }: {
+  /** The reader's zoom (useMapBox's `view`): zoom buttons, the wheel, a drag
+   *  to pan and a double-click to zoom in. Absent = a fixed map, as before. */
+  view?: MapView
   w: number
   h: number
   svgRef?: Ref<SVGSVGElement>
@@ -122,6 +198,39 @@ export function MapSvg({ w, h, svgRef, children, projection, tiles, credit, ...r
    *  on the tile attribution. */
   credit?: string | null
 } & Omit<SVGProps<SVGSVGElement>, 'width' | 'height' | 'viewBox' | 'ref'>) {
+  const inner = useRef<SVGSVGElement | null>(null)
+  const setRefs = (el: SVGSVGElement | null) => {
+    inner.current = el
+    if (typeof svgRef === 'function') svgRef(el)
+    else if (svgRef && typeof svgRef === 'object') (svgRef as { current: SVGSVGElement | null }).current = el
+  }
+  // Screen pixels -> viewBox units (the SVG scales to its tile).
+  const toBox = (clientX: number, clientY: number): [number, number] => {
+    const r = inner.current?.getBoundingClientRect()
+    if (!r || !r.width || !r.height) return [w / 2, h / 2]
+    return [(clientX - r.left) / r.width * w, (clientY - r.top) / r.height * h]
+  }
+  // The wheel zooms around the pointer. Registered non-passive, or its
+  // preventDefault is ignored and the page scrolls under the map as well.
+  const viewRef = useRef(view)
+  viewRef.current = view
+  const hasView = !!view
+  useEffect(() => {
+    const el = inner.current
+    if (!el || !hasView) return
+    const onWheel = (e: WheelEvent) => {
+      const v = viewRef.current
+      if (!v) return
+      e.preventDefault()
+      const r = el.getBoundingClientRect()
+      const at: [number, number] = r.width && r.height
+        ? [(e.clientX - r.left) / r.width * w, (e.clientY - r.top) / r.height * h] : [w / 2, h / 2]
+      v.zoomBy(e.deltaY < 0 ? 1.25 : 0.8, at)
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [hasView, w, h])
+  const drag = useRef<{ x: number; y: number; moved: boolean } | null>(null)
   if (!(w > 8 && h > 8)) return null
   const template = tiles ? ((prefersContrast() && tiles.contrast_tile_url) || tiles.tile_url) : null
   // A .pbf/.mvt template is a VECTOR tile server (no PNGs to show as images):
@@ -131,7 +240,7 @@ export function MapSvg({ w, h, svgRef, children, projection, tiles, credit, ...r
     ? tilesFor(projection, w, h, template, vector ? VECTOR_MAX_ZOOM : undefined) : []
   return (
     <svg
-      ref={svgRef}
+      ref={setRefs}
       width="100%"
       height="100%"
       viewBox={`0 0 ${w} ${h}`}
@@ -145,7 +254,28 @@ export function MapSvg({ w, h, svgRef, children, projection, tiles, credit, ...r
       // with the same variable) turn translucent over them.
       style={images.length ? { ...MAP_SVG_STYLE, ['--surface2' as string]: 'transparent' } : MAP_SVG_STYLE}
       data-basemap={images.length ? 'tiles' : undefined}
+      data-zoom={view ? view.k : undefined}
       {...rest}
+      // Drag to pan once zoomed in (shift-drag stays the area selection), and
+      // a double-click zooms in on the point.
+      onPointerDown={view ? e => {
+        rest.onPointerDown?.(e)
+        if (e.shiftKey || e.button !== 0 || view.k <= 1) return
+        drag.current = { x: e.clientX, y: e.clientY, moved: false }
+      } : rest.onPointerDown}
+      onPointerMove={view ? e => {
+        rest.onPointerMove?.(e)
+        const d = drag.current
+        if (!d) return
+        const [ax, ay] = toBox(d.x, d.y)
+        const [bx, by] = toBox(e.clientX, e.clientY)
+        if (!d.moved && Math.hypot(bx - ax, by - ay) < 3) return
+        view.panBy(bx - ax, by - ay)
+        drag.current = { x: e.clientX, y: e.clientY, moved: true }
+      } : rest.onPointerMove}
+      onPointerUp={view ? e => { rest.onPointerUp?.(e); drag.current = null } : rest.onPointerUp}
+      onPointerLeave={view ? e => { rest.onPointerLeave?.(e); drag.current = null } : rest.onPointerLeave}
+      onDoubleClick={view ? e => { rest.onDoubleClick?.(e); view.zoomBy(2, toBox(e.clientX, e.clientY)) } : rest.onDoubleClick}
     >
       {images.length > 0 && vector && projection && <VectorBasemap tiles={images} projection={projection} />}
       {images.length > 0 && !vector && (
@@ -165,6 +295,7 @@ export function MapSvg({ w, h, svgRef, children, projection, tiles, credit, ...r
         <text data-testid="map-boundary-credit" x={4} y={h - 4} textAnchor="start" fontSize={9} fill="var(--muted)"
           style={{ paintOrder: 'stroke', stroke: 'var(--surface)', strokeWidth: 3 }}>{credit}</text>
       )}
+      {view && <ZoomControls view={view} w={w} h={h} />}
     </svg>
   )
 }

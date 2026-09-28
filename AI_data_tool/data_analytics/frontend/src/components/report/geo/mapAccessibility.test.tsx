@@ -64,7 +64,9 @@ describe('a choropleth, read without seeing it', () => {
     fireEvent.keyDown(screen.getByRole('button', { name: 'Egypt: 5' }), { key: ' ' })
     expect(onClickPoint).toHaveBeenLastCalledWith('Egypt')
     // Only regions with data are stops: the rest of the world is not 170 tabs.
-    expect(screen.getAllByRole('button')).toHaveLength(3)
+    // (The zoom controls are the map's own three buttons, beside them.)
+    const regions = screen.getAllByRole('button').filter(b => !/zoom/i.test(b.getAttribute('aria-label') ?? ''))
+    expect(regions).toHaveLength(3)
   })
 
   it('shows the value when a region takes focus, as hover does', () => {
