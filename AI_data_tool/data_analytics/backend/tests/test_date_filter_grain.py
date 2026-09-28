@@ -200,3 +200,44 @@ class TestCalendarGaps:
     def test_a_series_sorted_by_value_is_left_alone(self):
         rows, filled = self._rows(dimension_granularity="day", aggregation="count", sort_by="value", sort="desc")
         assert filled is None
+
+
+class TestFastDateDetection:
+    """Live QA 2026-09-28: a 644k-row upload spent 47 of its 53 seconds parsing
+    a clock-time column one value at a time. The fast path must give the SAME
+    answer as the per-value parse, which it replaced only for speed."""
+
+    n = 8000
+
+    def _types(self, **cols):
+        from app.services.ingest import detect_types
+        df = pd.DataFrame(cols)
+        return detect_types(df), df
+
+    def test_clock_times_parse_fast_and_land_on_today(self):
+        times = ["04:50:31 PM", "11:02:00 AM", "12:05:09 AM"] * (self.n // 3)
+        types, df = self._types(t=times)
+        assert types["t"] == "datetime"
+        assert list(df["t"].dt.hour[:3]) == [16, 11, 0]
+        assert (df["t"].dt.normalize() == pd.Timestamp.today().normalize()).all()
+
+    def test_full_dates_and_24_hour_times(self):
+        types, df = self._types(d=["2026-03-04 00:00:00", "2026-09-19 13:45:00"] * (self.n // 2),
+                                h=["16:50", "09:05"] * (self.n // 2))
+        assert types == {"d": "datetime", "h": "datetime"}
+        assert df["d"].iloc[1] == pd.Timestamp("2026-09-19 13:45")
+
+    def test_a_format_that_does_not_hold_answers_as_the_old_parse_did(self):
+        vals = ["2026-03-04"] * (self.n - 1) + ["March 5, 2026"]
+        try:
+            pd.to_datetime(pd.Series(vals))
+            old = "datetime"
+        except (ValueError, TypeError):
+            old = "not datetime"
+        types, _ = self._types(d=vals)
+        assert ("datetime" if types["d"] == "datetime" else "not datetime") == old
+
+    def test_text_is_still_text(self):
+        types, _ = self._types(s=["Mobile Telephony", "USSD"] * (self.n // 2),
+                               b=[f"99900000{i:04d}" for i in range(self.n)])
+        assert types["s"] == "categorical" and types["b"] != "datetime"

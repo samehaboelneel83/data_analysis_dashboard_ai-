@@ -143,6 +143,43 @@ def is_time_only(series: pd.Series, share: float = 0.9) -> bool:
     return bool(text.str.match(_TIME_ONLY).mean() >= share)
 
 
+def _parse_dates(s: pd.Series) -> pd.Series:
+    """`pd.to_datetime(s)` -- the same answer, raising where it raises -- but
+    fast on a large column.
+
+    A format pandas cannot infer ("04:50:31 PM") made it parse each value on
+    its own through dateutil: 47 of the 53 seconds a 644k-row upload took
+    (live QA 2026-09-28). A sample decides first -- a text column fails on it
+    at once -- then the whole column is parsed with the format the values
+    show. Only when that format does not hold for every value does it fall
+    back to the old per-value parse."""
+    sample = s.dropna().head(1000)
+    pd.to_datetime(sample)                           # raises exactly as the full parse would
+    if len(s) <= 5000:
+        return pd.to_datetime(s)
+    from pandas.tseries.api import guess_datetime_format
+    fmt = guess_datetime_format(str(sample.iloc[0])) if len(sample) else None
+    if fmt:
+        try:
+            return pd.to_datetime(s, format=fmt)
+        except (ValueError, TypeError):
+            pass
+    # pandas guesses no format for a clock time with no date. Parsed per value
+    # it lands on today's date; parsed with a format, on 1900-01-01 -- moved to
+    # today, so nothing downstream sees a different value than before.
+    for clock in _CLOCK_FORMATS:
+        try:
+            pd.to_datetime(sample, format=clock)
+            times = pd.to_datetime(s, format=clock)
+        except (ValueError, TypeError):
+            continue
+        return pd.Timestamp.today().normalize() + (times - times.dt.normalize())
+    return pd.to_datetime(s)
+
+
+_CLOCK_FORMATS = ("%I:%M:%S %p", "%I:%M %p", "%H:%M:%S", "%H:%M", "%H:%M:%S.%f")
+
+
 def detect_types(df: pd.DataFrame) -> dict[str, str]:
     type_map = {}
     for col in df.columns:
@@ -168,7 +205,7 @@ def detect_types(df: pd.DataFrame) -> dict[str, str]:
                 # parsing -- expected here, since this IS the type probe.
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore", UserWarning)
-                    parsed = pd.to_datetime(s)
+                    parsed = _parse_dates(s)
                 if parsed.notna().sum() / max(len(s), 1) > 0.8:
                     df[col] = parsed
                     type_map[col] = "datetime"
