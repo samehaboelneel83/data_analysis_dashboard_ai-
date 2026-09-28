@@ -1,4 +1,5 @@
 import EvidenceSummary from '../../components/review/EvidencePopover'
+import { useDirection } from '../../contexts/DirectionContext'
 import type { IndexAdvice } from '../../services/api'
 import {
   type DriftVersion, type ReviewEntity, type ReviewQueue, type ReviewRelationship,
@@ -261,6 +262,7 @@ export function EntityRow({ entity, onSave, onConfirm }: {
  *  shipped; this panel is its first reader. Read-only -- fixing drift means
  *  running a sync and re-reviewing, both of which live above. */
 export function DriftPanel({ drift, error }: { drift: DriftVersion[] | null; error: string | null }) {
+  const { language } = useDirection()
   if (error) return <p role="alert" style={{ fontSize: 13, color: '#b3261e' }}>{error}</p>
   if (drift === null) return <p style={{ fontSize: 13, color: '#64748b' }}>Loading drift history…</p>
   if (drift.length === 0) {
@@ -287,7 +289,7 @@ export function DriftPanel({ drift, error }: { drift: DriftVersion[] | null; err
       {drift.map(v => (
         <div key={v.id} style={{ border: '1px solid #e2e8f0', borderRadius: 6, padding: '10px 12px', marginBottom: 8 }}>
           <div style={{ fontSize: 12, display: 'flex', gap: 10, alignItems: 'center' }}>
-            <span style={{ fontWeight: 600 }}>{new Date(v.detected_at).toLocaleString()}</span>
+            <span style={{ fontWeight: 600 }}>{new Date(v.detected_at).toLocaleString(language, { dateStyle: 'medium', timeStyle: 'short' })}</span>
             {v.is_baseline && (
               <span style={{ fontSize: 11, fontWeight: 700, color: '#2d5ba8', background: '#e5edfb',
                 borderRadius: 99, padding: '2px 8px', textTransform: 'uppercase', letterSpacing: '.04em' }}>

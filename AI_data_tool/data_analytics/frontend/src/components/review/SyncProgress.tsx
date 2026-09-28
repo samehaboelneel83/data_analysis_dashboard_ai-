@@ -1,4 +1,5 @@
 import type { SyncRun } from '../../services/api'
+import { useDirection } from '../../contexts/DirectionContext'
 import { friendlyMessage } from '../../lib/friendlyError'
 
 /**
@@ -49,6 +50,9 @@ function stageDetail(name: string, detail?: Record<string, any>): string | null 
 }
 
 export default function SyncProgress({ run }: { run: SyncRun | null }) {
+  // The interface's language, not the browser's: "27م 4:07:09 2026/9/" on an
+  // English page (live QA 2026-09-28).
+  const { language } = useDirection()
   if (!run || run.status === 'never_run') {
     return (
       <p style={{ color: '#64748b', fontSize: 13 }}>
@@ -61,7 +65,7 @@ export default function SyncProgress({ run }: { run: SyncRun | null }) {
     <div>
       <div style={{ fontSize: 13, marginBottom: 8 }}>
         Last run: <strong>{run.status}</strong>
-        {run.finished_at && <> · {new Date(run.finished_at).toLocaleString()}</>}
+        {run.finished_at && <> · {new Date(run.finished_at).toLocaleString(language, { dateStyle: 'medium', timeStyle: 'medium' })}</>}
       </div>
       <ol style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: 13 }}>
         {run.stages.map(stage => {

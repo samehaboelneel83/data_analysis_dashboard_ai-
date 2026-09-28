@@ -285,7 +285,9 @@ export default function SourceReview() {
   if (!queue) return <div style={{ padding: 24 }}><LoadingState /></div>
 
   return (
-    <div style={{ padding: 24, maxWidth: 1200 }}>
+    // Full width, like every other page: a 1200px cap left half of a wide
+    // screen empty beside the join graph (reported 2026-09-28).
+    <div style={{ padding: '24px 32px', width: '100%', boxSizing: 'border-box' }}>
       {/* Title+stats grouped on the start side, the action on the end side --
           matching the space-between header every other list page uses. The
           stats line reads as this page's subtitle (what the numbers below
@@ -293,12 +295,12 @@ export default function SourceReview() {
       <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
         <div>
           <h1 className="dl-page-title" style={{ margin: 0, marginBottom: 4 }}>Review data source</h1>
-          <span style={{ color: '#64748b', fontSize: 13 }}>
+          <span style={{ color: 'var(--muted)', fontSize: 13 }}>
             {queue.datasets.length} tables · {queue.columns.length} columns ·{' '}
             {pending.length} awaiting review · {settled.length} settled
           </span>
         </div>
-        <button onClick={runSync} disabled={syncing}>
+        <button type="button" className="btn btn-primary" onClick={runSync} disabled={syncing}>
           {syncing
             ? `Syncing… ${run?.stages?.length ?? 0}/6`
             : 'Run sync'}
@@ -306,11 +308,13 @@ export default function SourceReview() {
       </header>
 
       <input
+        className="input"
+        type="search"
+        aria-label="Search tables, columns and descriptions"
         value={search}
         onChange={e => setSearch(e.target.value)}
         placeholder="Search tables, columns and descriptions…"
-        style={{ width: '100%', padding: '8px 10px', marginBottom: 16,
-                 fontSize: 13, border: '1px solid #cbd5e1', borderRadius: 4 }}
+        style={{ width: '100%', marginBottom: 16, boxSizing: 'border-box' }}
       />
 
       <SourceOverview
@@ -350,16 +354,14 @@ export default function SourceReview() {
         }}
       />
 
-      <section style={{ marginBottom: 20, padding: 12, background: '#f8fafc',
-        borderRadius: 6, display: 'flex', alignItems: 'center', gap: 12 }}>
+      <section className="card" style={{ marginBottom: 20, padding: 12,
+        display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <div style={{ flex: 1 }}><SyncProgress run={run} /></div>
         {/* The step BEFORE a dataset exists: someone has connected a database,
             has no dataset, and does not know which of its tables to join. The
             backend has answered this since it shipped and nothing called it. */}
-        <button onClick={() => setSuggesting(true)}
-          style={{ fontSize: 12, padding: '6px 12px', borderRadius: 6, border: 'none',
-            background: 'var(--accent, #2563eb)', color: 'var(--mc-accent-fg)', cursor: 'pointer',
-            whiteSpace: 'nowrap' }}>
+        <button type="button" className="btn btn-primary" onClick={() => setSuggesting(true)}
+          style={{ whiteSpace: 'nowrap', alignSelf: 'flex-start' }}>
           Suggest a dashboard
         </button>
       </section>
@@ -370,26 +372,28 @@ export default function SourceReview() {
                                  onClose={() => setSuggesting(false)} />
       )}
 
-      <nav style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-        <button onClick={() => setTab('graph')} disabled={tab === 'graph'}>
-          Relationships ({pending.length})
-        </button>
-        <button onClick={() => setTab('columns')} disabled={tab === 'columns'}>
-          Columns ({columnsShown})
-        </button>
-        <button onClick={() => setTab('entities')} disabled={tab === 'entities'}>
-          Entities ({entities.length})
-        </button>
-        <button onClick={() => setTab('glossary')} disabled={tab === 'glossary'}>
-          Business terms
-        </button>
-        <button onClick={() => setTab('drift')} disabled={tab === 'drift'}>
-          Schema drift
-        </button>
-        <button onClick={() => setTab('health')} disabled={tab === 'health'}>
-          Source health
-        </button>
-      </nav>
+      {/* A tab strip, the current tab marked as selected -- they were plain
+          browser buttons, the current one shown only by being disabled. */}
+      <div role="tablist" aria-label="Review sections" className="dl-review-tabs"
+        style={{ display: 'flex', gap: 4, marginBottom: 12, flexWrap: 'wrap',
+          borderBottom: '1px solid var(--border)' }}>
+        {([
+          ['graph', `Relationships (${pending.length})`],
+          ['columns', `Columns (${columnsShown})`],
+          ['entities', `Entities (${entities.length})`],
+          ['glossary', 'Business terms'],
+          ['drift', 'Schema drift'],
+          ['health', 'Source health'],
+        ] as const).map(([key, label]) => (
+          <button key={key} type="button" role="tab" aria-selected={tab === key}
+            className="btn btn-ghost btn-sm" onClick={() => setTab(key)}
+            style={{ borderRadius: '6px 6px 0 0', marginBottom: -1,
+              borderBottom: tab === key ? '2px solid var(--accent)' : '2px solid transparent',
+              color: tab === key ? 'var(--accent)' : undefined, fontWeight: tab === key ? 600 : undefined }}>
+            {label}
+          </button>
+        ))}
+      </div>
 
       {tab === 'graph' ? (
         <>
@@ -397,10 +401,10 @@ export default function SourceReview() {
                      filter={search} />
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '12px 0' }}>
-            <button onClick={confirmSelected} disabled={!selected.size} title={!selected.size ? 'Tick at least one suggestion first' : undefined}>
+            <button type="button" className="btn btn-primary" onClick={confirmSelected} disabled={!selected.size} title={!selected.size ? 'Tick at least one suggestion first' : undefined}>
               Confirm {selected.size} selected
             </button>
-            <span style={{ fontSize: 12, color: '#64748b' }}>
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>
               High-confidence proposals are pre-selected.
             </span>
           </div>
