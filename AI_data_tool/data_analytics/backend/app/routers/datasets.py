@@ -412,6 +412,7 @@ async def _ingest_upload_file(
             db.add(DatasetColumn(
                 dataset_id=ds.id, name=col_name, dtype=dtype,
                 missing_pct=_missing_pct(df[col_name]), stats={},
+                semantic_type=_semantic_type_of(df[col_name]),
             ))
         await _apply_default_data_view(db, ds, org_id)
         return ds
@@ -419,6 +420,18 @@ async def _ingest_upload_file(
         file_path.unlink(missing_ok=True)
         remove_parquet_sidecar(str(file_path))
         raise
+
+
+def _semantic_type_of(series) -> str | None:
+    """What a column's values are (email, phone, national id...), from a
+    sample, so personal data is known from the moment a file lands: the
+    sensitivity floor and share/export redaction read it. Never fails an
+    upload."""
+    from ..services.pii import detect_semantic_type
+    try:
+        return detect_semantic_type(series.dropna().head(200).tolist())
+    except Exception:                                          # noqa: BLE001
+        return None
 
 
 async def _apply_default_data_view(db: AsyncSession, ds: Dataset, org_id: int) -> None:
@@ -555,7 +568,7 @@ async def _ingest_access_file(
                     db.add(DatasetColumn(
                         dataset_id=ds.id, name=col_name, dtype=dtype,
                         missing_pct=_missing_pct(df[col_name]),
-                        stats={}))
+                        stats={}, semantic_type=_semantic_type_of(df[col_name])))
                 await db.commit()
                 items.append(BatchUploadItem(
                     source_filename=label, status="created",
@@ -2378,6 +2391,39 @@ async def explain_column(dataset_id: int, column: str, body: dict | None = None,
 
 # ── Outlier details ──────────────────────────────────────────────────────────
 
+async def _personal_mask_for(db: AsyncSession, ds: Dataset, user: User) -> dict[str, str]:
+    """{column: personal-data type} to mask in the ROWS this caller is shown
+    by an analysis (outlier rows, quality examples) -- empty for the dataset's
+    owner and for an org admin, who are answerable for it. Live QA 2026-09-28:
+    an analyst's outlier drill-down on a call log returned its callers' names,
+    addresses and national IDs in full."""
+    if ds.created_by == user.id or bool(user.role and user.role.is_org_admin):
+        return {}
+    from ..services.sensitivity import personal_columns
+    return await personal_columns(db, ds.id)
+
+
+def _mask_frame_columns(frame, personal: dict[str, str]):
+    """`frame` with its personal columns masked (shape-preserving tokens)."""
+    from ..services.pii import mask_value
+    hit = [c for c in personal if c in frame.columns]
+    if not hit:
+        return frame
+    frame = frame.copy()
+    for c in hit:
+        kind = personal[c]
+        frame[c] = frame[c].map(lambda v, k=kind: None if v is None or v != v else mask_value(v, k))
+    return frame
+
+
+def _mask_records(records: list[dict], personal: dict[str, str]) -> list[dict]:
+    from ..services.pii import mask_value
+    if not personal:
+        return records
+    return [{k: (mask_value(v, personal[k]) if k in personal and v is not None else v) for k, v in r.items()}
+            for r in records]
+
+
 @router.post("/{dataset_id}/outlier-details")
 async def outlier_details(dataset_id: int, column: str, detector: str = "iqr",
                           db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -2404,6 +2450,7 @@ async def outlier_details(dataset_id: int, column: str, detector: str = "iqr",
     from ..services.prep import apply_prep_steps, prep_steps_of, resolve_join_frames
     _steps = prep_steps_of(ds)
     _aux = await resolve_join_frames(db, current_user, _steps) if _steps else {}
+    personal = await _personal_mask_for(db, ds, current_user)
 
     def _run():
         import pandas as pd
@@ -2430,7 +2477,7 @@ async def outlier_details(dataset_id: int, column: str, detector: str = "iqr",
         mask = clean_mask.reindex(s.index, fill_value=False)
         out_vals = s[mask.fillna(False)]
         total = float(clean.sum())
-        rows = df[mask.fillna(False)].head(50)
+        rows = _mask_frame_columns(df[mask.fillna(False)].head(50), personal)
         return {
             "column": column,
             "detector": detector,
@@ -2918,6 +2965,7 @@ async def data_quality(dataset_id: int, body: QualityRequest = QualityRequest(),
     denied = await resolve_denied_columns(db, current_user, dataset_id)
     steps = prep_steps_of(ds)
     aux = await resolve_join_frames(db, current_user, steps) if steps else {}
+    personal = await _personal_mask_for(db, ds, current_user)
 
     def _run():
         df = apply_rls_filter(load_file(ds.filename), rls_expr)
@@ -2926,7 +2974,13 @@ async def data_quality(dataset_id: int, body: QualityRequest = QualityRequest(),
         present = [c for c in (denied or []) if c in df.columns]
         if present:
             df = df.drop(columns=present)
-        return quality_report(df, body.rules)
+        report = quality_report(df, body.rules)
+        # The example ROWS carry personal values; the column statistics do not.
+        report["duplicate_examples"] = _mask_records(report["duplicate_examples"], personal)
+        for check in report["rules"]:
+            if "examples" in check:
+                check["examples"] = _mask_records(check["examples"], personal)
+        return report
 
     return await asyncio.to_thread(_run)
 

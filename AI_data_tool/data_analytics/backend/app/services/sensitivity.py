@@ -25,7 +25,7 @@ and in `report_classifications` for a report.
 """
 from __future__ import annotations
 
-from ..services.pii import is_pii
+from ..services.pii import personal_type
 
 LEVELS = ["Public", "Internal", "Confidential", "Restricted"]
 META_KEY = "__sensitivity__"
@@ -65,6 +65,15 @@ async def dataset_effective(db, dataset_id: int, _seen: set[int] | None = None) 
         if up and rank(up) > rank(label):
             label = up
             reasons = [f"{ds.name} is built from or joins data labelled {up}"] + up_reasons
+    # After the lineage, so a stated or inherited label is named first.
+    # Personal data sets the floor at Confidential whatever the label says:
+    # that is what turns on redaction for share links, embeds and exports. A
+    # call log holding its callers' names and national IDs was unlabelled, so
+    # none of it was protected (live QA 2026-09-28).
+    personal = await personal_columns(db, dataset_id)
+    if personal and rank(label) < rank("Confidential"):
+        shown = ", ".join(sorted(personal)[:4]) + (" and more" if len(personal) > 4 else "")
+        label, reasons = "Confidential", [f"{ds.name} holds personal data ({shown})"]
     return label, reasons
 
 
@@ -115,13 +124,23 @@ async def redacted_columns(db, dataset_id: int, context_label: str | None = None
     counts is the higher of the dataset's own effective label and the context
     (the report being shared), so a Confidential report redacts even over an
     unlabelled dataset."""
-    from sqlalchemy import select
-
-    from ..models.models import DatasetColumn
     label, _ = await dataset_effective(db, dataset_id)
     if rank(higher(label, context_label)) < rank("Confidential"):
         return []
+    return sorted(await personal_columns(db, dataset_id))
+
+
+async def personal_columns(db, dataset_id: int) -> dict[str, str]:
+    """{column: personal-data type} for this dataset's columns."""
+    from sqlalchemy import select
+
+    from ..models.models import DatasetColumn
     rows = (await db.execute(select(DatasetColumn.name, DatasetColumn.semantic_type)
                              .where(DatasetColumn.dataset_id == dataset_id))).all()
-    return sorted(name for name, sem in rows if is_pii(sem))
+    out = {}
+    for name, sem in rows:
+        kind = personal_type(name, sem)
+        if kind:
+            out[name] = kind
+    return out
 

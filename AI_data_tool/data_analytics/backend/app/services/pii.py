@@ -61,7 +61,10 @@ _NATIONAL_ID = re.compile(r"^\d{9,20}$")
 #: Types that identify a person. Only these are masked. `url`, `coordinate` and
 #: the numeric-shape types stay legible because the model needs them to reason
 #: about what a column means, and none of them names an individual.
-_PII_TYPES = frozenset({"email", "phone", "iban", "credit_card", "national_id"})
+_PII_TYPES = frozenset({"email", "phone", "iban", "credit_card", "national_id",
+                        # Recognised by column NAME (see personal_type): a name or an
+                        # address has no value shape a regex can trust.
+                        "person_name", "address", "device_id"})
 
 #: A column is only classified when most of its non-null values agree. One email
 #: address inside a free-text notes column must not turn the whole column into
@@ -198,6 +201,39 @@ def detect_semantic_type(values) -> str | None:
 def is_pii(semantic_type: str | None) -> bool:
     """Whether a semantic type names a person and must therefore be masked."""
     return semantic_type in _PII_TYPES
+
+
+# ── By name ─────────────────────────────────────────────────────────────────
+# Values say "this is an email" or "this is a 14-digit ID"; only the NAME says
+# "this is somebody's first name" or "their home address". Live QA 2026-09-28:
+# a call log's B_NUMBER_FIRST_NAME / _LAST_NAME / _ADDRESS / _NATIONAL_ID,
+# IMEI and IMSI were all unflagged, and an outlier drill-down handed them to an
+# analyst in full.
+
+_NAME_RULES: list[tuple[str, re.Pattern]] = [
+    ("national_id", re.compile(r"(^|_)(national_?id|nid|ssn|passport(_?(no|number))?)$", re.I)),
+    ("person_name", re.compile(r"(^|_)((first|last|full|given|family|middle)_?name|surname)$", re.I)),
+    ("address", re.compile(r"(^|_)(address|addr|street)$", re.I)),
+    ("email", re.compile(r"(^|_)e_?mail(_?address)?$", re.I)),
+    ("phone", re.compile(r"(^|_)(phone|mobile|msisdn|telephone)(_?(no|number))?$", re.I)),
+    ("device_id", re.compile(r"(^|_)(imei|imsi|iccid)$", re.I)),
+]
+#: A place's address is not a person's: a site's, a store's, a branch's.
+_PLACE_WORDS = re.compile(r"(^|_)(site|store|branch|office|warehouse|shop|plant|depot|company|business)(_|$)", re.I)
+
+
+def personal_type(column: str | None, semantic_type: str | None = None) -> str | None:
+    """The personal-data type of a column, from its detected semantic type or,
+    failing that, its name -- or None."""
+    if is_pii(semantic_type):
+        return semantic_type
+    name = str(column or "")
+    for kind, pattern in _NAME_RULES:
+        if pattern.search(name):
+            if kind == "address" and _PLACE_WORDS.search(name):
+                return None
+            return kind
+    return None
 
 
 def _token(value: str, length: int = 8) -> str:

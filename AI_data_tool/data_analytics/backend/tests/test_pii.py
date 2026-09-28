@@ -170,3 +170,27 @@ class TestMaskRows:
         would corrupt the null_ratio statistic computed from the same sample."""
         out = pii.mask_rows([{"email": None}], {"email": "email"})
         assert out[0]["email"] is None
+
+
+
+@pytest.mark.parametrize("column,kind", [
+    ("B_NUMBER_FIRST_NAME", "person_name"), ("last_name", "person_name"), ("surname", "person_name"),
+    ("B_NUMBER_ADDRESS", "address"), ("home_address", "address"),
+    ("B_NUMBER_NATIONAL_ID", "national_id"), ("passport_no", "national_id"),
+    ("customer_email", "email"), ("mobile_number", "phone"), ("IMEI", "device_id"), ("imsi", "device_id"),
+])
+def test_personal_columns_are_known_by_name(column, kind):
+    from app.services.pii import personal_type
+    assert personal_type(column) == kind
+
+
+@pytest.mark.parametrize("column", ["SITE_ADDRESS", "store_address", "product_name", "name",
+                                    "phone_calls", "email_count", "RATED_AMOUNT", "address_count"])
+def test_places_and_counts_are_not_personal(column):
+    from app.services.pii import personal_type
+    assert personal_type(column) is None
+
+
+def test_a_detected_value_type_wins_over_the_name():
+    from app.services.pii import personal_type
+    assert personal_type("contact", "email") == "email"

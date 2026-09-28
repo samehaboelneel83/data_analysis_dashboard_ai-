@@ -62,9 +62,12 @@ async def test_confidential_links_need_a_signed_in_member_and_redact_personal_da
     base, _, rep, w = await _world(db_session, two_orgs["a"]["org"], people)
     token = (await client.post(f"/api/v1/reports/{rep.id}/share-links", json={},
                                headers=auth_headers["a"])).json()["token"]
-    # Unlabelled: the anonymous link works and shows the email column.
-    anon = await client.post(f"/api/v1/shared/{token}/widget-data/{w.id}")
-    assert anon.status_code == 200 and "email" in str(anon.json())
+    # Unlabelled, but it holds an email column: personal data makes it
+    # Confidential by itself (live QA 2026-09-28 -- a call log's national IDs
+    # sat under no label at all).
+    s = (await client.get(f"/api/v1/datasets/{base.id}/sensitivity", headers=auth_headers["a"])).json()
+    assert s["label"] is None and s["effective"] == "Confidential"
+    assert s["reasons"] == ["People holds personal data (email)"]
     r = await client.put(f"/api/v1/datasets/{base.id}/sensitivity", json={"label": "Confidential"},
                          headers=auth_headers["a"])
     assert r.status_code == 200 and r.json()["effective"] == "Confidential"
@@ -74,6 +77,33 @@ async def test_confidential_links_need_a_signed_in_member_and_redact_personal_da
     assert member.status_code == 200
     body = str(member.json())
     assert "a@x.com" not in body and "spend" in body
+
+
+@pytest.mark.asyncio
+async def test_data_without_personal_columns_stays_openable_by_link(client, auth_headers, db_session, two_orgs, tmp_path):
+    path = tmp_path / "sales.csv"
+    pd.DataFrame({"region": ["N", "S"], "spend": [1.0, 2.0]}).to_csv(path, index=False)
+    org = two_orgs["a"]["org"]
+    ds = Dataset(name="Sales", filename=str(path), org_id=org.id, mode="import")
+    db_session.add(ds)
+    await db_session.flush()
+    for c in ("region", "spend"):
+        db_session.add(DatasetColumn(dataset_id=ds.id, name=c, dtype="categorical"))
+    rep = Report(name="Sales report", dataset_id=ds.id, org_id=org.id)
+    db_session.add(rep)
+    await db_session.flush()
+    page = ReportPage(report_id=rep.id, name="P1", position=0)
+    db_session.add(page)
+    await db_session.flush()
+    w = ReportWidget(page_id=page.id, widget_type="table", config={"columns": ["region", "spend"]})
+    db_session.add(w)
+    await db_session.commit()
+    s = (await client.get(f"/api/v1/datasets/{ds.id}/sensitivity", headers=auth_headers["a"])).json()
+    assert s["effective"] is None and s["redacted_on_share"] == []
+    token = (await client.post(f"/api/v1/reports/{rep.id}/share-links", json={},
+                               headers=auth_headers["a"])).json()["token"]
+    anon = await client.post(f"/api/v1/shared/{token}/widget-data/{w.id}")
+    assert anon.status_code == 200 and "spend" in str(anon.json())
 
 
 @pytest.mark.asyncio
@@ -98,3 +128,45 @@ async def test_batch_decisions_explain_themselves(client, auth_headers, db_sessi
     assert other["decisions"][0]["allowed"] is False
     too_many = await client.post("/api/v1/authz/decisions", json={"checks": checks * 13}, headers=auth_headers["a"])
     assert too_many.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_analysis_rows_mask_personal_columns_for_an_analyst_not_for_an_admin(
+        client, auth_headers, db_session, two_orgs, tmp_path):
+    """Live QA 2026-09-28: an analyst's outlier drill-down on a call log
+    returned its callers' names, addresses and national IDs in full."""
+    from .test_prediction_models_api import _restricted_user
+    path = tmp_path / "calls.csv"
+    n = 40
+    pd.DataFrame({
+        "B_NUMBER_FIRST_NAME": [f"Name{i}" for i in range(n)],
+        "B_NUMBER_NATIONAL_ID": [f"2901028140{i:04d}" for i in range(n)],
+        "SITE_ADDRESS": [f"Tower {i}" for i in range(n)],               # a place, not a person
+        "RATED_AMOUNT": [1.0] * (n - 1) + [500.0],
+    }).to_csv(path, index=False)
+    org = two_orgs["a"]["org"]
+    ds = Dataset(name="Calls", filename=str(path), org_id=org.id, mode="import")
+    db_session.add(ds)
+    await db_session.flush()
+    for c, t in (("B_NUMBER_FIRST_NAME", "categorical"), ("B_NUMBER_NATIONAL_ID", "categorical"),
+                 ("SITE_ADDRESS", "categorical"), ("RATED_AMOUNT", "numeric")):
+        db_session.add(DatasetColumn(dataset_id=ds.id, name=c, dtype=t))
+    await db_session.commit()
+    analyst = await _restricted_user(db_session, org, ds, email="analyst@example.com")
+
+    def outlier_row(body):
+        cols, [row] = body["outliers"]["columns"], body["outliers"]["rows"]
+        return dict(zip(cols, row))
+
+    url = f"/api/v1/datasets/{ds.id}/outlier-details?column=RATED_AMOUNT"
+    seen = outlier_row((await client.post(url, headers=analyst)).json())
+    assert seen["B_NUMBER_FIRST_NAME"] != "Name39" and seen["B_NUMBER_FIRST_NAME"].startswith("masked_")
+    assert seen["B_NUMBER_NATIONAL_ID"] != "29010281400039"
+    assert seen["SITE_ADDRESS"] == "Tower 39" and seen["RATED_AMOUNT"] == 500.0
+    admin = outlier_row((await client.post(url, headers=auth_headers["a"])).json())
+    assert admin["B_NUMBER_FIRST_NAME"] == "Name39"
+
+    r = await client.post(f"/api/v1/datasets/{ds.id}/quality", json={"rules": ["RATED_AMOUNT < 100"]},
+                          headers=analyst)
+    [example] = r.json()["rules"][0]["examples"]
+    assert example["B_NUMBER_FIRST_NAME"].startswith("masked_") and example["RATED_AMOUNT"] == 500.0
