@@ -254,3 +254,31 @@ class TestActionsTheChatCannotTake:
         prompt = " ".join(m["content"] for m in client.calls[0]["messages"])
         assert 'Q: create a new dataset -> {"intent": "chat"' in prompt
         assert "CREATE, SAVE, DELETE or CHANGE" in prompt
+
+
+import pytest as _pytest  # noqa: E402
+
+
+@_pytest.mark.parametrize("question,model_said,settled", [
+    # Live QA 2026-09-28: each of these came back wrong from the model.
+    ("Compare activity and rated amount over time.", "compare", "trend"),
+    ("Which services have high activity but relatively low rated amount?", "compare", "aggregate"),
+    ("Find unusual activity.", "explain", "aggregate"),
+    ("are there any spikes in orders", "lookup", "aggregate"),
+    # ...and these are left as the model gave them.
+    ("why did returns spike", "explain", "explain"),
+    ("cairo vs giza sales", "compare", "compare"),
+    ("total revenue by region", "aggregate", "aggregate"),
+    ("hi", "chat", "chat"),
+])
+def test_settle_intent(question, model_said, settled):
+    from app.services.agent.nodes.classify import settle_intent
+    got = settle_intent(question, {"intent": model_said, "ambiguous": True, "ambiguity_reason": "x"})
+    assert got["intent"] == settled
+    if settled != model_said:
+        assert got["ambiguous"] is False and got["ambiguity_reason"] is None
+
+
+def test_settle_intent_passes_a_failed_verdict_through():
+    from app.services.agent.nodes.classify import settle_intent
+    assert settle_intent("find unusual activity", None) is None

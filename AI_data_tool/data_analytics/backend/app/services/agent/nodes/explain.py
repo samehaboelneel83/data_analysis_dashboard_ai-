@@ -112,6 +112,37 @@ def _ordered(r: StepResult) -> list:
     return sorted(rows, key=lambda row: (row.get(key) is None, -float(row.get(key) or 0)))
 
 
+def _whole_result(rows: list) -> str:
+    """Each numeric column's smallest and largest value over EVERY row, with
+    the row it came from, and its total. Live QA 2026-09-28: shown the first
+    20 of 194 days, the answer said volume "ranged from 20 to 4125" -- the
+    true range was 1 to 918,127,301. A range the model reads from a sample is
+    a range it invents."""
+    if not rows or not isinstance(rows[0], dict):
+        return ""
+    keys = list(rows[0])
+    numeric = [k for k in keys if any(_is_number(r.get(k)) for r in rows)
+               and all(r.get(k) is None or _is_number(r.get(k)) for r in rows)]
+    label = next((k for k in keys if k not in numeric), None)
+    from ...semantic_guard import non_additive_kind
+    parts = []
+    for k in numeric:
+        kind = non_additive_kind(k)
+        if kind == "identifier":
+            # An identifier's range or total is not a figure anyone asked for
+            # ("19,610,370,001,963 total A_NUMBER", live QA 2026-09-28).
+            continue
+        vals = [r for r in rows if _is_number(r.get(k))]
+        if not vals:
+            continue
+        lo = min(vals, key=lambda r: r[k])
+        hi = max(vals, key=lambda r: r[k])
+        at = (lambda r: f" at {_tidy(r.get(label))}") if label else (lambda r: "")
+        total = "" if kind else f", total {_tidy(sum(float(r[k]) for r in vals))}"
+        parts.append(f"{k}: smallest {_tidy(lo[k])}{at(lo)}, largest {_tidy(hi[k])}{at(hi)}{total}")
+    return "; ".join(parts)
+
+
 def _facts(results: dict[str, StepResult],
            sink_ids: set[str] | None = None,
            names: dict[str, str] | None = None) -> str:
@@ -136,8 +167,16 @@ def _facts(results: dict[str, StepResult],
             # count its own figures disprove.
             sample = [{k: _tidy(v) for k, v in row.items()} if isinstance(row, dict) else row
                       for row in _ordered(r)[:20]]
-            lines.append(f"{_label(r, names)} ({n} {_row_noun(r)}, showing {shown}): "
+            # "all shown" when nothing is hidden: told "(1 rows, showing 1)"
+            # beside a rule about samples, the model called a one-row answer
+            # incomplete (live QA 2026-09-28).
+            seen = "all shown" if shown >= n else f"showing {shown}"
+            lines.append(f"{_label(r, names)} ({n} {_row_noun(r)}, {seen}): "
                         f"{sample!r}")
+            if n > shown:
+                whole = _whole_result(r.rows)
+                if whole:
+                    lines.append(f"  Across ALL {n} {_row_noun(r)} (not just those shown): {whole}")
     return "\n".join(lines)
 
 
@@ -174,6 +213,8 @@ async def describe(question: str, results: dict[str, StepResult],
             "surprising), and whatever their message asks about it.\n"
             "Use ONLY the figures given and state numbers exactly; never "
             "invent one, and never describe a value you were not given. "
+            "Take the largest, smallest and totals from a block's 'Across "
+            "ALL' line when it has one -- the rows shown are a sample. "
             "Refer to data by the names the figures label it with -- a "
             "quoted name is the dataset's own name, used as written; "
             "never call anything a step, a result set or a figure. "
@@ -199,7 +240,13 @@ async def explain(question: str, results: dict[str, StepResult],
     got = await client.complete(
         [{"role": "system", "content": (
             "Answer the user's question in 1-3 sentences from ONLY the "
-            "figures given. State numbers exactly; do not invent any. Refer "
+            "figures given. State numbers exactly; do not invent any. When a "
+            "block shows only some of its rows, take every smallest, largest, "
+            "total or range from its 'Across ALL' line -- never from the rows "
+            "shown, which are a sample. A block marked 'all shown' is "
+            "complete: when a top-N question returns fewer rows than N, "
+            "that many exist -- say so plainly, never that the list cannot "
+            "be completed. Refer "
             "to data by the names the figures label it with -- a quoted "
             "name is the dataset's own name, used as written; never "
             "call anything a step, a result set or a figure. Do not "

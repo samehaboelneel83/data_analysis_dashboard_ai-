@@ -62,6 +62,36 @@ async def generate_sql(question: str, context: SchemaContext,
         "bars were three different kinds of thing. One SELECT answers about "
         "ONE grouping; if several are genuinely wanted, put each in its own "
         "labelled column (or its own step), never one under another.",
+        "Counting words -- 'activity', 'how many', 'number of', 'traffic', "
+        "'busiest', 'most active', 'handled the most' -- mean COUNT(*) of the "
+        "rows (records, calls, transactions) unless the question names the "
+        "numeric column to add up. Never SUM or AVG an identifier, a code, a "
+        "phone number or a coordinate; a column named like a VOLUME can mix "
+        "units across rows (seconds for calls, bytes for data), so it is "
+        "added up only when the question asks for that volume by name. "
+        "Measured live: 'which services generated the highest activity' "
+        "summed seconds and bytes together and named the wrong leader.",
+        "A request for unusual, anomalous or spiking activity, with no "
+        "method named, is about DAYS, never individual rows: count the rows "
+        "per day in a subquery, score each day against the average day -- "
+        "(n - AVG(n) OVER ()) / STDDEV_POP(n) OVER () -- and return the ten "
+        "days with the largest absolute score first, with their counts and "
+        "scores. Never SELECT * for it.",
+        "'High X but low Y' per group is both figures per group side by "
+        "side, plus Y per unit of X (e.g. SUM(amount) / COUNT(*)), ordered "
+        "by that ratio ascending.",
+        "In call detail records the A-number (A_NUMBER, calling party) is "
+        "the ORIGINATING number and the B-number (B_NUMBER, called party) "
+        "is the destination; 'originating', 'caller' or 'from' means the "
+        "A-number -- even when it holds a single value, in which case the "
+        "answer is that one number, said plainly; never switch to the "
+        "B-number to make a longer list.",
+        "'Compare A and B over time' is both measures per period on one "
+        "date axis (one row per period, one column per measure), ordered "
+        "by the period.",
+        "A geographic distribution groups by the coordinate or place "
+        "columns and leaves out rows where they are NULL: a missing "
+        "location is not a place.",
         "When validation refuses a join as not confirmed, do not retry "
         "that join another way on repair — answer using only the "
         "permitted tables' own columns instead, degrading the answer "

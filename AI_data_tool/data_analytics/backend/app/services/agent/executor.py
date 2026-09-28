@@ -118,6 +118,23 @@ async def execute_sql(sql: str, cfg: dict, family: str, *, org_id: int | None = 
     )
 
 
+def _with_clock_times(frame):
+    """`frame` with its clock-time text columns ("04:50:31 PM") as real times,
+    so DuckDB sees TIME and hour()/date_part work. As VARCHAR, "activity by
+    hour" failed with `date_part(STRING_LITERAL, VARCHAR)` (live QA
+    2026-09-28). A frame with none is returned as it came."""
+    import pandas as pd
+
+    from ..ingest import is_time_only
+    cols = [c for c in frame.columns if frame[c].dtype == object and is_time_only(frame[c])]
+    if not cols:
+        return frame
+    frame = frame.copy()
+    for c in cols:
+        frame[c] = pd.to_datetime(frame[c], errors="coerce", format="mixed").dt.time
+    return frame
+
+
 def _run_datasets(sql: str, frames: dict, *, org_id: int | None = None,
                   dataset_id: int | None = None,
                   ) -> tuple[list[dict] | None, str | None]:
@@ -151,7 +168,7 @@ def _run_datasets(sql: str, frames: dict, *, org_id: int | None = None,
         # the local filesystem or network from this connection.
         conn.execute("SET enable_external_access=false")
         for name, frame in frames.items():
-            conn.register(name, frame)
+            conn.register(name, _with_clock_times(frame))
         capped = _cap_rows(sql, "duckdb", settings.agent_row_cap)
         # DuckDB has no statement-timeout pragma (unlike the customer-DB path
         # in _run above) — a watchdog timer is the only way to bound a

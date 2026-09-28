@@ -7,6 +7,8 @@ actually polices quality. This node only guarantees the SHAPE.
 """
 from __future__ import annotations
 
+import re
+
 from ..context import SchemaContext
 from .followup import render_history
 
@@ -68,6 +70,18 @@ Q: total revenue by region -> {"intent": "aggregate", "ambiguous": false, "ambig
 Q: how did signups change month over month -> {"intent": "trend", "ambiguous": false, "ambiguity_reason": null}
 Q: cairo vs giza sales -> {"intent": "compare", "ambiguous": false, "ambiguity_reason": null}
 Q: why did returns spike -> {"intent": "explain", "ambiguous": false, "ambiguity_reason": null}
+Q: compare activity and rated amount over time -> {"intent": "trend", "ambiguous": false, "ambiguity_reason": null}
+-- two measures ALONG the time axis: a trend of both, per period. "Compare" here
+-- is not a test between groups; answered as one, it came back as a p-value for
+-- two call types, a different question (live QA 2026-09-28).
+Q: which services have high activity but relatively low rated amount -> {"intent": "aggregate", "ambiguous": false, "ambiguity_reason": null}
+-- two figures per group read side by side (count and amount per service), not a
+-- significance test: routed as `compare` it came back as a p-value for call types.
+Q: find unusual activity -> {"intent": "aggregate", "ambiguous": false, "ambiguity_reason": null}
+Q: are there any spikes in orders -> {"intent": "aggregate", "ambiguous": false, "ambiguity_reason": null}
+-- a request to FIND what stands out: the days whose activity is furthest from
+-- the usual day. It has a sensible default, so it is not ambiguous -- asking
+-- back "which metric and which method?" answered nothing.
 Q: show me the numbers -> {"intent": "lookup", "ambiguous": true, "ambiguity_reason": "which numbers — no metric or table named"}
 Q: how many student solutions are there -> {"intent": "aggregate", "ambiguous": false, "ambiguity_reason": null}
 -- schema has both `student_solutions` (base table) and
@@ -200,6 +214,42 @@ async def classify(question: str, context: SchemaContext, client,
     # same truncation. Verified fix: the identical prompt/context succeeds
     # reliably at max_tokens=350+; 400 keeps headroom. The one-sentence
     # instruction above is defence in depth, not the fix.
-    return await client.complete_json(messages, CLASSIFY_SCHEMA,
-                                      enforce=True, max_tokens=400,
-                                      temperature=0.0)
+    verdict = await client.complete_json(messages, CLASSIFY_SCHEMA,
+                                         enforce=True, max_tokens=400,
+                                         temperature=0.0)
+    return settle_intent(question, verdict)
+
+
+_OVER_TIME = re.compile(r"\b(over time|over the (?:period|year|months?|weeks?|days?)|trend|per (?:day|week|month)|"
+                        r"by (?:day|week|month|quarter|year)|daily|weekly|monthly)\b", re.I)
+_HIGH_BUT_LOW = re.compile(r"\b(high|many|most|large)\b.*\bbut\b.*\b(low|few|little|small|less)\b|"
+                           r"\b(low|few|little|small)\b.*\bbut\b.*\b(high|many|large|more)\b", re.I)
+_UNUSUAL = re.compile(r"\b(unusual|anomal\w*|spikes?|outliers?|abnormal|strange|odd)\b", re.I)
+
+
+def settle_intent(question: str, verdict: dict | None) -> dict | None:
+    """Correct the three verdicts the model got wrong in the live QA of
+    2026-09-28, by the words of the question -- the same deterministic kind
+    of check as `is_dashboard_request`, and like it no model call:
+
+    * "compare A and B OVER TIME" is a trend of both, not a group test (it
+      came back as a p-value for call types);
+    * "high X but low Y" reads two figures side by side -- an aggregate --
+      and was sent to the same group test;
+    * "find unusual activity" has a sensible default and is never ambiguous
+      (it was answered only with a question back).
+    Anything else is returned exactly as the model gave it."""
+    if not verdict:
+        return verdict
+    q = question or ""
+    intent = verdict.get("intent")
+    settled = None
+    if intent == "compare" and _OVER_TIME.search(q):
+        settled = "trend"
+    elif intent in ("compare", "explain") and _HIGH_BUT_LOW.search(q):
+        settled = "aggregate"
+    elif _UNUSUAL.search(q) and not re.search(r"\bwhy\b", q, re.I) and intent not in ("chat", "describe_data"):
+        settled = "aggregate"
+    if settled is None:
+        return verdict
+    return {**verdict, "intent": settled, "ambiguous": False, "ambiguity_reason": None}

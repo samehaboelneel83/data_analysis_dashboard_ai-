@@ -174,3 +174,29 @@ class TestOrder:
         failure = validate_sql(
             "SELECT 1 FROM shipments s JOIN customers c ON s.x = c.city", ctx())
         assert failure.rung == "V2"
+
+
+import pytest as _pt  # noqa: E402
+
+
+@_pt.mark.parametrize("question,sql,refused", [
+    # Live QA 2026-09-28: "activity" answered by adding up seconds and bytes.
+    ("Which services generated the highest activity?",
+     "SELECT SERVICE, SUM(ROUNDED_VOLUME) AS v FROM t GROUP BY SERVICE", True),
+    ("Find unusual activity.",
+     "WITH d AS (SELECT DATE(x) AS day, SUM(ROUNDED_VOLUME) AS v FROM t GROUP BY 1) SELECT * FROM d", True),
+    # A count beside a named measure, a named sum, or no counting word at all: fine.
+    ("What was the daily activity trend?",
+     "SELECT d, COUNT(*) AS n, SUM(RATED_AMOUNT) AS a FROM t GROUP BY d", False),
+    ("Which services have high activity but relatively low rated amount?",
+     "SELECT SERVICE, COUNT(*) AS n, SUM(RATED_AMOUNT) AS a FROM t GROUP BY SERVICE", False),
+    ("How many calls used the most data volume?",
+     "SELECT SERVICE, SUM(volume) FROM t GROUP BY SERVICE", False),
+    ("Show rated amount by service.", "SELECT SERVICE, SUM(RATED_AMOUNT) FROM t GROUP BY SERVICE", False),
+])
+def test_a_counting_question_is_answered_with_a_count(question, sql, refused):
+    from app.services.agent.validate import measure_fit
+    got = measure_fit(question, sql, "duckdb")
+    assert (got is not None) is refused
+    if refused:
+        assert got.rung == "V7" and "COUNT(*)" in got.detail

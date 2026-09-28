@@ -211,3 +211,47 @@ def validate_sql(sql: str, context: SchemaContext) -> ValidationFailure | None:
                         "and may not be executed on.")
 
     return None
+
+
+# ── V7: the measure fits the question ───────────────────────────────────────
+import re as _re  # noqa: E402
+
+#: Words that ask HOW MANY rows, not how much of a column.
+_COUNTING = _re.compile(r"\b(activity|activities|how many|number of|traffic|busiest|"
+                        r"most active|handled the most)\b", _re.I)
+
+
+def measure_fit(question: str, sql: str, family: str) -> ValidationFailure | None:
+    """A counting question answered by adding up a column it never named.
+
+    Live QA 2026-09-28, three times over one call log: "which services
+    generated the highest activity", "find unusual activity" and "high
+    activity but low rated amount" each summed ROUNDED_VOLUME -- seconds for
+    calls and bytes for data, added together -- and named the wrong leader.
+    The prompt said "activity means COUNT(*)"; the model did not follow it.
+    Refused here, the repair loop gets the reason and counts the rows.
+
+    Passes whenever the query also has a plain COUNT projection (the trend
+    of activity AND amount is a fine answer), or when the summed column is
+    one the question names ("rated amount" -> RATED_AMOUNT)."""
+    if not _COUNTING.search(question or ""):
+        return None
+    try:
+        tree = sqlglot.parse_one(sql, dialect=_dialect(family))
+    except Exception:
+        return None
+    if tree is None:
+        return None
+    for select in tree.find_all(exp.Select):
+        if any(isinstance(p.unalias(), exp.Count) for p in select.expressions):
+            return None
+    asked = (question or "").lower().replace("_", " ")
+    for total in tree.find_all(exp.Sum):
+        for col in total.find_all(exp.Column):
+            name = col.name or ""
+            if name and name.lower().replace("_", " ") not in asked and name.lower() not in asked:
+                return ValidationFailure(
+                    "V7", f"the question asks about activity -- how many rows -- but this query "
+                          f"adds up {name}, which the question never names. Count the rows with "
+                          f"COUNT(*) instead (a column the question names may be added beside it).")
+    return None

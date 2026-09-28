@@ -46,7 +46,7 @@ from .overview import catalog_overview
 from .plan import plan_steps
 from .policy import PolicyError, apply_policies, load_policies
 from .state import StepResult, StepSpec, sink_step_ids
-from .validate import validate_sql
+from .validate import measure_fit, validate_sql
 
 #: Total generation attempts per step — the original plus two repairs (D4.4:
 #: "maximum three repair attempts, each with the specific error fed back.
@@ -447,7 +447,11 @@ async def run_agent(db, *, question: str, source: DataSource | None = None,
                 failures.append({"rung": "generate", "detail": "no SQL produced"})
                 break
 
-            failure = validate_sql(sql, context)
+            failure = (validate_sql(sql, context)
+                       # The person's question, not the planner's rewrite of it: a
+                       # step reworded as "total ROUNDED_VOLUME per service" names
+                       # the very column the question never asked for.
+                       or measure_fit(effective_question, sql, context.family))
             if failure is not None:
                 failures.append({"rung": failure.rung, "detail": failure.detail})
                 feedback = f"{failure.rung}: {failure.detail}"

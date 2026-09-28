@@ -51,7 +51,10 @@ async def plan_steps(question: str, intent: str, context: SchemaContext,
             "query already returns both the winners and their counts. "
             "Decompose only when a later step needs a DIFFERENT table's "
             "data that cannot be reached via the allowed joins, or is a "
-            "genuinely separate computation.")},
+            "genuinely separate computation. A question about unusual, "
+            "anomalous or spiking activity is ONE step: window functions "
+            "score each day against the average in a single query -- "
+            "never a statistics step followed by a filter over rows.")},
          {"role": "user", "content": (
              f"Database:\n{context.render(max_chars=3000)}\n\n"
              f"Intent: {intent}\nQuestion: {question}")}],

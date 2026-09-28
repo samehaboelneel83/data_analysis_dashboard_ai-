@@ -276,3 +276,34 @@ class TestAnswersReadLikeTheirData:
         text = render_fallback(self._r("SELECT SUM(x) AS s FROM qa_chrome_sales", [{"s": 2580.0}]),
                                [], names={"qa_chrome_sales": "QA_CHROME_sales"})
         assert '"QA_CHROME_sales"' in text and "2580.0" not in text
+
+
+def test_a_sampled_result_states_its_true_extremes_over_every_row():
+    """Live QA 2026-09-28: shown the first 20 of 194 days, the answer said
+    volume ranged from 20 to 4,125. The real range was 1 to 918,127,301."""
+    rows = [{"call_date": f"2026-03-{d:02d}", "volume": 20 + d} for d in range(1, 25)]
+    rows[22]["volume"] = 918127301
+    rows[23]["volume"] = 1
+    r = StepResult(step_id="s1", status="ok", sql="SELECT call_date, volume FROM t ORDER BY call_date",
+                   rows=rows, error=None, validation_failures=[], repair_attempts=0, ms=0)
+    facts = _facts({"s1": r})
+    assert "Across ALL 24 rows" in facts
+    assert "largest 918127301 at 2026-03-23" in facts and "smallest 1 at 2026-03-24" in facts
+
+
+def test_a_whole_result_needs_no_extra_line():
+    rows = [{"k": "a", "v": 1}, {"k": "b", "v": 2}]
+    r = StepResult(step_id="s1", status="ok", sql="SELECT k, v FROM t", rows=rows, error=None,
+                   validation_failures=[], repair_attempts=0, ms=0)
+    assert "Across ALL" not in _facts({"s1": r})
+
+
+def test_clock_time_text_reaches_duckdb_as_a_time():
+    """'activity by hour' failed with date_part(STRING_LITERAL, VARCHAR)."""
+    import pandas as pd
+    from app.services.agent.executor import _run_datasets
+    frame = pd.DataFrame({"CALL_TIME": ["04:50:31 PM", "04:59:00 PM", "11:02:00 AM"], "x": [1, 2, 3]})
+    rows, err = _run_datasets("SELECT hour(CALL_TIME) AS h, COUNT(*) AS n FROM calls GROUP BY 1 ORDER BY 1",
+                              {"calls": frame})
+    assert err is None, err
+    assert rows == [{"h": 11, "n": 1}, {"h": 16, "n": 2}]
