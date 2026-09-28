@@ -47,6 +47,14 @@ import { type Tab, OPS, FILTER_FUNC_CATS, PAGE_SIZE } from './datasetDetail/cons
 export default function DatasetDetail() {
   const arrows = navArrows(useDirection().rtl)
   const tr = useT()
+  // In the interface's language, not the browser's: an English page read
+  // "Last refreshed 28ص 1:38:17 2026/9/" on an Arabic-locale machine (live QA
+  // 2026-09-28).
+  const { language } = useDirection()
+  const refreshedWhen = (iso: string) => {
+    const d = new Date(iso)
+    return isNaN(d.getTime()) ? '' : d.toLocaleString(language, { dateStyle: 'medium', timeStyle: 'short' })
+  }
   const { id } = useParams<{ id: string }>()
   const dsId   = Number(id)
   const badId = !/^\d+$/.test(id ?? '')
@@ -214,7 +222,12 @@ export default function DatasetDetail() {
         // Only then: a normal visit does not trigger a full scan. `new` is
         // dropped from the address so a reload does not scan again.
         .catch(() => {
-          if (searchParams.get('new') === '1') {
+          // Once per dataset: the load runs twice (StrictMode in development,
+          // or a reload of the same dataset), both GETs 404 before either
+          // run lands, and `searchParams` still says new=1 after replaceState
+          // -- two scans and two "Analysis complete" toasts (live QA 2026-09-28).
+          if (searchParams.get('new') === '1' && autoAnalysedRef.current !== dsId) {
+            autoAnalysedRef.current = dsId
             window.history.replaceState(null, '', window.location.pathname)
             void runAnalysisRef.current?.()
           }
@@ -518,6 +531,7 @@ export default function DatasetDetail() {
   // effect would refire the instant the first attempt finished.
   const segmentAutoRanFor = useRef<number | null>(null)
   const patternsAutoRanFor = useRef<number | null>(null)
+  const autoAnalysedRef = useRef<number | null>(null)
   const influencersAutoRanFor = useRef<number | null>(null)
 
   const runSegment = useCallback(() => {
@@ -645,14 +659,14 @@ export default function DatasetDetail() {
             upload read exactly like a fresh one. */}
         {!(ds.data_source_id || canSchedule) && ds.mode !== 'directquery' && ds.last_refreshed_at && (
           <div data-testid="dataset-freshness" style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'end' }}>
-            {tr('dataset.lastRefreshed', { when: new Date(ds.last_refreshed_at).toLocaleString() })}
+            {tr('dataset.lastRefreshed', { when: refreshedWhen(ds.last_refreshed_at) })}
           </div>
         )}
         {(ds.data_source_id || canSchedule) && ds.mode !== 'directquery' && (
           <div style={{ position: 'relative' }}>
             {ds.last_refreshed_at && (
               <div style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'end', marginBottom: 2 }}>
-                {tr('dataset.lastRefreshed', { when: new Date(ds.last_refreshed_at).toLocaleString() })}
+                {tr('dataset.lastRefreshed', { when: refreshedWhen(ds.last_refreshed_at) })}
               </div>
             )}
             <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>

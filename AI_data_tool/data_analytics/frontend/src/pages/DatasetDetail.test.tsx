@@ -1236,3 +1236,25 @@ describe('a dataset just imported (E06)', () => {
     expect(analysisApi.run).not.toHaveBeenCalled()
   })
 })
+
+describe('the first look after an upload', () => {
+  // Live QA 2026-09-28: straight after an upload the profile ran twice, with
+  // two "Analysis complete" toasts -- the load ran twice under StrictMode and
+  // both 404s started a scan.
+  it('runs the analysis once, even when the page loads twice', async () => {
+    const { StrictMode } = await import('react')
+    vi.mocked(datasetsApi.get).mockResolvedValue(importDataset())
+    vi.mocked(analysisApi.get).mockRejectedValue(new Error('404'))
+    vi.mocked(analysisApi.run).mockClear()
+    vi.mocked(analysisApi.run).mockResolvedValue(null as never)
+    render(
+      <StrictMode>
+        <MemoryRouter initialEntries={['/datasets/41?new=1']}>
+          <Routes><Route path="/datasets/:id" element={<DatasetDetail />} /></Routes>
+        </MemoryRouter>
+      </StrictMode>)
+    await waitFor(() => expect(analysisApi.run).toHaveBeenCalled())
+    await new Promise(r => setTimeout(r, 50))
+    expect(analysisApi.run).toHaveBeenCalledTimes(1)
+  })
+})
