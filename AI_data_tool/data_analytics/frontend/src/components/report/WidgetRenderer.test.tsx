@@ -2342,6 +2342,15 @@ describe('circling sites on a point map filters the page to that place', () => {
   }, 30000)
 })
 
+describe('a filter that does not apply is said', () => {
+  it('shows a note naming the columns the server could not filter on', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ type: 'series', rows: [{ name: 'a', value: 1 }],
+      ignored_filters: ['country'], sampled: false } as never)
+    renderWidget({ widget: barWidget({ id: 51 }) })
+    expect(await screen.findByTestId('ignored-filters-note')).toHaveTextContent('The filter on country does not apply to this data')
+  })
+})
+
 describe('an object that lets the page show through', () => {
   /**
    * The SAS page this was measured against is a photograph with a bar chart,

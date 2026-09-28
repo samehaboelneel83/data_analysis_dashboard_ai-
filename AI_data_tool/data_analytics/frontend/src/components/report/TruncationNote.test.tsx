@@ -58,3 +58,11 @@ describe('missingCategorySentence', () => {
     expect(missingCategorySentence(2)).toBe('2 rows with no category are not shown')
   })
 })
+
+describe('ignoredFiltersSentence', () => {
+  it('names the columns whose filters changed nothing', async () => {
+    const { ignoredFiltersSentence } = await import('./TruncationNote')
+    expect(ignoredFiltersSentence(['NOT_A_COLUMN'])).toBe('The filter on NOT_A_COLUMN does not apply to this data')
+    expect(ignoredFiltersSentence(['a', 'b'])).toBe('The filters on a, b do not apply to this data')
+  })
+})

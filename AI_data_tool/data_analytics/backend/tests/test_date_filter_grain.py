@@ -151,3 +151,19 @@ class TestTimeOfDay:
         parsed = pd.to_datetime(pd.Series(["04:50:31 PM", "11:00:00 PM"]), format="%I:%M:%S %p")  # one day
         assert is_time_only(parsed)
         assert not is_time_only(pd.Series(pd.to_datetime(["2026-03-04 10:00", "2026-03-05 11:00"])))
+
+
+def test_a_filter_on_a_column_the_data_lacks_is_disclosed():
+    """Live QA 2026-09-28: every row came back under a filter on a column that
+    did not exist, with nothing to tell it from a filtered answer. It still
+    changes nothing -- a cross-filter from another dataset is meant to -- but
+    the result now says which filters did not apply."""
+    from app.services.widget_data import get_widget_data_from_df
+    df = pd.DataFrame({"service": ["a", "b", "a"], "amount": [1.0, 2.0, 3.0]})
+    r = get_widget_data_from_df(df, {"dimension": "service", "aggregation": "count", "filters": [
+        {"column": "NOT_A_COLUMN", "op": "eq", "value": "x"},
+        {"column": "service", "op": "eq", "value": "a"}]}, "bar")
+    assert r["ignored_filters"] == ["NOT_A_COLUMN"]
+    assert {x["name"]: x["value"] for x in r["rows"]} == {"a": 2}
+    clean = get_widget_data_from_df(df, {"dimension": "service", "aggregation": "count"}, "bar")
+    assert "ignored_filters" not in clean

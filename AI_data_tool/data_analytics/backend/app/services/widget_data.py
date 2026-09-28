@@ -3634,6 +3634,14 @@ def get_widget_data_from_df(
     # accepts. Overwritten rather than merged, so a request body cannot claim to
     # be a different widget than the one that was dispatched.
     config = {**config, "measure_defs": measures or [], "widget_type": widget_type}
+    # A filter on a column this frame does not have changes nothing. That is
+    # deliberate for a cross-filter from another dataset with no modelled
+    # relationship, but a chart that looks filtered and is not must say so:
+    # live QA 2026-09-28 got every row back under a filter on a column that
+    # did not exist, with nothing to tell it apart from a filtered answer.
+    ignored_filters = sorted({f.get("column") for f in (config.get("filters") or [])
+                              if isinstance(f, dict) and isinstance(f.get("column"), str)
+                              and f.get("column") and f.get("column") not in df.columns}) if check_fields else []
     # Relative dates resolve HERE, once, over the reader's whole visible frame:
     # every shaper then sees a concrete date_range, and the resolved windows
     # travel back as notes naming their anchor (see services/relative_dates).
@@ -3685,6 +3693,8 @@ def get_widget_data_from_df(
         result["rule_styles"] = styles
     if relative_notes and isinstance(result, dict):
         result["relative_dates"] = relative_notes
+    if ignored_filters and isinstance(result, dict) and result.get("type") != "error":
+        result["ignored_filters"] = ignored_filters
     # flag_partial is off for pre-aggregated frames (DuckDB, DirectQuery):
     # their date column holds bucket labels, not the data's real dates.
     if flag_partial and isinstance(result, dict) and result.get("type") not in ("error", "empty"):

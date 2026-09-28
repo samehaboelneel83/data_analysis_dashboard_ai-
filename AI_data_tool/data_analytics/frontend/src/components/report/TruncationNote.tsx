@@ -43,6 +43,14 @@ export function missingCategorySentence(rows: number, dimension?: string): strin
   return `${rows.toLocaleString()} row${one ? '' : 's'} with no ${dimension || 'category'} ${one ? 'is' : 'are'} not shown`
 }
 
+/** A filter on a column this data does not have changed nothing -- a
+ *  cross-filter from another dataset, or a column since renamed. Said, so a
+ *  chart that looks filtered but is not can be told apart. */
+export function ignoredFiltersSentence(columns: string[]): string {
+  const one = columns.length === 1
+  return `The filter${one ? '' : 's'} on ${columns.join(', ')} ${one ? 'does' : 'do'} not apply to this data`
+}
+
 /** E08: cells a grid left blank because too few rows stand behind them. */
 export function suppressedCellsSentence(cells: number, below: number): string {
   const one = cells === 1
