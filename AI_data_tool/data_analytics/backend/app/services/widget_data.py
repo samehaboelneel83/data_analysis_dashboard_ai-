@@ -431,6 +431,13 @@ def _dimension_granularity_label(series: pd.Series, granularity: str) -> pd.Seri
         return label.where(dt.notna())
     if granularity == "day":
         return dt.dt.strftime("%Y-%m-%d")
+    # Time of day (live QA 2026-09-28: "activity by hour" had no grain, and a
+    # heatmap of hour x call type needed a hand-written HOUR() formula).
+    # `hour_of_day` is zero-padded so the axis sorts 00..23 as text.
+    if granularity == "hour":
+        return dt.dt.strftime("%Y-%m-%d %H:00")
+    if granularity == "hour_of_day":
+        return dt.dt.strftime("%H")
     from .fiscal import fiscal_label, parse as parse_fiscal
     fiscal = parse_fiscal(granularity)
     if fiscal:
@@ -470,6 +477,8 @@ _BUCKET_LABEL_GRAINS = (
     (re.compile(r"\d{4}-W\d{2}"), "week"),
     (re.compile(r"\d{4}-\d{2}"), "month"),
     (re.compile(r"\d{4}-\d{2}-\d{2}"), "day"),
+    (re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:00"), "hour"),
+    (re.compile(r"\d{2}"), "hour_of_day"),
 )
 
 
@@ -1813,6 +1822,14 @@ def shape_heatmap(df: pd.DataFrame, config: dict) -> dict:
             _other_frame = _excluded_raw.groupby(cat2)[meas].agg(agg_fn)
 
     pivot = df.groupby([cat, cat2])[meas].agg(agg_fn).unstack(cat2)
+    if str(dim_granularity or "").lower() == "hour_of_day" and _keep is None:
+        # Every hour on the axis. Filtered to incoming calls, hours 02-05 had
+        # none and vanished, closing up the day (live QA 2026-09-28).
+        pivot = pivot.reindex([f"{h:02d}" for h in range(24)])
+    if agg in ("count", "countd", "count_distinct", "distinct"):
+        # No rows in a cell is a COUNT of 0 -- a number, not a gap. A sum or an
+        # average over no rows stays empty: "never occurs" is worth seeing.
+        pivot = pivot.fillna(0)
     if _other_frame is not None:
         pivot.loc["All Other"] = _other_frame.reindex(pivot.columns)
     rows_axis = [str(v) for v in pivot.index.tolist()]

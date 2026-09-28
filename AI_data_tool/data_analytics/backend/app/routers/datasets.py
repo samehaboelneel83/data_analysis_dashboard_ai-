@@ -427,8 +427,11 @@ def _semantic_type_of(series) -> str | None:
     sample, so personal data is known from the moment a file lands: the
     sensitivity floor and share/export redaction read it. Never fails an
     upload."""
+    from ..services.ingest import is_time_only
     from ..services.pii import detect_semantic_type
     try:
+        if is_time_only(series):
+            return "time_of_day"
         return detect_semantic_type(series.dropna().head(200).tolist())
     except Exception:                                          # noqa: BLE001
         return None

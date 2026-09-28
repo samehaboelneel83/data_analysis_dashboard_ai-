@@ -83,7 +83,7 @@ export const SETTING_VOCABULARIES: Record<string, readonly string[]> = {
   y_scale: ['linear', 'log'],
   gauge_shape: ['arc', 'speedometer', 'bullet', 'thermometer', 'progress'],
   container_mode: ['group', 'tabs', 'scroll', 'prompt', 'precision'],
-  dimension_granularity: ['year', 'quarter', 'month', 'week', 'day', 'hijri_month', 'hijri_year',
+  dimension_granularity: ['year', 'quarter', 'month', 'week', 'day', 'hour', 'hour_of_day', 'hijri_month', 'hijri_year',
                           'fiscal_year', 'fiscal_quarter'],
 }
 

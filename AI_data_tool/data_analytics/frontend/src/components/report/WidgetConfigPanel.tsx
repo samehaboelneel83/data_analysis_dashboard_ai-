@@ -901,6 +901,8 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
         onChange={e => setDimensionGranularity(e.target.value)} style={{ width:'100%', fontSize:11 }}>
         <option value="">each date</option>
         {['day', 'week', 'month', 'quarter', 'year'].map(g => <option key={g} value={g}>{g}</option>)}
+        <option value="hour">hour</option>
+        <option value="hour_of_day">hour of day (00–23)</option>
         <option value="hijri_month">Hijri month (هجري)</option>
         <option value="hijri_year">Hijri year (هجري)</option>
         {/* A forecast continues a calendar sequence (next month, next

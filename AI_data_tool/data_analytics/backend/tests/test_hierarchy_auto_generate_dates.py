@@ -68,3 +68,16 @@ def test_the_default_geography_chain_takes_the_place_columns_present():
     assert geography_chain(["region", "country", "revenue"]) == [("Continent", "region"), ("Country", "country")]
     # One level is not a chain.
     assert geography_chain(["country", "sales"]) == []
+
+
+async def test_a_time_of_day_column_drills_by_hour_not_by_year(client, db_session, two_orgs, auth_headers, tmp_path):
+    """Live QA 2026-09-28: CALL_TIME ("04:50:31 PM") got Year > Quarter > Month
+    levels -- all of them the day the file was read."""
+    ds = await _seed_dataset_with_file(db_session, two_orgs["a"]["org"].id, tmp_path, [
+        {"call_date": "2026-03-04", "call_time": "04:50:31 PM", "amount": 1},
+        {"call_date": "2026-03-05", "call_time": "11:02:00 AM", "amount": 2},
+    ], name="calls.csv")
+    nodes = (await client.post(f"/api/v1/datasets/{ds.id}/hierarchy/auto-generate", headers=auth_headers["a"])).json()
+    below = lambda col: [n["format"] for n in nodes if n["column_name"] == col and n["format"]]
+    assert below("call_time") == ["hour_of_day"]
+    assert below("call_date") == ["year", "quarter", "month", "week", "day"]

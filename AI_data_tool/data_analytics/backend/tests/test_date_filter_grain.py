@@ -99,3 +99,55 @@ class TestTheDashboardSeam:
             "dimension": "service", "aggregation": "count",
             "filters": [{"column": "d", "op": "eq", "value": "2026-05-20"}]})
         assert {r["name"]: r["value"] for r in data["rows"]} == {"voice": 1, "data": 1}
+
+
+class TestTimeOfDay:
+    """Live QA 2026-09-28: a call log's CALL_TIME ("04:50:31 PM") had no hour
+    grain, so "activity by hour" needed a hand-written HOUR() formula, and a
+    heatmap filtered to incoming calls dropped the hours that had none."""
+
+    calls = pd.DataFrame({
+        "t": ["00:10:00 AM", "01:15:00 AM", "01:20:00 AM", "04:50:31 PM", "04:59:00 PM", "11:00:00 PM"],
+        "kind": ["OUT", "OUT", "INC", "INC", "OUT", "OUT"],
+        "amount": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+    })
+
+    def test_hour_labels(self):
+        from app.services.widget_data import _dimension_granularity_label
+        assert list(_dimension_granularity_label(self.calls["t"], "hour_of_day")) == ["00", "01", "01", "16", "16", "23"]
+        stamps = pd.Series(pd.to_datetime(["2026-08-20 13:45", "2026-08-20 13:05"]))
+        assert list(_dimension_granularity_label(stamps, "hour")) == ["2026-08-20 13:00"] * 2
+
+    def test_a_clicked_hour_is_read_as_its_grain(self):
+        [f] = infer_date_filter_grains([{"column": "d", "op": "eq", "value": "16"}], DATES)
+        assert f["granularity"] == "hour_of_day"
+        [f] = infer_date_filter_grains([{"column": "d", "op": "eq", "value": "2026-08-20 13:00"}], DATES)
+        assert f["granularity"] == "hour"
+
+    def test_the_heatmap_keeps_every_hour_and_counts_empty_cells_as_zero(self):
+        from app.services.widget_data import get_widget_data_from_df
+        r = get_widget_data_from_df(self.calls, {
+            "dimension": "t", "dimension_granularity": "hour_of_day", "dimension2": "kind",
+            "measure": "amount", "aggregation": "count",
+            "filters": [{"column": "kind", "op": "eq", "value": "INC"}]}, "heatmap")
+        assert r["rows_axis"] == [f"{h:02d}" for h in range(24)]
+        by_hour = dict(zip(r["rows_axis"], (row[0] for row in r["cells"])))
+        assert by_hour["01"] == 1 and by_hour["16"] == 1 and by_hour["02"] == 0 and by_hour["23"] == 0
+
+    def test_an_average_of_no_rows_stays_empty(self):
+        from app.services.widget_data import get_widget_data_from_df
+        r = get_widget_data_from_df(self.calls, {
+            "dimension": "t", "dimension_granularity": "hour_of_day", "dimension2": "kind",
+            "measure": "amount", "aggregation": "avg"}, "heatmap")
+        cols = r["cols_axis"]
+        cell = r["cells"][r["rows_axis"].index("00")][cols.index("INC")]
+        assert cell is None
+
+    def test_a_time_only_column_is_recognised(self):
+        from app.services.ingest import is_time_only
+        assert is_time_only(self.calls["t"])
+        assert not is_time_only(pd.Series(["2026-03-04", "2026-03-05"]))
+        assert not is_time_only(pd.Series([1, 2, 3]))
+        parsed = pd.to_datetime(pd.Series(["04:50:31 PM", "11:00:00 PM"]), format="%I:%M:%S %p")  # one day
+        assert is_time_only(parsed)
+        assert not is_time_only(pd.Series(pd.to_datetime(["2026-03-04 10:00", "2026-03-05 11:00"])))

@@ -123,6 +123,26 @@ def looks_like_time_column(name: object) -> bool:
                for h in _TIME_NAME_HINTS)
 
 
+#: A clock time with no date: "16:50", "04:50:31 PM", "23:59:20.5".
+_TIME_ONLY = r"^\s*\d{1,2}:\d{2}(:\d{2}(\.\d+)?)?\s*([AaPp]\.?[Mm]\.?)?\s*$"
+
+
+def is_time_only(series: pd.Series, share: float = 0.9) -> bool:
+    """A column of clock times with no date. Parsed as dates, every value
+    takes the day it was parsed on: a call log's CALL_TIME grouped by day
+    put all 3,576 calls on the upload date (live QA 2026-09-28)."""
+    s = series.dropna()
+    if not len(s) or pd.api.types.is_numeric_dtype(s):
+        return False
+    if pd.api.types.is_datetime64_any_dtype(s):
+        # Already parsed: every value then sits on the one day it was parsed
+        # on, at varying times. (A log of a single day reads the same way, and
+        # hour of day is the right drill for that too.)
+        return len(s) > 1 and s.dt.normalize().nunique() == 1 and s.dt.time.nunique() > 1
+    text = s.astype(str).head(500)
+    return bool(text.str.match(_TIME_ONLY).mean() >= share)
+
+
 def detect_types(df: pd.DataFrame) -> dict[str, str]:
     type_map = {}
     for col in df.columns:

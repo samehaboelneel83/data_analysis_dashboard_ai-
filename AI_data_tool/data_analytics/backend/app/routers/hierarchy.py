@@ -9,6 +9,7 @@ from ..dependencies import get_current_user
 from ..models.models import Dataset, DatasetColumn, HierarchyNode, User
 from ..schemas.schemas import HierarchyNodeCreate, HierarchyNodeUpdate, HierarchyNodeOut
 from ..services.analytics import load_file, detect_types
+from ..services.ingest import is_time_only
 
 router = APIRouter(prefix="/datasets", tags=["hierarchy"])
 
@@ -16,6 +17,8 @@ router = APIRouter(prefix="/datasets", tags=["hierarchy"])
 #: month > week > the date itself. `format` is the grain each level groups by.
 DATE_DRILL_LEVELS = [("Year", "year"), ("Quarter", "quarter"), ("Month", "month"),
                      ("Week", "week"), ("Date", "day")]
+#: A time-of-day column's one level.
+TIME_DRILL_LEVELS = [("Hour of day", "hour_of_day")]
 
 #: The default geography chain, outermost first: each level is the first
 #: column whose name matches one of its spellings. Built when two or more
@@ -125,13 +128,16 @@ async def auto_generate(dataset_id: int, db: AsyncSession = Depends(get_db), cur
         # from the schema probe at dataset-creation time (see data_sources.py's
         # /import endpoint's directquery branch).
         cols_result = await db.execute(select(DatasetColumn).where(DatasetColumn.dataset_id == dataset_id))
-        type_map = {c.name: c.dtype for c in cols_result.scalars().all()}
+        _cols = cols_result.scalars().all()
+        type_map = {c.name: c.dtype for c in _cols}
+        time_only = {c.name for c in _cols if c.semantic_type == "time_of_day"}
     else:
         if not ds.filename:
             raise HTTPException(404, "Dataset not found or no file")
         try:
             df       = await asyncio.to_thread(load_file, ds.filename)
             type_map = await asyncio.to_thread(detect_types, df)
+            time_only = {c for c, t in type_map.items() if t == "datetime" and is_time_only(df[c])}
         except FileNotFoundError:
             raise HTTPException(404, "Dataset file not found on server — please re-upload the file")
 
@@ -175,7 +181,10 @@ async def auto_generate(dataset_id: int, db: AsyncSession = Depends(get_db), cur
             # levels, not measures.
             await db.flush()  # assign node.id so it can be used as parent_id below
             parent_id = node.id
-            for pos, (label, granularity) in enumerate(DATE_DRILL_LEVELS):
+            # A clock time with no date drills by hour of day; a year or a
+            # quarter of it would be the day the file was read.
+            levels = TIME_DRILL_LEVELS if col_name in time_only else DATE_DRILL_LEVELS
+            for pos, (label, granularity) in enumerate(levels):
                 level_node = HierarchyNode(
                     dataset_id=dataset_id, parent_id=parent_id, name=label,
                     node_type="date", column_name=col_name, aggregation=None,
