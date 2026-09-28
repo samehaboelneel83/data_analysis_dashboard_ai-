@@ -1,10 +1,11 @@
-import { ComposedChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LabelList } from 'recharts'
+import { ComposedChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LabelList, Brush } from 'recharts'
 import { TT, fmtStr, seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
+import { useChartViewport } from './useChartViewport'
 import { axisTitles, xAxisProps, yAxisProps, gridProps, legendProps, labelListProps, chartMargin } from './axisOptions'
 import { seriesName } from './axisOptions'
 
-export default function DualAxisBarChartRenderer({ rows, cfg, rtl, measureFmt, measure2Fmt, plotW, plotH, broadcasts, onClickPoint }: ChartRendererProps) {
+export default function DualAxisBarChartRenderer({ rows, cfg, rtl, measureFmt, measure2Fmt, plotW, plotH, broadcasts, onClickPoint, onBrushChange }: ChartRendererProps) {
   // Two measures on two scales: the right axis is titled from the
   // SECOND one, never from the left axis's label.
   const titles = axisTitles(cfg)
@@ -19,6 +20,13 @@ export default function DualAxisBarChartRenderer({ rows, cfg, rtl, measureFmt, m
   // are checked as well as the config because a saved widget can carry the data
   // without the label.
   const hasSecond = cfg.measure2 != null || rows.some((r: any) => r?.value2 != null)
+  // A long time axis opens on a readable window with a slider, as the line
+  // chart does; it showed the first 50 of 194 days with none (live QA
+  // 2026-09-28). The rows are never cut: the slider reaches every point.
+  const view = useChartViewport(cfg, rows, plotW, { dataKey: 'value', onChange: onBrushChange })
+  // The second series is named like the first -- "sum(RATED_AMOUNT)" beside
+  // "count(RATED_AMOUNT)", not the bare column.
+  const name2 = titles.measure2 ?? (cfg.measure2 as string | undefined) ?? 'value2'
   return (
     <ResponsiveContainer width="100%" height="100%">
       <ComposedChart data={rows} margin={chartMargin(rtl, { top: 4, right: 8, bottom: 20, left: 0 })}
@@ -27,20 +35,21 @@ export default function DualAxisBarChartRenderer({ rows, cfg, rtl, measureFmt, m
         style={broadcasts ? { cursor: 'pointer' } : undefined}
         onClick={broadcasts ? (d: any) => d?.activePayload?.[0] && onClickPoint(d.activePayload[0].payload.name) : undefined}>
         {grid && <CartesianGrid {...grid} />}
-        <XAxis dataKey="name" {...xAxisProps(cfg, rtl, rows.map((r: any) => String(r.name)), plotW)} />
+        <XAxis dataKey="name" {...xAxisProps(cfg, rtl, view.visible.map((r: any) => String(r.name)), plotW)} />
         {/* orientation re-applied after the spread: yAxisProps derives orientation from
             rtl alone for a single axis, but this is one of a left/right pair, so each
             side must reassert its own place after the builder's spread. */}
         <YAxis yAxisId="left" {...yAxisProps(cfg, rtl, measureFmt, rows.map((r: any) => r.value), undefined, { height: plotH })} orientation={rtl ? 'right' : 'left'} tickFormatter={v => fmtStr(v, measureFmt)} />
         {hasSecond && <YAxis yAxisId="right" {...yAxisProps(cfg, rtl, measure2Fmt, rows.map((r: any) => r.value2), undefined, { height: plotH, title: cfg.y2_axis_label ?? titles.measure2 ?? '' })} orientation={rtl ? 'left' : 'right'} tickFormatter={v => fmtStr(v, measure2Fmt)} />}
-        <Tooltip contentStyle={TT} formatter={(v: unknown, name: string) => [fmtStr(v, name === (cfg.measure2 ?? 'value2') ? measure2Fmt : measureFmt), name]} />
+        <Tooltip contentStyle={TT} formatter={(v: unknown, name: string) => [fmtStr(v, name === name2 ? measure2Fmt : measureFmt), name]} />
         {legend && <Legend {...legend} wrapperStyle={{ fontSize: 11, ...(rtl ? { direction: 'ltr' as const } : {}) }} />}
         <Bar yAxisId="left" dataKey="value" name={seriesName(cfg)} fill={seriesColor(0)} radius={[3, 3, 0, 0]}>
           {labels1 && <LabelList {...labels1} />}
         </Bar>
-        {hasSecond && (<Bar yAxisId="right" dataKey="value2" name={cfg.measure2 ?? 'value2'} fill={seriesColor(1)} radius={[3, 3, 0, 0]}>
+        {hasSecond && (<Bar yAxisId="right" dataKey="value2" name={name2} fill={seriesColor(1)} radius={[3, 3, 0, 0]}>
           {labels2 && <LabelList {...labels2} />}
         </Bar>)}
+        {view.brush && <Brush {...view.brush} />}
       </ComposedChart>
     </ResponsiveContainer>
   )

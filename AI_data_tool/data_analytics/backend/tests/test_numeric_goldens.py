@@ -274,7 +274,12 @@ class TestDateBuckets:
                 monkeypatch=monkeypatch)
         assert r["totals"][1] == pytest.approx(127)          # the blank date's 128 is out
         assert r["missing_category"] == {"rows": 1}
-        return values(r)
+        # Empty periods between the first and last are drawn at 0 now (live QA
+        # 2026-09-28, fill_calendar_gaps); these goldens pin the buckets that
+        # hold rows, and every filled one must be exactly 0.
+        got = values(r)
+        assert sum(1 for v in got.values() if v == 0) == r.get("filled_periods", 0)
+        return {k: v for k, v in got.items() if v != 0}
 
     def test_years_are_whole_numbers_even_with_a_blank_date(self, engine, dated, monkeypatch):
         got = self._bucket(engine, dated, "year", monkeypatch)

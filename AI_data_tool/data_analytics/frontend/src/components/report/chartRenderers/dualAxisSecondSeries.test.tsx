@@ -71,3 +71,24 @@ describe.each(Object.entries(RENDERERS))('%s with two measures', (_name, Rendere
     expect(container.textContent).toContain('length_of_stay_days')
   })
 })
+
+const DUAL_ONLY = Object.entries(RENDERERS).filter(([k]) => k !== 'comparative_time_series')
+const DAYS = Array.from({ length: 194 }, (_, i) => ({
+  name: new Date(Date.UTC(2026, 2, 4 + i)).toISOString().slice(0, 10), value: i % 7, value2: i % 5,
+}))
+
+describe.each(DUAL_ONLY)('%s over a long time axis', (_name, Renderer) => {
+  // Live QA 2026-09-28: the daily "records and amount" chart showed the first
+  // 50 of 194 days with no slider, its legend naming the second series by the
+  // bare column while the first read count(...).
+  it('opens on a window with a slider, and names the second series by its aggregation', async () => {
+    const { container } = render(
+      <div style={{ width: 600, height: 400 }}>
+        <Renderer rows={DAYS} data={{ rows: DAYS }} cfg={{ measure: 'RATED_AMOUNT', aggregation: 'count',
+          measure2: 'RATED_AMOUNT', aggregation2: 'sum' }} rtl={false} broadcasts={false}
+          localSelected={null} onClickPoint={() => {}} plotW={600} plotH={400} />
+      </div>)
+    await waitFor(() => expect(container.querySelector('.recharts-brush')).toBeTruthy())
+    expect(container.textContent).toContain('sum(RATED_AMOUNT)')
+  })
+})

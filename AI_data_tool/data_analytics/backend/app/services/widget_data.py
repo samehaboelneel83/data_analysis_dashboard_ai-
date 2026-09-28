@@ -1450,7 +1450,10 @@ def shape_dual_series(df: pd.DataFrame, config: dict) -> dict:
     meas = roles.get("measure")
     meas2 = roles.get("measure2")
     agg = (config.get("aggregation") or "sum").lower()
-    limit = int(config.get("limit") or 50)
+    # A time axis keeps every period by default -- the chart's slider windows
+    # it. 50 cut a daily series to its first 50 of 194 days (live QA
+    # 2026-09-28). An author's own limit still wins.
+    limit = int(config.get("limit") or (FULL_DATA_LIMIT if config.get("dimension_granularity") else 50))
     df = _apply_filters(df, filters)
     if df.empty or not cat or cat not in df.columns:
         return {"type": "empty", "rows": [], "total": 0}
@@ -3695,6 +3698,8 @@ def get_widget_data_from_df(
         result["relative_dates"] = relative_notes
     if ignored_filters and isinstance(result, dict) and result.get("type") != "error":
         result["ignored_filters"] = ignored_filters
+    if isinstance(result, dict) and result.get("type") == "series":
+        result = fill_calendar_gaps(result, config)
     # flag_partial is off for pre-aggregated frames (DuckDB, DirectQuery):
     # their date column holds bucket labels, not the data's real dates.
     if flag_partial and isinstance(result, dict) and result.get("type") not in ("error", "empty"):
@@ -3717,6 +3722,60 @@ def get_widget_data_from_df(
         if "truncation" not in result and shaper in _KEEPS_EVERY_GROUP:
             result["truncation"] = {"applied": False, "reason": "none"}
     return result
+
+
+#: Grains whose empty periods are filled, and the pandas period code for each.
+_GAP_FILL_PERIODS = {"day": "D", "week": "W-SUN", "month": "M", "quarter": "Q", "year": "Y"}
+#: Past this many periods a filled axis is not worth drawing; leave it as it is.
+_GAP_FILL_MAX = 5000
+
+
+def fill_calendar_gaps(result: dict, config: dict) -> dict:
+    """Put the periods with no rows back on a date axis, at 0.
+
+    Live QA 2026-09-28: a daily count of calls skipped the days with none, so
+    05 Sep and 07 Sep sat one step apart, like 07 and 08 -- a time axis whose
+    spacing is not time. For a COUNT or a SUM a period with no rows is 0, and
+    is drawn as 0. An average (or any other aggregation) of no rows has no
+    value, so those axes are left with their gaps; so is a series sorted by
+    value, cut to a top N, or split into several series."""
+    grain = str(config.get("dimension_granularity") or "").lower()
+    agg = str(config.get("aggregation") or ("sum" if config.get("measure") else "count")).lower()
+    rows = result.get("rows") or []
+    if (grain not in _GAP_FILL_PERIODS or agg not in ("count", "sum", "countd")
+            or len(rows) < 2 or (result.get("truncation") or {}).get("applied")
+            or any(not isinstance(r, dict) or set(r) - {"name", "value"} for r in rows)):
+        return result
+    names = [str(r["name"]) for r in rows]
+    if names != sorted(names):
+        return result                                   # not in time order: leave it
+    try:
+        if grain == "week":
+            # ISO labels ("2026-W10"): step through Mondays.
+            def monday(label):
+                y, w = label.split("-W")
+                return pd.Timestamp.fromisocalendar(int(y), int(w), 1)
+            start, end = monday(names[0]), monday(names[-1])
+            stamps = pd.date_range(start, end, freq="7D")
+            labels = [f"{d.isocalendar()[0]}-W{d.isocalendar()[1]:02d}" for d in stamps]
+        elif grain == "year":
+            labels = [str(y) for y in range(int(names[0]), int(names[-1]) + 1)]
+        elif grain == "quarter":
+            periods = pd.period_range(pd.Period(names[0].replace("-Q", "Q"), "Q"),
+                                      pd.Period(names[-1].replace("-Q", "Q"), "Q"), freq="Q")
+            labels = [f"{p.year}-Q{p.quarter}" for p in periods]
+        else:
+            fmt = "%Y-%m-%d" if grain == "day" else "%Y-%m"
+            periods = pd.period_range(names[0], names[-1], freq=_GAP_FILL_PERIODS[grain])
+            labels = [p.strftime(fmt) for p in periods]
+    except Exception:  # noqa: BLE001 -- a label shape we do not know: leave it
+        return result
+    if len(labels) > _GAP_FILL_MAX or len(labels) <= len(rows) or not set(names) <= set(labels):
+        return result
+    by_name = {str(r["name"]): r for r in rows}
+    year_ints = grain == "year" and isinstance(rows[0]["name"], int)
+    filled = [by_name.get(l) or {"name": int(l) if year_ints else l, "value": 0} for l in labels]
+    return {**result, "rows": filled, "filled_periods": len(labels) - len(rows)}
 
 
 def _today_for(config: dict):

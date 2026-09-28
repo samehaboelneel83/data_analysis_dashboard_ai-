@@ -167,3 +167,36 @@ def test_a_filter_on_a_column_the_data_lacks_is_disclosed():
     assert {x["name"]: x["value"] for x in r["rows"]} == {"a": 2}
     clean = get_widget_data_from_df(df, {"dimension": "service", "aggregation": "count"}, "bar")
     assert "ignored_filters" not in clean
+
+
+class TestCalendarGaps:
+    """Live QA 2026-09-28: a daily count skipped days with no calls, so 05 Sep
+    and 07 Sep sat one step apart -- a time axis whose spacing was not time."""
+
+    df = pd.DataFrame({"d": pd.to_datetime(["2026-09-04", "2026-09-05", "2026-09-07", "2026-09-07", "2026-09-12"]),
+                       "v": [1.0, 2.0, 3.0, 4.0, 5.0]})
+
+    def _rows(self, **cfg):
+        from app.services.widget_data import get_widget_data_from_df
+        r = get_widget_data_from_df(self.df, {"dimension": "d", **cfg}, "line")
+        return [(x["name"], x["value"]) for x in r["rows"]], r.get("filled_periods")
+
+    def test_a_count_by_day_draws_empty_days_at_zero(self):
+        rows, filled = self._rows(dimension_granularity="day", aggregation="count")
+        assert [n for n, _ in rows] == [f"2026-09-{d:02d}" for d in range(4, 13)]
+        assert dict(rows)["2026-09-06"] == 0 and dict(rows)["2026-09-07"] == 2 and filled == 5
+
+    def test_a_sum_by_week_fills_the_missing_iso_week(self):
+        df = pd.DataFrame({"d": pd.to_datetime(["2025-12-29", "2026-01-19"]), "v": [1.0, 2.0]})
+        from app.services.widget_data import get_widget_data_from_df
+        r = get_widget_data_from_df(df, {"dimension": "d", "dimension_granularity": "week",
+                                         "measure": "v", "aggregation": "sum"}, "line")
+        assert [x["name"] for x in r["rows"]] == ["2026-W01", "2026-W02", "2026-W03", "2026-W04"]
+
+    def test_an_average_keeps_its_gaps(self):
+        rows, filled = self._rows(dimension_granularity="day", measure="v", aggregation="avg")
+        assert len(rows) == 4 and filled is None
+
+    def test_a_series_sorted_by_value_is_left_alone(self):
+        rows, filled = self._rows(dimension_granularity="day", aggregation="count", sort_by="value", sort="desc")
+        assert filled is None
