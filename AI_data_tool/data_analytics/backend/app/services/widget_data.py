@@ -385,8 +385,12 @@ _ID_NAME_PATTERN = re.compile(r"(^id$|_id$|_key$|_uuid$|^uuid$|_code$)", re.I)
 
 
 def _is_id_like_column(col: str) -> bool:
-    """True when `col`'s name matches the identifier pattern (id, state_id, ...)."""
-    return bool(_ID_NAME_PATTERN.search(col))
+    """True when `col`'s name matches the identifier pattern (id, state_id,
+    A_NUMBER, IMEI, ...). One rule with the semantic veto's: this copy lagged
+    it, so the profile called IMEI a measure while the veto was being taught
+    otherwise (live QA 2026-09-28)."""
+    from .semantic_guard import non_additive_kind
+    return bool(_ID_NAME_PATTERN.search(col)) or non_additive_kind(col) == "identifier"
 
 
 def _dimension_granularity_label(series: pd.Series, granularity: str) -> pd.Series:

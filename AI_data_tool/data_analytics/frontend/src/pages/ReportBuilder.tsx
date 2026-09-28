@@ -1178,10 +1178,18 @@ export default function ReportBuilder() {
   /** Which group of the Fields tab a column sits in. Geography first: a
    *  classified region is what it is whatever it is stored as; then dates;
    *  then numbers (column_meta may say a numeric ZIP is a category). */
-  const fieldGroupOf = (c: DatasetColumn): 'Dimensions' | 'Measures' | 'Dates' | 'Geography' =>
-    geography[c.name] != null || columnMeta[c.name]?.role === 'geography' ? 'Geography'
-    : c.dtype === 'datetime' ? 'Dates'
-    : isNumericField(c) ? 'Measures' : 'Dimensions'
+  const fieldGroupOf = (c: DatasetColumn): 'Dimensions' | 'Measures' | 'Dates' | 'Geography' => {
+    if (geography[c.name] != null || columnMeta[c.name]?.role === 'geography') return 'Geography'
+    if (c.dtype === 'datetime') return 'Dates'
+    if (!isNumericField(c)) return 'Dimensions'
+    // Stored as a number is not the same as being a quantity. Unless the author
+    // said "measure", an identifier or a year groups with the dimensions and a
+    // coordinate with geography -- IMEI and A_NUMBER sat under Measures with a
+    // Sum beside them (live QA 2026-09-28).
+    if (columnMeta[c.name]?.role === 'measure') return 'Measures'
+    const kind = nonAdditiveKind(c.name)
+    return kind === 'coordinate' ? 'Geography' : kind ? 'Dimensions' : 'Measures'
+  }
 
   const toAutoField = (name: string): AutoField | null => {
     // A ticked hierarchy level ("h:<id>") stages as its column.
@@ -2598,7 +2606,7 @@ export default function ReportBuilder() {
                     const defined = group === 'Aggregated' && measures.length > 0
                     if (cols.length === 0 && !defined) return null
                     return (
-                      <div key={group} style={{ marginBottom: 8 }}>
+                      <div key={group} data-field-group={group} style={{ marginBottom: 8 }}>
                         {heading}
                         {!folded && defined && (
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 4 }}>

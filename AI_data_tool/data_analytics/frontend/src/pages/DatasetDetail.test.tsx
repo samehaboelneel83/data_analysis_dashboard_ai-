@@ -599,6 +599,26 @@ describe('DatasetDetail key influencers', () => {
       expect(analysisApi.keyInfluencers).toHaveBeenCalledWith(29, 'revenue')
     })
 
+    it('a call log opens on its amount, not on a phone number, an IMEI or an empty column', async () => {
+      // Live QA 2026-09-28: the default was A_NUMBER, one constant phone number.
+      const ds = importDataset()
+      ds.columns = [
+        { id: 1, name: 'A_NUMBER', dtype: 'numeric', missing_pct: 0, stats: {} },
+        { id: 2, name: 'SITE_NAME', dtype: 'numeric', missing_pct: 100, stats: {} },
+        { id: 3, name: 'LATITUDE', dtype: 'numeric', missing_pct: 31, stats: {} },
+        { id: 4, name: 'IMEI', dtype: 'numeric', missing_pct: 0, stats: {} },
+        { id: 5, name: 'RATED_AMOUNT', dtype: 'numeric', missing_pct: 0, stats: {} },
+      ]
+      vi.mocked(datasetsApi.get).mockResolvedValue(ds)
+      vi.mocked(analysisApi.get).mockResolvedValue(null)
+      vi.mocked(analysisApi.keyInfluencers).mockResolvedValue(result)
+
+      renderDetail(29)
+
+      expect(await screen.findByText(/is many/)).toBeInTheDocument()
+      expect(analysisApi.keyInfluencers).toHaveBeenCalledWith(29, 'RATED_AMOUNT')
+    })
+
     it('falls back to an identifier-shaped column rather than staying manual, if it is the only numeric one', async () => {
       // An imperfect default beats none: the "Re-run" button is right there
       // to retarget once the reader sees it, and "no numeric column at all"

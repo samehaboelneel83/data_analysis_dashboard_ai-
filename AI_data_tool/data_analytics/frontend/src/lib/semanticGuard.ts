@@ -11,7 +11,10 @@
  */
 export type NonAdditiveKind = 'coordinate' | 'identifier' | 'year'
 
-const ID_NAME = /(^id$|_id$|_key$|_uuid$|^uuid$|_code$)/i
+// Numbers that name something (A_NUMBER, phone_number, invoice_no) and the
+// telecom identifiers a call record carries: live QA 2026-09-28 summed IMEI
+// to 1.1e17 and led the insights with "66% of A_NUMBER".
+const ID_NAME = /(^id$|_id$|_key$|_uuid$|^uuid$|_code$|^number$|_number$|_no$|(^|_)(imei|imsi|msisdn|iccid|lac)$)/i
 const WORD = (name: string, words: string[]) => {
   const low = name.toLowerCase()
   return words.some(w => low === w || low.endsWith('_' + w) || low.startsWith(w + '_') || low.includes('_' + w + '_'))

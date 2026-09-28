@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef, useContext } from 'react'
+import { nonAdditiveKind } from '../lib/semanticGuard'
 import AggregatesPanel from '../components/dataset/AggregatesPanel'
 import ColumnMeaningPanel from '../components/dataset/ColumnMeaningPanel'
 import AlertsPanel from '../components/dataset/AlertsPanel'
@@ -580,8 +581,14 @@ export default function DatasetDetail() {
     // "Re-run" control right there is exactly how a reader corrects it.
     const looksLikeIdentifier = (name: string) =>
       /(^|_)(id|uuid|guid|pk)$/i.test(name) || /^(id|index|row_?num(ber)?)$/i.test(name)
+    // A quantity first: not an identifier, coordinate or year by the semantic
+    // veto's rules (IMEI, A_NUMBER), and not an all-empty column. Live QA
+    // 2026-09-28 opened on A_NUMBER, one constant phone number, and showed
+    // "has only one value, so nothing distinguishes its rows".
     const numericCols = ds.columns.filter(c => c.dtype === 'numeric')
-    const target = numericCols.find(c => !looksLikeIdentifier(c.name)) ?? numericCols[0]
+    const target = numericCols.find(c => !looksLikeIdentifier(c.name) && nonAdditiveKind(c.name) === null
+                                         && (c.missing_pct ?? 0) < 100)
+      ?? numericCols.find(c => !looksLikeIdentifier(c.name)) ?? numericCols[0]
     if (!target) return
     influencersAutoRanFor.current = ds.id
     setInfluencerTarget(target.name)

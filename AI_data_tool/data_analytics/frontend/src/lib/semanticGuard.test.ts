@@ -9,9 +9,13 @@ describe('nonAdditiveKind', () => {
     expect(nonAdditiveKind('zip_code')).toBe('identifier')
     expect(nonAdditiveKind('year')).toBe('year')
     expect(nonAdditiveKind('fiscal_year')).toBe('year')
+    for (const c of ['A_NUMBER', 'phone_number', 'invoice_no', 'IMEI', 'imsi', 'MSISDN', 'LAC', 'cell_lac']) {
+      expect(nonAdditiveKind(c)).toBe('identifier')
+    }
   })
   it('leaves quantities alone', () => {
-    for (const c of ['revenue', 'units', 'margin_pct', 'plateau', 'yearly_revenue', 'longevity', 'valid']) {
+    for (const c of ['revenue', 'units', 'margin_pct', 'plateau', 'yearly_revenue', 'longevity', 'valid',
+                     'number_of_calls', 'phone_calls', 'lace', 'imei_count', 'casino']) {
       expect(nonAdditiveKind(c)).toBeNull()
     }
   })

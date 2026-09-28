@@ -13,7 +13,11 @@ from __future__ import annotations
 
 import re
 
-_ID_NAME = re.compile(r"(^id$|_id$|_key$|_uuid$|^uuid$|_code$)", re.I)
+_ID_NAME = re.compile(r"(^id$|_id$|_key$|_uuid$|^uuid$|_code$"
+                      # Numbers that name something (A_NUMBER, phone_number, invoice_no) and the
+                      # telecom identifiers a call record carries (live QA 2026-09-28: IMEI
+                      # summed to 1.1e17 and "66% of A_NUMBER" led the insights).
+                      r"|^number$|_number$|_no$|(^|_)(imei|imsi|msisdn|iccid|lac)$)", re.I)
 _COORD_WORDS = ("lat", "latitude", "lon", "lng", "long", "longitude")
 _YEAR_WORDS = ("year", "yr", "fiscal_year")
 

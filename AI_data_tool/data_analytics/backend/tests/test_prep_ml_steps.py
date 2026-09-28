@@ -197,6 +197,36 @@ class TestDataQualityReport:
         assert amount_rule["failing_rows"] == 1 and amount_rule["examples"][0]["amount"] == -5.0
         assert "error" in bad_rule                                   # reported, not raised
 
+    def test_placeholder_codes_are_named_and_real_zeros_are_not(self):
+        """Live QA 2026-09-28: a call log's IMEI held -1, SITE_ID 0 and
+        ALPHA_SITE_ID "N/" for "unknown", and SUM(LAC) came out as -196."""
+        from app.services.data_quality import quality_report
+        n = 200
+        df = pd.DataFrame({
+            "IMEI": [-1] * 20 + [35683525067175 + i for i in range(n - 20)],
+            "SITE_ID": [0] * 30 + list(range(1, n - 29)),
+            "ALPHA_SITE_ID": ["N/"] * 25 + [f"S{i}" for i in range(n - 25)],
+            "RATED_AMOUNT": [0.0] * 100 + [1.5] * (n - 100),          # real zeros
+            "delta": [-1] * 20 + [-3, 4] * ((n - 20) // 2),            # negatives are real here
+        })
+        by = {c["column"]: c for c in quality_report(df)["column_report"]}
+        assert by["IMEI"]["placeholder"] == {"value": -1, "rows": 20}
+        assert by["SITE_ID"]["placeholder"] == {"value": 0, "rows": 30}
+        assert by["ALPHA_SITE_ID"]["placeholder"] == {"value": "N/", "rows": 25}
+        assert any("looks like a code" in i for i in by["IMEI"]["issues"])
+        assert by["RATED_AMOUNT"]["placeholder"] is None
+        assert by["delta"]["placeholder"] is None
+
+    def test_correlation_is_between_quantities_only(self):
+        from app.services.analytics import analyze_numeric
+        n = 50
+        df = pd.DataFrame({"IMSI": range(n), "LAC": range(n), "latitude": [30 + i / 100 for i in range(n)],
+                           "A_NUMBER": [9990000001] * n,
+                           "volume": [i * 2 for i in range(n)], "amount": [i * 3 + 1 for i in range(n)]})
+        r = analyze_numeric(df, list(df.columns))
+        assert set(r["correlation"]) == {"volume", "amount"}
+        assert set(r["columns"]) == set(df.columns)                  # statistics for every column still
+
     async def test_the_endpoint_runs_the_rules_and_is_org_scoped(
             self, client, db_session, two_orgs, auth_headers, tmp_path):
         from app.models.models import Dataset, DatasetColumn

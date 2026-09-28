@@ -66,8 +66,15 @@ def analyze_numeric(df: pd.DataFrame, cols: list[str]) -> dict:
             "missing_pct": round(df[col].isnull().mean() * 100, 2),
             "cv": _safe(s.std() / s.mean()) if s.mean() != 0 else None,
         }
-    if len(cols) >= 2:
-        corr = df[cols].apply(_numeric_series).corr(method="pearson").round(4)
+    # Correlation between QUANTITIES only. An identifier, a coordinate or a year
+    # correlates with something every time and it means nothing: on a call log
+    # the strongest pairs were LAC ~ IMSI (0.90) and IMEI ~ IMSI (0.81), ahead
+    # of the one real relationship (live QA 2026-09-28). A constant column has
+    # no correlation at all. Their statistics above stay.
+    from .semantic_guard import is_quantity
+    measures = [c for c in cols if is_quantity(c) and df[c].nunique(dropna=True) > 1]
+    if len(measures) >= 2:
+        corr = df[measures].apply(_numeric_series).corr(method="pearson").round(4)
         result["correlation"] = {c: {r: _safe(corr.loc[c, r]) for r in corr.columns} for c in corr.index}
     return result
 

@@ -23,6 +23,46 @@ def _records(frame: pd.DataFrame, n: int) -> list[dict]:
     return [{k: _safe(v) for k, v in row.items()} for row in frame.head(n).to_dict(orient="records")]
 
 
+#: Share of rows one placeholder value must hold before it is reported. Below
+#: this, a -1 is as likely a real value as a code.
+PLACEHOLDER_SHARE = 0.01
+_NEGATIVE_CODES = (-1, -9, -99, -999, -9999)
+_TEXT_CODES = {"n/", "n/a", "na", "#n/a", "-", "--", "?", "null", "none", "unknown", "nil"}
+
+
+def _placeholder(s: pd.Series, column: str) -> tuple[object, int] | None:
+    """The value standing in for "unknown" in this column, and how many rows
+    hold it -- or None. Live QA 2026-09-28: a call log's IMEI, IMSI and LAC
+    held -1 in ~750 rows each, SITE_ID held 0 in 719 and ALPHA_SITE_ID "N/"
+    in 719; none was flagged, and SUM(LAC) came out as -196.
+
+    Deliberately narrow: a 0 in an AMOUNT is a real zero (the same log's
+    RATED_AMOUNT is 0 in half its rows), so 0 counts only in an identifier."""
+    from .semantic_guard import non_additive_kind
+    non_null = s.dropna()
+    if not len(non_null):
+        return None
+    floor = max(1, int(len(non_null) * PLACEHOLDER_SHARE))
+    if pd.api.types.is_numeric_dtype(s) and s.dtype != bool:
+        counts = non_null.value_counts()
+        for code in _NEGATIVE_CODES:
+            n = int(counts.get(code, 0))
+            if n >= floor and bool((non_null[non_null != code] >= 0).all()):
+                return code, n
+        if non_additive_kind(column) == "identifier":
+            n = int(counts.get(0, 0))
+            if n >= floor:
+                return 0, n
+        return None
+    if s.dtype == object:
+        text = non_null.astype(str).str.strip()
+        hits = text[text.str.lower().isin(_TEXT_CODES)]
+        if len(hits) >= floor:
+            value = hits.mode().iloc[0]
+            return value, int((text == value).sum())
+    return None
+
+
 def _column(df: pd.DataFrame, c: str) -> dict:
     s = df[c]
     rows = len(df)
@@ -32,6 +72,12 @@ def _column(df: pd.DataFrame, c: str) -> dict:
     distinct = int(non_null.nunique())
     if rows > 1 and distinct <= 1:
         issues.append("constant" if distinct == 1 else "empty")
+    placeholder = _placeholder(s, c)
+    if placeholder:
+        value, n = placeholder
+        shown = f'"{value}"' if isinstance(value, str) else str(value)
+        issues.append(f"{n:,} row{'s' if n != 1 else ''} hold {shown}, which looks like a code for "
+                      f"“unknown” -- it is counted, summed and averaged as a real value")
     outliers = None
     if pd.api.types.is_numeric_dtype(s) and s.dtype != bool:
         if len(non_null) >= 4:
@@ -55,7 +101,8 @@ def _column(df: pd.DataFrame, c: str) -> dict:
         issues.insert(0, f"{missing * 100 / rows:.0f}% missing")
     return {"column": c, "dtype": str(s.dtype), "missing": missing,
             "missing_pct": round(missing * 100 / rows, 1) if rows else 0.0,
-            "distinct": distinct, "outliers": outliers, "issues": issues}
+            "distinct": distinct, "outliers": outliers, "issues": issues,
+            "placeholder": ({"value": placeholder[0], "rows": placeholder[1]} if placeholder else None)}
 
 
 def quality_report(df: pd.DataFrame, rules: list[str] | None = None, examples: int = 5) -> dict:

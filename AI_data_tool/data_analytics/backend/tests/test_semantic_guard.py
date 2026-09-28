@@ -10,13 +10,17 @@ from app.services.semantic_guard import non_additive_kind, is_quantity
     ("latitude", "coordinate"), ("store_lng", "coordinate"),
     ("customer_id", "identifier"), ("zip_code", "identifier"),
     ("year", "year"), ("fiscal_year", "year"),
+    ("A_NUMBER", "identifier"), ("phone_number", "identifier"), ("invoice_no", "identifier"),
+    ("IMEI", "identifier"), ("imsi", "identifier"), ("MSISDN", "identifier"),
+    ("LAC", "identifier"), ("cell_lac", "identifier"),
 ])
 def test_non_additive_columns_are_named(col, kind):
     assert non_additive_kind(col) == kind
 
 
 @pytest.mark.parametrize("col", ["revenue", "units", "margin_pct", "plateau",
-                                 "yearly_revenue", "longevity", "valid"])
+                                 "yearly_revenue", "longevity", "valid",
+                                 "number_of_calls", "phone_calls", "lace", "imei_count", "casino"])
 def test_quantities_are_left_alone(col):
     assert is_quantity(col)
 

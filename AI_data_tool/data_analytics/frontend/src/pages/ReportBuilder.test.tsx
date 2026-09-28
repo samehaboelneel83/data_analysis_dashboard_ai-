@@ -1650,6 +1650,23 @@ describe('dropping several fields on the canvas', () => {
     }))
   })
 
+  it('a numeric identifier groups with the dimensions and a coordinate with geography', async () => {
+    // Live QA 2026-09-28: IMEI and A_NUMBER sat under Measures with a Sum beside them.
+    vi.mocked(reportsApi.get).mockResolvedValue(baseReport() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Calls', columns: [
+      { id: 1, name: 'IMEI', dtype: 'numeric', missing_pct: 0, stats: {} },
+      { id: 2, name: 'LATITUDE', dtype: 'numeric', missing_pct: 0, stats: {} },
+      { id: 3, name: 'RATED_AMOUNT', dtype: 'numeric', missing_pct: 0, stats: {} },
+    ] } as any)
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    const groupOf = async (name: string) =>
+      (await screen.findByRole('checkbox', { name: `Select ${name}` })).closest('[data-field-group]')?.getAttribute('data-field-group')
+    expect(await groupOf('IMEI')).toMatch(/Dimensions/)
+    expect(await groupOf('LATITUDE')).toMatch(/Geography/)
+    expect(await groupOf('RATED_AMOUNT')).toMatch(/Measures/)
+  })
+
   it('a group folds away under its heading', async () => {
     await builderWithFields()
     const heading = await screen.findByRole('button', { name: /Dimensions/ })
