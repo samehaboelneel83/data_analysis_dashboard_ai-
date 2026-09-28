@@ -2351,6 +2351,31 @@ describe('a filter that does not apply is said', () => {
   })
 })
 
+describe('labels name what a figure is', () => {
+  // Live QA 2026-09-28: a grouped table headed "name / value" with the footer
+  // "Showing 6 of 3576", and a count KPI subtitled with the bare column.
+  it('a grouped table is headed by its fields and counts groups, not a cut', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ type: 'series',
+      rows: [{ name: 'Mobile Telephony', value: 810.37 }, { name: 'USSD', value: 0 }],
+      total: 3576, sampled: false } as never)
+    renderWidget({ widget: barWidget({ id: 61, widget_type: 'table',
+      config: { dimension: 'SERVICE', measure: 'RATED_AMOUNT', aggregation: 'sum' } }) })
+    expect(await screen.findByRole('columnheader', { name: 'SERVICE' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: /RATED_AMOUNT/ })).toBeInTheDocument()
+    expect(screen.queryByRole('columnheader', { name: 'name' })).toBeNull()
+    expect(screen.getByTestId('table-footer')).toHaveTextContent('2 groups from 3,576 rows')
+  })
+
+  it('a count KPI says it is a count', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ type: 'scalar',
+      rows: [{ name: 'RATED_AMOUNT', value: 3576 }], total: 3576, sampled: false } as never)
+    const { container } = renderWidget({ widget: barWidget({ id: 62, widget_type: 'kpi',
+      config: { measure: 'RATED_AMOUNT', aggregation: 'count' } }) })
+    await waitFor(() => expect(container.textContent).toContain('3,576'))
+    expect(container.textContent).toMatch(/count\(RATED_AMOUNT\)|Count of RATED_AMOUNT/i)
+  })
+})
+
 describe('an object that lets the page show through', () => {
   /**
    * The SAS page this was measured against is a photograph with a bar chart,

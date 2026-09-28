@@ -144,3 +144,14 @@ describe('TreemapChartRenderer data labels and tooltip', () => {
     expect(container.querySelectorAll('.recharts-tooltip-wrapper').length).toBe(1)
   })
 })
+
+describe('shares a reader can see', () => {
+  // Live QA 2026-09-28: two services with 1 call of 3,576 each read "0%".
+  it('never shows a slice that is there as 0%', async () => {
+    const { sharePercent } = await import('./DonutChartRenderer')
+    expect(sharePercent(1 / 3576)).toBe('0.03%')
+    expect(sharePercent(0.004)).toBe('0.4%')
+    expect(sharePercent(0.6356)).toBe('64%')
+    expect(sharePercent(0)).toBe('0%')
+  })
+})

@@ -1,6 +1,7 @@
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Customized } from 'recharts'
 import { TT, sliceLabel, fmtStr, SELECTED_STROKE, getFillFactory, COLORS, fillPattern, PatternDefs } from '../chartUtils'
 import type { ChartRendererProps } from './types'
+import { sharePercent } from './DonutChartRenderer'
 import { seriesName } from './axisOptions'
 
 export default function PieChartRenderer({ rows, cfg, rtl, broadcasts, localSelected, onClickPoint, measureFmt, ruleStyles }: ChartRendererProps) {
@@ -35,7 +36,12 @@ export default function PieChartRenderer({ rows, cfg, rtl, broadcasts, localSele
                 aria-label={`${r.name}: ${fmtStr(r.value, measureFmt)}`} />
             })}
           </Pie>
-          <Tooltip contentStyle={TT} formatter={(v: unknown) => [fmtStr(v, measureFmt), seriesName(cfg)]} />
+          <Tooltip contentStyle={TT} formatter={(v: unknown, name: unknown) => {
+            // The slice's name and share, as the donut's tooltip.
+            const total = rows.reduce((t: number, r: any) => t + (typeof r.value === 'number' ? r.value : 0), 0)
+            const share = total > 0 && typeof v === 'number' ? ` (${sharePercent(v / total)})` : ''
+            return [`${fmtStr(v, measureFmt)}${share}`, String(name ?? seriesName(cfg))]
+          }} />
         </PieChart>
       </ResponsiveContainer>
     </div>

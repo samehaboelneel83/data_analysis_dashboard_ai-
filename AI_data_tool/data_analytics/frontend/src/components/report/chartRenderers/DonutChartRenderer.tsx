@@ -4,6 +4,16 @@ import type { ChartRendererProps } from './types'
 import { legendProps } from './axisOptions'
 import { seriesName } from './axisOptions'
 
+/** A share as a reader should see it: whole percents, but never "0%" for a
+ *  slice that is there -- 0.03% of calls read as 0% (live QA 2026-09-28). */
+export function sharePercent(share: number): string {
+  const p = share * 100
+  if (p <= 0) return '0%'
+  if (p < 0.1) return `${p.toFixed(2)}%`
+  if (p < 1) return `${p.toFixed(1)}%`
+  return `${Math.round(p)}%`
+}
+
 export default function DonutChartRenderer({ rows, cfg, rtl, broadcasts, localSelected, onClickPoint, measureFmt, ruleStyles, plotW }: ChartRendererProps) {
   const getFill = getFillFactory(broadcasts, localSelected, ruleStyles?.rows)
   const patterns = !!cfg.series_patterns
@@ -26,7 +36,7 @@ export default function DonutChartRenderer({ rows, cfg, rtl, broadcasts, localSe
     sum + (typeof r.value === 'number' ? r.value : 0), 0)
   const totalCaption = (cfg.donut_total_label as string | undefined)
     ?? (cfg.measure ? `Total ${String(cfg.measure).replace(/_/g, ' ')}` : '')
-  const pct = (v: unknown) => total > 0 && typeof v === 'number' ? `${Math.round((v / total) * 100)}%` : ''
+  const pct = (v: unknown) => total > 0 && typeof v === 'number' ? sharePercent(v / total) : ''
   return (
     <div dir={rtl ? 'rtl' : undefined} style={{ height: '100%' }}>
       <ResponsiveContainer width="100%" height="100%">
@@ -84,7 +94,10 @@ export default function DonutChartRenderer({ rows, cfg, rtl, broadcasts, localSe
                 aria-label={`${r.name}: ${fmtStr(r.value, measureFmt)}`} />
             })}
           </Pie>
-          <Tooltip contentStyle={TT} formatter={(v: unknown) => [fmtStr(v, measureFmt), seriesName(cfg)]} />
+          {/* The slice's own name and its share: the tooltip read "count : 2,273"
+              with neither (live QA 2026-09-28). */}
+          <Tooltip contentStyle={TT} formatter={(v: unknown, name: unknown) =>
+            [`${fmtStr(v, measureFmt)}${pct(v) ? ` (${pct(v)})` : ''}`, String(name ?? seriesName(cfg))]} />
           {legend && (sideLegend
             ? <Legend {...legend} wrapperStyle={{ ...(legend.wrapperStyle ?? {}), paddingInlineStart: 12 }}
                 content={() => (
@@ -92,7 +105,8 @@ export default function DonutChartRenderer({ rows, cfg, rtl, broadcasts, localSe
                     display: 'grid', gridTemplateColumns: 'auto 1fr auto', columnGap: 10, rowGap: 8,
                     alignItems: 'center', fontSize: 12.5, minWidth: 150 }}>
                     {rows.map((r: any, i: number) => (
-                      <li key={i} style={{ display: 'contents' }}>
+                      <li key={i} style={{ display: 'contents', cursor: broadcasts ? 'pointer' : undefined }}
+                        onClick={broadcasts ? () => onClickPoint(r.name) : undefined}>
                         {/* Square key, name, then the share in the mono face so
                             the percentages line up as a column. */}
                         <span aria-hidden style={{ inlineSize: 10, blockSize: 10, borderRadius: 3,
@@ -107,6 +121,7 @@ export default function DonutChartRenderer({ rows, cfg, rtl, broadcasts, localSe
             // the slice's identity, and pale series colours (yellow, green)
             // are unreadable as text on a white card.
             : <Legend iconType="square" iconSize={9}
+                onClick={broadcasts ? (e: any) => onClickPoint(e?.value) : undefined}
                 formatter={(value: unknown) => <span style={{ color: 'var(--text)' }}>{String(value)}</span>}
                 {...legend} wrapperStyle={{ fontSize: 11, ...(legend.wrapperStyle ?? {}) }} />)}
         </PieChart>

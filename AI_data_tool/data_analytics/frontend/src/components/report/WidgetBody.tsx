@@ -431,7 +431,11 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
           </div>
         </div>
         <div style={{ fontSize: 12, color: 'var(--muted)', maxWidth: '100%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {cfg.measure || cfg.dimension || 'Value'}
+          {/* A count or an average is not the column itself: "Records" read
+              3,576 over the subtitle RATED_AMOUNT (live QA 2026-09-28). A sum
+              keeps the column's name, as it always has. */}
+          {cfg.measure && cfg.aggregation && String(cfg.aggregation).toLowerCase() !== 'sum'
+            ? seriesName(cfg) : (cfg.measure || cfg.dimension || 'Value')}
         </div>
       </div>
     )
@@ -478,7 +482,7 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
     return (
       <WindowedTable rtl={rtl} cfg={cfg} data={data} cols={cols} rows={rows}
         ruleStyles={ruleStyles} allFormats={allFormats} broadcasts={broadcasts}
-        onClickPoint={onClickPoint} />
+        onClickPoint={onClickPoint} grouped={isObjRows && cols.includes('name') && cols.includes('value')} />
     )
   }
 
@@ -594,7 +598,9 @@ const TOTALS_UNAVAILABLE_REASON: Record<string, string> = {
  *  WINDOW_THRESHOLD rows, only the slice near the viewport renders, with
  *  spacer rows standing in for the rest; banding, rule styles, row numbers
  *  and cross-filter clicks all index off the ABSOLUTE row index. */
-function WindowedTable({ rtl, cfg, data, cols: inCols, rows: inRows, ruleStyles, allFormats, broadcasts, onClickPoint }: {
+function WindowedTable({ rtl, cfg, data, cols: inCols, rows: inRows, ruleStyles, allFormats, broadcasts, onClickPoint, grouped = false }: {
+  /** Rows are groups of a dimension (a series), not the data's own rows. */
+  grouped?: boolean
   rtl: boolean
   cfg: any
   data: any
@@ -611,6 +617,13 @@ function WindowedTable({ rtl, cfg, data, cols: inCols, rows: inRows, ruleStyles,
   // renders. Reordered here, not in the payload, because charts read the same
   // crosstab shape and must not see their series move.
   const totalsBefore = cfg.totals_position === 'before'
+  // A grouped table's keys are the series' own: `name` is the dimension and
+  // `value` the measure. Headed "name" and "value" (live QA 2026-09-28), they
+  // are headed by what they are.
+  const headerOf = (c: string) => !grouped ? c
+    : c === 'name' ? String(cfg.dimension ?? cfg.roles?.category ?? 'name')
+    : c === 'value' ? seriesName(cfg)
+    : c
   const order = useMemo(() => {
     const idx = inCols.map((_, j) => j)
     const t = inCols.indexOf('__total__')
@@ -688,7 +701,7 @@ function WindowedTable({ rtl, cfg, data, cols: inCols, rows: inRows, ruleStyles,
           <tr>
             {rowNumbers && <th>#</th>}
             {/* `__total__` is the grid's row subtotal: its name on screen is "Total". */}
-            {cols.map((c: string) => <th key={c} style={{ padding: cellPad }}>{c === '__total__' ? 'Total' : c}</th>)}
+            {cols.map((c: string) => <th key={c} style={{ padding: cellPad }}>{c === '__total__' ? 'Total' : headerOf(c)}</th>)}
             {showSpark && <th style={{ padding: cellPad }}>Trend</th>}
           </tr>
           {totalsBefore && totalsRowEl}
@@ -745,9 +758,17 @@ function WindowedTable({ rtl, cfg, data, cols: inCols, rows: inRows, ruleStyles,
         </tbody>
         {!totalsBefore && totalsRowEl && <tfoot>{totalsRowEl}</tfoot>}
       </table>
-      {data.total > rows.length && (
-        <div style={{ padding: '6px 12px', color: 'var(--muted)', fontSize: 11, borderTop: '1px solid var(--border)' }}>
-          Showing {rows.length} of {data.total}
+      {grouped && data.total > 0 && (
+        // A grouped table's `total` is the ROWS its groups were made from, not
+        // groups it left out: "Showing 6 of 3576" read as a cut table (live QA
+        // 2026-09-28). A left-out group is the truncation note's to say.
+        <div data-testid="table-footer" style={{ padding: '6px 12px', color: 'var(--muted)', fontSize: 11, borderTop: '1px solid var(--border)' }}>
+          {rows.length.toLocaleString()} {rows.length === 1 ? 'group' : 'groups'} from {Number(data.total).toLocaleString()} rows
+        </div>
+      )}
+      {!grouped && data.total > rows.length && (
+        <div data-testid="table-footer" style={{ padding: '6px 12px', color: 'var(--muted)', fontSize: 11, borderTop: '1px solid var(--border)' }}>
+          Showing {rows.length.toLocaleString()} of {Number(data.total).toLocaleString()} rows
         </div>
       )}
       {/* The server sets this when "Show totals" was on but the only number it could
