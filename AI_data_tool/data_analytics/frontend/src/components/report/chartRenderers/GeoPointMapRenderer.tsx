@@ -46,7 +46,7 @@ export function markersWithin(markers: { name: string; x: number; y: number }[],
  * map_bubbles -- sqrt so AREA is proportional to value; a radius proportional to value
  * quadruples the visual weight of a doubled number.
  */
-function GeoPointMapRenderer({ rows, cfg, measureFmt, ruleStyles, variant, broadcasts,
+function GeoPointMapRenderer({ rows, data, cfg, measureFmt, ruleStyles, variant, broadcasts,
                               localSelected, onClickPoint, plotW, plotH }: ChartRendererProps & { variant: 'points' | 'bubbles' }) {
   const { ref, w, h, tiles, view } = useMapBox(plotW, plotH)
   // The author's boundary set (Egypt's governorates), drawn as outlines over
@@ -61,6 +61,11 @@ function GeoPointMapRenderer({ rows, cfg, measureFmt, ruleStyles, variant, broad
   // Resolved BEFORE the projection, because the projection is now fitted to
   // these coordinates: a map of one governorate should show that governorate,
   // not the globe with a dot on it.
+  // An animated map's frames share the extent of every frame (AnimatedRenderer).
+  const playExtent = useMemo(() => {
+    const e = (data as { fit_extent?: [number, number][] } | undefined)?.fit_extent
+    return Array.isArray(e) ? e.map(p => [p[0], p[1]] as [number, number]) : []
+  }, [data])
   const coordinateMode = useMemo(() => (rows as Record<string, unknown>[]).some(
     r => typeof r.lat === 'number' && typeof r.lon === 'number'), [rows])
   const { placed, unmatched } = useMemo(() => {
@@ -113,7 +118,7 @@ function GeoPointMapRenderer({ rows, cfg, measureFmt, ruleStyles, variant, broad
   // and an author who placed a pin plainly meant to see it.
   const padPx = Math.max(36, Math.min(w, h) * 0.14)
   const { projection, path } = useMemo(
-    () => view.fit(w, h, [...placed.map(p => p.coord), ...pins.map(p => p.coord)], padPx),
+    () => view.fit(w, h, [...placed.map(p => p.coord), ...pins.map(p => p.coord), ...playExtent], padPx),
     [placed, pins, w, h, padPx, tiles, view])
 
   const placedPins = useMemo(() => pins.flatMap(p => {
@@ -127,7 +132,11 @@ function GeoPointMapRenderer({ rows, cfg, measureFmt, ruleStyles, variant, broad
       const pt = projection(p.coord)
       if (pt) markers.push({ name: p.name, value: p.value, x: pt[0], y: pt[1], row: p.row, coord: p.coord })
     }
-    return { markers, maxValue: Math.max(1, ...markers.map(m => m.value)) }
+    // In a play, one bubble scale for every frame (the server's domain, handed
+    // over as y_max): a bubble grows because its value did, not because the
+    // period's largest site got smaller.
+    const shared = typeof (cfg as { y_max?: unknown })?.y_max === 'number' ? (cfg as { y_max: number }).y_max : 0
+    return { markers, maxValue: Math.max(1, shared, ...markers.map(m => m.value)) }
   }, [placed, projection])
 
   // E15: what the map says, in words and as a table. A point map without a

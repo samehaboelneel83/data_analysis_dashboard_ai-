@@ -446,3 +446,15 @@ def test_pivot_widgets(ts):
     draws the nested crosstab."""
     from app.services.pivot import PIVOT_WIDGETS
     assert _string_list(ts, "PIVOT_WIDGETS") == set(PIVOT_WIDGETS)
+
+
+def test_the_animatable_widgets_match():
+    """The config panel offers "Animate by" to ANIMATION_WIDGETS; the server
+    plays ANIMATION_TYPES. A type on one list only either offers a play that
+    never animates or hides one that would (maps joined both 2026-09-28)."""
+    path = os.path.join(os.path.dirname(_TS), "..", "components", "report", "chartRenderers", "AnimatedRenderer.tsx")
+    if not os.path.exists(path):
+        pytest.skip("AnimatedRenderer.tsx not reachable")
+    from app.services.widget_data import ANIMATION_TYPES
+    with open(path, encoding="utf-8") as fh:
+        assert _string_list(fh.read(), "ANIMATION_WIDGETS") == set(ANIMATION_TYPES)

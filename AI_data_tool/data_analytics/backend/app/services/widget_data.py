@@ -3244,7 +3244,10 @@ def shape_small_multiples(df: pd.DataFrame, config: dict) -> dict:
 #: can share one value axis.
 LATTICE_TYPES = ("bar", "line", "area", "scatter", "step", "dot_plot")
 #: Chart types with an animation role (a play control through an ordered field).
-ANIMATION_TYPES = ("bar", "line", "area", "scatter", "step", "dot_plot", "pie", "donut")
+# The maps play too (requested 2026-09-28: "a map control with a slider for a
+# series of date or time"). Mirrors ANIMATION_WIDGETS in AnimatedRenderer.tsx.
+ANIMATION_TYPES = ("bar", "line", "area", "scatter", "step", "dot_plot", "pie", "donut",
+                   "map_points", "map_bubbles", "map_choropleth")
 LATTICE_MAX_ROWS = 8
 LATTICE_MAX_COLS = 8
 LATTICE_MAX_CELLS = 60
@@ -3425,9 +3428,10 @@ def shape_animation(df: pd.DataFrame, config: dict, widget_type: str,
         frames.append({"label": str(v.date()) if isinstance(v, pd.Timestamp) else str(v),
                        "result": get_widget_data_from_df(sub, base, widget_type, measures, False)})
     stacked = str(config.get("bar_mode") or "") in ("stacked", "stacked100")
-    return {
+    out = {
         "type": "animated", "inner": widget_type, "animate_by": col, "granularity": gran,
         "frames": frames,
+
         "domain": None if str(config.get("bar_mode") or "") == "stacked100"
                   else _lattice_domain([f["result"] for f in frames], stacked),
         "animation_truncation": ({"text": f"Showing the last {len(frames)} of {len(frames) + omitted} "
@@ -3435,6 +3439,37 @@ def shape_animation(df: pd.DataFrame, config: dict, widget_type: str,
                                   "shown": len(frames), "of": len(frames) + omitted} if omitted else None),
         "rows": [], "total": int(len(counted)),
     }
+    if widget_type.startswith("map_"):
+        # A map keeps ONE frame through the play -- every frame fitted to what
+        # ALL frames draw, or it would jump to each period's own points -- and
+        # one value scale for its bubbles and colours, from the marker values
+        # (the generic axis read longitudes as values).
+        out.update(_map_fit_hint([f["result"] for f in frames]))
+    return out
+
+
+def _map_fit_hint(results: list[dict]) -> dict:
+    """What every frame of an animated map should be framed on: the corners of
+    all frames' coordinates (point and bubble maps), or all the region names
+    they colour (a choropleth)."""
+    lons, lats, names = [], [], set()
+    for r in results:
+        for row in r.get("rows") or []:
+            if not isinstance(row, dict):
+                continue
+            if isinstance(row.get("lat"), (int, float)) and isinstance(row.get("lon"), (int, float)):
+                lats.append(float(row["lat"]))
+                lons.append(float(row["lon"]))
+            elif row.get("name") is not None:
+                names.add(str(row["name"]))
+    values = [float(row["value"]) for r in results for row in (r.get("rows") or [])
+              if isinstance(row, dict) and isinstance(row.get("value"), (int, float)) and not isinstance(row.get("value"), bool)]
+    hint: dict = {"domain": [min(0.0, min(values)), max(values)] if values else None}
+    if lats:
+        hint["fit_extent"] = [[min(lons), min(lats)], [max(lons), max(lats)]]
+    elif names:
+        hint["fit_names"] = sorted(names)
+    return hint
 
 
 def _facet_max(results: list[dict]) -> float | None:

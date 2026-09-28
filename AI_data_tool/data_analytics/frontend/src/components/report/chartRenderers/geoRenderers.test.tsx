@@ -15,6 +15,7 @@ import { GeoLinesRenderer, GeoClustersRenderer } from './GeoLineClusterRenderer'
 import { GeoPiesRenderer, GeoLayersRenderer } from './GeoPieLayerRenderer'
 import GeoNetworkRenderer from './GeoNetworkRenderer'
 import type { ChartRendererProps } from './types'
+import { withMeasuredTiles } from '../../../test/measuredTiles'
 
 const base: Omit<ChartRendererProps, 'rows'> = {
   data: {}, cfg: {}, rtl: false, broadcasts: false, localSelected: null,
@@ -806,5 +807,36 @@ describe('zooming a map', () => {
     expect(Number(svg.getAttribute('data-zoom'))).toBeCloseTo(1.25)
     const { container: c2 } = render(<GeoChoroplethRenderer {...base} rows={[{ name: 'Egypt', value: 5 }]} />)
     expect(c2.querySelector('[data-testid="map-zoom-controls"]')).not.toBeNull()
+  })
+})
+
+describe('a map played through time', () => {
+  // Requested 2026-09-28: a map control with a slider for a date or time series.
+  withMeasuredTiles()
+  it('steps period by period on one map, so a site stays put between frames', async () => {
+    const { default: AnimatedRenderer } = await import('./AnimatedRenderer')
+    const cairo = { name: 'Cairo', lat: 30.04, lon: 31.4, value: 5, count: 5 }
+    const data = {
+      type: 'animated', inner: 'map_points', animate_by: 'FULL_DATE', granularity: 'month',
+      fit_extent: [[29.72, 30.04], [31.4, 31.09]], domain: [0, 8],
+      frames: [
+        { label: '2026-03', result: { type: 'geo_points', rows: [cairo] } },
+        { label: '2026-04', result: { type: 'geo_points', rows: [{ ...cairo, value: 8 },
+          { name: 'Alexandria', lat: 31.09, lon: 29.72, value: 2, count: 2 }] } },
+      ],
+    }
+    const { container } = render(<AnimatedRenderer Inner={GeoPointsRenderer}
+      props={{ ...base, rows: [], data, cfg: {} }} />)
+    const slider = await screen.findByRole('slider', { name: 'FULL_DATE frame' })
+    const at = () => {
+      const m = container.querySelector('[data-marker="Cairo"]')!
+      return [m.getAttribute('cx'), m.getAttribute('cy')]
+    }
+    expect(screen.getByTestId('anim-label')).toHaveTextContent('2026-04')
+    const inApril = at()
+    fireEvent.change(slider, { target: { value: '0' } })
+    expect(screen.getByTestId('anim-label')).toHaveTextContent('2026-03')
+    expect(at()).toEqual(inApril)                              // the map did not re-fit
+    expect(container.querySelector('[data-testid="map-zoom-controls"]')).not.toBeNull()
   })
 })

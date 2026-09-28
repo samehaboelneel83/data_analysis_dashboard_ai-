@@ -21,7 +21,7 @@ import { MapDataTable, mapSummary } from '../geo/MapDataTable'
  * districts -- and the chosen set REPLACES the world rather than layering on it,
  * so a governorate map is framed on Egypt instead of being a speck on a globe.
  */
-export default function GeoChoroplethRenderer({ rows, cfg, measureFmt, broadcasts,
+export default function GeoChoroplethRenderer({ rows, data, cfg, measureFmt, broadcasts,
                                                localSelected, onClickPoint,
                                                geography, plotW, plotH }: ChartRendererProps) {
   const { ref, w, h, tiles, view } = useMapBox(plotW, plotH)
@@ -37,11 +37,13 @@ export default function GeoChoroplethRenderer({ rows, cfg, measureFmt, broadcast
 
   // Framed on the countries that actually matched, so a national choropleth
   // fills the tile instead of sitting as a speck on a world map.
+  // An animated map's frames are framed on the regions of EVERY frame.
+  const playNames = (data as { fit_names?: string[] } | undefined)?.fit_names
   const { projection, path } = useMemo(() => view.fit(w, h,
-    (rows as { name: unknown }[]).flatMap(r => {
-      const f = matchRegion(r.name, set)
+    [...(rows as { name: unknown }[]).map(r => r.name), ...(playNames ?? [])].flatMap(n => {
+      const f = matchRegion(n, set)
       return f ? regionBoundsPoints(f) : []
-    })), [rows, set, w, h, tiles, view])
+    })), [rows, set, w, h, tiles, view, playNames])
 
   const { byFeature, sourceNames, unmatched, unmatchedNames, min, max } = useMemo(() => {
     // Keyed by the FEATURE, not by its name. An uploaded boundary file need not
@@ -66,8 +68,9 @@ export default function GeoChoroplethRenderer({ rows, cfg, measureFmt, broadcast
     const values = [...byFeature.values()]
     return {
       byFeature, sourceNames, unmatched, unmatchedNames,
-      min: values.length ? Math.min(...values) : 0,
-      max: values.length ? Math.max(...values) : 0,
+      // In a play, one colour scale for every frame (the server's domain).
+      min: typeof (cfg as any)?.y_min === 'number' ? (cfg as any).y_min : values.length ? Math.min(...values) : 0,
+      max: typeof (cfg as any)?.y_max === 'number' ? (cfg as any).y_max : values.length ? Math.max(...values) : 0,
     }
   }, [rows, set])
 

@@ -84,3 +84,26 @@ def test_latlon_mode_respects_filters():
              "filters": [{"column": "region", "op": "eq", "value": "EU"}]}, "map_points")
     assert len(r["rows"]) == 1
     assert r["rows"][0]["lat"] == 48.0
+
+
+class TestAnimatedMaps:
+    """Requested 2026-09-28: a map with a slider through a date or time series."""
+
+    df = pd.DataFrame({"d": pd.to_datetime(["2026-03-01", "2026-03-02", "2026-04-01", "2026-05-09"]),
+                       "lat": [30.0, 30.1, 31.0, 29.9], "lon": [31.3, 31.4, 29.7, 31.2],
+                       "amt": [1.0, 2.0, 5.0, 3.0]})
+
+    def test_one_frame_per_period_on_one_extent_and_one_scale(self):
+        r = get_widget_data_from_df(self.df, {"lat": "lat", "lon": "lon", "measure": "amt", "aggregation": "sum",
+                                              "animate_by": "d", "animate_granularity": "month"}, "map_bubbles")
+        assert r["type"] == "animated" and r["inner"] == "map_bubbles"
+        assert [f["label"] for f in r["frames"]] == ["2026-03", "2026-04", "2026-05"]
+        assert [len(f["result"]["rows"]) for f in r["frames"]] == [2, 1, 1]
+        assert r["fit_extent"] == [[29.7, 29.9], [31.4, 31.0]]
+        assert r["domain"] == [0.0, 5.0]                     # the marker values, not a longitude
+
+    def test_a_choropleth_frames_on_every_period_s_regions(self):
+        df = pd.DataFrame({"d": pd.to_datetime(["2026-03-01", "2026-04-01"]), "c": ["Egypt", "France"], "v": [1, 2]})
+        r = get_widget_data_from_df(df, {"dimension": "c", "measure": "v", "aggregation": "sum",
+                                         "animate_by": "d", "animate_granularity": "month"}, "map_choropleth")
+        assert r["fit_names"] == ["Egypt", "France"] and r["domain"] == [0.0, 2.0]

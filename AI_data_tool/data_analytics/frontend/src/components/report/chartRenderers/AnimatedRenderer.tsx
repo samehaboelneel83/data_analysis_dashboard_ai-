@@ -1,9 +1,10 @@
-import { useEffect, useState, type ComponentType } from 'react'
+import { Suspense, useEffect, useState, type ComponentType } from 'react'
 import type { ChartRendererProps } from './types'
 import { MeasuredChart } from '../MeasuredChart'
 
 /** Chart types with an animation role — must match ANIMATION_TYPES in widget_data.py. */
-export const ANIMATION_WIDGETS = ['bar', 'line', 'area', 'scatter', 'step', 'dot_plot', 'pie', 'donut'] as const
+export const ANIMATION_WIDGETS = ['bar', 'line', 'area', 'scatter', 'step', 'dot_plot', 'pie', 'donut',
+  'map_points', 'map_bubbles', 'map_choropleth'] as const
 export const FRAME_MS = 1200
 
 interface Frame { label: string; result: any }
@@ -45,6 +46,11 @@ export default function AnimatedRenderer({ Inner, props, onFrame }: {
     ? { y_min: domain[0], y_max: domain[1] } : {}) }
   if (!frame) return <div style={{ color: 'var(--muted)', fontSize: 12, padding: 8 }}>No data.</div>
   const res = frame.result ?? {}
+  // A map plays on ONE frame: each period drawn over the extent (or the
+  // regions) of every period, with its zoom kept -- so it stays mounted even
+  // for a period with no rows, which draws as an empty map.
+  const isMap = String(data.inner ?? '').startsWith('map_')
+  const shown = isMap ? { ...res, fit_extent: data.fit_extent, fit_names: data.fit_names } : res
   return (
     <div data-testid="animated" style={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 4px 4px' }}>
@@ -60,15 +66,17 @@ export default function AnimatedRenderer({ Inner, props, onFrame }: {
           style={{ fontSize: 12, fontWeight: 600, minWidth: 70, textAlign: 'end' }}>{frame.label}</span>
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>
-        {res.type === 'empty' || !(res.rows?.length)
+        {!isMap && (res.type === 'empty' || !(res.rows?.length))
           ? <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: 11, color: 'var(--muted)' }}>No rows in {frame.label}</div>
-          : <MeasuredChart>{(w, h) => (
-              <Inner {...props} data={res} rows={res.rows ?? []} cfg={cfg} plotW={w} plotH={h} />
-            )}</MeasuredChart>}
+          : <Suspense fallback={<div style={{ fontSize: 11, color: 'var(--muted)', padding: 8 }}>Loading map…</div>}>
+              <MeasuredChart>{(w, h) => (
+                <Inner {...props} data={shown} rows={res.rows ?? []} cfg={cfg} plotW={w} plotH={h} />
+              )}</MeasuredChart>
+            </Suspense>}
       </div>
       <div style={{ fontSize: 10, color: 'var(--muted)', padding: '2px 4px' }}>
-        {frames.length} frames by {data.animate_by}{data.granularity ? ` (${data.granularity})` : ''} · one axis for every frame
+        {frames.length} frames by {data.animate_by}{data.granularity ? ` (${data.granularity})` : ''} · {isMap ? 'one map and one scale for every frame' : 'one axis for every frame'}
         {data.animation_truncation?.text ? ` · ${data.animation_truncation.text}` : ''}
       </div>
     </div>
