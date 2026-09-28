@@ -28,6 +28,19 @@ MAX_LEVELS = 12
 MIN_ROWS = 20
 
 
+def _month_is_partial(dt: pd.Series, month) -> bool:
+    """Whether the data ends partway through `month`."""
+    from .relative_dates import cadence_days
+    last = dt.max()
+    if pd.isna(last):
+        return False
+    try:
+        step = max(float(cadence_days(dt.dropna())), 1.0)
+    except Exception:  # noqa: BLE001
+        step = 1.0
+    return last.normalize() + pd.Timedelta(days=step) < month.end_time.normalize()
+
+
 def _fmt(v: float) -> str:
     if abs(v) >= 1_000_000:
         return f"{v / 1_000_000:.1f}M"
@@ -244,6 +257,12 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
         for m in measures[:3]:
             v = pd.to_numeric(df[m], errors="coerce")
             monthly = v.groupby(dt.dt.to_period("M")).sum().dropna()
+            # The LAST FULL month. A month the data stops partway through is
+            # not a drop: a call log ending on 19 Sep "ran 96% below its monthly
+            # average" in September (live QA 2026-09-28). Partial means the
+            # data's own cadence would have put another date inside it.
+            if len(monthly) and _month_is_partial(dt, monthly.index[-1]):
+                monthly = monthly.iloc[:-1]
             if len(monthly) < 4:
                 continue
             last, prior = monthly.iloc[-1], monthly.iloc[:-1].mean()

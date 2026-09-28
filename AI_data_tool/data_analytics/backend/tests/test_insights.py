@@ -296,3 +296,23 @@ def test_eligibility_withholds_the_offer_and_nothing_else():
     assert roles["internal_cost"] == "numeric"
     assert generate_insights(df, {"region": "categorical",
                                   "internal_cost": "numeric"}, meta)["findings"]
+
+
+def test_a_month_the_data_stops_partway_through_is_not_a_drop():
+    """Live QA 2026-09-28: a call log ending on 19 Sep "ran 96% below its
+    monthly average" in September -- it simply had not finished."""
+    import pandas as _pd
+    from app.services.insights import generate_insights
+    days = _pd.date_range("2026-01-01", "2026-05-19", freq="D")
+    df = _pd.DataFrame({"day": days, "revenue": [100.0] * len(days)})
+    out = generate_insights(df, {"day": "datetime", "revenue": "numeric"})
+    assert not any(f["kind"] == "trend" and "2026-05" in f["title"] for f in out["findings"]), out["findings"]
+
+
+def test_a_finished_month_that_fell_is_still_reported():
+    import pandas as _pd
+    from app.services.insights import generate_insights
+    days = _pd.date_range("2026-01-01", "2026-05-31", freq="D")
+    rev = [100.0 if d.month < 5 else 20.0 for d in days]
+    out = generate_insights(_pd.DataFrame({"day": days, "revenue": rev}), {"day": "datetime", "revenue": "numeric"})
+    assert any(f["kind"] == "trend" and "2026-05" in f["title"] and "below" in f["title"] for f in out["findings"])
