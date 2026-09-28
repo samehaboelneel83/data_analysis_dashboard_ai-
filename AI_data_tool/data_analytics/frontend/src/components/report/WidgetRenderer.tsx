@@ -692,6 +692,19 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
     setShowContextMenu(true)
   }
 
+  // The keyboard's way to the same menu: the context-menu key or Shift+F10,
+  // opened at the widget's corner. Only 2 of 12 widgets on a dashboard could
+  // be reached by Tab at all, and none could open its menu (live QA 2026-09-28).
+  const handleFigureKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (isPreview || e.target !== e.currentTarget) return
+    if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
+      e.preventDefault()
+      const box = e.currentTarget.getBoundingClientRect()
+      setContextMenuPos({ x: box.left + 16, y: box.top + 16 })
+      setShowContextMenu(true)
+    }
+  }
+
   const handleButtonClick = () => {
     const cfg = widget.config as any
     if (cfg.action === 'navigate' && cfg.actionPageId != null) {
@@ -908,6 +921,8 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
       className={`dl-widget${selected ? ' dl-widget--selected' : ''}`}
       role="figure"
       aria-label={(cfg.alt_text as string) || widget.title || wt}
+      tabIndex={isPreview ? undefined : 0}
+      onKeyDown={handleFigureKeyDown}
       onClick={e => onSelect?.(e)}
       onContextMenu={handleContextMenu}
       onMouseEnter={tooltipPage ? handleMouseEnter : undefined}

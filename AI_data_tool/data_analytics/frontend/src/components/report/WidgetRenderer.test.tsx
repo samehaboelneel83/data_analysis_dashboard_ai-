@@ -676,6 +676,26 @@ describe('WidgetRenderer drillthrough context menu', () => {
     expect(screen.queryByRole('menuitem', { name: /Drill through/i })).not.toBeInTheDocument()
   })
 
+  it('is reachable by Tab, and the context-menu key opens the same menu', async () => {
+    // Live QA 2026-09-28: 2 of 12 widgets were tab stops and none could open
+    // its menu from the keyboard.
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'North', value: 5 }], sampled: false })
+    renderWidget({ widget: barWidget({ widget_type: 'list', config: { dimension: 'region' } }) })
+    await screen.findByText('North')
+    const figure = screen.getByRole('figure')
+    expect(figure).toHaveAttribute('tabindex', '0')
+    fireEvent.keyDown(figure, { key: 'ContextMenu' })
+    expect(await screen.findByRole('menuitem', { name: /Export data as CSV/i })).toBeInTheDocument()
+  })
+
+  it('Shift+F10 opens it too', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'North', value: 5 }], sampled: false })
+    renderWidget({ widget: barWidget({ widget_type: 'list', config: { dimension: 'region' } }) })
+    await screen.findByText('North')
+    fireEvent.keyDown(screen.getByRole('figure'), { key: 'F10', shiftKey: true })
+    expect(await screen.findByRole('menuitem', { name: /Export data as CSV/i })).toBeInTheDocument()
+  })
+
   it('hides export menu items when allowExport is false (S4: guest view)', async () => {
     vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'North', value: 5 }], sampled: false })
     const { container } = renderWidget({
