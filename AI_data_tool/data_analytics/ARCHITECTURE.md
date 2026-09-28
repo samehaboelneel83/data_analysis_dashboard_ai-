@@ -2349,7 +2349,7 @@ Agent pane (7)
 | Suite | Scope | Count |
 |-------|-------|-------|
 | Backend | `backend/tests/` | ~6,670 tests across 426 modules |
-| Frontend | colocated `*.test.ts(x)` | ~3,370 tests across 246 files |
+| Frontend | colocated `*.test.ts(x)` | ~3,400 tests across 247 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |
 | Doc audit | `tests/test_architecture_doc.py` | Enforces the *counts* in this document |
