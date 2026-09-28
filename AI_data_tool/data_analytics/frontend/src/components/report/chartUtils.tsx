@@ -196,8 +196,12 @@ export function formatValue(value: unknown, fmt?: CalcColumnFormat | null): Reac
     // and applies no grouping or forced decimals, so nothing else about the display
     // changes. Integers are left alone -- they carry no such artifact, and reducing
     // their precision would corrupt large ids.
+    //
+    // 12 digits, not 15: a sum of 2,273 amounts drifted into the 15th digit
+    // and read "810.370000000003" (live QA 2026-09-28). Twelve still keeps a
+    // billion with two decimals exact.
     if (typeof value === 'number' && Number.isFinite(value) && !Number.isInteger(value)) {
-      return String(Number(value.toPrecision(15)))
+      return String(Number(value.toPrecision(12)))
     }
     return String(value)
   }

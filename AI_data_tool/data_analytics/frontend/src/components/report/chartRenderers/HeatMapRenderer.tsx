@@ -28,14 +28,14 @@ export default function HeatMapRenderer({ data, rtl, measureFmt, plotH }: ChartR
   }
 
   // Rows share the tile's height, so a 24-hour grid is read at a glance
-  // instead of 7 rows and a scrollbar (live QA 2026-09-28). Between 14 and 32
-  // px a row; below 18 the figure moves to the cell's tooltip, the colour
-  // carrying the reading.
+  // instead of 7 rows and a scrollbar (live QA 2026-09-28). Between 12 and 32
+  // px a row; from 13 px the figure is still printed, smaller below 18; only
+  // thinner than that does it move to the cell's tooltip.
   const HEADER = 24
   const rowH = plotH && plotH > HEADER
-    ? Math.max(14, Math.min(32, Math.floor((plotH - HEADER - 8) / rowsAxis.length)))
+    ? Math.max(12, Math.min(32, Math.floor((plotH - HEADER - 8) / rowsAxis.length)))
     : 32
-  const showFigures = rowH >= 18
+  const showFigures = rowH >= 13
 
   return (
     <div dir={rtl ? 'rtl' : undefined} style={{ height: '100%', overflow: 'auto', padding: 4 }}>
@@ -57,7 +57,7 @@ export default function HeatMapRenderer({ data, rtl, measureFmt, plotH }: ChartR
                 return (
                   <td key={c} title={v == null ? 'No data' : `${r} × ${c}: ${fmtStr(v, measureFmt)}`}
                     style={{ padding: 0, border: '1px solid var(--border)' }}>
-                    <div style={{ background: v == null ? 'var(--surface2)' : cellColor(v, min, max), width: '100%', height: rowH, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: 'var(--text)' }}>
+                    <div style={{ background: v == null ? 'var(--surface2)' : cellColor(v, min, max), width: '100%', height: rowH, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: rowH < 18 ? 9 : 10, lineHeight: 1, color: 'var(--text)' }}>
                       {!showFigures ? null : v == null ? '—' : fmtStr(v, measureFmt)}
                     </div>
                   </td>

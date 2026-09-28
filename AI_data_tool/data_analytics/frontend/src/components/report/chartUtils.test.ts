@@ -199,3 +199,16 @@ describe('display units', () => {
     expect(fmtStr(42, { type: 'percent', decimals: 0, scale: 'thousands' })).toContain('42')
   })
 })
+
+describe('an unformatted sum reads as its value', () => {
+  // Live QA 2026-09-28: a table cell read "810.370000000003".
+  it('drops float drift from a long sum, keeps real precision', async () => {
+    const { formatValue } = await import('./chartUtils')
+    let sum = 0
+    for (let i = 0; i < 2273; i++) sum += 0.3565
+    expect(String(formatValue(810.370000000003))).toBe('810.37')
+    expect(String(formatValue(sum))).toBe(String(Number((0.3565 * 2273).toPrecision(12))))
+    expect(String(formatValue(1234567890.12))).toBe('1234567890.12')
+    expect(String(formatValue(9990000001))).toBe('9990000001')
+  })
+})

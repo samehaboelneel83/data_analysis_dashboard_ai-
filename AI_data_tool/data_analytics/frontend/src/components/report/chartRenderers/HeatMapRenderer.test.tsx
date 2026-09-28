@@ -19,11 +19,11 @@ describe('a heatmap of the day', () => {
     const cell = container.querySelector('tbody td div') as HTMLElement
     const h = parseInt(cell.style.height)
     expect(h * 24).toBeLessThanOrEqual(500)
-    expect(h).toBeGreaterThanOrEqual(14)
+    expect(h).toBeGreaterThanOrEqual(12)
   })
 
   it('moves the figures to the tooltip when rows are too thin to hold them', () => {
-    const { container } = draw(grid, 360)
+    const { container } = draw(grid, 300)
     const cells = [...container.querySelectorAll('tbody td[title]')]
     expect(cells[1].textContent).toBe('')
     expect(cells[1].getAttribute('title')).toMatch(/00 × OUT: 0/)
