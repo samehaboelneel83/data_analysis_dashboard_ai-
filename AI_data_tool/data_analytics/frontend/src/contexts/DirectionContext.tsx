@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { setDisplayLocale } from '../lib/displayLocale'
 
 export type Direction = 'ltr' | 'rtl'
 
@@ -78,6 +79,9 @@ export function DirectionProvider({ children }: { children: ReactNode }) {
   // reader to use an Arabic voice for that chrome and for report translations.
   useEffect(() => {
     document.documentElement.lang = language
+    // Bare date/number formatting follows too (lib/displayLocale; a no-op
+    // until main.tsx installs it, so tests keep their own pin).
+    setDisplayLocale(language)
   }, [language])
 
   const setDirection = (d: Direction) => {

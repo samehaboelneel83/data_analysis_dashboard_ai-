@@ -11,9 +11,16 @@ toast.error = ((message, opts) =>
 import App from './App'
 import './index.css'
 import { installAutoDir } from './lib/autoDir'
+import { installDisplayLocale } from './lib/displayLocale'
 
 // Latin values in RTL form controls were clipped at their start (QA 2026-09-26).
 installAutoDir()
+
+// Dates and numbers in the interface language, not the operating system's
+// (see lib/displayLocale). The switcher keeps it in step afterwards.
+try {
+  installDisplayLocale(localStorage.getItem('datalytics.language') === 'ar' ? 'ar' : 'en')
+} catch { installDisplayLocale('en') }
 
 // Stamp the theme BEFORE first paint, so pages outside the shell (Login, the
 // shared/embed views) render in the product's blue/white light default rather
