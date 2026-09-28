@@ -539,7 +539,9 @@ describe('the dashboards page is one full-width column', () => {
     renderReports()
     await screen.findByText('Revenue')
     expect(screen.queryByTestId('workspace-tree')).toBeNull()
-    expect(screen.queryByRole('button', { name: /folders/i })).toBeNull()
+    // No show/hide toggle for a folder column. (The Sections | Folders view
+    // toggle is a different control: it rearranges the list itself.)
+    expect(screen.queryByRole('button', { name: /(show|hide) folders/i })).toBeNull()
   })
 })
 
@@ -1197,5 +1199,76 @@ describe('Reports accessibility', () => {
     const { container } = renderReports()
     await screen.findByText('Revenue')
     expect(await axeViolations(container)).toEqual([])
+  })
+})
+
+/**
+ * The drill-down view (requested 2026-09-28): folders as tiles you open one
+ * level at a time, a breadcrumb back, and the dashboards filed at each level.
+ */
+describe('the folder view drills down one level at a time', () => {
+  const node = (over: Record<string, unknown>) => ({
+    id: 1, parent_id: null, node_type: 'folder', name: 'omda', report_id: null,
+    position: 0, can_manage: true, is_mine: true, role_ids: [], pages: [],
+    children: [], ...over,
+  })
+  const leaf = (reportId: number) =>
+    node({ id: 90 + reportId, node_type: 'report', name: 'x', report_id: reportId })
+
+  beforeEach(() => {
+    vi.mocked(reportsApi.list).mockResolvedValue([
+      report({ id: 1, name: 'Revenue' }), report({ id: 2, name: 'Costs' }), report({ id: 3, name: 'Margin' }),
+    ] as never)
+    vi.mocked(workspaceApi.tree).mockResolvedValue({
+      roots: [node({ children: [leaf(1), node({ id: 2, name: 'omda1', children: [leaf(2)] })] }),
+              node({ id: 3, name: 'sameh', children: [] })],
+      unfiled: [leaf(3)],
+    } as never)
+  })
+
+  it('opens a folder, then a subfolder, and the breadcrumb goes back', async () => {
+    renderReports()
+    fireEvent.click(await screen.findByRole('button', { name: 'Folders' }))
+    const view = screen.getByTestId('folder-view')
+    // The top level: its folders as tiles, and the one loose dashboard.
+    expect(within(view).getByRole('button', { name: 'Open folder omda' })).toBeInTheDocument()
+    expect(within(view).getByRole('button', { name: 'Open folder sameh' })).toBeInTheDocument()
+    expect(within(view).getByText('Margin')).toBeInTheDocument()
+    expect(within(view).queryByText('Revenue')).toBeNull()
+
+    fireEvent.click(within(view).getByRole('button', { name: 'Open folder omda' }))
+    expect(within(view).getByText('Revenue')).toBeInTheDocument()
+    expect(within(view).queryByText('Margin')).toBeNull()
+    expect(within(view).getByRole('button', { name: 'Open folder omda1' })).toBeInTheDocument()
+
+    fireEvent.keyDown(within(view).getByRole('button', { name: 'Open folder omda1' }), { key: 'Enter' })
+    expect(within(view).getByText('Costs')).toBeInTheDocument()
+    const crumbs = within(view).getByRole('navigation')
+    expect(within(crumbs).getByText('omda1')).toHaveAttribute('aria-current', 'page')
+
+    fireEvent.click(within(crumbs).getByRole('button', { name: 'All dashboards' }))
+    expect(within(view).getByText('Margin')).toBeInTheDocument()
+  })
+
+  it('says an empty folder is empty, and remembers the chosen view', async () => {
+    renderReports()
+    fireEvent.click(await screen.findByRole('button', { name: 'Folders' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open folder sameh' }))
+    expect(screen.getByText(/Nothing in this folder yet/)).toBeInTheDocument()
+    expect(localStorage.getItem('datalytics:dashboards-arrange')).toBe('folders')
+    fireEvent.click(screen.getByRole('button', { name: 'Sections' }))
+    expect(screen.queryByTestId('folder-view')).toBeNull()
+    expect(await screen.findByRole('region', { name: 'omda' })).toBeInTheDocument()
+  })
+
+  it('a new folder is made inside the folder being viewed', async () => {
+    vi.mocked(workspaceApi.create).mockResolvedValue({} as never)
+    renderReports()
+    fireEvent.click(await screen.findByRole('button', { name: 'Folders' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open folder omda' }))
+    fireEvent.click(screen.getByRole('button', { name: /New folder/ }))
+    await answerPrompt('Q3')
+    await waitFor(() => expect(workspaceApi.create).toHaveBeenCalledWith(
+      expect.objectContaining({ node_type: 'folder', name: 'Q3', parent_id: 1 })))
   })
 })

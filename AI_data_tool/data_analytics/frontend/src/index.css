@@ -2818,3 +2818,12 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--da
 
 /* The Default | Modern switch, beside View | Edit. */
 .dl-vw-style { display: inline-flex; }
+
+/* Dashboards page: Sections | Folders toggle, and the folder tiles of the
+   drill-down view (2026-09-28). */
+.dl-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.dl-seg > .btn { border-radius: 0; border: 0; gap: 4px; }
+.dl-seg > .btn[aria-pressed="true"] { background: var(--accent-soft, var(--surface2)); color: var(--accent); font-weight: 600; }
+.dl-folder-tile { padding: 14px 16px; transition: border-color .12s, box-shadow .12s; }
+.dl-folder-tile:hover, .dl-folder-tile:focus-visible { border-color: var(--accent); box-shadow: 0 1px 6px color-mix(in srgb, var(--accent) 18%, transparent); }
+.dl-folder-tile[data-drop-active="true"] { border-color: var(--accent); }

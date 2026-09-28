@@ -7,7 +7,7 @@ import { looksLikeTestData } from '../lib/testData'
 import { reportsApi, datasetsApi, workspaceApi } from '../services/api'
 import type { ReportSummary, DatasetSummary } from '../services/api'
 import type { WorkspaceTree } from '../types/report'
-import { FileBarChart, FolderPlus, Pencil, Plus, Trash2, Share2 } from 'lucide-react'
+import { ChevronRight, FileBarChart, Folder, FolderPlus, LayoutList, Pencil, Plus, Trash2, Share2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useConfirm } from '../components/ui/ConfirmDialog'
 import { usePrompt } from '../components/ui/PromptDialog'
@@ -17,6 +17,7 @@ import { Eye, Globe, GlobeLock } from 'lucide-react'
 import IconLabel from '../components/ui/IconLabel'
 import ActionMenu from '../components/ActionMenu'
 import { useT } from '../i18n'
+import { useDirection } from '../contexts/DirectionContext'
 
 import {
   ShareDialog, Fold, loadCollapsed, saveCollapsed, sectionsFor, reportNodes,
@@ -26,8 +27,11 @@ import type { FolderSection } from './reports/listParts'
 import { nextUntitledName } from '../lib/untitledName'
 export { nextUntitledName }
 
+const ARRANGE_KEY = 'datalytics:dashboards-arrange'
+
 export default function Reports() {
   const t = useT()
+  const { language } = useDirection()
   const [reports, setReports]   = useState<ReportSummary[]>([])
   const repFilter = useListFilter(reports,
     r => [r.name, r.description], t('search.dashboards'))
@@ -48,6 +52,18 @@ export default function Reports() {
   // no dataTransfer at all.
   const [dragging, setDragging] = useState<ReportSummary | null>(null)
   const [overTarget, setOverTarget] = useState<string | null>(null)
+  // Two ways to arrange the page (requested 2026-09-28): the folders as
+  // sections down the page, or a folder view you drill into, one level at a
+  // time, with a breadcrumb back. Remembered per browser.
+  const [arrange, setArrange] = useState<'sections' | 'folders'>(() => {
+    try { return localStorage.getItem(ARRANGE_KEY) === 'folders' ? 'folders' : 'sections' } catch { return 'sections' }
+  })
+  const chooseArrange = (a: 'sections' | 'folders') => {
+    setArrange(a)
+    try { localStorage.setItem(ARRANGE_KEY, a) } catch { /* private mode */ }
+  }
+  // The folder being viewed, as the path of folder ids from the top.
+  const [path, setPath] = useState<number[]>([])
   const toggleFold = (key: string) => setCollapsed(prev => {
     const next = new Set(prev)
     if (next.has(key)) next.delete(key)
@@ -276,7 +292,21 @@ export default function Reports() {
               {selecting ? t('bulk.done2') : t('bulk.select')}
             </button>
           )}
-          <button className="btn btn-ghost" onClick={() => void addFolder(null)} disabled={folderBusy}>
+          {reports.length > 0 && (
+            <div className="dl-seg" role="group" aria-label={t('dashboards.view')} data-testid="dashboards-arrange">
+              <button type="button" className="btn btn-ghost btn-sm" aria-pressed={arrange === 'sections'}
+                onClick={() => chooseArrange('sections')}>
+                <LayoutList size={13} aria-hidden /> {t('dashboards.viewSections')}
+              </button>
+              <button type="button" className="btn btn-ghost btn-sm" aria-pressed={arrange === 'folders'}
+                onClick={() => chooseArrange('folders')}>
+                <Folder size={13} aria-hidden /> {t('dashboards.viewFolders')}
+              </button>
+            </div>
+          )}
+          {/* In the folder view a new folder goes where you are. */}
+          <button className="btn btn-ghost" disabled={folderBusy}
+            onClick={() => void addFolder(arrange === 'folders' && path.length ? path[path.length - 1] : null)}>
             <FolderPlus size={14} /> {t('folders.newTop')}
           </button>
           <button className="btn btn-primary" onClick={() => void handleCreate()} disabled={creating}>
@@ -464,7 +494,9 @@ export default function Reports() {
                   </span>
                 )}
                 <span className="dl-dash-card__date">
-                  {new Date(r.created_at).toLocaleDateString()}
+                  {/* In the interface's language, not the browser's: an English
+                      page read "272026/9/" on an Arabic-locale machine. */}
+                  {new Date(r.created_at).toLocaleDateString(language, { dateStyle: 'medium' })}
                 </span>
               </div>
             </div>
@@ -474,6 +506,101 @@ export default function Reports() {
         const grid = (items: ReportSummary[]) => (
           <div className="dl-dash-grid">{items.map(renderCard)}</div>
         )
+
+        if (arrange === 'folders') {
+          // One level at a time: the folders here as tiles (a click opens one),
+          // then the dashboards filed directly here, as the usual cards.
+          const { sections, loose } = sectionsFor(repFilter.filtered, tree, {
+            all: reports, keepEmpty: !repFilter.query.trim(),
+          })
+          // Walk the path; a folder that has gone (deleted, or filtered out)
+          // stops the walk where it is, so the view never points at nothing.
+          const trail: FolderSection[] = []
+          let level = sections
+          for (const id of path) {
+            const next = level.find(s => s.id === id)
+            if (!next) break
+            trail.push(next)
+            level = next.children
+          }
+          const here = trail[trail.length - 1]
+          const folders = here ? here.children : sections
+          const cards = here ? here.direct : loose
+          const crumbs: { key: string; name: string; to: number[]; id: number | null }[] = [
+            { key: 'root', name: t('folders.root'), to: [], id: null },
+            ...trail.map((f, i) => ({ key: `folder:${f.id}`, name: f.name, to: trail.slice(0, i + 1).map(x => x.id), id: f.id })),
+          ]
+          return (
+            <div data-testid="folder-view">
+              <nav aria-label={t('dashboards.viewFolders')} className="dl-folder-crumbs"
+                style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4, margin: '4px 0 12px', fontSize: 13 }}>
+                {crumbs.map((c, i) => {
+                  const last = i === crumbs.length - 1
+                  return (
+                    <span key={c.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      {i > 0 && <ChevronRight size={13} aria-hidden style={{ color: 'var(--muted)' }} />}
+                      {/* Each crumb is also a drop target: drag a card up a level. */}
+                      <span {...dropTargetProps(`crumb:${c.key}`, c.id, c.id === null ? null : c.name)}
+                        data-drop-active={overTarget === `crumb:${c.key}` ? 'true' : undefined}
+                        style={{ borderRadius: 6, outline: overTarget === `crumb:${c.key}` ? '2px dashed var(--accent)' : undefined }}>
+                        {last
+                          ? <strong aria-current="page">{c.name}</strong>
+                          : <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPath(c.to)}>{c.name}</button>}
+                      </span>
+                    </span>
+                  )
+                })}
+              </nav>
+              {folders.length > 0 && (
+                <div className="dl-dash-grid" style={{ marginBlockEnd: 16 }}>
+                  {folders.map(f => (
+                    <div key={f.id} className="card dl-folder-tile" role="button" tabIndex={0}
+                      aria-label={t('folders.open', { name: f.name })}
+                      data-folder={f.name}
+                      {...dropTargetProps(`tile:${f.id}`, f.id, f.name)}
+                      data-drop-active={overTarget === `tile:${f.id}` ? 'true' : undefined}
+                      onClick={e => {
+                        if ((e.target as HTMLElement).closest('button, a, [role="menu"]')) return
+                        setPath([...trail.map(x => x.id), f.id])
+                      }}
+                      onKeyDown={e => {
+                        if (e.target !== e.currentTarget) return
+                        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setPath([...trail.map(x => x.id), f.id]) }
+                      }}
+                      style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer',
+                        outline: overTarget === `tile:${f.id}` ? '2px dashed var(--accent)' : undefined }}>
+                      <Folder size={28} aria-hidden style={{ color: 'var(--accent)', flex: 'none' }} />
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.name}</div>
+                        <div className="dl-muted-line" style={{ fontSize: 12 }}>
+                          {t('folders.count', { n: f.count })}
+                          {f.children.length > 0 && ` · ${t('folders.subfolders', { n: f.children.length })}`}
+                        </div>
+                      </div>
+                      {f.can_manage && (
+                        <ActionMenu
+                          label={t('folders.actions', { name: f.name })}
+                          items={[
+                            { key: 'subfolder', label: t('folders.new'), icon: <FolderPlus size={14} />,
+                              onSelect: () => void addFolder(f.id) },
+                            { key: 'rename', label: t('folders.rename'), icon: <Pencil size={14} />,
+                              onSelect: () => void renameFolder(f) },
+                            { key: 'delete', label: t('folders.delete'), icon: <Trash2 size={14} />, danger: true,
+                              onSelect: () => void removeFolder(f) },
+                          ]}
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {cards.length > 0 && grid(cards)}
+              {folders.length === 0 && cards.length === 0 && (
+                <p className="dl-fold__empty">{here ? t('folders.nothingHere') : t('folders.empty')}</p>
+              )}
+            </div>
+          )
+        }
 
         // One shape at every depth: the folder's own cards, then its
         // subfolders as smaller headings inside it. Nesting the <section>s
