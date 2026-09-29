@@ -1009,6 +1009,9 @@ def _fetch_and_compute(
 #: aggregation -- see `_needs_rows`.
 _ROW_LEVEL_KEYS = ("having", "suppress_below", "quick_calc", "sort_custom",
                    "dimension_levels", "dimension_granularity", "running",
+                   # Number ranges (services/auto_bin.py) when no bucket SQL
+                   # exists for the dialect: the shaper bins the fetched rows.
+                   "dimension_bin",
                    # A crosstab (E08): its grid is the import shaper's. The
                    # no-measure count path below refused it outright.
                    "dimension2",

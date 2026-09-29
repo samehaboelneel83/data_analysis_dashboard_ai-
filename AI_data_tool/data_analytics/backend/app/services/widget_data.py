@@ -927,6 +927,24 @@ def shape_series(df: pd.DataFrame, config: dict) -> dict:
         df = df.copy()
         df[dim] = _bucket_dimension(df[dim], dim_granularity)
 
+    # Equal-width number ranges (services/auto_bin.py): each value becomes the
+    # lower edge of its range, so the groups sort numerically and the labels
+    # ("0 – 50") are written after shaping. A column that is not numeric is
+    # left as it is, like a granularity on a non-date column above.
+    dim_bin = config.get("dimension_bin")
+    if isinstance(dim_bin, dict) and dim and dim in df.columns:
+        try:
+            width = float(dim_bin.get("width"))
+            origin = float(dim_bin.get("origin") or 0.0)
+        except (TypeError, ValueError):
+            width = 0.0
+        vals = pd.to_numeric(df[dim], errors="coerce")
+        if width > 0 and vals.notna().any():
+            df = df.copy()
+            df[dim] = np.floor((vals - origin) / width) * width + origin
+            if "sort_by" not in config:
+                sort_by, sort = "name", "asc"
+
     # 2. Raw table / list — no grouping requested. aggregation=none (or raw)
     # is the same intent with a measure set: list the column's row values
     # instead of collapsing them to one Sum. Live: a SUM() calculated column
