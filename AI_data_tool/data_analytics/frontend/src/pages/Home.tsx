@@ -6,6 +6,7 @@ import {
   ChevronDown, ChevronRight, Database, LayoutDashboard, type LucideIcon,
 } from 'lucide-react'
 import LoadError from '../components/ui/LoadError'
+import Loader from '../components/ui/Loader'
 import { formatTimeAgo, useT } from '../i18n'
 
 /**
@@ -72,16 +73,24 @@ const cardGrid: React.CSSProperties = {
 }
 
 /** One entity card: icon, name, a quiet subtitle, optional status chip. */
-function EntityCard({ to, icon: Icon, name, subtitle, chip, testId }: {
+function EntityCard({ to, icon: Icon, name, subtitle, chip, testId, onOpen }: {
   to: string
   icon: LucideIcon
   name: string
   subtitle: string | null
   chip?: React.ReactNode
   testId?: string
+  onOpen?: () => void
 }) {
+  // Only a plain left-click navigates THIS tab. Ctrl/Cmd/Shift/middle-click
+  // open elsewhere, and swapping Home for a loader there would strand it.
+  const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey
+      || e.shiftKey || e.altKey) return
+    onOpen?.()
+  }
   return (
-    <Link to={to} data-testid={testId} className="card"
+    <Link to={to} data-testid={testId} className="card" onClick={handleClick}
       style={{ display: 'block', padding: 14, textDecoration: 'none', color: 'var(--text)' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9 }}>
         <span aria-hidden style={{ display: 'inline-flex', flexShrink: 0, color: 'var(--accent)',
@@ -120,6 +129,12 @@ export default function Home() {
   const [recent, setRecent] = useState<RecentReport[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<unknown>(null)
+  // Set when a card is clicked. React Router 7 wraps navigation in a
+  // transition, so the router's Suspense fallback never shows while the next
+  // (lazy) page loads -- Home just sits there looking unresponsive. Home
+  // unmounts once the new page renders, which clears this naturally.
+  const [opening, setOpening] = useState(false)
+  const open = () => setOpening(true)
 
   const load = () => {
     setLoadError(null)
@@ -153,6 +168,8 @@ export default function Home() {
     </span>
   ) : undefined
 
+  if (opening) return <Loader label={t('common.loading')} />
+
   if (loadError) {
     return (
       <div>
@@ -183,7 +200,7 @@ export default function Home() {
             ) : (
               <div style={cardGrid}>
                 {recent.map(r => (
-                  <EntityCard key={r.id} to={`/reports/${r.id}`} icon={LayoutDashboard}
+                  <EntityCard key={r.id} onOpen={open} to={`/reports/${r.id}`} icon={LayoutDashboard}
                     testId={`home-recent-${r.id}`}
                     name={r.name} chip={draftChip(r)}
                     subtitle={formatTimeAgo(r.viewed_at, t)
@@ -201,7 +218,7 @@ export default function Home() {
             ) : (
               <div style={cardGrid}>
                 {(mine.length > 0 ? mine : reports.slice(0, RECENT_LIMIT)).map(r => (
-                  <EntityCard key={r.id} to={`/reports/${r.id}`} icon={LayoutDashboard}
+                  <EntityCard key={r.id} onOpen={open} to={`/reports/${r.id}`} icon={LayoutDashboard}
                     name={r.name} chip={draftChip(r)}
                     subtitle={r.my_capability === 'view'
                       ? t('home.viewOnly')
@@ -220,7 +237,7 @@ export default function Home() {
             ) : (
               <div style={cardGrid}>
                 {recentDatasets.map(d => (
-                  <EntityCard key={d.id} to={`/datasets/${d.id}`} icon={Database}
+                  <EntityCard key={d.id} onOpen={open} to={`/datasets/${d.id}`} icon={Database}
                     testId={`home-dataset-${d.id}`}
                     name={d.name}
                     chip={d.mode === 'directquery' ? (

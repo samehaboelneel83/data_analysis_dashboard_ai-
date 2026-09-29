@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import Home from './Home'
 import { datasetsApi, reportsApi, pinsApi } from '../services/api'
 import { axeViolations } from '../test/axe'
@@ -218,3 +218,36 @@ describe('Home accessibility', () => {
     expect(await axeViolations(container)).toEqual([])
   })
 })
+
+/**
+ * Router 7 navigates inside a transition, so the route-level Suspense loader
+ * never appears while the next page's chunk loads. Home must show it itself
+ * the moment a card is clicked -- otherwise the click looks ignored.
+ */
+describe('opening a card', () => {
+  it('shows the loader as soon as a card is clicked', async () => {
+    vi.mocked(datasetsApi.list).mockResolvedValue([dataset({ id: 7, name: 'orders' })] as never)
+    render(
+      <MemoryRouter>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          {/* A page that never finishes loading: only the loader should be visible. */}
+          <Route path="/datasets/:id" element={<Never />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    fireEvent.click(await screen.findByTestId('home-dataset-7'))
+    expect(await screen.findByRole('status')).toBeInTheDocument()
+  })
+
+  it('does not swap in the loader for a modified click (new tab)', async () => {
+    vi.mocked(datasetsApi.list).mockResolvedValue([dataset({ id: 7, name: 'orders' })] as never)
+    renderHome()
+    const card = await screen.findByTestId('home-dataset-7')
+    fireEvent.click(card, { ctrlKey: true })
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    expect(screen.getByTestId('home-dataset-7')).toBeInTheDocument()
+  })
+})
+
+function Never(): never { throw new Promise(() => {}) }
