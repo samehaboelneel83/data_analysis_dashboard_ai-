@@ -19,6 +19,8 @@ vi.mock('../contexts/AuthContext', () => ({
 }))
 // The bell fetches on mount; it has its own tests.
 vi.mock('./NotificationsBell', () => ({ default: () => <div data-testid="bell" /> }))
+// The model light polls the API; it has its own tests (LlmPicker.test.tsx).
+vi.mock('./LlmPicker', () => ({ default: () => <div data-testid="llm-picker" /> }))
 
 const renderAt = (path: string) =>
   render(<MemoryRouter initialEntries={[path]}><TopBar /></MemoryRouter>)

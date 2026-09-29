@@ -14,7 +14,9 @@ vi.mock('../../services/api', async () => {
   const actual = await vi.importActual<Record<string, unknown>>('../../services/api')
   return {
     ...actual,
-    platformSettingsApi: { get: vi.fn(), save: vi.fn(), testLlm: vi.fn() },
+    platformSettingsApi: { get: vi.fn(), save: vi.fn(), testLlm: vi.fn(),
+      // The endpoint list has its own tests (LlmEndpointsPanel.test.tsx).
+      getLlmEndpoints: vi.fn(() => new Promise(() => {})), saveLlmEndpoints: vi.fn(), resetLlmEndpoints: vi.fn() },
     mapSettingsApi: { get: vi.fn(), set: vi.fn() },
   }
 })

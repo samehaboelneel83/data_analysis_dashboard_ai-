@@ -4,6 +4,7 @@ import { CRUMB_EVENT, type CrumbDetail } from '../lib/crumb'
 import { useAuth } from '../contexts/AuthContext'
 import NotificationsBell from './NotificationsBell'
 import LanguageSwitcher from './LanguageSwitcher'
+import LlmPicker from './LlmPicker'
 import { messageForPath, SECTION_MESSAGE, useT } from '../i18n'
 import { sectionForPath } from './navigation'
 import { ChevronDown, ChevronRight, LogOut, Menu, Moon, Search, Sun } from 'lucide-react'
@@ -146,6 +147,8 @@ export default function TopBar({ onOpenNav, theme, onToggleTheme }: {
             background: 'var(--surface)' }}>Ctrl K</span>
         )}
       </button>
+
+      <LlmPicker />
 
       <LanguageSwitcher />
 

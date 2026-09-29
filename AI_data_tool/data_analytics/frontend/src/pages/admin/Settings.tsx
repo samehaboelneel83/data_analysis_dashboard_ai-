@@ -6,6 +6,7 @@ import { AuthContext } from '../../contexts/AuthContext'
 import { useT } from '../../i18n'
 import { platformSettingsApi, type PlatformSetting, type PlatformSettingsOut } from '../../services/api'
 import BasemapSettings from '../../components/admin/BasemapSettings'
+import LlmEndpointsPanel from '../../components/admin/LlmEndpointsPanel'
 import LoadError from '../../components/ui/LoadError'
 import LoadingState from '../../components/ui/LoadingState'
 
@@ -196,6 +197,7 @@ function PlatformSettings() {
         <details key={c.id} className="card dl-settings__group" open={Boolean(q) || OPEN_BY_DEFAULT.has(c.id)}>
           <summary><h3 style={{ display: 'inline', fontSize: 14 }}>{c.label}</h3>
             <span style={{ color: 'var(--muted)', fontSize: 12 }}> · {c.settings.length}</span></summary>
+          {c.id === 'ai' && <LlmEndpointsPanel />}
           {c.settings.map(s => (
             <SettingRow key={s.key} s={s} draft={drafts[s.key]} busy={busy}
               onChange={d => setDrafts(ds => ({ ...ds, [s.key]: d }))} onReset={() => void reset(s.key)} />

@@ -833,7 +833,7 @@ llm_reserved_interactive = 2</code></pre>
   <p class="owns"><strong>Owns:</strong> the HTTP surface, identity, and everything that leaves the system.</p>
 
   <h3>Routers</h3>
-  <p><strong>34 router modules</strong>, mounted with 34 <code>include_router</code> calls in <code>main.py</code> — <code>analysis</code> and <code>metadata</code> each expose a second router. All under <code>/api/v1</code> except the agent.</p>
+  <p><strong>35 router modules</strong>, mounted with 37 <code>include_router</code> calls in <code>main.py</code> — <code>analysis</code> and <code>metadata</code> each expose a second router. All under <code>/api/v1</code> except the agent.</p>
   <div class="scroll">
     <table>
       <thead><tr><th>Router</th><th>Surface</th></tr></thead>
@@ -1161,8 +1161,8 @@ llm_reserved_interactive = 2</code></pre>
     <table>
       <thead><tr><th>Suite</th><th>Scope</th><th>Count</th></tr></thead>
       <tbody>
-        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~6,670 tests · 426 modules</td></tr>
-        <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~3,410 tests · 248 files</td></tr>
+        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~6,670 tests · 428 modules</td></tr>
+        <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~3,410 tests · 250 files</td></tr>
         <tr><th>Evals</th><td><code>backend/evals/</code></td><td>Agent quality gates (<code>run_eval_gate.ps1</code>)</td></tr>
         <tr><th>Conformance</th><td><code>tests/test_layer_conformance.py</code></td><td>Enforces the layer boundaries above</td></tr>
         <tr><th>Doc audit</th><td><code>tests/test_architecture_doc.py</code></td><td>Enforces the <em>counts</em> in this document</td></tr>
