@@ -228,3 +228,7 @@ def clear_widget_data_cache() -> None:
     _inprocess_backend.delete_prefix("")
     if _valkey_backend is not None:
         _valkey_backend.delete_prefix("")
+    # The auto-bin stats (min/max/distinct per column) are a cache of the
+    # same data: a full clear clears them too.
+    from .auto_bin import clear_stats_cache
+    clear_stats_cache()

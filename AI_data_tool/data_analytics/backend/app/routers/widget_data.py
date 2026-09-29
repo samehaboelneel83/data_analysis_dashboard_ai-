@@ -208,11 +208,12 @@ def _bin_kind(ds_like, req: WidgetDataRequest) -> str | None:
     """'date' | 'number' when this widget should be auto-binned, else None."""
     from ..services import auto_bin
     cfg = req.config or {}
-    if not auto_bin.wants_bins(cfg, req.widget_type or "bar"):
-        return None
     col = next((c for c in (getattr(ds_like, "columns", None) or [])
                 if c.name == cfg.get("dimension")), None)
-    return auto_bin.column_kind(getattr(col, "dtype", None)) if col is not None else None
+    kind = auto_bin.column_kind(getattr(col, "dtype", None)) if col is not None else None
+    if kind is None or not auto_bin.wants_bins(cfg, req.widget_type or "bar", kind):
+        return None
+    return kind
 
 
 def _without_bin_keys(req: WidgetDataRequest) -> WidgetDataRequest:
@@ -571,8 +572,13 @@ async def _resolve_widget_data(
             cfg = req.config or {}
             dim = cfg["dimension"]
             window, stat_filters = _bin_stats_filters(cfg, dim, bin_kind)
-            key = _json.dumps(["dq", ds.id, source.id, source.cache_epoch, dq_ds.source_query,
+            # The connection's own settings and the table are in the key, not
+            # just ids: a stats entry must never outlive the thing it measured.
+            key = _json.dumps(["dq", ds.id, source.id, source.cache_epoch, source_cfg,
+                               getattr(dq_ds, "source_table", None), dq_ds.source_query,
                                dim, stat_filters, rls_filter_expr], sort_keys=True, default=str)
+            import hashlib as _hashlib
+            key = _hashlib.sha256(key.encode()).hexdigest()   # no credential kept as a key
             try:
                 stats = await asyncio.to_thread(
                     auto_bin.stats_cached, key,
@@ -583,8 +589,13 @@ async def _resolve_widget_data(
             if stats is not None:
                 bin_plan = auto_bin.plan_bins(cfg, req.widget_type or "bar", bin_kind, stats, window)
                 expr = (auto_bin.bucket_sql(_connectors.sql_family_of(source_cfg) or "", _quote(dim), bin_plan)
-                        if bin_plan.grouped else None)
-                if bin_plan.grouped and expr:
+                        if bin_plan.grouped and bin_kind != "text" else None)
+                if bin_kind == "text" and bin_plan.top_n:
+                    # Top N at the source; "All Other" is one more query after it.
+                    measure_names = {m.get("name") for m in measure_defs}
+                    new_cfg = (auto_bin.import_config(cfg, bin_plan) if cfg.get("measure") in measure_names
+                               else auto_bin.dq_top_config(cfg, bin_plan))
+                elif bin_plan.grouped and expr:
                     dq_ds = _DirectQueryBinView(dq_ds, expr, bin_kind)
                     new_cfg = auto_bin.dq_config(cfg, bin_plan)
                 else:
@@ -646,6 +657,21 @@ async def _resolve_widget_data(
                         bin_plan = None
             else:
                 result = await run(dq_ds, req)
+            if (bin_plan is not None and bin_plan.kind == "text" and bin_plan.top_n
+                    and (req.config or {}).get("limit") == bin_plan.top_n and isinstance(result, dict)
+                    and isinstance(result.get("rows"), list)):
+                from ..services import auto_bin
+                from ..services import connectors as _connectors
+                shown = [r.get("name") for r in result["rows"] if isinstance(r, dict)]
+                try:
+                    other = await asyncio.to_thread(
+                        auto_bin.dq_other, source_cfg, dq_ds, req.config, shown, rls_filter_expr,
+                        _connectors.sql_family_of(source_cfg) or "")
+                except Exception as e:  # noqa: BLE001 -- the top N still stand on their own
+                    _log.info("All Other declined for dataset %s: %s", ds.id, type(e).__name__)
+                    other = None
+                if other is not None:
+                    result["rows"].append({"name": auto_bin.OTHER_LABEL, "value": other[0]})
             if bin_plan is not None:
                 from ..services import auto_bin
                 result = auto_bin.finish(result, bin_plan)

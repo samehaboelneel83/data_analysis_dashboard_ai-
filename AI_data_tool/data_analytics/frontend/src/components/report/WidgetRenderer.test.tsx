@@ -158,10 +158,11 @@ describe('WidgetRenderer multi-value cross-filters', () => {
       </CrossFilterProvider>
     )
 
-    await waitFor(() => expect(widgetDataApi.query).toHaveBeenCalled())
-    const calls = vi.mocked(widgetDataApi.query).mock.calls
-    const [, config] = calls[calls.length - 1]
-    expect((config as any).filters).toContainEqual({ column: 'region', op: 'in', value: ['North', 'South'] })
+    // The filter lands just after mount; the refetch it causes waits FILTER_SETTLE_MS.
+    await waitFor(() => {
+      const [, config] = vi.mocked(widgetDataApi.query).mock.calls.at(-1)!
+      expect((config as any).filters).toContainEqual({ column: 'region', op: 'in', value: ['North', 'South'] })
+    })
   })
 })
 
@@ -180,9 +181,10 @@ describe('WidgetRenderer cross-source column mapping', () => {
           datasetId={20} datasets={dsets} relationships={rels} />
       </CrossFilterProvider>
     )
-    await waitFor(() => expect(widgetDataApi.query).toHaveBeenCalled())
-    const [, config] = vi.mocked(widgetDataApi.query).mock.calls.at(-1)!
-    expect((config as any).filters).toContainEqual({ column: 'cust_country', op: 'in', value: ['FR'] })
+    await waitFor(() => {
+      const [, config] = vi.mocked(widgetDataApi.query).mock.calls.at(-1)!
+      expect((config as any).filters).toContainEqual({ column: 'cust_country', op: 'in', value: ['FR'] })
+    })
   })
 
   it('leaves a shared column name untouched and an unmodelled one as-is', async () => {
@@ -195,10 +197,11 @@ describe('WidgetRenderer cross-source column mapping', () => {
           datasetId={20} datasets={dsets} relationships={rels} />
       </CrossFilterProvider>
     )
-    await waitFor(() => expect(widgetDataApi.query).toHaveBeenCalled())
-    const [, config] = vi.mocked(widgetDataApi.query).mock.calls.at(-1)!
-    expect((config as any).filters).toContainEqual({ column: 'amount', op: 'in', value: [5] })
-    expect((config as any).filters).toContainEqual({ column: 'ghost', op: 'in', value: ['x'] })
+    await waitFor(() => {
+      const [, config] = vi.mocked(widgetDataApi.query).mock.calls.at(-1)!
+      expect((config as any).filters).toContainEqual({ column: 'amount', op: 'in', value: [5] })
+      expect((config as any).filters).toContainEqual({ column: 'ghost', op: 'in', value: ['x'] })
+    })
   })
 })
 
@@ -2705,5 +2708,23 @@ describe('letting go of data a widget no longer needs (E14)', () => {
     await act(async () => { await Promise.resolve() })
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(screen.queryByText(/could not|failed|error/i)).not.toBeInTheDocument()
+  })
+})
+
+
+describe('a burst of filter changes costs one refetch, not one per click', () => {
+  it('waits for the clicks to settle', async () => {
+    vi.mocked(widgetDataApi.query).mockReset()
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'A', value: 1 }], sampled: false })
+    const w = barWidget({ id: 2 })
+    const { rerender } = render(<CrossFilterProvider><WidgetRenderer widget={w} datasetId={10} /></CrossFilterProvider>)
+    await waitFor(() => expect(widgetDataApi.query).toHaveBeenCalledTimes(1))       // first load: at once
+    for (const v of ['a', 'b', 'c']) {
+      rerender(<CrossFilterProvider><WidgetRenderer widget={{ ...w, config: { ...w.config, filters: [{ column: 'region', op: 'eq', value: v }] } } as Widget} datasetId={10} /></CrossFilterProvider>)
+    }
+    await new Promise(r => setTimeout(r, 400))
+    expect(widgetDataApi.query).toHaveBeenCalledTimes(2)                          // one more, for 'c'
+    const [, config] = vi.mocked(widgetDataApi.query).mock.calls.at(-1)!
+    expect((config as any).filters).toContainEqual({ column: 'region', op: 'eq', value: 'c' })
   })
 })

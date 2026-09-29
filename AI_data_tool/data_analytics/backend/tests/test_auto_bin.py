@@ -284,3 +284,20 @@ class TestAuthorGrainOnLiveSource:
         assert [r["name"] for r in out["rows"]] == sorted(df["d"].dt.strftime("%Y-%m").unique())
         expected = int(df["qty"].sum()) if measure else len(df)
         assert sum(r["value"] for r in out["rows"]) == expected
+
+
+class TestScatter:
+    """A scatter groups by its x, so 5,670 distinct prices were 5,670 points
+    (dashboard 213). Past 500 it draws ranges, each at its midpoint on x."""
+
+    async def test_scatter_over_prices_is_ranged(self, client, db_session, two_orgs, auth_headers, ordersfile, engine):
+        path, df = ordersfile
+        ds = await _import_ds(db_session, two_orgs["a"]["org"], path)
+        out = await _post(client, auth_headers, ds.id, "scatter",
+                          {"dimension": "price", "measure": "qty", "aggregation": "sum"})
+        assert out["binning"]["grouped"] and len(out["rows"]) <= 500
+        assert all(r["bin_start"] < r["x"] < r["bin_end"] for r in out["rows"])
+        assert sum(r["value"] for r in out["rows"]) == int(df["qty"].sum())
+
+    def test_a_date_scatter_is_left_alone(self):
+        assert not auto_bin.wants_bins({"dimension": "d"}, "scatter", "date")

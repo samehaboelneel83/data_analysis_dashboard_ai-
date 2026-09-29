@@ -1,7 +1,8 @@
-import { lazy, memo, Suspense, useEffect, useState, useCallback, useMemo, useRef } from 'react'
+import { lazy, memo, Suspense, useContext, useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import type { PartialPeriod, RelativeNote } from '../../lib/relativeDates'
 import type { BrushRange } from './chartRenderers/axisOptions'
 import OverviewStrip from './chartRenderers/OverviewStrip'
+import { StaticChartsContext } from './chartRenderers/useChartViewport'
 import { createPortal } from 'react-dom'
 import { Copy, Trash2, MoreVertical, Link as LinkIcon } from 'lucide-react'
 import { widgetDataApi } from '../../services/api'
@@ -148,11 +149,45 @@ function isHeaderControl(target: EventTarget | null): boolean {
 
 /** The server's account of auto-binning (services/auto_bin.py `finish`). */
 export interface Binning {
-  column: string; kind: 'date' | 'number'; grouped: boolean
+  column: string; kind: 'date' | 'number' | 'text'; grouped: boolean
+  top_n?: number | null; top_n_choices?: number[] | null
   grain?: string | null; width?: number | null; target?: number; distinct?: number
   buckets?: number | null; window?: [unknown, unknown] | null; finest?: boolean
 }
 interface StripRowLike { name?: unknown; value?: unknown; bin_start?: unknown; bin_end?: unknown }
+
+/** How long a chart waits after a filter change for the next one before it
+ *  asks the server again. Long enough to swallow a burst of clicks, short
+ *  enough not to be felt. */
+export const FILTER_SETTLE_MS = 250
+
+/** Rows a raw table asks the server for at a time (and again on each scroll
+ *  to the bottom). A tile shows about twenty; the rest are one scroll away. */
+export const TABLE_PAGE = 200
+
+/** A table of the data's own rows -- no grouping -- which the server can page. */
+export function isRawTable(widgetType: string, cfg: Record<string, unknown>): boolean {
+  if (widgetType !== 'table') return false
+  if (cfg.dimension || cfg.dimension2 || cfg.dimension_levels) return false
+  const agg = String(cfg.aggregation ?? '').toLowerCase()
+  return !cfg.measure || agg === 'none' || agg === 'raw'
+}
+
+/** Append the next page to what is on screen. Display-rule styles arrive
+ *  indexed from the page's first row, so they are shifted by `offset`. */
+export function mergeTablePage(prev: any, next: any, offset: number): any {
+  const rows = [...(prev.rows ?? []), ...(next.rows ?? [])]
+  let rule_styles = prev.rule_styles
+  const nr = next.rule_styles
+  if (nr && (nr.rows?.length || (nr.cells && Object.keys(nr.cells).length))) {
+    const baseRows: any[] = [...(prev.rule_styles?.rows ?? [])]
+    while (baseRows.length < offset) baseRows.push(null)
+    const cells: Record<string, any> = { ...(prev.rule_styles?.cells ?? {}) }
+    Object.entries(nr.cells ?? {}).forEach(([k, v]) => { cells[String(Number(k) + offset)] = v })
+    rule_styles = { ...(prev.rule_styles ?? { widget: {} }), rows: [...baseRows.slice(0, offset), ...(nr.rows ?? [])], cells }
+  }
+  return { ...prev, rows, rule_styles, page: { ...(prev.page ?? {}), loaded: rows.length } }
+}
 
 /** Charts whose axis the smart slider zooms: a continuous axis of dates or numbers. */
 const SMART_ZOOM_TYPES = new Set(['line', 'area', 'step', 'bar'])
@@ -165,11 +200,16 @@ export function binningLabel(b: Binning | undefined | null): string {
   if (!b?.grouped) return ''
   if (b.kind === 'date' && b.grain) return `by ${GRAIN_WORD[b.grain] ?? b.grain}`
   if (b.kind === 'number' && b.width) return `ranges of ${b.width.toLocaleString('en-US')}`
+  if (b.kind === 'text' && b.top_n) return `top ${b.top_n} + other`
   return 'grouped'
 }
 
 export function binningTitle(b: Binning | undefined | null): string {
   if (!b?.grouped) return ''
+  if (b.kind === 'text') {
+    return `${(b.distinct ?? 0).toLocaleString('en-US')} different ${b.column} values are too many to draw, so the chart shows the top ${b.top_n} and puts the rest together as "All Other". `
+      + 'Every row is still counted. Pick 10, 20 or 50 to see more or fewer.'
+  }
   const what = b.kind === 'date'
     ? `grouped by ${GRAIN_WORD[b.grain ?? ''] ?? b.grain}`
     : `grouped into ranges of ${(b.width ?? 0).toLocaleString('en-US')}`
@@ -341,6 +381,18 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
     setZoomSel(null); setZoom(null); setZoomLoading(false)
   }, [data])
   useEffect(() => () => zoomCtl.current?.abort(), [])
+
+  // ── Paged raw table ───────────────────────────────────────────────────────
+  // Printed and static charts read every row (a page cannot be scrolled on
+  // paper); everything interactive asks for TABLE_PAGE rows, then more.
+  const isStaticChart = useContext(StaticChartsContext)
+  const [loadingMore, setLoadingMore] = useState(false)
+  // The reader's own Top N choice (10 / 20 / 50) for a text axis the server
+  // cut down to its largest values. Widget-local and never saved, like a zoom.
+  const [topN, setTopN] = useState<number | null>(null)
+  const moreCtl = useRef<AbortController | null>(null)
+  useEffect(() => { moreCtl.current?.abort(); setLoadingMore(false) }, [refreshNonce])
+  useEffect(() => () => moreCtl.current?.abort(), [])
   // No clearing on new data here: the chart owns its window (useChartViewport)
   // and reports it for every series it draws, then null when it unmounts. A
   // parent effect runs AFTER the child's, so clearing here wiped the window
@@ -472,7 +524,12 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
         })
         return
       }
-      const result = await widgetDataApi.query(widgetDatasetId, mergedConfig, effectiveCalcCols, wt, { reportId, parameters, fresh, signal })
+      // A raw table asks for its first page only (see TABLE_PAGE / loadMore).
+      const queryConfig = !isStaticChart && isRawTable(wt, mergedConfig as Record<string, unknown>)
+        ? { ...mergedConfig, page: { offset: 0, size: TABLE_PAGE } }
+        : topN ? { ...mergedConfig, top_n: topN } : mergedConfig
+      moreCtl.current?.abort(); setLoadingMore(false)
+      const result = await widgetDataApi.query(widgetDatasetId, queryConfig, effectiveCalcCols, wt, { reportId, parameters, fresh, signal })
       if (signal.aborted) return
       setData(result)
       onFetchComplete?.(widget.id, {
@@ -503,7 +560,7 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
     }
     finally { if (!signal.aborted) setLoading(false) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [widgetDatasetId, widget.widget_type, JSON.stringify(mergedConfig), JSON.stringify(parameters ?? {}), dataOverride, getReceiveMode(widget.id), JSON.stringify(translatedCrossFilters), refreshNonce])
+  }, [widgetDatasetId, widget.widget_type, JSON.stringify(mergedConfig), JSON.stringify(parameters ?? {}), dataOverride, getReceiveMode(widget.id), JSON.stringify(translatedCrossFilters), refreshNonce, isStaticChart, topN])
 
   // Opt-in periodic reload interval (used below and by the lazy-fetch gate).
   // Clamped to >= 5s: a sub-second interval is a typo that would hammer the
@@ -535,8 +592,21 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
   }, [lazyEligible, hasBeenVisible])
 
   // Refetch only when config content actually changes (or first visibility).
+  // The first load goes at once. A CHANGE (a filter clicked, a slicer ticked)
+  // waits FILTER_SETTLE_MS for the next one: three quick clicks used to send
+  // three rounds of queries for every chart on the page, two of them for
+  // selections the reader had already moved past.
+  const firstFetchDone = useRef(false)
   useEffect(() => {
-    if (!lazyEligible || hasBeenVisible) fetchData()
+    if (lazyEligible && !hasBeenVisible) return
+    if (!firstFetchDone.current || dataOverride !== undefined) {
+      firstFetchDone.current = true
+      fetchData()
+      return
+    }
+    const id = setTimeout(() => { fetchData() }, FILTER_SETTLE_MS)
+    return () => clearTimeout(id)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchData, lazyEligible, hasBeenVisible])
 
   useEffect(() => {
@@ -611,6 +681,9 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
     // need nothing here -- their labels are the ones the server already reads
     // as a grain (infer_date_filter_grains).
     const shownBin = (zoom?.data ?? data) as { binning?: Binning; rows?: StripRowLike[] } | null
+    // "All Other" is not a value of the column: filtering the page to it would
+    // blank every other chart. It stays a slice to read, not to click.
+    if (shownBin?.binning?.kind === 'text' && shownBin.rows?.some(r => r.name === name && (r as { other?: boolean }).other)) return
     if (shownBin?.binning?.grouped && shownBin.binning.kind === 'number' && shownBin.binning.column === col) {
       const row = shownBin.rows?.find(r => r.name === name)
       if (row && typeof row.bin_start === 'number' && typeof row.bin_end === 'number') {
@@ -654,6 +727,27 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
       .finally(() => { if (!ctl.signal.aborted) setZoomLoading(false) })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [smartZoom, baseRows, widgetDatasetId, JSON.stringify(mergedConfig), JSON.stringify(effectiveCalcCols), widget.widget_type, reportId, JSON.stringify(parameters ?? {})])
+
+  /** The next page of a paged raw table, appended when the reader scrolls
+   *  near the bottom. One request at a time; a new base fetch cancels it. */
+  const loadMore = useCallback(() => {
+    const d = data as { page?: unknown; rows?: unknown[]; total?: number } | null
+    if (!d?.page || loadingMore || !widgetDatasetId) return
+    const have = d.rows?.length ?? 0
+    if (have >= (d.total ?? 0)) return
+    const ctl = new AbortController()
+    moreCtl.current = ctl
+    setLoadingMore(true)
+    widgetDataApi.query(widgetDatasetId, { ...mergedConfig, page: { offset: have, size: TABLE_PAGE } },
+      effectiveCalcCols, 'table', { reportId, parameters, signal: ctl.signal })
+      .then(res => {
+        if (ctl.signal.aborted) return
+        setData((prev: any) => prev?.page && (prev.rows?.length ?? 0) === have ? mergeTablePage(prev, res, have) : prev)
+      })
+      .catch(() => { /* the rows already on screen stay; the next scroll retries */ })
+      .finally(() => { if (!ctl.signal.aborted) setLoadingMore(false) })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, loadingMore, widgetDatasetId, JSON.stringify(mergedConfig), JSON.stringify(effectiveCalcCols), reportId, JSON.stringify(parameters ?? {})])
 
   const onZoomDrag = useCallback((a: number, b: number) => {
     if (!baseRows) return
@@ -1113,7 +1207,14 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
           <span data-testid="binning-chip" title={binningTitle(zoom?.data?.binning ?? binning)}
             style={{ fontSize: 9, padding: '1px 5px', borderRadius: 99, whiteSpace: 'nowrap',
               background: 'color-mix(in srgb, var(--accent) 14%, transparent)', color: 'var(--accent)' }}>
-            {binningLabel(zoom?.data?.binning ?? binning)}
+            {binning.kind === 'text' && binning.top_n_choices?.length ? (
+              <select aria-label="How many values to show" data-testid="top-n-select"
+                value={binning.top_n ?? ''} onClick={e => e.stopPropagation()}
+                onChange={e => setTopN(Number(e.target.value))}
+                style={{ font: 'inherit', color: 'inherit', background: 'transparent', border: 0, padding: 0, cursor: 'pointer' }}>
+                {binning.top_n_choices.map(n => <option key={n} value={n}>top {n} + other</option>)}
+              </select>
+            ) : binningLabel(zoom?.data?.binning ?? binning)}
           </span>
         )}
         {brushRange && (
@@ -1301,7 +1402,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
           </div>
         )}
         {!loading && !hiddenByRule && !smartZoom && (
-          <WidgetBody widget={viewAs && !editMode ? { ...widget, widget_type: viewAs as Widget['widget_type'] } : widget} data={data} fetchError={fetchError} onRetry={() => { void fetchData(true) }} localSelected={localSelected} onClickPoint={handleClick} broadcasts={broadcasts} allFormats={allFormats} checked={checked} onToggleSlicerValue={handleToggleSlicerValue} onButtonClick={handleButtonClick} ruleStyles={ruleStyles} parameters={parameters} geography={geography}
+          <WidgetBody onLoadMore={loadMore} loadingMore={loadingMore} widget={viewAs && !editMode ? { ...widget, widget_type: viewAs as Widget['widget_type'] } : widget} data={data} fetchError={fetchError} onRetry={() => { void fetchData(true) }} localSelected={localSelected} onClickPoint={handleClick} broadcasts={broadcasts} allFormats={allFormats} checked={checked} onToggleSlicerValue={handleToggleSlicerValue} onButtonClick={handleButtonClick} ruleStyles={ruleStyles} parameters={parameters} geography={geography}
             textFilter={textFilter} onSubmitTextFilter={handleSubmitTextFilter}
             onBrushChange={setBrushRange} brushNonce={brushNonce} onAnimationFrame={setAnimFrame}
             onAssignData={editMode ? () => window.dispatchEvent(new CustomEvent(ASSIGN_DATA_EVENT, { detail: { widgetId: widget.id } })) : undefined}

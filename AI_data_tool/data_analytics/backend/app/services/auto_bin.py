@@ -47,7 +47,17 @@ import pandas as pd
 #: `dimension` is put back to the reader's column.
 BIN_COL = "__bin__"
 
-CONFIG_KEYS = ("auto_bin", "bin_target", "bin_range")
+CONFIG_KEYS = ("auto_bin", "bin_target", "bin_range", "top_n")
+
+#: Text columns: how many values a chart shows before the rest become one
+#: "All Other" slice. Only charts where a category is a mark people compare --
+#: a line over 30,000 product ids is not a chart to rescue this way.
+TOP_N_DEFAULTS: dict[str, int] = {
+    "pie": 10, "donut": 10, "funnel": 10, "bar": 20, "dot_plot": 20, "treemap": 30,
+}
+#: The choices the chart's chip offers (and the only values accepted).
+TOP_N_CHOICES = (10, 20, 50)
+OTHER_LABEL = "All Other"   # the shaper's own Top-N residual label
 
 #: Buckets per chart type when the author set nothing. Chosen for readability,
 #: not for speed: a line stays a line at 150 points, a bar chart past ~50 bars
@@ -56,6 +66,9 @@ DEFAULT_TARGETS: dict[str, int] = {
     "line": 150, "area": 150, "step": 150,
     "bar": 50, "dot_plot": 60, "treemap": 50, "funnel": 20,
     "pie": 12, "donut": 12,
+    # One point per x value already (shape_series groups a scatter by its x),
+    # so 5,670 distinct prices were 5,670 points; 500 ranges draw the same cloud.
+    "scatter": 500,
 }
 
 #: Date grains, finest first, with their length in days (approximate is fine:
@@ -86,6 +99,10 @@ class BinPlan:
     window: tuple | None = None   # (start, end) the reader zoomed to
     full: tuple | None = None     # (lo, hi) of the data in the window
     extra_filters: list = field(default_factory=list)
+    #: text: how many values are shown before the rest become "All Other".
+    top_n: int | None = None
+    #: A scatter plots `x` on a numeric axis: each range sits at its midpoint.
+    point_x: bool = False
     #: False for a grain the AUTHOR chose, pushed down only for speed: the
     #: result then carries no `binning` (nothing was auto-grouped, and the
     #: page must not offer a zoom that would override the author's grain).
@@ -93,7 +110,7 @@ class BinPlan:
 
     @property
     def grouped(self) -> bool:
-        return self.grain is not None or self.width is not None
+        return self.grain is not None or self.width is not None or self.top_n is not None
 
 
 # ── eligibility ────────────────────────────────────────────────────────────
@@ -104,10 +121,24 @@ def column_kind(dtype: str | None) -> str | None:
         return "date"
     if d in ("numeric", "number", "integer", "float", "int", "decimal"):
         return "number"
+    if d in ("categorical", "text", "string", "object", "category", "boolean", "bool"):
+        return "text"
     return None
 
 
-def wants_bins(config: dict, widget_type: str) -> bool:
+def top_n_of(config: dict, widget_type: str) -> int:
+    try:
+        n = int(config.get("top_n") or 0)
+    except (TypeError, ValueError):
+        n = 0
+    return n if n in TOP_N_CHOICES else TOP_N_DEFAULTS.get(widget_type, 20)
+
+
+def wants_bins(config: dict, widget_type: str, kind: str | None = None) -> bool:
+    if kind == "text" and widget_type not in TOP_N_DEFAULTS:
+        return False
+    if widget_type == "scatter" and kind != "number":
+        return False
     if widget_type not in DEFAULT_TARGETS:
         return False
     if config.get("auto_bin") is False:
@@ -234,10 +265,19 @@ def choose_grain(lo: datetime, hi: datetime, target: int) -> str:
 def plan_bins(config: dict, widget_type: str, kind: str, stats: Stats,
               window: tuple | None = None) -> BinPlan:
     column = config["dimension"]
+    if kind == "text":
+        n = top_n_of(config, widget_type)
+        plan = BinPlan(column=column, kind="text", target=n, distinct=int(stats.distinct or 0))
+        # One more value than N fits as itself: an "All Other" of one value
+        # would hide a name to save nothing.
+        if plan.distinct > n + 1:
+            plan.top_n = n
+        return plan
     target = target_of(config, widget_type)
     plan = BinPlan(column=column, kind=kind, target=target, distinct=int(stats.distinct or 0),
                    window=window, full=(stats.lo, stats.hi) if stats.lo is not None else None,
-                   extra_filters=window_filters(column, kind, window))
+                   extra_filters=window_filters(column, kind, window),
+                   point_x=widget_type == "scatter")
     if stats.lo is None or stats.hi is None or plan.distinct <= target:
         return plan                      # the raw values already fit
     if kind == "date":
@@ -281,6 +321,8 @@ def clear_stats_cache() -> None:
 
 
 def _stats_from_series(s: pd.Series, kind: str) -> Stats:
+    if kind == "text":
+        return Stats(None, None, int(s.dropna().nunique()))
     if kind == "date":
         s = s if pd.api.types.is_datetime64_any_dtype(s) else pd.to_datetime(s, errors="coerce")
         if getattr(s.dt, "tz", None) is not None:
@@ -315,10 +357,11 @@ def import_stats(file_path: str, column: str, kind: str, filters: list[dict]) ->
         import duckdb
         from .duck_agg import _quote_ident, _source_expr
         col = _quote_ident(column)
-        val = f"TRY_CAST({col} AS TIMESTAMP)" if kind == "date" else f"TRY_CAST({col} AS DOUBLE)"
+        val = (f"TRY_CAST({col} AS TIMESTAMP)" if kind == "date"
+               else f"TRY_CAST({col} AS DOUBLE)" if kind == "number" else col)
         where, params = [], []
         ops = {"gt": ">", "gte": ">=", "lt": "<", "lte": "<="}
-        for f in filters:
+        for f in (filters if kind != "text" else []):
             v = _to_dt(f.get("value")) if kind == "date" else _to_num(f.get("value"))
             if v is None or f.get("op") not in ops:
                 continue
@@ -335,6 +378,8 @@ def import_stats(file_path: str, column: str, kind: str, filters: list[dict]) ->
         if kind == "number":
             lo = float(lo) if lo is not None else None
             hi = float(hi) if hi is not None else None
+        if kind == "text":
+            lo = hi = None
         return Stats(lo, hi, int(n or 0))
     except Exception:  # noqa: BLE001 -- fall back to the frame
         from .widget_data import load_file
@@ -357,8 +402,10 @@ def dq_stats(source_cfg: dict, dataset, column: str, kind: str, filters: list[di
         lo, hi, n = conn.execute(text(sql), {**(rls_params or {}), **params}).one()
     if kind == "date":
         lo, hi = _to_dt(lo), _to_dt(hi)
-    else:
+    elif kind == "number":
         lo, hi = _to_num(lo), _to_num(hi)
+    else:
+        lo = hi = None
     return Stats(lo, hi, int(n or 0))
 
 
@@ -506,7 +553,18 @@ def finish(result: dict, plan: BinPlan) -> dict:
     if result.get("dimension") == BIN_COL:
         result["dimension"] = plan.column
     rows = result.get("rows")
-    if plan.grouped and isinstance(rows, list):
+    if plan.kind == "text" and plan.top_n and isinstance(rows, list):
+        # Other is always last, whatever order the reader asked for; the
+        # truncation note would say values were cut -- they were not, they
+        # are inside Other.
+        other = [r for r in rows if isinstance(r, dict) and r.get("name") == OTHER_LABEL]
+        rest = [r for r in rows if not (isinstance(r, dict) and r.get("name") == OTHER_LABEL)]
+        for r in other:
+            r["other"] = True
+        result["rows"] = rows = rest + other
+        if isinstance(result.get("truncation"), dict):
+            result["truncation"] = {**result["truncation"], "applied": False, "reason": "top_n"}
+    elif plan.grouped and isinstance(rows, list):
         for r in rows:
             if not isinstance(r, dict) or r.get("name") is None:
                 continue
@@ -517,6 +575,8 @@ def finish(result: dict, plan: BinPlan) -> dict:
                 hi = lo + plan.width
                 r["bin_start"], r["bin_end"] = lo, hi
                 r["name"] = number_label(lo, hi)
+                if plan.point_x:
+                    r["x"] = lo + plan.width / 2
             else:
                 start = grain_start(r["name"], plan.grain)
                 if start is None:
@@ -536,13 +596,15 @@ def finish(result: dict, plan: BinPlan) -> dict:
         "grouped": plan.grouped,
         "grain": plan.grain,
         "width": plan.width,
+        "top_n": plan.top_n,
+        "top_n_choices": list(TOP_N_CHOICES) if plan.kind == "text" else None,
         "target": plan.target,
         "distinct": plan.distinct,
         "buckets": len(rows) if isinstance(rows, list) else None,
         "window": ([_iso(plan.window[0]), _iso(plan.window[1])] if plan.kind == "date"
                    else list(plan.window)) if plan.window else None,
         # What finer grain a zoom could reach; None at the raw values.
-        "finest": plan.grain is None and plan.width is None,
+        "finest": plan.grain is None and plan.width is None and plan.top_n is None,
     }
     return result
 
@@ -555,6 +617,9 @@ def import_config(config: dict, plan: BinPlan) -> dict:
         out["dimension_granularity"] = plan.grain
     elif plan.kind == "number" and plan.width:
         out["dimension_bin"] = {"width": plan.width, "origin": plan.origin}
+    elif plan.kind == "text" and plan.top_n:
+        out["rank"] = {"mode": "top", "n": plan.top_n, "other": True}
+        return out
     if plan.grouped and "sort_by" not in config:
         out["sort_by"], out["sort"] = "name", "asc"
     return out
@@ -570,3 +635,63 @@ def dq_config(config: dict, plan: BinPlan) -> dict:
         if "sort_by" not in config:
             out["sort_by"], out["sort"] = "name", "asc"
     return out
+
+
+# ── Top N + "All Other" on a live source ───────────────────────────────────
+
+def dq_top_config(config: dict, plan: BinPlan) -> dict:
+    """The N largest values, as an ordinary pushed-down GROUP BY ... LIMIT N.
+    (The shaper's own `rank` would fetch every row to rank them in Python.)"""
+    out = strip_keys(config)
+    out["sort_by"], out["sort"], out["limit"] = "value", "desc", plan.top_n
+    out.pop("sort_col", None)
+    return out
+
+
+def dq_other(source_cfg: dict, dataset, config: dict, shown: list, rls_filter_expr: str | None,
+             dialect: str):
+    """The "All Other" value: the chart's own aggregation over every row whose
+    value is not one of the N shown -- one more small query at the source. An
+    aggregate of the hidden groups' aggregates would be wrong for avg/min/max;
+    this is the same number the shaper's rank computes from raw rows.
+    Returns (value, rows) or None when this chart's aggregation has no SQL here."""
+    from sqlalchemy import text
+    from .direct_query import (_SUPPORTED_FILTER_OPS, _agg_sql, _base_query_sql, _build_where,
+                               _finalize_for_dialect, _quote, _translate_rls, get_engine)
+    filters = config.get("filters") or []
+    if any(f.get("granularity") or f.get("op") not in _SUPPORTED_FILTER_OPS for f in filters):
+        return None
+    meas = config.get("measure") or None
+    agg = (config.get("aggregation") or ("sum" if meas else "count")).lower()
+    if not meas or agg == "count":
+        value_sql = "COUNT(*)"
+    elif agg in ("countd", "distinct"):
+        value_sql = f"COUNT(DISTINCT {_quote(meas)})"
+    else:
+        try:
+            value_sql = _agg_sql(agg, _quote(meas), dialect)
+        except Exception:  # noqa: BLE001 -- percentiles on a dialect without them, pct, ...
+            return None
+    rls_where, rls_params = _translate_rls(dataset, rls_filter_expr)
+    base = _base_query_sql(dataset, rls_where)
+    where, params = _build_where(filters)
+    dim = _quote(config["dimension"])
+    clauses = ([where] if where else []) + [f"{dim} IS NOT NULL"]
+    if shown:
+        keys = [f"o{i}" for i in range(len(shown))]
+        params.update(dict(zip(keys, shown)))
+        clauses.append(f"{dim} NOT IN ({', '.join(':' + k for k in keys)})")
+    sql = _finalize_for_dialect(
+        f"SELECT {value_sql}, COUNT(*) FROM ({base}) AS other_src WHERE {' AND '.join(clauses)}", dialect)
+    engine = get_engine(source_cfg)
+    with engine.connect() as conn:
+        value, n = conn.execute(text(sql), {**(rls_params or {}), **params}).one()
+    if not n:
+        return None
+    try:
+        value = float(value) if value is not None else None
+        if value is not None and value.is_integer() and value_sql.startswith("COUNT"):
+            value = int(value)
+    except (TypeError, ValueError):
+        pass
+    return value, int(n)

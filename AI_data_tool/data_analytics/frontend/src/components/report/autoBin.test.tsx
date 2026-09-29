@@ -60,3 +60,27 @@ describe('a grouped chart on the page', () => {
     expect(screen.queryByTestId('overview-strip')).not.toBeInTheDocument()
   })
 })
+
+describe('Top N + All Other on a text axis', () => {
+  const topBinning: Binning = { column: 'product', kind: 'text', grouped: true, top_n: 10,
+    top_n_choices: [10, 20, 50], target: 10, distinct: 32951, buckets: 11 }
+  const donut = (): Widget => ({ id: 8, page_id: 1, widget_type: 'donut', title: 'Products',
+    config: { dimension: 'product', measure: 'price' }, layout: { x: 0, y: 0, w: 6, h: 5 }, created_at: '2026-01-01' } as Widget)
+  const rows = [...Array.from({ length: 10 }, (_, i) => ({ name: `p${i}`, value: 100 - i })),
+    { name: 'All Other', value: 5000, other: true }]
+
+  it('labels the chip and says every row is counted', () => {
+    expect(binningLabel(topBinning)).toBe('top 10 + other')
+    expect(binningTitle(topBinning)).toMatch(/32,951 different product values.*top 10.*All Other.*Every row is still counted/)
+  })
+
+  it('lets the reader ask for 50, which asks the server again', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ type: 'series', rows, binning: topBinning } as never)
+    render(<CrossFilterProvider><WidgetRenderer widget={donut()} datasetId={3} eagerFetch /></CrossFilterProvider>)
+    const select = await screen.findByTestId('top-n-select')
+    expect(select).toHaveValue('10')
+    const { fireEvent } = await import('@testing-library/react')
+    fireEvent.change(select, { target: { value: '50' } })
+    await waitFor(() => expect(vi.mocked(widgetDataApi.query).mock.calls.some(c => (c[1] as any).top_n === 50)).toBe(true))
+  })
+})
