@@ -52,20 +52,11 @@ export default function InsightsHub() {
   const load = () => {
     setLoadError(null)
     return datasetsApi.list()
-      .then(ds => {
-        setDatasets(ds)
-        // The API's own order is not a recency guarantee, and there is no
-        // "last opened" signal anywhere in the app (Home.tsx's own Recents
-        // falls back to created_at for the identical reason) -- this is the
-        // one honest default available without inventing new backend state.
-        // A user landing on the hub almost always wants to know something
-        // about the dataset they were just working with, not dataset #1.
-        if (ds.length > 0) {
-          const mostRecent = [...ds].sort((a, b) =>
-            new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime())[0]
-          setSelected(mostRecent.id)
-        }
-      })
+      // No dataset is chosen for the reader. Picking one starts a scan of it,
+      // and a scan the reader did not ask for -- of whichever dataset
+      // happened to be newest -- costs a wait and shows answers about data
+      // they were not asking about. The page opens asking them to choose.
+      .then(ds => { setDatasets(ds) })
       .catch(setLoadError)
   }
   useEffect(() => { load().finally(() => setLoading(false)) }, [])
@@ -126,9 +117,10 @@ export default function InsightsHub() {
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
             <label htmlFor="insights-hub-dataset" style={{ fontSize: 12, color: 'var(--muted)' }}>{t('insights.dataset')}</label>
             <select id="insights-hub-dataset" value={selected ?? ''}
-              onChange={e => setSelected(Number(e.target.value))}
+              onChange={e => setSelected(e.target.value ? Number(e.target.value) : null)}
               style={{ fontSize: 12, padding: '6px 8px', background: 'var(--surface2)',
                 border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)', minWidth: 240 }}>
+              <option value="" disabled>{t('insights.choose')}</option>
               {(noMatches ? datasets : filtered).map(d => (
                 <option key={d.id} value={d.id}>
                   {d.name}{d.mode === 'directquery' ? ' · live' : ''}
@@ -137,6 +129,12 @@ export default function InsightsHub() {
             </select>
             {input}
           </div>
+
+          {selected == null && (
+            <p data-testid="insights-pick-first" style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 16px' }}>
+              {t('insights.pickFirst')}
+            </p>
+          )}
 
           {isDirectQuery && current && (
             <div style={{ marginBottom: 16, padding: 14, background: 'var(--surface)',

@@ -347,6 +347,8 @@ export const en = {
   'insights.subtitle': 'Pick a dataset, then ask it a question. Every capability here runs on the same secured data your widgets read.',
   'insights.empty': 'No datasets yet — upload one or connect a database first.',
   'insights.dataset': 'Dataset',
+  'insights.choose': 'Choose a dataset…',
+  'insights.pickFirst': 'Choose a dataset to scan it for what stands out.',
   'insights.live': 'Live datasets are not scanned here — the preview would query the source on every visit. Open the dataset to explore it, or pick an imported dataset for a scan.',
   'insights.openDataset': 'Open dataset →',
 
