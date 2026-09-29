@@ -3,7 +3,6 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { Bot, History } from 'lucide-react'
 import EmptyState from '../components/ui/EmptyState'
 import ChatPane from '../components/chat/ChatPane'
-import Composer from '../components/chat/Composer'
 import { agentApi, datasetsApi, dataSourcesApi } from '../services/api'
 import type { AgentConversation, DatasetColumn } from '../services/api'
 import { useT } from '../i18n'
@@ -194,14 +193,12 @@ export default function AskAI() {
             <h1 id="dl-ask-title" className="dl-ask__title">{t('ask.hero.title')}</h1>
             <p className="dl-ask__sub">{t('ask.hero.sub')}</p>
             <div className="dl-ask__steps">
+              {/* One step only: the question box appears once data is chosen
+                  (the scoped view below), so a locked preview of it here was
+                  a second control that could not be used. */}
               <div className="dl-ask__step">
-                <span className="dl-ask__step-label"><b aria-hidden>1</b>{t('ask.step1')}</span>
+                <span className="dl-ask__step-label">{t('ask.step1')}</span>
                 <DataPicker items={items} value="" onChoose={choose} size="hero" loading={loading} />
-              </div>
-              <div className="dl-ask__step dl-ask__step--locked">
-                <span className="dl-ask__step-label"><b aria-hidden>2</b>{t('ask.step2')}</span>
-                <Composer value="" onChange={() => {}} onSend={() => {}} locked lockedHint={t('ask.lockedHint')} />
-                <p className="dl-ask__step-hint">{t('ask.pick')}</p>
               </div>
             </div>
           </section>

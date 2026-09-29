@@ -555,7 +555,6 @@ export const en = {
 
   'ask.noData': 'No data yet — upload a dataset or add a connection first.',
   'ask.uploadDataset': 'Upload a dataset',
-  'ask.pick': 'Pick a dataset or connection first, then your question goes here.',
   'ask.pickHint': 'Answers come back with the rows behind them; the SQL is one click away.',
   'ask.newChat': 'New chat',
   'ask.conversations': 'Conversations',
@@ -606,8 +605,7 @@ export const en = {
   'ai.limit.resets': 'Your organization has reached its AI limit for now. It resets {when}.',
   'ask.hero.title': 'Ask your data anything',
   'ask.hero.sub': 'Pick a dataset, ask in plain language, and get answers with the rows and SQL behind them.',
-  'ask.step1': 'Step 1 — Choose your data',
-  'ask.step2': 'Step 2 — Ask your question',
+  'ask.step1': 'Choose your data',
   'ask.lockedHint': 'Choose your data first to start asking…',
   'ask.placeholder': 'Ask a question about this data…',
   'ask.questionLabel': 'Your question',

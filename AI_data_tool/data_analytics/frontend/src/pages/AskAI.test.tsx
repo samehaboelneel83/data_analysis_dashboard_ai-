@@ -53,7 +53,7 @@ const renderAt = (path: string) => render(
 describe('AskAI', () => {
   it('mounts nothing until a scope is picked -- a question needs a target', async () => {
     renderAt('/ask')
-    expect(await screen.findByText(/Pick a dataset or connection/)).toBeInTheDocument()
+    expect(await screen.findByText('Choose your data')).toBeInTheDocument()
     expect(screen.queryByTestId('chat-pane')).not.toBeInTheDocument()
   })
 
@@ -90,11 +90,14 @@ describe('AskAI', () => {
     expect(await screen.findByTestId('chat-pane')).toHaveTextContent('source:3')
   })
 
-  it('shows the question box before a scope is picked, locked', async () => {
+  it('before a scope is picked, shows only the data step -- no locked question box', async () => {
+    // The locked composer was a second control nobody could use; the question
+    // box now appears only once data is chosen.
     renderAt('/ask')
     expect(await screen.findByRole('heading', { name: 'Ask your data anything' })).toBeInTheDocument()
-    expect(screen.getByRole('textbox', { name: 'Your question' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
+    expect(screen.getByText('Choose your data')).toBeInTheDocument()
+    expect(screen.queryByText(/Step \d/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: 'Your question' })).not.toBeInTheDocument()
   })
 
   it('a failed dataset list is an error, never "no data yet"', async () => {
