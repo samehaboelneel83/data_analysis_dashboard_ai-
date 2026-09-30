@@ -76,6 +76,52 @@ export function handleResponseError(error: any) {
 
 api.interceptors.response.use(r => r, handleResponseError)
 
+/** The person's LLM pick from the top bar (an endpoint id, or 'auto'). Kept in
+ *  this browser and sent with every request as X-LLM-Endpoint, which the
+ *  server's middleware hands to every AI call. Nothing stored = the platform
+ *  default. */
+export const LLM_CHOICE_KEY = 'datalytics.llmEndpoint'
+export const LLM_CHOICE_EVENT = 'datalytics:llm-choice'
+let memoryLlmChoice: string | null = null
+export function getLlmChoice(): string | null {
+  try { return localStorage.getItem(LLM_CHOICE_KEY) ?? memoryLlmChoice } catch { return memoryLlmChoice }
+}
+export function setLlmChoice(choice: string | null): void {
+  try {
+    if (choice) localStorage.setItem(LLM_CHOICE_KEY, choice)
+    else localStorage.removeItem(LLM_CHOICE_KEY)
+  } catch { /* private window: the pick lasts this page only */ }
+  memoryLlmChoice = choice
+  window.dispatchEvent(new CustomEvent(LLM_CHOICE_EVENT, { detail: choice }))
+}
+api.interceptors.request.use(config => {
+  const choice = getLlmChoice()
+  if (choice) config.headers.set('X-LLM-Endpoint', choice)
+  return config
+})
+
+/** Which models answered a request: the server lists them in X-LLM-Used as
+ *  `id=weight` pairs, in call order. The top bar listens for this event to
+ *  show the model Auto really used, step by step. */
+export const LLM_USED_EVENT = 'datalytics:llm-used'
+export interface LlmUsedStep { id: string; weight: string }
+export function parseLlmUsed(header: unknown): LlmUsedStep[] {
+  if (typeof header !== 'string' || !header.trim()) return []
+  return header.split(',').map(part => {
+    const [id, weight] = part.trim().split('=')
+    return { id: id ?? '', weight: weight ?? 'normal' }
+  }).filter(u => u.id)
+}
+function announceLlmUsed(headers: unknown) {
+  const raw = (headers as { get?: (k: string) => unknown; [k: string]: unknown } | undefined)
+  const value = typeof raw?.get === 'function' ? raw.get('x-llm-used') : raw?.['x-llm-used']
+  const used = parseLlmUsed(value)
+  if (used.length && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent<LlmUsedStep[]>(LLM_USED_EVENT, { detail: used }))
+  }
+}
+api.interceptors.response.use(r => { announceLlmUsed(r.headers); return r })
+
 export interface DatasetColumn {
   id: number
   name: string
@@ -709,8 +755,56 @@ export const platformSettingsApi = {
   /** null for a key removes its saved value (back to the environment). */
   save: (values: Record<string, string | number | boolean | null>) =>
     api.put<PlatformSettingsOut>('/platform/settings', { values }).then(r => r.data),
-  testLlm: (body: { llm_base_url?: string; llm_model?: string; llm_api_key?: string }) =>
+  testLlm: (body: { llm_base_url?: string; llm_model?: string; llm_api_key?: string; endpoint_id?: string }) =>
     api.post<LlmTestResult>('/platform/settings/test-llm', body).then(r => r.data),
+  getLlmEndpoints: () => api.get<LlmEndpointsOut>('/platform/settings/llm-endpoints').then(r => r.data),
+  saveLlmEndpoints: (endpoints: LlmEndpointIn[], defaultChoice: string) =>
+    api.put<LlmEndpointsOut>('/platform/settings/llm-endpoints', { endpoints, default: defaultChoice }).then(r => r.data),
+  resetLlmEndpoints: () => api.delete<LlmEndpointsOut>('/platform/settings/llm-endpoints').then(r => r.data),
+}
+
+/** One endpoint's light: from the background probe or the last real call. */
+export interface LlmStatus { ok: boolean; latency_ms: number | null; checked_at: string; error: string | null }
+export interface LlmEndpoint {
+  id: string; name: string; model: string; enabled: boolean; is_default: boolean
+  status: LlmStatus | null
+  /** 1-10 rank Auto routes by (set by the admin, or guessed from the name). */
+  strength: number
+  /** Context window in tokens (set, or read from the endpoint); null = unknown. */
+  context: number | null
+  /** Admin view only. */
+  base_url?: string; has_api_key?: boolean
+  strength_set?: number | null; context_set?: number | null; max_model_len?: number | null
+}
+export interface LlmEndpointsOut {
+  llm_enabled: boolean
+  /** An endpoint id, or 'auto'. */
+  default: string
+  /** The endpoint Auto would use now; null when none is up. */
+  auto_pick: string | null
+  source: 'saved' | 'deployment' | 'environment'
+  endpoints: LlmEndpoint[]
+  /** This person's most recent answered calls, oldest first. */
+  last_used?: LlmUse[]
+}
+export interface LlmUse {
+  id: string; name: string; model: string; weight: string; auto: boolean
+  feature: string | null; at: string
+}
+export interface LlmEndpointIn {
+  id?: string; name: string; base_url: string; model: string
+  /** undefined/null keeps the stored key; '' removes it. */
+  api_key?: string | null
+  enabled: boolean
+  /** 0/empty = guess from the model name. */
+  strength?: number
+  /** 0/empty = read from the endpoint. */
+  context?: number
+}
+
+export const llmApi = {
+  endpoints: (refresh = false) =>
+    api.get<LlmEndpointsOut>('/llm/endpoints', { params: refresh ? { refresh: true } : undefined }).then(r => r.data),
 }
 
 export interface BoundaryPack {

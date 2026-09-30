@@ -1272,3 +1272,31 @@ describe('the folder view drills down one level at a time', () => {
       expect.objectContaining({ node_type: 'folder', name: 'Q3', parent_id: 1 })))
   })
 })
+
+/**
+ * Opening a dashboard: React Router 7 navigates inside a transition, so the
+ * route's Suspense loader never showed while the report builder loaded and
+ * the click looked ignored. The list shows the loader itself.
+ */
+describe('opening a dashboard shows the loader', () => {
+  it('on a click anywhere on the card', async () => {
+    renderReports()
+    const title = await screen.findByText('Revenue')
+    fireEvent.click(title.closest('.dl-dash-card')!.querySelector('.dl-dash-card__foot') ?? title.closest('.dl-dash-card')!)
+    expect(await screen.findByRole('status')).toBeInTheDocument()
+    expect(screen.getByTestId('where')).toHaveTextContent('/reports/1')
+  })
+
+  it('on a click on the title link', async () => {
+    renderReports()
+    fireEvent.click(await screen.findByRole('link', { name: 'Revenue' }))
+    expect(await screen.findByRole('status')).toBeInTheDocument()
+  })
+
+  it('not on a ctrl-click, which opens a new tab', async () => {
+    renderReports()
+    fireEvent.click(await screen.findByRole('link', { name: 'Revenue' }), { ctrlKey: true })
+    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.getByRole('link', { name: 'Revenue' })).toBeInTheDocument()
+  })
+})

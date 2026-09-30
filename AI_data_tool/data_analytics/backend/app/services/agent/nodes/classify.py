@@ -214,9 +214,11 @@ async def classify(question: str, context: SchemaContext, client,
     # same truncation. Verified fix: the identical prompt/context succeeds
     # reliably at max_tokens=350+; 400 keeps headroom. The one-sentence
     # instruction above is defence in depth, not the fix.
+    # weight="light": sorting a question into an intent is small work, so
+    # Auto may send it to the fast model and keep the strong one for the SQL.
     verdict = await client.complete_json(messages, CLASSIFY_SCHEMA,
                                          enforce=True, max_tokens=400,
-                                         temperature=0.0)
+                                         temperature=0.0, weight="light")
     return settle_intent(question, verdict)
 
 

@@ -1,5 +1,17 @@
 from datetime import datetime, timedelta, timezone
-from passlib.context import CryptContext
+import bcrypt as _bcrypt
+
+# passlib 1.7.4 (its last release) reads `bcrypt.__about__.__version__` to
+# decide which backend quirks apply. bcrypt 4.1 removed that module, so every
+# start logged "AttributeError: module 'bcrypt' has no attribute '__about__'"
+# (passlib catches it and carries on -- hashing was never affected). Give it
+# the attribute it looks for instead of pinning bcrypt back to 4.0.
+if not hasattr(_bcrypt, "__about__"):
+    class _About:
+        __version__ = getattr(_bcrypt, "__version__", "4")
+    _bcrypt.__about__ = _About()  # type: ignore[attr-defined]
+
+from passlib.context import CryptContext  # noqa: E402
 from jose import jwt, JWTError
 from .config import settings
 

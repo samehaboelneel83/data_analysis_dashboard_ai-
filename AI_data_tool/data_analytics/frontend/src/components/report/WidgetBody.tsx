@@ -1,6 +1,6 @@
 import { semanticAggregationWarning, nonAdditiveKind, SAFE_AGGREGATION } from '../../lib/semanticGuard'
 import PivotTable, { type PivotData } from './PivotTable'
-import { Suspense, useMemo, useState, type ReactNode } from 'react'
+import { Suspense, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useDirection, widgetIsRtl } from '../../contexts/DirectionContext'
 import type { CalcColumnFormat } from '../../services/api'
 import type { Widget, WidgetType } from '../../types/report'
@@ -102,7 +102,7 @@ function renderTextWithLinks(content: string): ReactNode {
   })
 }
 
-export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, onClickPoint, broadcasts, allFormats, checked, onToggleSlicerValue, onButtonClick, ruleStyles, parameters, geography, textFilter, onSubmitTextFilter, onAssignData, onBrushChange, brushNonce, onAnimationFrame, onApplyFix }:
+export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, onClickPoint, broadcasts, allFormats, checked, onToggleSlicerValue, onButtonClick, ruleStyles, parameters, geography, textFilter, onSubmitTextFilter, onAssignData, onBrushChange, brushNonce, onAnimationFrame, onApplyFix, onLoadMore, loadingMore }:
   { widget: Widget; data: any; fetchError?: { detail: string; code?: string } | null; onRetry?: () => void; localSelected: unknown; onClickPoint: (v: unknown) => void; broadcasts: boolean; allFormats?: Record<string, CalcColumnFormat | undefined>; checked?: Set<unknown>; onToggleSlicerValue?: (v: unknown) => void; onButtonClick?: () => void; ruleStyles?: RuleStyles; parameters?: Record<string, unknown>; geography?: Record<string, number>;
     textFilter?: string; onSubmitTextFilter?: (value: string, column: string) => void
     /** Edit mode only: select this widget and open its Data roles. */
@@ -110,7 +110,9 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
     /** Overview-axis zoom reports; bumping brushNonce remounts the chart to reset it. */
     onBrushChange?: (range: BrushRange | null) => void
     brushNonce?: number
-    onAnimationFrame?: (label: string | null) => void ; onApplyFix?: (patch: Record<string, unknown>, label: string) => void }) {
+    onAnimationFrame?: (label: string | null) => void ; onApplyFix?: (patch: Record<string, unknown>, label: string) => void
+    /** A paged raw table: fetch the next page (the reader scrolled near the end). */
+    onLoadMore?: () => void; loadingMore?: boolean }) {
 
   const wt = widget.widget_type
   const cfg = widget.config as any
@@ -481,6 +483,7 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
       : rawRows
     return (
       <WindowedTable rtl={rtl} cfg={cfg} data={data} cols={cols} rows={rows}
+        onLoadMore={onLoadMore} loadingMore={loadingMore}
         ruleStyles={ruleStyles} allFormats={allFormats} broadcasts={broadcasts}
         onClickPoint={onClickPoint} grouped={isObjRows && cols.includes('name') && cols.includes('value')} />
     )
@@ -598,7 +601,9 @@ const TOTALS_UNAVAILABLE_REASON: Record<string, string> = {
  *  WINDOW_THRESHOLD rows, only the slice near the viewport renders, with
  *  spacer rows standing in for the rest; banding, rule styles, row numbers
  *  and cross-filter clicks all index off the ABSOLUTE row index. */
-function WindowedTable({ rtl, cfg, data, cols: inCols, rows: inRows, ruleStyles, allFormats, broadcasts, onClickPoint, grouped = false }: {
+function WindowedTable({ rtl, cfg, data, cols: inCols, rows: inRows, ruleStyles, allFormats, broadcasts, onClickPoint, grouped = false, onLoadMore, loadingMore }: {
+  onLoadMore?: () => void
+  loadingMore?: boolean
   /** Rows are groups of a dimension (a series), not the data's own rows. */
   grouped?: boolean
   rtl: boolean
@@ -648,6 +653,20 @@ function WindowedTable({ rtl, cfg, data, cols: inCols, rows: inRows, ruleStyles,
   const cellPad = cfg.table_condensed ? '2px 6px' : undefined
   const estRowH = cfg.table_condensed ? 24 : 31
   const win = useWindowedRows(rows.length, estRowH, rows.length > WINDOW_THRESHOLD)
+  // Paged: more rows on the server than here. Asked for when the reader is
+  // within a few screens of the bottom, and again whenever the table is too
+  // short to scroll at all (a tall tile over a small first page).
+  const morePending = !!data.page && !grouped && Number(data.total) > rows.length
+  const nearEnd = (el: HTMLElement) => el.scrollTop + el.clientHeight > el.scrollHeight - 400
+  const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    win.onScroll()
+    if (morePending && nearEnd(e.currentTarget)) onLoadMore?.()
+  }
+  useEffect(() => {
+    const el = win.containerRef.current as HTMLElement | null
+    if (morePending && el && el.scrollHeight <= el.clientHeight + 400) onLoadMore?.()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [morePending, rows.length])
   // Per-row trend column: the numeric cells across the crosstab's value columns form
   // the series (the first column is the row's category label, __total__ is a summary,
   // so both are excluded). Needs at least two points to be a trend.
@@ -693,7 +712,7 @@ function WindowedTable({ rtl, cfg, data, cols: inCols, rows: inRows, ruleStyles,
   return (
     // Focusable, so a keyboard user can scroll a table wider or longer than
     // its tile (axe scrollable-region-focusable, E10).
-    <div dir={rtl ? 'rtl' : undefined} ref={win.containerRef} onScroll={win.onScroll}
+    <div dir={rtl ? 'rtl' : undefined} ref={win.containerRef} onScroll={onScroll}
       tabIndex={0} role="region" aria-label="Table"
       style={{ overflow: 'auto', height: '100%' }}>
       <table style={{ fontSize: 12 }}>
@@ -769,6 +788,7 @@ function WindowedTable({ rtl, cfg, data, cols: inCols, rows: inRows, ruleStyles,
       {!grouped && data.total > rows.length && (
         <div data-testid="table-footer" style={{ padding: '6px 12px', color: 'var(--muted)', fontSize: 11, borderTop: '1px solid var(--border)' }}>
           Showing {rows.length.toLocaleString()} of {Number(data.total).toLocaleString()} rows
+          {morePending && (loadingMore ? ' — loading more…' : ' — scroll for more')}
         </div>
       )}
       {/* The server sets this when "Show totals" was on but the only number it could

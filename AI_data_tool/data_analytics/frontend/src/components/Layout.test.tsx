@@ -8,6 +8,8 @@ import Layout from './Layout'
 // and Admin sections must vanish with it, not merely grey out.
 let mockUser: any = null
 
+// The model light polls the API; it has its own tests (LlmPicker.test.tsx).
+vi.mock('./LlmPicker', () => ({ default: () => null }))
 vi.mock('../contexts/AuthContext', async importOriginal => ({
   ...(await importOriginal<object>()),
   useAuth: () => ({ user: mockUser, logout: vi.fn() }),

@@ -106,6 +106,10 @@ _GRANULARITY_SQL = {
 }
 
 
+#: The column a count-mode frame carries its per-group row count in.
+COUNT_COL = "__count__"
+
+
 class Ineligible(Exception):
     """Not an error: this config simply belongs on the pandas path."""
 
@@ -169,13 +173,25 @@ def plan(config: dict, columns: list[str], source: str,
         raise Ineligible("no dimension (scalar/KPI shape)")
     if dim not in columns:
         raise Ineligible(f"dimension '{dim}' is not a real column")
-    if not meas:
-        raise Ineligible("no measure (count-style aggregation)")
-    if meas not in columns:
+    # No measure: "how many rows per value" -- the most common chart there is.
+    # Counted here as COUNT(*) into a column the shaper then SUMS (one row per
+    # group, so the sum is the count); re-counting a pre-aggregated frame would
+    # give 1 for every group. `pct` needs every group's share, and stays pandas.
+    count_mode = not meas
+    if count_mode and agg not in ("count", "sum", "", "none"):
+        raise Ineligible(f"no measure with aggregation '{agg}'")
+    if count_mode and config.get("dimension_granularity"):
+        # The pandas path notes a partial last period ("2025-05 is partial")
+        # from the raw dates, which a pre-aggregated frame no longer has. A
+        # count by month keeps that note rather than gain speed without it.
+        raise Ineligible("count by a date grain (partial-period note)")
+    if count_mode:
+        pass
+    elif meas not in columns:
         # A measure name that is not a column is a post-aggregation measure
         # expression, resolved by measure_eval against the full frame.
         raise Ineligible(f"measure '{meas}' is not a real column")
-    if agg not in GRAIN_SAFE_AGGREGATIONS or agg not in _SQL_AGG:
+    if not count_mode and (agg not in GRAIN_SAFE_AGGREGATIONS or agg not in _SQL_AGG):
         raise Ineligible(f"aggregation '{agg}' is not grain-safe")
 
     sort_col = config.get("sort_col") or None
@@ -218,7 +234,8 @@ def plan(config: dict, columns: list[str], source: str,
             where.append(f"{ident} {_SQL_COMPARISON[op]} ?")
             params.append(f.get("value"))
 
-    dim_i, meas_i = _quote_ident(dim), _quote_ident(meas)
+    dim_i = _quote_ident(dim)
+    meas_i = _quote_ident(meas) if meas else None
 
     granularity = str(config.get("dimension_granularity") or "").lower()
     probe_sql = None
@@ -247,9 +264,12 @@ def plan(config: dict, columns: list[str], source: str,
     # Verified 2026-08-28 against a fixture with nulls in both columns.
     where.append(f"{dim_expr} IS NOT NULL")
 
-    template = _SQL_AGG[agg]
-    agg_expr = (template.format(col=meas_i) if "{col}" in template
-                else f"{template}({meas_i})")
+    if count_mode:
+        agg_expr = "COUNT(*)"
+    else:
+        template = _SQL_AGG[agg]
+        agg_expr = (template.format(col=meas_i) if "{col}" in template
+                    else f"{template}({meas_i})")
 
     sql = (
         f"SELECT {dim_expr} AS __dim__, {agg_expr} AS __value__ "
@@ -258,7 +278,7 @@ def plan(config: dict, columns: list[str], source: str,
         f"GROUP BY {dim_expr}"
     )
     return DuckPlan(sql=sql, count_sql=count_sql, params=params,
-                    probe_sql=probe_sql, dimension=dim, measure=meas)
+                    probe_sql=probe_sql, dimension=dim, measure=meas or COUNT_COL)
 
 
 def _source_expr(file_path: str) -> str:
@@ -321,6 +341,7 @@ def aggregate(file_path: str, config: dict, columns: list[str],
     frame = frame.rename(columns={"__dim__": p.dimension, "__value__": p.measure})
     frame.attrs["source_row_count"] = int(total)
     frame.attrs["missing_dimension_rows"] = int(missing)
+    frame.attrs["count_mode"] = p.measure == COUNT_COL
     return frame
 
 

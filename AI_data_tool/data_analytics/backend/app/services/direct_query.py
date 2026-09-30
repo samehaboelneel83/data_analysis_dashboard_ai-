@@ -58,7 +58,7 @@ from .connections import _build_url
 from . import connectors
 from .query_log import log_query_run_sync
 from .sql_expr import ExpressionTranslationError, translate_filter_expr
-from .widget_data import get_widget_data_from_df
+from .widget_data import get_widget_data_from_df, table_page
 from .widget_shaping import (safe as _safe, widget_cache_get as _widget_data_cache_get,
                              widget_cache_set as _widget_data_cache_set)
 
@@ -396,6 +396,23 @@ def build_missing_dim_count_sql(
     where_sql, params = _build_where(plan.filters)
     where_clause = f" WHERE {where_sql}" if where_sql else ""
     sql = (f"SELECT COUNT(*) - COUNT({_quote(plan.dim)}) "
+           f"FROM ({base}) AS src{where_clause}")
+    return _finalize_for_dialect(sql, dialect), {**(rls_params or {}), **params}
+
+
+def build_count_and_missing_sql(
+    dataset, plan: QueryPlan, dialect: str,
+    rls_where: str = "", rls_params: dict | None = None,
+) -> tuple[str, dict]:
+    """build_count_sql and build_missing_dim_count_sql in ONE scan.
+
+    Both read the same base, WHERE and RLS; only the SELECT differs. As two
+    queries every grouped chart on a live source scanned its (often joined)
+    base three times -- the groups, the row count, the null count. Now twice."""
+    base = _base_query_sql(dataset, rls_where)
+    where_sql, params = _build_where(plan.filters)
+    where_clause = f" WHERE {where_sql}" if where_sql else ""
+    sql = (f"SELECT COUNT(*), COUNT(*) - COUNT({_quote(plan.dim)}) "
            f"FROM ({base}) AS src{where_clause}")
     return _finalize_for_dialect(sql, dialect), {**(rls_params or {}), **params}
 
@@ -1009,6 +1026,9 @@ def _fetch_and_compute(
 #: aggregation -- see `_needs_rows`.
 _ROW_LEVEL_KEYS = ("having", "suppress_below", "quick_calc", "sort_custom",
                    "dimension_levels", "dimension_granularity", "running",
+                   # Number ranges (services/auto_bin.py) when no bucket SQL
+                   # exists for the dialect: the shaper bins the fetched rows.
+                   "dimension_bin",
                    # A crosstab (E08): its grid is the import shaper's. The
                    # no-measure count path below refused it outright.
                    "dimension2",
@@ -1058,6 +1078,10 @@ def _dispatch_direct_query(
         return _run_histogram(source_cfg, dataset, config, rls_filter_expr)
     if widget_type == "correlation_matrix":
         return _run_correlation_matrix(source_cfg, dataset, config, rls_filter_expr)
+    if widget_type == "table" and _is_raw_table(config) and table_page(config):
+        paged = _run_table_page(source_cfg, dataset, config, rls_filter_expr, drop_columns)
+        if paged is not None:
+            return paged
     if widget_type in ROW_CAPPED_WIDGET_TYPES:
         return _fetch_and_compute(source_cfg, dataset, config, widget_type,
                                   rls_filter_expr, row_cap, drop_columns=drop_columns)
@@ -1118,6 +1142,94 @@ def _dispatch_direct_query(
                                   rls_filter_expr, row_cap, drop_columns=drop_columns)
     return _run_aggregate_plan(source_cfg, dataset, config, config, widget_type,
                                rls_filter_expr, plan, dialect)
+
+
+def _is_raw_table(config: dict) -> bool:
+    """A table of the data's own rows: no grouping, no aggregation."""
+    if config.get("dimension") or config.get("dimension2") or config.get("dimension_levels"):
+        return False
+    agg = (config.get("aggregation") or "").lower()
+    return not config.get("measure") or agg in ("none", "raw")
+
+
+def _page_clause(dialect: str, offset: int, size: int) -> str:
+    if dialect in ("oracle", "sqlserver"):
+        return f"OFFSET {int(offset)} ROWS FETCH NEXT {int(size)} ROWS ONLY"
+    return f"LIMIT {int(size)} OFFSET {int(offset)}"
+
+
+def _run_table_page(source_cfg: dict, dataset, config: dict, rls_filter_expr: str | None,
+                    drop_columns: list[str] | None) -> dict | None:
+    """One page of a raw table, read from the source in order.
+
+    Replaces, for a paged request, the row-capped fetch -- which pulled a
+    RANDOM 10,000-row sample of anything bigger and shaped it in Python. A page
+    is the real rows, in a stable order, with the exact row count: `ORDER BY`
+    the reader's sort, then every shown column, so no row is skipped or shown
+    twice between pages. None hands the request back to the old path (a drill
+    filter on a date bucket, which only the shaper can apply)."""
+    dialect = connectors.sql_family_of(source_cfg)
+    if dialect not in SUPPORTED_FAMILIES:
+        raise DirectQueryUnsupported(f"DirectQuery does not yet support '{dialect}' sources")
+    if any(isinstance(f, dict) and (f.get("granularity") or f.get("op") == "date_range")
+           for f in (config.get("filters") or [])):
+        return None
+    offset, size = table_page(config)
+    plan = plan_row_fetch(config, "table", allow_any_widget=True)
+    _validate_known_columns(dataset, [], plan.filters)
+    known = [c.name for c in (getattr(dataset, "columns", None) or [])]
+    denied = set(drop_columns or [])
+    wanted = config.get("columns") or known
+    cols = [c for c in wanted if c in known and c not in denied]
+    if not cols:
+        return None
+    pos = {c: i + 1 for i, c in enumerate(cols)}
+    order: list[str] = []
+    for k in (config.get("sort_keys") or []):
+        if isinstance(k, dict) and k.get("col") in pos:
+            order.append(f"{pos[k['col']]} {'ASC' if (k.get('dir') or 'asc').lower() == 'asc' else 'DESC'}")
+    if not order and config.get("sort_col") in pos:
+        order.append(f"{pos[config['sort_col']]} {'ASC' if (config.get('sort') or 'desc').lower() == 'asc' else 'DESC'}")
+    taken = {o.split()[0] for o in order}
+    order += [str(i) for i in range(1, len(cols) + 1) if str(i) not in taken]
+
+    rls_where, rls_params = _translate_rls(dataset, rls_filter_expr)
+    base = _base_query_sql(dataset, rls_where)
+    where_sql, params = _build_where(plan.filters)
+    where_clause = f" WHERE {where_sql}" if where_sql else ""
+    select_list = ", ".join(_quote(c) for c in cols)
+    sql = _finalize_for_dialect(
+        f"SELECT {select_list} FROM ({base}) AS src{where_clause} "
+        f"ORDER BY {', '.join(order)} {_page_clause(dialect, offset, size)}", dialect)
+    all_params = {**(rls_params or {}), **params}
+    count_sql, count_params = build_count_sql(dataset, plan, dialect, rls_where=rls_where, rls_params=rls_params)
+
+    wants_totals = bool(config.get("show_totals"))
+    numeric = [c for c in cols
+               if str(next((x.dtype for x in dataset.columns if x.name == c), "")).lower()
+               in ("numeric", "number", "integer", "float", "int", "decimal")]
+    engine = get_engine(source_cfg)
+    with engine.connect() as conn:
+        total = int(conn.execute(text(count_sql), count_params).scalar_one())
+        rows = conn.execute(text(sql), all_params).all()
+        sums = None
+        if wants_totals and numeric:
+            tsql, tparams = build_row_totals_sql(dataset, plan, dialect, numeric,
+                                                 rls_where=rls_where, rls_params=rls_params)
+            sums = dict(zip(numeric, [_sql_number(v) for v in conn.execute(text(tsql), tparams).one()]))
+    result = {
+        "type": "table", "columns": cols,
+        "rows": [[_safe(v) for v in r] for r in rows],
+        "total": total,
+        "page": {"offset": offset, "size": size, "total": total},
+        "truncation": {"applied": False, "shown": len(rows), "of": total,
+                       "limit": size, "reason": "page", "unit": "rows"},
+    }
+    if wants_totals:
+        result["totals"] = [sums.get(c) if sums and c in sums else None for c in cols]
+        result["totals_basis"] = {"unit": "rows", "shown": len(rows), "of": total,
+                                  "truncated": False, "suppressed_excluded": False}
+    return result
 
 
 def _totals_need_sql(result: dict, config: dict) -> bool:
@@ -1385,7 +1497,6 @@ def _run_count_series(
     rls_where, rls_params = _translate_rls(dataset, rls_filter_expr)
 
     sql, params = _build_count_series_sql(dataset, plan, dialect, rls_where, rls_params)
-    count_sql, count_params = build_count_sql(dataset, plan, dialect, rls_where=rls_where, rls_params=rls_params)
 
     wants_totals = bool(config.get("show_totals"))
     total_sql = total_params = None
@@ -1396,14 +1507,13 @@ def _run_count_series(
             dataset, plan, dialect, rls_where=rls_where, rls_params=rls_params, count_only=True,
         )
 
-    missing_sql, missing_params = build_missing_dim_count_sql(
+    cm_sql, cm_params = build_count_and_missing_sql(
         dataset, plan, dialect, rls_where=rls_where, rls_params=rls_params)
 
     engine = get_engine(source_cfg)
     with engine.connect() as conn:
         result_rows = conn.execute(text(sql), params).all()
-        total_rows = conn.execute(text(count_sql), count_params).scalar_one()
-        missing_rows = conn.execute(text(missing_sql), missing_params).scalar_one()
+        total_rows, missing_rows = conn.execute(text(cm_sql), cm_params).one()
         grand_total, n_groups = (conn.execute(text(total_sql), total_params).one()
                                  if wants_totals else (None, None))
 
@@ -1523,7 +1633,6 @@ def _run_aggregate_plan(source_cfg: dict, dataset, config: dict, shaped_config: 
     rls_where, rls_params = _translate_rls(dataset, rls_filter_expr)
 
     sql, params = build_sql(dataset, plan, dialect, rls_where=rls_where, rls_params=rls_params)
-    count_sql, count_params = build_count_sql(dataset, plan, dialect, rls_where=rls_where, rls_params=rls_params)
 
     # `show_totals` is only honoured for the table-shaped widget types, but the frame
     # the shaper sees here is already LIMITed by build_sql -- so whenever the shaper
@@ -1536,14 +1645,13 @@ def _run_aggregate_plan(source_cfg: dict, dataset, config: dict, shaped_config: 
             dataset, plan, dialect, rls_where=rls_where, rls_params=rls_params,
         )
 
-    missing_sql, missing_params = build_missing_dim_count_sql(
+    cm_sql, cm_params = build_count_and_missing_sql(
         dataset, plan, dialect, rls_where=rls_where, rls_params=rls_params)
 
     engine = get_engine(source_cfg)
     with engine.connect() as conn:
         df = pd.read_sql(text(sql), conn, params=params)
-        total_rows = conn.execute(text(count_sql), count_params).scalar_one()
-        missing_rows = conn.execute(text(missing_sql), missing_params).scalar_one()
+        total_rows, missing_rows = conn.execute(text(cm_sql), cm_params).one()
         grand_total, n_groups = (conn.execute(text(total_sql), total_params).one()
                                  if wants_totals else (None, None))
 

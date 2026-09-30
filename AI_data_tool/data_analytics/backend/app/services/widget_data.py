@@ -79,6 +79,28 @@ _TIME_TEXT = re.compile(r"^\d{4}(?:[-/]\d{2}(?:[-/]\d{2}(?:[ T][\d:.]+)?)?|-Q[1-
 #: never ship an unbounded payload; the same ceiling DirectQuery reads rows at.
 FULL_DATA_LIMIT = 10_000
 
+#: Rows per page for a paged raw table, and the most one request may ask for.
+TABLE_PAGE_MAX = 1000
+
+
+def table_page(config: dict) -> tuple[int, int] | None:
+    """(offset, size) when a raw table asks for one page of its rows, else None.
+
+    A table used to ship up to FULL_DATA_LIMIT rows in one response (2.9 MB on
+    dashboard 213) while the reader sees about twenty; the page asks for the
+    rows it can show and the next ones as the reader scrolls. Absent, the old
+    behaviour stands -- exports, deliveries and print still read every row."""
+    page = config.get("page")
+    if not isinstance(page, dict):
+        return None
+    try:
+        offset = max(0, int(page.get("offset") or 0))
+        size = int(page.get("size") or 200)
+    except (TypeError, ValueError):
+        return None
+    return offset, max(1, min(size, TABLE_PAGE_MAX))
+
+
 def _looks_like_time_text(s: pd.Series) -> bool:
     """True when a text column's values are (almost all) date-like labels."""
     if not (pd.api.types.is_object_dtype(s) or pd.api.types.is_string_dtype(s)):
@@ -927,6 +949,24 @@ def shape_series(df: pd.DataFrame, config: dict) -> dict:
         df = df.copy()
         df[dim] = _bucket_dimension(df[dim], dim_granularity)
 
+    # Equal-width number ranges (services/auto_bin.py): each value becomes the
+    # lower edge of its range, so the groups sort numerically and the labels
+    # ("0 – 50") are written after shaping. A column that is not numeric is
+    # left as it is, like a granularity on a non-date column above.
+    dim_bin = config.get("dimension_bin")
+    if isinstance(dim_bin, dict) and dim and dim in df.columns:
+        try:
+            width = float(dim_bin.get("width"))
+            origin = float(dim_bin.get("origin") or 0.0)
+        except (TypeError, ValueError):
+            width = 0.0
+        vals = pd.to_numeric(df[dim], errors="coerce")
+        if width > 0 and vals.notna().any():
+            df = df.copy()
+            df[dim] = np.floor((vals - origin) / width) * width + origin
+            if "sort_by" not in config:
+                sort_by, sort = "name", "asc"
+
     # 2. Raw table / list — no grouping requested. aggregation=none (or raw)
     # is the same intent with a measure set: list the column's row values
     # instead of collapsing them to one Sum. Live: a SUM() calculated column
@@ -955,7 +995,11 @@ def shape_series(df: pd.DataFrame, config: dict) -> dict:
                                 ascending=[asc for _, asc in sort_keys], kind="mergesort")
         elif sort_col and sort_col in df.columns:
             df = df.sort_values(sort_col, ascending=(sort == "asc"))
-        sub  = df[cols].head(limit)
+        page = table_page(config)
+        if page:
+            sub = df[cols].iloc[page[0]:page[0] + page[1]]
+        else:
+            sub = df[cols].head(limit)
         result = {
             "type": "table",
             "columns": cols,
@@ -964,6 +1008,12 @@ def shape_series(df: pd.DataFrame, config: dict) -> dict:
             "truncation": {"applied": len(sub) < len(df), "shown": len(sub), "of": len(df),
                            "limit": limit, "reason": "limit", "unit": "rows"},
         }
+        if page:
+            # Paged, not cut: the other rows are one scroll away, so nothing
+            # is truncated and the totals below describe every row.
+            result["page"] = {"offset": page[0], "size": page[1], "total": len(df)}
+            result["truncation"] = {"applied": False, "shown": len(sub), "of": len(df),
+                                    "limit": page[1], "reason": "page", "unit": "rows"}
         if config.get("show_totals"):
             # Computed from df, NOT sub: sub is already truncated by `limit`, and a
             # total describing only the visible page is worse than no total at all.
@@ -973,7 +1023,7 @@ def shape_series(df: pd.DataFrame, config: dict) -> dict:
             ]
             # The page's own total too, so the client can offer "Total (N shown)"
             # as well as the all-rows one -- same columns, only the rows on screen.
-            truncated = len(sub) < len(df)
+            truncated = len(sub) < len(df) and not page
             if truncated:
                 result["totals_shown"] = [
                     _safe(sub[c].sum()) if pd.api.types.is_numeric_dtype(sub[c]) else None
@@ -4521,8 +4571,17 @@ def get_widget_data(
                 # aggregations are eligible.
                 # check_fields off: the frame is pre-aggregated, and duck_agg.plan
                 # already refused any dimension/measure that is not a real column.
-                result = get_widget_data_from_df(duck_df, config, widget_type, flag_partial=False,
-                                                 check_fields=False)
+                if duck_df.attrs.get("count_mode"):
+                    # Counted by DuckDB: the shaper sums the per-group counts,
+                    # then the result says what the pandas path says (a count).
+                    result = get_widget_data_from_df(
+                        duck_df, {**config, "measure": _duck_agg.COUNT_COL, "aggregation": "sum"},
+                        widget_type, flag_partial=False, check_fields=False)
+                    result["measure"] = "count"
+                    result["aggregation"] = (config.get("aggregation") or "sum").lower() or "sum"
+                else:
+                    result = get_widget_data_from_df(duck_df, config, widget_type, flag_partial=False,
+                                                     check_fields=False)
                 # The shaper derives `total` from len(df), which on a
                 # pre-aggregated frame is the GROUP count. `total` means source
                 # rows, so restore the real figure DuckDB counted.

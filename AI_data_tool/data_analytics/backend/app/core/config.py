@@ -94,6 +94,13 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_timeout_s: float = Field(default=180.0, gt=0)
     llm_enabled: bool = True
+    # Several endpoints (services/llm_endpoints.py): a JSON list of
+    #   {"id", "name", "base_url", "model", "strength"?, "context"?, "api_key"?}
+    # used until a platform admin saves a list in Platform settings. Empty =
+    # the single endpoint above. docker-compose.yml ships the team's three
+    # vLLM boxes here. `llm_endpoints_default` is an id from it, or "auto".
+    llm_endpoints: str = ""
+    llm_endpoints_default: str = "auto"
 
     # Total in-flight requests to the model endpoint, ACROSS features -- the
     # sync's describe stage and agent runs share one box. Measured on the Qwen

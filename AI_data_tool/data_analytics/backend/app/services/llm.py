@@ -154,10 +154,24 @@ class LLMClient:
         timeout: float = 180.0,
         transport: httpx.BaseTransport | None = None,
         api_key: str = "",
+        endpoint_id: str | None = None,
+        fallbacks: "list[Any] | tuple[Any, ...]" = (),
+        auto: bool = False,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key or ""
         self.model = model
+        #: Which configured endpoint this is (services/llm_endpoints.py), so a
+        #: failed or successful call can update that endpoint's status light.
+        self.endpoint_id = endpoint_id
+        #: More endpoints to try, in order, when this one does not answer
+        #: ("Auto"). Each is an `llm_endpoints.Endpoint`.
+        self.fallbacks = list(fallbacks)
+        #: "Auto": order this endpoint and the fallbacks per call by what the
+        #: call needs (llm_endpoints.route) instead of keeping them fixed.
+        self.auto = auto
+        #: The endpoint that actually answered the last call.
+        self.answered_by: str | None = None
         self.enabled = enabled
         self.timeout = timeout
         self._transport = transport
@@ -187,6 +201,7 @@ class LLMClient:
         temperature: float = 0.2,
         background: bool = False,
         response_format: dict | None = None,
+        weight: str | None = None,
     ) -> str | None:
         """One chat completion. Returns the assistant's text, or None if the
         endpoint is disabled, unreachable, or answered with something unusable.
@@ -215,14 +230,50 @@ class LLMClient:
         if response_format is not None:
             payload["response_format"] = response_format
 
+        if weight is None:
+            weight = self._weight(background)
         total, back = _gates()
         if background:
             async with back, total:
-                return await self._post(payload)
+                return await self._post(payload, weight)
         async with total:
-            return await self._post(payload)
+            return await self._post(payload, weight)
 
-    async def _post(self, payload: dict[str, Any]) -> str | None:
+    @staticmethod
+    def _weight(background: bool) -> str:
+        """How much this call's answer quality matters, for Auto's routing:
+        the feature the usage meter was opened for, else light for background
+        batches, else normal."""
+        from . import llm_endpoints
+        meter = _meter.get()
+        if meter is not None and meter.feature in llm_endpoints.FEATURE_WEIGHT:
+            return llm_endpoints.FEATURE_WEIGHT[meter.feature]
+        return llm_endpoints.LIGHT if background else llm_endpoints.NORMAL
+
+    def _targets(self, payload: dict[str, Any], weight: str):
+        """(endpoint id, base url, model, key, max_tokens) to try, in order."""
+        from . import llm_endpoints as le
+        first = le.Endpoint(id=self.endpoint_id or "", name="", base_url=self.base_url,
+                            model=self.model, api_key=self.api_key)
+        if self.endpoint_id:
+            first = le.find(self.endpoint_id) or first
+        pool = [first] + list(self.fallbacks)
+        prompt = le.estimate_tokens(payload.get("messages") or [])
+        wanted = int(payload.get("max_tokens") or 1024)
+        if self.auto and len(pool) > 1:
+            pool = le.route(pool, prompt_tokens=prompt, max_tokens=wanted, weight=weight)
+        out = []
+        for ep in pool:
+            ctx = le.context_of(ep)
+            max_tokens = wanted
+            if ctx and prompt + wanted > ctx * 0.92:
+                # The prompt fits but the answer budget would overflow: ask for
+                # a shorter answer instead of a guaranteed 400.
+                max_tokens = max(64, int(ctx * 0.92) - prompt)
+            out.append((ep.id or None, ep.base_url.rstrip("/"), ep.model, ep.api_key, max_tokens))
+        return out
+
+    async def _post(self, payload: dict[str, Any], weight: str = "normal") -> str | None:
         meter = _meter.get()
         if meter is not None and meter.spent:
             meter.refused += 1
@@ -230,24 +281,52 @@ class LLMClient:
             logger.info("LLM call refused: AI budget spent (org %s, %s)", meter.org_id, meter.feature)
             return None
         self.call_count += 1
-        try:
-            async with httpx.AsyncClient(
-                timeout=self.timeout, transport=self._transport
-            ) as http:
-                response = await http.post(
-                    self._url, json=payload, headers=self._headers()
-                )
-                if response.status_code >= 400:
-                    self.last_error = f"HTTP {response.status_code}: {response.text[:300]}"
-                    logger.warning("LLM endpoint error: %s", self.last_error)
-                    return None
-                data = response.json()
-        except Exception as exc:
-            # Deliberately broad: connect errors, timeouts, TLS failures, invalid
-            # JSON bodies and DNS problems are all the same event to a caller —
-            # "no description this run" — and none of them may escape.
-            self.last_error = f"{type(exc).__name__}: {exc}"
-            logger.warning("LLM endpoint unreachable: %s", self.last_error)
+        from . import llm_endpoints
+
+        targets = self._targets(payload, weight)
+        data = None
+        errors: list[str] = []
+        for n, (eid, base, model, key, max_tokens) in enumerate(targets):
+            body = dict(payload, model=model, max_tokens=max_tokens)
+            headers = {"Content-Type": "application/json"}
+            if key:
+                headers["Authorization"] = f"Bearer {key}"
+            llm_endpoints.begin_call(eid)
+            try:
+                async with httpx.AsyncClient(
+                    timeout=self.timeout, transport=self._transport
+                ) as http:
+                    response = await http.post(f"{base}/chat/completions", json=body, headers=headers)
+                    if response.status_code >= 400:
+                        err = f"HTTP {response.status_code}: {response.text[:300]}"
+                        # A 5xx or a refused key says the endpoint is not usable
+                        # right now; a 4xx about this request (bad payload) does not.
+                        if response.status_code >= 500 or response.status_code in (401, 403, 404):
+                            llm_endpoints.mark(eid, False, err)
+                        errors.append(err)
+                        logger.warning("LLM endpoint error (%s): %s", eid or base, err)
+                        continue
+                    data = response.json()
+                    llm_endpoints.mark(eid, True)
+                    self.answered_by = eid
+                    llm_endpoints.record_use(
+                        eid, weight, auto=self.auto,
+                        user_id=meter.user_id if meter is not None else None,
+                        feature=meter.feature if meter is not None else None)
+                    break
+            except Exception as exc:
+                # Deliberately broad: connect errors, timeouts, TLS failures, invalid
+                # JSON bodies and DNS problems are all the same event to a caller —
+                # "no description this run" — and none of them may escape.
+                err = f"{type(exc).__name__}: {exc}"
+                llm_endpoints.mark(eid, False, err)
+                errors.append(err)
+                more = " -- trying the next endpoint" if n + 1 < len(targets) else ""
+                logger.warning("LLM endpoint unreachable (%s): %s%s", eid or base, err, more)
+            finally:
+                llm_endpoints.end_call(eid)
+        if data is None:
+            self.last_error = errors[-1] if errors else "the endpoint did not answer"
             return None
 
         usage = data.get("usage") or {}
@@ -282,6 +361,7 @@ class LLMClient:
         temperature: float = 0.2,
         background: bool = False,
         enforce: bool = False,
+        weight: str | None = None,
     ) -> dict | None:
         """A completion constrained to a JSON object matching `schema`.
 
@@ -304,7 +384,7 @@ class LLMClient:
         for attempt in range(retries + 1):
             raw = await self.complete(
                 attempt_messages, max_tokens=max_tokens, temperature=temperature,
-                background=background,
+                background=background, weight=weight,
                 response_format=(
                     {"type": "json_schema",
                      "json_schema": {"name": "reply", "schema": schema}}
@@ -435,16 +515,32 @@ _TYPE_CHECKS = {
 }
 
 
-def get_client() -> LLMClient:
+def get_client(choice: str | None = None) -> LLMClient:
     """The app-wide client, built from configuration.
 
     A fresh instance per call so token counters stay scoped to one unit of work;
     httpx opens its connection per request anyway, so there is no pool to share.
+
+    Which endpoint: `choice` if given, else the one the request picked (the
+    X-LLM-Endpoint header), else the platform default (services/llm_endpoints).
+    "auto" builds a client that fails over across every enabled endpoint,
+    reachable ones first.
     """
+    from . import llm_endpoints
+
+    targets = llm_endpoints.candidates(choice)
+    if not targets:
+        return LLMClient(base_url=settings.llm_base_url, model=settings.llm_model,
+                         enabled=False, timeout=settings.llm_timeout_s)
+    first, rest = targets[0], targets[1:]
+    picked = choice or llm_endpoints.current_choice()
     return LLMClient(
-        base_url=settings.llm_base_url,
-        model=settings.llm_model,
+        base_url=first.base_url,
+        model=first.model,
         enabled=settings.llm_enabled,
         timeout=settings.llm_timeout_s,
-        api_key=settings.llm_api_key,
+        api_key=first.api_key,
+        endpoint_id=first.id,
+        fallbacks=rest,
+        auto=picked == llm_endpoints.AUTO,
     )

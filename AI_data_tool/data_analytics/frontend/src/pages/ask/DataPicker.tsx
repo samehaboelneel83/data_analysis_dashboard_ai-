@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { Check, ChevronDown, Database, Plug, Search, Upload } from 'lucide-react'
 import { useT } from '../../i18n'
@@ -41,6 +41,41 @@ export function pushRecent(key: string) {
   } catch { /* private mode: recents are a convenience */ }
 }
 
+/** Search row + footer + gaps around the list: the popup's height minus its list. */
+const POP_CHROME = 110
+const LIST_MAX = 340
+const LIST_MIN = 120
+const EDGE = 12
+
+/** The box the popup can be seen in: the nearest ancestor that clips or
+ *  scrolls (the app's content pane), else the window. The popup is absolutely
+ *  positioned INSIDE that pane, so the window's height is the wrong measure. */
+function visibleBounds(el: HTMLElement): { top: number; bottom: number } {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const o = getComputedStyle(p).overflowY
+    if (o === 'auto' || o === 'scroll' || o === 'hidden') {
+      const r = p.getBoundingClientRect()
+      return { top: Math.max(r.top, 0), bottom: Math.min(r.bottom, window.innerHeight) }
+    }
+  }
+  return { top: 0, bottom: window.innerHeight }
+}
+
+/**
+ * Where the popup opens. Downward is the default; it flips UP only when the
+ * list would not fit below and there is more room above -- the hero picker
+ * sits low on the page, and opening it downward pushed the list off-screen so
+ * the user had to scroll to see what they were choosing from. The list's
+ * max-height then shrinks to the side it opened on, so it never overflows.
+ */
+export function placePopup(trigger: DOMRect, bounds: { top: number; bottom: number }) {
+  const below = bounds.bottom - trigger.bottom - EDGE
+  const above = trigger.top - bounds.top - EDGE
+  const up = below < POP_CHROME + LIST_MAX && above > below
+  const room = (up ? above : below) - POP_CHROME
+  return { up, listMax: Math.max(LIST_MIN, Math.min(LIST_MAX, Math.floor(room))) }
+}
+
 function shortDate(iso?: string | null): string {
   if (!iso) return ''
   const d = new Date(iso)
@@ -62,6 +97,19 @@ export default function DataPicker({ items, value, onChoose, size = 'hero', load
   const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const [place, setPlace] = useState<{ up: boolean; listMax: number }>({ up: false, listMax: LIST_MAX })
+
+  // Measured before paint, so the popup never flashes on the wrong side.
+  useLayoutEffect(() => {
+    if (!open || !triggerRef.current) return
+    const measure = () => {
+      const tr = triggerRef.current
+      if (tr) setPlace(placePopup(tr.getBoundingClientRect(), visibleBounds(tr)))
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [open])
 
   const selected = items.find(i => i.key === value)
 
@@ -155,7 +203,9 @@ export default function DataPicker({ items, value, onChoose, size = 'hero', load
       </button>
 
       {open && (
-        <div className="dl-pick__pop">
+        <div className={`dl-pick__pop${place.up ? ' dl-pick__pop--up' : ''}`}
+          data-placement={place.up ? 'top' : 'bottom'}
+          style={{ '--dl-pick-list-max': `${place.listMax}px` } as CSSProperties}>
           <div className="dl-pick__search">
             <Search size={15} aria-hidden />
             <input ref={inputRef} value={query} onChange={e => setQuery(e.target.value)} onKeyDown={onKey}

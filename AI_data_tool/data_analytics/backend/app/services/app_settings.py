@@ -75,9 +75,14 @@ _S = Spec
 SPECS: list[Spec] = [
     # -- AI model ---------------------------------------------------------
     _S("llm_enabled", "ai", "AI features on", "Off: Ask AI, the copilot and AI suggestions are unavailable."),
-    _S("llm_base_url", "ai", "LLM endpoint", "An OpenAI-compatible base URL, ending in /v1."),
-    _S("llm_model", "ai", "Model name", "The model id the endpoint serves."),
-    _S("llm_api_key", "ai", "API key", "Only if the endpoint requires one; sent as a Bearer token.", secret=True),
+    _S("llm_base_url", "ai", "LLM endpoint (single)",
+       "An OpenAI-compatible base URL, ending in /v1. Used only while no list is saved under LLM endpoints."),
+    _S("llm_model", "ai", "Model name (single)", "The model id that endpoint serves."),
+    _S("llm_api_key", "ai", "API key (single)", "Only if that endpoint requires one; sent as a Bearer token.", secret=True),
+    _S("llm_endpoints", "ai", "Built-in endpoint list (LLM_ENDPOINTS)",
+       "From the deployment; used until a list is saved under LLM endpoints above.", editable=False),
+    _S("llm_endpoints_default", "ai", "Built-in default (LLM_ENDPOINTS_DEFAULT)",
+       "An endpoint id from the built-in list, or auto.", editable=False),
     _S("llm_timeout_s", "ai", "Request timeout (seconds)"),
     _S("llm_max_concurrency", "ai", "Concurrent LLM calls", "Across the whole install."),
     _S("llm_reserved_interactive", "ai", "Calls reserved for people",
@@ -246,7 +251,14 @@ async def load(db: AsyncSession) -> None:
     global _SEEN_STAMP
     rows = (await db.execute(select(AppSetting))).scalars().all()
     values: dict[str, Any] = {}
+    from . import llm_endpoints
+    endpoint_list = None
     for row in rows:
+        if row.key == llm_endpoints.ROW_KEY:
+            # The LLM endpoint list is one structured row with its own
+            # validation (services/llm_endpoints.py), not a Settings field.
+            endpoint_list = row.value
+            continue
         spec = BY_KEY.get(row.key)
         if spec is None or not spec.editable:
             logger.warning("app setting %r ignored: not an editable setting", row.key)
@@ -256,6 +268,7 @@ async def load(db: AsyncSession) -> None:
         except (SettingError, ValueError) as e:
             logger.warning("app setting %r ignored: %s", row.key, e)
     _apply(values)
+    llm_endpoints.apply_stored(endpoint_list)
     _SEEN_STAMP = await _stamp(db)
 
 

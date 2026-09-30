@@ -1499,7 +1499,7 @@ breaks an org's tokens down by day, feature and person.
 
 ### Routers
 
-**34 router modules**, mounted with 35 `include_router` calls in `main.py` --
+**35 router modules**, mounted with 37 `include_router` calls in `main.py` --
 `analysis` and `metadata` each expose a second router. All under `/api/v1`
 except the agent:
 
@@ -2348,8 +2348,8 @@ Agent pane (7)
 
 | Suite | Scope | Count |
 |-------|-------|-------|
-| Backend | `backend/tests/` | ~6,670 tests across 426 modules |
-| Frontend | colocated `*.test.ts(x)` | ~3,410 tests across 248 files |
+| Backend | `backend/tests/` | ~6,670 tests across 428 modules |
+| Frontend | colocated `*.test.ts(x)` | ~3,410 tests across 250 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |
 | Doc audit | `tests/test_architecture_doc.py` | Enforces the *counts* in this document |

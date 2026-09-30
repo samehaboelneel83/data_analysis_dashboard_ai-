@@ -77,6 +77,15 @@ services:
       # is down. `EMBEDDING_DIM` matches embedding_server's fixed 384-dim
       # output; a mismatch here is exactly what the dim guard in
       # retrieval.py's `_verify_embedding_dim_or_block` catches.
+      # The LLM endpoints the app may use (services/llm_endpoints.py). Used
+      # until a platform admin saves a list in Platform settings -> LLM
+      # endpoints. "strength" is a 1-10 rank for Auto's routing (heavy work
+      # goes to the strongest, light work to the fastest); each model's
+      # context size is read from its /v1/models. Override with LLM_ENDPOINTS=
+      # in .env (set it to [] to fall back to the single LLM_BASE_URL).
+      LLM_ENDPOINTS: >-
+        ${LLM_ENDPOINTS:-[{"id":"qwen3.8-27b","name":"Qwen 3.8 27B","base_url":"http://10.125.18.37:8014/v1","model":"qwen3.8_27b","strength":8},{"id":"qwen3.5","name":"Qwen 3.5","base_url":"http://10.125.18.189:8000/v1","model":"qwen3.5","strength":6},{"id":"qwen3.5-9b","name":"Qwen 3.5 9B","base_url":"http://10.125.18.37:8015/v1","model":"qwen3.5_9b","strength":4}]}
+      LLM_ENDPOINTS_DEFAULT: ${LLM_ENDPOINTS_DEFAULT:-auto}
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-http://embeddings:8000/v1}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}
       EMBEDDING_DIM: ${EMBEDDING_DIM:-384}

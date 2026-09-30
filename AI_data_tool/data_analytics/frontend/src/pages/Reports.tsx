@@ -1,5 +1,6 @@
 import { useCallback, useContext, useEffect, useState } from 'react'
 import LoadError from '../components/ui/LoadError'
+import Loader from '../components/ui/Loader'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import BulkBar from '../components/ui/BulkBar'
 import { useBulkSelection } from '../lib/useBulkSelection'
@@ -120,7 +121,20 @@ export default function Reports() {
     }
   }
 
-  const openReport = useNavigate()
+  // Set when a dashboard is opened. React Router 7 navigates inside a
+  // transition, so the router's Suspense loader never shows while the report
+  // builder (the app's heaviest page) loads -- this list just sat there and
+  // the click looked ignored. The list unmounts once the dashboard renders,
+  // which clears this.
+  const [opening, setOpening] = useState(false)
+  const navigate = useNavigate()
+  const openReport = (to: string) => { setOpening(true); navigate(to) }
+  /** For the title link: only a plain left-click opens here. Ctrl/Cmd/Shift/
+   *  middle-click open a new tab, and this list must stay where it is. */
+  const onTitleClick = (e: React.MouseEvent) => {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+    setOpening(true)
+  }
 
   // Select mode: tick several dashboards and delete them together (clearing
   // out test runs was one menu + one dialog per card). Only dashboards the
@@ -277,6 +291,8 @@ export default function Reports() {
     }
   }
 
+  if (opening) return <Loader label={t('common.loading')} />
+
   return (
     <div className={`dl-dash-page${selecting ? ' dl-dash-page--selecting' : ''}`}>
       <div className="dl-page-head">
@@ -429,7 +445,7 @@ export default function Reports() {
                     planning extract output" about eight characters wide and
                     six lines tall. */}
                 <Link to={`/reports/${r.id}`} className="dl-dash-card__title"
-                  title={r.name} onClick={e => { if (selecting) e.preventDefault() }}>
+                  title={r.name} onClick={e => { if (selecting) e.preventDefault(); else onTitleClick(e) }}>
                   {r.name}
                 </Link>
                 <div className="dl-dash-card__controls">

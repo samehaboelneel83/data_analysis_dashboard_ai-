@@ -445,6 +445,9 @@ async def lifespan(app: FastAPI):
     # Settings saved by another worker or replica reach this one within 30s.
     from .services.app_settings import run_reloader
     settings_reloader = asyncio.create_task(run_reloader(AsyncSessionLocal))
+    # The up/down light for every LLM endpoint (services/llm_endpoints.py).
+    from .services.llm_endpoints import run_prober as run_llm_prober
+    llm_prober = asyncio.create_task(run_llm_prober())
 
     # E07/E12: the durable job worker (services/jobs.py). One per process,
     # like the scheduler; claims are compare-and-set on the jobs row, so
@@ -463,8 +466,20 @@ async def lifespan(app: FastAPI):
         call; a schema violation is logged at ERROR and nothing else happens —
         the app must start regardless."""
         try:
-            from .services import llm as llm_service
-            client = llm_service.get_client()
+            from .services import llm as llm_service, llm_endpoints
+            if not settings.llm_enabled:
+                return
+            # Probe first: with no endpoint reachable the contract check has
+            # nothing to test, and trying anyway only logged a ConnectError
+            # traceback-shaped warning at every start. The top bar's light
+            # tells people the model is down; the log says it once, plainly.
+            await llm_endpoints.probe_all()
+            if not any(llm_endpoints.is_up(e.id) for e in llm_endpoints.endpoints() if e.enabled):
+                logging.getLogger(__name__).info(
+                    "No LLM endpoint is reachable right now; AI features stay off until one answers "
+                    "(add or fix endpoints in Platform settings -> LLM endpoints).")
+                return
+            client = llm_service.get_client("auto")
             got = await client.complete_json(
                 [{"role": "user", "content": "Reply with the number one."}],
                 {"type": "object",
@@ -507,6 +522,7 @@ async def lifespan(app: FastAPI):
     finally:
         _STARTUP_COMPLETE = False
         settings_reloader.cancel()
+        llm_prober.cancel()
         scheduler.cancel()
         try:
             await scheduler
@@ -545,6 +561,30 @@ app = FastAPI(title="Datalytics API", version="2.0.0", lifespan=lifespan,
 # _run_secrets_migration above.
 from .core import telemetry as _telemetry
 _telemetry.setup_telemetry(app)
+
+
+@app.middleware("http")
+async def _llm_endpoint_choice(request, call_next):
+    """The person's LLM pick from the top bar rides on every request as the
+    X-LLM-Endpoint header; `llm.get_client()` reads it from here, so every AI
+    call site follows the pick without knowing about it."""
+    from .services import llm_endpoints
+    choice = request.headers.get("x-llm-endpoint")
+    token = llm_endpoints.use_choice(choice) if choice else None
+    # Every model call answered while serving this request is collected and
+    # returned as X-LLM-Used, so the top bar shows the model Auto REALLY
+    # used for this question (which differs per step: a light classification
+    # can go to the fast model and the SQL to the strongest).
+    usage = llm_endpoints.open_usage()
+    try:
+        response = await call_next(request)
+    finally:
+        used = llm_endpoints.close_usage(usage)
+        if token is not None:
+            llm_endpoints.release_choice(token)
+    if used:
+        response.headers["X-LLM-Used"] = llm_endpoints.used_header(used)
+    return response
 
 
 @app.middleware("http")
@@ -595,7 +635,7 @@ app.add_middleware(
     # cross-origin page unless it is exposed here: the app (3001) and the API
     # (8000) are different origins, so a 429's Retry-After -- when an AI
     # budget or a quota resets -- never reached the page that says so (E11).
-    expose_headers=["Retry-After"],
+    expose_headers=["Retry-After", "X-LLM-Used"],
 )
 
 app.include_router(datasets.router,     prefix="/api/v1")
@@ -628,6 +668,8 @@ app.include_router(dataflows.router,     prefix="/api/v1")
 app.include_router(platform.router,      prefix="/api/v1")
 from .routers import platform_settings  # noqa: E402
 app.include_router(platform_settings.router, prefix="/api/v1")
+from .routers import llm as llm_router  # noqa: E402
+app.include_router(llm_router.router, prefix="/api/v1")
 app.include_router(sso.router,           prefix="/api/v1")
 app.include_router(pins.router,          prefix="/api/v1")
 app.include_router(jobs_router.router,   prefix="/api/v1")
@@ -762,9 +804,16 @@ async def health_ready(response: Response):
             from .services.widget_data import _get_cache_backend
 
             backend = _get_cache_backend()
-            probe_key = "__readiness__"
-            backend.set(probe_key, {"v": 1}, ttl_s=5)
-            backend.get(probe_key)
+            # A direct PING, not a set/get through the cache: the old probe
+            # wrote a dict, which redis refuses. That raised inside
+            # ValkeyCache, opened its circuit and logged "Valkey connection
+            # failed ... Invalid input of type: 'dict'" on every healthcheck,
+            # so the shared cache was switched off almost all the time.
+            if not hasattr(backend, "ping"):
+                raise RuntimeError("valkey_url is set but the cache is in-process")
+            backend.ping()
+            if backend.circuit_open:
+                raise RuntimeError("recent Valkey errors: serving from the fallback")
             checks["valkey"] = {
                 "status": "ok",
                 "latency_ms": round((time.perf_counter() - started) * 1000, 1),

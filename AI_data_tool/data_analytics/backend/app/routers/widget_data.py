@@ -204,6 +204,75 @@ def _directquery_calc_view(ds, calc_cols: list, used: list[str]):
         known.add(name)
     return _DirectQueryCalcView(ds, sql, extra, reads)
 
+def _bin_kind(ds_like, req: WidgetDataRequest) -> str | None:
+    """'date' | 'number' when this widget should be auto-binned, else None."""
+    from ..services import auto_bin
+    cfg = req.config or {}
+    col = next((c for c in (getattr(ds_like, "columns", None) or [])
+                if c.name == cfg.get("dimension")), None)
+    kind = auto_bin.column_kind(getattr(col, "dtype", None)) if col is not None else None
+    if kind is None or not auto_bin.wants_bins(cfg, req.widget_type or "bar", kind):
+        return None
+    return kind
+
+
+def _without_bin_keys(req: WidgetDataRequest) -> WidgetDataRequest:
+    from ..services import auto_bin
+    cfg = req.config or {}
+    if not any(k in cfg for k in auto_bin.CONFIG_KEYS) and cfg.get("dimension_granularity") != "auto":
+        return req
+    return req.model_copy(update={"config": auto_bin.strip_keys(cfg)})
+
+
+def _bin_stats_filters(cfg: dict, column: str, kind: str):
+    from ..services import auto_bin
+    window = auto_bin.parse_window(cfg, kind)
+    return window, (auto_bin.same_column_bounds(cfg, column, kind)
+                    + auto_bin.window_filters(column, kind, window))
+
+
+#: Keys that make the shaper need the raw rows even with the grain pushed
+#: down (direct_query._ROW_LEVEL_KEYS minus the grain itself).
+_GRAIN_PUSHDOWN_BLOCKERS = ("having", "suppress_below", "quick_calc", "sort_custom", "dimension_levels",
+                            "running", "dimension2", "rows_extra", "columns_extra", "extra_measures",
+                            "rank", "dimension_bin", "animate_by", "lattice_rows", "lattice_columns")
+
+
+def _author_grain_plan(dq_ds, req: WidgetDataRequest, source_cfg: dict, denied: list[str]):
+    """A pushdown plan for a date grain the author chose, or None."""
+    from ..services import auto_bin
+    from ..services import connectors as _connectors
+    cfg = req.config or {}
+    grain, dim = cfg.get("dimension_granularity"), cfg.get("dimension")
+    if grain not in ("hour", "day", "week", "month", "quarter", "year") or not dim or dim in denied:
+        return None
+    if (req.widget_type or "bar") not in auto_bin.DEFAULT_TARGETS and req.widget_type not in ("table", "kpi"):
+        return None
+    if any(cfg.get(k) not in (None, "", [], {}) for k in _GRAIN_PUSHDOWN_BLOCKERS):
+        return None
+    col = next((c for c in (getattr(dq_ds, "columns", None) or []) if c.name == dim), None)
+    if col is None or auto_bin.column_kind(getattr(col, "dtype", None)) != "date":
+        return None
+    plan = auto_bin.BinPlan(column=dim, kind="date", target=0, distinct=0, grain=grain, announce=False)
+    if not auto_bin.bucket_sql(_connectors.sql_family_of(source_cfg) or "", '"x"', plan):
+        return None
+    return plan
+
+
+class _DirectQueryBinView(_DirectQueryCalcView):
+    """The dataset with one more SELECT layer: the bucket each row falls in,
+    as the column auto_bin.BIN_COL. The raw column stays, so filters and
+    cross-filters on it still read real values."""
+
+    def __init__(self, ds, bucket_expr: str, kind: str):
+        from types import SimpleNamespace
+        from ..services.auto_bin import BIN_COL
+        from ..services.direct_query import _base_query_sql, _quote
+        sql = f"SELECT bin_src.*, {bucket_expr} AS {_quote(BIN_COL)} FROM ({_base_query_sql(ds)}) AS bin_src"
+        super().__init__(ds, sql, [SimpleNamespace(name=BIN_COL, dtype="datetime" if kind == "date" else "numeric")],
+                         set(getattr(ds, "calc_reads", None) or set()))
+
+
 def _config_uses_measure(config: dict, measures: list[dict]) -> bool:
     """True when any role in the widget config names a dataset measure. Checked so a
     DirectQuery dataset fails loudly rather than silently falling back to a column."""
@@ -488,19 +557,125 @@ async def _resolve_widget_data(
                     raise widget_error(403, "forbidden_column",
                                        "This widget references a column your role cannot access")
 
+        # Auto-bin (services/auto_bin.py): too many values on the axis are
+        # grouped BY THE SOURCE -- one small stats query picks the buckets,
+        # and the chart's GROUP BY runs over the bucket column, so a donut
+        # over 5,670 prices brings back 12 ranges instead of 5,670 rows.
+        bin_plan = None
+        unbinned = (dq_ds, req)          # the safety net below runs this if bucket SQL fails
+        bin_kind = _bin_kind(dq_ds, req) if (req.config or {}).get("dimension") not in denied else None
+        if bin_kind:
+            from ..services import auto_bin
+            from ..services import connectors as _connectors
+            from ..services.direct_query import _quote
+            import json as _json
+            cfg = req.config or {}
+            dim = cfg["dimension"]
+            window, stat_filters = _bin_stats_filters(cfg, dim, bin_kind)
+            # The connection's own settings and the table are in the key, not
+            # just ids: a stats entry must never outlive the thing it measured.
+            key = _json.dumps(["dq", ds.id, source.id, source.cache_epoch, source_cfg,
+                               getattr(dq_ds, "source_table", None), dq_ds.source_query,
+                               dim, stat_filters, rls_filter_expr], sort_keys=True, default=str)
+            import hashlib as _hashlib
+            key = _hashlib.sha256(key.encode()).hexdigest()   # no credential kept as a key
+            try:
+                stats = await asyncio.to_thread(
+                    auto_bin.stats_cached, key,
+                    lambda: auto_bin.dq_stats(source_cfg, dq_ds, dim, bin_kind, stat_filters, rls_filter_expr))
+            except Exception as e:  # noqa: BLE001 -- binning is an optimisation; the chart still draws
+                _log.info("auto-bin stats declined for dataset %s: %s", ds.id, type(e).__name__)
+                stats = None
+            if stats is not None:
+                bin_plan = auto_bin.plan_bins(cfg, req.widget_type or "bar", bin_kind, stats, window)
+                expr = (auto_bin.bucket_sql(_connectors.sql_family_of(source_cfg) or "", _quote(dim), bin_plan)
+                        if bin_plan.grouped and bin_kind != "text" else None)
+                if bin_kind == "text" and bin_plan.top_n:
+                    # Top N at the source; "All Other" is one more query after it.
+                    measure_names = {m.get("name") for m in measure_defs}
+                    new_cfg = (auto_bin.import_config(cfg, bin_plan) if cfg.get("measure") in measure_names
+                               else auto_bin.dq_top_config(cfg, bin_plan))
+                elif bin_plan.grouped and expr:
+                    dq_ds = _DirectQueryBinView(dq_ds, expr, bin_kind)
+                    new_cfg = auto_bin.dq_config(cfg, bin_plan)
+                else:
+                    # Raw values fit, or no bucket SQL for this dialect: the
+                    # shaper buckets fetched rows (slower, same answer).
+                    new_cfg = auto_bin.import_config(cfg, bin_plan)
+                req = req.model_copy(update={"config": new_cfg})
+        if bin_plan is None:
+            req = _without_bin_keys(req)
+            # The AUTHOR's date grain, pushed to the source the same way.
+            # Without this a "by month" line on a live table fetched every row
+            # (up to the analysis cap) to group them in Python -- 2.2s for 25
+            # points on dashboard 213. Now the source returns the 25 rows.
+            bin_plan = _author_grain_plan(dq_ds, req, source_cfg, denied)
+            if bin_plan is not None:
+                from ..services import auto_bin
+                from ..services import connectors as _connectors
+                from ..services.direct_query import _quote
+                expr = auto_bin.bucket_sql(_connectors.sql_family_of(source_cfg) or "",
+                                           _quote(bin_plan.column), bin_plan)
+                dq_ds = _DirectQueryBinView(dq_ds, expr, "date")
+                cfg = dict(req.config or {})
+                cfg.pop("dimension_granularity", None)
+                req = req.model_copy(update={"config": auto_bin.dq_config(cfg, bin_plan)})
+
         try:
             # to_thread keeps the sync SQLAlchemy round-trip off the event loop --
             # one slow customer database must not stall every other request on
             # this worker. Only plain data crosses the thread boundary (dicts,
             # strings, ints pre-read from ORM rows above); never pass `db` or a
             # lazy ORM attribute into the thread.
-            return await _run_gated(
+            run = lambda d, r: _run_gated(  # noqa: E731
                 request, run_direct_query,
-                source_cfg, dq_ds, req.config, widget_type=req.widget_type, rls_filter_expr=rls_filter_expr,
+                source_cfg, d, r.config, widget_type=r.widget_type, rls_filter_expr=rls_filter_expr,
                 cache_ttl_seconds=source.cache_ttl_seconds, cache_epoch=source.cache_epoch,
                 org_id=current_user.org_id, drop_columns=denied or None,
                 measures=measure_defs or None,
             )
+            if isinstance(dq_ds, _DirectQueryBinView):
+                try:
+                    result = await run(dq_ds, req)
+                except (DirectQueryUnsupported, SourceUnavailable, CodedHTTPException):
+                    raise
+                except Exception as e:  # noqa: BLE001
+                    # The bucket SQL is ours, not the author's: a database that
+                    # rejects it (an odd column type, an old server) must cost
+                    # speed, never the chart. The shaper groups fetched rows.
+                    _log.warning("bucket SQL declined by the source for dataset %s (%s); "
+                                 "grouping fetched rows instead", ds.id, type(e).__name__)
+                    from ..services import auto_bin
+                    base_ds, base_req = unbinned
+                    cfg0 = base_req.config or {}
+                    if bin_plan.announce:
+                        cfg1 = auto_bin.import_config(cfg0, bin_plan)
+                    else:
+                        cfg1 = auto_bin.strip_keys(cfg0)
+                    result = await run(base_ds, base_req.model_copy(update={"config": cfg1}))
+                    if not bin_plan.announce:
+                        bin_plan = None
+            else:
+                result = await run(dq_ds, req)
+            if (bin_plan is not None and bin_plan.kind == "text" and bin_plan.top_n
+                    and (req.config or {}).get("limit") == bin_plan.top_n and isinstance(result, dict)
+                    and isinstance(result.get("rows"), list)):
+                from ..services import auto_bin
+                from ..services import connectors as _connectors
+                shown = [r.get("name") for r in result["rows"] if isinstance(r, dict)]
+                try:
+                    other = await asyncio.to_thread(
+                        auto_bin.dq_other, source_cfg, dq_ds, req.config, shown, rls_filter_expr,
+                        _connectors.sql_family_of(source_cfg) or "")
+                except Exception as e:  # noqa: BLE001 -- the top N still stand on their own
+                    _log.info("All Other declined for dataset %s: %s", ds.id, type(e).__name__)
+                    other = None
+                if other is not None:
+                    result["rows"].append({"name": auto_bin.OTHER_LABEL, "value": other[0]})
+            if bin_plan is not None:
+                from ..services import auto_bin
+                result = auto_bin.finish(result, bin_plan)
+            return result
         except DirectQueryUnsupported as e:
             raise widget_error(400, "unsupported", str(e))
         except SourceUnavailable:
@@ -534,6 +709,37 @@ async def _resolve_widget_data(
         email_override=email_override, org_id_override=org_id_override,
     )
 
+    # Auto-bin for an uploaded file: the grain comes from one DuckDB scan of
+    # the dimension column; the config then carries an ordinary granularity
+    # (DuckDB-eligible) or a number-range bucket (pandas).
+    bin_plan = None
+    bin_kind = _bin_kind(ds, req) if (req.config or {}).get("dimension") not in denied else None
+    if bin_kind and not steps:
+        from ..services import auto_bin
+        import json as _json
+        import os as _os
+        cfg = req.config or {}
+        dim = cfg["dimension"]
+        window, stat_filters = _bin_stats_filters(cfg, dim, bin_kind)
+        try:
+            st = _os.stat(ds.filename)
+            stamp = (st.st_mtime, st.st_size)
+        except OSError:
+            stamp = None
+        key = _json.dumps(["import", ds.filename, stamp, dim, stat_filters], sort_keys=True, default=str)
+        try:
+            stats = await asyncio.to_thread(
+                auto_bin.stats_cached, key,
+                lambda: auto_bin.import_stats(ds.filename, dim, bin_kind, stat_filters))
+        except Exception as e:  # noqa: BLE001 -- binning is an optimisation; the chart still draws
+            _log.info("auto-bin stats declined for dataset %s: %s", ds.id, type(e).__name__)
+            stats = None
+        if stats is not None:
+            bin_plan = auto_bin.plan_bins(cfg, req.widget_type or "bar", bin_kind, stats, window)
+            req = req.model_copy(update={"config": auto_bin.import_config(cfg, bin_plan)})
+    if bin_plan is None:
+        req = _without_bin_keys(req)
+
     try:
         # The whole pandas pipeline (CSV parse, RLS, prep, calc columns, shaping)
         # runs off the event loop: one 1M-row parse must not stall every other
@@ -544,7 +750,7 @@ async def _resolve_widget_data(
         # bounds how many pipelines run at once: the GIL serializes the pandas
         # work regardless, so extra parallelism only starves the loop
         # (measured -- see widget_work_max_concurrency in config.py).
-        return await _run_gated(
+        result = await _run_gated(
             request, get_widget_data,
             ds.filename, req.config, widget_type=req.widget_type,
             calculated_columns=calc_cols or None, filter_expr=author_filter_expr or None,
@@ -554,6 +760,10 @@ async def _resolve_widget_data(
             org_id=current_user.org_id, dataset_id=ds.id,
             custom_functions=ds.custom_functions,
         )
+        if bin_plan is not None:
+            from ..services import auto_bin
+            result = auto_bin.finish(result, bin_plan)
+        return result
     except FileNotFoundError:
         raise widget_error(404, "not_found", "Dataset file not found on server — please re-upload the file")
     except ImportRowCapExceeded as e:

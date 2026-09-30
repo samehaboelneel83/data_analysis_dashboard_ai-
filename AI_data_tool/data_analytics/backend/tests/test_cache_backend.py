@@ -206,3 +206,17 @@ def test_two_in_process_caches_do_not_share_entries():
     b = InProcessCache(maxsize=500)
     a.set("k", b"v")
     assert b.get("k") is None
+
+
+def test_a_dict_value_is_encoded_not_a_reason_to_open_the_circuit():
+    """redis refuses a dict ("Invalid input of type: 'dict'"). That used to be
+    caught as a CONNECTION failure: the circuit opened and every worker served
+    from its in-process cache for five minutes over a caller's bug."""
+    import json
+    import fakeredis
+    from app.services.cache_backend import ValkeyCache
+
+    cache = ValkeyCache(client=fakeredis.FakeRedis())
+    cache.set("k", {"v": 1}, ttl_s=5)
+    assert not cache.circuit_open
+    assert json.loads(cache.get("k")) == {"v": 1}
