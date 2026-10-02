@@ -1461,6 +1461,15 @@ def series_backbone(profile: dict, ineligible: set[str] | frozenset = frozenset(
         add("table", f"Top 10 days by {label(m)}",
             {"columns": [date, m] + beside, "sort_col": m, "sort": "desc", "limit": 10}, "exceptions", 4,
             f"The days with the most {label(m)}, and what else happened on them.")
+    # Two averages of one kind (avg_order_value, avg_freight_cost) read day
+    # against day: does a dearer basket cost more to ship? The daily-ops
+    # analysts drew it; nothing else in the panel asks it.
+    avgs = [r for r in rates if re.match(r"(avg|mean|average)_", r)]
+    if len(avgs) >= 2:
+        plain = lambda m: re.sub(r"^(avg|mean|average) ", "average ", label(m))  # noqa: E731
+        add("numeric_series", f"{plain(avgs[0]).capitalize()} vs {plain(avgs[1])} (per day)",
+            {"measure": avgs[0], "measure2": avgs[1]}, "relationships", 4,
+            "Whether the two daily averages rise and fall together.")
     if len(nums) >= 3:
         add("correlation_matrix", "Which measures move together",
             {"measures": (additive + rates)[:10]}, "relationships", 4,

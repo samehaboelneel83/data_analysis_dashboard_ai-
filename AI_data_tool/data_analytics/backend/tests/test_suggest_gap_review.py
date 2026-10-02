@@ -887,3 +887,12 @@ def test_rates_get_a_headline_beside_the_totals():
     kpis = {w["title"]: w["config"] for w in got if w["widget_type"] == "kpi"}
     assert kpis["Average order value per day"] == {"measure": "avg_order_value", "aggregation": "avg"}
     assert kpis["Average cancellation rate pct per day"]["aggregation"] == "avg"
+
+
+def test_two_daily_averages_are_read_against_each_other():
+    from app.services.analyst_panel import series_backbone
+    df = _daily_rated()
+    df["avg_freight_cost"] = df["avg_order_value"] * 0.15
+    got = series_backbone(_profile(df), set(), {}, ["day_date"])
+    pairs = [w["config"] for w in got if w["widget_type"] == "numeric_series"]
+    assert {"measure": "avg_order_value", "measure2": "avg_freight_cost"} in pairs
