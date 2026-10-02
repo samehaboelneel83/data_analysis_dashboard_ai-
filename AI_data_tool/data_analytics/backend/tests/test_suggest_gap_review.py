@@ -195,9 +195,15 @@ def test_a_panel_ends_on_a_detail_page_and_pages_carry_slicers():
     from tests.test_analyst_panel import _run
     out, _ = _run(size=12)
     sections = [p["section"] for p in out["proposals"]]
-    assert sections[-1] == "detail"
-    with_controls = [p for p in out["proposals"] if any(w["widget_type"] == "slicer" for w in p["widgets"])]
-    assert len(with_controls) == len(out["proposals"])
+    # the record page, then the hidden page a bar drills into
+    assert sections[-2:] == ["detail", "drill"]
+    drill = out["proposals"][-1]
+    assert drill["page_type"] == "drillthrough" and drill["prompt_column"]
+    marked = [w for p in out["proposals"] for w in p["widgets"] if w.get("drill_to") == "drill"]
+    assert marked and all(w["config"]["dimension"] == drill["prompt_column"] for w in marked)
+    pages = [p for p in out["proposals"] if p["section"] != "drill"]
+    with_controls = [p for p in pages if any(w["widget_type"] == "slicer" for w in p["widgets"])]
+    assert len(with_controls) == len(pages)
     for p in with_controls:
         first = [w for w in p["widgets"] if w["layout"]["y"] == 0]
         assert all(w["widget_type"] == "slicer" for w in first)
@@ -523,3 +529,163 @@ def test_a_share_of_a_whole_keeps_its_total_when_polished():
     b = polish_widget({"widget_type": "bar", "title": "Price by seller",
                        "config": {"dimension": "seller_id", "measure": "price", "aggregation": "sum"}}, profile)
     assert b["config"]["aggregation"] == "avg"
+
+
+# ── round 3: period data, drill-through, every engine ────────────────────────
+
+def _daily(n=400, seed=8):
+    rng = np.random.default_rng(seed)
+    orders = rng.integers(80, 300, n)
+    return pd.DataFrame({"day_date": pd.date_range("2017-01-01", periods=n, freq="D"),
+                         "total_orders": orders, "canceled_orders": rng.binomial(orders, 0.01),
+                         "total_revenue": orders * rng.uniform(90, 140, n),
+                         "avg_order_value": rng.uniform(90, 140, n)})
+
+
+def test_one_row_per_period_data_gets_an_exceptions_lens():
+    from app.services.analyst_panel import choose_lenses
+    assert "exceptions" in choose_lenses(_profile(_daily()), [])
+    assert "exceptions" not in choose_lenses(_profile(_enrolments()), [])
+
+
+def test_a_ranked_table_of_periods_lists_the_rows():
+    df = _daily()
+    w, ok, why = repair_and_check({"widget_type": "table", "title": "Top 10 cancellation days",
+                                   "config": {"dimension": "day_date", "measures": ["total_orders", "canceled_orders"],
+                                              "sort_by": "canceled_orders", "limit": 10}}, _profile(df), {})
+    assert ok, why
+    assert w["config"] == {"columns": ["day_date", "total_orders", "canceled_orders"], "limit": 10,
+                           "sort_col": "canceled_orders", "sort": "desc"}
+    from app.services.widget_data import get_widget_data_from_df
+    rows = get_widget_data_from_df(df, w["config"], "table")["rows"]
+    assert rows[0][2] == df.canceled_orders.max()
+
+
+def test_the_drill_page_repeats_headlines_and_records_for_one_value():
+    from app.services.analyst_panel import drill_page
+    props = [
+        {"section": "summary", "widgets": [{"widget_type": "kpi", "title": "Median wait", "config": {"measure": "w"},
+                                            "layout": {}}]},
+        {"section": "measures", "widgets": [{"widget_type": "bar", "title": "Wait by dept",
+                                             "config": {"dimension": "dept", "measure": "w"}, "layout": {}},
+                                            {"widget_type": "slicer", "title": "f", "config": {"dimension": "dept"},
+                                             "layout": {}}]},
+        {"section": "detail", "widgets": [{"widget_type": "table", "title": "Detail rows",
+                                           "config": {"columns": ["id", "dept", "w"]}, "layout": {}}]},
+    ]
+    page = drill_page(props, ["dept"])
+    assert page["page_type"] == "drillthrough" and page["prompt_column"] == "dept"
+    assert [w["widget_type"] for w in page["widgets"]] == ["kpi", "table"]
+    assert props[1]["widgets"][0]["drill_to"] == "drill" and "drill_to" not in props[1]["widgets"][1]
+    assert drill_page(props, []) is None
+
+
+def test_the_designer_and_statistics_engines_get_the_same_help(client_factory=None):
+    """Quick mode is offered the derived fields; the statistics engine trims
+    edge periods and applies the veto (checked on the router's helper)."""
+    import asyncio
+    from app.routers.datasets import _suggest_from_insights
+
+    class DS:
+        name, description, column_meta = "daily", None, {}
+    df = _daily(700)
+    df.loc[len(df)] = [pd.Timestamp("2019-01-01"), 5, 0, 500.0, 100.0]       # a stub period after a gap
+    tm = detect_types(df)
+    from app.services.widget_data import get_widget_data_from_df
+
+    async def probe(wt, cfg):
+        return get_widget_data_from_df(df, cfg, wt)
+    props, _ = asyncio.run(_suggest_from_insights(df, tm, DS(), probe, _profile(df)))
+    trends = [w for p in props for w in p["widgets"] if (w["config"].get("dimension_granularity") == "month")]
+    assert trends and all(any(f.get("op") == "lt" for f in w["config"].get("filters") or []) for w in trends)
+
+
+def test_the_datas_own_faults_are_stated():
+    from app.services.fact_sheet import quality_issues
+    df = pd.DataFrame({"dest": ["Mobile to Mobile", "Mobile To Mobile", " Catch All Zone", "Local"] * 10,
+                       "amount": list(range(39)) + [None]})
+    df = pd.concat([df, df.iloc[:3]], ignore_index=True)
+    got = quality_issues(df, ["dest"])
+    assert got[0].startswith("3 rows are exact duplicates")
+    assert any("stray spaces" in t and "' Catch All Zone'" in t for t in got)
+    assert any("'Mobile to Mobile' / 'Mobile To Mobile'" in t for t in got)
+    assert quality_issues(pd.DataFrame({"a": [1, 2, 3], "b": ["x", "y", "z"]}), ["b"]) == []
+
+
+# ── round 4 ──────────────────────────────────────────────────────────────────
+
+def test_data_with_nothing_to_group_by_gets_period_slicers():
+    from app.services.analyst_panel import slicers_for
+    from app.services.widget_data import get_widget_data_from_df, infer_date_filter_grains
+    df = _daily(700)
+    got = slicers_for([], _profile(df))
+    assert [s["config"] for s in got] == [{"dimension": "day_date", "dimension_granularity": "year"},
+                                         {"dimension": "day_date", "dimension_granularity": "month"}]
+    years = [r["name"] for r in get_widget_data_from_df(df, got[0]["config"], "slicer")["rows"]]
+    # a picked year is a bucket every engine filters by
+    f = infer_date_filter_grains([{"column": "day_date", "op": "eq", "value": years[0]}], {"day_date"})
+    kpi = get_widget_data_from_df(df, {"measure": "total_orders", "aggregation": "sum", "filters": f}, "kpi")
+    assert kpi["rows"][0]["value"] == df[df.day_date.dt.year == int(years[0])].total_orders.sum()
+
+
+def test_overlap_recall_counts_a_near_miss_but_not_a_stranger():
+    from app.services.panel_benchmark import coverage
+    ref = [{"widget_type": "table", "title": "Top cancellation days",
+            "config": {"dimension": "day", "measures": ["orders", "canceled", "rate"]}}]
+    cols = {"day", "orders", "canceled", "rate", "revenue"}
+    near = [{"widget_type": "table", "config": {"dimension": "day", "measures": ["orders", "canceled"]}}]
+    far = [{"widget_type": "table", "config": {"dimension": "day", "measures": ["revenue"]}}]
+    assert coverage(near, ref, cols)["question_recall"] == 0
+    assert coverage(near, ref, cols)["overlap_recall"] == 1
+    assert coverage(far, ref, cols)["overlap_recall"] == 0
+
+
+def test_quick_mode_replaces_what_the_gate_refused():
+    import asyncio
+    from app.services.suggest_dataset_dashboard import suggest_for_dataset
+    df = _enrolments()
+    profile = _profile(df)
+    first = {"proposals": [{"title": "Scores", "rationale": "r", "widgets": [
+        {"widget_type": "bar", "title": "Average score by faculty",
+         "config": {"dimension": "faculty", "measure": "final_score", "aggregation": "avg"}},
+        {"widget_type": "bar", "title": "Bad", "config": {"dimension": "region", "measure": "final_score"}}]}]}
+    second = {"proposals": [{"title": "Scores", "rationale": "r", "widgets": [
+        {"widget_type": "histogram", "title": "Score distribution", "config": {"measure": "final_score"}}]}]}
+
+    class Client:
+        calls = 0
+
+        async def complete_json(self, messages, schema, **kw):
+            Client.calls += 1
+            return first if Client.calls == 1 else second
+    from app.services.widget_data import get_widget_data_from_df
+
+    async def probe(wt, cfg):
+        return get_widget_data_from_df(df, cfg, wt)
+    props, reason = asyncio.run(suggest_for_dataset(profile, "I run admissions", 1, client=Client(), probe=probe))
+    assert [w["title"] for w in props[0]["widgets"]] == ["Average score by faculty", "Score distribution"]
+    assert reason.startswith("1 of 1 refused ideas replaced")
+
+
+def test_every_lens_asks_greedily_with_one_seed():
+    import asyncio
+    from app.services.analyst_panel import LENS_SEED
+    from app.services.suggest_inputs import SuggestInputs, panel
+    seen = []
+
+    class Client:
+        async def complete_json(self, messages, schema, **kw):
+            seen.append((kw.get("temperature"), kw.get("seed")))
+            return {"widgets": []}
+    df = _enrolments()
+    tm = detect_types(df)
+    inp = SuggestInputs(df=df, type_map=tm, profile=build_profile(df, tm, {}), knowledge=None, measures=[],
+                        column_meta={}, description=None, measured={})
+    asyncio.run(panel(inp, None, 12, client=Client()))
+    assert seen and set(seen) == {(0.0, LENS_SEED)}
+
+
+def test_the_model_client_sends_the_seed():
+    from app.services.llm import LLMClient
+    assert "seed" in LLMClient.complete.__code__.co_varnames
+    assert "seed" in LLMClient.complete_json.__code__.co_varnames

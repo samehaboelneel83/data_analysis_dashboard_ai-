@@ -406,6 +406,8 @@ export interface SuggestedWidget {
   evidence?: number
   /** Panel mode: its place on the section's page, decided on the server. */
   layout?: { x: number; y: number; w: number; h: number }
+  /** Panel mode: double-clicking a value opens the drill-through page. */
+  drill_to?: 'drill'
 }
 
 /** Which widgets can filter which others, and on what column. Indices into the
@@ -429,6 +431,11 @@ export interface DashboardSuggestion {
   source?: 'insights' | 'model' | 'panel'
   /** Panel mode: which lens section this proposal is. */
   section?: string
+  /** Panel mode: a drill-through page, filtered to the value clicked
+   *  elsewhere (`prompt_column`). */
+  page_type?: 'drillthrough'
+  prompt_column?: string
+  prompt_label?: string
 }
 
 /** What the analyst panel did: how many ideas each source gave, how many drew,

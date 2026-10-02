@@ -186,6 +186,46 @@ def edge_periods(df: pd.DataFrame, date_cols: list[str]) -> dict:
     return out
 
 
+def quality_issues(df: pd.DataFrame, cats: list[str], limit: int = 6) -> list[str]:
+    """Plain sentences about the data's own faults, worst first.
+
+    Call records (2026-10-02): 104 exact duplicate rows, " Catch All Zone"
+    with a leading space, and "Mobile to Mobile" / "Mobile To Mobile" as two
+    destinations -- the analysts flagged all three, the platform none. Read
+    by the analysts' lenses (to avoid splitting by a broken label) and shown
+    to the person beside the facts."""
+    from .suggest_variety import _h
+    out: list[str] = []
+    try:
+        dups = int(df.duplicated().sum())
+    except TypeError:
+        dups = 0
+    if dups:
+        out.append(f"{dups:,} rows are exact duplicates of another row ({dups / len(df):.1%}); "
+                   f"totals count them twice.")
+    for c in cats:
+        vals = df[c].dropna().astype(str)
+        if vals.empty or vals.nunique() > 200:
+            continue
+        uniq = vals.unique()
+        padded = [v for v in uniq if v != v.strip()]
+        if padded:
+            out.append(f"{_h(c)} has values with stray spaces ({', '.join(repr(v) for v in padded[:3])}).")
+        groups: dict = {}
+        for v in uniq:
+            groups.setdefault(" ".join(v.strip().lower().split()), []).append(v)
+        same = [g for g in groups.values() if len(g) > 1]
+        if same:
+            out.append(f"{_h(c)} spells one value several ways: " +
+                       "; ".join(" / ".join(repr(v) for v in g[:3]) for g in same[:2]) +
+                       " -- they are split into separate groups.")
+    for c in df.columns:
+        miss = float(df[c].isna().mean())
+        if 0.2 <= miss < 1:
+            out.append(f"{_h(c)} is missing on {miss:.0%} of rows; charts of it describe the rest only.")
+    return out[:limit]
+
+
 def _fmt(v: float) -> str:
     from .readback import _num
     return _num(v)
@@ -238,6 +278,10 @@ def build_facts(df: pd.DataFrame | None, roles: dict[str, str],
                      f"units. Show it for one {_h(u['by'])} at a time, with a filter; never total, average "
                      f"or set it side by side across {_h(u['by'])} values. Counting rows is fine." + also,
             [m, u["by"]], 1.0)
+
+    # ── the data's own faults ───────────────────────────────────────────────
+    for text in quality_issues(df, list(p.cats)):
+        add("quality", text, [], 0.9)
 
     # ── measures ────────────────────────────────────────────────────────────
     for m in p.nums[:3]:

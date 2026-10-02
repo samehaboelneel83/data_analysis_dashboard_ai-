@@ -1992,14 +1992,30 @@ async def suggest_dashboards(dataset_id: int, req: SuggestDashboardsRequest,
     goal = (req.goal or "").strip()
     if req.mode == "panel":
         return await sug.panel(inputs, goal, req.size)
+    fields: dict = {"facts": []}
     if goal:
         # Measured facts, not column shapes: the designer proposes for the
         # differences that exist (HR analyst panel, 2026-10-02).
         from ..services.fact_sheet import build_facts
         from ..services.insights import effective_roles
+        roles = effective_roles(type_map, inputs.column_meta)
         facts = await asyncio.to_thread(
-            build_facts, df, effective_roles(type_map, inputs.column_meta),
-            inputs.column_meta, inputs.ineligible())
+            build_facts, df, roles, inputs.column_meta, inputs.ineligible())
+        # The fields an analyst would add first (a rate of totals, a
+        # duration), as the panel offers them: drawn on a copy of the frame,
+        # created on the dataset only when the person accepts.
+        from ..services.suggest_inputs import _with_derived
+        inputs, fields, _ = await asyncio.to_thread(
+            _with_derived, inputs, roles, inputs.ineligible(), facts.get("mixed_units") or {})
+        if fields["calculated_columns"]:
+            facts = await asyncio.to_thread(
+                build_facts, inputs.df, effective_roles(inputs.type_map, inputs.column_meta),
+                inputs.column_meta, inputs.ineligible())
+        if fields["facts"]:
+            facts = {**facts, "text": (facts.get("text") or "") + "\n" + "\n".join(
+                f"- Derived field: {t}." for t in fields["facts"])}
+        df, type_map, profile = inputs.df, inputs.type_map, inputs.profile
+        probe, drawn = inputs.probe, inputs.drawn
         from ..services.suggest_dataset_dashboard import suggest_for_dataset
         proposals, reason = await suggest_for_dataset(
             profile, goal, req.count, probe=probe, knowledge=know, facts=facts["text"],
@@ -2008,9 +2024,14 @@ async def suggest_dashboards(dataset_id: int, req: SuggestDashboardsRequest,
             edges=facts.get("edges"))
         source = "model"
     else:
-        proposals, reason = await _suggest_from_insights(
-            df, type_map, ds, probe)
-        source = "insights"
+        # No goal, no model: the panel's own statistics -- findings, the
+        # derived fields, whole periods, a page per section with filters, the
+        # records and a drill-through page -- rather than one page of findings
+        # (statistics engine 41% of the analysts' questions on one page,
+        # five-dataset review 2026-10-02). Same gate, same selection, no model.
+        out = await sug.panel(inputs, None, 24, client=None)
+        return {**out, "source": "insights", "question": None,
+                "proposals": [{**p, "source": "insights"} for p in out["proposals"]]}
 
     # Each widget states what it actually drew. The proposal's own `why` (a
     # model's expectation, or a finding's text) stays beside it, so a reader
@@ -2047,8 +2068,12 @@ async def suggest_dashboards(dataset_id: int, req: SuggestDashboardsRequest,
         from ..services.suggest_dataset_dashboard import clarifying_question
         question = await clarifying_question(goal, reason, profile)
 
+    derived = {"measures": [], "calculated_columns": []}
+    if source == "model" and fields["facts"]:
+        from ..services.derived_fields import used_by
+        derived = used_by([w for p in proposals for w in p.get("widgets") or []], fields)
     return {"proposals": [{**p, "source": source} for p in proposals],
-            "reason": reason, "question": question,
+            "reason": reason, "question": question, "derived": derived,
             "profile": profile, "source": source,
             # Which rows the proposals were designed from. A dashboard proposed
             # off a sample is still a good dashboard; presenting it as though it
@@ -2061,7 +2086,8 @@ def _drawn_key(widget_type, config) -> str:
     return drawn_key(widget_type, config)
 
 
-async def _suggest_from_insights(df, type_map: dict, ds: Dataset, probe) -> tuple[list[dict], str]:
+async def _suggest_from_insights(df, type_map: dict, ds: Dataset, probe,
+                                 profile: dict | None = None) -> tuple[list[dict], str]:
     """One proposal, chosen by the statistics engine rather than a model.
 
     The findings are already ranked by how interesting they are and each
@@ -2086,13 +2112,24 @@ async def _suggest_from_insights(df, type_map: dict, ds: Dataset, probe) -> tupl
         result.get("findings") or [], roles, ds.description,
         ineligible=ineligible, column_meta=ds.column_meta or {}, frame=df)
 
+    # Whole periods only, as the panel and the designer draw them
+    # (fact_sheet.edge_periods); and the render path's veto before offering.
+    from ..services.analyst_panel import trim_edges
+    from ..services.fact_sheet import edge_periods
+    from ..services.suggest_dataset_dashboard import validate_widget
+    edges = await asyncio.to_thread(edge_periods, df, [c for c, t in roles.items() if t == "datetime"])
     widgets: list[dict] = []
     dropped: list[str] = []
     for suggestion in suggested:
-        widget = {"widget_type": suggestion.get("widget_type"),
-                  "title": suggestion.get("title") or "",
-                  "why": suggestion.get("reason") or "",
-                  "config": suggestion.get("config") or {}}
+        widget = trim_edges({"widget_type": suggestion.get("widget_type"),
+                             "title": suggestion.get("title") or "",
+                             "why": suggestion.get("reason") or "",
+                             "config": suggestion.get("config") or {}}, edges)
+        if profile is not None:
+            ok, why = validate_widget(widget, profile, ds.column_meta or {})
+            if not ok:
+                dropped.append(why)
+                continue
         drew, rows, why = await _probe(widget, probe)
         if not drew:
             dropped.append("{}: {}".format(widget["title"], why or "returned nothing to draw"))

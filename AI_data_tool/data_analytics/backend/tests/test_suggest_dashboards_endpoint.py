@@ -175,6 +175,18 @@ class TestAnEmptyGoalUsesNoModel:
                               json={"goal": ""}, headers=headers)
         assert r.json()["source"] == "insights"
 
+    async def test_without_a_goal_the_statistics_build_pages(self, client, db_session, two_orgs,
+                                                             clinic_csv, fake_model):
+        """No goal, no model: the panel's own statistics, a page per section
+        (five-dataset review: one page of findings covered 41%)."""
+        ds, headers = await _dataset(db_session, two_orgs["a"]["org"], clinic_csv)
+        r = await client.post(f"/api/v1/datasets/{ds.id}/suggest-dashboards",
+                              json={}, headers=headers)
+        body = r.json()
+        assert body["source"] == "insights" and fake_model.seen == []
+        assert all(p.get("section") for p in body["proposals"])
+        assert body["panel"]["from_model"] == 0 and "derived" in body
+
     async def test_a_goal_still_reaches_the_model(self, client, db_session, two_orgs,
                                                   clinic_csv, fake_model):
         ds, headers = await _dataset(db_session, two_orgs["a"]["org"], clinic_csv)

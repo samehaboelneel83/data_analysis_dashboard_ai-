@@ -116,7 +116,7 @@ const LEFT_OUT = ['units', 'meaning', 'repeat', 'promise', 'identifier', 'axis',
 const isLeftOut = (c?: string): c is typeof LEFT_OUT[number] => !!c && (LEFT_OUT as readonly string[]).includes(c)
 /** The panel's sections, named in the reader's language. The server's English
  *  title is the fallback for anything else (the quick designer's own titles). */
-const SECTIONS = ['summary', 'composition', 'measures', 'equity', 'time', 'relationships', 'detail'] as const
+const SECTIONS = ['summary', 'composition', 'measures', 'equity', 'time', 'exceptions', 'relationships', 'detail', 'drill'] as const
 type SectionKey = typeof SECTIONS[number]
 const isSection = (s?: string): s is SectionKey => !!s && (SECTIONS as readonly string[]).includes(s)
 const STAGES = ['queued', 'reading', 'facts', 'proposing', 'drawing', 'selecting'] as const
@@ -340,15 +340,15 @@ export default function SuggestDashboardsDialog(
         if (!from || !to) continue
         bySource.set(from, [...(bySource.get(from) ?? []), { targetId: to, mode: rel.mode }])
       }
+      const configs = proposal.widgets.map(w => ({ ...(w.config ?? {}) }) as Record<string, unknown>)
       for (const [widgetId, actions] of bySource) {
         const index = createdIds.indexOf(widgetId)
+        configs[index] = { ...configs[index], interaction: { broadcasts: true, receives: true, actions } }
         await reportsApi.updateWidget(reportId, pageId as number, widgetId, {
-          config: {
-            ...proposal.widgets[index].config,
-            interaction: { broadcasts: true, receives: true, actions },
-          },
+          config: configs[index],
         } as never)
       }
+      return { ids: createdIds, configs }
   }
 
   const newReport = async (name: string) => {
@@ -384,12 +384,32 @@ export default function SuggestDashboardsDialog(
       const missing = await createDerived()
       const pages = proposals.map(p => withoutFields(p, missing)).filter(p => p.widgets.length > 0)
       const { reportId, pageId } = await newReport(goal.trim() ? goal.trim().slice(0, 80) : datasetName)
+      const built: { pid: number; page: DashboardSuggestion; ids: number[]; configs: Record<string, unknown>[] }[] = []
       for (let i = 0; i < pages.length; i++) {
         let pid = pageId
-        if (i === 0) await reportsApi.updatePage(reportId, pageId, { name: titleOf(pages[0]) } as never)
-        else pid = (await reportsApi.addPage(reportId, { name: titleOf(pages[i]), position: i,
-                                                         layout_mode: 'packed' })).id
-        await fillPage(reportId, pid, pages[i])
+        const p = pages[i]
+        if (i === 0) await reportsApi.updatePage(reportId, pageId, { name: titleOf(p) } as never)
+        else pid = (await reportsApi.addPage(reportId, {
+          name: titleOf(p), position: i, layout_mode: 'packed',
+          // A drill-through page: hidden from the tabs, opened from a chart
+          // with the clicked value as its filter (prompt_column).
+          ...(p.page_type ? { page_type: p.page_type, prompt_column: p.prompt_column,
+                              prompt_label: p.prompt_label } : {}),
+        } as never)).id
+        built.push({ pid, page: p, ...(await fillPage(reportId, pid, p)) })
+      }
+      // Charts split by the drill page's category open it on double-click.
+      // Its id exists only now, so this is a pass after every page is built.
+      const drill = built.find(b => b.page.page_type === 'drillthrough')
+      if (drill) {
+        for (const b of built) {
+          for (let k = 0; k < b.page.widgets.length; k++) {
+            if (b.page.widgets[k].drill_to !== 'drill' || !b.ids[k]) continue
+            await reportsApi.updateWidget(reportId, b.pid, b.ids[k], {
+              config: { ...b.configs[k], drillthroughPageId: drill.pid },
+            } as never)
+          }
+        }
       }
       navigate(`/reports/${reportId}`)
     } catch (e) {
@@ -574,7 +594,7 @@ export default function SuggestDashboardsDialog(
                 </ul>
               </details>
             )}
-            {source === 'panel' && (
+            {(source === 'panel' || proposals?.some(p => p.section)) && (
               <div style={{ marginTop: 8 }}>
                 <button className="btn btn-primary btn-sm" disabled={building !== null} onClick={createAll}>
                   {building === -1 ? tr('sdd.building')

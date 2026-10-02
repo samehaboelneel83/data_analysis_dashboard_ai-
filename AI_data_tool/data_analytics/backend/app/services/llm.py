@@ -202,6 +202,7 @@ class LLMClient:
         background: bool = False,
         response_format: dict | None = None,
         weight: str | None = None,
+        seed: int | None = None,
     ) -> str | None:
         """One chat completion. Returns the assistant's text, or None if the
         endpoint is disabled, unreachable, or answered with something unusable.
@@ -229,6 +230,10 @@ class LLMClient:
         }
         if response_format is not None:
             payload["response_format"] = response_format
+        if seed is not None:
+            # Same question, same answer: OpenAI-compatible servers (vLLM,
+            # llama.cpp, Ollama) sample reproducibly with a seed.
+            payload["seed"] = seed
 
         if weight is None:
             weight = self._weight(background)
@@ -362,6 +367,7 @@ class LLMClient:
         background: bool = False,
         enforce: bool = False,
         weight: str | None = None,
+        seed: int | None = None,
     ) -> dict | None:
         """A completion constrained to a JSON object matching `schema`.
 
@@ -384,7 +390,7 @@ class LLMClient:
         for attempt in range(retries + 1):
             raw = await self.complete(
                 attempt_messages, max_tokens=max_tokens, temperature=temperature,
-                background=background, weight=weight,
+                background=background, weight=weight, seed=seed,
                 response_format=(
                     {"type": "json_schema",
                      "json_schema": {"name": "reply", "schema": schema}}
