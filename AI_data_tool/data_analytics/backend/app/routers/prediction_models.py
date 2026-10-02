@@ -123,8 +123,26 @@ async def train_model(
     """
     ds = await _dataset_for_read(dataset_id, db, current_user)
     await require_dataset_capability(db, current_user, dataset_id, "data")
-    if not ds.filename or ds.mode == "directquery":
-        raise HTTPException(400, "Training is available for import-mode datasets only")
+    live_frame = None
+    live_note = None
+    if ds.mode == "directquery" and ds.data_source_id:
+        # HR re-test 2026-10-01: every model WIDGET fitted on the live
+        # workforce dataset, but saving a model for the Score widget was
+        # refused. Read through the same secured live frame the widgets and
+        # analyses use (row rule pushed into the SQL, denied columns dropped).
+        from ..services.analysis_frame import FrameUnavailable, load_directquery_frame
+        try:
+            got = await load_directquery_frame(
+                db, ds, rls_filter_expr=await resolve_rls_expr(db, current_user, dataset_id),
+                denied=set(await resolve_denied_columns(db, current_user, dataset_id) or ()))
+        except FrameUnavailable as e:
+            raise HTTPException(400, str(e))
+        live_frame = got.frame
+        if got.sampled:
+            live_note = (f"Trained on a sample of {got.rows_analysed:,} of "
+                         f"{got.total_rows:,} rows read live from the source.")
+    elif not ds.filename:
+        raise HTTPException(400, "This dataset has no data behind it to train on")
 
     denied = await resolve_denied_columns(db, current_user, dataset_id)
     if req.target in (denied or []):
@@ -140,8 +158,11 @@ async def train_model(
         # the raw file instead would fit a model to columns the dataset does
         # not actually have -- a joined or derived column would be missing,
         # and a renamed one would be the old name.
-        df = load_file(ds.filename)
-        df = apply_rls_filter(df, rls_expr)
+        if live_frame is not None:
+            df = live_frame                      # already row-secured at the source
+        else:
+            df = load_file(ds.filename)
+            df = apply_rls_filter(df, rls_expr)
         # A denied column must not become a predictor: the resulting model
         # would carry it, and every future caller would inherit the leak.
         # Dropped BEFORE prep and calculated columns, as every other read
@@ -188,6 +209,7 @@ async def train_model(
         # Whether a row rule narrowed what it saw -- the rule itself stays
         # with the administrators who wrote it.
         "row_scope": "restricted by a row rule" if rls_expr else "every row",
+        **({"sample_note": live_note} if live_note else {}),
         # The data as it was: a later refresh makes these differ, which is
         # how a reader tells the model is older than the dataset.
         "dataset": {"id": ds.id, "name": ds.name, "row_count": ds.row_count,

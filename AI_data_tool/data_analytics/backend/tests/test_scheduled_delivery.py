@@ -398,3 +398,134 @@ class TestExportsComputeWhatTheDashboardShows:
         assert sheets == 1           # an unexpanded USEREMAIL() raised and dropped the sheet
         book = pd.read_excel(io.BytesIO(payload), sheet_name="By region")
         assert {r["name"]: r["value"] for _, r in book.iterrows()} == {"US": 150.0}
+
+
+async def _user_with_role(db, user_id):
+    """As the request dependency and the scheduler load a user: role included."""
+    from sqlalchemy.orm import selectinload
+    return (await db.execute(select(User).options(selectinload(User.role))
+                             .where(User.id == user_id))).scalar_one()
+
+
+class TestLiveDigest:
+    """HR re-test 2026-10-01: a live dashboard's Excel export was one sheet
+    saying "No widget produced tabular data". The dataset reached the worker
+    thread without its column list loaded and every sheet raised, silently."""
+
+    async def _live(self, db, org_id, tmp_path):
+        import sqlite3
+        from app.models.models import DataSource
+        path = tmp_path / "live.db"
+        con = sqlite3.connect(str(path))
+        con.execute("CREATE TABLE staff (region TEXT, revenue REAL)")
+        con.executemany("INSERT INTO staff VALUES (?, ?)",
+                        [("US", 100.0), ("US", 50.0), ("CA", 30.0)])
+        con.commit()
+        con.close()
+        src = DataSource(name="Live file", type="sqlite", org_id=org_id,
+                         config={"filepath": str(path)})
+        db.add(src)
+        await db.flush()
+        ds = Dataset(name="Live staff", org_id=org_id, mode="directquery",
+                     data_source_id=src.id, source_table="staff")
+        db.add(ds)
+        await db.flush()
+        for c, t in (("region", "categorical"), ("revenue", "numeric")):
+            db.add(DatasetColumn(dataset_id=ds.id, name=c, dtype=t))
+        await db.commit()
+        db.expunge_all()          # as a fresh request would see it: nothing loaded
+        return await db.get(Dataset, ds.id)
+
+    @pytest.mark.asyncio
+    async def test_a_live_dashboard_exports_one_sheet_per_widget(
+            self, client, auth_headers, db_session, two_orgs, tmp_path):
+        org_id = two_orgs["a"]["org"].id
+        user_id = two_orgs["a"]["user"].id
+        ds = await self._live(db_session, org_id, tmp_path)
+        rid = await _report_with_widget(client, auth_headers["a"], ds)
+        from app.models.models import Report
+        db_session.expunge_all()
+        report = await db_session.get(Report, rid)
+        creator = await _user_with_role(db_session, user_id)
+        payload, sheets = await build_digest(db_session, report, creator)
+        assert sheets == 1
+        book = pd.read_excel(io.BytesIO(payload), sheet_name="By region")
+        assert {r["name"]: r["value"] for _, r in book.iterrows()} == {"US": 150.0, "CA": 30.0}
+
+    @pytest.mark.asyncio
+    async def test_a_live_digest_keeps_the_senders_row_rule(
+            self, client, auth_headers, db_session, two_orgs, tmp_path):
+        org_id = two_orgs["a"]["org"].id
+        ds = await self._live(db_session, org_id, tmp_path)
+        rid = await _report_with_widget(client, auth_headers["a"], ds)
+        role = Role(org_id=org_id, name="CA live", is_org_admin=False)
+        db_session.add(role)
+        await db_session.flush()
+        db_session.add(RowSecurityRule(role_id=role.id, dataset_id=ds.id, filter_expr="region == 'CA'"))
+        restricted = User(org_id=org_id, role_id=role.id, email="live-ca@example.com",
+                          password_hash=hash_password("pw"))
+        db_session.add(restricted)
+        await db_session.commit()
+        from app.models.models import Report
+        rid_user = restricted.id
+        db_session.expunge_all()
+        report = await db_session.get(Report, rid)
+        restricted = await _user_with_role(db_session, rid_user)
+        payload, _ = await build_digest(db_session, report, restricted)
+        book = pd.read_excel(io.BytesIO(payload), sheet_name="By region")
+        assert set(book["name"]) == {"CA"}
+
+
+def test_alert_numbers_are_written_out():
+    """HR re-test 2026-10-01: Test now said "Now 2.401e+05" for 240,124."""
+    from types import SimpleNamespace
+    from app.services.alerts import _num, evaluate
+    assert _num(240124.0) == "240,124"
+    assert _num(72012.2358) == "72,012.24"
+    assert _num(0.12345) == "0.1235"
+    df = pd.DataFrame({"emp_no": range(240124)})
+    out = evaluate(df, SimpleNamespace(change_pct=20, expression="COUNT(emp_no)",
+                                       last_value=None, change_direction=None))
+    assert out["message"].startswith("Now 240,124.")
+
+
+@pytest.mark.asyncio
+async def test_an_alert_on_a_live_dataset_is_actually_checked(db_session, two_orgs, tmp_path):
+    """HR re-test 2026-10-01: alerts on the live workforce dataset had never
+    been checked -- every tick died in a flush from a worker thread
+    (MissingGreenlet), 22 attempts on one alert since 2026-09-14. Loaded the
+    way the scheduler loads it: a fresh session, nothing preloaded."""
+    import sqlite3
+    from app.models.models import DataSource
+    org_id = two_orgs["a"]["org"].id
+    user_id = two_orgs["a"]["user"].id
+    path = tmp_path / "live_alert.db"
+    con = sqlite3.connect(str(path))
+    con.execute("CREATE TABLE staff (dept TEXT, emp_no INTEGER)")
+    con.executemany("INSERT INTO staff VALUES (?, ?)", [("Sales", i) for i in range(30)])
+    con.commit()
+    con.close()
+    src = DataSource(name="Live", type="sqlite", org_id=org_id, config={"filepath": str(path)})
+    db_session.add(src)
+    await db_session.flush()
+    ds = Dataset(name="Live staff", org_id=org_id, mode="directquery",
+                 data_source_id=src.id, source_table="staff")
+    db_session.add(ds)
+    await db_session.flush()
+    for c, t in (("dept", "categorical"), ("emp_no", "numeric")):
+        db_session.add(DatasetColumn(dataset_id=ds.id, name=c, dtype=t))
+    alert = DataAlert(org_id=org_id, dataset_id=ds.id, creator_user_id=user_id,
+                      name="Headcount above 20", expression="COUNT(emp_no) > 20",
+                      interval_minutes=60, recipients=[])
+    db_session.add(alert)
+    await db_session.commit()
+    alert_id = alert.id
+    db_session.expunge_all()
+
+    fresh = await db_session.get(DataAlert, alert_id)
+    await check_alert(db_session, fresh)
+    fresh = await db_session.get(DataAlert, alert_id)
+    assert fresh.last_checked_at is not None
+    assert not (fresh.last_status or "").startswith("evaluation failed"), fresh.last_status
+    assert fresh.last_state == "firing"
+    assert fresh.last_value == 30

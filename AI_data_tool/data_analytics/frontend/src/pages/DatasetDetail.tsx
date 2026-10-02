@@ -43,6 +43,26 @@ import { isJobActive, jobsApi, type Job } from '../services/api'
 import DataQualityPanel from '../components/dataset/DataQualityPanel'
 
 import { type Tab, OPS, FILTER_FUNC_CATS, PAGE_SIZE } from './datasetDetail/constants'
+import { certificationOf, isCertified } from '../lib/cleanDatasets'
+
+/** 5.5: a server error in an analysis panel reads as "run analysis first",
+ *  never as a bare "Internal server error" on a dataset someone just made. */
+const notReadyOr = (err: any, fallback: string, notReady: string): string => {
+  const status = err?.response?.status
+  const detail = err?.response?.data?.detail
+  if ((typeof status === 'number' && status >= 500) || detail === 'Internal server error' || detail === 'Internal Server Error') {
+    return notReady
+  }
+  return typeof detail === 'string' ? detail : fallback
+}
+
+/** HR re-test: a mean salary read "88,604.645". Whole units from 100 up,
+ *  two decimals below -- the precision a reader can use. */
+export function fmtMean(v: number): string {
+  return Math.abs(v) >= 100
+    ? Math.round(v).toLocaleString()
+    : v.toLocaleString(undefined, { maximumFractionDigits: 2 })
+}
 
 export default function DatasetDetail() {
   const arrows = navArrows(useDirection().rtl)
@@ -550,7 +570,7 @@ export default function DatasetDetail() {
     setRulesError(null)
     analysisApi.associationRules(ds.id)
       .then(setRules)
-      .catch((err: any) => setRulesError(err?.response?.data?.detail ?? 'Could not mine rules'))
+      .catch((err: any) => setRulesError(notReadyOr(err, 'Could not mine rules', tr('ov.notReady'))))
       .finally(() => setRulesBusy(false))
   }, [ds])
 
@@ -560,7 +580,7 @@ export default function DatasetDetail() {
     setInfluencerError(null)
     analysisApi.keyInfluencers(ds.id, target)
       .then(setInfluencers)
-      .catch((err: any) => setInfluencerError(err?.response?.data?.detail ?? 'Could not find influencers'))
+      .catch((err: any) => setInfluencerError(notReadyOr(err, 'Could not find influencers', tr('ov.notReady'))))
       .finally(() => setInfluencerBusy(false))
   }, [ds])
 
@@ -646,6 +666,24 @@ export default function DatasetDetail() {
           <button className="btn btn-ghost btn-sm" onClick={() => setShowShareDialog(true)}>
             {tr('dataset.share')}
           </button>
+        )}
+        {isCertified(ds) && (
+          <span data-testid="certified-badge" style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--success, #15803d)' }}
+            title={tr('dsf.certifiedBy', { who: certificationOf(ds)?.by_email ?? '' })}>✓ {tr('dsf.badge')}</span>
+        )}
+        {isAdmin && (
+          <button className="btn btn-ghost btn-sm" onClick={async () => {
+            const on = !isCertified(ds)
+            try {
+              await datasetsApi.certify(ds.id, on)
+              setDs(prev => prev ? { ...prev, column_meta: (() => {
+                const m = { ...((prev.column_meta ?? {}) as unknown as Record<string, unknown>) }
+                if (on) m['__certified__'] = { by_email: '', at: new Date().toISOString() }
+                else delete m['__certified__']
+                return m as unknown as typeof prev.column_meta
+              })() } : prev)
+            } catch { toast.error(tr('dsf.certify')) }
+          }}>{isCertified(ds) ? tr('dsf.uncertify') : tr('dsf.certify')}</button>
         )}
         {ds.mode === 'directquery' && (
           <span title={tr('dataset.liveTitle')}
@@ -755,7 +793,7 @@ export default function DatasetDetail() {
             source, and both are admin-only on the server (E01). */}
         {isAdmin && ds.data_source_id && ds.query_model && (
           <button onClick={openEditQuery} disabled={queryEditLoading} className="btn btn-ghost btn-sm">
-            {queryEditLoading ? 'Loading…' : '✎ Edit query'}
+            {queryEditLoading ? tr('common.loading') : tr('ds.editQuery')}
           </button>
         )}
         <button type="button" onClick={() => void buildDashboard()} disabled={building}
@@ -899,7 +937,9 @@ export default function DatasetDetail() {
               {tr('dataset.noAnalysis')}
             </div>
           )}
-          {ds.mode !== 'directquery' && (
+          {/* Live datasets too (HR evaluation, item 3.4): the scan reads up to
+              250K rows from the source, and only when this button is pressed. */}
+          {(
             <section id="insights" style={{ marginBottom: 24 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
                 <h2 style={{ fontSize: 15, fontWeight: 700 }}>{tr('dataset.insights')}</h2>
@@ -963,7 +1003,7 @@ export default function DatasetDetail() {
               <select value={influencerTarget} aria-label="Outcome to explain"
                 onChange={e => { setInfluencerTarget(e.target.value); setInfluencers(null) }}
                 style={{ fontSize: 12 }}>
-                <option value="">choose an outcome…</option>
+                <option value="">{tr('ki.chooseOutcome')}</option>
                 {ds.columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
               </select>
               <button className="btn btn-sm" disabled={influencerBusy || !influencerTarget} title={!influencerTarget ? 'Choose the column to explain first' : undefined}
@@ -980,19 +1020,19 @@ export default function DatasetDetail() {
               <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 14 }}>
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
                   {influencers.meta.measure === 'rate'
-                    ? <>Baseline: <strong>{(influencers.meta.baseline * 100).toFixed(1)}%</strong> of rows are
-                        {' '}<strong>{influencers.meta.target} = {influencers.meta.target_value}</strong></>
-                    : <>Baseline mean <strong>{influencers.meta.baseline.toLocaleString()}</strong> for
+                    ? <>{tr('ki.baselineRate')} <strong>{(influencers.meta.baseline * 100).toFixed(1)}%</strong>
+                        {' '}<strong dir="ltr">{influencers.meta.target} = {influencers.meta.target_value}</strong></>
+                    : <>{tr('ki.baselineMean')} <strong>{fmtMean(influencers.meta.baseline)}</strong> {tr('ki.for')}
                         {' '}<strong>{influencers.meta.target}</strong></>}
-                  {' · '}{influencers.meta.n_rows_used.toLocaleString()} rows
+                  {' · '}{tr('ki.rows', { n: influencers.meta.n_rows_used.toLocaleString() })}
                 </div>
                 <table>
                   <thead>
                     <tr>
-                      <th>When</th>
-                      <th>{influencers.meta.measure === 'rate' ? 'Rate' : 'Mean'}</th>
-                      <th>vs baseline</th>
-                      <th>Rows</th>
+                      <th>{tr('ki.when')}</th>
+                      <th>{influencers.meta.measure === 'rate' ? tr('ki.rate') : tr('ki.mean')}</th>
+                      <th>{tr('ki.vsBaseline')}</th>
+                      <th>{tr('ki.rowsCol')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1001,17 +1041,20 @@ export default function DatasetDetail() {
                         {/* The rule can hold an interval, "(64.5, 70.1]": an LTR
                             isolate keeps its brackets in maths order under RTL,
                             where they otherwise swapped ends with the text. */}
-                        <td><span dir="ltr" style={{ unicodeBidi: 'isolate' }}><strong>{r.factor}</strong> is {r.group}</span></td>
+                        <td><span dir="ltr" style={{ unicodeBidi: 'isolate' }}><strong>{r.factor}</strong> {tr('ki.is')} {r.group}</span></td>
                         <td style={{ fontFamily: 'var(--mono)' }}>
                           {influencers.meta.measure === 'rate'
                             ? `${((r.rate ?? 0) * 100).toFixed(1)}%`
-                            : (r.mean ?? 0).toLocaleString()}
+                            : fmtMean(r.mean ?? 0)}
                         </td>
                         {/* Direction stated in words: "1.9x" alone reads as good
-                            news even when the outcome is churn. */}
-                        <td style={{ fontFamily: 'var(--mono)',
-                                     color: r.lift >= 1 ? 'var(--danger)' : 'var(--success, green)' }}>
-                          {r.lift.toFixed(2)}× {r.lift >= 1 ? 'more' : 'less'}
+                            news even when the outcome is churn. And NO red/green:
+                            the app cannot know whether more of a target is good
+                            (salary, tenure) or bad (churn), so colouring "more"
+                            red told an HR lead a higher salary was a problem. */}
+                        <td data-testid="influencer-lift" style={{ fontFamily: 'var(--mono)', color: 'var(--text)' }}>
+                          <span aria-hidden style={{ color: 'var(--accent)' }}>{r.lift >= 1 ? '▲' : '▼'}</span>{' '}
+                          {r.lift.toFixed(2)}× {r.lift >= 1 ? tr('ki.more') : tr('ki.less')}
                         </td>
                         <td style={{ fontFamily: 'var(--mono)' }}>{r.rows.toLocaleString()}</td>
                       </tr>
@@ -1044,7 +1087,7 @@ export default function DatasetDetail() {
             )}
             {rules && rules.rows.length === 0 && (
               <p style={{ fontSize: 12, color: 'var(--muted)' }}>
-                No combination occurs more often than chance would predict.
+                {tr('ar.none')}
               </p>
             )}
             {rules && rules.rows.length > 0 && (
@@ -1053,15 +1096,15 @@ export default function DatasetDetail() {
                 <table>
                   <thead>
                     <tr>
-                      <th>When</th>
-                      <th>Then</th>
+                      <th>{tr('ki.when')}</th>
+                      <th>{tr('ar.then')}</th>
                       {/* Lift first: it is the number that means something.
                           Confidence alone is unreadable without the base rate
                           beside it, which is why both are shown. */}
-                      <th>Lift</th>
-                      <th>Confidence</th>
-                      <th>Base rate</th>
-                      <th>Rows</th>
+                      <th>{tr('ar.lift')}</th>
+                      <th>{tr('ar.confidence')}</th>
+                      <th>{tr('ar.baseRate')}</th>
+                      <th>{tr('ki.rowsCol')}</th>
                     </tr>
                   </thead>
                   <tbody>

@@ -83,6 +83,18 @@ describe('DataPicker', () => {
     expect(screen.getByRole('group', { name: 'Recent' })).toHaveTextContent('Warehouse')
   })
 
+  it('adds a dataset made in the last day to Recent (5.20)', () => {
+    localStorage.setItem('datalytics.ask.recent', JSON.stringify(['s:3']))
+    const fresh = { key: 'd:9', kind: 'dataset' as const, name: 'Current workforce', rows: 240124, cols: 6,
+                    updated: new Date().toISOString() }
+    render(<MemoryRouter><DataPicker items={[...ITEMS, fresh]} value="" onChoose={() => {}} /></MemoryRouter>)
+    fireEvent.click(screen.getByRole('button', { name: 'What to ask about' }))
+    const recent = screen.getByRole('group', { name: 'Recent' })
+    expect(recent).toHaveTextContent('Warehouse')
+    expect(recent).toHaveTextContent('Current workforce')
+    expect(recent).not.toHaveTextContent('Sales 2026')
+  })
+
   it('Escape closes it', () => {
     render(<MemoryRouter><DataPicker items={ITEMS} value="" onChoose={() => {}} /></MemoryRouter>)
     fireEvent.click(screen.getByRole('button', { name: 'What to ask about' }))

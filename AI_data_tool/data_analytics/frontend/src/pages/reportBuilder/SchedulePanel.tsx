@@ -17,6 +17,8 @@ export function SchedulePanel({ reportId }: { reportId: number }) {
   const [schedMonthday, setSchedMonthday] = useState('1')
   const [schedTz, setSchedTz] = useState('')
   const [recipients, setRecipients] = useState('')
+  const [perRecipient, setPerRecipient] = useState(false)
+  const [onlyIfChanged, setOnlyIfChanged] = useState(false)
   const [subject, setSubject] = useState('')
   const [schedFormat, setSchedFormat] = useState<'xlsx' | 'pdf'>('xlsx')
   const reload = useCallback(() => { schedulesApi.list(reportId).then(setRows).catch(() => {}) }, [reportId])
@@ -44,6 +46,8 @@ export function SchedulePanel({ reportId }: { reportId: number }) {
               : `Every ${r.interval_minutes >= 1440 ? plural(Math.round(r.interval_minutes / 1440), 'day') : r.interval_minutes >= 60 ? plural(Math.round(r.interval_minutes / 60), 'hour') : plural(r.interval_minutes, 'minute')}`}
             {' → '}{r.recipients.join(', ')}
             {r.format === 'pdf' && <span style={{ marginInlineStart: 6, fontSize: 10.5, color: 'var(--accent)' }}>PDF</span>}
+            {r.per_recipient && <span style={{ marginInlineStart: 6, fontSize: 10.5, color: 'var(--accent)' }}>each their own view</span>}
+            {r.only_if_changed && <span style={{ marginInlineStart: 6, fontSize: 10.5, color: 'var(--muted)' }}>only when changed</span>}
           </div>
           {/* The status line is the whole observability story: it says whether the
               last run sent, and if not, why -- including "SMTP is not configured". */}
@@ -159,8 +163,24 @@ export function SchedulePanel({ reportId }: { reportId: number }) {
             <option value="pdf">PDF (rendered report)</option>
           </select>
         </label>
+        {/* HR evaluation, item 3.3: "each manager gets their own department". */}
+        <label style={{ fontSize: 12, display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+          <input type="checkbox" checked={perRecipient} aria-label="Each recipient sees their own data"
+            onChange={e => setPerRecipient(e.target.checked)} />
+          <span>Each recipient gets their own view
+            <span style={{ display: 'block', color: 'var(--muted)', fontSize: 11 }}>
+              Built separately for every recipient who has an account here, with their own row rules — a manager receives only their department.
+            </span></span>
+        </label>
+        <label style={{ fontSize: 12, display: 'flex', gap: 6, alignItems: 'center' }}>
+          <input type="checkbox" checked={onlyIfChanged} aria-label="Send only when the data changed"
+            onChange={e => setOnlyIfChanged(e.target.checked)} />
+          Send only when the data changed since the last delivery
+        </label>
         <button className="btn btn-primary btn-sm" style={{ alignSelf: 'flex-start' }}
           onClick={() => schedulesApi.create(reportId, {
+            ...(perRecipient ? { per_recipient: true } : {}),
+            ...(onlyIfChanged ? { only_if_changed: true } : {}),
             recipients: recipients.split(',').map(r => r.trim()).filter(Boolean),
             subject: subject || undefined,
             format: schedFormat,
@@ -174,7 +194,7 @@ export function SchedulePanel({ reportId }: { reportId: number }) {
                     ...(schedKind === 'monthly' ? { monthday: Number(schedMonthday) } : {}),
                   },
                   ...(schedTz.trim() ? { timezone: schedTz.trim() } : {}) }),
-          }).then(() => { setRecipients(''); setSubject(''); setSchedFormat('xlsx'); setSchedTz(''); reload(); toast.success('Schedule created') })
+          }).then(() => { setRecipients(''); setSubject(''); setSchedFormat('xlsx'); setSchedTz(''); setPerRecipient(false); setOnlyIfChanged(false); reload(); toast.success('Schedule created') })
             .catch(e => toast.error(e?.response?.data?.detail ?? 'Could not create the schedule'))}>
           Add schedule
         </button>

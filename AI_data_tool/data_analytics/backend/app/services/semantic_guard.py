@@ -78,6 +78,18 @@ def aggregation_refusal(column: str | None, aggregation: str | None) -> str | No
     return f"{what} {column} adds up years -- the result is not a year. {fix}"
 
 
+def marked_measure(meta: dict | None) -> bool:
+    """Whether a PERSON (or the catalog) said this column is a quantity.
+
+    The metadata automation also writes roles, marked `role_source:
+    "inferred"`; it called `hire_year` a measure, and that guess then
+    overrode the veto, so "Total hire year" was summed on the workforce
+    dashboard (five-dataset review, 2026-10-02). A guess does not get to
+    override the rule; only an authored role does."""
+    meta = meta if isinstance(meta, dict) else {}
+    return meta.get("role") == "measure" and meta.get("role_source") != "inferred"
+
+
 def config_refusal(config: dict, column_meta: dict | None, *,
                    sums_by_default: bool) -> dict | None:
     """The first measure in a widget config that is aggregated meaninglessly.
@@ -101,7 +113,7 @@ def config_refusal(config: dict, column_meta: dict | None, *,
         if agg is None and not sums_by_default:
             continue
         agg = agg or "sum"
-        if (meta.get(column) or {}).get("role") == "measure":
+        if marked_measure(meta.get(column)):
             continue
         message = aggregation_refusal(column, agg)
         if message:
@@ -109,3 +121,75 @@ def config_refusal(config: dict, column_meta: dict | None, *,
             return {"column": column, "aggregation": str(agg).lower(),
                     "safe": SAFE_AGGREGATION[kind], "message": message}
     return None
+
+
+# ── Default summary: what a measure MEANS when it is rolled up ───────────────
+# HR evaluation, blocker 5: every engine summed salary. "M has 60% of salary",
+# "salary in 1999-12 ran 98% below its monthly average" and a KPI of
+# 17,291,866,123 are all head-counts in disguise. A salary, a price, a rate or
+# an age is an INTENSIVE quantity: its total over a group means nothing to a
+# reader, its average does. Additive quantities (amount, revenue, cost, units,
+# minutes) keep summing.
+_INTENSIVE_WORDS = (
+    "salary", "salaries", "wage", "wages", "pay", "price", "unit_price",
+    "unit_cost", "rate", "ratio", "percent", "percentage", "pct", "share",
+    "avg", "average", "mean", "median", "age", "score", "grade", "rating",
+    "temperature", "temp", "speed", "margin", "probability", "prob", "index",
+    "level", "gpa", "bmi", "tenure_years",
+)
+_INTENSIVE_INFIX = re.compile(r"(^|_)per(_|$)", re.I)
+#: A distinct count already taken per row -- a DAILY count of unique customers
+#: or active sellers. Summed over days it counts the same customer once per
+#: day: "Active sellers in 2018-08 ran 62% above its monthly average" was a sum
+#: of daily seller counts (five-dataset gap review, 2026-10-02). Averaged, it is
+#: the typical day.
+_DISTINCT_SNAPSHOT = re.compile(
+    r"(^|_)(unique|distinct|dau|mau|wau)(_|$)|"
+    r"(^|_)active_(users|customers|sellers|members|accounts|subscribers|clients|visitors|devices)$",
+    re.I)
+
+#: The values ColumnMeta.aggregation may carry that set a default summary.
+_SUMMARY_ALIASES = {"sum": "sum", "avg": "avg", "mean": "avg", "average": "avg",
+                    "median": "median", "count": "count", "countd": "countd",
+                    "distinct": "countd", "nunique": "countd", "min": "min",
+                    "max": "max", "none": "none", "raw": "none"}
+
+
+def is_intensive(column: str | None) -> bool:
+    """True for a quantity whose SUM over a group is meaningless (salary,
+    price, rate, age, score...). Classified by name, like the veto above."""
+    if not column:
+        return False
+    low = str(column).lower()
+    return (_word(low, _INTENSIVE_WORDS) or bool(_INTENSIVE_INFIX.search(low))
+            or bool(_DISTINCT_SNAPSHOT.search(low)))
+
+
+def default_summary(column: str | None, column_meta: dict | None = None) -> str:
+    """How `column` should be rolled up when nobody said: 'sum' | 'avg' |
+    'countd' | 'median' | 'min' | 'max' | 'count' | 'none'.
+
+    Precedence: the author's recorded aggregation, then the recorded role
+    (an identifier is counted, never summed), then the name."""
+    meta = (column_meta or {}).get(column) if column else None
+    meta = meta if isinstance(meta, dict) else {}
+    agg = str(meta.get("aggregation") or "").strip().lower()
+    if agg in _SUMMARY_ALIASES:
+        return _SUMMARY_ALIASES[agg]
+    if meta.get("role") == "identifier":
+        return "countd"
+    kind = non_additive_kind(column)
+    if kind and not marked_measure(meta):
+        return SAFE_AGGREGATION[kind]
+    return "avg" if is_intensive(column) else "sum"
+
+
+def is_identifier(column: str | None, column_meta: dict | None = None) -> bool:
+    """A recorded identifier, or one named like one and not marked a measure."""
+    meta = (column_meta or {}).get(column) if column else None
+    meta = meta if isinstance(meta, dict) else {}
+    if meta.get("role") == "identifier":
+        return True
+    if marked_measure(meta):
+        return False
+    return non_additive_kind(column) == "identifier"

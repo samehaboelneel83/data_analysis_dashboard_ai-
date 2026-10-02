@@ -23,6 +23,7 @@ const ReportBuilder = lazy(() => import('./pages/ReportBuilder'))
 const ReportPrint = lazy(() => import('./pages/ReportPrint'))
 const Connections = lazy(() => import('./pages/Connections'))
 const Lineage = lazy(() => import('./pages/Lineage'))
+const Glossary = lazy(() => import('./pages/Glossary'))
 const Dataflows = lazy(() => import('./pages/Dataflows'))
 const Migration = lazy(() => import('./pages/Migration'))
 const SourceReview = lazy(() => import('./pages/SourceReview'))
@@ -112,6 +113,7 @@ export default function App() {
               <Route path="reports/:id/print" element={<ReportPrint />} />
               <Route path="connections" element={<Connections />} />
               <Route path="lineage" element={<Lineage />} />
+              <Route path="glossary" element={<Glossary />} />
               <Route path="dataflows" element={<Dataflows />} />
               <Route path="migration" element={<Migration />} />
           {/* Layer 1 — confirm the relationships and descriptions that

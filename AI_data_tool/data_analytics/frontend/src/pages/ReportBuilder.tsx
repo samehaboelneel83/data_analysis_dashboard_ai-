@@ -74,8 +74,10 @@ import CollapsibleSide from '../components/report/CollapsibleSide'
 import ReviewPane from '../components/report/ReviewPane'
 import PopupOverlay from '../components/report/PopupOverlay'
 import TooltipPageOverlay from '../components/report/TooltipPageOverlay'
-import { ArrowLeft, Plus, Settings, Eye, Undo2, Redo2, KeyRound, ShieldCheck, Pause, Play, FileDown, Printer, FileText, Package, Pencil, RefreshCw } from 'lucide-react'
-import { useViewStyle, updatedAgo } from '../lib/viewStyle'
+import { ArrowLeft, Plus, Eye, Undo2, Redo2, KeyRound, ShieldCheck, Pause, Play, FileDown, Printer, FileText, Package, Pencil, RefreshCw, ChevronUp, ChevronDown } from 'lucide-react'
+import { updatedAgo } from '../lib/viewStyle'
+import { columnKind, usePageFilters } from '../lib/pageFilters'
+import PageFilterBar, { type PageFilterColumn } from '../components/report/PageFilterBar'
 import { useUndoStack, IdAliases, describeConfigChange, changedKeys } from './reportBuilder/undo'
 import { ASSIGN_DATA_EVENT, ADD_DATASET_EVENT, missingRequiredRoles } from '../components/report/WidgetPlaceholder'
 import { PATCH_WIDGET_EVENT } from '../components/report/TruncationNote'
@@ -186,6 +188,12 @@ function conflictFrom(detail: ConflictDetail, mine: WidgetEdit, pageId: number, 
 export default function ReportBuilder() {
   const { language } = useDirection()
   const tr = useT()
+  // "Page 3" is the name the app gives a new page; shown in the reader's
+  // language (the stored name stays as it is). HR evaluation, item 3.6.
+  const pageLabel = (name: string) => {
+    const m = /^Page (\d+)$/.exec(name ?? '')
+    return m ? `${tr('builder.page')} ${m[1]}` : name
+  }
   const { id } = useParams<{ id: string }>()
   const reportId = Number(id)
   const badId = !/^\d+$/.test(id ?? '')
@@ -193,6 +201,10 @@ export default function ReportBuilder() {
   const [report,     setReport]     = useState<Report | null>(null)
   useCrumbTitle(report?.name)
   const [activePage, setActivePage] = useState<ReportPage | null>(null)
+  // The reader's own filters for the whole page (the bar above the page),
+  // kept per viewer and per page. `pageQueryFilters` is what every chart gets.
+  const { filters: pageFilters, setFilters: setPageFilters, query: pageQueryFilters } =
+    usePageFilters(reportId, activePage?.id)
   const [selectedW,  setSelectedW]  = useState<Widget | null>(null)
   const [templates,  setTemplates]  = useState<WidgetTemplate[]>([])
   const [tplName,    setTplName]    = useState('')
@@ -230,10 +242,30 @@ export default function ReportBuilder() {
     setLeftTabState(t)
     try { localStorage.setItem('datalytics:builder-left-tab', t) } catch { /* storage unavailable */ }
   }
+  // The top area (header + Report/Data/Model strip) folds away like the side
+  // panels, so the dashboard gets the height. Remembered per viewer.
+  const TOP_KEY = 'datalytics:builder-top-collapsed'
+  const [topOpen, setTopOpenState] = useState<boolean>(() => {
+    try { return localStorage.getItem(TOP_KEY) !== '1' } catch { return true }
+  })
+  const setTopOpen = (open: boolean) => {
+    setTopOpenState(open)
+    try { localStorage.setItem(TOP_KEY, open ? '0' : '1') } catch { /* storage unavailable */ }
+  }
   const [hierarchy,  setHierarchy]  = useState<HierarchyNode[]>([])
   const [calcCols,      setCalcCols]      = useState<CalcColumn[]>([])
   const [measures,      setMeasures]      = useState<MeasureDef[]>([])
   const [columnMeta,    setColumnMeta]    = useState<Record<string, ColumnMeta>>({})
+  // The dashboard's own Ask thread: remembered per report, so opening Ask on a
+  // new dashboard starts empty instead of resuming another dashboard's chat.
+  const reportChatKey = `datalytics:report-chat:${reportId}`
+  const [reportChatId, setReportChatId] = useState<number | null>(() => {
+    try { const v = Number(localStorage.getItem(reportChatKey)); return Number.isFinite(v) && v > 0 ? v : null } catch { return null }
+  })
+  const rememberReportChat = (id: number) => {
+    setReportChatId(id)
+    try { localStorage.setItem(reportChatKey, String(id)) } catch { /* a convenience */ }
+  }
   // Cached analysis, used only for the inline field hints. Its statistics were
   // already computed server-side and simply never surfaced next to the fields.
   const [analysis,      setAnalysis]      = useState<any>(null)
@@ -258,6 +290,14 @@ export default function ReportBuilder() {
   // exists. See useMeasuredWidth for why this cannot be an effect.
   const { width: containerW, attach: attachCanvas, ref: canvasRef } =
     useMeasuredWidth(900)
+  // The render in which the CANVAS changed width (a side panel or the rail
+  // opened or closed, the window resized). Tiles snap to their new boxes in
+  // that render instead of easing there: an eased tile hands its chart a new
+  // size every frame for 120ms, and the chart then waits for it to settle.
+  // Tiles moved by a drag or a reflow still ease.
+  const prevCanvasW = useRef(containerW)
+  const canvasResized = prevCanvasW.current !== containerW
+  useEffect(() => { prevCanvasW.current = containerW }, [containerW])
   const [editPid,      setEditPid]      = useState<number | null>(null)
   const [editPname,    setEditPname]    = useState('')
   const [promptValues, setPromptValues] = useState<Record<number, string>>({})
@@ -284,8 +324,6 @@ export default function ReportBuilder() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   // Kiosk playback: pages auto-advance on an interval; any key or click exits.
   const [kiosk, setKiosk] = useState(false)
-  // View mode's look: Default, or Modern (lib/viewStyle.ts). Per viewer.
-  const [viewStyle, setViewStyle] = useViewStyle()
   // Refresh in the Modern header remounts the canvas, so every widget asks again.
   const [refreshNonce, setRefreshNonce] = useState(0)
 
@@ -658,7 +696,7 @@ export default function ReportBuilder() {
   useEffect(() => {
     if (!report?.id) return
     let live = true
-    authzApi.decisions(['view', 'edit', 'data', 'share_link', 'download'].map(action => ({ resource: 'report' as const, id: report.id, action })))
+    authzApi.decisions(['view', 'edit', 'data', 'share_link', 'download', 'data_rules'].map(action => ({ resource: 'report' as const, id: report.id, action })))
       .then(ds => { if (live) setAccess(Object.fromEntries(ds.map(d => [d.action, d]))) })
       .catch(() => { if (live) setAccess({}) })
     reportsApi.getClassification(report.id)
@@ -811,6 +849,11 @@ export default function ReportBuilder() {
     const ws = activePage.widgets
     const maxY = ws.length ? Math.max(...ws.map(w => w.layout.y + w.layout.h)) : 0
     const cat = WIDGET_CATALOG.find(c => c.type === type)
+    // In Arabic a new widget is named in Arabic -- it was titled with the
+    // catalog's English label ("Association Rules" on an Arabic page).
+    const tileKey = `gallery.tile.${type}` as MessageKey
+    const localName = language === 'ar' && tr(tileKey) !== tileKey ? tr(tileKey) : undefined
+    title = title ?? localName ?? cat?.label ?? type
     const min = minSize(type)
     const w = Math.min(COLS, Math.max(cat?.defaultW ?? 6, min.w))
     const h = Math.max(cat?.defaultH ?? 5, min.h)
@@ -858,6 +901,10 @@ export default function ReportBuilder() {
         setTimeout(() => window.dispatchEvent(new CustomEvent(ASSIGN_DATA_EVENT, { detail: { widgetId: widget.id } })), 0)
       }
       toast.success(`${title ?? cat?.label ?? type} added`)
+    } catch (e) {
+      // A refused add said nothing at all: the click just did nothing.
+      toast.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+        ?? tr('builder.addFailed'))
     } finally {
       setSaving(false)
     }
@@ -1447,6 +1494,9 @@ export default function ReportBuilder() {
   // "Assign data" on an unfinished widget: select it and bring its settings
   // up (the panel itself switches to Data roles on the same event).
   const [rightOpenSignal, setRightOpenSignal] = useState(0)
+  // 5.8: the fields panel's state, so an empty canvas can say it is folded away.
+  const [leftOpen, setLeftOpen] = useState(true)
+  const [leftOpenSignal, setLeftOpenSignal] = useState(0)
   useEffect(() => {
     const onAssign = (e: Event) => {
       const id = (e as CustomEvent<{ widgetId: number }>).detail?.widgetId
@@ -2051,7 +2101,7 @@ export default function ReportBuilder() {
     else meta[c.name] = entry
     await setColumnMetaUndoable(report.dataset_id, meta,
       `Make ${c.name} a ${next === 'measure' ? 'measure' : 'category'}`)
-    toast.success(`${c.name} is now a ${next === 'measure' ? 'measure' : 'category'}`)
+    toast.success(tr(next === 'measure' ? 'meaning.now.measure' : 'meaning.now.category', { col: c.name }))
   }
 
   /** Where a field would go on this widget: the config with it placed in the
@@ -2121,7 +2171,7 @@ export default function ReportBuilder() {
     const pos = report?.pages.length ?? 0
     setSaving(true)
     try {
-      const spec = { name: `Page ${pos + 1}`, position: pos, layout_mode: 'packed' as const, layout_template: DEFAULT_RECIPE }
+      const spec = { name: `${tr('builder.page')} ${pos + 1}`, position: pos, layout_mode: 'packed' as const, layout_template: DEFAULT_RECIPE }
       const page = await reportsApi.addPage(reportId, spec)
       pushUndo({ label: `Add page "${spec.name}"`,
         undo: () => reportsApi.deletePage(reportId, pid(page.id)).then(() => {}),
@@ -2366,7 +2416,30 @@ export default function ReportBuilder() {
       </div>
     )
   }
-  if (!report) return <p style={{ color: 'var(--muted)', padding: 32 }}>Loading…</p>
+  if (!report) return <p style={{ color: 'var(--muted)', padding: 32 }}>{tr('common.loading')}</p>
+  // Every column the page's data offers to the filter bar: the report's
+  // dataset first, then any added ones. A name already offered is not repeated
+  // -- a filter is by column NAME, and reaches each chart that has it.
+  const pageFilterColumns: PageFilterColumn[] = (() => {
+    const ids = [report.dataset_id, ...(report.additional_dataset_ids ?? [])].filter((x): x is number => x != null)
+    const seen = new Set<string>()
+    const out: PageFilterColumn[] = []
+    for (const id of ids) {
+      const ds = datasets[id]
+      for (const c of ds?.columns ?? []) {
+        if (seen.has(c.name)) continue
+        seen.add(c.name)
+        out.push({ name: c.name, kind: columnKind(c.dtype, (c as { semantic_type?: string | null }).semantic_type),
+          datasetId: id, datasetName: ds?.name })
+      }
+    }
+    return out
+  })()
+  const pageFilterBar = (
+    <div className="dl-pf-slot">
+      <PageFilterBar columns={pageFilterColumns} filters={pageFilters} onChange={setPageFilters} reportId={reportId} />
+    </div>
+  )
 
   const columns: DatasetColumn[] = [
     ...(dataset?.columns ?? []),
@@ -2387,9 +2460,10 @@ export default function ReportBuilder() {
   const visibleColumns = columns.filter(c => !columnMeta[c.name]?.hidden)
   const hints = fieldHints(analysis)
   const pageWidgets = activePage?.widgets ?? []
-  // The Modern view style applies to a report being READ: never while
+  // A report being READ always uses the Modern look (the old "Default"
+  // reading look was removed: same data, one look to maintain). Never while
   // editing, presenting, or on the Data / Model views.
-  const modern = viewStyle === 'modern' && !editMode && !kiosk && activeView === 'report'
+  const modern = !editMode && !kiosk && activeView === 'report'
   const viewPages = report.pages.filter(page => page.page_type !== 'hidden' && page.page_type !== 'popup'
     && page.page_type !== 'tooltip' && page.page_type !== 'drillthrough')
   const updated = updatedAgo(dataset?.last_refreshed_at, tr('ai.limit.locale'))
@@ -2415,6 +2489,8 @@ export default function ReportBuilder() {
         id="builder-left"
         side="left"
         width={LEFT_SIDEBAR_W}
+        openSignal={leftOpenSignal}
+        onOpenChange={setLeftOpen}
         title="Fields"
         style={{ background:'var(--surface)', borderInlineEnd:'1px solid var(--border)' }}
       >
@@ -2951,6 +3027,10 @@ export default function ReportBuilder() {
       {/* Right section: top bar + page tabs + canvas */}
       <div className={modern ? 'dl-vw' : undefined} style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
 
+        {/* 5.14: the title row and the Report/Data/Model + panels row share one
+            wrapping row, so a wide screen spends one header's height on them
+            and a laptop wraps them back into two exactly as before. */}
+        <div className="dl-builder-top">
         {/* Top bar */}
         {/* flexWrap is load-bearing, not cosmetic. This row sits inside a parent
             with overflow:hidden, so without it the rightmost controls are simply
@@ -2960,14 +3040,28 @@ export default function ReportBuilder() {
             there was no way for a person to reach the button that puts a report
             into edit mode. Wrapping costs a second row; not wrapping costs the
             control. */}
+        {topOpen && (
         <div data-testid="builder-header"
-          style={{ display:'flex', alignItems:'center', flexWrap:'wrap', gap:10, padding:'10px 20px', borderBottom:'1px solid var(--border)', flexShrink:0, background:'var(--surface)' }}>
+          style={{ display:'flex', alignItems:'flex-start', flexWrap:'wrap', gap:10, padding:'10px 20px', borderBottom:'1px solid var(--border)', flexShrink:0, background:'var(--surface)' }}>
+          {/* Two parts: everything that varies by mode wraps INSIDE this one,
+              while the end part (Opened reports + the Edit/View button) stays
+              pinned to the top-right corner -- so the mode button never moves
+              when you switch modes. */}
+          <div className="dl-hdr-main" style={{ display:'flex', alignItems:'center', flexWrap:'wrap', gap:10, flex:'1 1 0', minWidth:0, minHeight:40 }}>
+          {/* The fold toggle sits at the START of whichever row is on top --
+              here when open, at the head of the page row when folded -- so it
+              stays under the pointer and a second click undoes the first. */}
+          <button type="button" className="dl-topfold" data-testid="top-collapse"
+            aria-expanded={true} aria-label={tr('builder.top.collapse')} title={tr('builder.top.collapse')}
+            onClick={() => setTopOpen(false)}>
+            <ChevronUp size={14} aria-hidden />
+          </button>
           {modern ? (<>
-            <Link to="/reports" className="dl-vw-back"><ArrowLeft size={14} className="flip-rtl" /> Reports</Link>
+            <Link to="/reports" className="dl-vw-back"><ArrowLeft size={14} className="flip-rtl" /> {tr('nav.dashboards')}</Link>
             <span className="dl-vw-vr" aria-hidden />
           </>) : (<>
           <Link to="/reports" style={{ color:'var(--muted)', display:'flex', alignItems:'center', gap:4, fontSize:12, textDecoration:'none' }}>
-            <ArrowLeft size={13} /> Reports
+            <ArrowLeft size={13} className="flip-rtl" /> {tr('nav.dashboards')}
           </Link>
           <span style={{ color:'var(--border)' }}>|</span>
           </>)}
@@ -3040,17 +3134,11 @@ export default function ReportBuilder() {
                 fontSize: 11, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase',
                 color: '#fff', padding: '2px 7px', borderRadius: 4,
                 background: CLASSIFICATION_COLORS[shown] ?? '#666' }}>
-                {shown}{inherited ? ' ⤴' : ''}
+                {(['Public', 'Internal', 'Confidential', 'Restricted'].includes(shown)
+                  ? tr(`sens.${shown}` as 'sens.Public') : shown)}{inherited ? ' ⤴' : ''}
               </span>
             )
           })()}
-          {modern && <span className="dl-vw-sp" />}
-          {modern && (
-            <button type="button" className="btn btn-ghost btn-sm" aria-label={tr('view.refresh')} title={tr('view.refresh')}
-              onClick={() => { loadReport().catch(() => {}); setRefreshNonce(n => n + 1) }}>
-              <RefreshCw size={14} aria-hidden />
-            </button>
-          )}
           {editMode && (
             <span style={{ display: 'inline-flex', gap: 2 }}>
               {/* aria-disabled, not disabled: a disabled button shows no tooltip,
@@ -3094,7 +3182,7 @@ export default function ReportBuilder() {
                 const floorIdx = sens?.floor ? CLASSIFICATION_LABELS.indexOf(sens.floor) : -1
                 const why = sens?.floor_reasons?.[0] ?? ''
                 return (<>
-                  <option value="" disabled={floorIdx >= 0}>— Unclassified —</option>
+                  <option value="" disabled={floorIdx >= 0}>{tr('class.unclassified')}</option>
                   {CLASSIFICATION_LABELS.map((l, i) => (
                     <option key={l} value={l} disabled={i < floorIdx}
                       title={i < floorIdx ? `Below its data: ${why}` : undefined}>
@@ -3105,64 +3193,89 @@ export default function ReportBuilder() {
               })()}
             </select>
           )}
-          {/* Share and Export are menus, not seven buttons in a row: the old
-              header wrapped onto a second line on a laptop. Each item keeps its
-              own gate -- a viewer sees no Share menu at all (every item in it is
-              edit/admin-only), and keeps Export and Subscribe. */}
-          <ToolbarMenu label={<IconLabel icon={Globe}>{tr('builder.share')}</IconLabel>} title="Links, guest access and permissions"
-            items={[
-              ...(canEdit ? [{ key: 'link', label: <IconLabel icon={Copy}>Copy link to this page</IconLabel>,
-                onSelect: () => {
-                  // The link encodes the active page, so a colleague lands where the
-                  // sender was looking rather than on page 1.
-                  const url = new URL(window.location.href)
-                  if (activePage) url.searchParams.set('page', String(activePage.id))
-                  navigator.clipboard.writeText(url.toString())
-                    .then(() => toast.success('Link copied'))
-                    .catch(() => toast.error('Could not copy the link'))
-                } }] : []),
-              ...(canEdit ? [{ key: 'guest', label: <IconLabel icon={Globe}>Guest links…</IconLabel>,
-                title: access.share_link && !access.share_link.allowed ? access.share_link.reason : 'Read-only access without a login',
-                disabled: access.share_link ? !access.share_link.allowed : false,
-                onSelect: () => setShareOpen(true) }] : []),
-              ...(Object.keys(access).length ? [{ key: 'why', label: <IconLabel icon={KeyRound}>Your access, and why…</IconLabel>,
-                title: 'What you can do here, and the rule behind each', onSelect: () => setAccessOpen2(true) }] : []),
-              ...(isAdmin ? [{ key: 'access', label: <IconLabel icon={ShieldCheck}>Access by role…</IconLabel>,
-                title: 'Set per-role capability levels for this report', onSelect: () => setAccessOpen(true) }] : []),
-            ]} />
-          {canEdit && (
-          <button className="btn btn-ghost btn-sm" title="Kiosk playback: pages advance every 8s; any key exits"
-            aria-pressed={kiosk}
-            onClick={() => { setEditMode(false); setKiosk(k => !k) }}>
-            {kiosk ? <IconLabel icon={Pause}>{tr('builder.stop')}</IconLabel> : <IconLabel icon={Play}>{tr('builder.present')}</IconLabel>}
-          </button>
-          )}
-          <ToolbarMenu label={<IconLabel icon={FileDown}>{tr('builder.export')}</IconLabel>} title="Print or download this dashboard"
-            items={[
-              { key: 'print', label: <IconLabel icon={Printer}>Print…</IconLabel>, title: 'Print or save as PDF from the browser',
-                onSelect: () => navigate(`/reports/${reportId}/print`) },
-              { key: 'pdf', label: <IconLabel icon={FileText}>Download PDF…</IconLabel>,
-                title: access.download && !access.download.allowed ? access.download.reason
-                  : "Server-rendered PDF: cover, contents, every page's visuals — choose paper, orientation and pages",
-                disabled: access.download ? !access.download.allowed : false,
-                onSelect: () => setPdfDialog(true) },
-              { key: 'package', label: <IconLabel icon={Package}>Offline package</IconLabel>,
-                disabled: access.download ? !access.download.allowed : false,
-                title: access.download && !access.download.allowed ? access.download.reason
-                  : 'One HTML file that opens without the platform: every visible page, frozen as you see it now',
-                onSelect: () => { reportsApi.downloadPackage(reportId, report.name)
-                  .then(() => toast.success('Offline package downloaded'))
-                  .catch(() => toast.error('Could not build the package')) } },
-            ]} />
-          {/* Beside PDF on purpose: a subscription is the recurring version of
-              that same export, and it needs only view -- so it must sit OUTSIDE
-              the editMode-gated toolbar, which a viewer never sees. */}
-          <SubscribeButton reportId={reportId} />
           {/* E09: whether viewers have this draft yet, and the button that
               gives it to them. Editors only; nothing for a viewer. */}
           <ReleaseControl report={report} canEdit={canEdit} revision={loadedRevision}
             onReleased={() => { loadReport().catch(() => {}) }} />
-          <div style={{ marginInlineStart:'auto', display:'flex', alignItems:'center', gap:8 }}>
+          </div>
+          <div className="dl-hdr-end" style={{ marginInlineStart:'auto', display:'flex', alignItems:'center', gap:8, flexShrink:0, minHeight:40 }}>
+            {/* The actions both modes share, in one fixed order, pinned here
+                so they never move when you switch between View and Edit. */}
+            <button type="button" className="btn btn-ghost btn-sm" aria-label={tr('view.refresh')} title={tr('view.refresh')}
+              onClick={() => { loadReport().catch(() => {}); setRefreshNonce(n => n + 1) }}>
+              <RefreshCw size={14} aria-hidden />
+            </button>
+            {/* Share and Export are menus, not seven buttons in a row: the old
+                header wrapped onto a second line on a laptop. Each item keeps its
+                own gate -- a viewer sees no Share menu at all (every item in it is
+                edit/admin-only), and keeps Export and Subscribe. */}
+            <ToolbarMenu label={<IconLabel icon={Globe}>{tr('builder.share')}</IconLabel>} title="Links, guest access and permissions"
+              items={[
+                ...(canEdit ? [{ key: 'link', label: <IconLabel icon={Copy}>Copy link to this page</IconLabel>,
+                  onSelect: () => {
+                    // The link encodes the active page, so a colleague lands where the
+                    // sender was looking rather than on page 1.
+                    const url = new URL(window.location.href)
+                    if (activePage) url.searchParams.set('page', String(activePage.id))
+                    navigator.clipboard.writeText(url.toString())
+                      .then(() => toast.success('Link copied'))
+                      .catch(() => toast.error('Could not copy the link'))
+                  } }] : []),
+                ...(canEdit ? [{ key: 'guest', label: <IconLabel icon={Globe}>Guest links…</IconLabel>,
+                  title: access.share_link && !access.share_link.allowed ? access.share_link.reason : 'Read-only access without a login',
+                  disabled: access.share_link ? !access.share_link.allowed : false,
+                  onSelect: () => setShareOpen(true) }] : []),
+                ...(Object.keys(access).length ? [{ key: 'why', label: <IconLabel icon={KeyRound}>Your access, and why…</IconLabel>,
+                  title: 'What you can do here, and the rule behind each', onSelect: () => setAccessOpen2(true) }] : []),
+                ...(isAdmin ? [{ key: 'access', label: <IconLabel icon={ShieldCheck}>Access by role…</IconLabel>,
+                  title: 'Set per-role capability levels for this report', onSelect: () => setAccessOpen(true) }] : []),
+              ]} />
+            {canEdit && (
+            <button className="btn btn-ghost btn-sm" title="Kiosk playback: pages advance every 8s; any key exits"
+              aria-pressed={kiosk}
+              onClick={() => { setEditMode(false); setKiosk(k => !k) }}>
+              {kiosk ? <IconLabel icon={Pause}>{tr('builder.stop')}</IconLabel> : <IconLabel icon={Play}>{tr('builder.present')}</IconLabel>}
+            </button>
+            )}
+            <ToolbarMenu label={<IconLabel icon={FileDown}>{tr('builder.export')}</IconLabel>} title="Print or download this dashboard"
+              items={[
+                { key: 'print', label: <IconLabel icon={Printer}>Print…</IconLabel>, title: 'Print or save as PDF from the browser',
+                  onSelect: () => navigate(`/reports/${reportId}/print`) },
+                { key: 'pdf', label: <IconLabel icon={FileText}>Download PDF…</IconLabel>,
+                  title: access.download && !access.download.allowed ? access.download.reason
+                    : "Server-rendered PDF: cover, contents, every page's visuals — choose paper, orientation and pages",
+                  disabled: access.download ? !access.download.allowed : false,
+                  onSelect: () => setPdfDialog(true) },
+                { key: 'xlsx', label: <IconLabel icon={FileText}>Excel (one sheet per chart)</IconLabel>,
+                  disabled: access.download ? !access.download.allowed : false,
+                  title: access.download && !access.download.allowed ? access.download.reason
+                    : "Every chart's data as you see it, one sheet each",
+                  onSelect: () => { reportsApi.downloadXlsx(reportId, report.name)
+                    .then(r => toast.success(r.withheld
+                      ? tr('export.xlsxDoneWithheld', { n: String(r.sheets), w: String(r.withheld) })
+                      : tr('export.xlsxDone', { n: String(r.sheets) })))
+                    // The reason travels in a Blob (responseType 'blob'), so
+                    // it is read back out rather than replaced with a guess.
+                    .catch(async (e: { response?: { data?: Blob } }) => {
+                      let msg = tr('export.xlsxFailed')
+                      try {
+                        const body = JSON.parse(await (e.response?.data as Blob).text()) as { detail?: string }
+                        if (body.detail) msg = body.detail
+                      } catch { /* keep the generic sentence */ }
+                      toast.error(msg)
+                    }) } },
+                { key: 'package', label: <IconLabel icon={Package}>Offline package</IconLabel>,
+                  disabled: access.download ? !access.download.allowed : false,
+                  title: access.download && !access.download.allowed ? access.download.reason
+                    : 'One HTML file that opens without the platform: every visible page, frozen as you see it now',
+                  onSelect: () => { reportsApi.downloadPackage(reportId, report.name)
+                    .then(() => toast.success(tr('export.packageDone')))
+                    .catch(() => toast.error(tr('export.packageFailed'))) } },
+              ]} />
+            {/* Beside PDF on purpose: a subscription is the recurring version of
+                that same export, and it needs only view -- so it must sit OUTSIDE
+                the editMode-gated toolbar, which a viewer never sees. */}
+            <SubscribeButton reportId={reportId} />
             {/* The reports open in this tab, as SAS lists them: one button and a
                 menu, not a strip of tabs above the page. */}
             {!kiosk && (
@@ -3175,40 +3288,23 @@ export default function ReportBuilder() {
                 }}
                 onCloseAll={() => { setOpenReports(closeAll()); navigate('/reports') }} />
             )}
-            {/* How View mode looks: the original, or Claude Design's Modern
-                view. Only while reading; the builder has one look. */}
-            {!editMode && !kiosk && (
-              <div role="group" aria-label={tr('view.style')} className="dl-seg dl-vw-style">
-                {(['default', 'modern'] as const).map(v => (
-                  <button key={v} type="button" aria-pressed={viewStyle === v}
-                    className={`dl-seg__btn${viewStyle === v ? ' dl-seg__btn--on' : ''}`}
-                    onClick={() => setViewStyle(v)}>
-                    {tr(v === 'modern' ? 'view.style.modern' : 'view.style.default')}
-                  </button>
-                ))}
-              </div>
-            )}
-            {canEdit && modern ? (
-              <button type="button" aria-label="Edit mode" aria-pressed={false} className="btn btn-primary btn-sm"
-                onClick={() => setEditMode(true)}>
-                <Pencil size={13} aria-hidden /> {tr('builder.edit')}
-              </button>
-            ) : canEdit ? (
-              // A two-way segmented switch, not a button labelled with the
-              // CURRENT state: "Edit mode" on a button read as the action it
-              // would take, so people clicked it to start editing and left.
-              <div role="group" aria-label={tr('builder.mode')} className="dl-seg">
-                <button type="button" aria-label="View mode" aria-pressed={!editMode}
-                  className={`dl-seg__btn${!editMode ? ' dl-seg__btn--on' : ''}`}
+            {canEdit ? (
+              // ONE button that flips in place: "Edit" while reading, "View"
+              // while editing. The old two-part switch appeared only in edit
+              // mode, so the control changed shape and moved on every switch.
+              editMode ? (
+                <button type="button" aria-label="View mode" data-testid="mode-toggle"
+                  className="btn btn-sm dl-modebtn" title={tr('builder.view')}
                   onClick={() => setEditMode(false)}>
-                  <Eye size={12} aria-hidden /> {tr('builder.view')}
+                  <Eye size={13} aria-hidden /> {tr('builder.view')}
                 </button>
-                <button type="button" aria-label="Edit mode" aria-pressed={editMode}
-                  className={`dl-seg__btn${editMode ? ' dl-seg__btn--on' : ''}`}
+              ) : (
+                <button type="button" aria-label="Edit mode" data-testid="mode-toggle"
+                  className="btn btn-primary btn-sm dl-modebtn" title={tr('builder.edit')}
                   onClick={() => setEditMode(true)}>
-                  <Settings size={12} aria-hidden /> {tr('builder.edit')}
+                  <Pencil size={13} aria-hidden /> {tr('builder.edit')}
                 </button>
-              </div>
+              )
             ) : (
               <button type="button" className="btn btn-ghost btn-sm" data-testid="view-only-why"
                 title={access.edit?.reason ? `View only — ${access.edit.reason}` : 'You have view-only access to this report'}
@@ -3219,10 +3315,11 @@ export default function ReportBuilder() {
             )}
           </div>
         </div>
+        )}
 
         {/* Report / Data / Model view strip — authors only. A viewer has one
             surface (the dashboard); these tabs are the studio. */}
-        {canEdit && !kiosk && !modern && (
+        {topOpen && canEdit && !kiosk && !modern && (
         <div className="dl-panebar">
           {/* Scoped to just these three: other tests use `within(view-strip)` to look
               for a button named /Report/i, and "Report rules" below would otherwise
@@ -3308,6 +3405,7 @@ export default function ReportBuilder() {
           })()}
         </div>
         )}
+        </div>
 
         {activeView === 'data' && dataset && (
           <div style={{ display:'flex', flex:1, overflow:'hidden' }}>
@@ -3422,6 +3520,16 @@ export default function ReportBuilder() {
         {/* Page tabs */}
         {!modern && (
         <div style={{ display:'flex', alignItems:'center', gap:3, padding:'0 16px', borderBottom:'1px solid var(--border)', flexShrink:0, background:'var(--surface)' }}>
+          {!topOpen && (
+            <span className="dl-topfold-lead">
+              <button type="button" className="dl-topfold" data-testid="top-expand"
+                aria-expanded={false} aria-label={tr('builder.top.expand')} title={tr('builder.top.expand')}
+                onClick={() => setTopOpen(true)}>
+                <ChevronDown size={14} aria-hidden />
+              </button>
+              <h1 className="dl-topfold-name" title={report.name}>{report.name}</h1>
+            </span>
+          )}
           {report.pages
             .filter(page => (editMode || (page.page_type !== 'hidden' && page.page_type !== 'popup')) && page.page_type !== 'tooltip' && page.page_type !== 'drillthrough')
             .map(page => {
@@ -3444,7 +3552,7 @@ export default function ReportBuilder() {
                         if (!editMode) return
                         setEditPid(page.id); setEditPname(page.name)
                       }}
-                    >{page.name}{typeIcon}</button>
+                    >{pageLabel(page.name)}{typeIcon}</button>
                   )}
                   {editMode && report.pages.length > 1 && (
                     <button style={{ background:'none', border:'none', color:'var(--muted)', cursor:'pointer', padding:'0 4px', fontSize:13 }}
@@ -3513,6 +3621,7 @@ export default function ReportBuilder() {
               )}
             </div>
           )}
+          {pageFilterBar}
         </div>
         )}
 
@@ -3536,15 +3645,26 @@ export default function ReportBuilder() {
           onPersistInteraction={persistInteraction}>
         {modern && (
           <div className="dl-vw-bar">
+            {!topOpen && (
+              <span className="dl-topfold-lead">
+                <button type="button" className="dl-topfold" data-testid="top-expand"
+                  aria-expanded={false} aria-label={tr('builder.top.expand')} title={tr('builder.top.expand')}
+                  onClick={() => setTopOpen(true)}>
+                  <ChevronDown size={14} aria-hidden />
+                </button>
+                <h1 className="dl-topfold-name" title={report.name}>{report.name}</h1>
+              </span>
+            )}
             <div className="dl-vw-pages" role="tablist" aria-label={tr('view.pages')}>
               {viewPages.map(page => (
                 <button key={page.id} type="button" role="tab" className="dl-vw-pg"
                   aria-selected={page.id === activePage?.id}
                   onClick={() => { setActivePage(page); setSelectedW(null) }}>
-                  {page.name}
+                  {pageLabel(page.name)}
                 </button>
               ))}
             </div>
+            {pageFilterBar}
             <FilterBar variant="chips" />
           </div>
         )}
@@ -3568,7 +3688,9 @@ export default function ReportBuilder() {
                 <button className="btn btn-ghost btn-sm" onClick={discardPending}>{tr('builder.discard')}</button>
               </div>
             )}
-            {!modern && <FilterBar />}
+            {/* 5.9: with page filters in use, the old "Filters: No selections"
+                line beside them read as "no filters apply" -- the opposite. */}
+            {!modern && !(pageFilters?.length > 0) && <FilterBar />}
             {/* The same filters, reachable after scrolling: the strip above is
                 at the top of the canvas and a tall dashboard scrolls it away. */}
             <FloatingFilterWindow />
@@ -3623,6 +3745,7 @@ export default function ReportBuilder() {
                           pages={report.pages}
                           reportDisplayRules={report.display_rules ?? EMPTY_RULES}
                           reportFilters={report.common_filters ?? []}
+                          pageFilters={pageQueryFilters}
                           onDrillthrough={handleDrillthrough}
                           hierarchy={hierarchy}
                           bookmarks={bookmarks}
@@ -3701,10 +3824,18 @@ export default function ReportBuilder() {
                       <span style={{ fontSize:15, fontWeight:600, color:'var(--text)' }}>{tr('builder.designPage')}</span>
                       <span style={{ fontSize:13, maxWidth:440 }}>
                         {report.dataset_id
-                          ? <>Drag a <b>field</b> from the left panel onto the page and it becomes the right chart — or pick a chart type and assign data to it.</>
+                          ? (leftOpen
+                              ? <>Drag a <b>field</b> from the left panel onto the page and it becomes the right chart — or pick a chart type and assign data to it.</>
+                              : <>{tr('builder.fieldsClosed')}</>)
                           : <>{tr('builder.startData')}</>}
                       </span>
                       <span style={{ display:'flex', gap:8, flexWrap:'wrap', justifyContent:'center', pointerEvents:'auto' }}>
+                        {report.dataset_id && !leftOpen && (
+                          <button type="button" className="btn btn-primary btn-sm"
+                            onClick={() => { setLeftTab('fields'); setLeftOpenSignal(n => n + 1) }}>
+                            {tr('builder.openFields')}
+                          </button>
+                        )}
                         {!report.dataset_id && (
                           <button type="button" className="btn btn-primary btn-sm"
                             onClick={openDatasetPicker}>
@@ -3737,7 +3868,7 @@ export default function ReportBuilder() {
                       onMouseEnter={!editMode ? (e) => handleTooltipEnter(widget, e) : undefined}
                       onMouseLeave={!editMode ? () => handleTooltipLeave(widget.id) : undefined}
                       style={{ ...gridStyle(effLayout, containerW), padding: GAP/2,
-                      transition: isBeingDragged ? 'none' : 'left .12s, top .12s, width .12s, height .12s',
+                      transition: isBeingDragged || canvasResized ? 'none' : 'left .12s, top .12s, width .12s, height .12s',
                       zIndex: isBeingDragged ? Z_DRAG : 1,
                       opacity: isHidden || (editMode && (widget.config as any).container_id) ? 0.5 : 1,
                       ...(dropTargetId === widget.id ? { outline: '2px dashed var(--accent)', outlineOffset: -2, borderRadius: 'var(--radius)' } : {}) }}
@@ -3765,6 +3896,7 @@ export default function ReportBuilder() {
                         pages={report.pages}
                         reportDisplayRules={report.display_rules ?? EMPTY_RULES}
                           reportFilters={report.common_filters ?? []}
+                          pageFilters={pageQueryFilters}
                         onDrillthrough={handleDrillthrough}
                         hierarchy={hierarchy}
                         bookmarks={bookmarks}
@@ -3875,7 +4007,8 @@ export default function ReportBuilder() {
                   }} />
               )}
               {rightPanelMode === 'suggestions' && (
-                <SuggestionsPane columns={columns} analysis={analysis} onAdd={addSuggestedWidget} reportId={reportId} datasetId={report.dataset_id} />
+                <SuggestionsPane columns={columns} analysis={analysis} onAdd={addSuggestedWidget} reportId={reportId}
+                  datasetId={report.dataset_id} pageWidgets={activePage?.widgets ?? []} columnMeta={columnMeta} />
               )}
               {rightPanelMode === 'insights' && (
                 <InsightsPane datasetId={report.dataset_id ?? null}
@@ -4022,10 +4155,21 @@ export default function ReportBuilder() {
                 </div>
               )}
               {rightPanelMode === 'ask' && (
-                dataset?.data_source_id != null ? (
+                // Ask the DASHBOARD's data. It used to switch to the dataset's
+                // connection whenever there was one, so a dashboard built on
+                // "Current workforce" was answered from the raw tables behind
+                // it (HR evaluation, blocker 3). One thread per dashboard,
+                // remembered here -- not the newest thread that happened to
+                // share the dataset.
+                chatDatasetIds.length > 0 ? (
+                  <ChatPane key={`ask-${reportId}`} datasetIds={chatDatasetIds}
+                    conversationId={reportChatId}
+                    onConversationCreated={c => rememberReportChat(c.id)}
+                    datasetColumns={columns.map(c => c.name)}
+                    onAddToPage={(draft, title) => addSuggestedWidget({
+                      widget_type: draft.widget_type, title, reason: 'from Ask', config: draft.config })} />
+                ) : dataset?.data_source_id != null ? (
                   <ChatPane dataSourceId={dataset.data_source_id} />
-                ) : chatDatasetIds.length > 0 ? (
-                  <ChatPane datasetIds={chatDatasetIds} />
                 ) : (
                   <div style={{ padding: 14, fontSize: 12, color: 'var(--muted)' }}>
                     Attach a dataset to this report before asking questions.
@@ -4039,8 +4183,8 @@ export default function ReportBuilder() {
                       title={selectedW ? (selectedW.title || selectedW.widget_type) : (activePage?.name ?? '')}
                       style={{ fontSize:12, fontWeight:600, color:'var(--text)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                       {selectedW
-                        ? `Widget: ${selectedW.title || WIDGET_CATALOG.find(w => w.type === selectedW.widget_type)?.label || selectedW.widget_type}`
-                        : `Page: ${activePage?.name ?? ''}`}
+                        ? tr('builder.panelWidget', { name: selectedW.title || WIDGET_CATALOG.find(w => w.type === selectedW.widget_type)?.label || selectedW.widget_type })
+                        : tr('builder.panelPage', { name: activePage?.name ?? '' })}
                     </span>
                     <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
                       <button style={{ background:'none', border:'none', color:'var(--accent)', cursor:'pointer', fontSize:11, padding:0 }}
@@ -4076,7 +4220,7 @@ export default function ReportBuilder() {
                           setSelectedW(v === 'page' ? null
                             : pageWidgets.find(w => String(w.id) === v) ?? null)
                         }}>
-                        <option value="page">Page — {activePage.name}</option>
+                        <option value="page">{tr('builder.pageOption', { name: activePage.name })}</option>
                         {pageWidgets.map(w => (
                           <option key={w.id} value={String(w.id)}>
                             {w.title || w.widget_type} ({w.widget_type})
@@ -4227,6 +4371,7 @@ export default function ReportBuilder() {
               pages={report.pages}
               reportDisplayRules={report.display_rules ?? EMPTY_RULES}
               reportFilters={report.common_filters ?? []}
+                          pageFilters={pageQueryFilters}
               onDrillthrough={handleDrillthrough}
               hierarchy={hierarchy}
               bookmarks={bookmarks}
@@ -4255,6 +4400,7 @@ export default function ReportBuilder() {
               pages={report.pages}
               reportDisplayRules={report.display_rules ?? EMPTY_RULES}
               reportFilters={report.common_filters ?? []}
+                          pageFilters={pageQueryFilters}
               onDrillthrough={handleDrillthrough}
               hierarchy={hierarchy}
               bookmarks={bookmarks}

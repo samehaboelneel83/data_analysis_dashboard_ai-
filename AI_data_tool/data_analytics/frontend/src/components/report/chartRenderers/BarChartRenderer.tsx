@@ -3,7 +3,7 @@ import { TT, fmtStr, getFillFactory, COLORS, fillPattern, PatternDefs } from '..
 import type { ChartRendererProps } from './types'
 import { toBarSeries } from './barSeries'
 import { computeAnalyticsLines } from './analyticsLines'
-import { xAxisProps, yAxisProps, gridProps, legendProps, labelListProps, chartMargin } from './axisOptions'
+import { xAxisProps, yAxisProps, gridProps, legendProps, labelListProps, chartMargin, valueTick } from './axisOptions'
 import { useChartViewport } from './useChartViewport'
 import { seriesName } from './axisOptions'
 
@@ -38,7 +38,9 @@ function designAxes(cfg: ChartRendererProps['cfg']) {
   }
 }
 
-function monoTick(t: Record<string, unknown>) {
+function monoTick(t: Record<string, unknown> | false) {
+  // `false` (axis_ticks: false) means no tick labels at all -- keep it false.
+  if (t === false) return false
   return { ...t, style: { ...((t.style as object) ?? {}), ...MONO } }
 }
 
@@ -86,8 +88,11 @@ export default function BarChartRenderer({ rows, data, cfg, rtl, broadcasts, loc
             axisLine={look.axisLine} />
           {(() => {
             const y = yAxisProps(cfg, rtl, measureFmt, isPercent ? undefined : axisValues, observedMin, { height: plotH, ...look.yOpts })
-            return <YAxis {...y} tick={monoTick(y.tick as Record<string, unknown>)}
-              tickFormatter={v => isPercent ? `${v}%` : fmtStr(v, measureFmt)} />
+            // A 100% stack is exactly 0-100: the automatic domain rounded it
+            // up to 120% (HR re-test 2026-10-02).
+            return <YAxis {...y} {...(isPercent ? { domain: [0, 100], allowDataOverflow: true } : {})}
+              tick={monoTick(y.tick as Record<string, unknown> | false)}
+              tickFormatter={v => isPercent ? `${v}%` : valueTick(cfg, measureFmt)(v)} />
           })()}
           {/* Each line names its series ("Online: 138"). The name used to be
               blanked, so a four-series tooltip was four bare numbers told
@@ -158,7 +163,7 @@ export default function BarChartRenderer({ rows, data, cfg, rtl, broadcasts, loc
         {grid && <CartesianGrid {...grid} />}
         <XAxis dataKey="name" {...xAxisProps(look.xCfg, rtl, view.visible.map((r: any) => String(r.name)), plotW, look.xOpts)}
           axisLine={look.axisLine} />
-        <YAxis {...y} tick={monoTick(y.tick as Record<string, unknown>)} tickFormatter={v => fmtStr(v, measureFmt)} />
+        <YAxis {...y} tick={monoTick(y.tick as Record<string, unknown> | false)} tickFormatter={valueTick(cfg, measureFmt)} />
         <Tooltip contentStyle={TT} cursor={{ fill: 'var(--surface2)' }} formatter={(v: unknown) => [fmtStr(v, measureFmt), seriesName(cfg)]}
           labelFormatter={(l: unknown) => partialLabel != null && String(l) === partialLabel
             ? `${String(l)} (partial — data to ${data.partial_period.through})` : String(l)} />

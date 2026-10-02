@@ -2,7 +2,7 @@ import { useState } from 'react'
 import {
   AreaChart, BarChart3, BarChart4, BarChartHorizontal, Blocks, Boxes, Brain, Building2, ChevronDown,
   Circle, CircleDashed, Cloud, Code2, Compass, CreditCard, Crosshair, Filter, Frame, Gauge,
-  GanttChart, GitBranch, Globe, Grid3x3, Hash, Image, LayoutGrid, Layers, LineChart, ListFilter,
+  GanttChart, GitBranch, Link2, Globe, Grid3x3, Hash, Image, LayoutGrid, Layers, LineChart, ListFilter,
   ListTree, Map as MapIcon, MapPin, MousePointerClick, Move, Network, Orbit, PieChart, Puzzle,
   MoreVertical, Route, Rows3, Scale, ScatterChart, Search, Shapes, Sigma, SlidersHorizontal, Snowflake,
   Spline, Square, Sun, Table2, Target, Thermometer, TreeDeciduous, TrendingUp, Type, Waves, Workflow,
@@ -83,7 +83,7 @@ const ICON_OF: Record<string, LucideIcon> = {
   map_network: Compass, map_bubbles: Circle,
   container: Frame,
   model_linear: TrendingUp, model_logistic: Spline, model_tree: GitBranch, model_cluster: Shapes,
-  model_compare: Scale, model_score: Target,
+  model_compare: Scale, model_score: Target, model_rules: Link2,
 }
 
 /** The gallery's glyph for a widget type, for anywhere else that names one. */

@@ -571,7 +571,7 @@ def _apply_filters(df: pd.DataFrame, filters: list[dict]) -> pd.DataFrame:
                 wanted = {str(v) for v in (val if isinstance(val, list) else [val])}
                 df = df[_dimension_granularity_label(df[col], f["granularity"]).astype(str).isin(wanted)]
             elif op == "in":   df = df[df[col].isin(val if isinstance(val, list) else [val])]
-            elif op == "like": df = df[df[col].astype(str).str.contains(str(val), case=False, na=False)]
+            elif op == "like": df = df[df[col].astype(str).str.contains(str(val), case=False, na=False, regex=False)]
         except Exception:
             pass
     return df
@@ -1324,16 +1324,31 @@ def shape_series(df: pd.DataFrame, config: dict) -> dict:
             "total": len(df),
         }
     if meas and meas in df.columns:
-        val = _agg_series(df[meas], agg)
-        return {
+        # An average (or median, percentile, spread) of a DATE is read as years
+        # since it -- "Average tenure" proposed as avg(hire_date) drew a raw
+        # date average under a "years" title (2026-10-02). Same reading as the
+        # bubble and the models; min/max of a date stay dates.
+        series, derived = df[meas], None
+        if str(agg).lower() in _DATE_AS_YEARS_AGGS and _is_date_like(series):
+            series, derived = _years_before_latest(series), {meas: "years_before_latest"}
+        val = _agg_series(series, agg)
+        out = {
             "type": "scalar",
             "measure": meas,
             "aggregation": agg,
             "rows": [{"name": meas, "value": val}],
             "total": len(df),
         }
+        if derived:
+            out["derived"] = derived
+        return out
 
     return {"type": "empty", "rows": [], "total": 0}
+
+
+#: Aggregations of a date that only mean something as "how long ago".
+_DATE_AS_YEARS_AGGS = frozenset({"avg", "mean", "average", "median", "p25", "p75", "p90", "p95",
+                                 "std", "stdev"})
 
 
 def shape_histogram(df: pd.DataFrame, config: dict) -> dict:
@@ -1462,7 +1477,12 @@ def shape_custom_graph(df: pd.DataFrame, config: dict) -> dict:
     frame = pd.DataFrame(series)
     # Ordered by the FIRST layer, which is the one the author put first and so
     # the one the chart is about; ties keep pandas' grouping order.
-    frame = frame.sort_values(plan[0]["key"], ascending=False).head(limit)
+    # A time axis (or an explicit sort by name) runs in order: by value it
+    # drew 1986 before 1985.
+    if granularity or str(config.get("sort_by") or "").lower() == "name":
+        frame = frame.sort_index(ascending=str(config.get("sort") or "asc").lower() != "desc").head(limit)
+    else:
+        frame = frame.sort_values(plan[0]["key"], ascending=False).head(limit)
 
     rows = []
     for name, values in frame.iterrows():
@@ -1606,6 +1626,22 @@ def shape_xy_numeric(df: pd.DataFrame, config: dict) -> dict:
     return {"type": "xy_series", "x": x, "y": y, "rows": rows, "total": len(df), "truncation": _truncation}
 
 
+def _is_date_like(s: pd.Series) -> bool:
+    """A datetime column, or the object column of `date`s a live source returns."""
+    if pd.api.types.is_datetime64_any_dtype(s):
+        return True
+    if s.dtype != object:
+        return False
+    import datetime as _dt
+    first = s.dropna().head(1)
+    return bool(len(first)) and isinstance(first.iloc[0], (_dt.date, _dt.datetime))
+
+
+def _years_before_latest(s: pd.Series) -> pd.Series:
+    dt = pd.to_datetime(s, errors="coerce")
+    return (dt.max() - dt).dt.days / 365.25
+
+
 def shape_bubble(df: pd.DataFrame, config: dict) -> dict:
     """roles: category (required), measure(x)/measure2(y)/size (all required),
     color (optional numeric, aggregated), group (optional categorical, via first())."""
@@ -1626,6 +1662,23 @@ def shape_bubble(df: pd.DataFrame, config: dict) -> dict:
         return {"type": "empty", "rows": [], "total": 0}
     agg_fn = _pandas_agg_fn(agg)
 
+    # A date on an axis is read as "years before the latest one" -- how long
+    # ago, which averages meaningfully per group (average years of service
+    # per title). Summing or averaging raw dates either failed or drew epoch
+    # nanoseconds. Measured from the data's own latest date, not today, so an
+    # archive from 2002 does not read as 24+ years for everyone.
+    derived: dict[str, str] = {}
+    for c in dict.fromkeys([x, y]):
+        if _is_date_like(df[c]):
+            df = df.assign(**{c: _years_before_latest(df[c])})
+            derived[c] = "years_before_latest"
+
+    # The bubble's size may be a COUNT while x and y are averages: "average
+    # salary and tenure per title, sized by headcount". One aggregation for all
+    # three could not say that -- headcount averaged is 1.
+    size_agg = str(config.get("size_aggregation") or "").lower()
+    size_counted = size_agg in ("count", "countd")
+
     # An id-like or non-numeric color column is a category wearing a color role,
     # not a measure: SUM-ing student_id (or averaging a text column, which pandas
     # can't do at all) is meaningless. Take it via first() alongside `group`
@@ -1634,10 +1687,11 @@ def shape_bubble(df: pd.DataFrame, config: dict) -> dict:
         not pd.api.types.is_numeric_dtype(df[color]) or _is_id_like_column(color)
     )
 
+    aggregated = (x, y) if size_counted else (x, y, size)
     if color_is_category:
-        num_cols = list(dict.fromkeys([c for c in (x, y, size) if c and c in df.columns]))
+        num_cols = list(dict.fromkeys([c for c in aggregated if c and c in df.columns]))
     else:
-        num_cols = list(dict.fromkeys([c for c in (x, y, size, color) if c and c in df.columns]))
+        num_cols = list(dict.fromkeys([c for c in (*aggregated, color) if c and c in df.columns]))
     if cat in num_cols or (group and group == cat) or (color_is_category and color == cat):
         # cat colliding with an aggregated/merge column makes reset_index()/merge
         # try to insert a column that already exists (ValueError: cannot insert ...)
@@ -1653,16 +1707,26 @@ def shape_bubble(df: pd.DataFrame, config: dict) -> dict:
     if color_is_category and color not in grouped.columns:
         color_vals = df.groupby(cat)[color].first().reset_index()
         grouped = grouped.merge(color_vals, on=cat, how="left")
+    size_col = size
+    if size_counted:
+        by = df.groupby(cat)[size]
+        counts = by.nunique() if size_agg == "countd" else by.count()
+        size_col = "__size__"
+        grouped[size_col] = grouped[cat].map(counts)
     grouped, _truncation = _cut(grouped.sort_values(cat), limit, "categories")
     rows = []
     for _, row in grouped.iterrows():
-        r = {"name": _safe(row[cat]), "x": _safe(row[x]), "y": _safe(row[y]), "size": _safe(row[size])}
+        r = {"name": _safe(row[cat]), "x": _safe(row[x]), "y": _safe(row[y]), "size": _safe(row[size_col])}
         if color and color in grouped.columns:
             r["color"] = _safe(row[color])
         if group and group in grouped.columns:
             r["group"] = _safe(row[group])
         rows.append(r)
     result = {"type": "bubble_series", "x": x, "y": y, "size": size, "color": color, "rows": rows, "total": len(df)}
+    if size_counted:
+        result["size_aggregation"] = size_agg
+    if derived:
+        result["derived"] = derived
     if color:
         result["color_kind"] = "category" if color_is_category else "measure"
     fit_kind = config.get("fit_line")
@@ -1938,6 +2002,11 @@ def shape_box_plot(df: pd.DataFrame, config: dict) -> dict:
     df = _apply_filters(df, filters)
     if df.empty or not cat or not meas or cat not in df.columns or meas not in df.columns:
         return {"type": "empty", "rows": [], "total": 0}
+    # Salary by hire YEAR drew one box per hire DAY: the grain was ignored.
+    grain = config.get("dimension_granularity") or None
+    if grain:
+        df = df.copy()
+        df[cat] = _bucket_dimension(df[cat], grain)
     rows = []
     for name, sub in df.groupby(cat):
         vals = sub[meas].dropna()
@@ -1977,6 +2046,11 @@ def shape_waterfall(df: pd.DataFrame, config: dict) -> dict:
     if df.empty or not cat or not meas or cat not in df.columns or meas not in df.columns:
         return {"type": "empty", "rows": [], "total": 0}
     agg_fn = _pandas_agg_fn(agg)
+    # Hires by YEAR drew the first 20 hire DAYS: the grain was ignored.
+    grain = config.get("dimension_granularity") or None
+    if grain:
+        df = df.copy()
+        df[cat] = _bucket_dimension(df[cat], grain)
     grouped, _truncation = _cut(df.groupby(cat)[meas].agg(agg_fn).sort_index(), limit, "categories")
     running = 0.0
     bars = []
@@ -3045,8 +3119,11 @@ def shape_sankey(df: pd.DataFrame, config: dict) -> dict:
         return {"type": "empty", "rows": [], "total": 0}
 
     limit = max(1, min(int(config.get("limit") or 30), 200))
+    agg = str(config.get("aggregation") or "sum").lower()
     if meas and meas in df.columns:
-        grouped = df.groupby([src, dst])[meas].sum()
+        # The aggregation was ignored: a flow of "employees" (countd of
+        # emp_no) summed the ID numbers into links of 9.8 billion.
+        grouped = df.groupby([src, dst])[meas].agg(_pandas_agg_fn(agg))
     else:
         grouped = df.groupby([src, dst]).size()
     grouped = grouped.sort_values(ascending=False).head(limit)
@@ -4571,16 +4648,22 @@ def get_widget_data(
                 # aggregations are eligible.
                 # check_fields off: the frame is pre-aggregated, and duck_agg.plan
                 # already refused any dimension/measure that is not a real column.
+                # Every filter already ran in DuckDB, over the raw rows (duck_agg
+                # declines any it cannot translate). Running them again here would
+                # test a filter on the measure's column against each group's
+                # AGGREGATE -- "price 100-200" on SUM(price) kept only the months
+                # whose total fell in that range.
+                shaped = {**config, "filters": []}
                 if duck_df.attrs.get("count_mode"):
                     # Counted by DuckDB: the shaper sums the per-group counts,
                     # then the result says what the pandas path says (a count).
                     result = get_widget_data_from_df(
-                        duck_df, {**config, "measure": _duck_agg.COUNT_COL, "aggregation": "sum"},
+                        duck_df, {**shaped, "measure": _duck_agg.COUNT_COL, "aggregation": "sum"},
                         widget_type, flag_partial=False, check_fields=False)
                     result["measure"] = "count"
                     result["aggregation"] = (config.get("aggregation") or "sum").lower() or "sum"
                 else:
-                    result = get_widget_data_from_df(duck_df, config, widget_type, flag_partial=False,
+                    result = get_widget_data_from_df(duck_df, shaped, widget_type, flag_partial=False,
                                                      check_fields=False)
                 # The shaper derives `total` from len(df), which on a
                 # pre-aggregated frame is the GROUP count. `total` means source
@@ -4848,7 +4931,13 @@ def _agg_value(frame: pd.DataFrame, measure: str | None, aggregation: str):
           "frequency": lambda: len(series), "avg": series.mean,
           "mean": series.mean, "average": series.mean, "median": series.median,
           "min": series.min, "minimum": series.min, "max": series.max,
-          "maximum": series.max}.get(agg, series.sum)
+          "maximum": series.max,
+          # A distinct count fell through to SUM: an org chart of "employees"
+          # added up their employee NUMBERS -- 60,770,729,684 at the root
+          # (HR analyst panel, 2026-10-02).
+          "countd": series.nunique, "distinct": series.nunique}.get(agg)
+    if fn is None:
+        return _clean_number(series.agg(_pandas_agg_fn(agg)))
     return _clean_number(fn())
 
 
@@ -4891,6 +4980,13 @@ def shape_hierarchy(df: pd.DataFrame, config: dict) -> dict:
     aggregation = str(config.get("aggregation") or "sum").lower()
     max_depth = min(int(config.get("max_depth") or HIER_MAX_DEPTH), HIER_MAX_DEPTH)
 
+    # A distinct count of a column that is unique per row (one employee
+    # number per row) adds up exactly like a count: each child's people are
+    # disjoint. Only a column that repeats (a customer in two regions) is
+    # truly non-additive.
+    if (aggregation in ("countd", "distinct") and measure and measure in df.columns
+            and df[measure].nunique() == int(df[measure].notna().sum())):
+        aggregation = "count"
     if widget in PARTITION_WIDGETS and measure and aggregation not in ADDITIVE_AGGREGATIONS:
         raise HierarchyError(
             f"A {widget} draws each value as a share of its parent, so it needs "

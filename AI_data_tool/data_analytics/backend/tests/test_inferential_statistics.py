@@ -655,3 +655,19 @@ class TestInsightsCorrectsItsOwnFamily:
         one = [{"p_value": 0.04, "score": 1.0, "significant": True, "detail": "x"}]
         _apply_multiple_comparison_correction(one)
         assert one[0]["significant"]
+
+
+def test_compare_groups_states_the_business_size_of_the_gap():
+    """HR re-test 2026-10-01: the verdict said "see the size of the gap" and
+    no gap was shown. It is now in the data's own units, beside the verdict."""
+    import pandas as _pd
+    from app.services.analysis.inferential import compare_groups as _cg
+    df = _pd.DataFrame({"g": ["M"] * 60 + ["F"] * 40,
+                        "salary": [72000 + (i % 7) for i in range(60)] + [71900 + (i % 5) for i in range(40)]})
+    r = _cg(df, "salary", "g").to_dict()
+    assert r["detail"]["business"]["sentence"].startswith("Average salary: M ")
+    assert "higher" in r["interpretation"] and "%" in r["interpretation"]
+    df3 = _pd.DataFrame({"d": ["A"] * 30 + ["B"] * 30 + ["C"] * 30,
+                         "salary": [10.0] * 30 + [20.0] * 30 + [30.0] * 30})
+    r3 = _cg(df3, "salary", "d").to_dict()
+    assert "Widest gap" in r3["interpretation"] and "C 30" in r3["interpretation"]

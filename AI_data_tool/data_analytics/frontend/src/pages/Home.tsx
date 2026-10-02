@@ -160,8 +160,8 @@ export default function Home() {
 
   const draftChip = (r: { created_by?: number | null; published?: boolean }) =>
     r.created_by != null && !r.published ? (
-    <span title={t('home.draftTitle')}
-      style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', flexShrink: 0,
+    <span title={t('home.draftTitle')} aria-label={t('home.draftTitle')} tabIndex={0}
+      style={{ cursor: 'help', fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', flexShrink: 0,
         border: '1px solid var(--border)', borderRadius: 99, padding: '1px 7px',
         textTransform: 'uppercase', letterSpacing: '.04em' }}>
       {t('common.draft')}

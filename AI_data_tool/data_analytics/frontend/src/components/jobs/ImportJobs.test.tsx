@@ -159,6 +159,22 @@ describe('ImportQueue', () => {
     expect(screen.getByText('Failed')).toBeInTheDocument()
     expect(screen.getByText('Done')).toBeInTheDocument()
   })
+
+  it('tucks away finished imports older than a day, and dismissed ones (5.4)', async () => {
+    try { localStorage.removeItem('datalytics:import-dismissed') } catch { /* */ }
+    const old = new Date(Date.now() - 3 * 24 * 3600_000).toISOString()
+    vi.mocked(jobsApi.list).mockResolvedValue([
+      job({ id: 3, state: 'succeeded', subject: 'Fresh import', created_at: new Date().toISOString() }),
+      job({ id: 2, state: 'failed', subject: 'kjhkjhkjh', created_at: old }),
+    ])
+    render(<MemoryRouter><ImportQueue /></MemoryRouter>)
+    expect(await screen.findByText('Fresh import')).toBeInTheDocument()
+    expect(screen.queryByText('kjhkjhkjh')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss Fresh import' }))
+    expect(screen.queryByText('Fresh import')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Show 2 older or dismissed imports' }))
+    expect(screen.getByText('kjhkjhkjh')).toBeInTheDocument()
+  })
 })
 
 describe('newIdempotencyKey', () => {

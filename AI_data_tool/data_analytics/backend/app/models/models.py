@@ -94,11 +94,45 @@ class DatasetShare(Base):
     id          = Column(Integer, primary_key=True)
     dataset_id  = Column(Integer, ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False)
     user_id     = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    #: 'view' (read only) or 'edit' (may also author the data model). 'edit'
+    #: is what every share meant before levels existed.
+    level       = Column(String(10), nullable=False, default="edit", server_default="edit")
     created_at  = Column(DateTime(timezone=True), default=datetime.utcnow)
     __table_args__ = (UniqueConstraint("dataset_id", "user_id", name="uq_dataset_share"),)
 
     dataset = relationship("Dataset")
     user    = relationship("User")
+
+
+class SavedQuery(Base):
+    """A SQL statement kept for a connection's Browse dialog (4.2): either a
+    named query someone saved, or one of their last runs (`name` is NULL --
+    the history, trimmed to the newest HISTORY_KEEP per user and connection).
+    New table, so create_all provisions it; alembic 0051 for existing DBs."""
+    __tablename__ = "saved_queries"
+    id             = Column(Integer, primary_key=True)
+    org_id         = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id        = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    data_source_id = Column(Integer, ForeignKey("data_sources.id", ondelete="CASCADE"), nullable=False, index=True)
+    name           = Column(String(255), nullable=True)
+    sql            = Column(Text, nullable=False)
+    created_at     = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class DatasetGroupShare(Base):
+    """A dataset shared with a whole ROLE or ORG UNIT (and everyone placed
+    under that unit), at 'view' or 'edit'. HR evaluation, item 2.5: sharing
+    "Current workforce" with nine department managers one user at a time was
+    the only way. Exactly one of role_id / org_unit_id is set. New table, so
+    create_all provisions it; alembic 0049 for existing databases."""
+    __tablename__ = "dataset_group_shares"
+    id          = Column(Integer, primary_key=True)
+    org_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    dataset_id  = Column(Integer, ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False, index=True)
+    role_id     = Column(Integer, ForeignKey("roles.id", ondelete="CASCADE"), nullable=True)
+    org_unit_id = Column(Integer, ForeignKey("org_units.id", ondelete="CASCADE"), nullable=True)
+    level       = Column(String(10), nullable=False, default="view", server_default="view")
+    created_at  = Column(DateTime(timezone=True), default=datetime.utcnow)
 
 
 class DatasetColumn(Base):
@@ -324,6 +358,11 @@ class DataSource(Base):
     # the model? Default off, per source, deliberately. Even a self-hosted endpoint
     # is a disclosure, and some sources must never be described by an LLM.
     allow_llm_sampling = Column(Boolean, nullable=False, default=False, server_default="0")
+    #: Sensitivity label for everything read from this connection (Public /
+    #: Internal / Confidential / Restricted). Every dataset built from it --
+    #: live, Query builder or Browse import -- inherits it as a floor (HR
+    #: evaluation, item 2.2: the imported copy of the salaries was Unlabelled).
+    sensitivity = Column(String(20), nullable=True)
     # A plain-language account of what this database holds, written by Stage 5
     # from the tables, their columns and the relationships between them. This is
     # the artefact a person actually reads after a sync -- the column-level
@@ -757,6 +796,11 @@ class Delivery(Base):
     artifact_kind = Column(String(10), nullable=False, default="none")  # pdf | csv | xlsx | none
     duration_ms   = Column(Integer, nullable=True)
     created_at    = Column(DateTime(timezone=True), default=datetime.utcnow, index=True)
+    # 5.18: what the row is ABOUT, so the log is not a column of dashes: the
+    # alert's or schedule's name, who it went to, and the file it carried.
+    subject       = Column(String(255), nullable=True)
+    recipients    = Column(Text, nullable=True)
+    file_name     = Column(String(255), nullable=True)
 
 
 class DataAlert(Base):
@@ -779,6 +823,16 @@ class DataAlert(Base):
     last_checked_at  = Column(DateTime(timezone=True), nullable=True)
     last_state       = Column(String(10), nullable=False, default="clear")   # clear | firing
     last_status      = Column(String(200))
+    #: CHANGE alerts (HR evaluation, item 3.1): when `change_pct` is set,
+    #: `expression` is a metric ("COUNT(emp_no)") and the alert fires when it
+    #: moves by at least that percentage since the previous check, in
+    #: `change_direction` ('up' | 'down' | 'any'). `last_value` is the metric
+    #: at the previous check (also shown for condition alerts).
+    last_value       = Column(Float, nullable=True)
+    change_pct       = Column(Float, nullable=True)
+    change_direction = Column(String(5), nullable=True)
+    #: Also post to a Teams / Slack / generic incoming webhook (https only).
+    webhook_url      = Column(String(500), nullable=True)
     created_at       = Column(DateTime(timezone=True), default=datetime.utcnow)
 
 
@@ -1692,6 +1746,15 @@ class GlossaryTerm(Base):
     synonyms       = Column(JSON, nullable=False, default=list)   # ["GMV", "إجمالي المبيعات"]
     maps_to_object = Column(String(255), nullable=True)
     maps_to_column = Column(String(255), nullable=True)
+    #: A business RULE the AI must follow whenever this term is meant -- a SQL
+    #: predicate ("dept_emp.to_date = '9999-01-01'") or a one-line instruction.
+    #: HR evaluation, blocker 3: the agent did not know that "current" means
+    #: an open-ended to_date, and answered with every salary a person ever had.
+    rule           = Column(Text, nullable=True)
+    #: Apply the rule to EVERY question on this source, not only when the term
+    #: is named: "employees per department" means current employees even
+    #: though nobody typed "current".
+    always         = Column(Boolean, nullable=False, default=False, server_default="0")
     created_at     = Column(DateTime(timezone=True), default=datetime.utcnow)
 
 
@@ -2063,6 +2126,10 @@ class Dataflow(Base):
     # Its OWN schedule. One interval drives every output, so the set refreshes
     # together rather than each output drifting to its own cadence.
     refresh_interval_minutes = Column(Integer, nullable=True)
+    # 4.6: a SNAPSHOT dataflow appends one row per period (and group) each
+    # run instead of replacing its output, so a live source -- which only
+    # ever shows today -- builds a history. Shape: services/snapshot_flow.py.
+    snapshot = Column(JSON, nullable=True)
 
     # A scheduled run has nobody at the keyboard, so it resolves row-level
     # security as this user -- the same stance ReportSchedule takes with its

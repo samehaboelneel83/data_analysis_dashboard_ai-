@@ -21,6 +21,7 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
   const isEdit = !!initial
   const specOf = (t: string) => catalog.find(s => s.key === t)
   const [name,    setName]    = useState(initial?.name ?? '')
+  const [label,   setLabel]   = useState<string>(initial?.sensitivity ?? '')
   const initialType = initial?.custom_connector_id != null
     ? (catalog.find(s => s.custom_connector_id === initial.custom_connector_id)?.key ?? initial?.type ?? catalog[0]?.key ?? 'postgresql')
     : (initial?.type ?? catalog[0]?.key ?? 'postgresql')
@@ -132,8 +133,8 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
         ? Object.fromEntries(Object.entries(cfg).filter(([, v]) => v !== ''))
         : cfg
       const result = isEdit
-        ? await dataSourcesApi.update(initial!.id, { name, type: submitType, custom_connector_id: customConnectorId, config: submitCfg })
-        : await dataSourcesApi.create({ name, type: submitType, custom_connector_id: customConnectorId, config: submitCfg })
+        ? await dataSourcesApi.update(initial!.id, { name, type: submitType, custom_connector_id: customConnectorId, config: submitCfg, sensitivity: label })
+        : await dataSourcesApi.create({ name, type: submitType, custom_connector_id: customConnectorId, config: submitCfg, sensitivity: label || null })
       onSave(result)
       toast.success(isEdit ? 'Updated' : 'Connection created')
     } catch (e: any) {
@@ -162,6 +163,21 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
           <input value={name} onChange={e => setName(e.target.value)} placeholder="My Database" maxLength={120}
             aria-invalid={showErrors && !name.trim() ? true : undefined} {...inp} />
           {showErrors && !name.trim() && <div className="dl-field__error">Connection name is required</div>}
+        </label>
+
+        {/* Sensitivity: a floor for every dataset read from this connection,
+            so an import of the salaries cannot come out Unlabelled. */}
+        <label style={{ display: 'block', marginBottom: 12 }}>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>
+            Sensitivity of this data <span style={{ opacity: .8 }}>— every dataset built from it inherits this at least</span>
+          </div>
+          <select aria-label="Connection sensitivity" value={label} onChange={e => setLabel(e.target.value)} {...inp}>
+            <option value="">Unlabelled</option>
+            <option value="Public">Public</option>
+            <option value="Internal">Internal</option>
+            <option value="Confidential">Confidential</option>
+            <option value="Restricted">Restricted</option>
+          </select>
         </label>
 
         {/* Type — grouped by category, from the catalog */}

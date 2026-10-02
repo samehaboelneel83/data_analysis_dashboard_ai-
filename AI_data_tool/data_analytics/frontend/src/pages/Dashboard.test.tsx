@@ -249,6 +249,19 @@ describe('DirectQuery rows report what they know, not zero', () => {
     expect(cells[4]).toHaveTextContent('—')
   })
 
+  it('fills in the live count once the source has been counted (4.5)', async () => {
+    vi.mocked(datasetsApi.list).mockResolvedValue([live] as never)
+    const liveCount = vi.fn().mockResolvedValue({ row_count: 240124, counted_at: '2026-10-01T10:00:00Z', live: true })
+    ;(datasetsApi as unknown as { liveCount: typeof liveCount }).liveCount = liveCount
+    renderDashboard()
+    const row = (await screen.findByText('live_orders')).closest('tr')!
+    await waitFor(() => expect(within(row).getAllByRole('cell')[2]).toHaveTextContent((240124).toLocaleString()))
+    expect(liveCount).toHaveBeenCalledWith(3)
+    // the size still does not apply: nothing is stored here
+    expect(within(row).getAllByRole('cell')[4]).toHaveTextContent('—')
+    delete (datasetsApi as unknown as { liveCount?: unknown }).liveCount
+  })
+
   it('still counts the columns, which it does know', async () => {
     vi.mocked(datasetsApi.list).mockResolvedValue([live] as never)
     renderDashboard()

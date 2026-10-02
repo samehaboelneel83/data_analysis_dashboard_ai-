@@ -446,12 +446,24 @@ class GlossaryIn(BaseModel):
     synonyms: list[str] = Field(default_factory=list)
     maps_to_object: str | None = None
     maps_to_column: str | None = None
+    #: A rule the AI must follow when the term is meant (a SQL predicate or a
+    #: one-line instruction), and whether it applies to EVERY question.
+    rule: str | None = Field(default=None, max_length=2000)
+    always: bool = False
+
+
+class GlossaryPatch(BaseModel):
+    definition: str | None = None
+    synonyms: list[str] | None = None
+    rule: str | None = Field(default=None, max_length=2000)
+    always: bool | None = None
 
 
 def _glossary_payload(t: GlossaryTerm) -> dict:
     return {"id": t.id, "term": t.term, "definition": t.definition,
             "synonyms": t.synonyms or [], "maps_to_object": t.maps_to_object,
             "maps_to_column": t.maps_to_column,
+            "rule": getattr(t, "rule", None), "always": bool(getattr(t, "always", False)),
             "data_source_id": t.data_source_id}
 
 
@@ -498,11 +510,45 @@ async def create_glossary_term(
         org_id=current_user.org_id, data_source_id=source.id, term=term,
         definition=body.definition, synonyms=[s.strip() for s in synonyms],
         maps_to_object=body.maps_to_object, maps_to_column=body.maps_to_column,
+        rule=(body.rule or "").strip() or None, always=bool(body.always),
     )
     db.add(row)
+    if row.rule:
+        # A new rule changes what earlier answers SHOULD have been.
+        from ..services.agent import memory
+        await memory.forget(db, current_user.org_id, source_id=source.id)
     await db.commit()
     await db.refresh(row)
     return _glossary_payload(row)
+
+
+@router.patch("/{source_id}/glossary/{term_id}")
+async def update_glossary_term(
+    source_id: int, term_id: int, body: GlossaryPatch,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_org_admin),
+):
+    """Edit a term's meaning or its rule -- the Glossary page's inline edit."""
+    await _get_source(db, source_id, current_user)
+    term = await db.get(GlossaryTerm, term_id)
+    check_org(term, current_user, "Glossary term not found")
+    if term.data_source_id not in (None, source_id):
+        raise HTTPException(404, "Glossary term not found")
+    data = body.model_dump(exclude_unset=True)
+    if "definition" in data:
+        term.definition = data["definition"]
+    if "synonyms" in data and data["synonyms"] is not None:
+        term.synonyms = [s.strip() for s in data["synonyms"] if s and s.strip()]
+    if "rule" in data:
+        term.rule = (data["rule"] or "").strip() or None
+    if "always" in data and data["always"] is not None:
+        term.always = bool(data["always"])
+    if "rule" in data or "always" in data:
+        from ..services.agent import memory
+        await memory.forget(db, current_user.org_id, source_id=source_id)
+    await db.commit()
+    await db.refresh(term)
+    return _glossary_payload(term)
 
 
 @router.delete("/{source_id}/glossary/{term_id}", status_code=204)

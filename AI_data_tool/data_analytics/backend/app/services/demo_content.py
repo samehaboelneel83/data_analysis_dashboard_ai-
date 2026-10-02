@@ -976,6 +976,8 @@ def _models_specs(datasets: dict[str, Dataset]) -> list[tuple[str, str, int, int
          {"response": "channel", "event_value": "Online", "predictors": ["units", "revenue", "region"]}),
         ("model_cluster", "Natural segments of sales", 6, 6,
          {"measures": ["revenue", "units", "cost"]}),
+        ("model_rules", "What goes with each sales channel (association rules)", 8, 6,
+         {"predictors": ["region", "units"], "response": "channel"}),
     ]
 
 

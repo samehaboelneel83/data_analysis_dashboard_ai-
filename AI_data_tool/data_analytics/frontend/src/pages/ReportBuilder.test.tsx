@@ -780,12 +780,15 @@ describe('ReportBuilder mobile layout editor', () => {
       addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => false,
     }) as unknown as MediaQueryList
 
-    renderBuilder()
-    await screen.findByTestId('view-strip')
-    fireEvent.click(screen.getByRole('button', { name: 'View mode' }))
-
-    expect(await screen.findByTestId('mobile-stack')).toBeInTheDocument()
-    window.matchMedia = realMatchMedia
+    try {
+      // A phone opens straight into View mode (Modern look): no studio strip.
+      renderBuilder()
+      expect(await screen.findByTestId('mobile-stack')).toBeInTheDocument()
+      expect(screen.queryByTestId('view-strip')).toBeNull()
+    } finally {
+      // Restored even on failure, or every later test runs as a phone.
+      window.matchMedia = realMatchMedia
+    }
   })
 })
 
@@ -1474,7 +1477,8 @@ describe('ReportBuilder — a view-only viewer gets the dashboard, not the studi
   it('offers no way into edit mode, and says why', async () => {
     await renderViewOnly()
     expect(screen.queryByRole('button', { name: /Edit mode/i })).not.toBeInTheDocument()
-    expect(screen.getByText(/View only/i)).toBeInTheDocument()
+    // The Modern header's "View only" chip, and the "View only · why?" button.
+    expect(screen.getByRole('button', { name: /View only · why\?/i })).toBeInTheDocument()
   })
 
   it('drops the authoring chrome: panels, add-widget, page controls, copilot', async () => {
@@ -1496,7 +1500,7 @@ describe('ReportBuilder — a view-only viewer gets the dashboard, not the studi
 
   it('does not let a double-click start renaming a page', async () => {
     await renderViewOnly()
-    fireEvent.doubleClick(screen.getByRole('button', { name: 'Page 1' }))
+    fireEvent.doubleClick(screen.getByRole('tab', { name: 'Page 1' }))
     // The rename input never appears, so nothing can get stuck open on a 403.
     expect(screen.queryByDisplayValue('Page 1')).not.toBeInTheDocument()
   })
@@ -1506,7 +1510,7 @@ describe('ReportBuilder — a view-only viewer gets the dashboard, not the studi
     // that rides with the render path -- none of it is edit-gated.
     await renderViewOnly()
     expect(screen.getByText('Sales by Region')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Page 1' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Page 1' })).toBeInTheDocument()
   })
 
   it('leaves a page prompt filter usable', async () => {
@@ -1525,7 +1529,8 @@ describe('ReportBuilder — a view-only viewer gets the dashboard, not the studi
     vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
     renderBuilder()
     await screen.findByText('Sales by Region')
-    expect(screen.getByRole('group', { name: 'Report mode' })).toBeInTheDocument()
+    // One mode button that flips in place: an editor opens in Edit, so it offers View.
+    expect(screen.getByTestId('mode-toggle')).toHaveAccessibleName('View mode')
     // The studio's left panel: Fields / Charts / More tabs (was an "Analytics" header).
     expect(screen.getByRole('tablist', { name: 'Builder panel' })).toBeInTheDocument()
   })
@@ -2231,6 +2236,62 @@ describe('the builder header', () => {
     const header = await screen.findByTestId('builder-header')
     expect(header).toHaveStyle({ flexWrap: 'wrap' })
   })
+
+  it('keeps the shared actions and the one mode button in the same place in both modes', async () => {
+    renderBuilder()
+    await screen.findByTestId('builder-header')
+    const endNames = () => Array.from(document.querySelectorAll('.dl-hdr-end button'))
+      .map(b => b.getAttribute('aria-label') || b.textContent?.trim()).filter(Boolean)
+    const editing = endNames()
+    expect(screen.getByTestId('mode-toggle')).toHaveAccessibleName('View mode')
+    fireEvent.click(screen.getByTestId('mode-toggle'))
+    expect(screen.getByTestId('mode-toggle')).toHaveAccessibleName('Edit mode')
+    // Same buttons, same order; only the mode button's word changes.
+    const reading = endNames()
+    expect(reading.slice(0, -1)).toEqual(editing.slice(0, -1))
+    expect(reading.length).toBe(editing.length)
+  })
+
+  it('applies the reader\'s page filters to every chart on the page, and shows them above it', async () => {
+    localStorage.setItem('datalytics:page-filters:1:100', JSON.stringify([
+      { id: 'a', column: 'region', kind: 'values', values: ['East'] },
+      { id: 'b', column: 'units', kind: 'range', from: 1, to: 20 },
+    ]))
+    vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data',
+      columns: [{ name: 'region', dtype: 'categorical' }, { name: 'units', dtype: 'numeric' }] } as any)
+    vi.mocked(widgetDataApi.query).mockClear()
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    try {
+      renderBuilder()
+      expect(await screen.findByRole('button', { name: 'region: East' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'units: 1 – 20' })).toBeInTheDocument()
+      await waitFor(() => {
+        const sent = vi.mocked(widgetDataApi.query).mock.calls.map(c => (c[1] as any).filters ?? [])
+        expect(sent.some(f => JSON.stringify(f).includes('"op":"in","value":["East"]')
+          && JSON.stringify(f).includes('{"column":"units","op":"gte","value":1}')
+          && JSON.stringify(f).includes('{"column":"units","op":"lte","value":20}'))).toBe(true)
+      })
+    } finally {
+      localStorage.removeItem('datalytics:page-filters:1:100')
+    }
+  })
+
+  it('folds the top area away and brings it back, remembering the choice', async () => {
+    localStorage.removeItem('datalytics:builder-top-collapsed')
+    renderBuilder()
+    await screen.findByTestId('builder-header')
+    expect(screen.getByTestId('view-strip')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('top-collapse'))
+    expect(screen.queryByTestId('builder-header')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('view-strip')).not.toBeInTheDocument()
+    expect(localStorage.getItem('datalytics:builder-top-collapsed')).toBe('1')
+
+    fireEvent.click(screen.getByTestId('top-expand'))
+    expect(screen.getByTestId('builder-header')).toBeInTheDocument()
+    expect(localStorage.getItem('datalytics:builder-top-collapsed')).toBe('0')
+  })
 })
 
 describe('ReportBuilder page layout recipes', () => {
@@ -2438,19 +2499,15 @@ describe('ReportBuilder accessibility', () => {
 })
 
 describe('ReportBuilder Modern view style', () => {
-  beforeEach(() => { try { localStorage.removeItem('datalytics.viewStyle') } catch { /* */ } })
-
-  it('reads a report in the Modern layout, remembers the choice, and never applies while editing', async () => {
+  it('reads a report in the Modern layout, with no style switch, and never applies while editing', async () => {
     vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
     vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
     renderBuilder()
     await screen.findByTestId('view-strip')
-    // The switch is a reading choice: the builder has one look.
-    expect(screen.queryByRole('group', { name: 'View style' })).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: 'View mode' }))
-    const styles = screen.getByRole('group', { name: 'View style' })
-    fireEvent.click(within(styles).getByRole('button', { name: 'Modern' }))
+    // One look only: the Default/Modern switch is gone.
+    expect(screen.queryByRole('group', { name: 'View style' })).toBeNull()
 
     // One header row, pill page tabs with the filters beside them; no studio strip.
     expect(screen.queryByTestId('view-strip')).toBeNull()
@@ -2458,7 +2515,6 @@ describe('ReportBuilder Modern view style', () => {
     expect(within(pages).getByRole('tab', { name: 'Page 1' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByText('No filters applied')).toBeInTheDocument()
     expect(await screen.findByText('Sales by Region')).toBeInTheDocument()
-    expect(localStorage.getItem('datalytics.viewStyle')).toBe('modern')
 
     // Edit is the primary action, and editing is the builder as always.
     fireEvent.click(screen.getByRole('button', { name: 'Edit mode' }))

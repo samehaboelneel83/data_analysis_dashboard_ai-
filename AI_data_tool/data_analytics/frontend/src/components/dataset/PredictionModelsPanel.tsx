@@ -316,17 +316,15 @@ export default function PredictionModelsPanel({ datasetId, columns, mode, datase
         </p>
       </div>
 
-      {mode === 'directquery' ? (
-        // Said up front, not discovered after filling the form in. Existing
-        // models are still listed below: a dataset switched to DirectQuery
-        // later may carry some, and hiding them loses the work.
-        <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0,
+      {mode === 'directquery' && (
+        // HR re-test 2026-10-01: training used to be refused here while every
+        // model WIDGET fitted on the same live data. It now reads the rows
+        // live, secured as the reader, up to the analysis cap.
+        <p data-testid="models-dq-note" style={{ fontSize: 12, color: 'var(--muted)', margin: 0,
           border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px' }}>
-          Training needs to read every row, so it is available on
-          <strong> import-mode</strong> datasets only. This one queries its
-          source live.
+          {t('models.dqTrainNote')}
         </p>
-      ) : (
+      )}
       <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', flexWrap: 'wrap' }}>
         <div>
           <label htmlFor="pm-target" style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--muted)' }}>
@@ -363,7 +361,6 @@ export default function PredictionModelsPanel({ datasetId, columns, mode, datase
           {training ? 'Training…' : 'Train and save'}
         </button>
       </div>
-      )}
 
       {loading ? (
         <p style={{ fontSize: 12, color: 'var(--muted)' }}>Loading…</p>

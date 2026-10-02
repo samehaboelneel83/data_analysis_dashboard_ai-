@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 
 export interface ActionMenuItem {
   key: string
@@ -33,6 +34,10 @@ interface Props {
    *  a LOGICAL inset so it mirrors under RTL instead of escaping the rail. */
   align?: 'start' | 'end'
   className?: string
+  /** Render the popup on document.body at fixed coordinates (5.10): a menu
+   *  inside a narrow chart tile with `overflow: hidden` was clipped to the
+   *  tile, its lower items unreachable. */
+  portal?: boolean
 }
 
 /**
@@ -46,10 +51,11 @@ interface Props {
  */
 export default function ActionMenu({
   items, label, trigger, triggerClassName = 'btn btn-ghost btn-sm', triggerStyle,
-  align = 'start', className,
+  align = 'start', className, portal = false,
 }: Props) {
   const [open, setOpen] = useState(false)
   const [placement, setPlacement] = useState<{ top?: boolean; left?: boolean }>({})
+  const [fixedAt, setFixedAt] = useState<{ top: number; left: number } | null>(null)
   const [activeIndex, setActiveIndex] = useState(0)
   const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -60,6 +66,7 @@ export default function ActionMenu({
 
   const close = (returnFocus: boolean) => {
     setOpen(false)
+    setFixedAt(null)
     if (returnFocus) triggerRef.current?.focus()
   }
 
@@ -72,7 +79,8 @@ export default function ActionMenu({
   useEffect(() => {
     if (!open) return
     const onDown = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false)
+      const t = e.target as Node
+      if (!rootRef.current?.contains(t) && !menuRef.current?.contains(t)) setOpen(false)
     }
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
@@ -89,7 +97,21 @@ export default function ActionMenu({
     const overflowsBottom = tRect.bottom + mRect.height > window.innerHeight
     const overflowsRight = tRect.left + mRect.width > window.innerWidth
     setPlacement({ top: overflowsBottom, left: overflowsRight })
-  }, [open])
+    if (portal) {
+      const top = overflowsBottom ? Math.max(4, tRect.top - mRect.height - 4) : tRect.bottom + 4
+      const left = overflowsRight || align === 'end'
+        ? Math.max(4, tRect.right - mRect.width) : tRect.left
+      setFixedAt({ top, left })
+    }
+  }, [open, portal, align])
+  // A portalled menu stays put on the page while the canvas scrolls under
+  // it, so it closes instead of floating away from its widget.
+  useEffect(() => {
+    if (!open || !portal) return
+    const onScroll = () => setOpen(false)
+    window.addEventListener('scroll', onScroll, true)
+    return () => window.removeEventListener('scroll', onScroll, true)
+  }, [open, portal])
 
   // Focus the active item as arrow navigation moves it.
   useEffect(() => {
@@ -128,7 +150,8 @@ export default function ActionMenu({
         {trigger ?? '⋯'}
       </button>
 
-      {open && (
+      {open && (() => {
+        const menu = (
         <div
           ref={menuRef}
           role="menu"
@@ -143,7 +166,12 @@ export default function ActionMenu({
               if (item) activate(item)
             }
           }}
-          style={{
+          style={portal ? {
+            position: 'fixed', top: fixedAt?.top ?? -9999, left: fixedAt?.left ?? -9999,
+            visibility: fixedAt ? 'visible' : 'hidden',
+            minWidth: 160, background: 'var(--surface)', border: '1px solid var(--border)',
+            borderRadius: 8, boxShadow: '0 8px 28px rgba(0,0,0,.25)', zIndex: 1200, padding: 4,
+          } : {
             position: 'absolute',
             top: placement.top ? 'auto' : '100%',
             bottom: placement.top ? '100%' : 'auto',
@@ -187,7 +215,9 @@ export default function ActionMenu({
             </button>
           ))}
         </div>
-      )}
+        )
+        return portal && typeof document !== 'undefined' ? createPortal(menu, document.body) : menu
+      })()}
     </div>
   )
 }

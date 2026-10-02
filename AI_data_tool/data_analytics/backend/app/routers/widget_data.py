@@ -34,7 +34,7 @@ def _safe_filename(name: str) -> str:
     return cleaned[:60]
 
 from ..core.widget_errors import CodedHTTPException, widget_error
-from ..services.direct_query import DirectQueryUnsupported, SourceUnavailable, run_direct_query
+from ..services.direct_query import DirectQueryUnsupported, SourceBusy, SourceUnavailable, run_direct_query
 from ..services.prep import prep_steps_of, resolve_join_frames
 from ..services.widget_data import (ImportRowCapExceeded, sums_measure_by_default,
                                     get_widget_data, infer_date_filter_grains)
@@ -164,7 +164,7 @@ class _DirectQueryCalcView:
         return getattr(self._ds, name)
 
 
-def _directquery_calc_view(ds, calc_cols: list, used: list[str]):
+def _directquery_calc_view(ds, calc_cols: list, used: list[str], dialect: str | None = None):
     from types import SimpleNamespace
     from ..services.direct_query import _base_query_sql, _quote
     from ..services.sql_expr import ExpressionTranslationError, calc_column_to_sql
@@ -192,7 +192,7 @@ def _directquery_calc_view(ds, calc_cols: list, used: list[str]):
         if expand_custom_functions and getattr(ds, "custom_functions", None):
             expr = expand_custom_functions(expr, ds.custom_functions)
         try:
-            col_sql, used_cols = calc_column_to_sql(expr, known)
+            col_sql, used_cols = calc_column_to_sql(expr, known, dialect)
         except ExpressionTranslationError as e:
             raise widget_error(400, "unsupported",
                                f"Calculated column '{name}' can't run on this live (DirectQuery) "
@@ -483,6 +483,12 @@ async def _resolve_widget_data(
     calc_cols = list(req.calculated_columns or []) + list(ds.calculated_columns or [])
     measure_defs = list(ds.measures or [])
 
+    # Before the live branch, not after it: a Score widget on a live dataset
+    # reached the shaper without its model loaded and read "The saved model
+    # could not be loaded" (HR re-test 2026-10-01). Both modes need it.
+    if req.widget_type == "model_score" and (req.config or {}).get("prediction_model_id"):
+        req = await _clear_scoring_model(req, db, current_user, dataset_id)
+
     if ds.mode == "directquery":
         # Calculated columns the widget uses are computed BY THE SOURCE: each
         # one becomes a SELECT layer over the dataset's base query (see
@@ -494,7 +500,12 @@ async def _resolve_widget_data(
                             and (_config_names(req.config or {}, c["name"])
                                  or _config_names(getattr(req, "filters", None) or [], c["name"]))})
         if used_calc:
-            dq_ds = _directquery_calc_view(ds, calc_cols, used_calc)
+            # The source's SQL family: a date difference is written per dialect.
+            from ..services.connectors import sql_family_of
+            calc_source = await db.get(DataSource, ds.data_source_id)
+            dialect = sql_family_of({**dict(calc_source.config or {}), "type": calc_source.type}) \
+                if calc_source is not None and calc_source.org_id == current_user.org_id else None
+            dq_ds = _directquery_calc_view(ds, calc_cols, used_calc, dialect)
         if ds.default_filter_expr:
             raise widget_error(400, "unsupported", "Report-level filter expressions are not yet supported for DirectQuery datasets")
 
@@ -678,6 +689,11 @@ async def _resolve_widget_data(
             return result
         except DirectQueryUnsupported as e:
             raise widget_error(400, "unsupported", str(e))
+        except SourceBusy:
+            raise widget_error(
+                503, "source_busy",
+                f"The data source '{source.name}' is reachable but ran short of "
+                f"memory answering this. Refresh in a moment.")
         except SourceUnavailable:
             # 502, not 500: this application is fine and the source it was
             # asked to query is not. A 500 sends the reader to our logs for
@@ -692,9 +708,6 @@ async def _resolve_widget_data(
 
     if not ds.filename:
         raise widget_error(404, "not_found", "Dataset not found")
-
-    if req.widget_type == "model_score" and (req.config or {}).get("prediction_model_id"):
-        req = await _clear_scoring_model(req, db, current_user, dataset_id)
 
     rls_filter_expr = await resolve_rls_expr(db, current_user, dataset_id)
     # Sensitivity redaction (Phase 7.3) rides the column-security path: a

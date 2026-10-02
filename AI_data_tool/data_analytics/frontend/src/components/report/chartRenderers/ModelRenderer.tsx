@@ -10,6 +10,8 @@
  */
 import { useState } from 'react'
 import { seriesColor } from '../chartUtils'
+import { useT, type MessageKey } from '../../../i18n'
+import { useDirection, navArrows } from '../../../contexts/DirectionContext'
 import type { ChartRendererProps } from './types'
 
 type Tab = { key: string; label: string }
@@ -21,25 +23,34 @@ const fmt = (v: unknown, digits = 3) => {
   const a = Math.abs(n)
   return a !== 0 && (a < 0.001 || a >= 1e6) ? n.toExponential(2) : n.toLocaleString(undefined, { maximumFractionDigits: digits })
 }
+/** An odds ratio per unit of a large-scale predictor (salary per dollar) sits
+ *  a hair from 1; three decimals showed "1" and an interval of "1 – 1"
+ *  (HR re-test 2026-10-01). Near 1, six decimals keep the effect visible. */
+const ofmt = (v: unknown) => (Math.abs(Number(v) - 1) < 0.01 ? fmt(v, 6) : fmt(v))
 const pfmt = (p: unknown) => (p == null ? '—' : Number(p) < 0.001 ? '< 0.001' : fmt(p, 3))
 
-const MODEL_NAMES: Record<string, string> = {
-  linear: 'Linear regression', logistic: 'Logistic regression', tree: 'Decision tree',
-  cluster: 'Clustering', compare: 'Model comparison', score: 'Scoring',
+// Fixed text in the reader's language (HR re-test 2026-10-01: every model
+// widget was English in Arabic mode). Sentences the statistics engine writes
+// (the interpretation, caveats) still arrive in English from the server.
+const MODEL_NAMES: Record<string, MessageKey> = {
+  linear: 'mdl.linear', logistic: 'mdl.logistic', tree: 'mdl.tree',
+  cluster: 'mdl.cluster', compare: 'mdl.compare', score: 'mdl.score', rules: 'mdl.rules',
 }
 
 function Population({ pop }: { pop: any }) {
+  const tr = useT()
   if (!pop) return null
   const dropped = Object.entries(pop.dropped_by ?? {}) as [string, number][]
   return (
     <div data-testid="model-population" style={{ fontSize: 11, color: 'var(--muted)' }}>
-      Rows used: <b style={{ color: 'var(--text)' }}>{Number(pop.rows_used ?? 0).toLocaleString()}</b> of {Number(pop.rows_total ?? 0).toLocaleString()}
-      {pop.rows_dropped > 0 && <> — {Number(pop.rows_dropped).toLocaleString()} dropped{dropped.length > 0 && <> (missing: {dropped.map(([c, n]) => `${c} ${n.toLocaleString()}`).join(', ')})</>}</>}
-      {pop.rows_before_filters != null && <> · re-fitted on the filtered rows ({Number(pop.rows_before_filters).toLocaleString()} before filters)</>}
-      {pop.sampled_from && <> · clustered a sample of {Number(pop.sampled_from).toLocaleString()} rows</>}
+      {tr('mdl.rowsUsed')} <b style={{ color: 'var(--text)' }}>{Number(pop.rows_used ?? 0).toLocaleString()}</b> {tr('mdl.of')} {Number(pop.rows_total ?? 0).toLocaleString()}
+      {pop.rows_dropped > 0 && <> — {tr('mdl.dropped', { n: Number(pop.rows_dropped).toLocaleString() })}{dropped.length > 0 && <> ({tr('mdl.missing')} {dropped.map(([c, n]) => `${c} ${n.toLocaleString()}`).join(', ')})</>}</>}
+      {pop.rows_before_filters != null && <> · {tr('mdl.refitted', { n: Number(pop.rows_before_filters).toLocaleString() })}</>}
+      {pop.sampled_from && <> · {tr('mdl.sampleFrom', { n: Number(pop.sampled_from).toLocaleString() })}</>}
+      {pop.sampled_of && <> · {tr('mdl.sampleOf', { n: Number(pop.sampled_of).toLocaleString() })}</>}
       {pop.partition
-        ? <> · partition <b style={{ color: 'var(--text)' }}>{pop.partition.column}</b>: trained on {Number(pop.partition.train_rows).toLocaleString()}, validated on {Number(pop.partition.validation_rows).toLocaleString()}</>
-        : pop.test_rows != null && <> · scored on {Number(pop.test_rows).toLocaleString()} held-out rows</>}
+        ? <> · {tr('mdl.partition')} <b style={{ color: 'var(--text)' }}>{pop.partition.column}</b>: {tr('mdl.trainedValidated', { a: Number(pop.partition.train_rows).toLocaleString(), b: Number(pop.partition.validation_rows).toLocaleString() })}</>
+        : pop.test_rows != null && <> · {tr('mdl.heldOut', { n: Number(pop.test_rows).toLocaleString() })}</>}
     </div>
   )
 }
@@ -119,26 +130,27 @@ const td: React.CSSProperties = { padding: '3px 6px', fontSize: 12, borderBottom
 const tdn: React.CSSProperties = { ...td, textAlign: 'end', fontVariantNumeric: 'tabular-nums' }
 
 function Coefficients({ coefs, odds }: { coefs: any[]; odds?: boolean }) {
+  const tr = useT()
   return (
     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
       <thead><tr>
-        <th style={th}>Term</th>
-        <th style={{ ...th, textAlign: 'end' }}>{odds ? 'Odds ratio' : 'Coefficient'}</th>
+        <th style={th}>{tr('mdl.term')}</th>
+        <th style={{ ...th, textAlign: 'end' }}>{odds ? tr('mdl.oddsRatio') : tr('mdl.coefficient')}</th>
         <th style={{ ...th, textAlign: 'end' }}>95% CI</th>
         <th style={{ ...th, textAlign: 'end' }}>p</th>
       </tr></thead>
       <tbody>
         {coefs.map(c => (
           <tr key={c.term} style={{ fontWeight: c.significant && c.term !== 'const' ? 600 : 400 }}>
-            <td style={td}>{c.term === 'const' ? '(intercept)' : c.term}{c.significant && c.term !== 'const' ? ' ✱' : ''}</td>
-            <td style={tdn}>{fmt(odds ? c.odds_ratio : c.coefficient)}</td>
-            <td style={tdn}>{odds ? `${fmt(c.or_ci_low)} – ${fmt(c.or_ci_high)}` : `${fmt(c.ci_low)} – ${fmt(c.ci_high)}`}</td>
+            <td style={td}>{c.term === 'const' ? tr('mdl.intercept') : c.term}{c.significant && c.term !== 'const' ? ' ✱' : ''}</td>
+            <td style={tdn}>{odds ? ofmt(c.odds_ratio) : fmt(c.coefficient)}</td>
+            <td style={tdn}>{odds ? `${ofmt(c.or_ci_low)} – ${ofmt(c.or_ci_high)}` : `${fmt(c.ci_low)} – ${fmt(c.ci_high)}`}</td>
             <td style={tdn}>{pfmt(c.p_value)}</td>
           </tr>
         ))}
       </tbody>
       <caption style={{ captionSide: 'bottom', textAlign: 'start', fontSize: 10, color: 'var(--muted)', paddingTop: 4 }}>
-        ✱ significant at 5%.{odds ? ' An odds ratio of 1.4 means 40% higher odds of the event per unit.' : ''}
+        {tr('mdl.sig5')}{odds ? ' ' + tr('mdl.oddsHint') : ''}
       </caption>
     </table>
   )
@@ -180,7 +192,11 @@ function TreeOutline({ node, depth = 0 }: { node: any; depth?: number }) {
 }
 
 function Bars({ rows, accentId, baseline, percent }: { rows: { id?: unknown; name: string; value: number | null }[]; accentId?: unknown; baseline?: { label: string; value: number }; percent?: boolean }) {
-  const show = (v: number | null) => percent && v != null ? `${(v * 100).toFixed(1)}%` : fmt(v)
+  const tr = useT()
+  // Whole units from 100 up: a predicted salary read "88,851.211" -- and the
+  // fixed 56px column then cut it to ",851.211" (HR re-test 2026-10-01).
+  const show = (v: number | null) => percent && v != null ? `${(v * 100).toFixed(1)}%`
+    : fmt(v, v != null && Math.abs(v) >= 100 ? 0 : 3)
   const vals = rows.map(r => r.value ?? 0).concat(baseline ? [baseline.value] : [])
   const max = Math.max(...vals, 0) || 1
   const min = Math.min(...vals, 0)
@@ -188,7 +204,7 @@ function Bars({ rows, accentId, baseline, percent }: { rows: { id?: unknown; nam
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       {rows.map((r, i) => (
-        <div key={i} style={{ display: 'grid', gridTemplateColumns: 'minmax(80px, 30%) 1fr 56px', gap: 6, alignItems: 'center', fontSize: 12 }}>
+        <div key={i} style={{ display: 'grid', gridTemplateColumns: 'minmax(80px, 30%) 1fr minmax(56px, max-content)', gap: 6, alignItems: 'center', fontSize: 12 }}>
           <span title={r.name} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
           <div style={{ background: 'var(--surface2)', borderRadius: 4, height: 14, position: 'relative' }}>
             <div style={{ position: 'absolute', insetInlineStart: `${((Math.min(0, r.value ?? 0) - min) / span) * 100}%`, width: `${(Math.abs(r.value ?? 0) / span) * 100}%`, height: '100%', borderRadius: 4,
@@ -198,14 +214,73 @@ function Bars({ rows, accentId, baseline, percent }: { rows: { id?: unknown; nam
         </div>
       ))}
       {baseline && (
-        <div style={{ fontSize: 11, color: 'var(--muted)' }}>Baseline — {baseline.label}: {fmt(baseline.value)}</div>
+        <div style={{ fontSize: 11, color: 'var(--muted)' }}>{tr('mdl.baseline')} — {baseline.label}: {fmt(baseline.value)}</div>
       )}
     </div>
   )
 }
 
+type Item = [string, string]
+const sideText = (items: Item[] | undefined, fallback: string) =>
+  items?.length ? items.map(([c, v]) => `${c} = ${v}`).join(', ') : fallback
+
+/** One side of a rule: each value as "column = value", the column muted so the
+ *  values read first. `dir="auto"` keeps an English value whole in Arabic. */
+function Side({ items, fallback }: { items?: Item[]; fallback: string }) {
+  if (!items?.length) return <span dir="auto">{fallback}</span>
+  return (
+    <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 4 }}>
+      {items.map(([c, v], i) => (
+        <span key={i} dir="auto" style={{ padding: '1px 6px', borderRadius: 10, background: 'var(--surface2)', whiteSpace: 'nowrap' }}>
+          <span style={{ color: 'var(--muted)' }}>{c}</span> = <b style={{ fontWeight: 600 }}>{v}</b>
+        </span>
+      ))}
+    </span>
+  )
+}
+
+/** Association rules: If / Then / Lift, with the base rate beside every
+ *  confidence -- "90% confident" means nothing for a conclusion true of 90%
+ *  of rows anyway. */
+const num: React.CSSProperties = { textAlign: 'end', whiteSpace: 'nowrap', width: '1%', verticalAlign: 'top' }
+const lead: React.CSSProperties = { display: 'inline-block', minWidth: 34, color: 'var(--muted)', fontSize: 11 }
+
+function RuleTable({ rules }: { rules: any[] }) {
+  const tr = useT()
+  const pct = (v: unknown) => (v == null ? '—' : `${(Number(v) * 100).toFixed(1)}%`)
+  return (
+    <table data-testid="rule-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <thead><tr>
+        <th style={th}>{tr('mdl.r.rule')}</th>
+        <th style={{ ...th, ...num }}>{tr('mdl.r.lift')}</th>
+        <th style={{ ...th, ...num }}>{tr('mdl.r.conf')}</th>
+        <th style={{ ...th, ...num }}>{tr('mdl.r.base')}</th>
+        <th style={{ ...th, ...num }}>{tr('mdl.r.rows')}</th>
+      </tr></thead>
+      <tbody>
+        {rules.map((x, i) => (
+          <tr key={i}>
+            {/* If over Then in ONE cell: as two columns the numbers were
+                pushed out of an ordinary-width widget. */}
+            <td style={{ ...td, lineHeight: 1.9 }}>
+              <div><span style={lead}>{tr('mdl.r.if')}</span><Side items={x.if_items} fallback={x.if} /></div>
+              <div><span style={lead}>{tr('mdl.r.then')}</span><Side items={x.then_items} fallback={x.then} /></div>
+            </td>
+            <td style={{ ...tdn, ...num, fontWeight: 700 }}>{fmt(x.lift, 2)}×</td>
+            <td style={{ ...tdn, ...num }}>{pct(x.confidence)}</td>
+            <td style={{ ...tdn, ...num, color: 'var(--muted)' }}>{pct(x.base_rate)}</td>
+            <td style={{ ...tdn, ...num }}>{Number(x.support_rows).toLocaleString()}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
 export default function ModelRenderer({ data }: ChartRendererProps) {
   const [tab, setTab] = useState<string | null>(null)
+  const tr = useT()
+  const { rtl } = useDirection()
   if (!data || data.type !== 'model') return null
   if (data.status === 'refused') {
     // A widget that is simply not set up yet (a comparison with no models to
@@ -214,7 +289,7 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
     const notSetUp = /needs at least|choose|pick|select .* first|no models?/i.test(String(data.reason ?? ''))
     return (
       <div role="note" style={{ padding: 12, fontSize: 13, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <b>{notSetUp ? 'Not set up yet' : 'This model could not be fitted'}</b>
+        <b>{notSetUp ? tr('mdl.notSetUp') : tr('mdl.notFitted')}</b>
         <span>{data.reason}</span>
         <Population pop={data.population} />
       </div>
@@ -224,16 +299,21 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
 
   const r = data.result ?? {}
   const kind: string = data.model
-  const tabs: Tab[] = kind === 'linear' ? [{ key: 'coef', label: 'Coefficients' }, { key: 'resid', label: 'Residuals' }, { key: 'ap', label: 'Actual vs predicted' }, { key: 'fit', label: 'Fit' }]
-    : kind === 'logistic' ? [{ key: 'coef', label: 'Odds ratios' }, { key: 'cm', label: 'Confusion matrix' }, { key: 'roc', label: 'ROC' }, { key: 'fit', label: 'Fit' }]
-    : kind === 'tree' ? [{ key: 'imp', label: 'Importance' }, { key: 'rules', label: 'Rules' }, { key: 'fit', label: 'Fit' }]
-    : kind === 'cluster' ? [{ key: 'seg', label: 'Segments' }, { key: 'fit', label: 'Fit' }]
-    : kind === 'score' ? [{ key: 'pred', label: 'Predictions' }, { key: 'fit', label: 'Check' }]
+  const tabs: Tab[] = kind === 'linear' ? [{ key: 'coef', label: tr('mdl.tab.coef') }, { key: 'resid', label: tr('mdl.tab.resid') }, { key: 'ap', label: tr('mdl.tab.ap') }, { key: 'fit', label: tr('mdl.tab.fit') }]
+    : kind === 'logistic' ? [{ key: 'coef', label: tr('mdl.tab.odds') }, { key: 'cm', label: tr('mdl.tab.cm') }, { key: 'roc', label: 'ROC' }, { key: 'fit', label: tr('mdl.tab.fit') }]
+    : kind === 'tree' ? [{ key: 'imp', label: tr('mdl.tab.imp') }, { key: 'rules', label: tr('mdl.tab.rules') }, { key: 'fit', label: tr('mdl.tab.fit') }]
+    : kind === 'cluster' ? [{ key: 'seg', label: tr('mdl.tab.seg') }, { key: 'fit', label: tr('mdl.tab.fit') }]
+    : kind === 'score' ? [{ key: 'pred', label: tr('mdl.tab.pred') }, { key: 'fit', label: tr('mdl.tab.check') }]
+    : kind === 'rules' ? [{ key: 'rlist', label: tr('mdl.tab.rules') }, { key: 'lift', label: tr('mdl.tab.lift') }, { key: 'rfit', label: tr('mdl.tab.fit') }]
     : (data.models ?? []).some((m: any) => Array.isArray(m.roc))
-      ? [{ key: 'verdict', label: 'Verdict' }, { key: 'rocs', label: 'ROC' }]
-      : [{ key: 'verdict', label: 'Verdict' }]
+      ? [{ key: 'verdict', label: tr('mdl.tab.verdict') }, { key: 'rocs', label: 'ROC' }]
+      : [{ key: 'verdict', label: tr('mdl.tab.verdict') }]
   const active = tab && tabs.some(t => t.key === tab) ? tab : tabs[0].key
   const formula = kind === 'cluster' ? (data.variables ?? []).join(', ')
+    : kind === 'rules' ? <>
+        {data.focus && <>{tr('mdl.r.about')} <bdi><b>{data.focus}</b></bdi> · </>}
+        <bdi>{(data.variables ?? []).filter((v: string) => v !== data.focus).join(', ') || tr('mdl.r.all')}</bdi>
+      </>
     : kind === 'compare' ? `${(data.models ?? []).length} models of ${data.target}`
     : kind === 'score' ? `saved model “${data.saved?.name}” (${data.saved?.family}) predicts ${data.target}`
     : `${data.target}${data.event != null ? ` = ${data.event}` : ''} ~ ${(data.predictors ?? []).join(' + ') || 'all usable columns'}`
@@ -249,9 +329,17 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
     <div data-testid="model-widget" style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 6, padding: '2px 4px', overflow: 'hidden' }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
         <div style={{ fontSize: 12 }}>
-          <b>{MODEL_NAMES[kind] ?? 'Model'}</b> <span style={{ color: 'var(--muted)' }}>· {formula}</span>
+          <b>{MODEL_NAMES[kind] ? tr(MODEL_NAMES[kind]) : tr('mdl.model')}</b> <span style={{ color: 'var(--muted)' }}>· {formula}</span>
         </div>
-        {fit && kind !== 'compare' && (
+        {kind === 'rules' && (
+          <div style={{ fontSize: 12 }}>
+            {(data.rules ?? []).length > 0
+              ? <>{tr('mdl.r.strongest')}: <b style={{ color: 'var(--accent)' }}>{fmt(fit?.value, 2)}×</b>
+                  <span style={{ color: 'var(--muted)' }}> · {tr('mdl.r.found', { n: (data.rules ?? []).length })}</span></>
+              : <span style={{ color: 'var(--muted)' }}>{tr('mdl.r.none')}</span>}
+          </div>
+        )}
+        {fit && kind !== 'compare' && kind !== 'rules' && (
           <div style={{ fontSize: 12 }}>
             {fit.name}: <b style={{ color: 'var(--accent)' }}>{fmt(fit.value)}</b>{held ? '' : effect}
             {/* With a partition the headline is the held-out score; the
@@ -262,9 +350,9 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
         {kind === 'compare' && (
           <div style={{ fontSize: 12 }}>
             {data.winner != null
-              ? <>Winner: <b style={{ color: 'var(--accent)' }}>{(data.models ?? []).find((m: any) => m.id === data.winner)?.title}</b>
-                  {data.winner_beats_baseline ? '' : <span style={{ color: 'var(--danger, #c0392b)' }}> — but it does not beat just guessing</span>}</>
-              : 'No model could be scored.'}
+              ? <>{tr('mdl.winner')} <b style={{ color: 'var(--accent)' }}>{(data.models ?? []).find((m: any) => m.id === data.winner)?.title}</b>
+                  {data.winner_beats_baseline ? '' : <span style={{ color: 'var(--danger, #c0392b)' }}> — {tr('mdl.notBeatGuess')}</span>}</>
+              : tr('mdl.noneScored')}
             <span style={{ color: 'var(--muted)' }}> · {data.metric}</span>
           </div>
         )}
@@ -350,6 +438,50 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
             Every model refitted on the same {Number(data.population.train_rows).toLocaleString()} rows and scored on the
             same {Number(data.population.test_rows).toLocaleString()} rows it never saw.
           </p>
+        )}
+        {active === 'rlist' && ((data.rules ?? []).length
+          ? <RuleTable rules={data.rules} />
+          : <p style={{ fontSize: 12, color: 'var(--muted)' }}>{tr('mdl.r.none')}</p>)}
+        {active === 'lift' && (
+          <div data-testid="lift-chart" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {(() => {
+              const rules: any[] = data.rules ?? []
+              const max = Math.max(...rules.map(x => Number(x.lift) || 0), 1)
+              // The rule on its own line above its bar: beside it, a third of
+              // the width cut every rule to "…rketing ← title = Staff".
+              return rules.map((x, i) => (
+                <div key={i} style={{ fontSize: 11.5 }}>
+                  {/* Three pieces in the PAGE's direction, each side isolated:
+                      as one dir="auto" string an English rule ran left to
+                      right and the RTL arrow pointed from Then back to If. */}
+                  <div style={{ marginBottom: 2, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    <bdi>{sideText(x.if_items, x.if)}</bdi>
+                    <b aria-hidden>{navArrows(rtl).forward}</b>
+                    <bdi>{sideText(x.then_items, x.then)}</bdi>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr max-content', gap: 6, alignItems: 'center' }}>
+                    <div style={{ background: 'var(--surface2)', borderRadius: 4, height: 10 }}>
+                      <div style={{ width: `${(Number(x.lift) / max) * 100}%`, height: '100%', borderRadius: 4,
+                        background: 'color-mix(in srgb, var(--muted) 45%, transparent)' }} />
+                    </div>
+                    <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{fmt(x.lift, 2)}×</span>
+                  </div>
+                </div>
+              ))
+            })()}
+          </div>
+        )}
+        {active === 'rfit' && (
+          <div style={{ fontSize: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div>{tr('mdl.r.strongest')}: <b>{fit?.value != null ? `${fmt(fit.value, 2)}×` : '—'}</b> · {tr('mdl.r.found', { n: (data.rules ?? []).length })}</div>
+            {data.banded && Object.keys(data.banded).length > 0 && (
+              <div>{tr('mdl.r.bands')} {Object.keys(data.banded).join(', ')}</div>
+            )}
+            <div style={{ color: 'var(--muted)', fontSize: 11 }}>
+              {tr('mdl.r.limits', { s: String(r.meta?.params?.min_support_rows ?? 20), l: String(r.meta?.params?.min_lift ?? 1.2) })}
+            </div>
+            <div style={{ color: 'var(--muted)', fontSize: 11 }}>{tr('mdl.r.hint')}</div>
+          </div>
         )}
         {active === 'fit' && fit && (
           <div style={{ fontSize: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>

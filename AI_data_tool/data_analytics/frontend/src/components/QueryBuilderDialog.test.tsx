@@ -325,4 +325,77 @@ describe('QueryBuilderDialog — self-referencing hierarchy', () => {
     expect(options).toContain('region')
     expect(options).not.toContain('__level')   // the SOURCE table's columns only
   })
+
+  describe('3.9: joins drawn on the diagram', () => {
+    async function withCustomersOnCanvas() {
+      render(<QueryBuilderDialog ds={ds} onClose={() => {}} />)
+      fireEvent.change(await screen.findByLabelText('Base table'), { target: { value: 'orders' } })
+      await waitFor(() => expect(screen.getByTestId('canvas-table-orders')).toBeInTheDocument())
+      fireEvent.change(screen.getByLabelText('Add table to canvas'), { target: { value: 'customers' } })
+      await waitFor(() => expect(screen.getByTestId('canvas-table-customers')).toBeInTheDocument())
+      await waitFor(() => expect(within(screen.getByTestId('canvas-table-customers')).getByText('region')).toBeInTheDocument())
+    }
+
+    it('a line drawn from the joined table back to the base still joins the new table', async () => {
+      await withCustomersOnCanvas()
+      fireEvent.click(within(screen.getByTestId('canvas-table-customers')).getByText('region'))
+      fireEvent.click(within(screen.getByTestId('canvas-table-orders')).getByText('region'))
+      await waitFor(() => expect(screen.getByLabelText('Join table 1')).toHaveValue('customers'))
+      expect(screen.getByLabelText('Join 1 base key')).toHaveValue('region')
+      expect(screen.getByLabelText('Join 1 joined key')).toHaveValue('region')
+    })
+
+    it('keeps the join type chosen on the row before the line was drawn', async () => {
+      await withCustomersOnCanvas()
+      fireEvent.change(screen.getByLabelText('Join type 1'), { target: { value: 'inner' } })
+      fireEvent.click(within(screen.getByTestId('canvas-table-orders')).getByText('region'))
+      fireEvent.click(within(screen.getByTestId('canvas-table-customers')).getByText('region'))
+      await waitFor(() => expect(screen.getByTestId('join-label-0')).toHaveTextContent('inner'))
+      expect(screen.getByLabelText('Join type 1')).toHaveValue('inner')
+    })
+
+    it('a type picked on the diagram (full outer) shows in the form, not as "left"', async () => {
+      await withCustomersOnCanvas()
+      fireEvent.click(within(screen.getByTestId('canvas-table-orders')).getByText('region'))
+      fireEvent.click(within(screen.getByTestId('canvas-table-customers')).getByText('region'))
+      fireEvent.click(await screen.findByTestId('join-label-0'))
+      fireEvent.click(screen.getByRole('menuitemradio', { name: /Full outer/ }))
+      await waitFor(() => expect(screen.getByLabelText('Join type 1')).toHaveValue('full'))
+    })
+
+    it('a second join can take its key from the first joined table', async () => {
+      vi.mocked(dataSourcesApi.schema).mockResolvedValue({ tables: [
+        { name: 'orders', kind: 'table' }, { name: 'customers', kind: 'table' }, { name: 'regions', kind: 'table' }] })
+      await withCustomersOnCanvas()
+      fireEvent.click(screen.getByRole('button', { name: '+ Add join' }))
+      const from = await screen.findByLabelText('Join 2 from table')
+      expect(within(from).getAllByRole('option').map(o => o.textContent)).toEqual(['orders', 'customers'])
+      fireEvent.change(from, { target: { value: 'customers' } })
+      expect(screen.getByLabelText('Join 2 from table')).toHaveValue('customers')
+    })
+  })
+
+
+  describe('4.1: Current rows only', () => {
+    it('offers one tick per history table and sends current_only', async () => {
+      vi.mocked(queryBuilderApi.columns).mockResolvedValue([
+        { name: 'emp_no', type: 'INT' }, { name: 'dept_no', type: 'TEXT' }, { name: 'to_date', type: 'DATE' }])
+      render(<QueryBuilderDialog ds={ds} onClose={() => {}} />)
+      fireEvent.change(await screen.findByLabelText('Base table'), { target: { value: 'orders' } })
+      const tick = await screen.findByLabelText('Current rows only in orders')
+      fireEvent.click(screen.getByRole('button', { name: '+ Add column' }))
+      fireEvent.change(await screen.findByLabelText('Column 1'), { target: { value: 'dept_no' } })
+      fireEvent.click(tick)
+      await waitFor(() => {
+        const last = vi.mocked(queryBuilderApi.compile).mock.calls.at(-1)!
+        expect(JSON.stringify(last)).toContain('"current_only":[{"table":"orders","column":"to_date"}]')
+      })
+    })
+
+    it('shows nothing for tables without an end date', async () => {
+      await buildBasicQuery()
+      expect(screen.queryByTestId('qb-current-only')).not.toBeInTheDocument()
+    })
+  })
+
 })

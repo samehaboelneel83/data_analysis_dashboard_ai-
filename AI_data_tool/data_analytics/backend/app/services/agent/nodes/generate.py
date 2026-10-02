@@ -97,6 +97,18 @@ async def generate_sql(question: str, context: SchemaContext,
         "permitted tables' own columns instead, degrading the answer "
         "honestly (identifiers instead of display names is a correct "
         "answer; a failed run is not).",
+        "Business rules listed below are the company's definitions: apply "
+        "each one whenever its tables are used (a 'current' rule filters "
+        "history tables to their open rows), unless the question explicitly "
+        "asks about history. Never average or total across every historical "
+        "row of a history table when a current-row rule exists.",
+        "Group by what a reader recognises: when the grouping column is a "
+        "code (d001, a numeric key) and a listed join reaches a name column "
+        "for it (a departments.dept_name for dept_no), select and group by "
+        "the NAME, not the code.",
+        "Averages of a pay, price, rate, age or score column are AVG over "
+        "the rows that the business rules keep -- one row per person or "
+        "item at its current value -- never over every historical row.",
         "When the Glossary below maps a question phrase to a column, the "
         "glossary TERM text is the canonical STORED value — use the term "
         "verbatim in SQL predicates against that column, never the "
@@ -115,7 +127,9 @@ async def generate_sql(question: str, context: SchemaContext,
     if examples:
         shown = "\n".join(f"Q: {e['question']}\nSQL: {e['sql']}"
                           for e in examples)
-        parts.append(f"\nVerified examples from this database:\n{shown}")
+        parts.append("\nEarlier answered questions on this database (follow the "
+                     "business rules above over these examples whenever they "
+                     f"disagree):\n{shown}")
     if history:
         # The question below already stands alone (nodes/followup.py
         # rewrote it); the turns are here so a follow-up that builds on an

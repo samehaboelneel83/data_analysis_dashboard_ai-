@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { alertsApi, type DataAlert, type DatasetColumn } from '../../services/api'
+import { alertsApi, type AlertTestResult, type DataAlert, type DatasetColumn } from '../../services/api'
 import ExpressionBuilder from '../expr/ExpressionBuilder'
 import LoadError from '../ui/LoadError'
 import EmptyState from '../ui/EmptyState'
@@ -93,6 +93,15 @@ export default function AlertsPanel({ datasetId, columns }: {
   const [interval, setInterval] = useState(60)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  // A CHANGE alert watches a number and fires when it moves by a percentage
+  // since the last check -- "leavers up 20%" (HR evaluation, item 3.1).
+  const [kind, setKind] = useState<'condition' | 'change'>('condition')
+  const [changePct, setChangePct] = useState('20')
+  const [direction, setDirection] = useState<'up' | 'down' | 'any'>('any')
+  const [webhook, setWebhook] = useState('')
+  const [testing, setTesting] = useState(false)
+  const [test, setTest] = useState<AlertTestResult | null>(null)
+  const [testError, setTestError] = useState<string | null>(null)
 
   const load = useCallback(() => {
     setLoadError(null)
@@ -102,7 +111,22 @@ export default function AlertsPanel({ datasetId, columns }: {
   }, [datasetId])
   useEffect(() => { load() }, [load])
 
-  const complete = !!name.trim() && !!expression.trim() && splitEmails(emails).length > 0
+  const complete = !!name.trim() && !!expression.trim()
+    && (splitEmails(emails).length > 0 || !!webhook.trim())
+    && (kind === 'condition' || Number(changePct) > 0)
+
+  const runTest = async () => {
+    if (!expression.trim()) return
+    setTesting(true); setTest(null); setTestError(null)
+    try {
+      setTest(await alertsApi.test(datasetId, {
+        expression: expression.trim(),
+        ...(kind === 'change' ? { change_pct: Number(changePct), change_direction: direction } : {}),
+      }))
+    } catch (e: unknown) {
+      setTestError((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'The test could not run')
+    } finally { setTesting(false) }
+  }
 
   const create = async () => {
     if (!complete) return
@@ -111,8 +135,10 @@ export default function AlertsPanel({ datasetId, columns }: {
       await alertsApi.create(datasetId, {
         name: name.trim(), expression: expression.trim(),
         interval_minutes: interval, recipients: splitEmails(emails),
+        ...(kind === 'change' ? { change_pct: Number(changePct), change_direction: direction } : {}),
+        ...(webhook.trim() ? { webhook_url: webhook.trim() } : {}),
       })
-      setAdding(false); setName(''); setExpression(''); setEmails('')
+      setAdding(false); setName(''); setExpression(''); setEmails(''); setWebhook(''); setTest(null)
       load()
     } catch (e: unknown) {
       // The endpoint validates the expression through the same sandbox gate the
@@ -166,13 +192,50 @@ export default function AlertsPanel({ datasetId, columns }: {
               placeholder="Revenue fell below target" />
           </div>
 
+          <div role="radiogroup" aria-label="What to watch" style={{ display: 'flex', gap: 14, marginBottom: 10, fontSize: 12 }}>
+            <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              <input type="radio" name="alert-kind" checked={kind === 'condition'} onChange={() => { setKind('condition'); setTest(null) }} />
+              When a condition turns true
+            </label>
+            <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              <input type="radio" name="alert-kind" checked={kind === 'change'} onChange={() => { setKind('change'); setTest(null) }} />
+              A number changes by a percentage
+            </label>
+          </div>
+
           <div style={{ marginBottom: 10 }}>
-            <label htmlFor="alert-expr" style={label}>{t('alerts.condition')}</label>
+            <label htmlFor="alert-expr" style={label}>{kind === 'condition' ? t('alerts.condition') : 'Number to watch'}</label>
             <ExpressionBuilder
               columns={columns} functionsCatalog={ALERT_FUNCS}
-              value={expression} onChange={setExpression}
+              value={expression} onChange={v => { setExpression(v); setTest(null) }}
               layout="flat" rows={2} textareaId="alert-expr"
-              placeholder="SUM(revenue) < 100000" />
+              placeholder={kind === 'condition' ? 'SUM(revenue) < 100000' : 'COUNT(emp_no)'} />
+          </div>
+
+          {kind === 'change' && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, fontSize: 12, flexWrap: 'wrap' }}>
+              Fire when it
+              <select aria-label="Direction" value={direction} onChange={e => setDirection(e.target.value as 'up' | 'down' | 'any')}>
+                <option value="any">moves (up or down)</option>
+                <option value="up">rises</option>
+                <option value="down">falls</option>
+              </select>
+              by at least
+              <input aria-label="Change percent" type="number" min={1} value={changePct}
+                onChange={e => setChangePct(e.target.value)} style={{ width: 70 }} />
+              % since the previous check
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+            <button className="btn btn-sm" disabled={!expression.trim() || testing} onClick={() => void runTest()}>
+              {testing ? 'Testing…' : 'Test now'}
+            </button>
+            {test && (
+              <span role="status" data-testid="alert-test-result" style={{ fontSize: 12,
+                color: test.firing ? 'var(--warning, #b45309)' : 'var(--muted)' }}>{test.message}</span>
+            )}
+            {testError && <span role="alert" style={{ fontSize: 12, color: 'var(--danger)' }}>{testError}</span>}
           </div>
 
           <div style={{ display: 'flex', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
@@ -184,6 +247,12 @@ export default function AlertsPanel({ datasetId, columns }: {
               <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
                 {t('alerts.comma')}
               </div>
+            </div>
+            <div style={{ flex: '1 1 260px' }}>
+              <label htmlFor="alert-webhook" style={label}>Teams / Slack webhook (optional)</label>
+              <input id="alert-webhook" value={webhook} style={{ width: '100%' }}
+                onChange={e => setWebhook(e.target.value)}
+                placeholder="https://…" />
             </div>
             <div style={{ width: 150 }}>
               <label htmlFor="alert-interval" style={label}>{t('alerts.every')}</label>
@@ -231,7 +300,12 @@ export default function AlertsPanel({ datasetId, columns }: {
 }
 
 function AlertRow({ alert, onDelete }: { alert: DataAlert; onDelete: () => void }) {
-  const failed = !!alert.last_status && alert.last_status !== 'ok'
+  // The scheduler writes "clear", "fired, emailed 2", "still firing (no re-send)"
+  // on success and "evaluation failed: ..." / "disabled: ..." on failure. Every
+  // status but "ok" used to read as a failure here.
+  const status = alert.last_status ?? ''
+  const failed = /failed|disabled|error|skipped/i.test(status) && !/^fired/i.test(status)
+  const firing = alert.last_state === 'firing' || alert.last_state === true
   return (
     <div className="card" style={{ padding: 12, display: 'flex', gap: 12,
                                    alignItems: 'flex-start' }}>
@@ -242,7 +316,9 @@ function AlertRow({ alert, onDelete }: { alert: DataAlert; onDelete: () => void 
           {alert.expression}
         </div>
         <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-          {alert.recipients.join(', ')} · {cadence(alert.interval_minutes)}
+          {alert.change_pct ? `fires on a ${alert.change_direction === 'up' ? 'rise' : alert.change_direction === 'down' ? 'fall' : 'move'} of ${alert.change_pct}% · ` : ''}
+          {[...alert.recipients, ...(alert.webhook_url ? ['webhook'] : [])].join(', ')} · {cadence(alert.interval_minutes)}
+          {alert.last_value != null ? ` · last value ${alert.last_value.toLocaleString()}` : ''}
         </div>
         {/* A broken alert that looks fine is worse than no alert: nobody learns
             the condition stopped being watched. */}
@@ -253,7 +329,7 @@ function AlertRow({ alert, onDelete }: { alert: DataAlert; onDelete: () => void 
         ) : alert.last_checked_at ? (
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
             Checked {new Date(alert.last_checked_at).toLocaleString()}
-            {alert.last_state ? ' · currently true, so the email has already gone' : ''}
+            {firing ? ' · currently firing, so the notice has already gone' : ' · quiet'}
           </div>
         ) : (
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>

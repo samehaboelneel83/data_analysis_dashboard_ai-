@@ -68,9 +68,13 @@ def test_query_builder_table_columns_applies_connect_timeout(monkeypatch):
     assert cap["connect_args"].get("connect_timeout") == 8
 
 
-def test_sqlite_gets_no_connect_timeout(monkeypatch):
+def test_sqlite_gets_no_connect_timeout(monkeypatch, tmp_path):
     # In-process drivers reject connect_timeout — it must stay absent for them.
+    # The file has to exist: a missing one is now refused with a plain message
+    # before any engine is built (HR evaluation 5.3).
+    db = tmp_path / "x.sqlite"
+    db.write_bytes(b"")
     cap = _capture(monkeypatch, connections)
     with pytest.raises(_Stop):
-        connections.list_tables(SQLITE)
+        connections.list_tables({**SQLITE, "filepath": str(db)})
     assert "connect_timeout" not in cap["connect_args"]

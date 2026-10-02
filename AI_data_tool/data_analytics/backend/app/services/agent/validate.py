@@ -120,8 +120,22 @@ def validate_sql(sql: str, context: SchemaContext) -> ValidationFailure | None:
         for cte in tree.find_all(exp.CTE) if cte.alias
     }
 
+    # Derived tables -- `FROM (SELECT ...) AS latest` -- are named result sets
+    # exactly like CTEs: their alias is a valid qualifier and their projection
+    # is their column list. Without this, "step s1: unknown alias: latest"
+    # refused the leaver question the HR evaluation asked (blocker 3, item
+    # 1.10). Their INNER select is still validated table-by-table below.
+    for sq in tree.find_all(exp.Subquery):
+        if sq.alias and isinstance(sq.this, exp.Select):
+            cte_names.add(sq.alias)
+            cte_output_columns[sq.alias] = _cte_output_columns(sq)
+
     alias_to_table: dict[str, str] = {}
     cte_aliases: set[str] = set()
+    for sq in tree.find_all(exp.Subquery):
+        if sq.alias and sq.alias in cte_names:
+            alias_to_table[sq.alias] = sq.alias
+            cte_aliases.add(sq.alias)
     for table in tree.find_all(exp.Table):
         name = table.name
         ref = table.alias or name
@@ -150,6 +164,9 @@ def validate_sql(sql: str, context: SchemaContext) -> ValidationFailure | None:
             if t.find_ancestor(exp.Select) is not select:
                 continue
             scope[t.alias or t.name] = t.name
+        for sq in select.find_all(exp.Subquery):
+            if sq.alias and sq.alias in cte_names and sq.find_ancestor(exp.Select) is select:
+                scope[sq.alias] = sq.alias
         return scope
 
     select_scopes = {id(s): _select_scope(s) for s in tree.find_all(exp.Select)}
@@ -199,6 +216,11 @@ def validate_sql(sql: str, context: SchemaContext) -> ValidationFailure | None:
         for eq in on.find_all(exp.EQ):
             left, right = eq.left, eq.right
             if isinstance(left, exp.Column) and isinstance(right, exp.Column):
+                # A join onto a CTE or derived table: its columns come from
+                # tables the inner query already joined under these rules,
+                # so the edge to check is inside it, not here.
+                if left.table in cte_aliases or right.table in cte_aliases:
+                    continue
                 lt, rt = _resolve(left), _resolve(right)
                 if lt is None or rt is None:
                     return ValidationFailure("V3", f"cannot resolve join: {eq.sql()}")

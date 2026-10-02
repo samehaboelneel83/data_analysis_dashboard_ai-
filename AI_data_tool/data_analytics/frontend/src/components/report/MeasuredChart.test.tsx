@@ -36,3 +36,36 @@ describe('MeasuredChart', () => {
     await waitFor(() => expect(getByTestId('later-1')).toHaveAttribute('aria-hidden', 'true'))
   })
 })
+
+describe('MeasuredChart resizing', () => {
+  it('redraws at once after a one-off change, and waits only while the size keeps changing', async () => {
+    const { vi, act } = await import('vitest').then(async v => ({ vi: v.vi, act: (await import('@testing-library/react')).act }))
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance', 'Date'] })
+    const callbacks: (() => void)[] = []
+    const notify = () => callbacks.forEach(cb => cb())
+    const Real = window.ResizeObserver
+    window.ResizeObserver = class { constructor(cb: () => void) { callbacks.push(cb) } observe() {} disconnect() {} unobserve() {} } as never
+    let w = 400
+    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(() => ({ width: w, height: 200, top: 0, left: 0, right: w, bottom: 200, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect)
+    const seen: number[] = []
+    try {
+      render(<MeasuredChart>{(pw) => { if (pw) seen.push(pw); return <svg /> }}</MeasuredChart>)
+      expect(seen.at(-1)).toBe(400)
+      // A panel closed: one jump, long after the last one -- drawn straight away.
+      vi.advanceTimersByTime(1000)
+      w = 600; act(() => notify())
+      expect(seen.at(-1)).toBe(600)
+      // A drag: changes every few ms -- the chart waits for the last one.
+      w = 610; act(() => notify())
+      w = 620; act(() => notify())
+      expect(seen.at(-1)).not.toBe(620)
+      act(() => { vi.advanceTimersByTime(200) })
+      expect(seen.at(-1)).toBe(620)
+    } finally {
+      rect.mockRestore()
+      window.ResizeObserver = Real
+      vi.useRealTimers()
+    }
+  })
+})

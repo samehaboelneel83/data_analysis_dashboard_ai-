@@ -21,3 +21,19 @@ describe('i18n catalogs', () => {
     expect(messageForPath('/datasets/3')).toBe('nav.datasets')
   })
 })
+
+describe('Arabic plurals (HR re-test 2026-10-01)', () => {
+  it('chooses the Arabic form for the number', async () => {
+    const { translate } = await import('./index')
+    expect(translate('ar', 'time.hoursAgo_other', { n: 2 })).toBe('منذ ساعتين')
+    expect(translate('ar', 'time.hoursAgo_other', { n: 3 })).toBe('منذ 3 ساعات')
+    expect(translate('ar', 'time.hoursAgo_other', { n: 11 })).toBe('منذ 11 ساعة')
+    expect(translate('ar', 'home.rowsCols', { rows: '240,124', cols: 7 })).toBe('240,124 صفًا · 7 أعمدة')
+    expect(translate('ar', 'home.rowsCols', { rows: 9, cols: 3 })).toBe('9 صفوف · 3 أعمدة')
+  })
+  it('leaves English and plain templates alone', async () => {
+    const { translate, pluralize } = await import('./index')
+    expect(pluralize('{n} rows', 'en', { n: 3 })).toBe('{n} rows')
+    expect(translate('en', 'time.hoursAgo_other', { n: 2 })).toMatch(/2/)
+  })
+})

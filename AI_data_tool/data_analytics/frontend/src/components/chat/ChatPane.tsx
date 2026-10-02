@@ -10,12 +10,13 @@ import AnalysisResult, { isAnalysisResult } from './AnalysisResult'
 import ChoiceOptions, { isChoices } from './ChoiceOptions'
 import DashboardProposals, { type DashboardProposalsPresentation }
   from './DashboardProposals'
-import { useT } from '../../i18n'
+import { useT, translate, type TranslateFn } from '../../i18n'
 import { aiLimitMessage } from '../../lib/aiLimit'
 import Composer from './Composer'
 import AnswerText from './AnswerText'
 import AddToDashboard from './AddToDashboard'
-import { answerToWidget } from './answerWidget'
+import SaveAsRule, { looksLikeDefinition } from './SaveAsRule'
+import { answerToWidget, type WidgetDraft } from './answerWidget'
 import '../../pages/ask/ask.css'
 
 /**
@@ -53,6 +54,9 @@ export interface ChatPaneProps {
   /** The dataset's column names, when the pane asks about ONE dataset --
    *  what "Add to dashboard" maps an answer back onto. */
   datasetColumns?: string[]
+  /** Mounted inside a dashboard: "Add to this page" puts the answer straight
+   *  onto the page being edited, instead of asking which dashboard. */
+  onAddToPage?: (draft: WidgetDraft, title: string) => unknown
 }
 
 type MessageKind = 'answer' | 'clarify' | 'error' | 'limit'
@@ -126,7 +130,7 @@ function isProposals(p: unknown): p is DashboardProposalsPresentation {
 }
 
 export default function ChatPane({ dataSourceId, datasetIds, conversationId, onConversationCreated,
-  suggestions, datasetColumns }: ChatPaneProps) {
+  suggestions, datasetColumns, onAddToPage }: ChatPaneProps) {
   const t = useT()
   const owned = conversationId !== undefined
   const [convId, setConvId] = useState<number | null>(conversationId ?? null)
@@ -433,6 +437,11 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
                   <p className="dl-turn__q-text" dir="auto">{turn.question.text}</p>
                 </header>
               )}
+              {turn.question && dataSourceId != null && looksLikeDefinition(turn.question.text) && (
+                <div className="dl-turn__rule" style={{ display: 'flex', justifyContent: 'flex-end', paddingInlineEnd: 34 }}>
+                  <SaveAsRule sourceId={dataSourceId} text={turn.question.text} />
+                </div>
+              )}
               {isPending && <Pending question={turn.question?.text ?? ''} />}
               {msg && (
                 <div className="dl-turn__a">
@@ -528,15 +537,22 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
     const runId = msg.runId!
     const sqlable = !(msg.intent === 'chat' || isProposals(msg.presentation)
       || isAnalysisResult(msg.presentation))
-    const draft = datasetColumns && datasetIds?.length === 1
+    const draft = datasetColumns && (datasetIds?.length === 1 || (onAddToPage && datasetIds?.length))
       ? answerToWidget(msg.results?.[0], msg.sql ?? sqlByRun[runId], datasetColumns,
           msg.presentation?.x, msg.presentation?.y)
       : null
+    const answerTitle = question ?? msg.text.slice(0, 80)
     return (
       <div className="dl-actions-wrap">
         <div className="dl-actions">
-          {draft && datasetIds && (
-            <AddToDashboard datasetId={datasetIds[0]} draft={draft} title={question ?? msg.text.slice(0, 80)} />
+          {draft && onAddToPage && (
+            <button type="button" className="dl-act" data-testid="add-to-page"
+              onClick={() => void onAddToPage(draft, answerTitle)}>
+              <Sparkles size={14} aria-hidden /> <span className="dl-act__text">{t('ask.addToPage')}</span>
+            </button>
+          )}
+          {draft && !onAddToPage && datasetIds && (
+            <AddToDashboard datasetId={datasetIds[0]} draft={draft} title={answerTitle} />
           )}
           <button type="button" className="dl-act" onClick={() => void copyAnswer(msg)} aria-label={t('ask.copyAnswer')}>
             <Copy size={14} aria-hidden /> <span className="dl-act__text">{t('ask.copy')}</span>
@@ -629,32 +645,27 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
   }
 }
 
-/** One line naming the engine behind an assistant answer, and its evidence. */
-export function answerSource(msg: Pick<ChatMessage, 'intent' | 'results' | 'sql' | 'presentation'>): string {
-  if (isProposals(msg.presentation)) {
-    return 'Proposed by the AI model from this data; "Show SQL" on each shows the query it is built on'
-  }
-  if (isAnalysisResult(msg.presentation)) {
-    return 'The AI chose the test; the result was computed on the data by the statistics engine (method and effect size above)'
-  }
+/** One line naming the engine behind an assistant answer, and its evidence.
+ *  In the reader's language (HR re-test 2026-10-01: English under an Arabic
+ *  answer); English when no translator is passed. */
+export function answerSource(msg: Pick<ChatMessage, 'intent' | 'results' | 'sql' | 'presentation'>,
+                             t: TranslateFn = (k, v) => translate('en', k, v)): string {
+  if (isProposals(msg.presentation)) return t('ask.src.proposals')
+  if (isAnalysisResult(msg.presentation)) return t('ask.src.analysis')
   const results = msg.results ?? []
-  if (msg.intent === 'chat' || results.length === 0) {
-    return 'AI reply: no data was queried for this'
-  }
-  if (results.every(r => (r as { source?: string }).source === 'catalog')) {
-    return 'AI answer from the data catalog (what is in scope), not from a query on the rows'
-  }
+  if (msg.intent === 'chat' || results.length === 0) return t('ask.src.chat')
+  if (results.every(r => (r as { source?: string }).source === 'catalog')) return t('ask.src.catalog')
   const rows = results.reduce((n, r) => n + (Number(r.total) || 0), 0)
   const queries = Math.max(msg.sql?.length ?? 0, results.length)
-  return `AI answer from ${queries} ${queries === 1 ? 'query' : 'queries'} on your data `
-    + `(${rows.toLocaleString()} ${rows === 1 ? 'row' : 'rows'}); "Show SQL" shows exactly what ran`
+  return t('ask.src.query', { q: queries, rows: rows.toLocaleString() })
 }
 
 function AnswerSource({ msg }: { msg: ChatMessage }) {
+  const t = useT()
   if (msg.role !== 'assistant' || msg.kind === 'error' || msg.kind === 'clarify' || msg.kind === 'limit') return null
   return (
     <div data-testid="answer-source" style={{ marginTop: 6, fontSize: 10.5, color: 'var(--muted)' }}>
-      <span aria-hidden>ⓘ </span>{answerSource(msg)}
+      <span aria-hidden>ⓘ </span>{answerSource(msg, t)}
     </div>
   )
 }

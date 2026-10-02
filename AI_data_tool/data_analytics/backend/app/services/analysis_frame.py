@@ -90,6 +90,35 @@ def analysis_row_cap() -> int:
     return int(getattr(settings, "analysis_row_cap", 250_000) or 250_000)
 
 
+#: Said when the source answered but ran short of memory twice in a row.
+BUSY_MESSAGE = (
+    "The database is reachable but ran short of memory while reading the rows "
+    "(often several large reads at once). Try again in a moment; if it keeps "
+    "happening, give the database more shared memory.")
+
+
+async def ensure_columns_loaded(db, dataset) -> None:
+    """Load `dataset.columns` on the event loop, before the dataset is handed
+    to a worker thread.
+
+    The live query reads the column list (row-rule translation, filter-column
+    validation). A Dataset fetched with `db.get` has not loaded it, and the
+    lazy load cannot run inside `asyncio.to_thread` -- so the read raised, and
+    callers that skip a failing widget dropped it without a word. HR re-test
+    2026-10-01: a live dashboard's Excel export was a single "No widget
+    produced tabular data" note, and a row-scoped manager's live reads failed
+    the same way. Never fatal on its own: a dataset without the attribute
+    (a test double) is left as it is.
+    """
+    try:
+        from sqlalchemy import inspect as _inspect
+        state = _inspect(dataset, raiseerr=False)
+        if state is not None and "columns" in state.unloaded:
+            await db.refresh(dataset, attribute_names=["columns"])
+    except Exception:                                   # noqa: BLE001
+        pass
+
+
 async def load_directquery_frame(
     db, dataset: Dataset, *, rls_filter_expr: str | None = None,
     denied: set[str] | None = None, row_cap: int | None = None,
@@ -108,7 +137,7 @@ async def load_directquery_frame(
     """
     import asyncio
 
-    from .direct_query import (DirectQueryUnsupported, SourceUnavailable,
+    from .direct_query import (DirectQueryUnsupported, SourceBusy, SourceUnavailable,
                                fetch_analysis_frame)
 
     if dataset.data_source_id is None:
@@ -118,6 +147,7 @@ async def load_directquery_frame(
     source = await db.get(DataSource, dataset.data_source_id)
     if source is None:
         raise FrameUnavailable("The connection behind this dataset no longer exists.")
+    await ensure_columns_loaded(db, dataset)
 
     cfg = dict(source.config or {})
     cfg["type"] = source.type
@@ -129,6 +159,18 @@ async def load_directquery_frame(
             row_cap=row_cap or analysis_row_cap())
     except DirectQueryUnsupported as exc:
         raise FrameUnavailable(str(exc)) from exc
+    except SourceBusy as exc:
+        raise FrameUnavailable(BUSY_MESSAGE) from exc
+    except Exception as exc:  # noqa: BLE001 -- see below
+        # A connection-level failure (server down, refused, bad login) that
+        # reached here unwrapped used to surface as a raw driver traceback in
+        # the UI. Said plainly; anything else is re-raised as it was.
+        from sqlalchemy.exc import InterfaceError, OperationalError
+        if isinstance(exc, (OperationalError, InterfaceError)) or isinstance(exc, SourceUnavailable):
+            raise FrameUnavailable(
+                "Could not reach the data source to read its rows -- check that the "
+                "database is running and the connection's settings are right.") from exc
+        raise
     except SourceUnavailable as exc:
         raise FrameUnavailable(
             "Could not reach the data source to read its rows.") from exc

@@ -46,6 +46,7 @@ export default function GlossaryPanel({ sourceId, canEdit, objectNames }: Glossa
   const [busy, setBusy] = useState(false)
   const [draft, setDraft] = useState({
     term: '', definition: '', synonyms: '', maps_to_object: '', maps_to_column: '',
+    rule: '', always: false,
   })
 
   const load = useCallback(async () => {
@@ -76,13 +77,38 @@ export default function GlossaryPanel({ sourceId, canEdit, objectNames }: Glossa
         synonyms: draft.synonyms.split(',').map(s => s.trim()).filter(Boolean),
         maps_to_object: draft.maps_to_object.trim() || undefined,
         maps_to_column: draft.maps_to_column.trim() || undefined,
+        rule: draft.rule.trim() || undefined,
+        always: draft.always,
       })
-      setDraft({ term: '', definition: '', synonyms: '', maps_to_object: '', maps_to_column: '' })
+      setDraft({ term: '', definition: '', synonyms: '', maps_to_object: '', maps_to_column: '', rule: '', always: false })
       setAdding(false)
       await load()
       toast.success('Term added')
     } catch (e: any) {
       toast.error(e?.response?.data?.detail ?? 'Could not add the term')
+    } finally { setBusy(false) }
+  }
+
+  const setAlways = async (t: GlossaryTerm, always: boolean) => {
+    setBusy(true)
+    try {
+      await metadataApi.updateTerm(sourceId, t.id, { always })
+      await load()
+      toast.success(always ? `“${t.term}” now applies to every question` : `“${t.term}” applies only when it is named`)
+    } catch (e: any) {
+      toast.error(e?.response?.data?.detail ?? 'Could not update the term')
+    } finally { setBusy(false) }
+  }
+
+  const editRule = async (t: GlossaryTerm, rule: string) => {
+    if ((t.rule ?? '') === rule.trim()) return
+    setBusy(true)
+    try {
+      await metadataApi.updateTerm(sourceId, t.id, { rule: rule.trim() || null })
+      await load()
+      toast.success('Rule saved')
+    } catch (e: any) {
+      toast.error(e?.response?.data?.detail ?? 'Could not save the rule')
     } finally { setBusy(false) }
   }
 
@@ -157,6 +183,18 @@ export default function GlossaryPanel({ sourceId, canEdit, objectNames }: Glossa
                 onChange={e => setDraft({ ...draft, maps_to_column: e.target.value })} />
             </label>
           </div>
+          <label style={{ fontSize: 11, color: 'var(--muted)' }}>
+            Rule the AI must follow (optional) — a filter or a one-line instruction
+            <input style={input} value={draft.rule} aria-label="Rule"
+              placeholder="dept_emp.to_date = '9999-01-01'"
+              onChange={e => setDraft({ ...draft, rule: e.target.value })} />
+          </label>
+          <label style={{ fontSize: 11, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input type="checkbox" checked={draft.always} aria-label="Apply to every question"
+              onChange={e => setDraft({ ...draft, always: e.target.checked })} />
+            Apply to every question, even when the term is not named
+            <span style={{ opacity: .8 }}>(“employees per department” means current employees)</span>
+          </label>
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={() => void save()} disabled={busy}
               style={{ fontSize: 12, padding: '5px 12px', borderRadius: 6, border: 'none',
@@ -187,6 +225,8 @@ export default function GlossaryPanel({ sourceId, canEdit, objectNames }: Glossa
               <th style={{ textAlign: 'start', padding: '4px 8px' }}>Means</th>
               <th style={{ textAlign: 'start', padding: '4px 8px' }}>Also called</th>
               <th style={{ textAlign: 'start', padding: '4px 8px' }}>Maps to</th>
+              <th style={{ textAlign: 'start', padding: '4px 8px' }}>Rule for the AI</th>
+              <th style={{ textAlign: 'start', padding: '4px 8px' }} title="Applied to every question, even when the term is not named">Always</th>
               <th />
             </tr>
           </thead>
@@ -210,6 +250,21 @@ export default function GlossaryPanel({ sourceId, canEdit, objectNames }: Glossa
                   {t.maps_to_column
                     ? `${t.maps_to_object ? `${t.maps_to_object}.` : ''}${t.maps_to_column}`
                     : (t.maps_to_object || '—')}
+                </td>
+                <td style={{ padding: '6px 8px', color: 'var(--muted)', minWidth: 160 }}>
+                  {canEdit && t.data_source_id !== null ? (
+                    <input key={`${t.id}:${t.rule ?? ''}`} defaultValue={t.rule ?? ''} aria-label={`Rule for ${t.term}`}
+                      placeholder="—" disabled={busy}
+                      onBlur={e => void editRule(t, e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                      style={{ ...input, fontFamily: 'var(--mono, monospace)', fontSize: 11 }} />
+                  ) : (t.rule || '—')}
+                </td>
+                <td style={{ padding: '6px 8px' }}>
+                  <input type="checkbox" checked={!!t.always} aria-label={`Always apply ${t.term}`}
+                    disabled={!canEdit || busy || t.data_source_id === null || !t.rule}
+                    title={!t.rule ? 'Write a rule first' : undefined}
+                    onChange={e => void setAlways(t, e.target.checked)} />
                 </td>
                 <td style={{ padding: '6px 8px', textAlign: 'end' }}>
                   {/* An org-wide term is not this connection's to delete: it is

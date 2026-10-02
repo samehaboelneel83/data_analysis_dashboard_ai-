@@ -30,6 +30,11 @@ export default function Lineage() {
   const [graph, setGraph] = useState<LineageGraph | null>(null)
   const [loadError, setLoadError] = useState<unknown>(null)
   const [selected, setSelected] = useState<string | null>(null)   // "ds:5" | "rep:2" | "src:1"
+  // 3.12: in an org with hundreds of assets the full graph is a wall. A search
+  // box narrows it by name, and "Show only this path" keeps just what feeds
+  // the selected node and everything it feeds, all the way along.
+  const [query, setQuery] = useState('')
+  const [pathOnly, setPathOnly] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const nodeRefs = useRef<Record<string, HTMLElement | null>>({})
   const [paths, setPaths] = useState<{ d: string; key: string; active: boolean; label?: string; lx?: number; ly?: number }[]>([])
@@ -67,12 +72,48 @@ export default function Lineage() {
     return set
   }, [selected, edges])
 
+  /** Everything upstream AND downstream of the selection, transitively --
+   *  the whole lineage path, not only the direct neighbours. */
+  const pathSet = useMemo(() => {
+    if (!selected) return null
+    const set = new Set([selected])
+    for (const dir of ['up', 'down'] as const) {
+      const stack = [selected]
+      while (stack.length) {
+        const cur = stack.pop()!
+        for (const e of edges) {
+          const next = dir === 'down' ? (e.from === cur ? e.to : null) : (e.to === cur ? e.from : null)
+          if (next && !set.has(next)) { set.add(next); stack.push(next) }
+        }
+      }
+    }
+    return set
+  }, [selected, edges])
+
+  const names = useMemo(() => {
+    const m: Record<string, string> = {}
+    if (!graph) return m
+    for (const s of graph.sources) m[`src:${s.id}`] = s.name
+    for (const d of graph.datasets) m[`ds:${d.id}`] = d.name
+    for (const r of graph.reports) m[`rep:${r.id}`] = r.name
+    return m
+  }, [graph])
+
+  const shown = useCallback((key: string) => {
+    if (pathOnly && pathSet && !pathSet.has(key)) return false
+    const q = query.trim().toLowerCase()
+    if (!q) return true
+    if (key === selected) return true
+    return (names[key] ?? '').toLowerCase().includes(q)
+  }, [pathOnly, pathSet, query, names, selected])
+
   const measure = useCallback(() => {
     const container = containerRef.current
     if (!container || !graph) return
     const base = container.getBoundingClientRect()
     const next: { d: string; key: string; active: boolean; label?: string; lx?: number; ly?: number }[] = []
     for (const e of edges) {
+      if (!shown(e.from) || !shown(e.to)) continue
       const a = nodeRefs.current[e.from]?.getBoundingClientRect()
       const b = nodeRefs.current[e.to]?.getBoundingClientRect()
       if (!a || !b) continue
@@ -103,7 +144,7 @@ export default function Lineage() {
       })
     }
     setPaths(next)
-  }, [graph, edges, touching])
+  }, [graph, edges, touching, shown])
 
   /**
    * Re-measure whenever the LAYOUT changes, not merely when React re-renders.
@@ -151,6 +192,7 @@ export default function Lineage() {
   if (!graph) return <div><LoadingState /></div>
 
   const node = (key: string, title: string, subtitle: string, link?: string, badges?: React.ReactNode) => {
+    if (!shown(key)) return null
     const dimmed = touching ? !touching.has(key) : false
     return (
       // The BOX (border, position, the ref the edges are drawn to) wraps two
@@ -233,6 +275,24 @@ export default function Lineage() {
       <p className="dl-page-head__sub" style={{ marginBottom: 18 }}>
         {t('lineage.subtitle')}
       </p>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 14 }}>
+        <input type="search" aria-label={t('lineage.search')} placeholder={t('lineage.search')}
+          value={query} onChange={e => setQuery(e.target.value)} style={{ minWidth: 240, fontSize: 12 }} />
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12,
+          color: selected ? 'var(--text)' : 'var(--muted)' }} title={selected ? undefined : t('lineage.pathHint')}>
+          <input type="checkbox" checked={pathOnly && !!selected} disabled={!selected}
+            onChange={e => setPathOnly(e.target.checked)} />
+          {t('lineage.pathOnly')}
+        </label>
+        {selected && (
+          <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+            {t('lineage.selected', { name: names[selected] ?? selected })}{' '}
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setSelected(null); setPathOnly(false) }}>
+              {t('lineage.clear')}
+            </button>
+          </span>
+        )}
+      </div>
       <div ref={containerRef} style={{ position: 'relative', display: 'flex', gap: 80, alignItems: 'flex-start' }}>
         <svg aria-hidden style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
           {paths.map(p => (

@@ -94,7 +94,7 @@ HANDLERS: dict[str, Handler] = {}
 #: `enqueue` know every kind without depending on import order elsewhere.
 HANDLER_MODULES = ("app.services.source_import", "app.services.refresh_jobs",
                    "app.services.delivery_jobs", "app.services.model_scoring",
-                   "app.services.model_drift")
+                   "app.services.model_drift", "app.services.suggest_jobs")
 
 
 def load_handlers() -> None:

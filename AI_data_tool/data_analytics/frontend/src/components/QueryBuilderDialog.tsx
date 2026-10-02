@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import { dataSourcesApi, queryBuilderApi, type DataSource } from '../services/api'
-import QueryCanvas from './QueryCanvas'
+import QueryCanvas, { JOIN_TYPES } from './QueryCanvas'
 import { compileWhere, type SqlConditionRow } from '../lib/sqlWhere'
 import { useConfirm } from './ui/ConfirmDialog'
 import { useModalDialog } from './ui/useModalDialog'
+import { useT } from '../i18n'
+import ModeExplainer from '../pages/connections/ModeExplainer'
 
 // D3: the canvas cycles through a fixed subset of AGGS -- the click-badge is
 // for the common PowerBuilder-feel case; count_distinct with a custom alias
@@ -31,6 +33,17 @@ const label = { display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--m
  * statement is shown as it evolves. The result saves as an ordinary dataset,
  * imported or DirectQuery, and from there every widget just works.
  */
+/** The column that ends a row's validity on a history table (dept_emp.to_date,
+ *  salaries.to_date, contracts.end_date). Null when the table has none. */
+export function endDateColumn(columns: string[]): string | null {
+  const exact = ['to_date', 'end_date', 'valid_to', 'effective_to', 'date_to', 'end_dt', 'ended_at', 'valid_until', 'expiry_date']
+  for (const name of exact) {
+    const hit = columns.find(c => c.toLowerCase() === name)
+    if (hit) return hit
+  }
+  return columns.find(c => /(^|_)(to|end|until)_?(date|dt)$/i.test(c)) ?? null
+}
+
 export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }: {
   ds: DataSource
   onClose: () => void
@@ -40,6 +53,7 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
   // (full reload) instead of creating a sibling.
   existing?: { id: number; name: string; query_model: Record<string, unknown> }
 }) {
+  const tr = useT()
   const confirm = useConfirm()
   const dialogRef = useModalDialog<HTMLDivElement>(onClose)
   const [tables, setTables] = useState<string[]>([])
@@ -52,6 +66,8 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
   const [filters, setFilters] = useState<FilterRow[]>([])
   const [filtersJoiner, setFiltersJoiner] = useState<'and' | 'or'>('and')
   const [having, setHaving] = useState<HavingRow[]>([])
+  // 4.1: per table, the end-date column whose open rows are "current".
+  const [currentOnly, setCurrentOnly] = useState<Record<string, string>>({})
   // Self-referencing hierarchy: when on, the query walks `hierTable` with a
   // recursive CTE and the CTE (named "hierarchy") becomes the base table.
   const [hierOn, setHierOn] = useState(false)
@@ -87,7 +103,7 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
         setTables(r.tables.map(t => t.name))
         setKinds(Object.fromEntries(r.tables.map(t => [t.name, t.kind])))
       })
-      .catch(() => toast.error('Could not load the connection schema'))
+      .catch(() => toast.error(tr('qb.schemaFail')))
     queryBuilderApi.functions(ds.id).then(setFunctions).catch(() => setFunctions([]))
   }, [ds.id])
 
@@ -108,6 +124,7 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
       filters?: { table?: string; column: string; op: string; value?: unknown }[]
       filters_joiner?: 'and' | 'or'
       having?: { table?: string; column: string; aggregation: string; op: string; value?: unknown }[]
+      current_only?: { table: string; column: string }[]
       sort?: { alias: string; dir: 'asc' | 'desc' }[]
       limit?: number
     }
@@ -135,6 +152,7 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
     })))
     if (m.sort?.[0]) { setSortAlias(m.sort[0].alias); setSortDir(m.sort[0].dir) }
     if (m.limit) setLimit(String(m.limit))
+    setCurrentOnly(Object.fromEntries((m.current_only ?? []).map(c => [c.table, c.column])))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [existing])
 
@@ -192,8 +210,11 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
       })),
     } : {}),
     ...(sortAlias ? { sort: [{ alias: sortAlias, dir: sortDir }] } : {}),
+    ...(Object.keys(currentOnly).length ? { current_only: Object.entries(currentOnly)
+      .filter(([t]) => t === base || joins.some(j => j.table === t))
+      .map(([table, column]) => ({ table, column })) } : {}),
     limit: Number(limit) || 10000,
-  }), [base, joins, cols, filters, filtersJoiner, having, sortAlias, sortDir, limit,
+  }), [base, joins, cols, filters, filtersJoiner, having, sortAlias, sortDir, limit, currentOnly,
       hierOn, hierTable, hierId, hierParent])
 
   // live SQL: recompile 500ms after any edit — the statement is the truth of
@@ -202,17 +223,17 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
     if (!base || !cols.some(c => c.column)) { setSql(''); setSqlError(''); return }
     clearTimeout(debounce.current)
     debounce.current = setTimeout(() => {
-      queryBuilderApi.compile(ds.id, model())
+      queryBuilderApi.compile(ds.id, model(), mode)
         .then(r => { setSql(r.sql); setSqlError('') })
-        .catch(e => { setSql(''); setSqlError(e?.response?.data?.detail || 'Invalid query') })
+        .catch(e => { setSql(''); setSqlError(e?.response?.data?.detail || tr('qb.invalid')) })
     }, 500)
     return () => clearTimeout(debounce.current)
-  }, [ds.id, model, base, cols])
+  }, [ds.id, model, base, cols, mode])
 
   const runPreview = () => {
     queryBuilderApi.preview(ds.id, model())
       .then(r => setPreview({ columns: r.columns, rows: r.rows }))
-      .catch(e => toast.error(e?.response?.data?.detail || 'Preview failed'))
+      .catch(e => toast.error(e?.response?.data?.detail || tr('qb.previewFail')))
   }
 
   const create = async () => {
@@ -228,16 +249,16 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
       onCreated?.(r.id)
       onClose()
     } catch (e) {
-      toast.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Could not create the dataset')
+      toast.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || tr('qb.createFail'))
     }
   }
 
   // Explicit + confirmed, since it discards whatever was hand-typed.
   const revertToDesign = async () => {
     if (!await confirm({
-      title: 'Return to Design?',
-      body: 'The SQL is regenerated from the model, and your manual edits are discarded.',
-      confirmLabel: 'Return to Design',
+      title: tr('qb.returnQ'),
+      body: tr('qb.returnBody'),
+      confirmLabel: tr('qb.return'),
     })) return
     setScriptMode(false)
     setManualSql('')
@@ -267,13 +288,13 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
     <div onClick={onClose}
       style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', zIndex: 1000,
         display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={existing ? `Edit query — ${ds.name}` : `Query builder — ${ds.name}`}
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={`${existing ? tr('qb.editTitle') : tr('qb.title')} — ${ds.name}`}
           onClick={e => e.stopPropagation()}
         style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10,
           padding: 18, width: 920, maxWidth: '96vw', maxHeight: '90vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-          <strong style={{ fontSize: 13 }}>{existing ? 'Edit query — ' : 'Query builder — '}{ds.name}</strong>
-          <button onClick={onClose} aria-label="Close"
+          <strong style={{ fontSize: 13 }}>{existing ? tr('qb.editTitle') : tr('qb.title')}{' — '}{ds.name}</strong>
+          <button onClick={onClose} aria-label={tr('qb.close')}
             style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 14, color: 'var(--muted)' }}>✕</button>
         </div>
 
@@ -283,7 +304,7 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
               className="btn btn-ghost btn-sm"
               style={{ fontSize: 11, borderRadius: 0, borderBottom: tab === t ? '2px solid var(--accent)' : '2px solid transparent',
                 fontWeight: tab === t ? 700 : 400 }}>
-              {t === 'design' ? 'Design' : 'SQL'}
+              {t === 'design' ? tr('qb.design') : 'SQL'}
             </button>
           ))}
         </div>
@@ -292,8 +313,8 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
           <div role="alert" style={{ fontSize: 11, color: 'var(--warning, #b45309)', background: 'var(--surface2)',
             border: '1px solid var(--border)', borderRadius: 6, padding: '8px 10px', marginBottom: 10,
             display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'space-between' }}>
-            <span>Manual SQL — return to Design regenerates from the model and discards manual edits.</span>
-            <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }} onClick={revertToDesign}>Return to Design</button>
+            <span>{tr('qb.manualNote')}</span>
+            <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }} onClick={revertToDesign}>{tr('qb.return')}</button>
           </div>
         )}
 
@@ -303,8 +324,8 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
 
         {base && (
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
-            <span style={{ ...label, marginBottom: 0 }}>Diagram</span>
-            <select aria-label="Add table to canvas" value=""
+            <span style={{ ...label, marginBottom: 0 }}>{tr('qb.diagram')}</span>
+            <select aria-label={tr('qb.addTable')} value=""
               onChange={e => {
                 const t = e.target.value
                 if (!t) return
@@ -328,12 +349,22 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
             columnsByTable={effectiveColumns}
             joins={joins.filter(j => j.table && j.left_column && j.right_column)
               .map(j => ({ ...j, left_table: j.left_table || base }))}
-            onAddJoin={j => {
+            onAddJoin={drawn => setJoins(p => {
+              // A line can be drawn in either direction. The side already in
+              // the query (the base, or a table joined earlier) is the LEFT
+              // side; drawing employees <- salaries used to join the base
+              // table to itself.
+              const inQuery = new Set([base, ...p.filter(x => x.left_column && x.right_column).map(x => x.table)])
+              const j = inQuery.has(drawn.table) && !inQuery.has(drawn.left_table)
+                ? { left_table: drawn.table, left_column: drawn.right_column,
+                    table: drawn.left_table, right_column: drawn.left_column, how: drawn.how }
+                : drawn
               ensureColumns(j.table)
-              // the completed join replaces any keyless placeholder row that put
-              // the table on the canvas in the first place
-              setJoins(p => [...p.filter(x => !(x.table === j.table && !x.left_column && !x.right_column)), j])
-            }}
+              // The completed join replaces the keyless placeholder row that put
+              // the table on the canvas -- and keeps the join TYPE chosen on it.
+              const placeholder = p.find(x => x.table === j.table && !x.left_column && !x.right_column)
+              return [...p.filter(x => x !== placeholder), placeholder ? { ...j, how: placeholder.how } : j]
+            })}
             onCycleJoin={i => setJoins(p => {
               const real = p.filter(j => j.table && j.left_column && j.right_column)
               const target = real[i]
@@ -366,8 +397,8 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <div>
-            <label style={label}>Base table</label>
-            <select aria-label="Base table" value={base}
+            <label style={label}>{tr('qb.base')}</label>
+            <select aria-label={tr('qb.base')} value={base}
               onChange={e => { setBase(e.target.value); ensureColumns(e.target.value) }}
               style={{ width: '100%', fontSize: 12 }}>
               <option value="">— choose —</option>
@@ -380,7 +411,7 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
                 (id, parent_id) table cannot answer about itself. */}
             <div data-testid="qb-hierarchy" style={{ marginTop: 12 }}>
               <label style={{ ...label, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <input type="checkbox" aria-label="Walk a self-referencing hierarchy"
+                <input type="checkbox" aria-label={tr('qb.hier')}
                   checked={hierOn}
                   onChange={e => {
                     const on = e.target.checked
@@ -394,14 +425,14 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
               </label>
               {hierOn && (
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
-                  <select aria-label="Hierarchy table" value={hierTable}
+                  <select aria-label={tr('qb.hierTable')} value={hierTable}
                     onChange={e => { setHierTable(e.target.value); ensureColumns(e.target.value) }}
                     style={{ fontSize: 11 }}>
                     <option value="">— table —</option>
                     {tables.map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
-                  {colSelect(hierTable, hierId, setHierId, 'Hierarchy id column')}
-                  {colSelect(hierTable, hierParent, setHierParent, 'Hierarchy parent column')}
+                  {colSelect(hierTable, hierId, setHierId, tr('qb.hierId'))}
+                  {colSelect(hierTable, hierParent, setHierParent, tr('qb.hierParent'))}
                   <span style={{ fontSize: 11, color: 'var(--muted)', alignSelf: 'center' }}>
                     adds __level, __path, __root_id
                   </span>
@@ -409,7 +440,30 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
               )}
             </div>
 
-            <label style={{ ...label, marginTop: 12 }}>Joins</label>
+            {activeTables.some(t => endDateColumn(effectiveColumns[t] ?? [])) && (
+              <div data-testid="qb-current-only" style={{ marginTop: 12 }}>
+                <label style={label}>{tr('qb.currentOnly')}</label>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{tr('qb.currentOnlyHint')}</div>
+                {activeTables.map(t => {
+                  const col = endDateColumn(effectiveColumns[t] ?? [])
+                  if (!col) return null
+                  return (
+                    <label key={t} style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12 }}>
+                      <input type="checkbox" aria-label={tr('qb.currentFor', { table: t })}
+                        checked={currentOnly[t] === col}
+                        onChange={e => setCurrentOnly(p => {
+                          const next = { ...p }
+                          if (e.target.checked) next[t] = col; else delete next[t]
+                          return next
+                        })} />
+                      <span><b>{t}</b> — <code>{col}</code> {tr('qb.isOpen')}</span>
+                    </label>
+                  )
+                })}
+              </div>
+            )}
+
+            <label style={{ ...label, marginTop: 12 }}>{tr('qb.joins')}</label>
             {joins.map((j, i) => (
               <div key={i} style={{ display: 'flex', gap: 4, marginBottom: 4, flexWrap: 'wrap' }}>
                 <select aria-label={`Join table ${i + 1}`} value={j.table}
@@ -420,19 +474,29 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
                 </select>
                 <select aria-label={`Join type ${i + 1}`} value={j.how}
                   onChange={e => setJoins(p => p.map((x, k) => k === i ? { ...x, how: e.target.value } : x))} style={{ fontSize: 11 }}>
-                  <option value="left">left</option><option value="inner">inner</option><option value="right">right</option>
+                  {JOIN_TYPES.map(t => <option key={t.how} value={t.how} title={t.hint}>{t.label}</option>)}
                 </select>
-                {colSelect(base, j.left_column, v => setJoins(p => p.map((x, k) => k === i ? { ...x, left_column: v } : x)), `Join ${i + 1} base key`)}
+                {/* The key on the left comes from ANY table already in the
+                    query -- the base or a table joined above this row -- so
+                    salaries can join titles on emp_no, not only the base. */}
+                {i > 0 && (
+                  <select aria-label={`Join ${i + 1} from table`} value={j.left_table || base}
+                    onChange={e => setJoins(p => p.map((x, k) => k === i ? { ...x, left_table: e.target.value, left_column: '' } : x))}
+                    style={{ fontSize: 11 }}>
+                    {[base, ...joins.slice(0, i).map(x => x.table)].filter(Boolean).map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                )}
+                {colSelect(j.left_table || base, j.left_column, v => setJoins(p => p.map((x, k) => k === i ? { ...x, left_column: v } : x)), `Join ${i + 1} base key`)}
                 <span style={{ fontSize: 11, alignSelf: 'center' }}>=</span>
                 {colSelect(j.table, j.right_column, v => setJoins(p => p.map((x, k) => k === i ? { ...x, right_column: v } : x)), `Join ${i + 1} joined key`)}
                 <button aria-label={`Remove join ${i + 1}`} onClick={() => setJoins(p => p.filter((_, k) => k !== i))}
                   style={{ border: 'none', background: 'none', color: 'var(--danger)', cursor: 'pointer' }}>✕</button>
               </div>
             ))}
-            <button className="btn" style={{ fontSize: 11 }} disabled={!base} title={!base ? 'Choose a base table first' : undefined}
+            <button className="btn" style={{ fontSize: 11 }} disabled={!base} title={!base ? tr('qb.chooseBase') : undefined}
               onClick={() => setJoins(p => [...p, { left_table: base, table: '', left_column: '', right_column: '', how: 'left' }])}>+ Add join</button>
 
-            <label style={{ ...label, marginTop: 12 }}>Columns</label>
+            <label style={{ ...label, marginTop: 12 }}>{tr('qb.columns')}</label>
             {cols.map((c, i) => (
               <div key={i} style={{ display: 'flex', gap: 4, marginBottom: 4, flexWrap: 'wrap' }}>
                 <select aria-label={`Column table ${i + 1}`} value={c.table || base}
@@ -458,16 +522,16 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
                   style={{ border: 'none', background: 'none', color: 'var(--danger)', cursor: 'pointer' }}>✕</button>
               </div>
             ))}
-            <button className="btn" style={{ fontSize: 11 }} disabled={!base} title={!base ? 'Choose a base table first' : undefined}
+            <button className="btn" style={{ fontSize: 11 }} disabled={!base} title={!base ? tr('qb.chooseBase') : undefined}
               onClick={() => setCols(p => [...p, { table: base, column: '', aggregation: '', alias: '', func: '' }])}>+ Add column</button>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12 }}>
-              <label style={{ ...label, marginBottom: 0 }}>Filters</label>
+              <label style={{ ...label, marginBottom: 0 }}>{tr('qb.filters')}</label>
               {filters.length > 1 && (
-                <select aria-label="Filters match" value={filtersJoiner}
+                <select aria-label={tr('qb.match')} value={filtersJoiner}
                   onChange={e => setFiltersJoiner(e.target.value as 'and' | 'or')} style={{ fontSize: 11 }}>
-                  <option value="and">Match ALL (AND)</option>
-                  <option value="or">Match ANY (OR)</option>
+                  <option value="and">{tr('qb.all')}</option>
+                  <option value="or">{tr('qb.any')}</option>
                 </select>
               )}
             </div>
@@ -492,7 +556,7 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
                   style={{ border: 'none', background: 'none', color: 'var(--danger)', cursor: 'pointer' }}>✕</button>
               </div>
             ))}
-            <button className="btn" style={{ fontSize: 11 }} disabled={!base} title={!base ? 'Choose a base table first' : undefined}
+            <button className="btn" style={{ fontSize: 11 }} disabled={!base} title={!base ? tr('qb.chooseBase') : undefined}
               onClick={() => setFilters(p => [...p, { table: base, column: '', op: 'eq', value: '' }])}>+ Add filter</button>
             {filters.some(f => f.column) && (
               <div data-testid="qb-where-preview" style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
@@ -508,7 +572,7 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
                 be a form whose every value the compiler rejects. */}
             {isGrouped && (
               <div data-testid="qb-having" style={{ marginTop: 12 }}>
-                <label style={label}>Having (filters the totals)</label>
+                <label style={label}>{tr('qb.having')}</label>
                 {having.map((h, i) => (
                   <div key={i} style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center' }}>
                     <select aria-label={`Having aggregation ${i + 1}`} value={h.aggregation}
@@ -541,23 +605,30 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
 
             <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'flex-end' }}>
               <div>
-                <label style={label}>Sort by alias</label>
-                <input aria-label="Sort alias" value={sortAlias} onChange={e => setSortAlias(e.target.value)}
+                <label style={label}>{tr('qb.sort')}</label>
+                <input aria-label={tr('qb.sortAlias')} value={sortAlias} onChange={e => setSortAlias(e.target.value)}
                   placeholder="e.g. total" style={{ fontSize: 11, width: 100 }} />
               </div>
-              <select aria-label="Sort direction" value={sortDir} onChange={e => setSortDir(e.target.value as 'asc' | 'desc')} style={{ fontSize: 11 }}>
+              <select aria-label={tr('qb.sortDir')} value={sortDir} onChange={e => setSortDir(e.target.value as 'asc' | 'desc')} style={{ fontSize: 11 }}>
                 <option value="desc">desc</option><option value="asc">asc</option>
               </select>
               <div>
-                <label style={label}>Limit</label>
-                <input aria-label="Row limit" type="number" value={limit} onChange={e => setLimit(e.target.value)}
-                  style={{ fontSize: 11, width: 90 }} />
+                <label style={label}>{tr('qb.limit')}</label>
+                {mode === 'directquery' ? (
+                  <div data-testid="qb-limit-live" style={{ fontSize: 11, color: 'var(--muted)', maxWidth: 220 }}>
+                    None — a live dataset always reads every row
+                  </div>
+                ) : (
+                  <input aria-label={tr('qb.rowLimit')} type="number" min={1} value={limit} onChange={e => setLimit(e.target.value)}
+                    title={tr('qb.limitTip')}
+                    style={{ fontSize: 11, width: 90 }} />
+                )}
               </div>
             </div>
           </div>
 
           <div>
-            <label style={label}>SQL (compiled live, identifiers schema-checked)</label>
+            <label style={label}>{tr('qb.sqlHead')}</label>
             <pre data-testid="qb-sql" style={{ fontSize: 11, background: 'var(--surface2)', border: '1px solid var(--border)',
               borderRadius: 6, padding: 10, whiteSpace: 'pre-wrap', minHeight: 80, margin: 0 }}>
               {sqlError ? '' : sql || '— pick a base table and columns —'}
@@ -575,7 +646,7 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
             )}
 
             <div style={{ display: 'flex', gap: 8, margin: '10px 0' }}>
-              <button className="btn" style={{ fontSize: 11 }} disabled={!sql} title={!sql ? 'Add a table and at least one column to preview' : undefined} onClick={runPreview}>Preview data</button>
+              <button className="btn" style={{ fontSize: 11 }} disabled={!sql} title={!sql ? tr('qb.previewNeed') : undefined} onClick={runPreview}>{tr('qb.preview')}</button>
             </div>
             {preview && (
               <div style={{ overflow: 'auto', maxHeight: 220, border: '1px solid var(--border)', borderRadius: 6 }}>
@@ -598,7 +669,7 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
             <label style={label}>
               SQL {scriptMode ? '(hand-edited — SQL edited by hand — Design view no longer reflects it)' : '(compiled live, identifiers schema-checked)'}
             </label>
-            <textarea aria-label="SQL editor" value={displaySql} readOnly={!sqlUnlocked}
+            <textarea aria-label={tr('qb.sqlEditor')} value={displaySql} readOnly={!sqlUnlocked}
               onChange={e => { setManualSql(e.target.value); setScriptMode(true) }}
               style={{ width: '100%', fontSize: 11, fontFamily: 'var(--mono, monospace)',
                 background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6,
@@ -607,29 +678,30 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
             {sqlError && !scriptMode && <div role="alert" style={{ fontSize: 11, color: 'var(--danger)', marginTop: 4 }}>{sqlError}</div>}
             {!sqlUnlocked && (
               <button className="btn btn-ghost btn-sm" style={{ fontSize: 11, marginTop: 8 }}
-                onClick={() => setSqlUnlocked(true)}>Edit SQL manually</button>
+                onClick={() => setSqlUnlocked(true)}>{tr('qb.editSql')}</button>
             )}
             {scriptMode && (
               <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>
                 This dataset will save from the SQL above only — the design is no longer editable visually once saved this way.{' '}
-                <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }} onClick={revertToDesign}>Return to Design</button>
+                <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }} onClick={revertToDesign}>{tr('qb.return')}</button>
               </div>
             )}
           </div>
         )}
 
         <div style={{ borderTop: '1px solid var(--border)', marginTop: 12, paddingTop: 10 }}>
-          <label style={label}>Save as dataset</label>
+          <label style={label}>{tr('qb.saveAs')}</label>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <input aria-label="Dataset name" value={dsName} onChange={e => setDsName(e.target.value)}
-              placeholder="e.g. Revenue by segment" style={{ fontSize: 12, flex: 1, minWidth: 160 }} />
-            <select aria-label="Dataset mode" value={mode} onChange={e => setMode(e.target.value as 'import' | 'directquery')} style={{ fontSize: 12 }}>
-              <option value="import">Import (materialise now)</option>
-              <option value="directquery">DirectQuery (live)</option>
+            <input aria-label={tr('qb.dsName')} value={dsName} onChange={e => setDsName(e.target.value)}
+              placeholder={tr('qb.dsNameEg')} style={{ fontSize: 12, flex: 1, minWidth: 160 }} />
+            <select aria-label={tr('qb.dsMode')} value={mode} onChange={e => setMode(e.target.value as 'import' | 'directquery')} style={{ fontSize: 12 }}>
+              <option value="import">{tr('qb.modeImport')}</option>
+              <option value="directquery">{tr('qb.modeDq')}</option>
             </select>
-            <button className="btn btn-primary" style={{ fontSize: 12 }} disabled={!displaySql || !dsName.trim()} title={!displaySql ? 'Build the query first: a table and at least one column' : !dsName.trim() ? 'Name the dataset first' : undefined}
-              onClick={() => void create()}>{existing ? 'Save changes' : 'Create dataset'}</button>
+            <button className="btn btn-primary" style={{ fontSize: 12 }} disabled={!displaySql || !dsName.trim()} title={!displaySql ? tr('qb.buildFirst') : !dsName.trim() ? tr('qb.nameFirst') : undefined}
+              onClick={() => void create()}>{existing ? tr('qb.saveChanges') : tr('qb.create')}</button>
           </div>
+          <div style={{ marginTop: 6 }}><ModeExplainer mode={mode} /></div>
         </div>
       </div>
     </div>

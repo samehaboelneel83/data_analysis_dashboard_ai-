@@ -59,14 +59,41 @@ describe('Dataflows (E12)', () => {
     renderAt()
     await screen.findByTestId('flow-5')
     const source = screen.getByLabelText('Source dataset') as HTMLSelectElement
-    // A live dataset cannot feed a dataflow, so it is not offered.
-    expect([...source.options].map(o => o.textContent)).not.toContain('Live orders')
+    // 4.6: a live dataset feeds dataflows too, marked as live.
+    expect([...source.options].map(o => o.textContent)).toContain('Live orders · Live')
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Clean sales' } })
     fireEvent.change(source, { target: { value: '1' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create' }))
     await waitFor(() => expect(dataflowsApi.create).toHaveBeenCalledWith({ name: 'Clean sales', source_dataset_id: 1, steps: [] }))
     expect(await screen.findByRole('heading', { name: 'Clean sales' })).toBeInTheDocument()
     expect(screen.getByTestId('where')).toHaveTextContent('/dataflows?flow=6')
+  })
+
+  it('creates a monthly snapshot of a live dataset, run daily (4.6)', async () => {
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 2, name: 'Live orders', columns: [
+      { id: 1, name: 'dept', dtype: 'categorical' }, { id: 2, name: 'from_date', dtype: 'datetime' },
+      { id: 3, name: 'to_date', dtype: 'datetime' }] } as never)
+    vi.mocked(dataflowsApi.create).mockResolvedValue(flow({ id: 7, name: 'Headcount', steps: [], outputs: [], last_run_at: null,
+      source_dataset_id: 2, snapshot: { every: 'month', group_by: ['dept'], measure: null, agg: 'count', as: 'headcount',
+        backfill: { from_column: 'from_date', to_column: 'to_date', start: '2025-01-01' } } }) as never)
+    renderAt()
+    await screen.findByTestId('flow-5')
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Headcount' } })
+    fireEvent.change(screen.getByLabelText('Source dataset'), { target: { value: '2' } })
+    fireEvent.click(screen.getByRole('radio', { name: 'Monthly snapshot' }))
+    const form = await screen.findByTestId('snapshot-form')
+    await waitFor(() => expect(within(form).getByLabelText('Split by')).toHaveTextContent('dept'))
+    fireEvent.change(within(form).getByLabelText('Split by'), { target: { value: 'dept' } })
+    fireEvent.click(within(form).getByLabelText('Rebuild past months from start and end dates'))
+    expect(within(form).getByLabelText('Start date column')).toHaveValue('from_date')
+    expect(within(form).getByLabelText('End date column')).toHaveValue('to_date')
+    fireEvent.change(within(form).getByLabelText('From month'), { target: { value: '2025-01-01' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+    await waitFor(() => expect(dataflowsApi.create).toHaveBeenCalledWith({
+      name: 'Headcount', source_dataset_id: 2, steps: [], refresh_interval_minutes: 1440,
+      snapshot: { every: 'month', group_by: ['dept'], measure: null, agg: 'count', as: 'headcount',
+        backfill: { from_column: 'from_date', to_column: 'to_date', start: '2025-01-01' } } }))
+    expect(await screen.findByTestId('snapshot-summary')).toHaveTextContent(/split by dept/)
   })
 
   it('opened on one: saves its recipe, its schedule, and runs it', async () => {

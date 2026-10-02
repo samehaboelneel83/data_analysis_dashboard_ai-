@@ -52,7 +52,14 @@ def _even_sample(n: int, k: int = DIAG_POINTS) -> np.ndarray:
 
 def _population(df: pd.DataFrame, numeric: list[str], raw: list[str], used: int) -> dict:
     """Rows in, rows used, and which columns cost the difference."""
+    raw = list(raw)
+    from .widget_data import _is_date_like
     dropped_by: dict[str, int] = {}
+    # A date predictor is a number here (years since it); converting it with
+    # to_numeric would call every row missing.
+    dates = [c for c in numeric if c in df.columns and _is_date_like(df[c])]
+    numeric = [c for c in numeric if c not in dates]
+    raw += dates
     for c in numeric:
         if c in df.columns:
             n = int(pd.to_numeric(df[c], errors="coerce").isna().sum())
@@ -64,8 +71,24 @@ def _population(df: pd.DataFrame, numeric: list[str], raw: list[str], used: int)
             if n:
                 dropped_by[c] = n
     total = int(len(df))
-    return {"rows_total": total, "rows_used": int(used),
-            "rows_dropped": max(0, total - int(used)), "dropped_by": dropped_by}
+    # Rows a value was missing from, counted once however many columns lacked it.
+    cols = [c for c in [*numeric, *raw] if c in df.columns]
+    if cols:
+        probe = df[cols].copy()
+        for c in numeric:
+            if c in probe.columns:
+                probe[c] = pd.to_numeric(probe[c], errors="coerce")
+        complete = int(len(probe.dropna()))
+    else:
+        complete = total
+    out = {"rows_total": total, "rows_used": int(used),
+           "rows_dropped": max(0, total - max(complete, int(used))), "dropped_by": dropped_by}
+    # HR re-test 2026-10-01: a fit on 200,000 of 240,124 rows read "40,124
+    # dropped" with no reason -- the statistics engine samples above 200K, and
+    # that is not a missing value. Said as what it is.
+    if 0 < int(used) < complete:
+        out["sampled_of"] = complete
+    return out
 
 
 def _incomplete(needs: list[str]) -> dict:
@@ -104,8 +127,17 @@ class _Design:
         self.encodings: dict[str, dict] = {}
         self.expanded: dict[str, list[str]] = {}
         self.refusal: str | None = None
+        #: Date predictors read as "years before the latest date" (tenure),
+        #: so a coefficient is "per year of service". As text, hire_date was
+        #: 5,425 levels and every model naming it was refused (HR analyst
+        #: panel, 2026-10-02).
+        self.derived: dict[str, str] = {}
+        from .widget_data import _is_date_like, _years_before_latest
         for p in preds:
             raw = df[p]
+            if _is_date_like(raw):
+                raw = _years_before_latest(raw)
+                self.derived[p] = "years_before_latest"
             num = pd.to_numeric(raw, errors="coerce")
             present = raw.notna()
             if present.any() and num[present].notna().mean() >= 0.9:
@@ -224,7 +256,7 @@ def shape_model_linear(df: pd.DataFrame, config: dict) -> dict:
                                    "validation_rows": int(len(valid_idx))}
     return {
         "type": "model", "status": "ok", "model": "linear", "target": target,
-        "predictors": preds, "encodings": d.encodings, "result": r,
+        "predictors": preds, "encodings": d.encodings, "derived": d.derived, "result": r,
         "population": population, "fit": fit,
         "diagnostics": {
             "residuals": [[_num(yhat[i]), _num(resid[i])] for i in idx],
@@ -305,7 +337,8 @@ def shape_model_logistic(df: pd.DataFrame, config: dict) -> dict:
                                    "validation_rows": int(len(scored))}
     return {
         "type": "model", "status": "ok", "model": "logistic", "target": target,
-        "event": positive, "predictors": preds, "encodings": d.encodings, "result": r,
+        "event": positive, "predictors": preds, "encodings": d.encodings, "derived": d.derived,
+        "result": r,
         "population": population,
         "fit": {"name": f"AUC{where}", "value": _num(_auc(y, p)),
                 "secondary": {f"accuracy at 0.5{where}": _num((tp + tn) / n),
@@ -319,6 +352,15 @@ def shape_model_logistic(df: pd.DataFrame, config: dict) -> dict:
 
 
 # ── Decision tree ────────────────────────────────────────────────────────────
+
+def _guess_baseline(df: pd.DataFrame, target, score_name) -> dict:
+    """What always answering the commonest value scores: 97.9% accuracy on
+    order status is nothing when 98% of orders are delivered (Olist panel)."""
+    if str(score_name or "").lower() != "accuracy" or target not in df.columns:
+        return {}
+    shares = df[target].dropna().astype(str).value_counts(normalize=True)
+    return {"accuracy of always guessing the commoner outcome": _num(shares.iloc[0])} if len(shares) else {}
+
 
 def shape_model_tree(df: pd.DataFrame, config: dict) -> dict:
     from .analysis.decision_tree import DecisionTreeError, decision_tree
@@ -348,7 +390,8 @@ def shape_model_tree(df: pd.DataFrame, config: dict) -> dict:
         "population": _population(df, [], [target, *(r.get("predictors_used") or [])], used),
         "fit": {"name": r.get("score_name") or "score", "value": _num(r.get("score")),
                 "secondary": {"on the rows it trained on": _num(r.get("train_score")),
-                              "rows held out for scoring": r.get("n_test")}},
+                              "rows held out for scoring": r.get("n_test"),
+                              **_guess_baseline(df, target, r.get("score_name"))}},
         "warnings": warnings,
         "rows": [{"name": k, "value": v} for k, v in importance],
     }
@@ -356,12 +399,37 @@ def shape_model_tree(df: pd.DataFrame, config: dict) -> dict:
 
 # ── Clustering ───────────────────────────────────────────────────────────────
 
+def _cluster_population(df: pd.DataFrame, cols: list[str], meta: dict) -> dict:
+    """Rows in and used; the engine's own sample said once, as `sampled_from`."""
+    pop = _population(df, cols, [], meta.get("n_rows_used", 0))
+    if meta.get("sampled"):
+        pop.pop("sampled_of", None)
+        pop["sampled_from"] = meta.get("n_rows_total")
+    return pop
+
+
 def shape_model_cluster(df: pd.DataFrame, config: dict) -> dict:
     from .analysis.segment import SegmentError, segment_dataframe
 
     cols = [c for c in (config.get("measures") or []) if isinstance(c, str) and c]
     if len(cols) < 2:
         return _incomplete(["Variables (at least two)"])
+    # An identifier numbers rows; it does not describe them. Named in a
+    # clustering widget it grouped people by employee number (HR re-test
+    # 2026-10-01) -- refused by name, with what to pick instead.
+    from .semantic_guard import is_identifier
+    from .widget_data import _is_id_like_column
+    ids = [c for c in cols if is_identifier(c, None) or _is_id_like_column(c)]
+    if ids:
+        return _refused(
+            f"{', '.join(ids)} {'is an identifier' if len(ids) == 1 else 'are identifiers'}: "
+            f"it numbers the rows rather than describing them, so grouping by it means "
+            f"nothing. Choose measures such as amounts, durations or scores.",
+            _population(df, cols, [], 0))
+    from .widget_data import _is_date_like, _years_before_latest
+    dates = [c for c in cols if _is_date_like(df[c])]
+    if dates:
+        df = df.assign(**{c: _years_before_latest(df[c]) for c in dates})
     try:
         out = segment_dataframe(df, cols).to_dict()
     except SegmentError as e:
@@ -370,12 +438,128 @@ def shape_model_cluster(df: pd.DataFrame, config: dict) -> dict:
     centroids = meta.get("centroids", [])
     return {
         "type": "model", "status": "ok", "model": "cluster", "variables": cols, "result": out,
-        "population": {**_population(df, cols, [], meta.get("n_rows_used", 0)),
-                       **({"sampled_from": meta.get("n_rows_total")} if meta.get("sampled") else {})},
+        "population": _cluster_population(df, cols, meta),
         "fit": {"name": "silhouette", "value": _num(meta.get("silhouette")),
                 "secondary": {"segments": meta.get("params", {}).get("k")}},
         "warnings": out.get("warnings", []),
         "rows": [{"name": f"Segment {c['cluster'] + 1}", "value": c.get("size")} for c in centroids],
+    }
+
+
+# ── Association rules ────────────────────────────────────────────────────────
+
+#: A number column named for rule mining is cut into this many equal-count
+#: bands ("salary 40,000–52,000"); a rule needs values that repeat.
+RULE_BANDS = 4
+#: At or below this many distinct values a number is already a category
+#: (a 1–5 rating, a floor number) and is kept as it is.
+RULE_KEEP_LEVELS = 12
+
+
+def _is_id(col: str) -> bool:
+    from .semantic_guard import is_identifier
+    from .widget_data import _is_id_like_column
+    return bool(is_identifier(col, None) or _is_id_like_column(col))
+
+
+def _band_label(lo: float, hi: float) -> str:
+    def f(v: float) -> str:
+        return f"{v:,.0f}" if abs(v) >= 100 else f"{v:,.2f}".rstrip("0").rstrip(".")
+    return f"{f(lo)}–{f(hi)}"
+
+
+def _rule_frame(df: pd.DataFrame, cols: list[str]) -> tuple[pd.DataFrame, dict[str, str]]:
+    """The chosen columns as categories: numbers cut into equal-count bands,
+    dates into years, text as it is. Returns the frame and, per column that
+    was converted, how (shown to the reader beside the rules)."""
+    out = pd.DataFrame(index=df.index)
+    how: dict[str, str] = {}
+    for c in cols:
+        s = df[c]
+        if pd.api.types.is_datetime64_any_dtype(s):
+            out[c] = s.dt.year.astype("Int64").astype(str).where(s.notna())
+            how[c] = "year"
+            continue
+        num = pd.to_numeric(s, errors="coerce") if not pd.api.types.is_bool_dtype(s) else None
+        present = s.notna()
+        if (num is not None and present.any() and num[present].notna().mean() >= 0.9
+                and num.nunique() > RULE_KEEP_LEVELS):
+            try:
+                cut = pd.qcut(num, RULE_BANDS, duplicates="drop")
+            except ValueError:
+                out[c] = s
+                continue
+            labels = {iv: _band_label(iv.left if i else float(num.min()), iv.right)
+                      for i, iv in enumerate(cut.cat.categories)}
+            out[c] = cut.map(labels).astype(object).where(cut.notna())
+            how[c] = f"{len(labels)} equal-count bands"
+            continue
+        out[c] = s.astype(object).where(present).map(lambda v: v if v is None else str(v))
+    return out, how
+
+
+def shape_model_rules(df: pd.DataFrame, config: dict) -> dict:
+    """Which values travel together -- "employees in Sales are mostly Staff",
+    "customers on the premium tier pay by card" -- as a living widget.
+
+    Reuses `analysis.patterns.association_rules`, so a rule here is the rule the
+    dataset's Patterns panel finds on the same rows. Ranked by lift (how many
+    times more often than chance), with the base rate beside every confidence:
+    a rule that is "90% confident" about something true of 90% of rows anyway
+    says nothing."""
+    from .analysis.patterns import PatternError, association_rules
+
+    focus = config.get("response") or None
+    focus = focus if isinstance(focus, str) and focus else None
+    chosen = [c for c in (config.get("predictors") or config.get("measures") or [])
+              if isinstance(c, str) and c and c != focus]
+    missing = [c for c in [*chosen, *([focus] if focus else [])] if c not in df.columns]
+    if missing:
+        return _refused(f"Column '{missing[0]}' is not in this dataset.")
+    ids = [c for c in [*chosen, *([focus] if focus else [])] if _is_id(c)]
+    if ids:
+        return _refused(
+            f"{', '.join(ids)} {'is an identifier' if len(ids) == 1 else 'are identifiers'}: "
+            f"every row has its own value, so nothing can repeat to form a rule. "
+            f"Choose descriptive columns such as department, product, region or status.",
+            _population(df, [], chosen, 0))
+    if chosen:
+        cols = [*chosen, *([focus] if focus else [])]
+    else:
+        # Every column the miner can use: text with a handful of values, never
+        # an identifier. A number or date is only used when named, because its
+        # bands are a choice the reader should see being made.
+        cols = [c for c in df.columns
+                if not pd.api.types.is_numeric_dtype(df[c])
+                and not pd.api.types.is_datetime64_any_dtype(df[c])
+                and 1 < df[c].nunique() <= 50 and not _is_id(c)]
+        if focus and focus not in cols:
+            cols.append(focus)
+    frame, banded = _rule_frame(df, cols)
+    complete = frame.dropna()
+    try:
+        out = association_rules(complete, cols, then_column=focus).to_dict()
+    except PatternError as e:
+        msg = str(e)
+        return _refused(msg[:1].upper() + msg[1:] + ".", _population(df, [], cols, 0))
+    meta = out.get("meta", {})
+    rules = out.get("rows") or []
+    pop = _population(df, [], cols, meta.get("rows_scanned", len(complete)))
+    pop.pop("sampled_of", None)
+    if meta.get("sampled"):
+        pop["sampled_from"] = meta.get("total_rows")
+    strongest = rules[0]["lift"] if rules else None
+    return {
+        "type": "model", "status": "ok", "model": "rules",
+        "variables": meta.get("columns_considered", cols), "focus": focus,
+        "banded": banded, "result": out, "rules": rules,
+        "population": pop,
+        "fit": {"name": "strongest lift", "value": _num(strongest),
+                "secondary": {"rules found": len(rules),
+                              "least rows behind a rule": meta.get("params", {}).get("min_support_rows"),
+                              "least lift reported": meta.get("params", {}).get("min_lift")}},
+        "warnings": [],
+        "rows": [{"name": f"{r['if']} → {r['then']}", "value": r["lift"]} for r in rules],
     }
 
 
@@ -506,6 +690,13 @@ def shape_model_compare(df: pd.DataFrame, config: dict) -> dict:
             entry["note"] = "left out of the shared refit: " + "; ".join(skipped_cols[p] for p in skipped)
         results.append(entry)
 
+    # A model listed in the config (not picked from a widget on the page) has
+    # no widget id; the winner is named by id, so it came back null and the
+    # header said "No model could be scored" over a ranked list of scores
+    # (HR re-test 2026-10-01). Every entry gets an id.
+    for i, r in enumerate(results):
+        if r.get("id") is None:
+            r["id"] = f"model-{i + 1}"
     scored = [r for r in results if r["score"] is not None]
     winner = max(scored, key=lambda r: r["score"]) if scored else None
     baseline = 0.5 if classification else 0.0
@@ -661,4 +852,5 @@ MODEL_SHAPERS: dict[str, Any] = {
     "model_cluster": _living(shape_model_cluster),
     "model_compare": _living(shape_model_compare),
     "model_score": _living(shape_model_score),
+    "model_rules": _living(shape_model_rules),
 }

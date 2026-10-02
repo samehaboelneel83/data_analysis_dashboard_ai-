@@ -18,6 +18,16 @@ import { hijriLabel } from '../../../lib/arabicFormats'
 export interface FormatConfig {
   overview_axis?: boolean
   axis_tick_size?: number
+  /** `false`: draw the axes with their NAMES only -- no tick labels. For a
+   *  small chart read at a glance (the Suggestions preview), where long
+   *  category names would take more room than the bars. */
+  axis_ticks?: boolean
+  /** Category tick labels longer than this are shortened with "…" (the
+   *  axis is planned for the shortened text, so it takes less room). */
+  axis_tick_max_chars?: number
+  /** Numbers written compactly -- value labels AND the value axis' ticks:
+   *  4.47B, 614.3K, 6B. */
+  labels_compact?: boolean
   axis_tick_color?: string
   axis_line?: boolean
   tick_line?: boolean
@@ -569,11 +579,14 @@ export function xAxisProps(
   const width = containerW && containerW > 0
     ? Math.max(120, containerW - X_GUTTER_ALLOWANCE)
     : undefined
-  const plan = labels && labels.length
-    ? xAxisPlan(labels, { fontSize, width, rtl, angle: explicitAngle })
+  const maxChars = typeof cfg.axis_tick_max_chars === 'number' && cfg.axis_tick_max_chars > 1
+    ? cfg.axis_tick_max_chars : undefined
+  const planLabels = maxChars && labels ? labels.map(l => clipLabel(l, maxChars)) : labels
+  const plan = planLabels && planLabels.length
+    ? xAxisPlan(planLabels, { fontSize, width, rtl, angle: explicitAngle })
     : null
 
-  return {
+  const out = {
     tick: tick(cfg),
     axisLine: cfg.axis_line ?? false,
     tickLine: cfg.tick_line ?? false,
@@ -612,6 +625,16 @@ export function xAxisProps(
 
     label: title ? xTitleLabel(title) : undefined,
   }
+  if (maxChars) {
+    // Shortened first, then whatever the plan itself would clip to.
+    const inner = (out as { tickFormatter?: (v: unknown) => string }).tickFormatter
+    const outer = (v: unknown) => clipLabel(String(v ?? ''), maxChars)
+    ;(out as { tickFormatter?: (v: unknown) => string }).tickFormatter = inner ? (v: unknown) => inner(outer(v)) : outer
+  }
+  // Names only: the tick band goes, the title keeps its lane.
+  return cfg.axis_ticks === false
+    ? { ...out, tick: false as const, height: (title ? X_TITLE_H : 0) + 6, ticks: undefined, tickFormatter: undefined }
+    : out
 }
 
 /** Recharts' own default. Fits "1,500" and nothing much longer. */
@@ -643,6 +666,8 @@ export function yAxisWidth(
 ): number {
   const explicit = (cfg as { y_axis_width?: number }).y_axis_width
   if (typeof explicit === 'number' && explicit > 0) return explicit
+  // Compact ticks ("6B", "-1.5M") are at most six characters: no wide gutter.
+  if (cfg.labels_compact) return 44
 
   // An author-set bound is drawn as a tick even when no datum comes near it,
   // so it is measured alongside the data -- `yAxisProps` already honours these
@@ -813,7 +838,7 @@ export function yAxisProps(
     domain = ['auto', 'auto']
   }
 
-  return {
+  const out = {
     tick: tick(cfg),
     axisLine: cfg.axis_line ?? false,
     tickLine: cfg.tick_line ?? false,
@@ -871,6 +896,9 @@ export function yAxisProps(
     domain,
     label: axisTitle ? yTitleLabel(axisTitle, rtl) : undefined,
   }
+  return cfg.axis_ticks === false
+    ? { ...out, tick: false as const, width: (axisTitle ? Y_TITLE_W : 0) + 6 }
+    : out
 }
 
 export function gridProps(cfg: FormatConfig) {
@@ -1010,6 +1038,20 @@ export function keepLabel(index: number, n: number): boolean {
   return (n - 1 - index) % stride === 0
 }
 
+const COMPACT = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 2 })
+
+/** A value axis' tick text: compact when the chart asks for it (labels_compact),
+ *  else the measure's own format. Every value axis goes through this, so the
+ *  setting cannot reach the bars' labels and miss the axis beside them. */
+export function valueTick(cfg: FormatConfig, fmt?: CalcColumnFormat | null) {
+  // Compact when the chart asks, and -- unless it said no -- for millions and
+  // up: a value axis reading "6,000,000,000" took a fifth of a small tile's
+  // width (Chrome re-test of 5.11).
+  return (v: unknown) => typeof v === 'number' && Math.abs(v) >= 10000
+    && (cfg.labels_compact ?? Math.abs(v) >= 1_000_000)
+    ? COMPACT.format(v) : fmtStr(v, fmt ?? undefined)
+}
+
 export function labelListProps(
   cfg: FormatConfig, fmt?: CalcColumnFormat, dataKey = 'value', pointCount = 0,
 ) {
@@ -1036,7 +1078,15 @@ export function labelListProps(
       if (n > 0 && !keepLabel(index, n)) return ''
       const payload = (entry?.payload ?? entry) as Record<string, unknown>
       const raw = payload?.[dataKey] ?? entry?.value
-      return raw == null ? '' : fmtStr(raw, fmt)
+      if (raw == null) return ''
+      if (typeof raw === 'number' && Math.abs(raw) >= 10000) {
+        // 5.11: unless the author chose, a label that would collide with its
+        // neighbours goes compact on its own -- "1,733,412,880" over every bar
+        // ran into the next one; "1.73B" fits. Explicit false keeps full digits.
+        const compact = cfg.labels_compact ?? (Math.abs(raw) >= 1_000_000 || n > 6)
+        if (compact) return COMPACT.format(raw)
+      }
+      return fmtStr(raw, fmt)
     },
   }
 }

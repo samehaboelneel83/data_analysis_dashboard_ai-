@@ -45,11 +45,15 @@ def _reject_directquery(ds: Dataset) -> None:
     DirectQuery path, so the refusal points at it rather than just saying no.
     Called on BOTH the create and the ask path: conversations stored before
     this guard existed are still bound to these datasets."""
-    if ds.mode == "directquery" or not ds.filename:
+    # Live datasets are read through their own SQL now (graph.dataset_frames):
+    # asking about "Current workforce" must answer from Current workforce, not
+    # from the raw tables behind it. Only a dataset with neither a file nor a
+    # connection has nothing to read.
+    if not ds.filename and not (ds.mode == "directquery" and ds.data_source_id):
         raise HTTPException(
             400,
-            f"'{ds.name}' is a DirectQuery dataset, which Ask AI cannot read "
-            "as a table. Pick its connection instead to ask about live data.")
+            f"'{ds.name}' has no data file and no connection behind it, so there "
+            "is nothing for Ask AI to read.")
 
 
 class ConversationIn(BaseModel):
@@ -160,6 +164,9 @@ async def _history(db: AsyncSession, conv: Conversation) -> list[dict]:
         entry = {"role": m.role, "content": m.content, "sql": [], "results": []}
         run = runs.get(m.agent_run_id) if m.agent_run_id is not None else None
         if run is not None:
+            # The graph needs to know a turn was a clarifying question, so the
+            # reply to it is read WITH the question it clarifies (3.8).
+            entry["status"] = run.status
             payload = _run_payload(run, steps.get(run.id, []))
             entry["sql"], entry["results"] = payload["sql"], payload["results"]
         out.append(entry)
@@ -445,6 +452,15 @@ async def submit_feedback(cid: int, body: FeedbackIn,
                            conversation_id=conv.id, run_id=body.run_id,
                            rating=body.rating, comment=body.comment)
         db.add(fb)
+    if body.rating == "down" and body.run_id is not None:
+        # A 👎 answer must not live on as a few-shot example for the next one.
+        from ..services.agent import memory
+        from ..models.models import AgentStep
+        steps = (await db.execute(select(AgentStep).where(
+            AgentStep.agent_run_id == body.run_id))).scalars().all()
+        for st in steps:
+            if st.sql:
+                await memory.forget(db, user.org_id, sql=st.sql)
     await db.commit()
     await db.refresh(fb)
     return {"id": fb.id, "run_id": fb.run_id, "rating": fb.rating,

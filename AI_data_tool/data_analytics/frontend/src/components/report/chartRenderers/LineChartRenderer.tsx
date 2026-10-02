@@ -2,7 +2,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Referenc
 import { TT, fmtStr, COLORS, seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
 import { computeAnalyticsLines } from './analyticsLines'
-import { xAxisProps, yAxisProps, gridProps, labelListProps, legendProps, chartMargin } from './axisOptions'
+import { xAxisProps, yAxisProps, gridProps, labelListProps, legendProps, chartMargin, valueTick } from './axisOptions'
 import { useChartViewport } from './useChartViewport'
 import { seriesName } from './axisOptions'
 import { toBarSeries } from './barSeries'
@@ -33,7 +33,7 @@ export default function LineChartRenderer({ rows, data, cfg, rtl, broadcasts, on
       >
         {grid && <CartesianGrid {...grid} />}
         <XAxis dataKey="name" {...xAxisProps(cfg, rtl, view.visible.map((r: any) => String(r.name)), plotW)} />
-        <YAxis {...yAxisProps(cfg, rtl, measureFmt, values, undefined, { height: plotH })} tickFormatter={v => fmtStr(v, measureFmt)} />
+        <YAxis {...yAxisProps(cfg, rtl, measureFmt, values, undefined, { height: plotH })} tickFormatter={valueTick(cfg, measureFmt)} />
         <Tooltip contentStyle={TT} formatter={(v: unknown, name: unknown) =>
             [fmtStr(v, measureFmt), multi ? String(name ?? '') : seriesName(cfg)]}
           labelFormatter={(l: unknown) => data?.partial_period?.label != null && String(l) === data.partial_period.label

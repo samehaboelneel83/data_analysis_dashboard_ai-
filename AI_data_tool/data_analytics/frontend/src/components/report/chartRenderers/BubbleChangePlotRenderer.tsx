@@ -74,10 +74,10 @@ export default function BubbleChangePlotRenderer({ data, cfg, rtl, broadcasts, l
         <ResponsiveContainer width="100%" height="100%">
           <ScatterChart margin={chartMargin(rtl, { top: 4, right: 16, bottom: 4, left: 0 })}>
             {grid && <CartesianGrid {...grid} />}
-            <XAxis type="number" dataKey="x" {...xAxisProps(cfg, rtl, undefined, undefined, { title: titles.measure })} tickFormatter={v => fmtStr(v, measureFmt)} />
+            <XAxis type="number" dataKey="x" {...xAxisProps(cfg, rtl, undefined, undefined, { title: cfg.x_axis_label ?? titles.measure })} tickFormatter={v => fmtStr(v, measureFmt)} />
             {/* allowDecimals forced true after the spread: this axis never set it before, so
                 Recharts' own default (true) applied, unlike the builder's false default. */}
-            <YAxis type="number" dataKey="y" {...yAxisProps(cfg, rtl, measure2Fmt, rows.map((r: any) => r.y), undefined, { height: plotH, title: titles.measure2 })} allowDecimals tickFormatter={v => fmtStr(v, measure2Fmt)} />
+            <YAxis type="number" dataKey="y" {...yAxisProps(cfg, rtl, measure2Fmt, rows.map((r: any) => r.y), undefined, { height: plotH, title: cfg.y_axis_label ?? titles.measure2 })} allowDecimals tickFormatter={v => fmtStr(v, measure2Fmt)} />
             <ZAxis type="number" dataKey="size" range={[60, 600]} />
             <Tooltip contentStyle={TT} cursor={{ strokeDasharray: '3 3' }}
               formatter={(v: unknown, name: string) => [name === 'x' ? fmtStr(v, measureFmt) : name === 'y' ? fmtStr(v, measure2Fmt) : String(v), name]} />

@@ -738,7 +738,8 @@ svg.recharts-surface { direction: ltr; }
   gap: 1px;
   overflow-x: hidden;
   overflow-y: auto;
-  transition: width var(--dl-dur) var(--dl-ease);
+  /* No width transition: the content beside the rail (a dashboard's charts)
+     would re-lay out on every frame of it. Collapsing snaps, once. */
 }
 
 /* ---- Brand row ---- */
@@ -2144,6 +2145,154 @@ html[data-presenting="1"] .dl-bleed { margin: 0; block-size: 100%; }
 .dl-upload__errors > p { color: var(--dl-error-text); }
 
 /* ============================================================
+   Page filter bar: "+ Filter" and chips, in the row above the page
+   ============================================================ */
+.dl-pf { position: relative; display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.dl-pf__add {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 8px;
+  border: 1px dashed color-mix(in oklab, var(--accent) 55%, var(--border)); background: transparent;
+  color: var(--accent); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.dl-pf__add:hover, .dl-pf__add[aria-expanded="true"] { background: var(--accent-soft, color-mix(in oklab, var(--accent) 12%, transparent)); border-style: solid; }
+.dl-pf__add:focus-visible, .dl-pf__chip button:focus-visible, .dl-pf__clear:focus-visible, .dl-pf__opt:focus-visible,
+.dl-pf__val:focus-visible, .dl-pf__btn:focus-visible, .dl-pf__back:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dl-pf__count {
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; display: inline-grid; place-items: center;
+  background: var(--accent); color: var(--mc-accent-fg, var(--surface)); font-size: 11px; font-weight: 700;
+}
+.dl-pf__chip {
+  display: inline-flex; align-items: center; max-width: 280px; height: 28px; border-radius: 999px;
+  background: var(--accent-soft, color-mix(in oklab, var(--accent) 14%, transparent));
+  border: 1px solid color-mix(in oklab, var(--accent) 40%, var(--border)); color: var(--text);
+}
+.dl-pf__chip-text {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0; background: none;
+  color: inherit; font: inherit; font-size: 12.5px; font-weight: 500; padding: 0 4px 0 10px; padding-inline: 10px 4px; cursor: pointer;
+}
+.dl-pf__chip-x {
+  flex-shrink: 0; display: inline-grid; place-items: center; width: 22px; height: 22px; margin-inline-end: 3px;
+  border: 0; border-radius: 50%; background: none; color: var(--muted); cursor: pointer;
+}
+.dl-pf__chip-x:hover { background: color-mix(in oklab, var(--text) 10%, transparent); color: var(--text); }
+.dl-pf__clear { border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; padding: 0 4px; }
+.dl-pf__clear:hover { color: var(--text); text-decoration: underline; }
+
+.dl-pf__pop {
+  /* Anchored to the bar's END: the bar sits at the end of its row, so opening
+     toward the start keeps the popup on screen (opening the other way pushed
+     the page sideways). */
+  position: absolute; z-index: 720; top: calc(100% + 6px); inset-inline-end: 0; width: min(360px, 92vw);
+  max-height: var(--pf-room, 70vh);
+  display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; box-shadow: 0 16px 40px rgb(0 0 0 / .28); overflow: hidden;
+}
+.dl-pf__head { padding: 10px 12px 6px; font-size: 12px; font-weight: 700; color: var(--muted); }
+.dl-pf__head--col { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); color: var(--text); font-size: 13.5px; }
+.dl-pf__col { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dl-pf__back { display: inline-grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
+.dl-pf__back:hover { background: var(--surface2); color: var(--text); }
+.dl-pf__search {
+  display: flex; align-items: center; gap: 8px; margin: 4px 10px 6px; padding: 0 10px; height: 32px;
+  border: 1px solid var(--border); border-radius: 8px; color: var(--muted); background: var(--bg);
+}
+.dl-pf__search:focus-within { border-color: var(--accent); }
+.dl-pf__search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: 13px; }
+.dl-pf__list { max-height: min(280px, 45vh); overflow-y: auto; padding: 2px 6px 6px; display: flex; flex-direction: column; gap: 1px; }
+.dl-pf__list--values { max-height: min(220px, 36vh); padding: 0; margin: 0 0 4px; }
+.dl-pf__opt, .dl-pf__val {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border: 0; border-radius: 7px;
+  background: none; color: var(--text); font: inherit; font-size: 13px; text-align: start; cursor: pointer;
+}
+.dl-pf__opt:hover, .dl-pf__val:hover { background: var(--surface2); }
+.dl-pf__opt-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dl-pf__opt-meta { flex-shrink: 0; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.dl-pf__kind { flex-shrink: 0; display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; background: var(--surface2); color: var(--muted); }
+.dl-pf__kind--number { color: var(--accent); }
+.dl-pf__kind--date { color: var(--warning, var(--accent)); }
+.dl-pf__empty { padding: 12px; text-align: center; font-size: 12.5px; color: var(--muted); }
+.dl-pf__body { padding: 12px; display: flex; flex-direction: column; gap: 10px; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.dl-pf__head, .dl-pf__foot, .dl-pf__search { flex-shrink: 0; }
+.dl-pf__pop > .dl-pf__list { flex: 1 1 auto; min-height: 0; max-height: none; }
+.dl-pf__pair { display: flex; align-items: flex-end; gap: 8px; }
+.dl-pf__pair label { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; font-weight: 600; color: var(--muted); }
+.dl-pf__pair input, .dl-pf__input {
+  width: 100%; height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg); color: var(--text); font: inherit; font-size: 13px; color-scheme: light dark;
+}
+.dl-pf__pair input:focus, .dl-pf__input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent); }
+.dl-pf__dash { padding-bottom: 8px; color: var(--muted); }
+.dl-pf__slider { position: relative; height: 22px; margin: 2px 4px 0; direction: ltr; }
+[dir="rtl"] .dl-pf__slider { transform: scaleX(-1); }
+.dl-pf__track { position: absolute; inset-inline: 0; top: 9px; height: 4px; border-radius: 4px; background: var(--border); }
+.dl-pf__fill { position: absolute; top: 0; bottom: 0; border-radius: 4px; background: var(--accent); }
+.dl-pf__slider input[type="range"] {
+  position: absolute; inset: 0; width: 100%; margin: 0; background: none; pointer-events: none;
+  -webkit-appearance: none; appearance: none;
+}
+.dl-pf__slider input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; pointer-events: auto; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--surface); border: 2px solid var(--accent); cursor: grab; margin-top: 0;
+}
+.dl-pf__slider input[type="range"]::-moz-range-thumb {
+  pointer-events: auto; width: 14px; height: 14px; border-radius: 50%; background: var(--surface); border: 2px solid var(--accent); cursor: grab;
+}
+.dl-pf__slider input[type="range"]::-webkit-slider-runnable-track { background: none; height: 16px; }
+.dl-pf__slider input[type="range"]::-moz-range-track { background: none; }
+.dl-pf__hint { min-height: 16px; font-size: 11.5px; color: var(--muted); }
+.dl-pf__warn { color: var(--warning, var(--danger)); font-weight: 600; }
+.dl-pf__note { margin: 0; font-size: 11.5px; color: var(--muted); }
+.dl-pf__text { display: flex; flex-direction: column; gap: 8px; }
+.dl-pf__text .dl-pf__search { margin: 0; }
+.dl-pf__modes { align-self: flex-start; }
+.dl-pf__box {
+  flex-shrink: 0; display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 4px;
+  border: 1.5px solid var(--border); color: var(--mc-accent-fg, var(--surface));
+}
+.dl-pf__val--on .dl-pf__box { background: var(--accent); border-color: var(--accent); }
+.dl-pf__foot { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border); background: var(--surface2); }
+.dl-pf__grow { flex: 1; }
+.dl-pf__btn {
+  height: 30px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer;
+}
+.dl-pf__btn:hover { border-color: color-mix(in oklab, var(--accent) 50%, var(--border)); }
+.dl-pf__btn--primary { background: var(--accent); border-color: var(--accent); color: var(--mc-accent-fg, var(--surface)); }
+.dl-pf__btn--primary:hover { filter: brightness(1.06); }
+.dl-pf__btn--danger { color: var(--danger); border-color: transparent; background: none; padding: 0 6px; }
+/* In the page row: the bar sits at the end of the row, after the page tabs. */
+.dl-pf-slot { margin-inline-start: auto; display: flex; align-items: center; min-width: 0; padding-block: 3px; }
+
+/* ============================================================
+   Report builder header: ONE geometry for View and Edit
+   The shared actions (.dl-hdr-end) keep the same size and spot in both
+   modes, so switching modes never moves them under the pointer. These
+   used to differ (Modern: 6px/16px padding, 32px buttons; Edit: 10px/20px,
+   24px buttons), which shifted every button by ~10px on each switch.
+   ============================================================ */
+[data-testid="builder-header"] { min-height: 56px; padding: 6px 16px !important; gap: 8px !important; }
+.dl-hdr-end .btn, .dl-hdr-end button.btn { height: 32px; }
+.dl-modebtn { min-width: 76px; justify-content: center; }
+
+/* ============================================================
+   Report builder: the top area folds away like the side panels
+   ============================================================ */
+.dl-topfold {
+  display: inline-grid; place-items: center; flex-shrink: 0;
+  width: 26px; height: 26px; padding: 0; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--muted); cursor: pointer;
+}
+.dl-topfold:hover { color: var(--text); border-color: color-mix(in oklab, var(--accent) 50%, var(--border)); }
+.dl-topfold:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dl-topfold-lead {
+  display: inline-flex; align-items: center; gap: 8px; min-width: 0; flex-shrink: 1;
+  padding-inline-end: 10px; margin-inline-end: 6px; border-inline-end: 1px solid var(--border);
+}
+.dl-topfold-lead .dl-topfold-name, .dl-vw .dl-topfold-lead .dl-topfold-name {
+  margin: 0; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 13px; font-weight: 700; line-height: 1.3; letter-spacing: normal; color: var(--text);
+}
+
+/* ============================================================
    Report builder: view switch + panel bar
    ============================================================ */
 
@@ -2519,44 +2668,96 @@ html[data-presenting="1"] .dl-bleed { margin: 0; block-size: 100%; }
    A card per candidate: glyph, name, why, and the live thumbnail. The add
    action is small and at the row's end; the chart is the content.
    ============================================================ */
-.dl-sug { padding: 12px; overflow-y: auto; block-size: 100%; }
-.dl-sug__head { display: flex; align-items: center; margin-block-end: 10px; }
-.dl-sug__title { font-size: 13px; font-weight: 650; color: var(--text); }
-.dl-sug__head .btn { margin-inline-start: auto; }
-.dl-sug__group {
-  font-size: 11px; font-weight: 600; color: var(--muted);
-  margin: 4px 0 6px;
+.dl-sug { overflow-y: auto; block-size: 100%; display: flex; flex-direction: column; }
+.dl-sug__top { padding: 12px 12px 10px; border-block-end: 1px solid var(--border); background: var(--surface); display: flex; flex-direction: column; gap: 10px; }
+.dl-sug__head { display: flex; align-items: flex-start; gap: 10px; }
+.dl-sug__heading { flex: 1; min-inline-size: 0; display: flex; flex-direction: column; gap: 2px; }
+.dl-sug__title { display: inline-flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 650; color: var(--text); }
+.dl-sug__title svg { color: var(--accent); }
+.dl-sug__summary { font-size: 12px; color: var(--muted); }
+.dl-sug__chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.dl-sug__chip {
+  display: inline-flex; align-items: center; gap: 6px; block-size: 26px; padding: 0 10px; border-radius: 999px;
+  border: 1px solid var(--border); background: transparent; color: var(--text); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
 }
-.dl-sug__group--accent { color: var(--accent); }
-.dl-sug__list { list-style: none; display: flex; flex-direction: column; gap: 8px; margin: 0 0 12px; padding: 0; }
+.dl-sug__chip:disabled { color: var(--mc-faint, var(--muted)); cursor: default; opacity: .7; }
+.dl-sug__chip--on { background: var(--accent-soft); border-color: var(--mc-accent-line, var(--accent)); color: var(--mc-accent-ink, var(--accent)); }
+.dl-sug__chip-n { font-variant-numeric: tabular-nums; opacity: .75; font-weight: 600; }
+/* One colour per kind of idea, from the chart series: a mark, never text. */
+.dl-sug__dot { inline-size: 8px; block-size: 8px; border-radius: 2px; flex: none; background: var(--muted); }
+.dl-sug__card--compare, .dl-sug__dot--compare { --sug-c: var(--dl-series-2, var(--accent)); }
+.dl-sug__card--trend, .dl-sug__dot--trend { --sug-c: var(--dl-series-1, var(--accent)); }
+.dl-sug__card--dist, .dl-sug__dot--dist { --sug-c: var(--dl-series-3, var(--accent)); }
+.dl-sug__card--rel, .dl-sug__dot--rel { --sug-c: var(--dl-series-4, var(--accent)); }
+.dl-sug__card--summary, .dl-sug__dot--summary { --sug-c: var(--dl-series-5, var(--muted)); }
+.dl-sug__dot[class*="--"] { background: var(--sug-c); }
+.dl-sug__section { padding: 0 12px; }
+/* The heading stays at the top while its cards scroll under it. */
+.dl-sug__sec-head {
+  position: sticky; top: 0; z-index: 2; margin: 0; padding: 12px 2px 8px; background: var(--bg);
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
+}
+.dl-sug__list { list-style: none; display: flex; flex-direction: column; gap: 8px; margin: 0 0 4px; padding: 0; }
 .dl-sug__card {
-  border: 1px solid var(--border); border-radius: 10px; padding: 10px;
-  background: var(--surface);
-  transition: border-color .12s ease, box-shadow .12s ease;
+  border: 1px solid var(--border); border-radius: 12px; background: var(--surface);
+  transition: border-color var(--dl-dur, .14s) ease, box-shadow var(--dl-dur, .14s) ease;
 }
-.dl-sug__card:hover { border-color: var(--border-strong, var(--border)); box-shadow: var(--dl-shadow-sm, 0 1px 2px rgb(15 23 42 / .06)); }
+.dl-sug__card:hover { border-color: var(--border-strong, var(--border)); }
+.dl-sug__card--open { border-color: var(--mc-accent-line, var(--accent)); }
 .dl-sug__card--aligned { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
-.dl-sug__row { display: flex; align-items: flex-start; gap: 8px; }
-.dl-sug__icon {
-  flex: none; inline-size: 28px; block-size: 28px; border-radius: 7px;
-  display: inline-flex; align-items: center; justify-content: center;
-  background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent);
+.dl-sug__row { display: flex; align-items: center; gap: 4px; padding-inline-end: 10px; }
+.dl-sug__main {
+  flex: 1; min-inline-size: 0; display: flex; align-items: center; gap: 12px; padding: 9px 6px 9px 9px; padding-inline: 9px 6px;
+  border: 0; background: none; color: inherit; font: inherit; text-align: start; cursor: pointer; border-radius: 12px;
 }
-.dl-sug__text { flex: 1; min-inline-size: 0; }
-.dl-sug__name { font-size: 12.5px; font-weight: 600; line-height: 1.3; display: flex; align-items: center; gap: 4px; }
-.dl-sug__star { color: var(--accent); flex: none; }
-.dl-sug__why { font-size: 11.5px; color: var(--muted); margin-block-start: 2px; line-height: 1.35; }
-.dl-sug__add { flex: none; padding: 3px 8px; font-size: 11.5px; }
+.dl-sug__main:focus-visible, .dl-sug__onpage-toggle:focus-visible, .dl-sug__goto:focus-visible, .dl-sug__chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dl-sug__thumb {
+  flex: none; inline-size: 72px; block-size: 44px; border-radius: 8px; background: var(--surface2);
+  display: grid; place-items: center; direction: ltr;
+}
+.dl-sug__thumb-bars { fill: var(--sug-c, var(--accent)); }
+.dl-sug__thumb-line { fill: none; stroke: var(--sug-c, var(--accent)); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.dl-sug__thumb-area { fill: var(--sug-c, var(--accent)); fill-opacity: .18; }
+.dl-sug__text { flex: 1; min-inline-size: 0; display: flex; flex-direction: column; gap: 3px; }
+.dl-sug__name { font-size: 13.5px; font-weight: 600; line-height: 1.3; color: var(--text); display: block; }
+.dl-sug__star { color: var(--accent); margin-inline-end: 4px; vertical-align: -1px; }
+.dl-sug__why { font-size: 12px; color: var(--muted); line-height: 1.35; }
+.dl-sug__add { flex: none; padding: 3px 9px; font-size: 12px; }
+.dl-sug__added {
+  flex: none; display: inline-flex; align-items: center; gap: 5px; block-size: 26px; padding: 0 9px; border-radius: 8px;
+  background: var(--accent-soft); border: 1px solid var(--mc-accent-line, var(--accent)); color: var(--mc-accent-ink, var(--accent));
+  font-size: 12px; font-weight: 600;
+}
+.dl-sug__more { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 10px; }
 /* A suggested chart has to be READ to be chosen: never smaller than a chart
-   with axes and labels can draw clearly in. Wider than the panel on a narrow
-   screen, the card scrolls sideways rather than squeezing the chart. */
+   with axes, axis names and labels can draw clearly in. */
 .dl-sug__preview {
-  block-size: clamp(200px, 26vh, 260px); min-block-size: 200px; min-inline-size: 260px;
-  pointer-events: none; margin-block-start: 8px;
-  border-radius: 8px; background: var(--surface2); overflow: hidden;
+  /* Tall enough for named axes AND long tick labels (a histogram's bins) to
+     leave the bars room to be read. */
+  block-size: clamp(300px, 42vh, 360px); min-inline-size: 260px;
+  pointer-events: none; border-radius: 8px; background: var(--surface2); overflow: hidden;
 }
-.dl-sug__card { overflow-x: auto; }
-.dl-sug__none { font-size: 12px; color: var(--muted); }
+/* The card above already names the chart; the preview's own header would
+   only print its type ("histogram") for want of a title. */
+.dl-sug__preview .dl-whead { display: none !important; } /* its display is set inline */
+.dl-sug__detail { margin: 0; font-size: 12.5px; line-height: 1.55; color: var(--text); }
+.dl-sug__actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.dl-sug__none { font-size: 12.5px; color: var(--muted); padding: 16px 14px; margin: 0; line-height: 1.55; }
+.dl-sug__onpage { margin: 12px 12px 16px; padding-block-start: 8px; border-block-start: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+.dl-sug__onpage-toggle {
+  display: flex; align-items: center; gap: 6px; padding: 6px 2px; border: 0; background: none; color: var(--muted);
+  font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; text-align: start;
+}
+.dl-sug__chev { transition: transform var(--dl-dur, .14s) ease; }
+.dl-sug__onpage-toggle[aria-expanded="true"] .dl-sug__chev { transform: rotate(90deg); }
+.dl-sug__card--onpage { background: transparent; border-style: dashed; }
+.dl-sug__card--onpage .dl-sug__row { padding: 8px 10px; gap: 12px; }
+.dl-sug__goto {
+  flex: none; display: inline-flex; align-items: center; gap: 3px; border: 0; background: none; color: var(--accent);
+  font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+@media (prefers-reduced-motion: reduce) { .dl-sug__chev, .dl-sug__card { transition: none; } }
 
 /* ============================================================
    Underline tabs (dataset sections)
@@ -2827,3 +3028,17 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--da
 .dl-folder-tile { padding: 14px 16px; transition: border-color .12s, box-shadow .12s; }
 .dl-folder-tile:hover, .dl-folder-tile:focus-visible { border-color: var(--accent); box-shadow: 0 1px 6px color-mix(in srgb, var(--accent) 18%, transparent); }
 .dl-folder-tile[data-drop-active="true"] { border-color: var(--accent); }
+
+/* Modern bar: the page filters and the selection chips share the row's end. */
+.dl-vw-bar .dl-pf-slot + .dl-vw-flt { margin-inline-start: 12px; }
+
+/* 5.14: the builder's two header rows sit side by side when the screen is
+   wide enough, and wrap to two rows (as before) when it is not. */
+.dl-builder-top { display: flex; flex-wrap: wrap; flex-shrink: 0; align-items: stretch;
+  background: var(--surface); border-bottom: 1px solid var(--border); }
+/* `auto` bases each row on its own content, so the panel bar joins the title
+   row only when BOTH fit on one line; otherwise it wraps below as before. A
+   fixed basis squeezed the title row into a narrow column in Arabic, where
+   its labels are longer (Chrome re-test). */
+.dl-builder-top > [data-testid="builder-header"] { flex: 1 1 auto !important; min-width: 0; max-width: 100%; border-bottom: none !important; }
+.dl-builder-top > .dl-panebar { flex: 1 1 auto; min-width: 0; border-block-end: none; }

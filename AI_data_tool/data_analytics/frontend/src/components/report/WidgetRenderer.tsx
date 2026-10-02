@@ -80,6 +80,10 @@ interface Props {
   reportDisplayRules?: DisplayRule[]
   /** Report-level filters applied to every widget (defined once for the whole report). */
   reportFilters?: { column: string; op: string; value: unknown }[]
+  /** The reader's own filters for the whole page (the filter bar above the
+   *  page). Applied only where this widget's data HAS the column -- a live
+   *  (DirectQuery) source refuses an unknown column outright. */
+  pageFilters?: { column: string; op: string; value: unknown }[]
   onDrillthrough?: (targetPageId: number, filterValue: unknown) => void
   isPreview?:    boolean
   hierarchy?:    HierarchyNode[]
@@ -217,15 +221,15 @@ export function binningTitle(b: Binning | undefined | null): string {
     + 'Every row is still counted. Drag the slider under the chart to zoom in and see more detail.'
 }
 
-function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, geography, datasets, selected, isMultiSelected, onSelect, onDelete, onDuplicate, editMode, promptFilter, onDragStart, onResizeStart, isDragging, onFetchComplete, pages, reportDisplayRules, reportFilters, onDrillthrough, isPreview, hierarchy, bookmarks, onNavigateToPage, onApplyBookmark, reportId, parameters, onSetParameter, dataOverride, relationships, eagerFetch, allowExport = true, refreshNonce }: Props) {
+function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, geography, datasets, selected, isMultiSelected, onSelect, onDelete, onDuplicate, editMode, promptFilter, onDragStart, onResizeStart, isDragging, onFetchComplete, pages, reportDisplayRules, reportFilters, pageFilters, onDrillthrough, isPreview, hierarchy, bookmarks, onNavigateToPage, onApplyBookmark, reportId, parameters, onSetParameter, dataOverride, relationships, eagerFetch, allowExport = true, refreshNonce }: Props) {
   const { emitFilter, emitMultiFilter, getFiltersFor, canBroadcast, canReceive, activeFilters, clearAllFilters, clearFilter, interactions, getReceiveMode, carryFiltersTo } = useCrossFilter()
   const [data,    setData]    = useState<any>(null)
   const [loading, setLoading] = useState(
     () => widgetFetchesData(widget.widget_type, widget.config, dataOverride))
   // The backend's `code` beside its `detail` (services/error_codes.py). The
   // detail is what the reader sees; the code is what decides whether a
-  // 'Try again' is offered -- `source_unavailable` and `quota` (after
-  // Retry-After) are the two answers that can change on retry.
+  // 'Try again' is offered -- `source_unavailable`, `source_busy` and `quota`
+  // (after Retry-After) are the answers that can change on retry.
   const [fetchError, setFetchError] = useState<{ detail: string; code?: string } | null>(null)
 
   // Per-widget dataset override: if the widget has dataset_id in its config, use that dataset's
@@ -319,7 +323,10 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
     // modelled relationship like cross-filters do, and let the shaper skip any that
     // this widget's dataset lacks (_apply_filters ignores unknown columns).
     const reportWide = (reportFilters ?? []).map(f => ({ column: translate(f.column), op: f.op, value: f.value }))
-    cfg.filters = [...existing, ...reportWide, ...crossFilters, ...pagePrompt]
+    const pageWide = (pageFilters ?? [])
+      .map(f => ({ column: translate(f.column), op: f.op, value: f.value }))
+      .filter(f => !myCols || myCols.size === 0 || myCols.has(f.column))
+    cfg.filters = [...existing, ...reportWide, ...pageWide, ...crossFilters, ...pagePrompt]
     if (hierarchyNodeId != null && expandDepth > 0 && expandLevels.length > 1) {
       cfg.dimension_levels = expandLevels.slice(0, expandDepth + 1)
       cfg.dimension = expandLevels[0]
@@ -349,7 +356,7 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
     // rebuild this exact config WITHOUT them for its unfiltered baseline.
     return { config: cfg, crossFilters }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(widget.config), JSON.stringify(incomingFilters), promptFilter?.column, promptFilter?.value, hierarchyNodeId, currentNode?.column_name, currentNode?.format, JSON.stringify(drillPath), JSON.stringify(decompPath), decompSplit, widget.widget_type, expandDepth, expandLevels.join(','), JSON.stringify(relationships ?? []), JSON.stringify(reportDisplayRules), JSON.stringify(reportFilters)])
+  }, [JSON.stringify(widget.config), JSON.stringify(incomingFilters), promptFilter?.column, promptFilter?.value, hierarchyNodeId, currentNode?.column_name, currentNode?.format, JSON.stringify(drillPath), JSON.stringify(decompPath), decompSplit, widget.widget_type, expandDepth, expandLevels.join(','), JSON.stringify(relationships ?? []), JSON.stringify(reportDisplayRules), JSON.stringify(reportFilters), JSON.stringify(pageFilters)])
   const mergedConfig = mergedPair.config
   const translatedCrossFilters = mergedPair.crossFilters
 
@@ -420,6 +427,8 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
       { title: 'Set by the author (this widget)', empty: 'No filters.', items: own.map(describeFilter) },
       { title: 'Set by the author (whole report)', empty: 'No report filters.',
         items: report.map(f => `${describeFilter(f)}${applies(f.column) ? '' : ' — does not apply: this widget’s data has no such column'}`) },
+      { title: 'Your page filters', empty: 'None — add one with + Filter above the page.',
+        items: (pageFilters ?? []).map(f => `${describeFilter(f as FilterLikeLocal)}${applies(f.column) ? '' : ' — does not apply: this widget’s data has no such column'}`) },
       { title: 'Your selections', empty: 'None — click a mark on another widget to filter this one.',
         items: [
           ...translatedCrossFilters.map(f => describeFilter(f as FilterLikeLocal)),
@@ -1302,10 +1311,16 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
             ...options.map(o => ({ key: `as-${o.type}`, label: `View as ${o.label}${o.recommended ? ' (recommended)' : ''}`,
                                    onSelect: () => setViewAs(o.type) })),
             ...(viewAs ? [{ key: 'as-original', label: 'Show as designed', onSelect: () => setViewAs(null) }] : []),
+            // The data behind this chart, from the visible menu -- it used to be
+            // reachable only by right-clicking (HR evaluation, item 3.2).
+            ...(live && widgetDatasetId != null && allowExport ? [
+              { key: 'export-csv', label: 'Export data as CSV', onSelect: () => handleExport('csv') },
+              { key: 'export-xlsx', label: 'Export data as Excel', onSelect: () => handleExport('xlsx') },
+            ] : []),
           ]
           return (
             <span onMouseDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
-              <ActionMenu label={`Analyse ${title}`} items={items}
+              <ActionMenu portal label={`Analyse ${title}`} items={items}
                 trigger={<MoreVertical size={15} aria-hidden />} triggerClassName="dl-wicon" />
             </span>
           )
@@ -1315,7 +1330,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
             <button className="dl-wicon" aria-label={`Delete widget ${title}`} title="Delete"
               onClick={e => { e.stopPropagation(); onDelete() }}><Trash2 size={15} aria-hidden /></button>
             <span onMouseDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
-              <ActionMenu
+              <ActionMenu portal
                 trigger={<MoreVertical size={15} aria-hidden />} triggerClassName="dl-wicon"
                 label={`More actions for widget ${title}`}
                 items={[
@@ -1375,7 +1390,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
             onDrillthrough?.(drillthroughPageId, last.value)
           }
         } : undefined}>
-        {loading && <EmptyState msg="Loading…" />}
+        {loading && <EmptyState msg={t('common.loading')} />}
         {!loading && hiddenByRule && editMode && (
           <div data-testid="widget-hidden-by-rule" style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12, textAlign: 'center', padding: 8 }}>
             Hidden by a display rule
@@ -1489,9 +1504,14 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
         </div>
       )}
 
-      {/* Resize handle — bottom-right corner */}
+      {/* Resize handle — bottom-right corner, in BOTH directions. The canvas
+          places widgets from the left in Arabic too (layout x is a left
+          offset), so a resize always grows the widget rightward and down; a
+          handle mirrored to the bottom-left in RTL pointed the wrong way
+          (HR re-test 2026-10-01). Physical `right`, LTR-pinned contents. */}
       {editMode && onResizeStart && (
         <div
+          data-testid="widget-resize-handle"
           onMouseDown={e => { e.stopPropagation(); e.preventDefault(); onResizeStart(e) }}
           onPointerDown={e => {
             e.stopPropagation(); e.preventDefault()
@@ -1499,7 +1519,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
             onResizeStart(e)
           }}
           style={{
-            position: 'absolute', bottom: 0, insetInlineEnd: 0,
+            position: 'absolute', bottom: 0, right: 0, direction: 'ltr',
             width: 18, height: 18, cursor: 'nwse-resize',
             display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end',
             padding: '3px',

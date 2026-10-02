@@ -56,7 +56,18 @@ _JOIN_NEEDS_ON = {"left", "inner", "right", "full"}
 _SUBQUERY_OPS = {"in": "IN", "not_in": "NOT IN", "exists": "EXISTS",
                  "not_exists": "NOT EXISTS"}
 _ALIAS = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,60}$")
-MAX_LIMIT = 100_000
+#: The highest row limit the builder accepts. Kept equal to the import cap
+#: (settings.import_row_cap) so the Query builder and Browse follow ONE rule:
+#: the HR evaluation typed 300,000, the SQL quietly said 100,000, and the
+#: dataset came out 58% short with nothing on screen saying so. A limit above
+#: this is now refused with a message, never clamped.
+def max_limit() -> int:
+    from ..core.config import settings
+    cap = int(getattr(settings, "import_row_cap", 0) or 0)
+    return cap if cap > 0 else 10_000_000
+
+
+MAX_LIMIT = 100_000  # kept for importers; the live ceiling is max_limit()
 #: A nested WHERE may itself nest. Bounded because the compile is recursive and
 #: a model is client-supplied: without a ceiling, a deeply self-nested payload
 #: is a stack-overflow request rather than a query.
@@ -312,12 +323,17 @@ def qid_null_check(qparent: str) -> str:
 def build_sql(model: dict, dialect: str, known: dict[str, set[str]],
               schema: str | None = None,
               known_functions: set[str] | None = None,
-              depth: int = 0) -> str:
+              depth: int = 0, unlimited: bool = False) -> str:
     """Compile the model. Raises ValueError with an author-readable message on
     anything invalid -- the router turns those into 400s.
 
     `depth` is the subquery nesting level; callers leave it at 0 and the
     recursive WHERE-subquery compile increments it.
+
+    `unlimited` compiles with NO row limit -- the form a DirectQuery dataset
+    stores. A live dataset is a view of the source, not a sample of it: a
+    LIMIT baked into its SQL silently cut every widget to the first N rows
+    (and, with no ORDER BY, a different N rows on every query).
     """
     def qtable(t: str) -> str:
         q = _quote(dialect, t)
@@ -522,11 +538,17 @@ def build_sql(model: dict, dialect: str, known: dict[str, set[str]],
             orders.append(f"{qcol(s.get('table'), s['column'])} {direction}")
 
     try:
-        limit = min(int(model.get("limit") or 10_000), MAX_LIMIT)
+        limit = int(model.get("limit") or 10_000)
     except (TypeError, ValueError):
         limit = 10_000
     if limit < 1:
         limit = 1
+    ceiling = max_limit()
+    if limit > ceiling and not unlimited and depth == 0:
+        raise ValueError(
+            f"The row limit can be at most {ceiling:,} (the import limit set in "
+            f"Admin → Settings). Lower it, or choose DirectQuery (live), which "
+            f"has no row limit.")
 
     # A SUBQUERY takes no LIMIT of its own. The outer query bounds the result;
     # a limit inside `IN (...)` silently truncates the set being matched
@@ -535,17 +557,38 @@ def build_sql(model: dict, dialect: str, known: dict[str, set[str]],
     # (Oracle and SQL Server also reject a bare inner LIMIT/TOP outright.)
     nested = depth > 0
 
-    top = f"TOP {limit} " if dialect == "sqlserver" and not nested else ""
+    top = f"TOP {limit} " if dialect == "sqlserver" and not nested and not unlimited else ""
     sql = f"{hier_cte}SELECT {top}{', '.join(select_parts)} FROM {sql_from}"
-    if wheres:
-        sql += " WHERE " + f" {joiner.upper()} ".join(wheres)
+    # 4.1 "Current rows only": a table with from/to dates (dept_emp, titles,
+    # salaries) holds history; "current" is the row whose end date is still
+    # open -- NULL, the 9999-01-01 sentinel, or simply in the future. One tick
+    # per table instead of three hand-written filter rows. ANDed with the
+    # filter group whatever its joiner: it narrows the population, it is not
+    # one alternative among the filters. CURRENT_DATE is evaluated by the
+    # database on every read, so a live dataset stays current tomorrow.
+    today = "CAST(GETDATE() AS date)" if dialect == "sqlserver" else "CURRENT_DATE"
+    current = [f"({c} IS NULL OR {c} > {today})" for c in (
+        qcol(x.get("table"), _require(x, "column", "a current-rows option"))
+        for x in (model.get("current_only") or []))]
+    if wheres or current:
+        group = f" {joiner.upper()} ".join(wheres)
+        if group and current and len(wheres) > 1 and joiner == "or":
+            group = f"({group})"
+        sql += " WHERE " + " AND ".join([g for g in [group] if g] + current)
     if group_parts:
         sql += " GROUP BY " + ", ".join(group_parts)
     if havings:
         sql += " HAVING " + " AND ".join(havings)
+    if not orders and not nested and not unlimited:
+        # A LIMIT with no ORDER BY lets the database return ANY N rows, and it
+        # may return different ones next time -- the evaluation saw a payroll
+        # total move by 130M between two reloads with nothing edited. Order by
+        # every selected column (by position, which every dialect accepts) so
+        # a capped result is the same capped result every time.
+        orders = [str(i + 1) for i in range(len(select_parts))]
     if orders:
         sql += " ORDER BY " + ", ".join(orders)
-    if nested:
+    if nested or unlimited:
         return sql
     if dialect == "oracle":
         sql += f" FETCH FIRST {limit} ROWS ONLY"

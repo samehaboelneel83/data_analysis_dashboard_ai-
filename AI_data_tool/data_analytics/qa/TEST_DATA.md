@@ -155,3 +155,16 @@ Pacific looking like empty ocean is **not** a fail. Clipped city names or half a
 - A folder missing from one user’s menu while a direct URL still opens the report (menu is navigation, not access control).
 - “Loading map…” for a moment while a chart chunk loads.
 - No Sign Up button — there is none on purpose.
+
+## HR evaluation re-test accounts (2026-10-01)
+
+Created through the admin API for Phase 6 item 8 (security). Password is the
+dev seed password from `scripts/seed_dev_accounts.py`.
+
+| Account | Role | What the role is limited to |
+|---|---|---|
+| hr.sales.manager@example.invalid | HR test — Sales manager (53) | Row rule on "Current workforce" (214): `dept_name == "Sales"` |
+| hr.recruiter@example.invalid | HR test — Recruiter (54) | Column rule on "Current workforce" (214): `salary` hidden |
+
+Both roles can view dataset 214 and dashboard 248. Delete the two users and
+roles in Admin when the re-test is no longer needed.

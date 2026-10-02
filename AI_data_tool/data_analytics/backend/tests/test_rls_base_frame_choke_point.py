@@ -42,6 +42,18 @@ _ALLOWED_FILES = {
     # build_profile, not after, because the profile is what reaches a model in
     # step 4 and it carries sample VALUES. REVIEWED.
     "services/automation_runner.py",
+    # prepare (2026-10-02): the "suggest dashboards" frame, moved out of
+    # routers/datasets.py so the background analyst-panel job builds the same
+    # one. RLS on the line after load_file, then prep and calculated columns;
+    # denied columns dropped before build_profile, which reaches a model.
+    # The job resolves RLS as the person who queued it, as they are now. REVIEWED.
+    "services/suggest_inputs.py",
+    # source_frame (4.6): a dataflow's source rows for the user running it --
+    # or, on a schedule, its recorded creator. Filters the BASE frame on the
+    # line after load_file, drops denied columns, then replays the recipe.
+    # A live source pushes the same predicate down through
+    # load_directquery_frame instead. REVIEWED.
+    "services/snapshot_flow.py",
     # Both call sites filter the BASE frame on the line after load_file,
     # before prep and calculated columns -- the same order every other
     # frame-reading endpoint uses. Training secures the frame a model is

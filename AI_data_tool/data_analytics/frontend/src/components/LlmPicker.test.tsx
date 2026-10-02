@@ -45,6 +45,16 @@ describe('LlmPicker', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: /Server B, available/ })).toBeInTheDocument())
   })
 
+  it('says in plain words what picking a model changes (4.9)', async () => {
+    render(<MemoryRouter><LlmPicker /></MemoryRouter>)
+    fireEvent.click(await screen.findByRole('button', { name: /AI model/ }))
+    const box = screen.getByTestId('llm-explainer')
+    expect(box).toHaveTextContent('What does this change?')
+    expect(box).toHaveTextContent(/Ask AI, the steps of Automations/)
+    expect(box).toHaveTextContent(/Lighter models answer faster/)
+    expect(box).toHaveTextContent(/set the default for everyone under Manage/)
+  })
+
   it('forgets a pick of an endpoint that no longer exists', async () => {
     api.setLlmChoice('gone')
     render(<MemoryRouter><LlmPicker /></MemoryRouter>)

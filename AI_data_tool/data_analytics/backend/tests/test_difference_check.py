@@ -66,4 +66,19 @@ def test_a_significant_but_negligible_part_is_worded_as_such():
     r = difference_check(df, "g", ["A", "B"], "v", "sum")
     counts = r["tests"][1]
     assert counts["significant"] and counts["effect_label"] == "negligible"
-    assert "Only the number of rows differs significantly, and by a negligible amount" in r["summary"]
+    assert "Only the number of rows differs significantly, with a negligible statistical effect" in r["summary"]
+    # ...and the business size is said beside it, not "unlikely to matter" (3.10)
+    assert "unlikely to matter" not in r["summary"]
+    assert "(+11.6%)" in r["summary"]
+
+
+def test_a_large_headcount_gap_is_not_called_irrelevant():
+    """HR evaluation: 3,300 more people (+15%) came back as 'unlikely to
+    matter in practice' because Cohen's h was negligible."""
+    df = pd.DataFrame({"dept": ["Development"] * 25300 + ["Production"] * 22000})
+    r = difference_check(df, "dept", ["Development", "Production"])
+    t = r["tests"][0]
+    assert t["effect_label"] == "negligible"
+    assert t["business"]["absolute"] == 3300
+    assert "Development has 3,300 more rows than Production (+15.0%)" in r["summary"]
+    assert "unlikely to matter" not in r["summary"]

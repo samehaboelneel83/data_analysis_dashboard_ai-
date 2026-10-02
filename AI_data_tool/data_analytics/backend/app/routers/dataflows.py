@@ -52,6 +52,8 @@ class DataflowIn(BaseModel):
     source_dataset_id: int
     steps: list[dict] = []
     refresh_interval_minutes: int | None = None
+    # 4.6: append one row per period instead of replacing (snapshot_flow.py).
+    snapshot: dict | None = None
 
 
 class DataflowPatch(BaseModel):
@@ -59,6 +61,7 @@ class DataflowPatch(BaseModel):
     description: str | None = None
     steps: list[dict] | None = None
     refresh_interval_minutes: int | None = None
+    snapshot: dict | None = None
 
 
 class RunRequest(BaseModel):
@@ -108,6 +111,7 @@ def _out(flow: Dataflow, outputs: list[dict] | None = None,
         "join_dataset_ids": flow.join_dataset_ids or [],
         "steps": flow.steps or [],
         "refresh_interval_minutes": flow.refresh_interval_minutes,
+        "snapshot": getattr(flow, "snapshot", None),
         "created_by": flow.created_by,
         "created_at": _iso_z(flow.created_at),
         "last_run_at": _iso_z(flow.last_run_at),
@@ -175,8 +179,10 @@ async def create_dataflow(req: DataflowIn, db: AsyncSession = Depends(get_db),
     src = await db.get(Dataset, req.source_dataset_id)
     check_org(src, current_user, "Dataset not found")
     await require_dataset_capability(db, current_user, req.source_dataset_id, "data")
-    if src.mode == "directquery" or not src.filename:
-        raise HTTPException(400, "Only import-mode datasets can feed a dataflow")
+    # 4.6: a live (DirectQuery) dataset may feed a dataflow -- a snapshot of
+    # one is how a source that only shows today builds a history.
+    if not src.filename and not (src.mode == "directquery" and src.data_source_id):
+        raise HTTPException(400, "This dataset has no data behind it to feed a dataflow")
     # Said at once rather than at the first run: a dataflow over governed or
     # export-blocked data could be created and scheduled but never run (E12,
     # found driving the new Dataflows page against the demo's Sales, which has
@@ -199,7 +205,20 @@ async def create_dataflow(req: DataflowIn, db: AsyncSession = Depends(get_db),
     except ValueError as e:
         raise HTTPException(400, str(e))
 
+    from ..services.snapshot_flow import validate_spec
+    try:
+        # Checked against the source's columns when the recipe leaves them as
+        # they are; a recipe that reshapes them is checked at the first run.
+        snapshot = validate_spec(req.snapshot, known if not steps else
+                                 set((req.snapshot or {}).get("group_by") or []) | {
+                                     c for c in [(req.snapshot or {}).get("measure"),
+                                                 ((req.snapshot or {}).get("backfill") or {}).get("from_column"),
+                                                 ((req.snapshot or {}).get("backfill") or {}).get("to_column")] if c})
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
     flow = Dataflow(
+        snapshot=snapshot,
         org_id=current_user.org_id, name=name, description=req.description or None,
         source_dataset_id=req.source_dataset_id, steps=steps,
         join_dataset_ids=sorted(set(collect_join_dataset_ids(steps))),
@@ -260,6 +279,16 @@ async def update_dataflow(flow_id: int, req: DataflowPatch,
         flow.steps = req.steps
         flow.join_dataset_ids = sorted(set(collect_join_dataset_ids(req.steps)))
 
+    if "snapshot" in req.model_fields_set:
+        from ..services.snapshot_flow import validate_spec
+        try:
+            flow.snapshot = validate_spec(req.snapshot, {r[0] for r in (await db.execute(
+                select(DatasetColumn.name).where(DatasetColumn.dataset_id == flow.source_dataset_id))).all()}
+                if not (flow.steps or []) else set((req.snapshot or {}).get("group_by") or []) | {
+                    c for c in [(req.snapshot or {}).get("measure")] if c})
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
     if req.refresh_interval_minutes is not None:
         if req.refresh_interval_minutes and req.refresh_interval_minutes < MIN_INTERVAL_MINUTES:
             raise HTTPException(400, f"Minimum refresh interval is {MIN_INTERVAL_MINUTES} minutes")
@@ -299,7 +328,7 @@ async def run_dataflow(flow_id: int, req: RunRequest,
     existing output in place -- which is what the scheduler calls, so both paths
     run identical code rather than drifting apart.
     """
-    from ..routers.datasets import (_build_frame, _refuse_if_ungovernable,
+    from ..routers.datasets import (_refuse_if_ungovernable,
                                     _write_frame_as_dataset_file)
     from ..services.prep import DERIVED_FROM_KEY
 
@@ -307,7 +336,8 @@ async def run_dataflow(flow_id: int, req: RunRequest,
     await require_dataflow_capability(db, current_user, flow_id, "edit")
 
     src = await db.get(Dataset, flow.source_dataset_id) if flow.source_dataset_id else None
-    if src is None or src.org_id != current_user.org_id or not src.filename:
+    if src is None or src.org_id != current_user.org_id or not (
+            src.filename or (src.mode == "directquery" and src.data_source_id)):
         raise HTTPException(409, "This dataflow's source dataset no longer exists")
 
     steps = flow.steps or []
@@ -316,10 +346,21 @@ async def run_dataflow(flow_id: int, req: RunRequest,
     inherited = await _refuse_if_ungovernable(
         db, [flow.source_dataset_id] + list(flow.join_dataset_ids or []))
 
+    from ..services.analysis_frame import FrameUnavailable
+    from ..services.snapshot_flow import merge as merge_snapshot, snapshot_rows, source_frame, validate_spec
     try:
-        out = await _build_frame(db, current_user, src, steps)
+        out = await source_frame(db, current_user, src, steps)
     except FileNotFoundError:
         raise HTTPException(404, "Source dataset file not found on server")
+    except (FrameUnavailable, ValueError) as e:
+        raise HTTPException(400, str(e))
+    spec = None
+    if getattr(flow, "snapshot", None):
+        try:
+            spec = validate_spec(flow.snapshot, set(out.columns))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        out = snapshot_rows(out, spec)
 
     if len(out) > MATERIALIZE_MAX_ROWS:
         raise HTTPException(400, f"Result has {len(out):,} rows, above the "
@@ -372,10 +413,19 @@ async def run_dataflow(flow_id: int, req: RunRequest,
         if not outputs:
             raise HTTPException(400, "This dataflow has no outputs yet — name one to create it")
         type_map = await asyncio.to_thread(detect_types, out)
+        from ..services.ingest import load_file
+        run_rows = out
         for ds in outputs:
+            # A snapshot APPENDS this run's period to what the output holds.
+            if spec is not None:
+                try:
+                    existing = await asyncio.to_thread(load_file, ds.filename)
+                except Exception:  # noqa: BLE001 -- a missing file starts the history afresh
+                    existing = None
+                out = merge_snapshot(existing, run_rows)
             # Written in place so every report pointing at the output picks the
             # new rows up with no rewiring.
-            await asyncio.to_thread(lambda p=ds.filename: out.to_csv(p, index=False))
+            await asyncio.to_thread(lambda p=ds.filename, f=out: f.to_csv(p, index=False))
             await asyncio.to_thread(write_parquet_sidecar, str(ds.filename))
             ds.row_count, ds.col_count = len(out), len(out.columns)
             ds.last_refreshed_at = now

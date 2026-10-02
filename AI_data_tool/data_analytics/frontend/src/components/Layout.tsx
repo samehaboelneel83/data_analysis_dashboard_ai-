@@ -48,7 +48,20 @@ const DRAWER_BREAKPOINT = 900
 export default function Layout() {
   const [theme, setTheme] = useState<'dark' | 'light'>(getInitialTheme)
   const { direction, setDirection } = useDirection()
-  const [expanded, setExpanded] = useState(() => localStorage.getItem('rail-expanded') !== '0')
+  // Remembered PER USER (5.1): one global key let a previous user's (or an
+  // old test's) collapsed rail greet every newcomer on this browser as a
+  // strip of unlabelled icons. A user with no choice yet starts expanded.
+  const { user: railUser } = useAuth()
+  const railKey = railUser?.id != null ? `rail-expanded:${railUser.id}` : null
+  const readRail = (key: string | null) => {
+    try { return key ? localStorage.getItem(key) !== '0' : true } catch { return true }
+  }
+  const [railState, setRail] = useState(() => ({ key: railKey, expanded: readRail(railKey) }))
+  // A different person signed in: read THEIR choice before anything is saved.
+  if (railState.key !== railKey) setRail({ key: railKey, expanded: readRail(railKey) })
+  const expanded = railState.key === railKey ? railState.expanded : readRail(railKey)
+  const setExpanded = (v: boolean | ((x: boolean) => boolean)) =>
+    setRail(r => ({ key: r.key, expanded: typeof v === 'function' ? v(r.expanded) : v }))
   const [narrow, setNarrow] = useState(() => window.innerWidth < DRAWER_BREAKPOINT)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [folds, setFolds] = useState<Record<string, boolean>>(getInitialFolds)
@@ -58,7 +71,10 @@ export default function Layout() {
     document.documentElement.setAttribute('data-theme', theme)
     localStorage.setItem('theme', theme)
   }, [theme])
-  useEffect(() => { localStorage.setItem('rail-expanded', expanded ? '1' : '0') }, [expanded])
+  useEffect(() => {
+    if (!railState.key) return
+    try { localStorage.setItem(railState.key, railState.expanded ? '1' : '0') } catch { /* blocked storage: not remembered */ }
+  }, [railState])
   useEffect(() => {
     try { localStorage.setItem('rail-folded', JSON.stringify(folds)) } catch { /* storage full or blocked: folds just won't persist */ }
   }, [folds])

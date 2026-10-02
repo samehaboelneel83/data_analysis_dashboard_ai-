@@ -9,6 +9,8 @@ import LoadingState from '../components/ui/LoadingState'
 import FindingChart from '../components/insights/FindingChart'
 import { Database } from 'lucide-react'
 import { useT } from '../i18n'
+import DatasetListFilter, { useCleanDatasets } from '../components/dataset/DatasetListFilter'
+import { isCertified } from '../lib/cleanDatasets'
 
 /**
  * Pick a dataset, see what stands out in it.
@@ -61,11 +63,17 @@ export default function InsightsHub() {
   }
   useEffect(() => { load().finally(() => setLoading(false)) }, [])
 
+  // 4.7: certified first, test-looking leftovers out of sight.
+  const clean = useCleanDatasets(datasets)
   const { filtered, input, noMatches } = useListFilter(
-    datasets, d => [d.name], t('search.datasetsEllipsis'))
+    clean.visible, d => [d.name], t('search.datasetsEllipsis'))
 
   const current = datasets.find(d => d.id === selected) ?? null
-  const isDirectQuery = current?.mode === 'directquery'
+  // A live dataset is scanned on request, not on selection: the scan reads up
+  // to 250K rows from the source, which is the reader's call to make (HR
+  // evaluation, item 3.4 -- live data used to get no insights at all).
+  const [liveApproved, setLiveApproved] = useState<number | null>(null)
+  const isDirectQuery = current?.mode === 'directquery' && liveApproved !== current?.id
 
   // The inline "top insights" preview: fires the moment a dataset is
   // selected (auto or manual), so seeing whether there is anything worth
@@ -121,13 +129,14 @@ export default function InsightsHub() {
               style={{ fontSize: 12, padding: '6px 8px', background: 'var(--surface2)',
                 border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)', minWidth: 240 }}>
               <option value="" disabled>{t('insights.choose')}</option>
-              {(noMatches ? datasets : filtered).map(d => (
+              {(noMatches ? clean.visible : filtered).map(d => (
                 <option key={d.id} value={d.id}>
-                  {d.name}{d.mode === 'directquery' ? ' · live' : ''}
+                  {isCertified(d) ? '✓ ' : ''}{d.name}{d.mode === 'directquery' ? ' · live' : ''}
                 </option>
               ))}
             </select>
             {input}
+            <DatasetListFilter state={clean} />
           </div>
 
           {selected == null && (
@@ -142,9 +151,14 @@ export default function InsightsHub() {
               <p style={{ fontSize: 13, margin: 0 }}>
                 {t('insights.live')}
               </p>
-              <Link to={`/datasets/${current.id}`} style={{ fontSize: 12, display: 'inline-block', marginTop: 8 }}>
-                {t('insights.openDataset')}
-              </Link>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 8 }}>
+                <button className="btn btn-primary btn-sm" onClick={() => setLiveApproved(current.id)}>
+                  {t('insights.scanLive')}
+                </button>
+                <Link to={`/datasets/${current.id}`} style={{ fontSize: 12 }}>
+                  {t('insights.openDataset')}
+                </Link>
+              </div>
             </div>
           )}
 

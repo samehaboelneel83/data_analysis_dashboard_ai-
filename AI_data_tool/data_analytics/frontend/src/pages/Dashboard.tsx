@@ -16,6 +16,7 @@ import { formatTimeAgo, useT, type TranslateFn } from '../i18n'
 import BulkBar from '../components/ui/BulkBar'
 import { useBulkSelection } from '../lib/useBulkSelection'
 import { looksLikeTestData } from '../lib/testData'
+import { certificationOf, isCertified } from '../lib/cleanDatasets'
 
 /**
  * The dataset inventory.
@@ -86,6 +87,11 @@ export function catalogWords(c: DatasetCatalog, t: TranslateFn): { what: string;
   return { what, when, tone: c.freshness === 'overdue' ? 'bad' : c.freshness === 'due' ? 'warn' : 'ok' }
 }
 const storesItsOwnRows = (d: DatasetSummary) => d.mode !== 'directquery'
+/** When a live dataset's rows were last counted (4.5), or null. */
+export const liveCountedAt = (d: DatasetSummary): string | null => {
+  const v = (d.column_meta as unknown as Record<string, unknown> | undefined)?.['__live_count_at__']
+  return typeof v === 'string' ? v : null
+}
 
 /**
  * Rows per page.
@@ -106,6 +112,15 @@ function storedPageSize(): number {
     const n = Number(localStorage.getItem(PAGE_SIZE_KEY))
     return (PAGE_SIZES as readonly number[]).includes(n) ? n : DEFAULT_PAGE_SIZE
   } catch { return DEFAULT_PAGE_SIZE }
+}
+
+/** The server writes "Imported from X (postgresql)" / "DirectQuery from X
+ *  (postgresql)" as a placeholder description. The provenance line under the
+ *  name already says it, translated -- so in Arabic the row read the same fact
+ *  twice, once in English (HR re-test 2026-10-01). A description a person
+ *  wrote is always shown. */
+export function isAutoDescription(text: string): boolean {
+  return /^(Imported|DirectQuery) from .+ \([\w-]+\)$/.test(text.trim())
 }
 
 export default function Dashboard() {
@@ -135,7 +150,23 @@ export default function Dashboard() {
   const load = () => {
     setLoadError(null)
     datasetsApi.list()
-      .then(setDatasets)
+      .then(list => {
+        setDatasets(list)
+        // 4.5: live datasets with no count (or an hour-old one) are counted
+        // in the background; each row fills in as its answer arrives.
+        const hour = 3600_000
+        for (const d of list) {
+          if (d.mode !== 'directquery') continue
+          const at = liveCountedAt(d)
+          if (at && Date.now() - Date.parse(at) < hour) continue
+          datasetsApi.liveCount?.(d.id)?.then(r => {
+            if (r.counted_at && r.row_count != null) setDatasets(ds => ds.map(x => x.id === d.id
+              ? { ...x, row_count: r.row_count as number,
+                  column_meta: { ...(x.column_meta ?? {}), __live_count_at__: r.counted_at } as typeof x.column_meta }
+              : x))
+          }).catch(() => {})
+        }
+      })
       .catch(e => setLoadError(e ?? new Error('failed')))
       .finally(() => setLoading(false))
   }
@@ -311,6 +342,12 @@ export default function Dashboard() {
                               <IconLabel icon={Plug} size={12}>{t('datasets.live')}</IconLabel>
                             </span>
                           )}
+                          {isCertified(ds) && (
+                            <span className="dl-chip dl-chip--certified" style={{ color: 'var(--success, #15803d)' }}
+                              title={t('dsf.certifiedBy', { who: certificationOf(ds)?.by_email ?? '' })}>
+                              ✓ {t('dsf.badge')}
+                            </span>
+                          )}
                           {ds.shared && (
                             <span className="dl-chip dl-chip--shared"
                               title="Shared with you by an org admin">
@@ -318,12 +355,16 @@ export default function Dashboard() {
                             </span>
                           )}
                         </div>
-                        {ds.description && (
+                        {ds.description && !isAutoDescription(ds.description) && (
                           <div className="dl-cell-sub">{ds.description}</div>
                         )}
                       </td>
                       <td className="dl-table__num">
-                        {storesItsOwnRows(ds) ? ds.row_count.toLocaleString() : NOT_APPLICABLE}
+                        {storesItsOwnRows(ds) ? ds.row_count.toLocaleString()
+                          : liveCountedAt(ds)
+                            ? <span title={t('datasets.liveCountAt', { when: new Date(liveCountedAt(ds)!).toLocaleString() })}>
+                                {ds.row_count.toLocaleString()}</span>
+                            : NOT_APPLICABLE}
                       </td>
                       <td className="dl-table__num">{ds.col_count.toLocaleString()}</td>
                       <td className="dl-table__num">

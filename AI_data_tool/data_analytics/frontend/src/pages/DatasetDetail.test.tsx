@@ -8,6 +8,9 @@ import type { Dataset, User } from '../services/api'
 import { axeViolations } from '../test/axe'
 
 vi.mock('../services/api', () => ({
+  // DatasetShareDialog offers roles and org units (2.5).
+  adminRolesApi: { list: vi.fn().mockResolvedValue([]) },
+  orgUnitsApi: { list: vi.fn().mockResolvedValue([]) },
   datasetsApi: { get: vi.fn(), refresh: vi.fn(), setSchedule: vi.fn(), quality: vi.fn(),
                  list: vi.fn().mockResolvedValue([]),
                  queueRefresh: vi.fn(), activeRefresh: vi.fn().mockResolvedValue(null) },

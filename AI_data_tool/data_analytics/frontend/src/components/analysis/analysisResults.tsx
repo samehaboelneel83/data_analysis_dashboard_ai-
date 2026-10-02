@@ -368,7 +368,7 @@ function ResultCard({ result }: { result: StatisticalTestResult }) {
       <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', margin: '14px 0' }}>
         <Stat label={result.effect_name.replace(/_/g, ' ')}
           value={result.effect_size} suffix={` · ${result.effect_label}`} />
-        <Stat label="p-value" value={result.p_value} />
+        <Stat label="p-value" value={pText(result.p_value)} />
         <Stat label="rows" value={result.n} />
       </div>
 
@@ -390,8 +390,14 @@ function ResultCard({ result }: { result: StatisticalTestResult }) {
   )
 }
 
+/** A p-value is never exactly 0; "0" read as certainty. Below 0.001 it says so. */
+export function pText(p: number | null): string | null {
+  if (p == null) return null
+  return p < 0.001 ? '< 0.001' : String(p)
+}
+
 function Stat({ label, value, suffix }: {
-  label: string; value: number | null; suffix?: string
+  label: string; value: number | string | null; suffix?: string
 }) {
   return (
     <div>

@@ -21,6 +21,8 @@ import {
 import EmptyState from '../components/ui/EmptyState'
 import LoadError from '../components/ui/LoadError'
 import LoadingState from '../components/ui/LoadingState'
+import DatasetListFilter, { useCleanDatasets } from '../components/dataset/DatasetListFilter'
+import { isCertified } from '../lib/cleanDatasets'
 
 const STATUS_KEY: Record<AutomationRunRow['status'], MessageKey> = {
   pending: 'auto.status.pending', running: 'auto.status.running', failed: 'auto.status.failed',
@@ -35,6 +37,41 @@ const STEP_KEY: Record<string, MessageKey> = {
   propose: 'auto.step.propose', review: 'auto.step.review', compose: 'auto.step.compose',
   notify: 'auto.step.notify',
 }
+const STEP_STATE_KEY: Record<AutomationStepRow['status'], MessageKey> = {
+  pending: 'auto.stepState.pending', running: 'auto.stepState.running', ok: 'auto.stepState.ok', failed: 'auto.stepState.failed',
+}
+/** 5.15: between two steps of a moving run nothing is "running" for a moment,
+ *  and the next step read "Waiting" while the run plainly was not. The first
+ *  unfinished step of an active run is the one in progress. */
+export function shownStepStatus(run: Pick<AutomationRunRow, 'status' | 'steps'>, i: number): AutomationStepRow['status'] {
+  const s = run.steps[i]
+  if (s.status !== 'pending' || !(run.status === 'running' || run.status === 'pending')) return s.status
+  if (run.steps.some(x => x.status === 'running')) return s.status
+  const first = run.steps.findIndex(x => x.status !== 'ok')
+  return first === i ? 'running' : s.status
+}
+
+/** 5.21: a rough duration, said before starting: most of a run is reading and
+ *  scanning the rows, so it scales with them. "About", never a promise. */
+export function estimateMinutes(rows: number | null | undefined): number {
+  const r = Math.max(0, rows ?? 0)
+  return Math.max(1, Math.round((40 + 25 * (r / 100_000)) / 60))
+}
+
+/** The run's one line in the reader's language, from its fields (the server's
+ *  sentence is English; it stays the fallback for shapes not covered here). */
+export function runSummary(run: AutomationRunRow, t: (k: MessageKey, v?: Record<string, string | number>) => string): string | null {
+  if (run.widgets_accepted == null) return null   // no counts: keep the server's sentence
+  const kept = run.widgets_accepted, rejected = run.widgets_rejected ?? 0
+  if (run.status === 'done' || run.status === 'needs_review') {
+    if (kept === 0) return t('auto.sum.nothing', { why: run.error ?? t('auto.sum.noFinding') })
+    if (run.status === 'needs_review') return null
+    const name = run.result_report?.name ?? run.dataset?.name ?? ''
+    return rejected ? t('auto.sum.some', { name, kept, rejected }) : t('auto.sum.all', { name, kept })
+  }
+  return null
+}
+
 const STEP_MARK: Record<AutomationStepRow['status'], string> = { pending: '○', running: '◐', ok: '●', failed: '✕' }
 
 function when(iso: string | null): string {
@@ -48,6 +85,8 @@ export default function Automations() {
   const [runs, setRuns] = useState<AutomationRunRow[] | null>(null)
   const [error, setError] = useState<unknown>(null)
   const [datasets, setDatasets] = useState<Dataset[]>([])
+  // 4.7: certified first, test-looking leftovers out of sight.
+  const clean = useCleanDatasets(datasets)
   const [chosen, setChosen] = useState('')
   const [starting, setStarting] = useState(false)
   const [open, setOpen] = useState<number | null>(focus)
@@ -58,7 +97,9 @@ export default function Automations() {
   const load = useCallback(() => automationApi.list().then(r => { setRuns(r); setError(null) }).catch(setError), [])
   useEffect(() => { void load() }, [load])
   useEffect(() => {
-    datasetsApi.list().then(ds => setDatasets(ds.filter(d => d.mode !== 'directquery'))).catch(() => setDatasets([]))
+    // Live datasets too, marked: the run reads them through their SQL
+    // (HR evaluation, item 3.5 -- they used to be silently missing here).
+    datasetsApi.list().then(ds => setDatasets(ds)).catch(() => setDatasets([]))
   }, [])
   // A run moves on its own (one step a minute at most): follow it while any is unfinished.
   const anyActive = useMemo(() => (runs ?? []).some(isAutomationActive), [runs])
@@ -114,9 +155,18 @@ export default function Automations() {
           {t('auto.dataset')}
           <select value={chosen} onChange={e => setChosen(e.target.value)} style={{ minWidth: 260 }}>
             <option value="">{t('auto.chooseDataset')}</option>
-            {datasets.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+            {clean.visible.map(d => <option key={d.id} value={d.id}>{isCertified(d) ? '✓ ' : ''}{d.name}{d.mode === 'directquery' ? ' · live' : ''}</option>)}
           </select>
         </label>
+        <DatasetListFilter state={clean} />
+        {chosen && (() => {
+          const d = datasets.find(x => String(x.id) === chosen)
+          return d ? (
+            <span data-testid="auto-estimate" style={{ fontSize: 12, color: 'var(--muted)', alignSelf: 'center' }}>
+              {t('auto.estimate', { n: String(estimateMinutes(d.row_count)), rows: (d.row_count ?? 0).toLocaleString() })}
+            </span>
+          ) : null
+        })()}
         <button className="btn btn-primary btn-sm" disabled={!chosen || starting} onClick={() => void start()}>
           {starting ? t('auto.starting') : t('auto.start')}
         </button>
@@ -146,9 +196,9 @@ export default function Automations() {
                   {t(STATUS_KEY[run.status])}
                 </span>
                 <ol aria-label={t('auto.steps')} style={{ display: 'flex', gap: 4, listStyle: 'none', margin: 0, padding: 0 }}>
-                  {run.steps.map(s => (
-                    <li key={s.name} title={`${t(STEP_KEY[s.name] ?? 'auto.step.profile')}: ${s.status}${s.error ? ` — ${s.error}` : ''}`}
-                      aria-label={`${t(STEP_KEY[s.name] ?? 'auto.step.profile')}: ${s.status}`}
+                  {run.steps.map((s0, si) => ({ ...s0, status: shownStepStatus(run, si) })).map(s => (
+                    <li key={s.name} title={`${t(STEP_KEY[s.name] ?? 'auto.step.profile')}: ${(STEP_STATE_KEY[s.status] ? t(STEP_STATE_KEY[s.status]) : s.status)}${s.error ? ` — ${s.error}` : ''}`}
+                      aria-label={`${t(STEP_KEY[s.name] ?? 'auto.step.profile')}: ${(STEP_STATE_KEY[s.status] ? t(STEP_STATE_KEY[s.status]) : s.status)}`}
                       style={{ fontSize: 13, color: s.status === 'failed' ? 'var(--danger, #c0392b)' : s.status === 'ok' ? '#15803d' : 'var(--muted)' }}>
                       {STEP_MARK[s.status]}
                     </li>
@@ -168,7 +218,7 @@ export default function Automations() {
                     onClick={() => setOpen(expanded ? null : run.id)}>{t('auto.details')}</button>
                 </span>
               </div>
-              {run.summary && <div style={{ fontSize: 12 }}>{run.summary}</div>}
+              {run.summary && <div style={{ fontSize: 12 }} dir="auto">{runSummary(run, t) ?? run.summary}</div>}
               {run.error && run.status !== 'needs_review' && (
                 <div style={{ fontSize: 12, color: 'var(--muted)' }}>{run.error}</div>
               )}
@@ -206,10 +256,10 @@ export default function Automations() {
                     <th style={{ textAlign: 'start', padding: '3px 8px' }}>{t('auto.note')}</th>
                   </tr></thead>
                   <tbody>
-                    {d.steps.map(s => (
+                    {d.steps.map((s0, si) => ({ ...s0, status: shownStepStatus(d, si) })).map(s => (
                       <tr key={s.name} style={{ borderTop: '1px solid var(--border)' }}>
                         <td style={{ padding: '3px 8px' }}>{t(STEP_KEY[s.name] ?? 'auto.step.profile')}</td>
-                        <td style={{ padding: '3px 8px' }}>{s.status}{s.attempts > 1 ? ` (${localDigits(String(s.attempts))})` : ''}</td>
+                        <td style={{ padding: '3px 8px' }}>{(STEP_STATE_KEY[s.status] ? t(STEP_STATE_KEY[s.status]) : s.status)}{s.attempts > 1 ? ` (${localDigits(String(s.attempts))})` : ''}</td>
                         <td style={{ padding: '3px 8px' }}>{when(s.finished_at)}</td>
                         <td style={{ padding: '3px 8px', color: s.error ? 'var(--danger, #c0392b)' : 'var(--muted)' }}>
                           {s.error ?? ''}{s.next_attempt_at && s.status === 'failed' ? ` ${t('auto.nextTry', { when: when(s.next_attempt_at) })}` : ''}

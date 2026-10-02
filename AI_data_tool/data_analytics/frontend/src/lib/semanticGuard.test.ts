@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { nonAdditiveKind, semanticAggregationWarning, SAFE_AGGREGATION } from './semanticGuard'
+import { nonAdditiveKind, semanticAggregationWarning, SAFE_AGGREGATION, defaultSummary } from './semanticGuard'
 
 describe('nonAdditiveKind', () => {
   it('recognises coordinates, identifiers and years by name', () => {
@@ -40,5 +40,23 @@ describe('semanticAggregationWarning', () => {
   })
   it('offers a safe aggregation for every kind', () => {
     expect(SAFE_AGGREGATION.identifier.value).toBe('countd')
+  })
+})
+
+describe('defaultSummary: per-row distinct counts', () => {
+  // Mirrors tests/test_suggest_gap_review.py: a daily count of unique
+  // customers summed over days counts each customer once per day.
+  it('averages them and keeps totals summing', () => {
+    for (const c of ['active_sellers', 'unique_customers', 'unique_products_sold', 'distinct_users', 'dau'])
+      expect(defaultSummary(c)).toBe('avg')
+    for (const c of ['total_orders', 'total_revenue', 'active_minutes'])
+      expect(defaultSummary(c)).toBe('sum')
+  })
+})
+
+describe('an inferred role does not override the veto', () => {
+  it('sums nothing just because automation guessed "measure"', () => {
+    expect(defaultSummary('hire_year', { hire_year: { role: 'measure', role_source: 'inferred' } })).toBe('max')
+    expect(defaultSummary('hire_year', { hire_year: { role: 'measure' } })).toBe('sum')
   })
 })

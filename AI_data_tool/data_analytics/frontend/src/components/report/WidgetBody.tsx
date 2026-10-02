@@ -2,6 +2,7 @@ import { semanticAggregationWarning, nonAdditiveKind, SAFE_AGGREGATION } from '.
 import PivotTable, { type PivotData } from './PivotTable'
 import { Suspense, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useDirection, widgetIsRtl } from '../../contexts/DirectionContext'
+import { useT } from '../../i18n'
 import type { CalcColumnFormat } from '../../services/api'
 import type { Widget, WidgetType } from '../../types/report'
 import type { RuleStyles } from '../../lib/displayRules'
@@ -100,6 +101,21 @@ function renderTextWithLinks(content: string): ReactNode {
       </a>
     )
   })
+}
+
+/** A widget's fetch error, in the reader's language where the code says what
+ *  it is. The server's sentence is English; for the two source states it is
+ *  replaced (the source's name carried over), for anything else it is shown
+ *  as written -- laid out by its OWN direction, so an English sentence in the
+ *  Arabic layout no longer reads ".Refresh in a moment" (HR re-test). */
+function FetchErrorState({ err, onRetry }: { err: { detail: string; code?: string }; onRetry?: () => void }) {
+  const t = useT()
+  const name = /'([^']+)'/.exec(err.detail ?? '')?.[1] ?? ''
+  const msg = err.code === 'source_busy' ? t('widget.err.busy', { name })
+    : err.code === 'source_unavailable' ? t('widget.err.unreachable', { name })
+    : err.detail
+  const retry = (err.code === 'source_unavailable' || err.code === 'source_busy' || err.code === 'quota') && onRetry
+  return <EmptyState msg={msg} action={retry ? { label: t('widget.err.retry'), onClick: onRetry! } : undefined} />
 }
 
 export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, onClickPoint, broadcasts, allFormats, checked, onToggleSlicerValue, onButtonClick, ruleStyles, parameters, geography, textFilter, onSubmitTextFilter, onAssignData, onBrushChange, brushNonce, onAnimationFrame, onApplyFix, onLoadMore, loadingMore }:
@@ -321,11 +337,7 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
       return <EmptyState msg={fetchError.detail}
         action={{ label: fix.label, onClick: () => onApplyFix!(fix.patch, fix.label) }} />
     }
-    return (
-      <EmptyState msg={fetchError.detail}
-        action={(fetchError.code === 'source_unavailable' || fetchError.code === 'quota') && onRetry
-          ? { label: 'Try again', onClick: onRetry } : undefined} />
-    )
+    return <FetchErrorState err={fetchError} onRetry={onRetry} />
   }
   if (!data) return <EmptyState msg="Configure widget to see data" />
   // The second channel: a 200 whose body says it failed. A measure that

@@ -149,10 +149,12 @@ describe('on a DirectQuery dataset', () => {
   const dq = () => render(
     <PredictionModelsPanel datasetId={1} columns={columns} mode="directquery" />)
 
-  it('says training is not available rather than offering the form', async () => {
+  it('offers training on live data and says how it reads the rows', async () => {
+    // HR re-test 2026-10-01: refused here while every model widget fitted on
+    // the same live dataset.
     dq()
-    expect(await screen.findByText(/import-mode/i)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /train/i })).not.toBeInTheDocument()
+    expect(await screen.findByTestId('models-dq-note')).toHaveTextContent(/live/i)
+    expect(screen.getByRole('button', { name: /train/i })).toBeInTheDocument()
   })
 
   it('still lists models that already exist', async () => {

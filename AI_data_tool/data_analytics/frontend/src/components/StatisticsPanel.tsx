@@ -4,7 +4,7 @@ import {
 } from '../services/api'
 import LoadError from './ui/LoadError'
 import { FlaskConical } from 'lucide-react'
-import { useT } from '../i18n'
+import { useT, type MessageKey } from '../i18n'
 import { ResultFor } from './analysis/analysisResults'
 
 /**
@@ -60,6 +60,22 @@ function fieldKind(prop: Prop) {
 function answered(v: Value | undefined) {
   if (Array.isArray(v)) return v.length > 0
   return v !== undefined && v !== ''
+}
+
+/** HR re-test: the form read "value col", "group col" -- the parameter's
+ *  code name. Known parameters get plain words; anything else drops a trailing
+ *  "col" and its underscores, so a new analysis never shows worse than before. */
+const PARAM_LABEL: Record<string, MessageKey> = {
+  value_col: 'stat.param.valueCol', group_col: 'stat.param.groupCol',
+  col_a: 'stat.param.colA', col_b: 'stat.param.colB', columns: 'stat.param.columns',
+  target: 'stat.param.target', target_value: 'stat.param.targetValue',
+  target_y: 'stat.param.targetY', duration_col: 'stat.param.durationCol',
+  event_col: 'stat.param.eventCol',
+}
+export function paramLabel(key: string, t: (k: MessageKey) => string): string {
+  const k = PARAM_LABEL[key]
+  if (k) return t(k)
+  return key.replace(/_cols?$/, '').replace(/_/g, ' ').trim()
 }
 
 export default function StatisticsPanel({ datasetId, columns, mode }: {
@@ -172,7 +188,7 @@ export default function StatisticsPanel({ datasetId, columns, mode }: {
 
         {spec && Object.entries(spec.params_schema.properties).map(([key, prop]) => {
           const kind = fieldKind(prop)
-          const label = key.replace(/_/g, ' ')
+          const label = paramLabel(key, t)
           const isRequired = required.includes(key)
           return (
             <div key={key} style={{ marginTop: 10 }}>
