@@ -1486,6 +1486,114 @@ def series_backbone(profile: dict, ineligible: set[str] | frozenset = frozenset(
     return out
 
 
+_MONEY = re.compile(r"amount|revenue|price|fee|cost|salary|salaries|pay|income|sales|spend|gmv|"
+                    r"charge|freight|payroll|budget|value", re.I)
+
+
+def money_totals(profile: dict, ineligible: set[str] | frozenset = frozenset(),
+                 mixed: dict | None = None, identical: dict | None = None) -> list[dict]:
+    """The total of each money column, and that total per main category.
+
+    Every reference with a money column opened with its total and split it
+    by the main category -- tuition income by faculty, payroll by
+    department, GMV, rated amount by service -- while the statistics engine
+    proposes averages and the lenses only sometimes ask for the sum
+    (enrolments live, 2026-10-03). A fee fixed per faculty is still worth
+    totalling: income is fee x students. Rates, averages, scores and
+    identifiers are not money totals."""
+    from .semantic_guard import non_additive_kind
+    cols = [c for c in profile.get("columns", []) if c["name"] not in ineligible and not c.get("is_personal")]
+    money: list[str] = []
+    for c in cols:
+        m = c["name"]
+        if c.get("role") != "numeric" or c.get("is_identifier") or not _MONEY.search(m) \
+                or _not_additive(m) or non_additive_kind(m) is not None or m in (mixed or {}):
+            continue
+        # A copy is the same money twice: "price (copy)" became "Total price
+        # (copy) by order status" on live Olist (2026-10-03).
+        if re.search(r"\bcopy\b", m, re.I) or any(m in ((identical or {}).get(k) or ()) for k in money):
+            continue
+        money.append(m)
+    money = money[:3]
+    # The two richest categories (up to 30 values): revenue by service AND by
+    # switch, payroll by department AND by title.
+    cats = [c["name"] for c in sorted(
+        (c for c in cols if c.get("role") == "categorical" and not c.get("is_identifier")
+         and 3 <= (c.get("distinct") or 0) <= 30), key=lambda c: -(c.get("distinct") or 0))][:2]
+    out = []
+    label = lambda m: re.sub(r"^total ", "", m.replace("_", " "), flags=re.I)   # noqa: E731
+    for m in money:
+        out.append({"widget_type": "kpi", "title": f"Total {label(m)}", "question": f"Total {label(m)}",
+                    "config": {"measure": m, "aggregation": "sum"}, "section": "summary", "value": 4,
+                    "source": "backbone", "audience": "executive", "why": f"All {label(m)} in the data."})
+        for cat in cats:
+            out.append({"widget_type": "bar", "title": f"Total {label(m)} by {label(cat)}",
+                        "question": f"Where does the {label(m)} come from?",
+                        "config": {"dimension": cat, "measure": m, "aggregation": "sum", "sort": "desc"},
+                        "section": "composition", "value": 4, "source": "backbone", "audience": "manager",
+                        "why": f"The total {label(m)}, {label(cat)} by {label(cat)}."})
+    return out
+
+
+_DONE_DATE = re.compile(r"deliver|shipped|complet|closed|resolved|finished|fulfil", re.I)
+_PROMISE_DATE = re.compile(r"estimat|expect|due|deadline|limit|promis|target|planned", re.I)
+
+
+def completion_trends(profile: dict, ineligible: set[str] | frozenset = frozenset()) -> list[dict]:
+    """How many records finished each month, by the date they finished on.
+
+    A record with a start date and a finish date has two throughputs: orders
+    placed per month and orders delivered per month. The panel puts start
+    dates first as the time axis (promise dates were the Olist axis once), so
+    nothing asked the second: "Deliveries completed per month" was the Olist
+    analysts' only question the live panel missed (2026-10-03). A promise
+    (estimated, due, limit) is not a finish."""
+    cols = [c for c in profile.get("columns", []) if c["name"] not in ineligible]
+    dates = [c["name"] for c in cols if c.get("role") == "datetime"]
+    if len(dates) < 2:
+        return []
+    # A record's id has about one value per record; order_item_id (1..21, a
+    # position in the basket) is flagged an identifier too, and its distinct
+    # count read as 21 orders a month (live Olist, 2026-10-03).
+    rows = profile.get("row_count") or 0
+    ids = [c["name"] for c in cols if c.get("is_identifier") and not c.get("is_personal")
+           and (not rows or (c.get("distinct") or 0) >= 0.2 * rows)]
+    out = []
+    for d in dates:
+        if not _DONE_DATE.search(d) or _PROMISE_DATE.search(d):
+            continue
+        # Count the record the date belongs to: order_delivered_customer_date
+        # counts order_id, not item rows.
+        # The date's first word names its record ("order_..." -> order_id);
+        # "customer" later in the name is who received it, not what finished.
+        words = [w for w in re.split(r"[_\W]+", d.lower()) if len(w) > 2]
+        # Among the ids naming that word, the plainest: order_id, never
+        # order_item_id (a position in the basket, 1..21: counting its
+        # distinct values counted 21 "orders" a month, live Olist 2026-10-03).
+        def toks(i: str) -> list:
+            return [x for x in re.split(r"[_\W]+", i.lower()) if x]
+        idc = next((min((i for i in ids if w in toks(i)), key=lambda i: len(toks(i)))
+                    for w in words if any(w in toks(i) for i in ids)), None)
+        cfg = {"dimension": d, "dimension_granularity": "month",
+               "measure": idc or d, "aggregation": "countd" if idc else "count"}
+        what = (idc or "record").replace("_id", "").replace("_", " ")
+        done = _DONE_DATE.search(d).group(0).lower()
+        out.append({"widget_type": "line", "title": f"{what.capitalize()}s {done.rstrip('e')}ed per month"
+                    if not done.endswith(("ed", "d")) else f"{what.capitalize()}s {done} per month",
+                    "question": f"How many {what}s finish each month?", "config": cfg, "section": "time",
+                    "value": 4, "source": "backbone", "audience": "manager",
+                    "why": f"Throughput by the day each {what} finished ({d}), not the day it began."})
+    if len(out) > 1:
+        for w in out:
+            w["title"] += f" (by {_h_date(w['config']['dimension'])})"
+    return out[:2]
+
+
+def _h_date(d: str) -> str:
+    words = [w for w in d.lower().split("_") if w not in ("at", "timestamp")]
+    return " ".join(words[1:] if len(words) > 2 else words)
+
+
 def detail_table(profile: dict, ineligible: set[str] | frozenset = frozenset(),
                  dates: list[str] | None = None, mixed: dict | None = None) -> dict | None:
     """The rows themselves, for looking one up: the record's identifier, its
@@ -1503,7 +1611,8 @@ def detail_table(profile: dict, ineligible: set[str] | frozenset = frozenset(),
     date_cols = [d for d in (dates or []) if d in {c["name"] for c in cols}][:1]
     from .semantic_guard import non_additive_kind
     nums = [c["name"] for c in cols if c.get("role") == "numeric" and not c.get("is_identifier")
-            and non_additive_kind(c["name"]) != "coordinate"][:3]
+            and non_additive_kind(c["name"]) != "coordinate"
+            and not re.search(r"\bcopy\b", c["name"], re.I)][:3]      # "price (copy)" is price again
     columns = ([ids[0]["name"]] if ids else []) + cats + date_cols + nums
     if len(columns) < 2:
         return None
@@ -1533,17 +1642,22 @@ QUALITY = {"key": "quality", "title": "Data quality",
            "brief": "what in the data itself could mislead a chart, and where to fix it"}
 
 
-def quality_widgets(findings: list[dict]) -> list[dict]:
+def quality_widgets(findings: list[dict], mixed: dict | None = None) -> list[dict]:
     """A "Data quality" page: the faults in words, then each mis-spelt or
     space-padded label counted side by side, so the person sees how many rows
     each spelling holds before deciding which to fix.
 
     The call-record analysts' reference had such a page (duplicates, " Catch
     All Zone", "Mobile To Mobile"); the panel only stated the facts."""
-    if not findings:
+    mixed = mixed or {}
+    notes = [f["text"] for f in findings] + [
+        f"{m.replace('_', ' ')} is recorded in different units for each {u['by'].replace('_', ' ')} "
+        f"(median {u['high_median']:,.0f} for {u['high']}, {u['low_median']:,.0f} for {u['low']}): "
+        f"it is never totalled across them." for m, u in list(mixed.items())[:2]]
+    if not notes:
         return []
     out = [{"widget_type": "text", "title": "What to check in the data", "section": "quality",
-            "config": {"content": "\n".join(f"- {f['text']}" for f in findings)},
+            "config": {"content": "\n".join(f"- {t}" for t in notes)},
             "why": "Faults found in the rows themselves; totals and splits include them until fixed.",
             "source": "panel", "value": 4}]
     for f in findings:
@@ -1556,7 +1670,16 @@ def quality_widgets(findings: list[dict]) -> list[dict]:
                     "config": {"dimension": c, "measure": c, "aggregation": "count",
                                "filters": [{"column": c, "op": "in", "value": vals}]},
                     "why": f["text"]})
-    return out[:5]
+    # A column in different units per group, shown as the unit check the
+    # call-record analysts drew: the typical value per group, side by side
+    # (bytes for data, seconds for calls; CDR, 2026-10-03).
+    for m, u in list(mixed.items())[:2]:
+        out.append({"widget_type": "bar", "title": f"Typical {m.replace('_', ' ')} by {u['by'].replace('_', ' ')}",
+                    "section": "quality", "source": "panel", "value": 4,
+                    "config": {"dimension": u["by"], "measure": m, "aggregation": "median"},
+                    "why": f"{m.replace('_', ' ')} means something different for each {u['by'].replace('_', ' ')}: "
+                           f"compare within one, never add them up."})
+    return out[:6]
 
 
 def drill_page(proposals: list[dict], categories: list[str]) -> dict | None:
@@ -1700,6 +1823,11 @@ async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
         # flat line of ones ("Rows over day date", daily ops).
         rules = [w for w in rules if not (str((w.get("config") or {}).get("aggregation")) == "count"
                                           and (w.get("config") or {}).get("dimension") in dates)]
+    series = bool(backbone)
+    backbone = backbone + completion_trends(profile, ineligible)
+    if not series:
+        backbone = backbone + money_totals(profile, ineligible, facts.get("mixed_units") or {},
+                                           facts.get("identical") or {})
     candidates = proposed + rules + extra + backbone
 
     # 2. gate: fix vocabulary, validate, draw
@@ -1758,7 +1886,7 @@ async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
     # A series has a headline per total (orders, revenue, cancellations...),
     # not the four a categorical dataset's summary page holds.
     chosen, stats = select(alive, size, sections,
-                           summary_cap=9 if backbone else 4)
+                           summary_cap=9 if series else 4)
 
     # 4. the detail page: the rows themselves, drawn like everything else
     from .insights import order_event_dates
@@ -1774,7 +1902,7 @@ async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
             log.warning("detail table could not be drawn: %s", exc)
 
     # 4b. the data-quality page: the faults in words, the broken labels drawn
-    for w in quality_widgets(facts.get("quality") or []):
+    for w in quality_widgets(facts.get("quality") or [], facts.get("mixed_units") or {}):
         if w["widget_type"] != "text":
             try:
                 got = await probe(w["widget_type"], w["config"])
