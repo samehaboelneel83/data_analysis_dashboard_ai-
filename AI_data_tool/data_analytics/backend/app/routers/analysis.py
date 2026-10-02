@@ -70,6 +70,12 @@ async def get_analysis_registry(current_user: User = Depends(get_current_user)):
 
 
 
+#: 5.5: what a reader is told when an analysis panel cannot run yet, instead
+#: of the generic "Internal server error" a raw exception used to surface.
+NOT_READY = ("This analysis could not run on this dataset yet. Open Overview and run "
+             "the analysis first, then try again.")
+
+
 async def _directquery_frame(db: AsyncSession, ds, current_user: User,
                              rls_expr: str | None):
     """Rows from a live source, sized for ANALYSIS rather than for a preview.
@@ -242,7 +248,9 @@ async def run_segment(dataset_id: int, req: SegmentRequest, db: AsyncSession = D
 
     restricted = bool(await resolve_rls_expr(db, current_user, dataset_id))
     try:
-        contract = segment_dataframe(df, req.columns, include_rows=req.include_rows)
+        _ds = await db.get(Dataset, dataset_id)
+        contract = segment_dataframe(df, req.columns, include_rows=req.include_rows,
+                                     column_meta=(_ds.column_meta if _ds else None) or {})
     except SegmentError as e:
         # A viewer narrowed by a row rule is told it is their access, not the
         # data -- and without the counts, which would describe the rows the
@@ -282,6 +290,10 @@ async def run_association_rules(
     restricted = bool(await resolve_rls_expr(db, current_user, dataset_id))
     try:
         contract = await asyncio.to_thread(_run)
+    except (KeyError, TypeError, ValueError) as e:
+        if isinstance(e, PatternError):
+            raise HTTPException(400, explain_shortfall(str(e), restricted))
+        raise HTTPException(400, NOT_READY)
     except PatternError as e:
         # A viewer narrowed by a row rule is told it is their access, not the
         # data -- and without the counts, which would describe the rows the
@@ -330,7 +342,10 @@ async def run_key_influencers(
             frame = apply_prep_steps(frame, _steps, _aux)
             return frame
 
-        df = await asyncio.to_thread(_load)
+        try:
+            df = await asyncio.to_thread(_load)
+        except FileNotFoundError:
+            raise HTTPException(409, "This dataset's data file is missing -- refresh or re-import it.")
 
     # A denied column must not become an "influencer": naming it, with a rate
     # attached, would leak exactly what the rule hides.
@@ -343,6 +358,10 @@ async def run_key_influencers(
     try:
         contract = await asyncio.to_thread(
             key_influencers, df, req.target, req.target_value, req.factors)
+    except (KeyError, TypeError, ValueError) as e:
+        if isinstance(e, InfluencerError):
+            raise HTTPException(400, explain_shortfall(str(e), bool(rls_expr)))
+        raise HTTPException(400, NOT_READY)
     except InfluencerError as e:
         # A viewer narrowed by a row rule is told it is their access, not the
         # data -- and without the counts, which would describe the rows the

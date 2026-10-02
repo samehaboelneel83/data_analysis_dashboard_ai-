@@ -40,7 +40,7 @@ export default function DatasetSensitivity({ datasetId }: { datasetId: number })
         <option value="">{t('sens.none')}</option>
         {s.options.map(o => <option key={o} value={o}>{label(o)}</option>)}
       </select>
-      {inherited && <span style={{ color: 'var(--muted)' }}>in force: <b>{s.effective}</b></span>}
+      {inherited && <span style={{ color: 'var(--muted)' }}>{t('sens.inForce')} <b>{s.effective ? label(s.effective) : ''}</b></span>}
     </span>
   )
 }

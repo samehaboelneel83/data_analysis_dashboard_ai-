@@ -1,5 +1,5 @@
 import type { AgentResult } from '../../services/api'
-import { chartColumns } from './ResultView'
+import { chartColumns, groupedBars } from './ResultView'
 
 /**
  * Can this answer become a dashboard widget -- honestly?
@@ -65,6 +65,14 @@ export function answerToWidget(
   if (result.columns.length === 1 && result.rows.length === 1) {
     const m = measureFor(result.columns[0])
     return m ? { widget_type: 'kpi', config: { ...m } } : null
+  }
+  // Two labels and a measure: the second label splits each bar (dimension2),
+  // the same grouped chart the answer showed.
+  const grouped = !(x && y) ? groupedBars(result) : null
+  if (grouped) {
+    const dim = real(grouped.x); const dim2 = real(grouped.series)
+    const m = measureFor(grouped.y, dim)
+    if (dim && dim2 && m) return { widget_type: 'bar', config: { dimension: dim, dimension2: dim2, ...m } }
   }
   const axes = chartColumns(result, x, y)
   if (!axes.x || !axes.y) return null

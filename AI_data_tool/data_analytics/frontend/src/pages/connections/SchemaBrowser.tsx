@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { dataSourcesApi } from '../../services/api'
-import type { DataSource, Job } from '../../services/api'
+import { dataSourcesApi, queryBuilderApi } from '../../services/api'
+import type { DataSource, Job, SavedQuery } from '../../services/api'
+import SqlEditor from './SqlEditor'
+import ModeExplainer from './ModeExplainer'
 import { useT } from '../../i18n'
 import ImportJobRow from '../../components/jobs/ImportJobRow'
 import { useJob } from '../../components/jobs/useJob'
@@ -35,6 +37,63 @@ export function SchemaBrowser({ ds, onClose, onQueued }: {
   const [mode,      setMode]      = useState<'import' | 'directquery'>('import')
   const [schemaError, setSchemaError] = useState<string | null>(null)
   const [attempt,   setAttempt]   = useState(0)
+  // 4.2 / 4.3: saved queries, the last runs, schema autocomplete, sorting.
+  const [columnsByTable, setColumnsByTable] = useState<Record<string, string[]>>({})
+  const [saved, setSaved] = useState<SavedQuery[]>([])
+  const [history, setHistory] = useState<SavedQuery[]>([])
+  const [saveName, setSaveName] = useState<string | null>(null)
+  const [sort, setSort] = useState<{ col: number; dir: 'asc' | 'desc' } | null>(null)
+  const loadQueries = () => {
+    dataSourcesApi.queries?.(ds.id)
+      ?.then(r => { setSaved(r.saved); setHistory(r.history) })
+      .catch(() => { /* optional: Browse works without them */ })
+  }
+  useEffect(loadQueries, [ds.id])
+  const needColumns = (table: string) => {
+    if (columnsByTable[table]) return
+    setColumnsByTable(p => ({ ...p, [table]: [] }))
+    queryBuilderApi.columns(ds.id, table)
+      .then(cols => setColumnsByTable(p => ({ ...p, [table]: cols.map(c => c.name) })))
+      .catch(() => {})
+  }
+  const saveQuery = async () => {
+    const name = (saveName ?? '').trim()
+    if (!name || !query.trim()) return
+    try {
+      await dataSourcesApi.saveQuery(ds.id, name, query.trim())
+      toast.success(t('sb.savedToast', { name }))
+      setSaveName(null)
+      loadQueries()
+    } catch (e: any) { toast.error(e?.response?.data?.detail ?? t('sb.saveFail')) }
+  }
+  const deleteSaved = async (q: SavedQuery) => {
+    try { await dataSourcesApi.deleteQuery(ds.id, q.id); loadQueries() }
+    catch { toast.error(t('sb.saveFail')) }
+  }
+  const downloadCsv = async () => {
+    try {
+      const r = await dataSourcesApi.downloadCsv(ds.id, selected ?? undefined, selected ? undefined : query.trim() || undefined)
+      if (r.truncated) toast(t('sb.csvCut', { n: r.rows.toLocaleString() }))
+    } catch (e: any) {
+      let msg = t('sb.csvFail')
+      try { const d = JSON.parse(await e?.response?.data?.text?.()); if (d?.detail) msg = d.detail } catch { /* blob */ }
+      toast.error(msg)
+    }
+  }
+  const sortedRows = (() => {
+    if (!preview || !sort) return preview?.rows ?? []
+    const k = sort.col
+    const num = (v: unknown) => (typeof v === 'number' ? v : v != null && v !== '' && !isNaN(Number(v)) ? Number(v) : null)
+    return [...preview.rows].sort((a, b) => {
+      const x = (a as unknown[])[k], y = (b as unknown[])[k]
+      if (x == null && y == null) return 0
+      if (x == null) return 1
+      if (y == null) return -1
+      const nx = num(x), ny = num(y)
+      const c = nx != null && ny != null ? nx - ny : String(x).localeCompare(String(y))
+      return sort.dir === 'asc' ? c : -c
+    })
+  })()
 
   // A failed schema read is shown IN the table list, where the reader is
   // looking, rather than as a toast over a panel that then said "No tables
@@ -44,7 +103,7 @@ export function SchemaBrowser({ ds, onClose, onQueued }: {
     setSchemaError(null)
     dataSourcesApi.schema(ds.id)
       .then(r => setTables(r.tables))
-      .catch(e => setSchemaError(e?.response?.data?.detail ?? 'Could not read the tables on this connection.'))
+      .catch(e => setSchemaError(e?.response?.data?.detail ?? t('sb.readFail')))
       .finally(() => setLoading(false))
   }, [ds.id, attempt])
 
@@ -59,10 +118,12 @@ export function SchemaBrowser({ ds, onClose, onQueued }: {
     try {
       const r = await dataSourcesApi.preview(ds.id, table, q, 50)
       setPreview(r)
+      setSort(null)
+      if (q) loadQueries()
     } catch (e: any) {
       const d = e?.response?.data
       const raw: string | undefined = typeof d?.detail_raw === 'string' ? d.detail_raw : undefined
-      const msg = typeof d?.detail === 'string' ? d.detail : 'Preview failed'
+      const msg = typeof d?.detail === 'string' ? d.detail : t('qb.previewFail')
       // Postgres names the exact token; surface that line for a SQL error.
       const sqlLine = raw?.match(/syntax error[^\n]*/i)?.[0]
       setPvError({ msg: sqlLine ? `The source rejected the query: ${sqlLine}` : msg, raw })
@@ -111,7 +172,7 @@ export function SchemaBrowser({ ds, onClose, onQueued }: {
   }
 
   const handleImport = async () => {
-    if (!dsName.trim()) { toast.error('Enter a dataset name'); return }
+    if (!dsName.trim()) { toast.error(t('sb.enterName')); return }
     setImporting(true)
     try {
       if (mode === 'directquery') {
@@ -127,7 +188,7 @@ export function SchemaBrowser({ ds, onClose, onQueued }: {
       toast.success(t('importJobs.queued', { name: dsName }))
       followJob(queued)
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail ?? (mode === 'directquery' ? 'Import failed' : t('importJobs.startFailed')))
+      toast.error(e?.response?.data?.detail ?? (mode === 'directquery' ? t('sb.importFail') : t('importJobs.startFailed')))
     } finally { setImporting(false) }
   }
 
@@ -165,17 +226,17 @@ export function SchemaBrowser({ ds, onClose, onQueued }: {
             <div style={{ width: 220, borderInlineEnd: '1px solid var(--border)', overflowY: 'auto',
               padding: '12px 8px', flexShrink: 0 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase',
-                letterSpacing: '.06em', padding: '0 6px', marginBottom: 8 }}>Tables & Views</div>
-              {loading && <p style={{ fontSize: 11, color: 'var(--muted)', padding: '0 6px' }}>Loading…</p>}
+                letterSpacing: '.06em', padding: '0 6px', marginBottom: 8 }}>{t('sb.tables')}</div>
+              {loading && <p style={{ fontSize: 11, color: 'var(--muted)', padding: '0 6px' }}>{t('sb.loading')}</p>}
               {!loading && schemaError && (
                 <div role="alert" style={{ margin: '0 4px', padding: '10px 10px', borderRadius: 8, fontSize: 12,
                   background: 'var(--dl-error-bg)', border: '1px solid var(--dl-error-line)', color: 'var(--text)' }}>
-                  <div style={{ fontWeight: 600, color: 'var(--dl-error-text)', marginBottom: 4 }}>Could not connect</div>
+                  <div style={{ fontWeight: 600, color: 'var(--dl-error-text)', marginBottom: 4 }}>{t('sb.noConnect')}</div>
                   <div style={{ marginBottom: 8 }}>{schemaError}</div>
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAttempt(a => a + 1)}>Try again</button>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAttempt(a => a + 1)}>{t('sb.retry')}</button>
                 </div>
               )}
-              {!loading && !schemaError && tables.length === 0 && <p style={{ fontSize: 11, color: 'var(--muted)', padding: '0 6px' }}>No tables found</p>}
+              {!loading && !schemaError && tables.length === 0 && <p style={{ fontSize: 11, color: 'var(--muted)', padding: '0 6px' }}>{t('sb.noTables')}</p>}
               {tables.map(t => (
                 <button key={t.name} onClick={() => handleSelect(t.name)}
                   style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', padding: '5px 8px',
@@ -196,34 +257,78 @@ export function SchemaBrowser({ ds, onClose, onQueued }: {
             {/* Custom query */}
             <div style={{ marginBottom: 10, flexShrink: 0 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase',
-                letterSpacing: '.06em', marginBottom: 6 }}>Custom Query</div>
-              <textarea
-                value={query}
-                onChange={e => setQuery(e.target.value)}
-                placeholder={ds.type === 'api' ? 'Leave empty to fetch from URL directly' : 'SELECT * FROM table WHERE …'}
-                rows={3}
-                style={{ width: '100%', fontFamily: 'var(--mono)', fontSize: 12, padding: '6px 8px',
-                  background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6,
-                  color: 'var(--text)', resize: 'vertical', boxSizing: 'border-box' }}
-              />
-              <button className="btn btn-ghost btn-sm" onClick={handleRunQuery} disabled={pvLoad}
-                style={{ marginTop: 4, fontSize: 11 }}>
-                ▶ Run Preview
-              </button>
+                letterSpacing: '.06em', marginBottom: 6 }}>{t('sb.custom')}</div>
+              {ds.type !== 'api' && (saved.length > 0 || history.length > 0) && (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 6 }}>
+                  {saved.length > 0 && (
+                    <select aria-label={t('sb.savedQueries')} value=""
+                      onChange={e => { const q = saved.find(x => String(x.id) === e.target.value); if (q) setQuery(q.sql) }}
+                      style={{ fontSize: 11, maxWidth: 220 }}>
+                      <option value="">{t('sb.savedQueries')} ({saved.length})</option>
+                      {saved.map(q => <option key={q.id} value={q.id}>{q.name}</option>)}
+                    </select>
+                  )}
+                  {history.length > 0 && (
+                    <select aria-label={t('sb.history')} value=""
+                      onChange={e => { const q = history.find(x => String(x.id) === e.target.value); if (q) setQuery(q.sql) }}
+                      style={{ fontSize: 11, maxWidth: 260 }}>
+                      <option value="">{t('sb.history')} ({history.length})</option>
+                      {history.map(q => <option key={q.id} value={q.id}>{q.sql.replace(/\s+/g, ' ').slice(0, 70)}</option>)}
+                    </select>
+                  )}
+                  {saved.filter(q => q.sql === query.trim()).map(q => (
+                    <button key={q.id} type="button" className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}
+                      onClick={() => void deleteSaved(q)}>{t('sb.deleteSaved', { name: q.name ?? '' })}</button>
+                  ))}
+                </div>
+              )}
+              {ds.type === 'api' ? (
+                <textarea value={query} onChange={e => setQuery(e.target.value)} placeholder={t('sb.leaveEmpty')} rows={3}
+                  aria-label={t('sb.custom')}
+                  style={{ width: '100%', fontFamily: 'var(--mono)', fontSize: 12, padding: '6px 8px',
+                    background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6,
+                    color: 'var(--text)', resize: 'vertical', boxSizing: 'border-box' }} />
+              ) : (
+                <SqlEditor value={query} onChange={setQuery} onRun={handleRunQuery} label={t('sb.custom')}
+                  tables={tables.map(x => x.name)} columnsByTable={columnsByTable} onNeedColumns={needColumns}
+                  placeholder="SELECT * FROM table WHERE …   (Ctrl+Enter runs)" />
+              )}
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
+                <button className="btn btn-ghost btn-sm" onClick={handleRunQuery} disabled={pvLoad}
+                  style={{ fontSize: 11 }}>
+                  ▶ Run Preview
+                </button>
+                {ds.type !== 'api' && saveName == null && (
+                  <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: 11 }} disabled={!query.trim()}
+                    onClick={() => setSaveName(saved.find(q => q.sql === query.trim())?.name ?? '')}>{t('sb.saveQuery')}</button>
+                )}
+                {saveName != null && (
+                  <>
+                    <input aria-label={t('sb.queryName')} placeholder={t('sb.queryName')} value={saveName} autoFocus
+                      onChange={e => setSaveName(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') void saveQuery(); if (e.key === 'Escape') setSaveName(null) }}
+                      style={{ fontSize: 11, minWidth: 180 }} />
+                    <button type="button" className="btn btn-primary btn-sm" style={{ fontSize: 11 }}
+                      disabled={!saveName.trim()} onClick={() => void saveQuery()}>{t('sb.save')}</button>
+                    <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}
+                      onClick={() => setSaveName(null)}>{t('common.cancel')}</button>
+                  </>
+                )}
+              </div>
             </div>
 
             {/* Preview table. Focusable, so a keyboard user can scroll a
                 preview wider or longer than the dialog (axe, E10). */}
-            <div role="region" aria-label="Preview" tabIndex={0}
+            <div role="region" aria-label={t('sb.preview')} tabIndex={0}
               style={{ flex: 1, overflow: 'auto', background: 'var(--surface2)',
               border: '1px solid var(--border)', borderRadius: 8, marginBottom: 10 }}>
-              {pvLoad && <div style={{ padding: 20, color: 'var(--muted)', fontSize: 12 }}>Loading preview…</div>}
+              {pvLoad && <div style={{ padding: 20, color: 'var(--muted)', fontSize: 12 }}>{t('sb.loadingPreview')}</div>}
               {!pvLoad && !preview && pvError && (
                 <div role="alert" className="dl-conn-test dl-conn-test--fail" style={{ margin: 12 }}>
                   <span style={{ minWidth: 0 }}>
                     {pvError.msg}
                     {pvError.raw && (
-                      <details className="dl-conn-test__raw"><summary>Technical details</summary><pre>{pvError.raw}</pre></details>
+                      <details className="dl-conn-test__raw"><summary>{t('sb.tech')}</summary><pre>{pvError.raw}</pre></details>
                     )}
                   </span>
                 </div>
@@ -236,10 +341,19 @@ export function SchemaBrowser({ ds, onClose, onQueued }: {
               {!pvLoad && preview && (
                 <table style={{ fontSize: 11 }}>
                   <thead>
-                    <tr>{preview.columns.map(c => <th key={c} style={{ whiteSpace: 'nowrap' }}>{c}</th>)}</tr>
+                    <tr>{preview.columns.map((c, j) => (
+                      <th key={c} style={{ whiteSpace: 'nowrap' }}
+                        aria-sort={sort?.col === j ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                        <button type="button" onClick={() => setSort(p => p?.col === j
+                            ? (p.dir === 'asc' ? { col: j, dir: 'desc' } : null) : { col: j, dir: 'asc' })}
+                          style={{ all: 'unset', cursor: 'pointer', fontWeight: 600 }} title={t('sb.sortBy', { col: c })}>
+                          {c}{sort?.col === j ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
+                        </button>
+                      </th>
+                    ))}</tr>
                   </thead>
                   <tbody>
-                    {preview.rows.map((row, i) => (
+                    {sortedRows.map((row, i) => (
                       <tr key={i}>
                         {(row as unknown[]).map((v, j) => (
                           <td key={j}>{v == null ? <span style={{ color: 'var(--muted)' }}>—</span> : String(v)}</td>
@@ -258,33 +372,35 @@ export function SchemaBrowser({ ds, onClose, onQueued }: {
                   <div style={{ fontSize: 11, color: 'var(--muted)', flexShrink: 0 }}>
                     {preview.total} rows preview
                   </div>
+                  {ds.type !== 'api' && (
+                    <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: 11, flexShrink: 0 }}
+                      onClick={() => void downloadCsv()}>
+                      <IconLabel icon={Download}>{t('sb.csv')}</IconLabel>
+                    </button>
+                  )}
                   <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden', flexShrink: 0 }}>
                     {(['import', 'directquery'] as const).map(m => (
                       <button key={m} onClick={() => setMode(m)}
                         style={{ padding: '5px 10px', fontSize: 11, border: 'none', cursor: 'pointer',
                           background: mode === m ? 'var(--accent)' : 'var(--surface2)',
                           color: mode === m ? 'var(--mc-accent-fg)' : 'var(--text)' }}>
-                        {m === 'import' ? 'Import' : 'DirectQuery'}
+                        {m === 'import' ? t('sb.import') : t('sb.dq')}
                       </button>
                     ))}
                   </div>
                   <input value={dsName} onChange={e => setDsName(e.target.value)}
-                    placeholder="Dataset name…"
+                    placeholder={t('sb.namePh')}
                     style={{ flex: 1, fontSize: 12, padding: '5px 8px', background: 'var(--surface2)',
                       border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)' }} />
                   <button className="btn btn-primary btn-sm" onClick={handleImport} disabled={importing || jobActive}>
                     {importing
-                      ? (mode === 'directquery' ? 'Connecting…' : 'Importing…')
+                      ? (mode === 'directquery' ? t('sb.connecting') : t('sb.importing'))
                       : (mode === 'directquery'
-                  ? <IconLabel icon={Cable}>Create DirectQuery Dataset</IconLabel>
-                  : <IconLabel icon={Download}>Import as Dataset</IconLabel>)}
+                  ? <IconLabel icon={Cable}>{t('sb.createDq')}</IconLabel>
+                  : <IconLabel icon={Download}>{t('sb.importDs')}</IconLabel>)}
                   </button>
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                  {mode === 'directquery'
-                    ? 'Queries the live source on every widget render — no data copied to this server.'
-                    : 'Copies the current result set into this app; refresh by re-importing.'}
-                </div>
+                <ModeExplainer mode={mode} />
                 {job && (
                   <div className="dl-job-inline">
                     <ImportJobRow job={job} compact onChange={j => (j.id === job.id ? setJob(j) : followJob(j))} />

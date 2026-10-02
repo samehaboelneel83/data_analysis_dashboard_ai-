@@ -52,6 +52,27 @@ def _reject_access_query(query: str | None) -> None:
                          "sources — choose a table instead")
 
 
+class MissingDatabaseFile(Exception):
+    """A file-based connection (SQLite, DuckDB) whose file is not there.
+
+    5.3: SQLite's own text is "unable to open database file", which names no
+    file and suggests no fix; Browse and Test showed it raw. Said once, with
+    the path and what to do."""
+
+
+def _check_file_source(cfg: dict) -> None:
+    import os
+    if cfg.get('type') not in ('sqlite', 'duckdb'):
+        return
+    path = (cfg.get('filepath') or '').strip()
+    if cfg.get('type') == 'duckdb' and not path:
+        return  # in-memory
+    if not path or not os.path.exists(path):
+        raise MissingDatabaseFile(
+            f"Database file not found at {path or '(no path given)'} — edit the connection "
+            f"and point it at the file.")
+
+
 def test_connection(cfg: dict) -> dict:
     if cfg['type'] == 'api':
         return _test_api(cfg)
@@ -63,6 +84,7 @@ def test_connection(cfg: dict) -> dict:
         except Exception as e:
             return {'ok': False, 'error': str(e)}
     try:
+        _check_file_source(cfg)
         url = _build_url(cfg)
         engine = create_engine(url, connect_args=connectors.connect_args(cfg))
         with engine.connect() as conn:
@@ -89,6 +111,7 @@ def list_tables(cfg: dict) -> list[dict]:
         from . import mdb
         return [{'name': t, 'kind': 'table'}
                 for t in mdb.list_tables(_access_path(cfg))]
+    _check_file_source(cfg)
     url = _build_url(cfg)
     engine = create_engine(url, connect_args=connectors.connect_args(cfg))
     try:
@@ -113,6 +136,7 @@ def preview_table(cfg: dict, table: str | None, query: str | None, limit: int = 
             'rows':    [[_safe_val(v) for v in row] for row in df.values.tolist()],
             'total':   len(df),
         }
+    _check_file_source(cfg)
     url    = _build_url(cfg)
     engine = create_engine(url, connect_args=connectors.connect_args(cfg))
     try:

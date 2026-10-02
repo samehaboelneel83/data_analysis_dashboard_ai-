@@ -1,16 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Bot, History } from 'lucide-react'
+import { BarChart3, Bot, Code2, History, MessageSquareText, Sparkles } from 'lucide-react'
 import EmptyState from '../components/ui/EmptyState'
 import ChatPane from '../components/chat/ChatPane'
 import { agentApi, datasetsApi, dataSourcesApi } from '../services/api'
-import type { AgentConversation, DatasetColumn } from '../services/api'
+import type { AgentConversation, Dataset, DatasetColumn } from '../services/api'
 import { useT } from '../i18n'
 import AskIllustration from './ask/AskIllustration'
 import DataPicker, { type PickerItem } from './ask/DataPicker'
 import HistoryPanel from './ask/HistoryPanel'
 import { connectionSuggestions, datasetSuggestions } from './ask/suggestions'
 import './ask/ask.css'
+import DatasetListFilter, { useCleanDatasets } from '../components/dataset/DatasetListFilter'
+import { isCertified } from '../lib/cleanDatasets'
 
 /**
  * The agent's own page. Two states:
@@ -42,7 +44,18 @@ const readFold = () => { try { return localStorage.getItem(FOLD_KEY) === '1' } c
 export default function AskAI() {
   const t = useT()
   const [params, setParams] = useSearchParams()
-  const [items, setItems] = useState<PickerItem[]>([])
+  const [usableDatasets, setUsableDatasets] = useState<Dataset[]>([])
+  const [sourceItems, setSourceItems] = useState<PickerItem[]>([])
+  // 4.7: certified first, test-looking leftovers out of sight -- in the
+  // picker a newcomer sees first.
+  const clean = useCleanDatasets(usableDatasets)
+  const items: PickerItem[] = useMemo(() => [
+    ...clean.visible.map(d => ({
+      key: `d:${d.id}`, kind: 'dataset' as const, name: isCertified(d) ? `✓ ${d.name}` : d.name,
+      rows: d.row_count ?? null, cols: d.col_count ?? null, updated: d.updated_at ?? null,
+    })),
+    ...sourceItems,
+  ], [clean.visible, sourceItems])
   const [columnsById, setColumnsById] = useState<Record<number, DatasetColumn[]>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -65,22 +78,15 @@ export default function AskAI() {
       dataSourcesApi.list().catch(() => []),
     ])
       .then(([ds, srcs]) => {
-        // DirectQuery datasets keep their rows in the connection, so the
-        // agent's dataset mode -- which answers out of a file frame -- has
-        // nothing to read and the API refuses them with a 400. The connection
-        // is the live-data path and is already listed, so leaving these out
-        // removes a dead choice rather than a capability.
-        const usable = ds.filter(d => d.mode !== 'directquery' && d.filename)
-        setItems([
-          ...usable.map(d => ({
-            key: `d:${d.id}`, kind: 'dataset' as const, name: d.name,
-            rows: d.row_count ?? null, cols: d.col_count ?? null, updated: d.updated_at ?? null,
-          })),
-          ...srcs.map(s => ({
-            key: `s:${s.id}`, kind: 'source' as const, name: s.name,
-            sourceType: s.type ?? null, updated: s.created_at ?? null,
-          })),
-        ])
+        // Live (DirectQuery) datasets are asked through their own SQL now, so
+        // "Current workforce" is answered from Current workforce rather than
+        // from the raw tables of its connection (HR evaluation, blocker 3).
+        const usable = ds.filter(d => d.filename || (d.mode === 'directquery' && d.data_source_id != null))
+        setUsableDatasets(usable)
+        setSourceItems(srcs.map(s => ({
+          key: `s:${s.id}`, kind: 'source' as const, name: s.name,
+          sourceType: s.type ?? null, updated: s.created_at ?? null,
+        })))
         const cols: Record<number, DatasetColumn[]> = {}
         for (const d of usable) if (Array.isArray(d.columns) && d.columns.length) cols[d.id] = d.columns
         setColumnsById(cols)
@@ -188,18 +194,30 @@ export default function AskAI() {
           <EmptyState icon={Bot} title={t('ask.noData')}
             action={<Link to="/upload" className="btn btn-primary">{t('ask.uploadDataset')}</Link>} />
         ) : (
+          // Text and picker on one side, the picture on the other: the
+          // picker's list opens into the empty space under the text column, so
+          // it never lands on the illustration (it used to sit under the
+          // picture and flip up over it).
           <section className="dl-ask__hero" aria-labelledby="dl-ask-title">
-            <AskIllustration className="dl-ask__art" />
-            <h1 id="dl-ask-title" className="dl-ask__title">{t('ask.hero.title')}</h1>
-            <p className="dl-ask__sub">{t('ask.hero.sub')}</p>
-            <div className="dl-ask__steps">
+            <div className="dl-ask__copy">
+              <span className="dl-ask__eyebrow"><Sparkles size={14} aria-hidden /> {t('ask.hero.eyebrow')}</span>
+              <h1 id="dl-ask-title" className="dl-ask__title">{t('ask.hero.title')}</h1>
+              <p className="dl-ask__sub">{t('ask.hero.sub')}</p>
+              <ul className="dl-ask__points">
+                <li><MessageSquareText size={16} aria-hidden /> {t('ask.hero.point1')}</li>
+                <li><BarChart3 size={16} aria-hidden /> {t('ask.hero.point2')}</li>
+                <li><Code2 size={16} aria-hidden /> {t('ask.hero.point3')}</li>
+              </ul>
               {/* One step only: the question box appears once data is chosen
-                  (the scoped view below), so a locked preview of it here was
-                  a second control that could not be used. */}
+                  (the scoped view below). */}
               <div className="dl-ask__step">
                 <span className="dl-ask__step-label">{t('ask.step1')}</span>
                 <DataPicker items={items} value="" onChoose={choose} size="hero" loading={loading} />
+                <div style={{ marginTop: 8 }}><DatasetListFilter state={clean} /></div>
               </div>
+            </div>
+            <div className="dl-ask__art-wrap" aria-hidden>
+              <AskIllustration className="dl-ask__art" />
             </div>
           </section>
         )}

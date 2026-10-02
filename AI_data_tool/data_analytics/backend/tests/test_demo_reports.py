@@ -79,7 +79,7 @@ EXPECTED_TYPES: dict[str, list[str]] = {
                                "map_pie", "map_layers", "map_density", "map_contour",
                                "map_network", "container", "kpi", "kpi"],
     "Demo — Models": ["model_linear", "model_tree", "model_compare", "model_score",
-                      "model_logistic", "model_cluster"],
+                      "model_logistic", "model_cluster", "model_rules"],
 }
 
 # The authority for "every widget type". There is no backend enum to read: the
@@ -454,6 +454,7 @@ def _model(result):
 VALIDATORS = {
     "model_linear": _model, "model_logistic": _model, "model_tree": _model,
     "model_cluster": _model, "model_compare": _model, "model_score": _model,
+    "model_rules": _model,
     "map_contour": _geo_contour,
     "small_multiples": _small_multiples,
     "decomposition": _decomposition,

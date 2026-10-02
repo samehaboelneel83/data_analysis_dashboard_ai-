@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Optional
+from typing import Literal, Any, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -45,6 +45,13 @@ class SuggestDashboardsRequest(BaseModel):
     """
     goal: Optional[str] = Field(default=None, max_length=2000)
     count: int = Field(default=3, ge=1, le=5)
+    #: "quick" is one designer call; "panel" asks several analyst lenses, draws
+    #: every idea, and keeps the `size` best by what the data actually shows.
+    mode: Literal["quick", "panel"] = "quick"
+    size: int = Field(default=24, ge=6, le=60)
+    #: Panel only: queue it as a job and answer with its id at once. The
+    #: dialog polls the job and can be closed and reopened meanwhile.
+    background: bool = False
 
 
 class CalcColumnPreviewRequest(BaseModel):
@@ -197,6 +204,8 @@ class DatasetOut(BaseModel):
     last_refreshed_at:        Optional[datetime] = None
     aggregate_of_dataset_id: int | None = None
     aggregate_spec: dict | None = None
+    # 4.7: who made it, for the "Mine" filter on dataset pickers.
+    created_by: Optional[int] = None
     # E06: transient, on the list only -- what the dataset is (upload,
     # connection copy, live, derived, aggregate) and how current. See
     # services/catalog.py.
@@ -560,6 +569,7 @@ class DataSourceCreate(BaseModel):
     type: str
     config: dict = {}
     custom_connector_id: Optional[int] = None
+    sensitivity: Optional[str] = None
 
 class DataSourceUpdate(BaseModel):
     name: Optional[str] = None
@@ -567,6 +577,8 @@ class DataSourceUpdate(BaseModel):
     config: Optional[dict] = None
     cache_ttl_seconds: Optional[int] = None
     custom_connector_id: Optional[int] = None
+    #: "" clears the label; None leaves it unchanged.
+    sensitivity: Optional[str] = None
 
 class DataSourceOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -577,6 +589,7 @@ class DataSourceOut(BaseModel):
     cache_ttl_seconds: int = 60
     created_at: datetime
     custom_connector_id: Optional[int] = None
+    sensitivity: Optional[str] = None
     custom_connector_label: Optional[str] = None    # Transient, set only on the response to a CREATE: the metadata sync that
     # started for this connection, so the client can send the user straight to
     # the review page with progress already running instead of announcing a
@@ -752,13 +765,24 @@ class RlsAutoGenerateRequest(BaseModel):
 
 
 class DatasetShareCreate(BaseModel):
-    user_id: int
+    """Exactly one of user_id / role_id / org_unit_id."""
+    user_id: Optional[int] = None
+    role_id: Optional[int] = None
+    org_unit_id: Optional[int] = None
+    level: str = "view"
 
 
 class DatasetShareOut(BaseModel):
     id: int
-    user_id: int
-    email: str
+    #: 'user' | 'role' | 'org_unit' -- which kind of grantee.
+    kind: str = "user"
+    user_id: Optional[int] = None
+    email: Optional[str] = None
+    role_id: Optional[int] = None
+    org_unit_id: Optional[int] = None
+    #: The grantee's display name (email, role name or unit name).
+    name: Optional[str] = None
+    level: str = "edit"
     created_at: datetime
 
 

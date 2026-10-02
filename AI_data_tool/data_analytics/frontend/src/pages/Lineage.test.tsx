@@ -278,3 +278,40 @@ describe('Lineage accessibility', () => {
     expect(await axeViolations(container)).toEqual([])
   })
 })
+
+describe('Lineage search and path (3.12)', () => {
+  const graphWithStray = () => vi.mocked(lineageApi.graph).mockResolvedValue({
+    sources: [{ id: 1, name: 'Warehouse', type: 'postgres' }, { id: 2, name: 'Sheets', type: 'gsheets' }],
+    datasets: [
+      { id: 5, name: 'Orders', mode: 'import', source_id: 1, joins: [6], extraction_kind: null,
+        transform: { count: 0, kinds: [] }, load: { last_refreshed_at: null, strategy: null, cursor_column: null, staleness: 'never' } },
+      { id: 6, name: 'Customers', mode: 'import', source_id: null, joins: [], extraction_kind: null,
+        transform: { count: 0, kinds: [] }, load: { last_refreshed_at: null, strategy: null, cursor_column: null, staleness: 'never' } },
+      { id: 7, name: 'Budget', mode: 'import', source_id: 2, joins: [], extraction_kind: null,
+        transform: { count: 0, kinds: [] }, load: { last_refreshed_at: null, strategy: null, cursor_column: null, staleness: 'never' } },
+    ],
+    reports: [{ id: 9, name: 'Sales', dataset_ids: [5] }, { id: 10, name: 'Finance', dataset_ids: [7] }],
+  } as never)
+
+  it('the search box narrows the graph by name', async () => {
+    graphWithStray()
+    render(<MemoryRouter><Lineage /></MemoryRouter>)
+    await screen.findByText('Budget')
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'budg' } })
+    expect(screen.getByText('Budget')).toBeInTheDocument()
+    expect(screen.queryByText('Orders')).not.toBeInTheDocument()
+    expect(screen.queryByText('Sales')).not.toBeInTheDocument()
+  })
+
+  it('"Show only this path" keeps everything upstream and downstream of the selection', async () => {
+    graphWithStray()
+    render(<MemoryRouter><Lineage /></MemoryRouter>)
+    const box = await screen.findByRole('checkbox', { name: /show only this path/i })
+    expect(box).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: /^Sales/ }))
+    fireEvent.click(screen.getByRole('checkbox', { name: /show only this path/i }))
+    // Sales <- Orders <- (Warehouse, Customers): the whole chain stays
+    for (const n of ['Sales', 'Orders', 'Customers', 'Warehouse']) expect(screen.getByText(n)).toBeInTheDocument()
+    for (const n of ['Budget', 'Finance', 'Sheets']) expect(screen.queryByText(n)).not.toBeInTheDocument()
+  })
+})

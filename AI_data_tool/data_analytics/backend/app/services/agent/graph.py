@@ -186,10 +186,29 @@ async def run_agent(db, *, question: str, source: DataSource | None = None,
             return _frames
         built: dict = {}
         for ds, tname in zip(datasets, table_names):
-            frame = await asyncio.to_thread(analytics.load_file, ds.filename)
             expr = await resolve_rls_expr(db, user, ds.id)
-            frame = widget_data.apply_rls_filter(frame, expr)
             denied_here = denied_by_table.get(tname)
+            if ds.mode == "directquery" or not ds.filename:
+                # A live dataset is read through its own SQL, with the row
+                # rule pushed down with the query (no new apply_rls_filter
+                # site). Asking from a dashboard built on "Current workforce"
+                # must answer from Current workforce -- not from the raw
+                # tables behind it, which hold every salary a person ever had
+                # (HR evaluation, blocker 3).
+                from ..analysis_frame import load_directquery_frame
+                from ...core.config import settings as _settings
+                got = await load_directquery_frame(
+                    db, ds, rls_filter_expr=expr, denied=set(denied_here or ()),
+                    row_cap=int(_settings.import_row_cap or 0) or None)
+                if got.sampled:
+                    raise ValueError(
+                        f"'{ds.name}' has {got.total_rows:,} rows, more than Ask AI "
+                        f"reads from a live dataset. Ask its connection instead, or "
+                        f"add an aggregate on the dataset's Aggregates tab.")
+                built[tname] = got.frame
+                continue
+            frame = await asyncio.to_thread(analytics.load_file, ds.filename)
+            frame = widget_data.apply_rls_filter(frame, expr)
             if denied_here:
                 present = [c for c in frame.columns
                            if c.casefold() in {x.casefold() for x in denied_here}]
@@ -220,7 +239,16 @@ async def run_agent(db, *, question: str, source: DataSource | None = None,
     # and applied at the single success exit -- there is no other way to say
     # "answer this, and draw the answer".
     chart_request: dict | None = None
-    if history:
+    # The reply to a clarifying question is not a new question: it settles
+    # the one asked before it. Re-reading it cold answered only the
+    # clarified part ("by department" came back as a list of departments)
+    # and dropped the rest of what was asked. So the original question is
+    # carried WHOLE, with the reply attached, and the run does not ask again
+    # -- one clarification, then the best reading.
+    clarified = clarified_question(question, history)
+    if clarified is not None:
+        effective_question = clarified
+    elif history:
         resolved = await resolve_followup(question, history, client)
         if resolved is not None:
             kind = resolved["kind"]
@@ -312,7 +340,7 @@ async def run_agent(db, *, question: str, source: DataSource | None = None,
             source_id=source_id, org_id=user.org_id,
             frames=await dataset_frames() if dataset_mode else None)
 
-    if verdict["ambiguous"]:
+    if verdict["ambiguous"] and clarified is None:
         ask = await clarify(question, verdict["ambiguity_reason"] or "", client)
         return _finish(run, started, status="needs_clarification",
                        answer=ask or "Could you make the question more specific?")
@@ -575,6 +603,12 @@ async def run_agent(db, *, question: str, source: DataSource | None = None,
 
     concerns = [c for r in results.values()
                 if (c := sanity_check(r.rows or [], step_question(steps, r.step_id)))]
+    if not dataset_mode:
+        from .policy import closed_table_note
+        for r in results.values():
+            note = closed_table_note(r.sql or "", context)
+            if note and note not in concerns:
+                concerns.append(note)
     if (failed or query_gave_up) and overview is not None:
         # Said in the answer, not swallowed: the person asked for a
         # description and got one, and should still know a query was tried.
@@ -754,6 +788,24 @@ def _ask_choices(run: AgentRun, started: float, question: str,
     nowhere, which is worse than a plain question."""
     run.presentation = {"kind": "choices", "options": options}
     return _finish(run, started, status="needs_clarification", answer=question)
+
+
+def clarified_question(reply: str, history: list[dict] | None) -> str | None:
+    """The original question plus the person's answer to the clarifying
+    question that followed it, or None when the last turn did not ask one."""
+    if not history or not reply.strip():
+        return None
+    last = history[-1]
+    if last.get("role") != "assistant" or last.get("status") != "needs_clarification":
+        return None
+    original = next((h.get("content") for h in reversed(history[:-1])
+                     if h.get("role") == "user" and (h.get("content") or "").strip()), None)
+    if not original:
+        return None
+    return (f"{original.strip()}\n"
+            f"(Clarification -- you asked: \"{(last.get('content') or '').strip()}\" "
+            f"and the answer is: \"{reply.strip()}\". Answer the ORIGINAL question "
+            f"in full, every part of it, using this clarification.)")
 
 
 #: Rows of the dataset read to decide what is worth charting. Enough for a

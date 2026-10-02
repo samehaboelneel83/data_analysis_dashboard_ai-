@@ -11,6 +11,55 @@ from sqlglot import exp
 from ..state import StepResult
 
 
+#: HR evaluation (item 3.6): an Arabic question was answered in English.
+LANGUAGE_RULE = ("Write in the SAME language as the user's question -- an Arabic "
+                 "question gets an Arabic answer -- keeping every number, name and "
+                 "data value exactly as given. Write numbers of four or more digits "
+                 "with thousands separators (37,701) in every language. ")
+
+
+def _period_key(v) -> float | None:
+    """A sortable number for a period label: 2002, '2002', '2002-08', '2002-Q3'."""
+    import re
+    s = str(v).strip()
+    m = re.fullmatch(r"(\d{4})(?:[-/](\d{1,2}))?(?:-(\d{1,2}))?", s)
+    if m:
+        y = int(m.group(1))
+        if not 1900 <= y <= 2200:
+            return None
+        return y + (int(m.group(2)) / 100 if m.group(2) else 0)
+    m = re.fullmatch(r"(\d{4})-Q([1-4])", s)
+    if m:
+        return int(m.group(1)) + int(m.group(2)) / 10
+    return None
+
+
+def partial_period_note(r: StepResult) -> str | None:
+    """A series by period whose LAST period drops sharply -- often a period the
+    data only partly covers (HR evaluation: leavers in 2002 looked like an
+    improvement, but the data stops in August). Said as a possibility, never
+    as a finding."""
+    rows = r.rows or []
+    if len(rows) < 4 or not isinstance(rows[0], dict):
+        return None
+    keys = list(rows[0].keys())
+    if len(keys) < 2:
+        return None
+    period, value = keys[0], next((k for k in keys[1:]
+                                   if isinstance(rows[0].get(k), (int, float, Decimal))), None)
+    if value is None:
+        return None
+    pts = [(_period_key(row.get(period)), row.get(value), row.get(period)) for row in rows]
+    if any(p is None or not isinstance(v, (int, float, Decimal)) for p, v, _ in pts):
+        return None
+    pts.sort(key=lambda t: t[0])
+    last, prev = float(pts[-1][1]), float(pts[-2][1])
+    if prev > 0 and last < prev * 0.7:
+        return (f"the last period ({pts[-1][2]}) is much lower than the one before it; "
+                f"it may be a period the data only partly covers")
+    return None
+
+
 def _catalog_is_columns(r: StepResult) -> bool:
     """Whether the catalog step is describing ONE object's columns.
 
@@ -74,14 +123,20 @@ def _label(r: StepResult, names: dict[str, str] | None = None) -> str:
 
 def _tidy(v):
     """A number as a person writes it (BUG-032): a float64 sum reached the
-    model as 2580.0 and was repeated that way. Whole values lose the ".0";
-    others keep four decimals, more than any answer states."""
+    model as 2580.0 and was repeated that way. Whole values lose the ".0".
+
+    HR re-test 2026-10-01: the model repeats what it is handed, so an average
+    salary reached the reader as "71963.5708" in both languages. From 100 up
+    two decimals are all an answer ever needs (money, counts, averages of
+    either); small values -- rates, ratios -- keep four."""
     if isinstance(v, bool) or not isinstance(v, (float, Decimal)):
         return v
     f = float(v)
     if math.isnan(f) or math.isinf(f):
         return v
-    return int(f) if f.is_integer() and abs(f) < 1e15 else round(f, 4)
+    if f.is_integer() and abs(f) < 1e15:
+        return int(f)
+    return round(f, 2) if abs(f) >= 100 else round(f, 4)
 
 
 def _is_number(v) -> bool:
@@ -177,6 +232,9 @@ def _facts(results: dict[str, StepResult],
                 whole = _whole_result(r.rows)
                 if whole:
                     lines.append(f"  Across ALL {n} {_row_noun(r)} (not just those shown): {whole}")
+            note = partial_period_note(r)
+            if note:
+                lines.append(f"  Note: {note} -- mention this possibility.")
     return "\n".join(lines)
 
 
@@ -205,6 +263,7 @@ async def describe(question: str, results: dict[str, StepResult],
     the result exists, describe what is in it."""
     got = await client.complete(
         [{"role": "system", "content": (
+            LANGUAGE_RULE +
             "You are describing a result the person is ALREADY LOOKING AT. It "
             "has been computed and is on their screen, drawn as a table or a "
             "chart. Say what it shows in 2-4 sentences: how many rows and "
@@ -239,6 +298,7 @@ async def explain(question: str, results: dict[str, StepResult],
                   names: dict[str, str] | None = None) -> str | None:
     got = await client.complete(
         [{"role": "system", "content": (
+            LANGUAGE_RULE +
             "Answer the user's question in 1-3 sentences from ONLY the "
             "figures given. State numbers exactly; do not invent any. When a "
             "block shows only some of its rows, take every smallest, largest, "

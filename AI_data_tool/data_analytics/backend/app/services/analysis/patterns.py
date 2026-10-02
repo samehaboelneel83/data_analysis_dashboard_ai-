@@ -37,9 +37,11 @@ from ..analysis_contract import AnalysisContract
 RANDOM_STATE = 42
 
 #: Above this the frame is sampled. Rule mining is combinatorial, and an
-#: unbounded frame turns one request into a long CPU burn on a shared worker --
-#: the same ceiling `influencers.py` and `segment.py` apply.
-FRAME_SAMPLE_THRESHOLD = 50_000
+#: unbounded frame turns one request into a long CPU burn on a shared worker.
+#: The candidate space is capped (MAX_ITEMS, MAX_LEN), so the cost is linear
+#: in rows: ~1s for 240K HR rows. Set to the live-source row cap, so a dataset
+#: that arrives whole is mined whole.
+FRAME_SAMPLE_THRESHOLD = 250_000
 
 #: A rule needs enough baskets behind it to mean anything. In ROWS, not a
 #: fraction: 1% of 200 rows is two, and a fractional floor would admit exactly
@@ -64,6 +66,10 @@ MIN_LIFT = 1.2
 #: A longer rule must beat the simpler rule it contains by this factor to be
 #: worth reporting separately. Below it, the extra condition is decoration.
 REDUNDANCY_MARGIN = 1.1
+#: ...and by this many standard deviations of the count the simpler rule
+#: predicts (about a 1-in-200 chance of noise), so a sample's wobble does not
+#: promote a decorated copy above the finding it contains.
+REDUNDANCY_Z = 2.58
 
 #: Confidence at or above which a rule is treated as schema structure rather
 #: than a discovery. "Australia implies Asia Pacific" holds in 100% of rows
@@ -173,37 +179,71 @@ def _drop_redundant(rows: list[dict]) -> list[dict]:
                         if hit is not None:
                             yield hit
 
+    def no_better_than(row: dict, simpler: dict) -> bool:
+        if "base_rate" not in row:
+            return False        # a certain rule; removed by the caller anyway
+        if row["lift"] <= simpler["lift"] * REDUNDANCY_MARGIN:
+            return True
+        # Beating the margin is not enough on a sample: "Marketing, F ->
+        # Staff" cleared it over "Marketing -> Staff" by noise alone on HR
+        # data (2026-10-01; 2.44 vs 2.2 in the sample, 2.35 vs 2.32 in full).
+        # Under "the extra condition adds nothing", the longer rule's joint
+        # count is binomial with the simpler rule's lift; it must clear that
+        # by REDUNDANCY_Z standard deviations.
+        p = simpler["lift"] * row["base_rate"]
+        if not p < 1:
+            return True
+        ante_n = row["support_rows"] / row["confidence"] if row["confidence"] else 0
+        sd = (ante_n * p * (1 - p)) ** 0.5
+        return not sd or (row["support_rows"] - ante_n * p) / sd < REDUNDANCY_Z
+
     kept: list[dict] = []
     for row in rows:
         ante, cons = parts(row)
-        if any(row["lift"] <= s["lift"] * REDUNDANCY_MARGIN
-               for s in simpler_forms(ante, cons)):
+        if any(no_better_than(row, s) for s in simpler_forms(ante, cons)):
             continue
         kept.append(row)
     return kept
 
 
 def association_rules(df: pd.DataFrame,
-                      columns: list[str] | None = None) -> AnalysisContract:
+                      columns: list[str] | None = None,
+                      then_column: str | None = None) -> AnalysisContract:
     """Find value combinations that co-occur more than chance predicts.
 
     `columns` limits the search to specific categorical columns; omitted, every
     usable categorical column is considered.
+
+    `then_column` keeps only rules whose conclusion is a value of that column
+    ("what goes with each job title"). It is applied BEFORE the top-N cut, so
+    a focused question is not answered from the 25 rules that happened to
+    lead the unfocused list.
     """
     total_rows = len(df)
     sampled = total_rows > FRAME_SAMPLE_THRESHOLD
     if sampled:
-        df = df.sample(n=FRAME_SAMPLE_THRESHOLD, random_state=RANDOM_STATE)
+        # Chosen by a hash of each row's values, not by position: a live
+        # source returns rows in no fixed order, and a positional sample gave
+        # the same widget a lift of 5.49 on one load and 5.08 on the next
+        # (HR re-test 2026-10-01). Same rows in, same sample out.
+        keys = pd.util.hash_pandas_object(df, index=False)
+        df = df.loc[keys.nsmallest(FRAME_SAMPLE_THRESHOLD, keep="first").index]
 
     if columns:
         missing = [c for c in columns if c not in df.columns]
         if missing:
             raise PatternError(f"column '{missing[0]}' is not in this dataset")
         usable = list(columns)
+        if then_column and then_column not in usable:
+            usable.append(then_column)
     else:
         usable = [c for c in df.columns
                   if not pd.api.types.is_numeric_dtype(df[c])
                   and 1 < df[c].nunique() <= MAX_LEVELS]
+        if then_column and then_column in df.columns and then_column not in usable:
+            usable.append(then_column)
+    if then_column and then_column not in df.columns:
+        raise PatternError(f"column '{then_column}' is not in this dataset")
 
     if len(usable) < 2:
         raise PatternError(
@@ -264,6 +304,7 @@ def association_rules(df: pd.DataFrame,
 
     # ---- rules from those itemsets -------------------------------------------
     rows: list[dict] = []
+    certain: list[dict] = []
     for itemset, joint in support.items():
         if len(itemset) < 2:
             continue
@@ -271,6 +312,8 @@ def association_rules(df: pd.DataFrame,
             for antecedent in itertools.combinations(sorted(itemset), r):
                 ante = frozenset(antecedent)
                 cons = itemset - ante
+                if then_column and any(c != then_column for c, _ in cons):
+                    continue
                 ante_n = support.get(ante)
                 cons_n = support.get(cons)
                 if not ante_n or not cons_n:
@@ -282,7 +325,12 @@ def association_rules(df: pd.DataFrame,
                     continue
                 if confidence >= FUNCTIONAL_DEPENDENCY_CONFIDENCE:
                     # A rule that never fails is describing the schema, not the
-                    # data. See FUNCTIONAL_DEPENDENCY_CONFIDENCE.
+                    # data. See FUNCTIONAL_DEPENDENCY_CONFIDENCE. Remembered, so
+                    # its longer variants can be dropped with it below.
+                    certain.append({
+                        "if": ", ".join(f"{c}={v}" for c, v in sorted(ante)),
+                        "then": ", ".join(f"{c}={v}" for c, v in sorted(cons)),
+                        "lift": float("inf")})
                     continue
                 rows.append({
                     "if": ", ".join(f"{c}={v}" for c, v in sorted(ante)),
@@ -295,10 +343,20 @@ def association_rules(df: pd.DataFrame,
                     # happens 90% of the time anyway.
                     "base_rate": round(base_rate, 4),
                     "lift": round(lift, 3),
+                    # The same two sides as [column, value] pairs: a value may
+                    # itself contain ", " or "=", which the joined text cannot
+                    # be split back on.
+                    "if_items": [[c, v] for c, v in sorted(ante)],
+                    "then_items": [[c, v] for c, v in sorted(cons)],
                 })
 
     rows.sort(key=lambda r: (-r["lift"], -r["support_rows"], r["if"]))
-    rows = _drop_redundant(rows)[:TOP_N]
+    # A certain rule is suppressed, but "Senior Staff -> Sales, gender=F" is
+    # the same non-finding with an unrelated column attached, and it led the
+    # list on HR data (2026-10-01). Ranked as unbeatable simpler forms, the
+    # certain rules take their variants out with them, then leave.
+    rows = [r for r in _drop_redundant(certain + rows)
+            if r["lift"] != float("inf")][:TOP_N]
 
     caveats = [
         "These are co-occurrences, not causes: the values appear together more "
@@ -326,6 +384,7 @@ def association_rules(df: pd.DataFrame,
         rows=rows,
         meta={"rows_scanned": n, "total_rows": total_rows, "sampled": sampled,
               "columns_considered": usable, "items_considered": len(ordered),
+              "then_column": then_column,
               "params": {"min_support_rows": MIN_SUPPORT_COUNT,
                          "min_lift": MIN_LIFT, "max_itemset_size": MAX_LEN}},
         warnings=caveats,

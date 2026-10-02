@@ -5,7 +5,9 @@ import { adminUsersApi, datasetSharesApi } from '../services/api'
 
 vi.mock('../services/api', () => ({
   adminUsersApi: { list: vi.fn() },
-  datasetSharesApi: { list: vi.fn(), create: vi.fn(), delete: vi.fn() },
+  datasetSharesApi: { list: vi.fn(), create: vi.fn(), delete: vi.fn(), createGroup: vi.fn(), deleteGroup: vi.fn() },
+  adminRolesApi: { list: vi.fn().mockResolvedValue([{ id: 3, name: 'HR managers', is_org_admin: false }]) },
+  orgUnitsApi: { list: vi.fn().mockResolvedValue([]) },
 }))
 
 beforeEach(() => {
@@ -44,7 +46,7 @@ describe('DatasetShareDialog', () => {
     fireEvent.change(screen.getByLabelText('User to share with'), { target: { value: '1' } })
     fireEvent.click(screen.getByRole('button', { name: 'Share' }))
 
-    await waitFor(() => expect(datasetSharesApi.create).toHaveBeenCalledWith(5, 1))
+    await waitFor(() => expect(datasetSharesApi.create).toHaveBeenCalledWith(5, 1, 'view'))
     expect(await screen.findByText('alice@example.com')).toBeInTheDocument()
   })
 
@@ -70,5 +72,17 @@ describe('DatasetShareDialog', () => {
     await waitFor(() =>
       expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
     expect(datasetSharesApi.delete).not.toHaveBeenCalled()
+  })
+
+  it('shares with a whole role, view-only (HR evaluation 2.5)', async () => {
+    vi.mocked(datasetSharesApi.createGroup).mockResolvedValue({ id: 20, kind: 'role', role_id: 3, name: 'HR managers', level: 'view', created_at: '2026-10-01' })
+    render(<DatasetShareDialog datasetId={5} onClose={() => {}} />)
+    await screen.findByText('bob@example.com')
+    fireEvent.change(screen.getByLabelText('Share with'), { target: { value: 'role' } })
+    await waitFor(() => expect((screen.getByLabelText('Role to share with') as HTMLSelectElement).options.length).toBe(2))
+    fireEvent.change(screen.getByLabelText('Role to share with'), { target: { value: '3' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Share' }))
+    await waitFor(() => expect(datasetSharesApi.createGroup).toHaveBeenCalledWith(5, { role_id: 3, level: 'view' }))
+    expect(await screen.findByText('HR managers')).toBeInTheDocument()
   })
 })

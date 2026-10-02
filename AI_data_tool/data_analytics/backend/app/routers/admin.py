@@ -659,7 +659,8 @@ async def list_monitoring_deliveries(
         {"id": d.id, "kind": d.kind, "status": d.status, "error": d.error,
          "artifact_kind": d.artifact_kind, "duration_ms": d.duration_ms,
          "created_at": d.created_at, "report_id": d.report_id,
-         "report_name": report_name, "schedule_id": d.schedule_id}
+         "report_name": report_name, "schedule_id": d.schedule_id,
+         "subject": d.subject, "recipients": d.recipients, "file_name": d.file_name}
         for d, report_name in rows
     ]
 

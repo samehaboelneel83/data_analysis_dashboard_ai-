@@ -641,9 +641,21 @@ class TestProfileRefusesRatherThanGuessing:
             db_session, org, "dq@example.invalid")
         ds = await ProfileFixtures.dataset(db_session, org, user, sales_csv,
                                            mode="directquery")
+        # Live datasets are profiled through their connection now (HR
+        # evaluation, item 3.5); one whose connection is gone is refused.
+        from app.models.models import DataSource
+        src = DataSource(name="dead", type="postgresql", org_id=org.id if hasattr(org, "id") else org,
+                         config={"host": "127.0.0.1", "port": 1, "database": "x",
+                                 "username": "u", "password": "p"})
+        db_session.add(src)
+        await db_session.flush()
+        ds.filename = None
+        ds.data_source_id = src.id
+        ds.source_table = "orders"
+        await db_session.commit()
 
         _run, step, _ = await _run_profile(db_session, org, user, ds.id)
-        await self._assert_refused(step, mentions="directquery")
+        await self._assert_refused(step, mentions="reach")
 
     async def test_the_file_is_missing_from_disk(self, db_session, tmp_path,
                                                  artifact_dir):
@@ -2228,7 +2240,8 @@ class TestTheNameIsStructuralNotASentence:
         name = automation_runner._compose_name(
             "Enrolments 2025", [finding], run_id=1, taken=set())
         assert "Enrolments 2025" in name
-        assert "final_score" in name or "faculty" in name
+        # 5.17: plain words built from the schema -- "final score by faculty"
+        assert name == "Enrolments 2025 overview — final score by faculty"
         assert "trails the other" not in name, (
             "the finding's sentence was copied into the name")
 
@@ -2241,7 +2254,12 @@ class TestTheNameIsStructuralNotASentence:
 
     def test_with_no_findings_it_still_names_the_dataset(self):
         name = automation_runner._compose_name("Enrolments 2025", [], 1, set())
-        assert "Enrolments 2025" in name
+        assert name == "Enrolments 2025 overview"
+
+    def test_a_trend_reads_as_over_time_not_as_a_schema_dump(self):
+        name = automation_runner._compose_name(
+            "Workforce", [{"kind": "trend", "columns": ["salary", "hire_date"]}], 1, set())
+        assert name == "Workforce overview — salary over time"
 
 
 class TestTheCollisionSuffixSurvivesTruncation:
@@ -2997,3 +3015,86 @@ class TestNotifyContract:
         with pytest.raises(automation_runner.StepRefused):
             await automation_runner._notify_step(ctx, db_session)
         assert not await _notifications_for(db_session, user.id)
+
+
+@pytest.mark.asyncio
+async def test_the_automation_loop_moves_on_at_once_after_a_step(monkeypatch):
+    """5.21: one step per tick still, but no minute of idle time between steps."""
+    import asyncio
+    from contextlib import asynccontextmanager
+
+    from app.services import automation_runner as ar
+
+    results = iter([True, True, False])
+    sleeps = []
+
+    async def fake_tick(session, now=None):
+        try:
+            return next(results)
+        except StopIteration:
+            raise asyncio.CancelledError
+
+    async def fake_sleep(s):
+        sleeps.append(s)
+
+    @asynccontextmanager
+    async def factory():
+        yield None
+
+    monkeypatch.setattr(ar, "tick", fake_tick)
+    monkeypatch.setattr(ar.asyncio, "sleep", fake_sleep)
+    with pytest.raises(asyncio.CancelledError):
+        await ar.run_automation_loop(factory)
+    assert sleeps == [ar.BETWEEN_STEPS_SECONDS, ar.BETWEEN_STEPS_SECONDS, ar.IDLE_SECONDS]
+
+
+def test_a_run_with_no_widgets_says_nothing_to_build_and_why():
+    """5.16: zero widgets read as a success ("all 0 widgets passed review")."""
+    from app.models.models import AutomationRun
+    from app.services.automation_runner import NEEDS_REVIEW, describe_run
+    run = AutomationRun(id=9, status=NEEDS_REVIEW, widgets_accepted=0, widgets_rejected=0,
+                        error="nothing was proposed to review")
+    text, link = describe_run(run)
+    assert text.startswith("Nothing to build: nothing was proposed to review.")
+    assert "passed review" not in text and link == "/automation?run=9"
+    done = AutomationRun(id=10, status="done", widgets_accepted=0, widgets_rejected=2, error=None)
+    assert "2 proposed widgets failed review" in describe_run(done)[0]
+
+
+class TestASecuredDatasetGetsNoFixedProse:
+    """HR re-test 2026-10-01: a Sales-only manager opened the automated page
+    and read every department's averages compared in its Summary text."""
+
+    async def test_no_summary_and_plain_titles_when_rows_are_secured(
+            self, db_session, reviewable_csv, artifact_dir, monkeypatch):
+        from sqlalchemy import select
+        from app.models.models import Report, ReportPage, ReportWidget, RowSecurityRule
+
+        _with_proposal(monkeypatch, [GOOD_WIDGET], path="insights")
+        org, _admin = await _seed(db_session)
+        role, user = await ProfileFixtures.member(
+            db_session, org, "secured1@example.invalid")
+        ds = await ProfileFixtures.dataset(db_session, org, user, reviewable_csv)
+        other = (await db_session.execute(select(type(role)).where(
+            type(role).org_id == org.id, type(role).id != role.id))).scalars().first() or role
+        db_session.add(RowSecurityRule(role_id=other.id, dataset_id=ds.id,
+                                       filter_expr="1 == 1"))
+        await db_session.commit()
+
+        run, _steps = await _run_through_compose(db_session, org, user, ds.id)
+        widgets = (await db_session.execute(
+            select(ReportWidget).join(ReportPage, ReportWidget.page_id == ReportPage.id)
+            .where(ReportPage.report_id == run.result_report_id))).scalars().all()
+        assert widgets
+        assert not [w for w in widgets if w.widget_type == "text"]
+        report = await db_session.get(Report, run.result_report_id)
+        assert not report.description
+
+
+def test_a_plain_title_states_no_value():
+    t = automation_runner._plain_widget_title(
+        {"widget_type": "bar", "title": "Sales has the highest average salary",
+         "config": {"dimension": "dept_name", "measure": "salary", "aggregation": "avg"}})
+    assert t == "Average salary by dept name"
+    assert automation_runner._plain_widget_title(
+        {"widget_type": "histogram", "config": {"measure": "salary"}}) == "Distribution of salary"

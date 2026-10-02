@@ -66,6 +66,9 @@ interface Props {
    *  panel's Suggestions draw live charts). The author's own width is kept
    *  and comes back once the floor is lifted. */
   minWidth?: number
+  /** Told whenever the panel opens or collapses, so the page can say where
+   *  a hidden control went (5.8: an empty canvas with the fields folded away). */
+  onOpenChange?: (open: boolean) => void
 }
 
 /**
@@ -77,9 +80,10 @@ interface Props {
  * mid-edit in -- the children stay mounted and merely hidden, so an open dropdown or a
  * half-typed field survives a collapse.
  */
-export default function CollapsibleSide({ id, side, width, title, style, children, scrollResetKey, openSignal, minWidth }: Props) {
+export default function CollapsibleSide({ id, side, width, title, style, children, scrollResetKey, openSignal, minWidth, onOpenChange }: Props) {
   const [open, setOpen] = useState(() => readMap<boolean>(STORAGE_KEY)[id] ?? true)
   useEffect(() => { if (openSignal) setOpen(true) }, [openSignal])
+  useEffect(() => { onOpenChange?.(open) }, [open, onOpenChange])
   const [panelW, setPanelW] = useState(() => {
     const saved = readMap<number>(WIDTH_KEY)[id]
     return typeof saved === 'number' && Number.isFinite(saved) ? clampW(saved) : width
@@ -160,8 +164,12 @@ export default function CollapsibleSide({ id, side, width, title, style, childre
         flexDirection: 'column',
         position: 'relative',
         overflow: 'hidden',
-        // No width transition mid-drag: an eased width lags the pointer and reads as lag.
-        transition: dragging ? 'none' : 'width .14s ease',
+        // No width transition, ever. An eased width changes the canvas beside
+        // it on every frame of the ease, and every frame re-laid out every
+        // tile (100-150ms frames on a six-chart page); the charts then waited
+        // for the size to settle. Snapping changes the size ONCE, and the
+        // charts redraw at it straight away (MeasuredChart).
+        transition: 'none',
         ...(open ? style : { background: 'var(--surface)', [side === 'right' ? 'borderInlineStart' : 'borderInlineEnd']: '1px solid var(--border)' }),
       }}
     >

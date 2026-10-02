@@ -21,22 +21,51 @@
    illustration is the one flexible piece: it gives up height first, so the
    title, picker and composer always fit without a page scrollbar. Only a
    window too short for the text itself (art at its floor) scrolls. */
+/* Wide: two columns -- the copy and picker on the reading side, the picture on
+   the other. The hero sits in the upper part of the pane (not dead centre) so
+   the picker keeps a full list's worth of room BELOW it: the list opens
+   downward into empty space and never covers the picture or the headline. */
 .dl-ask--hero {
   height: 100%; min-height: 0; display: flex; flex-direction: column; align-items: center;
-  justify-content: safe center; padding: 0 16px 8px;
+  justify-content: flex-start; padding: clamp(16px, 7vh, 72px) 24px 16px; overflow-y: auto;
 }
 .dl-ask__error {
   width: 100%; max-width: 720px; margin-bottom: 16px; padding: 12px 16px; border-radius: 10px;
   color: var(--dl-error-text, var(--danger)); background: var(--dl-error-bg, transparent);
   border: 1px solid var(--dl-error-line, var(--danger));
 }
-.dl-ask__hero { width: 100%; max-width: 720px; min-height: 0; flex: 0 1 auto; display: flex; flex-direction: column; align-items: center; text-align: center; }
-.dl-ask__art { flex: 0 1 265px; height: 265px; min-height: 72px; width: auto; max-width: min(100%, 460px); margin: 4px 0 8px; }
-.dl-ask__title { margin: 0; font-size: clamp(26px, 4vw, 36px); line-height: 1.15; font-weight: 700; letter-spacing: -0.02em; }
-.dl-ask__sub { margin: 10px 0 0; max-width: 560px; color: var(--muted); font-size: 15px; line-height: 1.55; }
-.dl-ask__steps { width: 100%; max-width: 600px; margin-top: 20px; display: flex; flex-direction: column; gap: 20px; text-align: start; }
-.dl-ask__step { display: flex; flex-direction: column; gap: 8px; }
-.dl-ask__step-label { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--text); }
+.dl-ask__hero {
+  width: 100%; max-width: 1120px; flex: 0 0 auto;
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: clamp(24px, 4vw, 64px);
+}
+.dl-ask__copy { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; text-align: start; }
+.dl-ask__eyebrow {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; margin-bottom: 14px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; color: var(--accent);
+  background: var(--accent-soft, var(--ask-soft)); border: 1px solid color-mix(in oklab, var(--accent) 30%, transparent);
+}
+.dl-ask__title { margin: 0; font-size: clamp(28px, 3.4vw, 42px); line-height: 1.1; font-weight: 700; letter-spacing: -0.02em; }
+.dl-ask__sub { margin: 12px 0 0; max-width: 520px; color: var(--muted); font-size: 15px; line-height: 1.6; }
+.dl-ask__points { list-style: none; margin: 22px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.dl-ask__points li { display: flex; align-items: center; gap: 10px; font-size: 13.5px; color: var(--text); }
+.dl-ask__points svg {
+  flex-shrink: 0; box-sizing: content-box; padding: 5px; border-radius: 8px;
+  color: var(--accent); background: var(--accent-soft, var(--ask-soft));
+}
+.dl-ask__step { width: 100%; max-width: 520px; margin-top: 22px; display: flex; flex-direction: column; gap: 8px; }
+.dl-ask__step-label { font-size: 13px; font-weight: 600; color: var(--text); }
+.dl-ask__art-wrap { display: grid; place-items: center; min-width: 0; }
+.dl-ask__art { width: 100%; max-width: 560px; height: auto; }
+
+/* Narrow: one column, picture first (small), copy and picker under it -- the
+   list still opens below the picker, away from the picture. */
+@media (max-width: 900px) {
+  .dl-ask--hero { padding-top: 16px; }
+  .dl-ask__hero { grid-template-columns: minmax(0, 1fr); max-width: 600px; gap: 16px; }
+  .dl-ask__art-wrap { order: -1; height: clamp(120px, 24vh, 200px); }
+  .dl-ask__art { width: auto; height: 100%; }
+  .dl-ask__step { max-width: none; }
+}
 
 /* ── Illustration ─────────────────────────────────────────────────────── */
 .dl-askart { direction: ltr; overflow: visible; }

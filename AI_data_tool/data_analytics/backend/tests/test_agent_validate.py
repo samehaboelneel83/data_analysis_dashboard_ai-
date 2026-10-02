@@ -200,3 +200,40 @@ def test_a_counting_question_is_answered_with_a_count(question, sql, refused):
     assert (got is not None) is refused
     if refused:
         assert got.rung == "V7" and "COUNT(*)" in got.detail
+
+
+class TestDerivedTables:
+    """HR evaluation 2026-10-01 (item 1.10): `FROM (SELECT ...) AS latest`
+    was refused with "unknown alias: latest", so a leaver definition given in
+    plain words could never be answered."""
+
+    def test_a_derived_table_alias_is_a_valid_qualifier(self):
+        sql = ("SELECT latest.customer_id, COUNT(*) FROM "
+               "(SELECT customer_id, MAX(total) AS top FROM orders GROUP BY customer_id) AS latest "
+               "GROUP BY latest.customer_id")
+        assert validate_sql(sql, ctx()) is None
+
+    def test_a_derived_table_joined_to_a_real_table(self):
+        sql = ("SELECT c.city, COUNT(*) FROM customers c JOIN "
+               "(SELECT customer_id FROM orders) AS o ON o.customer_id = c.id GROUP BY c.city")
+        assert validate_sql(sql, ctx()) is None
+
+    def test_its_inner_tables_are_still_checked(self):
+        sql = "SELECT x.a FROM (SELECT a FROM nope) AS x"
+        got = validate_sql(sql, ctx())
+        assert got is not None and got.rung == "V2"
+
+    def test_an_unknown_qualifier_still_fails(self):
+        sql = "SELECT z.id FROM (SELECT id FROM orders) AS x"
+        got = validate_sql(sql, ctx())
+        assert got is not None and "unknown alias" in got.detail
+
+
+def test_partial_last_period_is_flagged():
+    from app.services.agent.nodes.explain import partial_period_note
+    from app.services.agent.state import StepResult
+    rows = [{"leave_year": y, "n": v} for y, v in [(1999, 6964), (2000, 7610), (2001, 7241), (2002, 4011)]]
+    r = StepResult("s1", "ok", None, rows, None, [], 0, 0)
+    assert "2002" in (partial_period_note(r) or "")
+    steady = [{"y": y, "n": 100} for y in (2000, 2001, 2002, 2003)]
+    assert partial_period_note(StepResult("s1", "ok", None, steady, None, [], 0, 0)) is None

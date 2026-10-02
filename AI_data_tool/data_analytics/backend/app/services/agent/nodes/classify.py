@@ -102,6 +102,11 @@ Q: build me a dashboard for my courses -> {"intent": "suggest_dashboard", "ambig
 -- over the data, and it is never ambiguous: choosing what to show IS the request,
 -- so asking back "which dashboard?" returns the question to the person who asked
 -- precisely because they did not want to decide.
+Q: كم عدد الموظفين في قسم المبيعات -> {"intent": "aggregate", "ambiguous": false, "ambiguity_reason": null}
+-- "المبيعات" is Arabic for Sales: a department named in the question's own
+-- language is the same department. Not seeing the word in the schema is
+-- not a tie between two readings (HR re-test 2026-10-01: this asked back
+-- whether Sales "exists" and offered an Operations department there is none of).
 Q: hi -> {"intent": "chat", "ambiguous": false, "ambiguity_reason": null}
 Q: مرحبا -> {"intent": "chat", "ambiguous": false, "ambiguity_reason": null}
 Q: thanks, that helps -> {"intent": "chat", "ambiguous": false, "ambiguity_reason": null}
@@ -181,7 +186,12 @@ async def classify(question: str, context: SchemaContext, client,
             "with where the action is done, never with a query. `chat` is never "
             "ambiguous. A message that asks for data is never `chat`, even "
             "when it opens with a greeting: the question inside it wins. "
-            "Keep "
+            "A value named in another language is read by its meaning: "
+            "an Arabic question about \"قسم المبيعات\" asks about the "
+            "department whose value is 'Sales', \"التسويق\" is 'Marketing'. "
+            "Translate the value and match it to the column it belongs to; a "
+            "value that translates to one that exists, or that you cannot "
+            "see listed, is never ambiguity -- the query filters on it. Keep "
             "`ambiguity_reason` to ONE short sentence. When a 'Conversation "
             "so far' block is present the question is a follow-up in that "
             "conversation: read it with those turns, and never call it "

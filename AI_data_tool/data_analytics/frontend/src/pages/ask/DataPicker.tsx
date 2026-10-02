@@ -45,6 +45,8 @@ export function pushRecent(key: string) {
 const POP_CHROME = 110
 const LIST_MAX = 340
 const LIST_MIN = 120
+/** Below this much list room, a roomier side above wins. */
+const LIST_COMFY = 200
 const EDGE = 12
 
 /** The box the popup can be seen in: the nearest ancestor that clips or
@@ -71,7 +73,9 @@ function visibleBounds(el: HTMLElement): { top: number; bottom: number } {
 export function placePopup(trigger: DOMRect, bounds: { top: number; bottom: number }) {
   const below = bounds.bottom - trigger.bottom - EDGE
   const above = trigger.top - bounds.top - EDGE
-  const up = below < POP_CHROME + LIST_MAX && above > below
+  // Down is the natural direction: keep it whenever a usable list fits
+  // (LIST_COMFY rows' worth), so the list does not jump up over the headline.
+  const up = below < POP_CHROME + LIST_COMFY && above > below
   const room = (up ? above : below) - POP_CHROME
   return { up, listMax: Math.max(LIST_MIN, Math.min(LIST_MAX, Math.floor(room))) }
 }
@@ -123,6 +127,13 @@ export default function DataPicker({ items, value, onChoose, size = 'hero', load
       recentKeys = items.filter(i => i.kind === 'dataset' && i.updated)
         .sort((a, b) => (b.updated ?? '').localeCompare(a.updated ?? '')).slice(0, 3).map(i => i.key)
     }
+    // 5.20: a dataset made in the last day is what someone came to ask about,
+    // even before they have asked about it once -- it joins Recent.
+    const DAY = 24 * 3600_000
+    const fresh = items.filter(i => i.kind === 'dataset' && i.updated && !recentKeys.includes(i.key)
+      && Date.now() - Date.parse(i.updated) < DAY)
+      .sort((a, b) => (b.updated ?? '').localeCompare(a.updated ?? '')).map(i => i.key)
+    recentKeys = [...recentKeys, ...fresh].slice(0, 5)
     const recent = q ? [] : recentKeys.map(k => items.find(i => i.key === k)!).filter(Boolean)
     const rest = items.filter(i => !recent.includes(i) && match(i))
     const out: { label: string; items: PickerItem[] }[] = []

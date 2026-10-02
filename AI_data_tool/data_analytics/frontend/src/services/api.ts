@@ -3,6 +3,7 @@ import { sanitizeErrorDetail } from '../lib/friendlyError'
 import { canceledRequest } from '../lib/canceledRequest'
 import type { Report, ReportRelease, ReportPage, Widget, HierarchyNode, Bookmark, BookmarkState, WorkspaceTree, WorkspaceNode } from '../types/report'
 import type { DisplayRule } from '../lib/displayRules'
+import type { SaidI18n } from '../lib/readbackText'
 
 /**
  * Where the API lives, in three cases:
@@ -208,6 +209,8 @@ export interface DatasetCatalog {
 export interface Dataset {
   id: number
   name: string
+  /** 4.7: who made it -- the "Mine" filter on dataset pickers. */
+  created_by?: number | null
   description?: string
   filename?: string
   row_count: number
@@ -310,6 +313,8 @@ export interface Dataflow {
   join_dataset_ids: number[]
   steps: Record<string, unknown>[]
   refresh_interval_minutes: number | null
+  /** 4.6: a snapshot dataflow appends a row per period (and group). */
+  snapshot?: DataflowSnapshot | null
   created_by: number | null
   created_at: string | null
   last_run_at: string | null
@@ -322,12 +327,22 @@ export interface Dataflow {
 
 export interface DataflowGrant { role_id: number; level: string }
 
+export interface DataflowSnapshot {
+  every: 'month' | 'week' | 'day'
+  group_by?: string[]
+  measure?: string | null
+  agg?: 'count' | 'nunique' | 'sum' | 'avg'
+  as?: string
+  backfill?: { from_column: string; to_column: string; start: string } | null
+}
+
 export const dataflowsApi = {
   list:   ()           => api.get<Dataflow[]>('/dataflows').then(r => r.data),
   get:    (id: number) => api.get<Dataflow>(`/dataflows/${id}`).then(r => r.data),
   create: (body: { name: string; source_dataset_id: number; description?: string
                    steps?: Record<string, unknown>[]
-                   refresh_interval_minutes?: number | null }) =>
+                   refresh_interval_minutes?: number | null
+                   snapshot?: DataflowSnapshot | null }) =>
     api.post<Dataflow>('/dataflows', body).then(r => r.data),
   update: (id: number, body: Partial<{ name: string; description: string
                                        steps: Record<string, unknown>[]
@@ -376,10 +391,21 @@ export interface SuggestedWidget {
   widget_type: string
   title: string
   why?: string
+  /** What the widget actually drew, read from its result (services/readback.py). */
+  takeaway?: string
+  /** The same sentence as a key and its pieces, for the reader's language. */
+  takeaway_i18n?: SaidI18n | null
   config: Record<string, unknown>
   /** How many rows it returned when the server ran it. Every widget offered has
    *  been executed; this is the evidence. */
   row_count: number
+  /** Panel mode: the question it answers, the proposer's 1-5 value, and how
+   *  strongly the drawn result shows something (0-1). */
+  question?: string
+  value?: number
+  evidence?: number
+  /** Panel mode: its place on the section's page, decided on the server. */
+  layout?: { x: number; y: number; w: number; h: number }
 }
 
 /** Which widgets can filter which others, and on what column. Indices into the
@@ -400,10 +426,71 @@ export interface DashboardSuggestion {
   relations?: WidgetRelation[]
   /** `insights` when the statistics engine chose these charts and no model was
    *  involved; `model` when the person's own words were tailored to. */
-  source?: 'insights' | 'model'
+  source?: 'insights' | 'model' | 'panel'
+  /** Panel mode: which lens section this proposal is. */
+  section?: string
 }
 
+/** What the analyst panel did: how many ideas each source gave, how many drew,
+ *  how many were merged as the same question, how many were kept. */
+export interface PanelStats {
+  lenses: string[]
+  candidates: number
+  from_model: number
+  from_statistics: number
+  drawn: number
+  rejected: number
+  duplicates_merged: number
+  selected: number
+  size: number
+  /** Refused ideas by kind (units, promise, identifier, axis, empty, error, invalid). */
+  left_out?: Record<string, number>
+  /** Drew fine but lost to stronger ideas for the space. */
+  not_picked?: number
+}
+
+/** One idea the panel left out, and why (the reason is the server's English). */
+export interface PanelRefusal {
+  title: string | null
+  widget_type: string | null
+  why: string | null
+  code?: string
+  source?: string
+}
+
+/** What "suggest dashboards" answers. A panel asked for in the background
+ *  answers with `job_id` only; the same shape then arrives as the job's
+ *  `result`. */
+export interface SuggestDashboardsAnswer {
+  proposals: DashboardSuggestion[]
+  reason: string
+  profile: DatasetProfile
+  source?: 'insights' | 'model' | 'panel'
+  panel?: PanelStats
+  facts?: string[]
+  refused?: PanelRefusal[]
+  /** One short question asked back when nothing could be designed.
+   *  A reason is a dead end; a question is a next step. Null when
+   *  the model is unavailable or declines -- an invented question
+   *  would be worse than the plain refusal it replaced. */
+  question?: string | null
+  job_id?: number
+  state?: string
+  /** Fields the proposals draw that the dataset does not have yet -- a rate
+   *  of totals, a duration (services/derived_fields.py). Created on the
+   *  dataset when the person creates the dashboard, not before. */
+  derived?: { measures: MeasureDef[]; calculated_columns: CalcColumn[] }
+}
+
+export interface LiveCount { row_count: number | null; counted_at: string | null; live: boolean; error?: string }
+
 export const datasetsApi = {
+  /** 4.5: a live dataset's cached row count, recounted when over an hour old. */
+  /** 4.7: mark (or unmark) the dataset to use. Admin only. */
+  certify: (id: number, certified = true, note?: string) =>
+    api.post<{ certified: boolean }>(`/datasets/${id}/certify`, { certified, note }).then(r => r.data),
+  liveCount: (id: number, force = false) =>
+    api.post<LiveCount>(`/datasets/${id}/live-count`, null, { params: force ? { force: true } : {} }).then(r => r.data),
   list:    ()         => api.get<Dataset[]>('/datasets').then(r => r.data),
   /** Ask the model what dashboards would suit this dataset and this person.
    *  `goal` is their own description of their job, free text. Slow by nature —
@@ -415,15 +502,15 @@ export const datasetsApi = {
     api.patch<ColumnDescriptionResult>(
       `/datasets/${id}/columns/${encodeURIComponent(column)}/description`,
       { description }).then(r => r.data),
-  suggestDashboards: (id: number, body: { goal?: string; count?: number }, signal?: AbortSignal) =>
-    api.post<{ proposals: DashboardSuggestion[]; reason: string
-               profile: DatasetProfile; source?: 'insights' | 'model'
-               /** One short question asked back when nothing could be designed.
-                *  A reason is a dead end; a question is a next step. Null when
-                *  the model is unavailable or declines -- an invented question
-                *  would be worse than the plain refusal it replaced. */
-               question?: string | null }>(
-      `/datasets/${id}/suggest-dashboards`, body, { timeout: 300000, signal }).then(r => r.data),
+  /** `mode: 'panel'` asks several analyst lenses, draws every idea and keeps
+   *  the `size` best by what the data shows: minutes rather than seconds, so
+   *  its timeout is longer. */
+  suggestDashboards: (id: number, body: { goal?: string; count?: number; mode?: 'quick' | 'panel'; size?: number;
+                                          background?: boolean },
+                      signal?: AbortSignal) =>
+    api.post<SuggestDashboardsAnswer>(
+      `/datasets/${id}/suggest-dashboards`, body,
+      { timeout: body.mode === 'panel' && !body.background ? 600000 : 300000, signal }).then(r => r.data),
   get:     (id: number) => api.get<Dataset>(`/datasets/${id}`).then(r => r.data),
   delete:  (id: number) => api.delete(`/datasets/${id}`),
   // E05: a full refresh that drops a column in use answers 409 `schema_break`
@@ -503,8 +590,16 @@ export interface BatchUploadResult {
 
 export interface DatasetShare {
   id: number
-  user_id: number
-  email: string
+  /** Who the share is for. Older servers send only user shares. */
+  kind?: 'user' | 'role' | 'org_unit'
+  user_id?: number | null
+  email?: string | null
+  role_id?: number | null
+  org_unit_id?: number | null
+  /** The grantee's display name: an email, a role or an org unit. */
+  name?: string | null
+  /** 'view' reads only; 'edit' may also re-model the data. */
+  level?: 'view' | 'edit'
   created_at: string
 }
 
@@ -512,9 +607,13 @@ export interface DatasetShare {
  *  mirrors the report guest-link shape, but grants an in-org user, not a token. */
 export const datasetSharesApi = {
   list:   (datasetId: number) => api.get<DatasetShare[]>(`/datasets/${datasetId}/shares`).then(r => r.data),
-  create: (datasetId: number, userId: number) =>
-    api.post<DatasetShare>(`/datasets/${datasetId}/shares`, { user_id: userId }).then(r => r.data),
+  create: (datasetId: number, userId: number, level: 'view' | 'edit' = 'view') =>
+    api.post<DatasetShare>(`/datasets/${datasetId}/shares`, { user_id: userId, level }).then(r => r.data),
+  /** Share with a whole role, or an org unit and everyone placed under it. */
+  createGroup: (datasetId: number, body: { role_id?: number; org_unit_id?: number; level: 'view' | 'edit' }) =>
+    api.post<DatasetShare>(`/datasets/${datasetId}/shares`, body).then(r => r.data),
   delete: (datasetId: number, shareId: number) => api.delete(`/datasets/${datasetId}/shares/${shareId}`),
+  deleteGroup: (datasetId: number, shareId: number) => api.delete(`/datasets/${datasetId}/group-shares/${shareId}`),
 }
 
 export interface SegmentResult {
@@ -632,9 +731,13 @@ export interface DataAlert {
   expression: string
   interval_minutes: number
   recipients: string[]
-  /** Whether the condition held at the last check -- the rising edge is
-   *  measured against this, so a `true` here means the email has already gone. */
-  last_state: boolean | null
+  /** 'firing' | 'clear' at the last check (older servers: a boolean) -- the
+   *  rising edge is measured against this, so 'firing' means the email went. */
+  last_state: 'firing' | 'clear' | boolean | null
+  last_value?: number | null
+  change_pct?: number | null
+  change_direction?: 'up' | 'down' | 'any' | null
+  webhook_url?: string | null
   /** "ok", or the evaluation error. Null means it has never run. */
   last_status: string | null
   last_checked_at: string | null
@@ -645,7 +748,14 @@ export interface DataAlertInput {
   expression: string
   interval_minutes: number
   recipients: string[]
+  /** A CHANGE alert: `expression` is a metric and it fires on this % move. */
+  change_pct?: number | null
+  change_direction?: 'up' | 'down' | 'any' | null
+  /** Teams / Slack / generic incoming webhook (https). */
+  webhook_url?: string | null
 }
+
+export interface AlertTestResult { firing: boolean; value: number | null; message: string }
 
 export const alertsApi = {
   list: (datasetId: number) =>
@@ -655,6 +765,10 @@ export const alertsApi = {
       `/datasets/${datasetId}/alerts`, body).then(r => r.data),
   remove: (datasetId: number, alertId: number) =>
     api.delete(`/datasets/${datasetId}/alerts/${alertId}`).then(() => undefined),
+  /** Evaluate now, as the caller, without saving. */
+  test: (datasetId: number, body: { expression: string; change_pct?: number | null
+                                    change_direction?: string | null; alert_id?: number }) =>
+    api.post<AlertTestResult>(`/datasets/${datasetId}/alerts/test`, body).then(r => r.data),
 }
 
 /**
@@ -1261,6 +1375,19 @@ export const reportsApi = {
     document.body.appendChild(a); a.click(); a.remove()
     URL.revokeObjectURL(url)
   },
+  /** The dashboard's data as Excel, one sheet per chart, as the caller sees it.
+   *  Resolves to how many sheets were written and how many datasets were
+   *  withheld by their export policy. */
+  downloadXlsx: async (rid: number, name: string) => {
+    const r = await api.get(`/reports/${rid}/xlsx`, { responseType: 'blob' })
+    const url = URL.createObjectURL(r.data as Blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${(name || 'dashboard').replace(/[^a-z0-9 _-]/gi, '').trim() || 'dashboard'}.xlsx`
+    document.body.appendChild(a); a.click(); a.remove()
+    URL.revokeObjectURL(url)
+    return { sheets: Number(r.headers?.['x-sheet-count'] ?? 0), withheld: Number(r.headers?.['x-withheld-datasets'] ?? 0) }
+  },
 }
 
 export interface WidgetTemplate {
@@ -1628,15 +1755,23 @@ export interface DifferenceTest {
   question: 'row counts' | 'typical row'; test: string; p_value: number; p_text: string; significant: boolean
   effect_name: string; effect_size: number; effect_label: string
   values: Record<string, number>; sentence: string
+  /** The gap in the data's own units ("3,300 more rows (+15%)"), next to the
+   *  unitless effect size (3.10). */
+  business?: { absolute: number; percent: number | null; sentence: string }
 }
 export interface DifferenceCheck {
   population: { rows_a: number; rows_b: number; group_a: string; group_b: string
                 dimension: string; measure: string | null; aggregation: string }
   tests: DifferenceTest[]; summary: string; caveats: string[]
+  business?: { absolute: number; percent: number | null; sentence: string }
 }
 
 export interface AuthzCheck { resource: 'report' | 'dataset'; id: number; action: string; column?: string }
-export interface AuthzDecision extends AuthzCheck { allowed: boolean; reason: string; level?: string; sensitivity?: string | null }
+export interface AuthzDataRule { dataset_id: number; dataset_name: string; row_rule: string | null
+  row_rule_for_you: string | null; hidden_columns: string[] }
+export interface AuthzDecision extends AuthzCheck { allowed: boolean; reason: string; level?: string; sensitivity?: string | null
+  /** `data_rules` only: the row and column rules on the report's data (3.13). */
+  rules?: AuthzDataRule[] }
 
 /** Batch "may I…?" with the rule that decided each (Phase 7.3), so the UI
  *  can grey out what the server would refuse AND say why. */
@@ -1696,8 +1831,8 @@ export const queryBuilderApi = {
     api.get<{ name: string; returns: string }[]>(`/data-sources/${dsId}/functions`).then(r => r.data),
   columns: (dsId: number, table: string) =>
     api.get<{ name: string; type: string }[]>(`/data-sources/${dsId}/tables/${encodeURIComponent(table)}/columns`).then(r => r.data),
-  compile: (dsId: number, model: Record<string, unknown>) =>
-    api.post<{ sql: string }>(`/data-sources/${dsId}/build-query`, model).then(r => r.data),
+  compile: (dsId: number, model: Record<string, unknown>, mode: 'import' | 'directquery' = 'import') =>
+    api.post<{ sql: string }>(`/data-sources/${dsId}/build-query`, model, { params: { mode } }).then(r => r.data),
   preview: (dsId: number, model: Record<string, unknown>) =>
     api.post<{ columns: string[]; rows: unknown[][]; sql: string }>(
       `/data-sources/${dsId}/build-query/preview`, model).then(r => r.data),
@@ -1801,6 +1936,10 @@ export interface ReportScheduleRow {
   id: number; interval_minutes: number; recipients: string[]
   calendar?: { kind: 'daily' | 'weekly' | 'monthly'; hour: number; minute: number; weekday?: number; monthday?: number } | null
   format?: 'xlsx' | 'pdf'
+  /** Each recipient gets the report built as THEM (their own row rules). */
+  per_recipient?: boolean
+  /** Nothing is sent when the data is unchanged since the last delivery. */
+  only_if_changed?: boolean
   subject?: string | null; last_run_at?: string | null; last_status?: string | null
   timezone?: string | null
 }
@@ -1809,6 +1948,8 @@ export interface DeliveryRow {
   id: number; schedule_id: number | null; kind: 'schedule' | 'alert' | 'manual'
   status: 'ok' | 'error'; error: string | null; artifact_kind: 'pdf' | 'csv' | 'xlsx' | 'none'
   duration_ms: number | null; created_at: string
+  /** 5.18: what the row is about -- the alert or report, who it went to, the file. */
+  subject?: string | null; recipients?: string | null; file_name?: string | null
 }
 
 // Common IANA zones for the free-text timezone input's datalist -- server-side
@@ -1951,6 +2092,9 @@ export const columnSecurityApi = {
 export interface WidgetSuggestion {
   widget_type: string; title: string; reason: string
   config: Record<string, unknown>; score: number; kind: string; aligned: boolean
+  /** What the chart shows, read from its drawn result on every row. */
+  takeaway?: string
+  takeaway_i18n?: SaidI18n | null
 }
 
 export const suggestApi = {
@@ -1969,6 +2113,7 @@ export const schedulesApi = {
   list:   (reportId: number) => api.get<ReportScheduleRow[]>(`/reports/${reportId}/schedules`).then(r => r.data),
   create: (reportId: number, body: { interval_minutes?: number; recipients: string[]; subject?: string;
                                      format?: 'xlsx' | 'pdf'; timezone?: string;
+                                     per_recipient?: boolean; only_if_changed?: boolean;
                                      calendar?: { kind: 'daily' | 'weekly' | 'monthly'; hour: number; minute: number; weekday?: number; monthday?: number } }) =>
     api.post(`/reports/${reportId}/schedules`, body).then(r => r.data),
   delete: (reportId: number, id: number) => api.delete(`/reports/${reportId}/schedules/${id}`),
@@ -2175,6 +2320,9 @@ export interface DataSource {
   created_at: string
   custom_connector_id?: number | null
   custom_connector_label?: string | null
+  /** Sensitivity label for everything read from this connection; every
+   *  dataset built from it inherits it as a floor. */
+  sensitivity?: string | null
   /** Transient, on the response to a CREATE only: the metadata sync that
    *  started for this connection, so the client can go straight to the review
    *  page with progress already running. Null when nothing was started. */
@@ -2305,14 +2453,16 @@ export const jobsApi = {
   retry: (id: number) => api.post<Job>(`/jobs/${id}/retry`).then(r => r.data),
 }
 
+export interface SavedQuery { id: number; name: string | null; sql: string; created_at: string | null }
+
 export const dataSourcesApi = {
   indexAdvice: (id: number, days = 30) =>
     api.get<IndexAdvice>(`/data-sources/${id}/index-advice`, { params: { days } }).then(r => r.data),
   connectors: () => api.get<ConnectorSpec[]>('/data-sources/connectors').then(r => r.data),
   list:    ()                                              => api.get<DataSource[]>('/data-sources').then(r => r.data),
-  create:  (body: { name: string; type: string; config: Record<string, unknown>; custom_connector_id?: number | null }) =>
+  create:  (body: { name: string; type: string; config: Record<string, unknown>; custom_connector_id?: number | null; sensitivity?: string | null }) =>
     api.post<DataSource>('/data-sources', body).then(r => r.data),
-  update:  (id: number, body: Partial<{ name: string; type: string; config: Record<string, unknown>; custom_connector_id: number | null }>) =>
+  update:  (id: number, body: Partial<{ name: string; type: string; config: Record<string, unknown>; custom_connector_id: number | null; sensitivity: string }>) =>
     api.put<DataSource>(`/data-sources/${id}`, body).then(r => r.data),
   delete:  (id: number)                                   => api.delete(`/data-sources/${id}`),
   test:    (id: number)                                   => api.post<{ ok: boolean; error?: string }>(`/data-sources/${id}/test`).then(r => r.data),
@@ -2323,6 +2473,26 @@ export const dataSourcesApi = {
   schema:  (id: number)                                   => api.get<{ tables: { name: string; kind: string }[] }>(`/data-sources/${id}/schema`).then(r => r.data),
   preview: (id: number, table?: string, query?: string, limit = 200) =>
     api.post<{ columns: string[]; rows: unknown[][]; total: number }>(`/data-sources/${id}/preview`, { table, query, limit }).then(r => r.data),
+  /** 4.2: named queries for this connection and the caller's last runs. */
+  queries: (id: number) =>
+    api.get<{ saved: SavedQuery[]; history: SavedQuery[] }>(`/data-sources/${id}/queries`).then(r => r.data),
+  saveQuery: (id: number, name: string, sql: string) =>
+    api.post<SavedQuery>(`/data-sources/${id}/queries`, { name, sql }).then(r => r.data),
+  deleteQuery: (id: number, queryId: number) =>
+    api.delete(`/data-sources/${id}/queries/${queryId}`),
+  /** 4.3: the rows of a table or query as CSV (refused on a Restricted connection). */
+  downloadCsv: async (id: number, table?: string, query?: string) => {
+    const r = await api.post(`/data-sources/${id}/query-csv`, { table, query }, { responseType: 'blob' })
+    const url = URL.createObjectURL(r.data as Blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${table || 'query'}.csv`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+    return { rows: Number(r.headers?.['x-rows'] ?? 0), truncated: r.headers?.['x-truncated'] === '1' }
+  },
   import:  (id: number, dataset_name: string, table?: string, query?: string, mode: 'import' | 'directquery' = 'import',
             query_model?: Record<string, unknown>, dataset_id?: number) =>
     api.post<{ id: number; name: string; row_count: number; col_count: number; mode: string }>(
@@ -2939,8 +3109,11 @@ export const metadataApi = {
     api.get<GlossaryTerm[]>(`/data-sources/${sourceId}/glossary`).then(r => r.data),
   addTerm: (sourceId: number, body: { term: string; definition?: string
                                       synonyms?: string[]; maps_to_object?: string
-                                      maps_to_column?: string }) =>
+                                      maps_to_column?: string; rule?: string; always?: boolean }) =>
     api.post<GlossaryTerm>(`/data-sources/${sourceId}/glossary`, body).then(r => r.data),
+  updateTerm: (sourceId: number, termId: number, body: { definition?: string | null
+                                      synonyms?: string[]; rule?: string | null; always?: boolean }) =>
+    api.patch<GlossaryTerm>(`/data-sources/${sourceId}/glossary/${termId}`, body).then(r => r.data),
   deleteTerm: (sourceId: number, termId: number) =>
     api.delete(`/data-sources/${sourceId}/glossary/${termId}`),
 }
@@ -2954,6 +3127,11 @@ export interface GlossaryTerm {
   synonyms: string[]
   maps_to_object: string | null
   maps_to_column: string | null
+  /** A rule the AI must follow when the term is meant: a SQL predicate
+   *  ("dept_emp.to_date = '9999-01-01'") or a one-line instruction. */
+  rule?: string | null
+  /** Apply `rule` to every question on this connection, named or not. */
+  always?: boolean
   data_source_id: number | null
 }
 

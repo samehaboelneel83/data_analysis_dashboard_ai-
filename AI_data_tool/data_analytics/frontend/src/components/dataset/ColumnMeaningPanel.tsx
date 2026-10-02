@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { Pencil } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { columnMetaApi, datasetsApi, type ColumnMeta, type Dataset } from '../../services/api'
+import { defaultSummary } from '../../lib/semanticGuard'
+import { useT, type MessageKey } from '../../i18n'
 
 /**
  * What a column IS, for every engine that reads it.
@@ -21,6 +23,31 @@ const ROLES: { value: NonNullable<ColumnMeta['role']>; label: string; why: strin
   { value: 'freetext',   label: 'Free text',  why: 'prose - never a chart axis; topic analysis reads it' },
   { value: 'identifier', label: 'Identifier', why: 'counted, never summed' },
 ]
+
+/** How a measure rolls up when a chart, an insight or an alert does not say.
+ *  "Average" for a salary is what keeps "M has 60% of salary" off the page. */
+const SUMMARIES: { value: string; label: string }[] = [
+  { value: 'sum', label: 'Sum' },
+  { value: 'avg', label: 'Average' },
+  { value: 'median', label: 'Median' },
+  { value: 'min', label: 'Minimum' },
+  { value: 'max', label: 'Maximum' },
+  { value: 'countd', label: 'Count distinct' },
+]
+const SUMMARY_LABEL: Record<string, string> = Object.fromEntries(SUMMARIES.map(x => [x.value, x.label]))
+
+/** A short code that needs a gloss ("d001", "M", "CS") -- not a value already
+ *  written in words. Mirrors `is_code_like` in services/insights.py. */
+export function isCodeLike(v: string): boolean {
+  const t = v.trim()
+  if (!t || t.includes(' ')) return false
+  if (/\d/.test(t)) return true
+  if (t.length === 1) return true
+  return t.length <= 4 && t === t.toUpperCase()
+}
+
+/** "an Identifier", "a Measure" -- the toast read "is now a identifier". */
+const article = (word: string) => (/^[aeiou]/i.test(word) ? 'an' : 'a')
 
 /**
  * What each column MEANS, and where that sentence lives.
@@ -51,6 +78,7 @@ export interface ColumnMeaningPanelProps {
 export default function ColumnMeaningPanel(
   { dataset, canEdit, onSaved }: ColumnMeaningPanelProps,
 ) {
+  const t = useT()
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
@@ -174,12 +202,17 @@ export default function ColumnMeaningPanel(
                       )}
                     </>
                   )}
-                  {values && (
-                    <div style={{ color: 'var(--muted)', fontSize: 11, marginTop: 2 }}>
-                      {Object.entries(values).slice(0, 8)
-                        .map(([raw, label]) => `${raw} = ${label}`).join(', ')}
-                    </div>
-                  )}
+                  {(() => {
+                    // Only glosses that SAY something: "d001 = Marketing", never
+                    // "Marketing = Marketing" (HR evaluation).
+                    const useful = Object.entries(values ?? {})
+                      .filter(([raw, label]) => isCodeLike(raw) && String(label).trim().toLowerCase() !== raw.trim().toLowerCase())
+                    return useful.length > 0 && (
+                      <div style={{ color: 'var(--muted)', fontSize: 11, marginTop: 2 }}>
+                        {useful.slice(0, 8).map(([raw, label]) => `${raw} = ${label}`).join(', ')}
+                      </div>
+                    )
+                  })()}
 
                   {canEdit && (
                     <div style={{ display: 'flex', gap: 14, alignItems: 'center',
@@ -193,8 +226,8 @@ export default function ColumnMeaningPanel(
                             c.name,
                             { role: (e.target.value || undefined) as ColumnMeta['role'] },
                             e.target.value
-                              ? `${c.name} is now a ${e.target.value}`
-                              : `${c.name} goes back to what detection found`)}
+                              ? t(`meaning.now.${e.target.value}` as MessageKey, { col: c.name })
+                              : t('meaning.now.detected', { col: c.name }))}
                           style={{ fontSize: 11, padding: '2px 4px',
                             background: 'var(--surface2)', color: 'var(--text)',
                             border: '1px solid var(--border)', borderRadius: 4 }}>
@@ -206,6 +239,29 @@ export default function ColumnMeaningPanel(
                           ))}
                         </select>
                       </label>
+
+                      {(c.dtype === 'numeric' || meta[c.name]?.role === 'measure') && meta[c.name]?.role !== 'identifier'
+                        && meta[c.name]?.role !== 'category' && (
+                        <label style={{ fontSize: 11, color: 'var(--muted)',
+                          display: 'flex', alignItems: 'center', gap: 4 }}
+                          title="How this number is rolled up when a chart, an insight or an alert does not say. Salaries, prices and rates read best as an average.">
+                          Summarise as
+                          <select disabled={busy} value={meta[c.name]?.aggregation ?? ''}
+                            aria-label={`Summary for ${c.name}`}
+                            onChange={e => void patchMeta(
+                              c.name,
+                              { aggregation: e.target.value || undefined },
+                              e.target.value
+                                ? t('meaning.summaryNow', { col: c.name, how: (SUMMARY_LABEL[e.target.value] ?? e.target.value).toLowerCase() })
+                                : t('meaning.summaryAuto', { col: c.name }))}
+                            style={{ fontSize: 11, padding: '2px 4px',
+                              background: 'var(--surface2)', color: 'var(--text)',
+                              border: '1px solid var(--border)', borderRadius: 4 }}>
+                            <option value="">auto ({(SUMMARY_LABEL[defaultSummary(c.name)] ?? 'Sum').toLowerCase()})</option>
+                            {SUMMARIES.map(x => <option key={x.value} value={x.value}>{x.label}</option>)}
+                          </select>
+                        </label>
+                      )}
 
                       {/* An OUTCOME worth explaining. This is what lets the
                           "what drives X" analyses run without being told what X
@@ -220,8 +276,8 @@ export default function ColumnMeaningPanel(
                             c.name,
                             { target_candidate_priority: e.target.checked ? 10 : undefined },
                             e.target.checked
-                              ? `The analyses will look for what drives ${c.name}`
-                              : `${c.name} is no longer treated as an outcome`)} />
+                              ? t('meaning.outcomeOn', { col: c.name })
+                              : t('meaning.outcomeOff', { col: c.name }))} />
                         Worth explaining
                         {targets[c.name] !== undefined && (
                           <span style={{ opacity: .7 }}>({targets[c.name]})</span>
@@ -240,8 +296,8 @@ export default function ColumnMeaningPanel(
                             c.name,
                             { eligible_for_suggestion: e.target.checked ? undefined : false },
                             e.target.checked
-                              ? `${c.name} can be suggested again`
-                              : `${c.name} will not be suggested - it stays usable`)} />
+                              ? t('meaning.suggestOn', { col: c.name })
+                              : t('meaning.suggestOff', { col: c.name }))} />
                         May be suggested
                       </label>
                     </div>

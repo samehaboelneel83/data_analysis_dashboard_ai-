@@ -101,4 +101,13 @@ describe('FindingChart', () => {
     expect(widgetDataApi.query).toHaveBeenLastCalledWith(
       5, { dimension: 'region', measure: 'cost', aggregation: 'sum' }, [], 'bar')
   })
+
+  it('averages when the finding is about an average (Chrome re-test)', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'Sales', value: 88600 }] } as any)
+    render(<FindingChart datasetId={5} columnTypes={{ dept_name: 'categorical', salary: 'numeric' }}
+      finding={{ kind: 'standout', title: 'Sales has the highest average salary', columns: ['dept_name', 'salary'] }} />)
+    expect(await screen.findByTestId('mini-bar-caption')).toHaveTextContent('average salary by dept_name')
+    expect(vi.mocked(widgetDataApi.query).mock.calls.at(-1)![1]).toMatchObject({ aggregation: 'avg' })
+    expect(screen.getByTestId('mini-bar-row')).toHaveTextContent('88.6k')
+  })
 })

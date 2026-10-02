@@ -1,4 +1,4 @@
-import { Home, Bot, Database, GitBranch, Waypoints, LayoutDashboard, Sparkles, RefreshCw, Mail, Activity, Users, Shield, Lock, EyeOff, Download, Key, Fingerprint, ScrollText, Building2, Network, Upload, Plug, Map as MapIcon, Workflow, CalendarDays, ArrowRightLeft, Settings as SettingsIcon, SlidersHorizontal, type LucideIcon } from 'lucide-react'
+import { Home, Bot, Database, GitBranch, Waypoints, BookOpen, LayoutDashboard, Sparkles, RefreshCw, Mail, Activity, Users, Shield, Lock, EyeOff, Download, Key, Fingerprint, ScrollText, Building2, Network, Upload, Plug, Map as MapIcon, Workflow, CalendarDays, ArrowRightLeft, Settings as SettingsIcon, SlidersHorizontal, type LucideIcon } from 'lucide-react'
 
 /**
  * The navigation tree, as data.
@@ -65,6 +65,7 @@ export const NAVIGATION: NavSection[] = [
     items: [
       { to: '/datasets', label: 'Datasets', icon: Database, permission: 'member', end: true },
       { to: '/lineage', label: 'Lineage', icon: Waypoints, permission: 'member' },
+      { to: '/glossary', label: 'Glossary', icon: BookOpen, permission: 'member' },
       { to: '/dataflows', label: 'Dataflows', icon: GitBranch, permission: 'member' },
     ],
   },

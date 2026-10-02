@@ -509,30 +509,31 @@ async def refresh_dataflow(session, flow) -> bool:
 
     src = await session.get(Dataset, flow.source_dataset_id) if flow.source_dataset_id else None
     builder = await session.get(User, flow.created_by) if flow.created_by else None
-    if src is None or not src.filename or builder is None:
+    if src is None or builder is None or not (
+            src.filename or (src.mode == "directquery" and src.data_source_id)):
         _finish("failed", "source dataset or creator is gone")
         await session.commit()
         return True
 
     try:
-        from ..core.rls import resolve_denied_columns, resolve_rls_expr
-        rls = await resolve_rls_expr(session, builder, src.id)
-        denied = await resolve_denied_columns(session, builder, src.id)
-        aux = await resolve_join_frames(session, builder, flow.steps or [])
-
-        def _run():
-            frame = load_file(src.filename)
-            frame = apply_rls_filter(frame, rls)
-            present = [c for c in (denied or []) if c in frame.columns]
-            if present:
-                frame = frame.drop(columns=present)
-            return apply_prep_steps(frame, flow.steps or [], aux)
-
-        out = await _asyncio.to_thread(_run)
+        from .snapshot_flow import merge as merge_snapshot, snapshot_rows, source_frame, validate_spec
+        # 4.6: the same reader the manual run uses -- a file, or a live source
+        # read through its connection -- as the dataflow's creator.
+        out = await source_frame(session, builder, src, flow.steps or [])
+        spec = validate_spec(flow.snapshot, set(out.columns)) if getattr(flow, "snapshot", None) else None
+        if spec is not None:
+            out = snapshot_rows(out, spec)
+        run_rows = out
         type_map = await _asyncio.to_thread(detect_types, out)
 
         for ds in outputs:
-            await _asyncio.to_thread(lambda p=ds.filename: out.to_csv(p, index=False))
+            if spec is not None:
+                try:
+                    existing = await _asyncio.to_thread(load_file, ds.filename)
+                except Exception:  # noqa: BLE001 -- a missing file starts the history afresh
+                    existing = None
+                out = merge_snapshot(existing, run_rows)
+            await _asyncio.to_thread(lambda p=ds.filename, f=out: f.to_csv(p, index=False))
             await _asyncio.to_thread(write_parquet_sidecar, str(ds.filename))
             ds.row_count, ds.col_count = len(out), len(out.columns)
             ds.last_refreshed_at = now
@@ -945,25 +946,10 @@ async def run_scheduler(session_factory) -> None:
             await run_items(session_factory, due_alert_ids, DataAlert,
                             2_000_000_000, check_alert, "alert")
 
-            # Power Pi automation: ONE step of ONE run per tick. It shares this
-            # loop for the reason stated above -- a second scheduler would be a
-            # second place for the tick, the advisory-lock discipline and the
-            # never-die contract to drift. Its own try/except because the two
-            # are independent: an orchestrator bug must not stop tonight's
-            # dataset refreshes, and a broken refresh must not stall the
-            # automation queue.
-            #
-            # Deliberately one step per tick rather than "drain what's ready":
-            # a real step is a profile or a report composition, and the
-            # refreshes above are waiting behind it.
-            try:
-                from .automation_runner import tick as automation_tick
-                async with session_factory() as automation_session:
-                    await automation_tick(automation_session, now)
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:  # noqa: BLE001 - never-die, same contract
-                log.warning("Automation runner tick failed: %s", e)
+            # Automations used to take ONE step per tick of this loop, which put
+            # a minute of idle time between every two steps. 5.21: they advance
+            # on their own loop (automation_runner.run_automation_loop), still
+            # one step per tick and under the same per-run advisory lock.
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001 - a bad tick must not kill the loop

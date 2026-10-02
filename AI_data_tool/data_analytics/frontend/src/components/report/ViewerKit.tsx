@@ -337,6 +337,13 @@ export function DifferenceDialog({ datasetId, dimension, measure, aggregation, g
             <div key={i} style={{ borderInlineStart: '2px solid var(--border)', paddingInlineStart: 8 }}>
               <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.04em' }}>{t.question}</div>
               <div style={{ fontSize: 12.5 }}>{t.sentence}</div>
+              {t.business && (
+                <div data-testid="difference-business" style={{ fontSize: 12.5, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '2px 8px', margin: '4px 0' }}>
+                  <span style={{ color: 'var(--muted)' }}>Size of the gap</span><b dir="auto">{t.business.sentence}</b>
+                  <span style={{ color: 'var(--muted)' }}>Statistical effect</span>
+                  <span>{t.effect_label} — how much the two groups overlap, not how much the gap matters</span>
+                </div>
+              )}
               <div style={{ fontSize: 12, margin: '2px 0' }} dir="auto">
                 {Object.entries(t.values).map(([k, v]) => `${k}: ${v.toLocaleString()}`).join(' · ')}
                 {t.question === 'typical row' ? ` (${res.population.aggregation === 'median' ? 'median' : 'mean'} per row)` : ' rows'}

@@ -56,6 +56,71 @@ async def _before_commit(hook, db, dataset) -> None:
         await hook(db, dataset)
 
 
+def compile_model_for_source(cfg: dict, ds_type: str, model: dict, *, unlimited: bool) -> str:
+    """Compile a Query-builder model against the live schema -- the SAME
+    compile the builder shows, run server-side at save time so the stored SQL
+    never depends on what the browser happened to send.
+
+    `unlimited` is True for DirectQuery: a live dataset stores its SQL with no
+    LIMIT (see query_builder.build_sql)."""
+    from .query_builder import (build_sql, introspect_tables, list_functions,
+                                referenced_functions, referenced_tables)
+    known = introspect_tables(cfg, referenced_tables(model))
+    funcs = {f["name"] for f in list_functions(cfg)} if referenced_functions(model) else set()
+    return build_sql(model, connectors.sql_family_of(cfg) or ds_type, known,
+                     cfg.get('schema') or None, funcs, unlimited=unlimited)
+
+
+_TRAILING_LIMIT = None
+
+
+def strip_compiled_limit(sql: str) -> str | None:
+    """The LIMIT the builder appended to a compiled statement, removed -- or
+    None when `sql` does not end the way build_sql ends a capped query.
+
+    Used once, to repair live datasets saved before build_sql learned
+    `unlimited`: their stored SQL ends `... LIMIT 100000` (or the Oracle /
+    SQL Server spelling) and every widget saw only those rows."""
+    import re
+    global _TRAILING_LIMIT
+    if _TRAILING_LIMIT is None:
+        _TRAILING_LIMIT = (
+            re.compile(r"\s+LIMIT\s+\d+\s*$", re.I),
+            re.compile(r"\s+FETCH\s+FIRST\s+\d+\s+ROWS\s+ONLY\s*$", re.I),
+            re.compile(r"^(\s*(?:WITH\s.*?\)\s*)?SELECT\s+)TOP\s+\d+\s+", re.I | re.S),
+        )
+    lim, fetch, top = _TRAILING_LIMIT
+    for pat in (lim, fetch):
+        if pat.search(sql):
+            return pat.sub("", sql)
+    if top.search(sql):
+        return top.sub(r"\1", sql, count=1)
+    return None
+
+
+async def repair_capped_live_datasets(db: AsyncSession) -> int:
+    """Strip the row LIMIT that older Query-builder saves baked into live
+    (DirectQuery) datasets. Only datasets with a `query_model` are touched:
+    their SQL was compiled by build_sql, so the trailing LIMIT is known to be
+    the builder's and not something a person wrote on purpose. Idempotent."""
+    rows = (await db.execute(
+        select(Dataset).where(Dataset.mode == "directquery",
+                              Dataset.query_model.is_not(None),
+                              Dataset.source_query.is_not(None)))).scalars().all()
+    fixed = 0
+    for d in rows:
+        new_sql = strip_compiled_limit(d.source_query or "")
+        if new_sql and new_sql != d.source_query:
+            d.source_query = new_sql
+            fixed += 1
+    if fixed:
+        await db.commit()
+        import logging
+        logging.getLogger(__name__).info(
+            "removed a builder row LIMIT from %d live dataset(s)", fixed)
+    return fixed
+
+
 async def import_from_source(db: AsyncSession, current_user: User, ds: DataSource,
                              req: ImportRequest, *, checkpoint=None, before_commit=None) -> dict:
     """Import (or DirectQuery-connect) `req` from `ds` for `current_user`.
@@ -101,6 +166,18 @@ async def import_from_source(db: AsyncSession, current_user: User, ds: DataSourc
             if col.source_column_id is None:
                 col.source_column_id = source_links.get(col.name)
             db.add(col)
+
+    # A builder save carries its model: compile it HERE, for the target mode,
+    # instead of storing whatever SQL the browser sent. Live datasets get no
+    # row LIMIT; imports keep the person's limit (refused above the import
+    # cap, never silently lowered). Hand-written SQL (no model) is kept as is.
+    if req.query_model and req.query:
+        try:
+            req.query = await asyncio.to_thread(
+                compile_model_for_source, cfg, ds.type, req.query_model,
+                unlimited=(req.mode == "directquery"))
+        except ValueError as e:
+            raise ImportRefused(str(e))
 
     if req.mode == "directquery":
         # Refuse up front for a source that cannot serve DirectQuery at all.
@@ -182,6 +259,8 @@ async def import_from_source(db: AsyncSession, current_user: User, ds: DataSourc
         # never synced has no catalog to link against, and an import must not
         # fail because metadata is missing.
         await knowledge.link_columns(db, dataset)
+        from .sensitivity import apply_confidential_export_default
+        await apply_confidential_export_default(db, dataset)
         await _audit_import(db, current_user, dataset, ds, req, replaced=False)
         await _before_commit(before_commit, db, dataset)
         await db.commit()
@@ -332,6 +411,8 @@ async def import_from_source(db: AsyncSession, current_user: User, ds: DataSourc
     # never synced has no catalog to link against, and an import must not
     # fail because metadata is missing.
     await knowledge.link_columns(db, dataset)
+    from .sensitivity import apply_confidential_export_default
+    await apply_confidential_export_default(db, dataset)
     await _audit_import(db, current_user, dataset, ds, req, replaced=False)
     await _before_commit(before_commit, db, dataset)
     await db.commit()
@@ -344,9 +425,16 @@ async def _audit_import(db: AsyncSession, user: User, dataset, source, req, *, r
     exports and deletes were audited; an import from a database was not."""
     from .audit import record
     what = req.table or ("query: " + " ".join((req.query or "").split())[:200])
-    rows = "live" if dataset.mode == "directquery" else f"{dataset.row_count:,} rows"
-    await record(db, user, "dataset.reimport" if replaced else "dataset.import", "dataset",
-                 dataset.id, f"{source.name} ({source.type}) {what} -> {rows}")
+    live = dataset.mode == "directquery"
+    rows = "live" if live else f"{dataset.row_count:,} rows"
+    # 5.7: a live dataset copies nothing, so "import" in the activity log
+    # misdescribed it -- an auditor looking for data leaving the source would
+    # chase a copy that does not exist.
+    if live:
+        action = "dataset.update_live" if replaced else "dataset.create_live"
+    else:
+        action = "dataset.reimport" if replaced else "dataset.import"
+    await record(db, user, action, "dataset", dataset.id, f"{source.name} ({source.type}) {what} -> {rows}")
 
 
 # ── The queued path ──────────────────────────────────────────────────────────

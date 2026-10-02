@@ -36,6 +36,9 @@ REQUIRED_ROLES: dict[str, tuple[str, ...]] = {
     "model_cluster": ("measures",),
     "model_compare": (),
     "model_score": (),
+    # Association rules: the columns are optional (blank = every usable text
+    # column), and so is the column the conclusions must be about.
+    "model_rules": (),
     "area": ("category",),
     "bar": ("category",),
     "box_plot": ("category", "measure"),

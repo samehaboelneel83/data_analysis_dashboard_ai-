@@ -237,6 +237,17 @@ export default function LlmPicker() {
           {!data.llm_enabled && (
             <p role="status" style={{ fontSize: 12, color: 'var(--danger)', margin: '4px 10px 8px' }}>{t('llm.off')}</p>
           )}
+          {/* 4.9: a business user saw a list of model names and had to ask
+              what picking one would change. Said here, in plain words. */}
+          <details data-testid="llm-explainer" style={{ margin: '2px 8px 6px', fontSize: 11.5, lineHeight: 1.5 }}>
+            <summary style={{ cursor: 'pointer', color: 'var(--accent)', fontWeight: 600 }}>{t('llm.whatTitle')}</summary>
+            <ul style={{ margin: '4px 0 0', paddingInlineStart: 16, color: 'var(--text)' }}>
+              <li>{t('llm.whatUses')}</li>
+              <li>{t('llm.whatTrade')}</li>
+              <li>{t('llm.whatAuto')}</li>
+              <li>{user.is_super_admin ? t('llm.whatDefaultAdmin') : t('llm.whatDefault')}</li>
+            </ul>
+          </details>
           {row('auto', t('llm.auto'),
             usedEp ? t('llm.autoUsed', { name: usedEp.name })
               : autoEp ? t('llm.autoUsing', { name: autoEp.name })

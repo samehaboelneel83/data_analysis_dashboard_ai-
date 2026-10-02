@@ -40,7 +40,7 @@ from dataclasses import dataclass
 import pandas as pd
 
 from ..core.config import settings
-from .direct_query import GRAIN_SAFE_AGGREGATIONS, _SUPPORTED_FILTER_OPS
+from .direct_query import GRAIN_SAFE_AGGREGATIONS, _SUPPORTED_FILTER_OPS, like_pattern
 
 logger = logging.getLogger(__name__)
 
@@ -230,6 +230,10 @@ def plan(config: dict, columns: list[str], source: str,
                 raise Ineligible("'in' filter without a list of values")
             where.append(f"{ident} IN ({', '.join('?' for _ in values)})")
             params.extend(values)
+        elif op == "like":
+            # Same meaning as pandas' str.contains(case=False): text, any case.
+            where.append(f"lower(CAST({ident} AS VARCHAR)) LIKE ?")
+            params.append(like_pattern(f.get("value")))
         else:
             where.append(f"{ident} {_SQL_COMPARISON[op]} ?")
             params.append(f.get("value"))

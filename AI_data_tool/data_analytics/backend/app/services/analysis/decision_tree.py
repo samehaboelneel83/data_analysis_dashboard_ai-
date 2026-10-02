@@ -144,7 +144,13 @@ def _node(tree, index: int, feature_names: list[str], labels: dict[str, str],
     samples = int(tree.n_node_samples[index])
 
     if classes is not None:
-        counts = tree.value[index][0]
+        counts = np.asarray(tree.value[index][0], dtype=float)
+        # scikit-learn >= 1.4 stores each node's class SHARES (summing to 1),
+        # older versions stored counts. Rounding shares to ints made every
+        # node read "0 of each class" (HR re-test 2026-10-01); shares are
+        # turned back into row counts with the node's own sample count.
+        if counts.sum() <= 1.0 + 1e-9:
+            counts = counts * samples
         prediction = classes[int(np.argmax(counts))]
         total = float(counts.sum()) or 1.0
         confidence = round(float(counts.max()) / total, 4)

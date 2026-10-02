@@ -128,4 +128,5 @@ export const CHART_RENDERERS: Partial<Record<WidgetType, React.FC<ChartRendererP
   model_cluster: ModelRenderer,
   model_compare: ModelRenderer,
   model_score: ModelRenderer,
+  model_rules: ModelRenderer,
 }

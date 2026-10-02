@@ -213,3 +213,15 @@ describe('an alert that is not scheduled', () => {
     expect(screen.getByText(/every 1 hour/i)).toBeInTheDocument()
   })
 })
+
+describe('HR evaluation 3.1', () => {
+  it('reads a successful last check as healthy, not as a failure', async () => {
+    vi.mocked(alertsApi.list).mockResolvedValueOnce([{ id: 9, name: 'Headcount', expression: 'COUNT(emp_no) < 1',
+      interval_minutes: 60, recipients: ['hr@example.com'], last_state: 'clear', last_status: 'clear',
+      last_checked_at: '2026-10-01T10:00:00Z', last_value: 240124 }] as never)
+    panel()
+    expect(await screen.findByText('Headcount')).toBeInTheDocument()
+    expect(screen.queryByText(/Last check failed/)).not.toBeInTheDocument()
+    expect(screen.getByText(/last value 240,124/)).toBeInTheDocument()
+  })
+})

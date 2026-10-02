@@ -6,6 +6,10 @@
  * same line instead of a new one-off, and so the wording stays a single
  * edit away from changing everywhere at once.
  */
-export default function LoadingState({ label = 'Loading…' }: { label?: string }) {
-  return <p style={{ color: 'var(--muted)' }}>{label}</p>
+import { useT } from '../../i18n'
+
+export default function LoadingState({ label }: { label?: string }) {
+  // In the reader's language (HR re-test 2026-10-01: "Loading…" in Arabic mode).
+  const t = useT()
+  return <p style={{ color: 'var(--muted)' }}>{label ?? t('common.loading')}</p>
 }

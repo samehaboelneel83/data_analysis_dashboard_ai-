@@ -293,7 +293,9 @@ export function EmptyState({ msg, action }: {
     // widget on every surface, and a restyle here is an app-wide change.
     <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12, flexDirection: 'column', gap: 6 }}>
       <span style={{ fontSize: 24, opacity: .4 }}>◻</span>
-      <span>{msg}</span>
+      {/* dir="auto": a message takes the direction of its own text, so its
+          punctuation lands at the right end in either layout. */}
+      <span dir="auto" style={{ textAlign: 'center', maxWidth: '100%' }}>{msg}</span>
       {action && (
         <button type="button" onClick={action.onClick} className="btn btn-ghost btn-sm"
           style={{ fontSize: 11, padding: '3px 10px' }}>

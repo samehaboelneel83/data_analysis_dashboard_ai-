@@ -249,6 +249,10 @@ EXCUSED_ROUTES = {
     ("POST", "/api/v1/datasets/{dataset_id}/prediction-models/{model_id}/drift-checks"): "the drift check (usable_model + secured frame) kept on the card; test_model_drift_history.py",
     ("GET", "/api/v1/datasets/{dataset_id}/prediction-models/{model_id}/drift-history"): "only through a model the caller may use (usable_model); test_model_drift_history.py",
     ("POST", "/api/v1/datasets/{dataset_id}/widget-data/reconcile"): "multipart upload; resolves the widget through _resolve_widget_data as widget-data does (row rules, denied columns, other orgs); test_widget_reconcile.py",
+    # HR evaluation follow-up (3.1, 4.5, 4.7):
+    ("POST", "/api/v1/datasets/{dataset_id}/alerts/test"): "one number, no rows: the alert's metric over alerts.alert_frame, which applies the caller's row rules and denied columns like every frame read; test_alert_changes.py",
+    ("POST", "/api/v1/datasets/{dataset_id}/live-count"): "a row COUNT only, before row rules -- the same total an imported dataset's row_count shows every reader on the list; needs dataset read; test_live_counts.py",
+    ("POST", "/api/v1/datasets/{dataset_id}/certify"): "admin-only metadata toggle (column_meta.__certified__); returns no row content; test_live_counts.py",
 }
 
 

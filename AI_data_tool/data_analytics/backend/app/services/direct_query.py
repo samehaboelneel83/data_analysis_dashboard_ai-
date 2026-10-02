@@ -78,7 +78,18 @@ AGGREGATE_STRATEGY_WIDGET_TYPES = {
     "dot_plot", "crosstab", "needle", "word_cloud",
 }
 
-_SUPPORTED_FILTER_OPS = {"eq", "neq", "gt", "lt", "gte", "lte", "in"}
+_SUPPORTED_FILTER_OPS = {"eq", "neq", "gt", "lt", "gte", "lte", "in", "like"}
+
+
+def like_pattern(value) -> str:
+    """The bound value for a "contains" filter: case-folded and wrapped in %.
+
+    No ESCAPE clause on purpose: its syntax differs by dialect (MySQL reads a
+    backslash inside the literal as an escape, ClickHouse has no ESCAPE at
+    all), so a % or _ typed by the reader stays a wildcard -- a slightly wider
+    match, never an error and never SQL: the value is always a bound parameter.
+    """
+    return f"%{str(value).lower()}%"
 
 # Dialects supported for pushdown. sqlserver was originally excluded because its
 # TOP-n syntax sits after SELECT rather than at the end of the query, which does
@@ -109,6 +120,41 @@ class SourceUnavailable(Exception):
     the password; `/health/ready` refuses to quote exception text for exactly
     that reason, and a widget is seen by far more people than a probe.
     """
+
+
+class SourceBusy(SourceUnavailable):
+    """The source answered, but ran out of a resource while doing the work --
+    Postgres "could not resize shared memory segment ... No space left on
+    device" (SQLSTATE 53100) is the one seen in the HR re-test, when two large
+    reads ran side by side in a container with Docker's 64 MB /dev/shm.
+
+    A subclass of SourceUnavailable so every existing caller still treats it as
+    "not our fault"; the callers that can say something better catch it first.
+    Like its parent it carries no driver text.
+    """
+
+
+#: SQLSTATE class 53 = insufficient resources (disk full, out of memory, too
+#: many connections). A momentary state of the server, not of the connection.
+_RESOURCE_SQLSTATES = ("53",)
+
+
+def is_resource_exhaustion(exc: BaseException) -> bool:
+    """True when the driver error says the server ran short of a resource."""
+    orig = getattr(exc, "orig", exc)
+    code = getattr(orig, "pgcode", None) or getattr(orig, "sqlstate", None)
+    if isinstance(code, str) and code.startswith(_RESOURCE_SQLSTATES):
+        return True
+    text_ = str(orig).lower()
+    return "shared memory" in text_ or "no space left on device" in text_ or "out of memory" in text_
+
+
+def _quiet_parallel(conn, dialect: str) -> None:
+    """A full row pull gains nothing from parallel workers -- every row goes to
+    the client anyway -- and parallel workers are what claim dynamic shared
+    memory. Turned off for this transaction only (SET LOCAL), Postgres only."""
+    if dialect == "postgresql":
+        conn.execute(text("SET LOCAL max_parallel_workers_per_gather = 0"))
 
 
 class DirectQueryUnsupported(Exception):
@@ -273,6 +319,11 @@ def _build_where(filters: list[dict]) -> tuple[str, dict]:
             keys = [f"f{i}_{j}" for j in range(len(vals))]
             params.update(dict(zip(keys, vals)))
             clauses.append(f"{col_sql} IN ({', '.join(':' + k for k in keys)})")
+        elif op == "like":
+            # "contains", ignoring case. Offered only on text columns.
+            key = f"f{i}"
+            params[key] = like_pattern(val)
+            clauses.append(f"LOWER({col_sql}) LIKE :{key}")
         else:
             key = f"f{i}"
             params[key] = val
@@ -619,6 +670,10 @@ ROW_CAPPED_WIDGET_TYPES = {
     "table", "list", "kpi", "card",
 }
 
+#: Row-capped types whose marks are per-group aggregates, not rows: they take
+#: the analysis cap rather than the 10,000-row drawing cap (see _fetch_and_compute).
+AGGREGATING_ROW_CAPPED_TYPES = {"bubble", "bubble_change"}
+
 _RANDOM_FN = {"mysql": "RAND()", "oracle": "DBMS_RANDOM.VALUE", "sqlserver": "NEWID()"}
 # clickhouse is absent on purpose: the builder emits RANDOM() and the
 # transpile in _finalize_for_dialect rewrites it to randCanonical().
@@ -852,13 +907,33 @@ def fetch_analysis_frame(
     count_sql, count_params = build_count_sql(
         dataset, plan, dialect, rls_where=rls_where, rls_params=rls_params)
     engine = get_engine(source_cfg)
-    with engine.connect() as conn:
-        total = int(conn.execute(text(count_sql), count_params).scalar_one())
-        sampled = total > row_cap
-        fetch_sql, fetch_params = build_row_fetch_sql(
-            dataset, plan, dialect, row_cap, sampled,
-            rls_where=rls_where, rls_params=rls_params)
-        frame = pd.read_sql(text(fetch_sql), conn, params=fetch_params)
+
+    def _once():
+        with engine.connect() as conn:
+            _quiet_parallel(conn, dialect)
+            total = int(conn.execute(text(count_sql), count_params).scalar_one())
+            sampled = total > row_cap
+            fetch_sql, fetch_params = build_row_fetch_sql(
+                dataset, plan, dialect, row_cap, sampled,
+                rls_where=rls_where, rls_params=rls_params)
+            return total, sampled, pd.read_sql(text(fetch_sql), conn, params=fetch_params)
+
+    from sqlalchemy.exc import OperationalError
+    try:
+        total, sampled, frame = _once()
+    except OperationalError as e:
+        # A resource squeeze is usually another big read finishing; one short
+        # pause and a second try clears it. A second failure is reported as
+        # what it is rather than as "could not reach the source".
+        if not is_resource_exhaustion(e):
+            raise
+        time.sleep(1.0)
+        try:
+            total, sampled, frame = _once()
+        except OperationalError as e2:
+            if is_resource_exhaustion(e2):
+                raise SourceBusy("the data source ran short of memory") from e2
+            raise
 
     return FetchedFrame(frame=frame, total_rows=total, sampled=sampled,
                         row_cap=row_cap)
@@ -890,8 +965,26 @@ def run_direct_query(*args, **kwargs) -> dict:
     from sqlalchemy.exc import InterfaceError, OperationalError
     try:
         return _run_direct_query_inner(*args, **kwargs)
-    except (OperationalError, InterfaceError) as e:
+    except OperationalError as e:
+        if is_resource_exhaustion(e):
+            # Several widgets rendering at once can squeeze a small server.
+            # The retry runs with Postgres parallel workers OFF: they are what
+            # take the shared memory, so the retry does not need any (HR
+            # re-test: retrying the same parallel plan just failed again).
+            from .engines import parallel_workers_off
+            time.sleep(0.5)
+            try:
+                with parallel_workers_off():
+                    return _run_direct_query_inner(*args, **kwargs)
+            except OperationalError as e2:
+                if is_resource_exhaustion(e2):
+                    raise SourceBusy("the data source ran short of memory") from e2
+                raise SourceUnavailable("could not reach the data source") from e2
+            except InterfaceError as e2:
+                raise SourceUnavailable("could not reach the data source") from e2
         # The driver's text is deliberately dropped, not reformatted.
+        raise SourceUnavailable("could not reach the data source") from e
+    except InterfaceError as e:
         raise SourceUnavailable("could not reach the data source") from e
 
 
@@ -1008,8 +1101,23 @@ def _fetch_and_compute(
     # enough that ordinary tables come back whole, bounded enough that nobody
     # pulls millions of rows across the wire to add them up.
     from ..core.config import settings
+    # A bubble chart draws one mark per GROUP, and each mark is an aggregate
+    # (average salary per title, sized by headcount): on a 10,000-row sample
+    # the headcounts were a twenty-fourth of the truth. It gets the analysis
+    # cap like every other aggregate; its marks are still one per group.
+    # A KPI's sum/avg/min/max/count are re-measured exactly in SQL
+    # (_remeasure_scalar); a median or percentile is not, and on the 10,000-row
+    # drawing cap it came back 69,934 / 69,915 on two loads for a true 69,805.
+    measure_col = next((c for c in (getattr(dataset, "columns", None) or [])
+                        if getattr(c, "name", None) == config.get("measure")), None)
+    aggregating = (widget_type in AGGREGATING_ROW_CAPPED_TYPES
+                   or (widget_type in ("kpi", "card")
+                       and (str(config.get("aggregation") or "").lower() not in _SCALAR_SQL
+                            # Years since a date are computed from the rows,
+                            # not re-measured in SQL: read them all.
+                            or str(getattr(measure_col, "dtype", "")) == "datetime")))
     base = (int(getattr(settings, "analysis_row_cap", 250_000) or 250_000)
-            if widget_type not in ROW_CAPPED_WIDGET_TYPES
+            if widget_type not in ROW_CAPPED_WIDGET_TYPES or aggregating
             else (row_cap or DEFAULT_ROW_CAP))
     effective = base
     if override:
@@ -1076,6 +1184,12 @@ def _dispatch_direct_query(
                                        row_cap, drop_columns, measures, mrefs, known)
     if widget_type == "histogram":
         return _run_histogram(source_cfg, dataset, config, rls_filter_expr)
+    if widget_type == "decomposition":
+        # Its total is the NODE's own value (average salary of everyone in
+        # it), which a pushed-down GROUP BY cannot give: the total came back as
+        # the row count, 240,124, above children averaging 88,853.
+        return _fetch_and_compute(source_cfg, dataset, config, widget_type,
+                                  rls_filter_expr, row_cap, drop_columns=drop_columns)
     if widget_type == "correlation_matrix":
         return _run_correlation_matrix(source_cfg, dataset, config, rls_filter_expr)
     if widget_type == "table" and _is_raw_table(config) and table_page(config):
@@ -1444,14 +1558,100 @@ def _run_row_capped(
                 result.pop("totals", None)
                 result["totals_unavailable"] = "sampled"
 
+        # A KPI is ONE number about the whole table. Above the cap the shaper
+        # aggregated a 10,000-row sample: "Total Headcount 10,000" on a
+        # 240,124-row workforce (HR re-test, 2026-10-01), and a salary sum
+        # 24x too small. The plain aggregates are re-measured in SQL over the
+        # real rows, the same way the totals are above; anything SQL cannot
+        # say the same way (median, percentiles, ...) stays a labelled sample.
+        exact_scalar = False
+        if sampled and widget_type in ("kpi", "card") and result.get("type") == "scalar":
+            exact_scalar = _remeasure_scalar(conn, dataset, plan, dialect, result,
+                                             rls_where, rls_params, drop_columns)
+        elif sampled and widget_type == "card" and result.get("rows"):
+            # A multi-row card is several KPIs: "Workforce snapshot" showed a
+            # headcount of 10,000 -- the cap -- on the 240,124-row workforce
+            # (analyst panel dashboard, 2026-10-02). Each row is re-measured.
+            exact_scalar = _remeasure_card(conn, dataset, plan, dialect, result,
+                                           str(config.get("aggregation") or "sum"),
+                                           rls_where, rls_params, drop_columns)
+
     if "total" in result:
-        result["total"] = total
+        # A decomposition's `total` is its node's VALUE (average salary of the
+        # node), not a row count -- overwriting it put 240,124 above children
+        # averaging 88,853. The population still goes in rows_scanned.
+        if result.get("type") != "decomposition":
+            result["total"] = total
         result["rows_scanned"] = total  # the population, not the pre-aggregated groups
-    result["sampled"] = sampled
-    if sampled:
+    result["sampled"] = sampled and not exact_scalar
+    if sampled and not exact_scalar:
         result["sample_size"] = len(df)
         result["total_rows"] = total
     return result
+
+
+#: The KPI aggregations SQL computes exactly as `_agg_series` does (NULLs
+#: ignored by both). Median and the percentiles are left out on purpose:
+#: their SQL spelling differs per dialect and an approximate one would be a
+#: different number from import mode's.
+_SCALAR_SQL = {
+    "sum": "SUM({c})", "avg": "AVG({c})", "mean": "AVG({c})", "average": "AVG({c})",
+    "min": "MIN({c})", "minimum": "MIN({c})", "max": "MAX({c})", "maximum": "MAX({c})",
+    "count": "COUNT({c})", "frequency": "COUNT({c})",
+    "countd": "COUNT(DISTINCT {c})", "distinct": "COUNT(DISTINCT {c})",
+    "count_distinct": "COUNT(DISTINCT {c})",
+}
+
+
+def _remeasure_card(conn, dataset, plan, dialect: str, result: dict, aggregation: str,
+                    rls_where: str, rls_params: dict | None,
+                    drop_columns: list[str] | None) -> bool:
+    """Each row of a sampled multi-row card, re-measured in SQL. True only when
+    EVERY row could be (otherwise the card stays a labelled sample)."""
+    rows = result.get("rows") or []
+    if not rows or result.get("derived"):
+        return False
+    exact = []
+    for row in rows:
+        single = {"measure": row.get("name"), "aggregation": aggregation,
+                  "rows": [{"value": row.get("value")}]}
+        if not _remeasure_scalar(conn, dataset, plan, dialect, single,
+                                 rls_where, rls_params, drop_columns):
+            return False
+        exact.append(single["rows"][0]["value"])
+    for row, value in zip(rows, exact):
+        row["value"] = value
+    return True
+
+
+def _remeasure_scalar(conn, dataset, plan, dialect: str, result: dict,
+                      rls_where: str, rls_params: dict | None,
+                      drop_columns: list[str] | None) -> bool:
+    """Replace a sampled KPI value with the exact one. True when it did."""
+    meas = result.get("measure")
+    fn = _SCALAR_SQL.get(str(result.get("aggregation") or "").lower())
+    rows = result.get("rows") or []
+    if not fn or not meas or len(rows) != 1 or meas in (drop_columns or []):
+        return False
+    if result.get("derived"):
+        # Years since a date: SQL AVG of a date is not that number (and is an
+        # error on PostgreSQL). The value stays the fetched rows' own.
+        return False
+    if any(isinstance(f, dict) and f.get("granularity") for f in (plan.filters or [])):
+        return False
+    _validate_known_columns(dataset, [meas], plan.filters)
+    base = _base_query_sql(dataset, rls_where)
+    where_sql, params = _build_where(plan.filters)
+    where_clause = f" WHERE {where_sql}" if where_sql else ""
+    sql = _finalize_for_dialect(
+        f"SELECT {fn.format(c=_quote(meas))} FROM ({base}) AS src{where_clause}", dialect)
+    value = conn.execute(text(sql), {**(rls_params or {}), **params}).scalar()
+    value = _sql_number(value) if value is not None else None
+    if value is not None and str(result.get("aggregation")).lower() in (
+            "count", "frequency", "countd", "distinct", "count_distinct"):
+        value = int(value)
+    rows[0]["value"] = value
+    return True
 
 
 def _build_count_series_sql(
@@ -1655,6 +1855,15 @@ def _run_aggregate_plan(source_cfg: dict, dataset, config: dict, shaped_config: 
         grand_total, n_groups = (conn.execute(text(total_sql), total_params).one()
                                  if wants_totals else (None, None))
 
+    # The filters in the plan already ran in SQL, over the raw rows. They must
+    # not run again here: `df` holds one row per group, with the measure's
+    # AGGREGATE under the measure's own name, so a filter on that column
+    # ("price between 100 and 200" on a SUM of price) would be tested against
+    # each month's total and drop almost every group. Filters on any other
+    # column only went unnoticed because those columns are absent from `df`.
+    ran = [f for f in (plan.filters or [])]
+    shaped_config = {**shaped_config,
+                     "filters": [f for f in (shaped_config.get("filters") or []) if f not in ran]}
     # check_fields off: `df` is the pushed-down GROUP BY (dimension + measure
     # only), and _validate_columns above already refused an unknown field.
     result = get_widget_data_from_df(df, shaped_config, widget_type, flag_partial=False,

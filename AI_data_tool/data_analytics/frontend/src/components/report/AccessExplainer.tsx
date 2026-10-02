@@ -12,6 +12,8 @@ export default function AccessExplainer({ decisions, sensitivity, onClose }: {
   decisions: AuthzDecision[]; sensitivity?: { effective?: string | null; reasons?: string[] } | null; onClose: () => void
 }) {
   const ref = useModalDialog<HTMLDivElement>(onClose)
+  const dataRules = decisions.find(d => d.action === 'data_rules')
+  const actions = decisions.filter(d => d.action !== 'data_rules')
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.45)',
       display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -23,7 +25,7 @@ export default function AccessExplainer({ decisions, sensitivity, onClose }: {
           <button type="button" className="btn btn-sm" aria-label="Close" onClick={onClose}>×</button>
         </div>
         <ul data-testid="access-decisions" style={{ margin: 0, paddingInlineStart: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {decisions.map(d => (
+          {actions.map(d => (
             <li key={d.action} style={{ display: 'flex', gap: 8 }}>
               <span aria-label={d.allowed ? 'allowed' : 'not allowed'} style={{ color: d.allowed ? 'var(--success)' : 'var(--danger)', fontWeight: 700 }}>
                 {d.allowed ? '✓' : '✕'}
@@ -33,6 +35,28 @@ export default function AccessExplainer({ decisions, sensitivity, onClose }: {
             </li>
           ))}
         </ul>
+        {dataRules && dataRules.allowed && (
+          <div data-testid="access-data-rules" style={{ fontSize: 12, borderTop: '1px solid var(--border)', paddingTop: 8,
+            display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <b style={{ fontSize: 13 }}>What data you see</b>
+            <span style={{ color: 'var(--muted)' }}>{dataRules.reason}</span>
+            {(dataRules.rules ?? []).map(r => (
+              <div key={r.dataset_id} style={{ border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px' }}>
+                <div style={{ fontWeight: 600 }}>{r.dataset_name}</div>
+                {r.row_rule ? (
+                  <div>Rows: only where <code dir="ltr">{r.row_rule_for_you ?? r.row_rule}</code>
+                    {r.row_rule_for_you && r.row_rule_for_you !== r.row_rule && (
+                      <span style={{ color: 'var(--muted)' }}> (rule: <code dir="ltr">{r.row_rule}</code>)</span>
+                    )}
+                  </div>
+                ) : <div>Rows: all</div>}
+                <div>Columns: {r.hidden_columns.length
+                  ? <>hidden from you — <b>{r.hidden_columns.join(', ')}</b></>
+                  : 'all'}</div>
+              </div>
+            ))}
+          </div>
+        )}
         {sensitivity?.effective && (
           <div data-testid="access-sensitivity" style={{ fontSize: 12, borderTop: '1px solid var(--border)', paddingTop: 8 }}>
             Sensitivity in force: <b>{sensitivity.effective}</b>{sensitivity.reasons?.[0] ? ` — ${sensitivity.reasons[0]}` : ''}.

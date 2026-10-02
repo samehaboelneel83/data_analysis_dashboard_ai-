@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { widgetDataApi } from '../../services/api'
 import MiniBarChart from './MiniBarChart'
+import { defaultSummary } from '../../lib/semanticGuard'
 
 interface Finding {
   kind: string
@@ -39,9 +40,15 @@ export default function FindingChart({ datasetId, finding, columnTypes }: {
     let widgetType = 'bar'
     let says: string | undefined
     if (cats.length && nums.length) {
-      config = { dimension: cats[0], measure: nums[0], aggregation: 'sum' }
+      // The chart says what its sentence says: "Sales has the highest AVERAGE
+      // salary" was drawn as sum(salary) by dept -- the department with the
+      // most people, not the best-paid one (Chrome re-test). A salary, price
+      // or rate is averaged by the same rule the insight engine uses.
+      const agg = /\baverage\b|\bmean\b/i.test(finding.title) ? 'avg'
+        : defaultSummary(nums[0]) === 'avg' ? 'avg' : 'sum'
+      config = { dimension: cats[0], measure: nums[0], aggregation: agg }
       widgetType = 'bar'
-      says = `sum(${nums[0]}) by ${cats[0]}`
+      says = agg === 'avg' ? `average ${nums[0]} by ${cats[0]}` : `sum(${nums[0]}) by ${cats[0]}`
     } else if (nums.length === 1) {
       config = { measure: nums[0], bins: 20 }
       widgetType = 'histogram'

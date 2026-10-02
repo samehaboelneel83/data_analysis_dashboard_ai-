@@ -63,6 +63,24 @@ async def _migrate(conn):
         # is a new table, which create_all provisions.
         "ALTER TABLE quotas ADD COLUMN IF NOT EXISTS max_ai_tokens_per_day INTEGER",
         "ALTER TABLE quotas ADD COLUMN IF NOT EXISTS max_ai_tokens_per_month INTEGER",
+        # 0047: business rules on glossary terms (HR evaluation, blocker 3).
+        "ALTER TABLE glossary_terms ADD COLUMN IF NOT EXISTS rule TEXT",
+        "ALTER TABLE glossary_terms ADD COLUMN IF NOT EXISTS always BOOLEAN NOT NULL DEFAULT FALSE",
+        # 0048: a connection's sensitivity label (HR evaluation, item 2.2).
+        "ALTER TABLE data_sources ADD COLUMN IF NOT EXISTS sensitivity VARCHAR(20)",
+        # 0049: dataset share levels; dataset_group_shares is a new table.
+        "ALTER TABLE dataset_shares ADD COLUMN IF NOT EXISTS level VARCHAR(10) NOT NULL DEFAULT 'edit'",
+        # 0050: change alerts and webhooks (HR evaluation, items 3.1 / 4.8).
+        "ALTER TABLE data_alerts ADD COLUMN IF NOT EXISTS last_value DOUBLE PRECISION",
+        "ALTER TABLE data_alerts ADD COLUMN IF NOT EXISTS change_pct DOUBLE PRECISION",
+        "ALTER TABLE data_alerts ADD COLUMN IF NOT EXISTS change_direction VARCHAR(5)",
+        "ALTER TABLE data_alerts ADD COLUMN IF NOT EXISTS webhook_url VARCHAR(500)",
+        # 0052: snapshot dataflows (HR evaluation, item 4.6).
+        "ALTER TABLE dataflows ADD COLUMN IF NOT EXISTS snapshot JSON",
+        # 0053: what a delivery row is about (HR evaluation, item 5.18).
+        "ALTER TABLE deliveries ADD COLUMN IF NOT EXISTS subject VARCHAR(255)",
+        "ALTER TABLE deliveries ADD COLUMN IF NOT EXISTS recipients TEXT",
+        "ALTER TABLE deliveries ADD COLUMN IF NOT EXISTS file_name VARCHAR(255)",
         # 0043: model versions (see PredictionModel.version). The unique key
         # moves from (org, dataset, name) to (..., version).
         "ALTER TABLE prediction_models ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1",
@@ -433,6 +451,13 @@ async def lifespan(app: FastAPI):
                 # like progress nobody is making.
                 from .services.automation_runner import reap_stuck_automation_steps
                 await reap_stuck_automation_steps(session)
+                # Live datasets saved by the Query builder before it stopped
+                # baking a row LIMIT into their SQL (HR evaluation, blocker 1).
+                try:
+                    from .services.source_import import repair_capped_live_datasets
+                    await repair_capped_live_datasets(session)
+                except Exception:
+                    logging.getLogger(__name__).exception("live dataset LIMIT repair skipped")
         finally:
             if is_pg:
                 await lockconn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": _STARTUP_LOCK_KEY})
@@ -448,6 +473,12 @@ async def lifespan(app: FastAPI):
     # The up/down light for every LLM endpoint (services/llm_endpoints.py).
     from .services.llm_endpoints import run_prober as run_llm_prober
     llm_prober = asyncio.create_task(run_llm_prober())
+    # 4.5: live datasets get a cached row count, refreshed hourly.
+    from .services.live_counts import run_live_count_loop
+    live_counter = asyncio.create_task(run_live_count_loop(AsyncSessionLocal))
+    # 5.21: the automation queue's own loop (one step per tick, no minute gap).
+    from .services.automation_runner import run_automation_loop
+    automation_loop = asyncio.create_task(run_automation_loop(AsyncSessionLocal))
 
     # E07/E12: the durable job worker (services/jobs.py). One per process,
     # like the scheduler; claims are compare-and-set on the jobs row, so
@@ -523,6 +554,8 @@ async def lifespan(app: FastAPI):
         _STARTUP_COMPLETE = False
         settings_reloader.cancel()
         llm_prober.cancel()
+        live_counter.cancel()
+        automation_loop.cancel()
         scheduler.cancel()
         try:
             await scheduler

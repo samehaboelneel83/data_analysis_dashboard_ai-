@@ -165,7 +165,9 @@ export default function MiniBarChart({ rows, ordered = false, caption }: {
               width: `${(Math.abs(r.value) / max) * 100}%` }} />
           </span>
           <span style={{ flex: '0 0 auto', fontFamily: 'var(--mono)', color: 'var(--muted)' }}>
-            {Number.isInteger(r.value) ? r.value : r.value.toFixed(1)}
+            {/* "4155249858" read as a phone number (Chrome re-test): compact
+                 from ten thousand up, the same scale the bin labels use. */}
+            {Math.abs(r.value) >= 10_000 ? compact(r.value) : Number.isInteger(r.value) ? r.value : r.value.toFixed(1)}
           </span>
         </div>
       ))}

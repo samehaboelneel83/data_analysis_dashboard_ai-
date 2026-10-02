@@ -48,6 +48,7 @@ class SegmentError(ValueError):
 
 def segment_dataframe(
     df: pd.DataFrame, columns: list[str] | None = None, include_rows: bool = False,
+    column_meta: dict | None = None,
 ) -> AnalysisContract:
     from sklearn.cluster import KMeans
     from sklearn.metrics import silhouette_score
@@ -62,11 +63,16 @@ def segment_dataframe(
         usable = [c for c in columns if c in df.columns and pd.api.types.is_numeric_dtype(df[c])
                   and not pd.api.types.is_bool_dtype(df[c])]
     else:
+        # Identifiers never describe a row: clustering on emp_no grouped people
+        # by their employee number (HR evaluation). Skipped unless named.
+        from ..semantic_guard import is_identifier
         usable = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])
-                  and not pd.api.types.is_bool_dtype(df[c])]
+                  and not pd.api.types.is_bool_dtype(df[c])
+                  and not is_identifier(c, column_meta)]
 
     if len(usable) < 2:
-        raise SegmentError("Segmentation needs at least 2 usable numeric columns")
+        raise SegmentError("Segmentation needs at least 2 usable numeric columns "
+                           "(identifier columns such as IDs and numbers are skipped)")
 
     sub = df[usable].apply(pd.to_numeric, errors="coerce").dropna()
     n = len(sub)

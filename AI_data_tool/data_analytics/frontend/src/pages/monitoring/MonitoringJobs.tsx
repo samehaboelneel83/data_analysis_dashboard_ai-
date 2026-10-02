@@ -99,6 +99,12 @@ export default function MonitoringJobs() {
     jobs, j => [j.name, KIND_LABEL[j.kind], t(`jobs.kind.${j.kind}` as MessageKey), j.status], t('search.jobs'))
   // Known status words in the reader's language; anything else (an error
   // sentence, a delivery summary) is shown as the server wrote it.
+  // The server's reason, in the reader's words where it is a known one.
+  const skipReason = (e: string) => {
+    if (/no outputs yet/i.test(e)) return t('jobs.reason.noOutputs')
+    if (/source dataset or creator is gone/i.test(e)) return t('jobs.reason.sourceGone')
+    return e
+  }
   const statusText = (st: string) => { const k = `jobs.status.${st.toLowerCase()}` as MessageKey; const v = t(k); return v && v !== k ? v : st }
 
   return (
@@ -158,6 +164,12 @@ export default function MonitoringJobs() {
                   <td style={{ color: tone ? TONE_COLOR[tone] : 'var(--muted)' }}
                     title={j.error ?? undefined}>
                     {j.status ? statusText(j.status) : '—'}
+                    {/* 5.19: "skipped" alone left the reader guessing why. */}
+                    {j.error && j.status && !/^(ok|clear)$/i.test(j.status) && (
+                      <div data-testid={`job-reason-${j.kind}-${j.id}`} style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 2, whiteSpace: 'normal' }}>
+                        {skipReason(j.error)}
+                      </div>
+                    )}
                   </td>
                 </tr>
               )

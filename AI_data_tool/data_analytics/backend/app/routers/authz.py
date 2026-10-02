@@ -6,6 +6,7 @@ instead of offering a button the server then refuses. The decisions are the
 same functions every endpoint enforces with; this router only asks them.
 """
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.capability import (can_read_dataset, explain_capability, max_dataset_capability,
@@ -48,7 +49,49 @@ async def _report_decision(db, user, report_id: int, action: str) -> dict:
                     "reason": f"The report is Restricted{because}; only data-level access may download it."}
         note = " Personal-data columns are redacted from the file." if s_rank(label) >= s_rank("Confidential") else ""
         return {"allowed": True, "level": level, "sensitivity": label, "reason": why + note}
+    if action == "data_rules":
+        return await _report_data_rules(db, user, report, level, why)
     raise HTTPException(400, f"Unknown report action '{action}'")
+
+
+async def _report_data_rules(db, user, report, level: str, why: str) -> dict:
+    """Which ROWS and COLUMNS of this report's data the viewer sees, and the
+    rule behind each (3.13). "You can view this report" was the whole answer
+    before, while a row rule quietly showed a manager one department and a
+    column rule hid salary -- the numbers looked complete and were not."""
+    from ..core.rls import resolve_denied_columns, resolve_rls_expr
+    from ..models.models import RowSecurityRule
+    from ..services.sensitivity import report_dataset_ids
+    if report is None or cap_rank(level) < cap_rank("view"):
+        return {"allowed": False, "level": level, "reason": why, "rules": []}
+    if user.role.is_org_admin:
+        return {"allowed": True, "level": level, "rules": [],
+                "reason": "Your role is an org administrator, so no row or column rules apply: "
+                          "you see every row and every column."}
+    rules = []
+    for did in sorted(await report_dataset_ids(db, report)):
+        ds = await db.get(Dataset, did)
+        if ds is None or ds.org_id != user.org_id:
+            continue
+        raw = (await db.execute(select(RowSecurityRule.filter_expr).where(
+            RowSecurityRule.role_id == user.role_id,
+            RowSecurityRule.dataset_id == did))).scalar_one_or_none()
+        try:
+            resolved = await resolve_rls_expr(db, user, did)
+            hidden = await resolve_denied_columns(db, user, did) or []
+        except Exception:  # noqa: BLE001 -- a broken rule is reported, not raised
+            resolved, hidden = None, []
+        if raw is None and resolved is None and not hidden:
+            continue
+        rules.append({"dataset_id": did, "dataset_name": ds.name,
+                      "row_rule": raw, "row_rule_for_you": resolved,
+                      "hidden_columns": list(hidden)})
+    if not rules:
+        reason = f"Your role ({user.role.name}) has no row or column rules on this report's data: you see every row and column."
+    else:
+        reason = (f"Your role ({user.role.name}) sees this report's data through "
+                  f"{len(rules)} rule set{'s' if len(rules) != 1 else ''}; totals cover only the rows you can see.")
+    return {"allowed": True, "level": level, "reason": reason, "rules": rules}
 
 
 async def _dataset_decision(db, user, dataset_id: int, action: str, column: str | None) -> dict:

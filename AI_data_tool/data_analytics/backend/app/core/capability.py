@@ -318,6 +318,9 @@ async def require_dataset_capability(db: AsyncSession, user: User, dataset_id: i
     # dataset by id while every read of it answered 404. Read first: what you
     # were not given does not exist for you, to change any more than to open.
     await require_dataset_read(db, user, dataset_id)
+    ceiling = await dataset_share_ceiling(db, user, dataset_id)
+    if ceiling == "view" and rank(min_level) > rank("view"):
+        raise HTTPException(403, "This dataset was shared with you to view, not to change.")
     if rank(await max_dataset_capability(db, user, dataset_id)) < _RANK[min_level]:
         raise HTTPException(
             403, f"Editing this dataset's data model needs {min_level}-level access to a report that uses it")
@@ -416,7 +419,76 @@ async def _directly_readable_ids(db: AsyncSession, org_id: int, user_id: int,
     ids |= set((await db.execute(
         select(DatasetShare.dataset_id).where(DatasetShare.user_id == user_id)
     )).scalars().all())
+    ids |= set((await group_share_levels(db, org_id, user_id)).keys())
     return ids
+
+
+async def _my_unit_ids(db: AsyncSession, org_id: int, user_id: int) -> set[int]:
+    """The org units this user is placed in AND every unit above them: a share
+    to "HR" reaches someone placed in "HR / Payroll" -- the same upward reading
+    folder grants use."""
+    from ..models.models import OrgUnit, UserOrgUnit
+    placements = (await db.execute(
+        select(UserOrgUnit.org_unit_id).where(UserOrgUnit.user_id == user_id)
+    )).scalars().all()
+    if not placements:
+        return set()
+    parent_of = dict((await db.execute(
+        select(OrgUnit.id, OrgUnit.parent_id).where(OrgUnit.org_id == org_id))).all())
+    out: set[int] = set()
+    for uid in placements:
+        seen: set[int] = set()
+        cur: int | None = uid
+        while cur is not None and cur not in seen and cur in parent_of:
+            seen.add(cur)
+            out.add(cur)
+            cur = parent_of[cur]
+    return out
+
+
+async def group_share_levels(db: AsyncSession, org_id: int, user_id: int) -> dict[int, str]:
+    """dataset_id -> best level a ROLE or ORG-UNIT share gives this user."""
+    from ..models.models import DatasetGroupShare
+    role_id = (await db.execute(select(User.role_id).where(User.id == user_id))).scalar_one_or_none()
+    units = await _my_unit_ids(db, org_id, user_id)
+    conds = []
+    if role_id is not None:
+        conds.append(DatasetGroupShare.role_id == role_id)
+    if units:
+        conds.append(DatasetGroupShare.org_unit_id.in_(units))
+    if not conds:
+        return {}
+    rows = (await db.execute(
+        select(DatasetGroupShare.dataset_id, DatasetGroupShare.level)
+        .where(DatasetGroupShare.org_id == org_id, or_(*conds)))).all()
+    out: dict[int, str] = {}
+    for did, level in rows:
+        if did not in out or rank(level) > rank(out[did]):
+            out[did] = level
+    return out
+
+
+async def dataset_share_ceiling(db: AsyncSession, user: User, dataset_id: int) -> str | None:
+    """When a user reaches a dataset ONLY through shares, the best level those
+    shares give ('view' | 'edit'); None when something else already opens it
+    (admin, owner, unowned data) or no share applies. A 'view' share means
+    look, never re-model (HR evaluation, item 2.5)."""
+    if user.role and user.role.is_org_admin:
+        return None
+    ds = await db.get(Dataset, dataset_id)
+    if ds is None or ds.created_by is None or ds.created_by == user.id:
+        return None
+    levels: list[str] = []
+    own = (await db.execute(select(DatasetShare.level).where(
+        DatasetShare.dataset_id == dataset_id, DatasetShare.user_id == user.id))).scalar_one_or_none()
+    if own:
+        levels.append(own)
+    grp = (await group_share_levels(db, user.org_id, user.id)).get(dataset_id)
+    if grp:
+        levels.append(grp)
+    if not levels:
+        return None
+    return max(levels, key=rank)
 
 
 async def _dashboard_rung_ids(db: AsyncSession, report_ids: list[int], *,

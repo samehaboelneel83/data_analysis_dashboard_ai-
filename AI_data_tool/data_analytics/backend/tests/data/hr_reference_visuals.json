@@ -1,0 +1,819 @@
+{
+ "about": "The HR analyst panel's 49 hand-picked visuals (2026-10-02, one text note dropped), each verified against SQL on the live 240,124-row workforce dataset. The benchmark for the automatic panel: how many of these questions it finds.",
+ "columns": [
+  "emp_no",
+  "dept_name",
+  "title",
+  "gender",
+  "salary",
+  "hire_date"
+ ],
+ "visuals": [
+  {
+   "no": 1,
+   "section": "Executive summary",
+   "question": "How many people do we employ today?",
+   "title": "Total headcount",
+   "widget_type": "kpi",
+   "config": {
+    "measure": "emp_no",
+    "aggregation": "countd"
+   }
+  },
+  {
+   "no": 2,
+   "section": "Executive summary",
+   "question": "What is the typical current salary in the company?",
+   "title": "Median salary",
+   "widget_type": "kpi",
+   "config": {
+    "measure": "salary",
+    "aggregation": "median"
+   }
+  },
+  {
+   "no": 3,
+   "section": "Executive summary",
+   "question": "What is the annual payroll run-rate?",
+   "title": "Annual payroll",
+   "widget_type": "kpi",
+   "config": {
+    "measure": "salary",
+    "aggregation": "sum"
+   }
+  },
+  {
+   "no": 4,
+   "section": "Executive summary",
+   "question": "What share of the workforce has been here since the 1980s?",
+   "title": "Staff hired before 1990",
+   "widget_type": "kpi",
+   "config": {
+    "measure": "emp_no",
+    "aggregation": "countd",
+    "filters": [
+     {
+      "column": "hire_date",
+      "op": "lt",
+      "value": "1990-01-01"
+     }
+    ]
+   }
+  },
+  {
+   "no": 5,
+   "section": "Executive summary",
+   "question": "Front page: which departments are big, well paid and long-tenured?",
+   "title": "Departments: pay vs tenure vs size",
+   "widget_type": "bubble",
+   "config": {
+    "dimension": "dept_name",
+    "measure": "salary",
+    "measure2": "hire_date",
+    "size": "emp_no",
+    "size_aggregation": "countd",
+    "aggregation": "avg",
+    "limit": 20
+   }
+  },
+  {
+   "no": 6,
+   "section": "Executive summary",
+   "question": "Is each newer cohort both smaller and cheaper?",
+   "title": "Cohort size vs cohort pay",
+   "widget_type": "custom_graph",
+   "config": {
+    "dimension": "hire_date",
+    "dimension_granularity": "year",
+    "layers": [
+     {
+      "mark": "bar",
+      "measure": "emp_no",
+      "aggregation": "countd",
+      "axis": "left"
+     },
+     {
+      "mark": "line",
+      "measure": "salary",
+      "aggregation": "avg",
+      "axis": "right"
+     }
+    ]
+   }
+  },
+  {
+   "no": 7,
+   "section": "Executive summary",
+   "question": "Which single factor explains the most salary variance: title, department or tenure?",
+   "title": "Salary: title vs dept vs tenure",
+   "widget_type": "model_compare",
+   "config": {
+    "compare": [
+     {
+      "model": "linear",
+      "response": "salary",
+      "predictors": [
+       "title"
+      ]
+     },
+     {
+      "model": "linear",
+      "response": "salary",
+      "predictors": [
+       "dept_name"
+      ]
+     },
+     {
+      "model": "linear",
+      "response": "salary",
+      "predictors": [
+       "hire_date"
+      ]
+     },
+     {
+      "model": "linear",
+      "response": "salary",
+      "predictors": [
+       "title",
+       "dept_name",
+       "hire_date"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "no": 8,
+   "section": "Workforce composition",
+   "question": "Where do our people sit - which departments carry the workforce?",
+   "title": "Headcount by department",
+   "widget_type": "treemap",
+   "config": {
+    "dimension": "dept_name",
+    "measure": "emp_no",
+    "aggregation": "countd",
+    "limit": 10,
+    "sort": "desc",
+    "sort_by": "value"
+   }
+  },
+  {
+   "no": 9,
+   "section": "Workforce composition",
+   "question": "What does our job-title structure look like?",
+   "title": "Headcount by title",
+   "widget_type": "bar",
+   "config": {
+    "dimension": "title",
+    "measure": "emp_no",
+    "aggregation": "countd",
+    "limit": 10,
+    "sort": "desc",
+    "sort_by": "value"
+   }
+  },
+  {
+   "no": 10,
+   "section": "Workforce composition",
+   "question": "What is the gender mix of the workforce?",
+   "title": "Gender mix",
+   "widget_type": "donut",
+   "config": {
+    "dimension": "gender",
+    "measure": "emp_no",
+    "aggregation": "countd",
+    "limit": 10,
+    "sort": "desc",
+    "sort_by": "value"
+   }
+  },
+  {
+   "no": 11,
+   "section": "Workforce composition",
+   "question": "Which department x title combinations hold the people?",
+   "title": "Headcount: department x title",
+   "widget_type": "heatmap",
+   "config": {
+    "dimension": "dept_name",
+    "dimension2": "title",
+    "measure": "emp_no",
+    "aggregation": "countd"
+   }
+  },
+  {
+   "no": 12,
+   "section": "Workforce composition",
+   "question": "How senior is each department - what share of its people are in senior vs junior titles?",
+   "title": "Title mix within each department (100%)",
+   "widget_type": "bar",
+   "config": {
+    "dimension": "dept_name",
+    "dimension2": "title",
+    "bar_mode": "stacked100",
+    "measure": "emp_no",
+    "aggregation": "countd",
+    "limit": 10,
+    "sort": "desc",
+    "sort_by": "value"
+   }
+  },
+  {
+   "no": 13,
+   "section": "Workforce composition",
+   "question": "How does each department break down into titles?",
+   "title": "Department to title hierarchy",
+   "widget_type": "sunburst",
+   "config": {
+    "levels": [
+     "dept_name",
+     "title"
+    ],
+    "measure": "emp_no",
+    "aggregation": "countd"
+   }
+  },
+  {
+   "no": 14,
+   "section": "Workforce composition",
+   "question": "Which career tracks (engineering vs staff) does each department feed?",
+   "title": "Department to title flow",
+   "widget_type": "sankey",
+   "config": {
+    "dimension": "dept_name",
+    "dimension2": "title",
+    "measure": "emp_no",
+    "aggregation": "countd",
+    "limit": 70
+   }
+  },
+  {
+   "no": 15,
+   "section": "Workforce composition",
+   "question": "What drives headcount - which department and title explain where people are?",
+   "title": "Headcount decomposition tree",
+   "widget_type": "decomposition",
+   "config": {
+    "roles": {
+     "measure": "emp_no"
+    },
+    "aggregation": "countd",
+    "split_by": "dept_name"
+   }
+  },
+  {
+   "no": 16,
+   "section": "Pay levels & spread",
+   "question": "What does the overall salary distribution look like and how long is the high-pay tail?",
+   "title": "Salary distribution",
+   "widget_type": "histogram",
+   "config": {
+    "measure": "salary",
+    "bins": 40
+   }
+  },
+  {
+   "no": 17,
+   "section": "Pay levels & spread",
+   "question": "How wide is the pay range inside each title, and do title bands overlap?",
+   "title": "Salary band by title",
+   "widget_type": "box_plot",
+   "config": {
+    "dimension": "title",
+    "measure": "salary",
+    "limit": 10
+   }
+  },
+  {
+   "no": 18,
+   "section": "Pay levels & spread",
+   "question": "How does the pay distribution differ by department, beyond the averages?",
+   "title": "Salary band by department",
+   "widget_type": "box_plot",
+   "config": {
+    "dimension": "dept_name",
+    "measure": "salary",
+    "limit": 10
+   }
+  },
+  {
+   "no": 19,
+   "section": "Pay levels & spread",
+   "question": "Which department x title combinations pay most, i.e. is the Sales premium a title effect or a department effect?",
+   "title": "Avg salary: department x title",
+   "widget_type": "heatmap",
+   "config": {
+    "dimension": "dept_name",
+    "dimension2": "title",
+    "measure": "salary",
+    "aggregation": "avg"
+   }
+  },
+  {
+   "no": 20,
+   "section": "Pay levels & spread",
+   "question": "Which departments pay above or below the company average?",
+   "title": "Dept avg salary vs company mean",
+   "widget_type": "needle",
+   "config": {
+    "dimension": "dept_name",
+    "measure": "salary",
+    "aggregation": "avg",
+    "limit": 10,
+    "sort": "desc",
+    "sort_by": "value",
+    "baseline": 72012
+   }
+  },
+  {
+   "no": 21,
+   "section": "Pay levels & spread",
+   "question": "Can a manager drill from company average pay into department, then title, to locate pay differences?",
+   "title": "Avg salary drill-down",
+   "widget_type": "decomposition",
+   "config": {
+    "roles": {
+     "measure": "salary"
+    },
+    "aggregation": "avg",
+    "split_by": "dept_name"
+   }
+  },
+  {
+   "no": 22,
+   "section": "Pay levels & spread",
+   "question": "Which titles have the most dispersed pay (least consistent banding)?",
+   "title": "Pay dispersion (CV) by title",
+   "widget_type": "bar",
+   "config": {
+    "dimension": "title",
+    "measure": "salary",
+    "aggregation": "cv",
+    "limit": 10,
+    "sort": "desc",
+    "sort_by": "value",
+    "filters": [
+     {
+      "column": "title",
+      "op": "neq",
+      "value": "Manager"
+     }
+    ]
+   }
+  },
+  {
+   "no": 23,
+   "section": "Pay levels & spread",
+   "question": "Where are the top earners (above the company 90th percentile) concentrated?",
+   "title": "Headcount above p90 ($96k) by dept",
+   "widget_type": "bar",
+   "config": {
+    "dimension": "dept_name",
+    "measure": "emp_no",
+    "aggregation": "countd",
+    "limit": 10,
+    "sort": "desc",
+    "sort_by": "value",
+    "filters": [
+     {
+      "column": "salary",
+      "op": "gt",
+      "value": 96089
+     }
+    ]
+   }
+  },
+  {
+   "no": 24,
+   "section": "Pay equity",
+   "question": "Is there a gender pay gap within the same title?",
+   "title": "Avg salary by title and gender",
+   "widget_type": "bar",
+   "config": {
+    "dimension": "title",
+    "dimension2": "gender",
+    "measure": "salary",
+    "aggregation": "avg",
+    "bar_mode": "clustered",
+    "sort": "desc",
+    "sort_by": "value",
+    "limit": 10,
+    "filters": [
+     {
+      "column": "title",
+      "op": "neq",
+      "value": "Manager"
+     }
+    ]
+   }
+  },
+  {
+   "no": 25,
+   "section": "Pay equity",
+   "question": "Within each title, do men and women have the same pay distribution, not just the same average?",
+   "title": "Salary spread by gender, per title",
+   "widget_type": "small_multiples",
+   "config": {
+    "facet_by": "title",
+    "inner_widget_type": "box_plot",
+    "dimension": "gender",
+    "measure": "salary",
+    "filters": [
+     {
+      "column": "title",
+      "op": "neq",
+      "value": "Manager"
+     }
+    ]
+   }
+  },
+  {
+   "no": 26,
+   "section": "Pay equity",
+   "question": "Is there a gender pay gap within any department?",
+   "title": "Avg salary by department and gender",
+   "widget_type": "bar",
+   "config": {
+    "dimension": "dept_name",
+    "dimension2": "gender",
+    "measure": "salary",
+    "aggregation": "avg",
+    "bar_mode": "clustered",
+    "limit": 10,
+    "sort": "desc",
+    "sort_by": "value"
+   }
+  },
+  {
+   "no": 27,
+   "section": "Pay equity",
+   "question": "Is median pay equal for men and women within each department?",
+   "title": "Median salary: department x gender",
+   "widget_type": "matrix",
+   "config": {
+    "dimension": "dept_name",
+    "dimension2": "gender",
+    "measure": "salary",
+    "aggregation": "median"
+   }
+  },
+  {
+   "no": 28,
+   "section": "Pay equity",
+   "question": "Does gender pay parity hold across every hire cohort, or only on average?",
+   "title": "Avg salary by hire year and gender",
+   "widget_type": "bar",
+   "config": {
+    "dimension": "hire_date",
+    "dimension_granularity": "year",
+    "dimension2": "gender",
+    "measure": "salary",
+    "aggregation": "avg",
+    "bar_mode": "clustered",
+    "limit": 20,
+    "sort": "asc",
+    "sort_by": "name"
+   }
+  },
+  {
+   "no": 29,
+   "section": "Pay equity",
+   "question": "Is gender balance consistent across departments, or are some functions skewed?",
+   "title": "Gender share by department (100%)",
+   "widget_type": "bar",
+   "config": {
+    "dimension": "dept_name",
+    "dimension2": "gender",
+    "bar_mode": "stacked100",
+    "measure": "emp_no",
+    "aggregation": "countd",
+    "limit": 10,
+    "sort": "desc",
+    "sort_by": "value"
+   }
+  },
+  {
+   "no": 30,
+   "section": "Pay equity",
+   "question": "Is the 60/40 gender split the same at every title level (pipeline vs senior roles)?",
+   "title": "Headcount by title and gender",
+   "widget_type": "crosstab",
+   "config": {
+    "dimension": "title",
+    "dimension2": "gender",
+    "measure": "emp_no",
+    "aggregation": "countd",
+    "limit": 10,
+    "sort": "desc",
+    "sort_by": "value",
+    "show_totals": true,
+    "table_row_lines": true
+   }
+  },
+  {
+   "no": 31,
+   "section": "Pay equity",
+   "question": "Fairness check: can salary, title, department or tenure predict gender?",
+   "title": "Gender predictability (fairness test)",
+   "widget_type": "model_logistic",
+   "config": {
+    "response": "gender",
+    "event_value": "F",
+    "predictors": [
+     "salary",
+     "title",
+     "dept_name",
+     "hire_date"
+    ]
+   }
+  },
+  {
+   "no": 32,
+   "section": "Hiring, cohorts & tenure",
+   "question": "When did we hire most, and how fast did hiring shrink?",
+   "title": "Hires per year (current staff by hire year)",
+   "widget_type": "bar",
+   "config": {
+    "measure": "emp_no",
+    "aggregation": "countd",
+    "dimension": "hire_date",
+    "dimension_granularity": "year",
+    "limit": 20,
+    "sort": "asc",
+    "sort_by": "name"
+   }
+  },
+  {
+   "no": 33,
+   "section": "Hiring, cohorts & tenure",
+   "question": "How does pay change with hire year (tenure effect)?",
+   "title": "Avg salary by hire-year cohort",
+   "widget_type": "line",
+   "config": {
+    "dimension": "hire_date",
+    "dimension_granularity": "year",
+    "measure": "salary",
+    "aggregation": "avg",
+    "limit": 20,
+    "sort": "asc",
+    "sort_by": "name"
+   }
+  },
+  {
+   "no": 34,
+   "section": "Hiring, cohorts & tenure",
+   "question": "Is there seasonality in hiring months?",
+   "title": "Monthly hires 1985-2000",
+   "widget_type": "line",
+   "config": {
+    "measure": "emp_no",
+    "aggregation": "countd",
+    "dimension": "hire_date",
+    "dimension_granularity": "month",
+    "limit": 200,
+    "sort": "asc",
+    "sort_by": "name"
+   }
+  },
+  {
+   "no": 35,
+   "section": "Hiring, cohorts & tenure",
+   "question": "What does a 1985 hire earn vs a 1995 hire within the same title?",
+   "title": "Avg salary: hire year x title",
+   "widget_type": "heatmap",
+   "config": {
+    "dimension": "hire_date",
+    "dimension_granularity": "year",
+    "dimension2": "title",
+    "measure": "salary",
+    "aggregation": "avg"
+   }
+  },
+  {
+   "no": 36,
+   "section": "Hiring, cohorts & tenure",
+   "question": "Did the department mix of new hires change over time?",
+   "title": "Department share of each hire year",
+   "widget_type": "bar",
+   "config": {
+    "measure": "emp_no",
+    "aggregation": "countd",
+    "dimension": "hire_date",
+    "dimension_granularity": "year",
+    "dimension2": "dept_name",
+    "bar_mode": "stacked100",
+    "limit": 20,
+    "sort": "asc",
+    "sort_by": "name"
+   }
+  },
+  {
+   "no": 37,
+   "section": "Hiring, cohorts & tenure",
+   "question": "Did the title mix of hires change by cohort (who got promoted)?",
+   "title": "Current title share by hire year",
+   "widget_type": "bar",
+   "config": {
+    "measure": "emp_no",
+    "aggregation": "countd",
+    "dimension": "hire_date",
+    "dimension_granularity": "year",
+    "dimension2": "title",
+    "bar_mode": "stacked100",
+    "limit": 20,
+    "sort": "asc",
+    "sort_by": "name"
+   }
+  },
+  {
+   "no": 38,
+   "section": "Hiring, cohorts & tenure",
+   "question": "Did every department follow the same hiring curve?",
+   "title": "Hires per year by department",
+   "widget_type": "small_multiples",
+   "config": {
+    "facet_by": "dept_name",
+    "inner_widget_type": "line",
+    "dimension": "hire_date",
+    "dimension_granularity": "year",
+    "measure": "emp_no",
+    "aggregation": "countd"
+   }
+  },
+  {
+   "no": 39,
+   "section": "Hiring, cohorts & tenure",
+   "question": "How was today's workforce built up, cohort by cohort?",
+   "title": "Cumulative headcount by hire year",
+   "widget_type": "waterfall",
+   "config": {
+    "measure": "emp_no",
+    "aggregation": "countd",
+    "dimension": "hire_date",
+    "dimension_granularity": "year",
+    "limit": 20
+   }
+  },
+  {
+   "no": 40,
+   "section": "Hiring, cohorts & tenure",
+   "question": "How many years of service does each title average, and how does that relate to pay?",
+   "title": "Title: tenure vs pay vs headcount",
+   "widget_type": "bubble",
+   "config": {
+    "dimension": "title",
+    "measure": "hire_date",
+    "measure2": "salary",
+    "size": "emp_no",
+    "size_aggregation": "countd",
+    "aggregation": "avg",
+    "limit": 10
+   }
+  },
+  {
+   "no": 41,
+   "section": "Hiring, cohorts & tenure",
+   "question": "How spread is pay within each cohort?",
+   "title": "Salary distribution by hire year",
+   "widget_type": "box_plot",
+   "config": {
+    "dimension": "hire_date",
+    "dimension_granularity": "year",
+    "measure": "salary",
+    "limit": 20
+   }
+  },
+  {
+   "no": 42,
+   "section": "Hiring, cohorts & tenure",
+   "question": "Inside one title, does an earlier start still mean higher pay?",
+   "title": "Senior Staff avg salary by hire year",
+   "widget_type": "step",
+   "config": {
+    "dimension": "hire_date",
+    "dimension_granularity": "year",
+    "measure": "salary",
+    "aggregation": "avg",
+    "limit": 20,
+    "sort": "asc",
+    "sort_by": "name",
+    "filters": [
+     {
+      "column": "title",
+      "op": "eq",
+      "value": "Senior Staff"
+     }
+    ]
+   }
+  },
+  {
+   "no": 43,
+   "section": "Hiring, cohorts & tenure",
+   "question": "Which cohorts earn above or below the company average?",
+   "title": "Cohort avg salary vs company mean (72,012)",
+   "widget_type": "needle",
+   "config": {
+    "dimension": "hire_date",
+    "dimension_granularity": "year",
+    "measure": "salary",
+    "aggregation": "avg",
+    "limit": 20,
+    "sort": "asc",
+    "sort_by": "name",
+    "baseline": 72012
+   }
+  },
+  {
+   "no": 45,
+   "section": "Drivers & patterns",
+   "question": "How much of salary is explained by title vs department vs hire date vs gender?",
+   "title": "Salary drivers (linear model)",
+   "widget_type": "model_linear",
+   "config": {
+    "measure": "salary",
+    "predictors": [
+     "title",
+     "dept_name",
+     "hire_date",
+     "gender"
+    ]
+   }
+  },
+  {
+   "no": 46,
+   "section": "Drivers & patterns",
+   "question": "Can a simple rule set predict salary bands \u2014 what are the top pay segments?",
+   "title": "Salary decision tree",
+   "widget_type": "model_tree",
+   "config": {
+    "response": "salary",
+    "predictors": [
+     "dept_name",
+     "title",
+     "hire_date",
+     "gender"
+    ],
+    "max_depth": 3
+   }
+  },
+  {
+   "no": 47,
+   "section": "Drivers & patterns",
+   "question": "Can we predict someone's title from department, salary and tenure?",
+   "title": "Predicting title",
+   "widget_type": "model_tree",
+   "config": {
+    "response": "title",
+    "predictors": [
+     "dept_name",
+     "salary",
+     "hire_date"
+    ],
+    "max_depth": 3
+   }
+  },
+  {
+   "no": 48,
+   "section": "Drivers & patterns",
+   "question": "What separates Senior Staff from everyone else (seniority odds)?",
+   "title": "Odds of being Senior Staff",
+   "widget_type": "model_logistic",
+   "config": {
+    "response": "title",
+    "event_value": "Senior Staff",
+    "predictors": [
+     "dept_name",
+     "salary",
+     "hire_date"
+    ]
+   }
+  },
+  {
+   "no": 49,
+   "section": "Drivers & patterns",
+   "question": "Which departments, titles and pay bands travel together?",
+   "title": "Department-title-pay rules",
+   "widget_type": "model_rules",
+   "config": {
+    "predictors": [
+     "dept_name",
+     "title",
+     "salary"
+    ],
+    "response": "title"
+   }
+  },
+  {
+   "no": 50,
+   "section": "Drivers & patterns",
+   "question": "Are there natural employee segments by pay and tenure?",
+   "title": "Pay x tenure segments",
+   "widget_type": "model_cluster",
+   "config": {
+    "measures": [
+     "salary",
+     "hire_date"
+    ]
+   }
+  }
+ ]
+}

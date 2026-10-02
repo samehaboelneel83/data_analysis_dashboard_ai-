@@ -17,6 +17,7 @@ export const PATH_MESSAGE: [string, MessageKey][] = [
   ['/dashboards', 'nav.dashboards'],
   ['/connections', 'nav.connections'],
   ['/lineage', 'nav.lineage'],
+  ['/glossary', 'nav.glossary'],
   ['/dataflows', 'nav.dataflows'],
   ['/insights', 'nav.insights'],
   ['/automation', 'nav.automations'],
@@ -50,6 +51,7 @@ export const NAV_ITEM_MESSAGE: Record<string, MessageKey> = {
   '/ask': 'nav.askAi',
   '/datasets': 'nav.datasets',
   '/lineage': 'nav.lineage',
+  '/glossary': 'nav.glossary',
   '/dataflows': 'nav.dataflows',
   '/upload': 'nav.upload',
   '/connections': 'nav.connections',
@@ -92,13 +94,37 @@ function interpolate(template: string, vars?: Record<string, string | number>): 
     vars[k] === undefined ? `{${k}}` : String(vars[k]))
 }
 
+/** `{n, plural, one{...} two{...} few{# ...} other{# ...}}` -- the ICU shape,
+ *  categories chosen by Intl.PluralRules for the language. Arabic needs it:
+ *  "منذ 2 ساعة" and "3 عمود" read as mistakes (HR re-test 2026-10-01); the
+ *  right forms are "منذ ساعتين" and "3 أعمدة". `#` is the value as passed, so
+ *  an already-formatted "240,124" stays formatted. */
+const PLURAL = /\{(\w+),\s*plural,\s*((?:[a-z]+\s*\{[^{}]*\}\s*)+)\}/g
+
+export function pluralize(template: string, language: string,
+                          vars?: Record<string, string | number>): string {
+  if (!vars || !template.includes('plural')) return template
+  return template.replace(PLURAL, (whole, k: string, body: string) => {
+    const raw = vars[k]
+    if (raw === undefined) return whole
+    const n = typeof raw === 'number' ? raw : Number(String(raw).replace(/[,\s\u066C]/g, ''))
+    if (!Number.isFinite(n)) return whole
+    const forms: Record<string, string> = {}
+    for (const m of body.matchAll(/([a-z]+)\s*\{([^{}]*)\}/g)) forms[m[1]] = m[2]
+    let cat = 'other'
+    try { cat = new Intl.PluralRules(language).select(n) } catch { /* 'other' */ }
+    const form = forms[cat] ?? forms.other ?? ''
+    return form.replace(/#/g, String(raw))
+  })
+}
+
 export function translate(
   language: Language,
   key: MessageKey,
   vars?: Record<string, string | number>,
 ): string {
   const table = CATALOG[language] ?? en
-  return interpolate(table[key] ?? en[key], vars)
+  return interpolate(pluralize(table[key] ?? en[key], language, vars), vars)
 }
 
 export function messageForPath(pathname: string): MessageKey {

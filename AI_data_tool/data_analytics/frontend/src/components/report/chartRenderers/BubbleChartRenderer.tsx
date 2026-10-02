@@ -13,6 +13,9 @@ function colorForValue(v: number, min: number, max: number): string {
   return `rgb(${r},${g},${b})`
 }
 
+/** Up to this many bubbles are labelled with their group's name. */
+const NAME_LABELS_MAX = 12
+
 export default function BubbleChartRenderer({ rows, data, cfg, rtl, broadcasts, localSelected, onClickPoint, measureFmt, measure2Fmt, ruleStyles, plotH }: ChartRendererProps) {
   const groups = Array.from(new Set(rows.map((r: any) => r.group).filter((g: unknown) => g != null)))
   const colorVals = rows.map((r: any) => r.color).filter((c: unknown) => typeof c === 'number')
@@ -54,10 +57,13 @@ export default function BubbleChartRenderer({ rows, data, cfg, rtl, broadcasts, 
     <ResponsiveContainer width="100%" height="100%">
       <ScatterChart margin={chartMargin(rtl, { top: 4, right: 16, bottom: 4, left: 0 })}>
         {grid && <CartesianGrid {...grid} />}
-        <XAxis type="number" dataKey="x" name="x" {...xAxisProps(cfg, rtl, undefined, undefined, { title: titles.measure })} tickFormatter={v => fmtStr(v, measureFmt)} />
+        {/* Both axes are measures compared with EACH OTHER, not with zero:
+            salaries of 57K-81K on a 0-100K axis crowded seven bubbles into one
+            corner (HR re-test 2026-10-02). The builders' own domain still wins. */}
+        <XAxis type="number" dataKey="x" name="x" domain={['auto', 'auto']} {...xAxisProps(cfg, rtl, undefined, undefined, { title: cfg.x_axis_label ?? titles.measure })} tickFormatter={v => fmtStr(v, measureFmt)} />
         {/* allowDecimals forced true after the spread: this axis never set it before, so
             Recharts' own default (true) applied, unlike the builder's false default. */}
-        <YAxis type="number" dataKey="y" name="y" {...yAxisProps(cfg, rtl, measure2Fmt, rows.map((r: any) => r.y), undefined, { height: plotH, title: titles.measure2 })} allowDecimals tickFormatter={v => fmtStr(v, measure2Fmt)} />
+        <YAxis type="number" dataKey="y" name="y" {...yAxisProps(cfg, rtl, measure2Fmt, rows.map((r: any) => r.y), undefined, { height: plotH, title: cfg.y_axis_label ?? titles.measure2 })} allowDecimals tickFormatter={v => fmtStr(v, measure2Fmt)} />
         <ZAxis type="number" dataKey="size" range={[60, 600]} />
         <Tooltip contentStyle={TT} cursor={{ strokeDasharray: '3 3' }}
           formatter={(v: unknown, name: string) => [name === 'x' ? fmtStr(v, measureFmt) : name === 'y' ? fmtStr(v, measure2Fmt) : String(v), name]} />
@@ -85,6 +91,12 @@ export default function BubbleChartRenderer({ rows, data, cfg, rtl, broadcasts, 
               <Cell key={i} fill={ruleStyles?.rows?.[i]?.fill ?? fillForUngrouped(r, i)} opacity={broadcasts && localSelected !== null && localSelected !== r.name ? 0.35 : 0.75} />
             ))}
             {labels && <LabelList {...labels} />}
+            {/* A handful of bubbles is read by NAME: which one is Senior
+                Staff? Without it the answer was hover-only. */}
+            {!labels && rows.length <= NAME_LABELS_MAX && (
+              <LabelList dataKey="name" position="top" offset={8}
+                style={{ fontSize: 10, fill: 'var(--muted)', pointerEvents: 'none' }} />
+            )}
           </Scatter>
         )}
         {data?.fit_line && (

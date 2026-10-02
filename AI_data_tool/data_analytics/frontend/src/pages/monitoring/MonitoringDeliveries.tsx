@@ -32,7 +32,7 @@ export default function MonitoringDeliveries() {
   useEffect(() => { load() }, [])
 
   const { filtered, input, noMatches } = useListFilter(
-    rows, r => [r.report_name, r.kind, r.status, r.error], t('search.deliveries'))
+    rows, r => [r.report_name, r.subject, r.recipients, r.file_name, r.kind, r.status, r.error], t('search.deliveries'))
 
   return (
     <div style={{ maxWidth: 1200 }}>
@@ -63,6 +63,7 @@ export default function MonitoringDeliveries() {
               <th>{t('col.when')}</th>
               <th>{t('col.report')}</th>
               <th>{t('col.kind')}</th>
+              <th>{t('col.recipients')}</th>
               <th>{t('col.artifact')}</th>
               <th>{t('col.duration')}</th>
               <th>{t('col.status')}</th>
@@ -75,10 +76,16 @@ export default function MonitoringDeliveries() {
                 <td style={{ fontWeight: 600 }}>
                   {r.report_id != null
                     ? <Link to={`/reports/${r.report_id}`} style={{ color: 'var(--text)' }}>{r.report_name ?? `#${r.report_id}`}</Link>
-                    : <span style={{ color: 'var(--muted)' }}>—</span>}
+                    : r.subject
+                      ? <span>{r.subject}</span>
+                      : <span style={{ color: 'var(--muted)' }}>—</span>}
                 </td>
                 <td>{r.kind}</td>
-                <td>{r.artifact_kind === 'none' ? '—' : r.artifact_kind}</td>
+                <td style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  title={r.recipients ?? undefined}>{r.recipients || <span style={{ color: 'var(--muted)' }}>—</span>}</td>
+                <td title={r.file_name ?? undefined}>
+                  {r.file_name ?? (r.artifact_kind === 'none' ? '—' : r.artifact_kind)}
+                </td>
                 <td style={{ whiteSpace: 'nowrap' }}>
                   {r.duration_ms != null ? `${r.duration_ms} ms` : '—'}
                 </td>

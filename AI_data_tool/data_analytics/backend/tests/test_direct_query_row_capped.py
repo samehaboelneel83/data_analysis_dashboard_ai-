@@ -32,7 +32,7 @@ def test_plan_row_fetch_rejects_non_row_capped_widget_type():
 
 def test_plan_row_fetch_rejects_unsupported_filter_operator():
     with pytest.raises(DirectQueryUnsupported):
-        plan_row_fetch({"filters": [{"column": "region", "op": "like", "value": "e"}]}, "bubble")
+        plan_row_fetch({"filters": [{"column": "region", "op": "regex", "value": "e"}]}, "bubble")
 
 
 def test_build_row_fetch_sql_unsampled_has_no_order_by():

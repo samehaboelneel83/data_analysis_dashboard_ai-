@@ -13,7 +13,7 @@ export type WidgetType =
   | 'script'
   | 'tree' | 'sunburst' | 'icicle' | 'dendrogram' | 'org' | 'circle_pack'
 | 'custom_graph'
-  | 'model_linear' | 'model_logistic' | 'model_tree' | 'model_cluster' | 'model_compare' | 'model_score'
+  | 'model_linear' | 'model_logistic' | 'model_tree' | 'model_cluster' | 'model_compare' | 'model_score' | 'model_rules'
 
 export interface Widget {
   id: number
@@ -226,6 +226,7 @@ export const WIDGET_CATALOG = [
   { type: 'model_cluster'  as WidgetType, label: 'Clustering',          category: 'Models', icon: '⁂', defaultW: 7, defaultH: 7 },
   { type: 'model_compare'  as WidgetType, label: 'Model Comparison',    category: 'Models', icon: '⚖', defaultW: 7, defaultH: 6 },
   { type: 'model_score'    as WidgetType, label: 'Score with Saved Model', category: 'Models', icon: '🎯', defaultW: 6, defaultH: 6 },
+  { type: 'model_rules'    as WidgetType, label: 'Association Rules',   category: 'Models', icon: '⇄', defaultW: 8, defaultH: 7 },
 ]
 
 export const ROLE_TO_CONFIG_KEY: Record<string, string> = { category: 'dimension', category2: 'dimension2', measure: 'measure' }
@@ -556,11 +557,17 @@ export const ROLE_SPECS: Record<WidgetType, RoleField[]> = {
   model_compare: [],
   // The saved model is chosen in the panel (it is not a column).
   model_score: [{ role: 'category', label: 'Break down by', required: false }],
+  // Which values travel together. Both optional: blank columns mine every
+  // usable text column; a focus keeps only conclusions about that column.
+  model_rules: [
+    { role: 'predictors', label: 'Columns (blank = every text column; numbers become bands)', required: false, multi: true },
+    { role: 'response',   label: 'Conclusions about (optional)', required: false },
+  ],
 }
 
 /** Model widgets: their data is a fitted model, not an aggregated series. */
 export const MODEL_WIDGETS: readonly string[] = [
-  'model_linear', 'model_logistic', 'model_tree', 'model_cluster', 'model_compare', 'model_score',
+  'model_linear', 'model_logistic', 'model_tree', 'model_cluster', 'model_compare', 'model_score', 'model_rules',
 ]
 
 export const AGGREGATIONS = [

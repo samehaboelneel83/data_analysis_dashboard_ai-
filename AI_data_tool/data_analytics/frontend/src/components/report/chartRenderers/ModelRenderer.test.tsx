@@ -84,4 +84,35 @@ describe('ModelRenderer', () => {
     expect(screen.getByText(/On the training rows: Explains 46%/)).toBeTruthy()
     expect(screen.getByText(/validated on 569/)).toBeTruthy()
   })
+
+  it('lists association rules with lift, confidence and the base rate beside it', () => {
+    const rule = { if: 'dept_name=Sales', then: 'title=Senior Staff', if_items: [['dept_name', 'Sales']],
+      then_items: [['title', 'Senior Staff']], lift: 3.086, confidence: 0.179, base_rate: 0.058, support_rows: 179 }
+    render(<ModelRenderer {...base} data={{
+      type: 'model', status: 'ok', model: 'rules', variables: ['dept_name', 'title'], focus: 'title',
+      banded: { salary: '4 equal-count bands' }, rules: [rule],
+      result: { meta: { params: { min_support_rows: 20, min_lift: 1.2 } } },
+      population: { rows_total: 3000, rows_used: 3000, rows_dropped: 0, dropped_by: {} },
+      fit: { name: 'strongest lift', value: 3.086, secondary: {} }, rows: [],
+    }} />)
+    expect(screen.getByText('Association rules')).toBeTruthy()
+    expect(screen.getByTestId('model-widget').textContent).toContain('conclusions about title')
+    expect(screen.getByText('1 rule found', { exact: false })).toBeTruthy()
+    const table = screen.getByTestId('rule-table')
+    expect(table.textContent).toContain('Senior Staff')
+    expect(table.textContent).toContain('3.09×')
+    expect(table.textContent).toContain('17.9%')
+    expect(table.textContent).toContain('5.8%')
+    fireEvent.click(screen.getByRole('tab', { name: 'Fit' }))
+    expect(screen.getByText(/equal-count bands: salary/)).toBeTruthy()
+  })
+
+  it('says plainly when no values travel together', () => {
+    render(<ModelRenderer {...base} data={{
+      type: 'model', status: 'ok', model: 'rules', variables: ['a', 'b'], rules: [], result: {},
+      population: { rows_total: 50, rows_used: 50, rows_dropped: 0, dropped_by: {} },
+      fit: { name: 'strongest lift', value: null, secondary: {} }, rows: [],
+    }} />)
+    expect(screen.getAllByText(/more often than chance/).length).toBeGreaterThan(0)
+  })
 })

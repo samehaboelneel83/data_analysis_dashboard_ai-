@@ -1,15 +1,23 @@
 import { fmtStr, seriesColor } from '../chartUtils'
+import { valueTick } from './axisOptions'
 import type { ChartRendererProps } from './types'
 
 const MARGIN_TOP = 20
 const MARGIN_BOTTOM = 30
-const MARGIN_LEFT = 50
+// 5.12: the value labels live in an HTML gutter beside the drawing, not in the
+// SVG. The SVG stretches to the tile (preserveAspectRatio="none"), so its text
+// stretched with it and a 50-unit margin was ~20px on a small tile: salary
+// ticks like "38,735.12" were squashed past reading.
+const MARGIN_LEFT = 6
+const GUTTER_PX = 52
 const W = 1000
 const H = 400
 
 interface BoxRow { name: string; min: number; q1: number; median: number; q3: number; max: number; outliers: number[] }
 
-export default function BoxPlotRenderer({ data, rtl, measureFmt }: ChartRendererProps) {
+export default function BoxPlotRenderer({ data, rtl, measureFmt, cfg }: ChartRendererProps) {
+  // The shared tick formatter, compact by default here: a gutter is narrow.
+  const tick = valueTick({ ...(cfg ?? {}), labels_compact: cfg?.labels_compact ?? true }, measureFmt)
   const rows: BoxRow[] = data?.rows ?? []
 
   if (rows.length === 0) {
@@ -28,16 +36,27 @@ export default function BoxPlotRenderer({ data, rtl, measureFmt }: ChartRenderer
   const slotW = plotW / orderedRows.length
   const boxW = Math.min(slotW * 0.5, 60)
 
+  const TICKS = [0, 0.25, 0.5, 0.75, 1]
   return (
-    <div style={{ height: '100%', width: '100%' }}>
-      <svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ display: 'block' }}>
-        {[0, 0.25, 0.5, 0.75, 1].map(t => {
+    <div style={{ height: '100%', width: '100%', position: 'relative', display: 'flex',
+      flexDirection: rtl ? 'row-reverse' : 'row' }}>
+      <div aria-hidden data-testid="boxplot-ticks" style={{ position: 'relative', width: GUTTER_PX, flexShrink: 0 }}>
+        {TICKS.map(t => {
+          const v = yMin + t * yRange
+          return (
+            <span key={t} style={{ position: 'absolute', insetInlineEnd: 4, top: `${(yToPx(v) / H) * 100}%`,
+              transform: 'translateY(-50%)', fontSize: 10, color: 'var(--muted)', whiteSpace: 'nowrap',
+              fontVariantNumeric: 'tabular-nums' }}>{tick(v)}</span>
+          )
+        })}
+      </div>
+      <svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ display: 'block', flex: 1, minWidth: 0 }}>
+        {TICKS.map(t => {
           const v = yMin + t * yRange
           const y = yToPx(v)
           return (
             <g key={t}>
               <line x1={MARGIN_LEFT} y1={y} x2={W - 10} y2={y} stroke="var(--border)" strokeWidth={1} strokeDasharray={t === 0 ? undefined : '2 3'} />
-              <text x={MARGIN_LEFT - 6} y={y + 3} textAnchor="end" fontSize={9} fill="var(--muted)">{fmtStr(v, measureFmt)}</text>
             </g>
           )
         })}

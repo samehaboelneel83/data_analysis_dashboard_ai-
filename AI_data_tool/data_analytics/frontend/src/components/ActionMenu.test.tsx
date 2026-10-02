@@ -151,3 +151,16 @@ describe('ActionMenu', () => {
     })
   })
 })
+describe('ActionMenu portal (5.10)', () => {
+  it('renders the popup on document.body so a clipping tile cannot hide it', async () => {
+    const { container } = render(
+      <div style={{ overflow: 'hidden', width: 40 }}>
+        <ActionMenu portal label="More" items={[{ key: 'a', label: 'Duplicate widget', onSelect: () => {} }]} />
+      </div>)
+    fireEvent.click(screen.getByRole('button', { name: 'More' }))
+    const menu = await screen.findByRole('menu', { name: 'More' })
+    expect(container.contains(menu)).toBe(false)
+    expect(document.body.contains(menu)).toBe(true)
+    expect(menu.style.position).toBe('fixed')
+  })
+})

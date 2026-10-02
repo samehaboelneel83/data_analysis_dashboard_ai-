@@ -21,12 +21,16 @@ function isUserishColumn(col: DatasetColumn): boolean {
   return col.semantic_type === 'email' || /user|email|owner/i.test(col.name)
 }
 
-type MatchTarget = 'useremail' | 'userid' | 'orgid' | 'literal'
+type MatchTarget = 'useremail' | 'userid' | 'orgid' | 'myscope' | 'literal'
 
 const MATCH_TARGETS: { value: MatchTarget; label: string; token?: string }[] = [
   { value: 'useremail', label: 'Current user email', token: 'USEREMAIL()' },
   { value: 'userid',    label: 'Current user id',     token: 'USERID()' },
   { value: 'orgid',     label: 'Current organization id', token: 'ORGID()' },
+  // One rule for every manager: each sees the org-chart units they are placed
+  // in and everything below them (Admin -> Organization chart). HR evaluation,
+  // item 2.6: "each department manager sees only their department".
+  { value: 'myscope',   label: "Viewer's org-chart units (and below)", token: 'MYSCOPE()' },
   { value: 'literal',   label: 'Literal value (per role)' },
 ]
 
@@ -37,6 +41,7 @@ function generateExpression(column: string, target: MatchTarget, literalValue: s
   const targetDef = MATCH_TARGETS.find(t => t.value === target)
   const rhs = targetDef?.token ?? (literalValue.trim() ? literal(literalValue) : '')
   if (!rhs) return ''
+  if (target === 'myscope') return `${colRef(column)} in ${rhs}`
   return `${colRef(column)} == ${rhs}`
 }
 
@@ -175,6 +180,14 @@ function RuleModal({ initial, roles, datasets, onSave, onClose }: {
                 {MATCH_TARGETS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
               </select>
             </div>
+
+            {matchTarget === 'myscope' && (
+              <div data-testid="myscope-hint" style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>
+                Place each person in the <a href="/admin/org-units">Organization chart</a> once — a
+                unit's match value must equal the values in this column (e.g. a unit “Sales” with match
+                value <code>Sales</code>). Everyone then sees their units and every unit below them.
+              </div>
+            )}
 
             {matchTarget === 'literal' && (
               <div style={{ marginBottom: 8 }}>
@@ -407,19 +420,21 @@ export default function AdminRowSecurityRules() {
           <Plus size={16} aria-hidden /> {t('admin.newRule')}
         </button>
       </div>
-      {/* The single most important sentence on this page. These rules narrow a
-          DATASET; Ask AI queries the CONNECTION and obeys a different table
-          entirely. An admin who sets a rule here and stops has not finished, and
-          before this line there was nothing anywhere to tell them so -- a student
-          limited to one row here pulled five thousand rows through Ask AI. */}
-      <p style={{
+      {/* What these rules reach, said accurately. The old banner said "these
+          rules do not apply to Ask AI" -- true once, false since E01 placed
+          dataset rules on the connection's tables too -- and the HR evaluation
+          read it as "a manager can ask the AI for every department's pay". */}
+      <p data-testid="rls-ask-note" style={{
         margin: '0 0 20px', padding: '12px 14px', borderRadius: 6, fontSize: 13,
-        background: 'var(--surface2)', borderInlineStart: '3px solid var(--warning, #b4232a)',
+        background: 'var(--surface2)', borderInlineStart: '3px solid var(--accent)',
       }}>
-        <strong>These rules do not apply to Ask AI.</strong> They narrow a dataset.
-        The assistant queries the connection directly, so the same person can ask
-        it for rows this rule hides. Set the matching rule under{' '}
-        <a href="/admin/connection-rules">Connection rules (Ask AI)</a>.
+        <strong>These rules also apply to Ask AI.</strong> Asked about a dataset, the
+        assistant reads only the rows its rule allows. Asked about the connection, a
+        rule on a table-based dataset is placed on that table; the tables a
+        query-based dataset reads are hidden from the restricted role, and the answer
+        tells them to ask the dataset instead. Use{' '}
+        <a href="/admin/connection-rules">Connection rules (Ask AI)</a> for tables no
+        dataset covers.
       </p>
 
 

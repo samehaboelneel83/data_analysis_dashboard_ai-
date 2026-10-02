@@ -30,6 +30,14 @@ describe('placePopup', () => {
     expect(p.listMax).toBe(520 - 176 - 12 - 110)
   })
 
+  it('stays down when a comfortable list fits below, even with more room above', () => {
+    // Hero picker under the headline on a short window: down keeps the
+    // headline visible; 310px below gives a 200px list.
+    const p = placePopup(rect(400), { top: 50, bottom: 778 })
+    expect(p.up).toBe(false)
+    expect(p.listMax).toBe(778 - 456 - 12 - 110)
+  })
+
   it('never shrinks the list below a usable height', () => {
     expect(placePopup(rect(100), { top: 90, bottom: 200 }).listMax).toBe(120)
   })

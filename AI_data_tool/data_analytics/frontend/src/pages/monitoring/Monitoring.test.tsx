@@ -57,6 +57,16 @@ describe('MonitoringJobs', () => {
     expect(screen.getByRole('link', { name: 'Nightly rollup' })).toHaveAttribute('href', '/dataflows?flow=5')
   })
 
+  it('says why a job was skipped (5.19)', async () => {
+    vi.mocked(monitoringApi.jobs).mockResolvedValue([
+      { kind: 'dataflow', id: 6, name: 'Headcount history', interval_minutes: 1440,
+        last_run_at: new Date().toISOString(), status: 'skipped', error: 'no outputs yet' },
+    ])
+    renderIn(<MonitoringJobs />)
+    expect(await screen.findByTestId('job-reason-dataflow-6'))
+      .toHaveTextContent('Nothing to refresh yet: run this dataflow once into a new output')
+  })
+
   it('shows the empty state when nothing is scheduled', async () => {
     vi.mocked(monitoringApi.jobs).mockResolvedValue([])
     renderIn(<MonitoringJobs />)

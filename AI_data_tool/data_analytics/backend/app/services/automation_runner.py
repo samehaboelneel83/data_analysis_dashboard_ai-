@@ -360,11 +360,8 @@ async def _profile_step(ctx: StepContext, session) -> str:
     if not await can_read_dataset(session, user, ds.id):
         raise StepRefused("dataset not found for this creator")
 
-    if ds.mode == "directquery":
-        raise StepRefused(
-            "dataset is in directquery mode; step 1 profiles import-mode "
-            "datasets, which are the ones that can be read whole")
-    if not ds.filename:
+    live = ds.mode == "directquery" and ds.data_source_id
+    if not ds.filename and not live:
         raise StepRefused("dataset has no stored file to profile")
 
     rls_expr = await resolve_rls_expr(session, user, ds.id)
@@ -372,12 +369,33 @@ async def _profile_step(ctx: StepContext, session) -> str:
     steps = prep_steps_of(ds)
     aux = await resolve_join_frames(session, user, steps) if steps else {}
 
+    live_df = None
+    if live:
+        # A live dataset is read through its own SQL, once, with the row rule
+        # pushed down -- up to the import cap, refused (not cut) above it, so
+        # the analysis is of every row (HR evaluation, item 3.5).
+        from ..core.config import settings as _settings
+        from .analysis_frame import FrameUnavailable, load_directquery_frame
+        try:
+            got = await load_directquery_frame(
+                session, ds, rls_filter_expr=rls_expr, denied=set(denied or ()),
+                row_cap=int(_settings.import_row_cap or 0) or None)
+        except FrameUnavailable as e:
+            raise StepRefused(str(e)) from None
+        if got.sampled:
+            raise StepRefused(f"the live dataset has {got.total_rows:,} rows, more than an "
+                              f"automated analysis reads; add an aggregate or import it")
+        live_df = got.frame
+
     def _build() -> dict:
-        df = load_file(ds.filename)
-        df = apply_rls_filter(df, rls_expr)
-        if denied:
-            df = df.drop(columns=[c for c in denied if c in df.columns])
-        df = apply_prep_steps(df, steps, aux)
+        if live_df is not None:
+            df = live_df
+        else:
+            df = load_file(ds.filename)
+            df = apply_rls_filter(df, rls_expr)
+            if denied:
+                df = df.drop(columns=[c for c in denied if c in df.columns])
+            df = apply_prep_steps(df, steps, aux)
         if ds.calculated_columns:
             df = apply_calculated_columns(
                 df, ds.calculated_columns, ds.custom_functions)
@@ -560,6 +578,13 @@ def describe_run(run: AutomationRun) -> tuple[str, str | None]:
     link = f"/reports/{run.result_report_id}" if run.result_report_id else None
     if run.status == NEEDS_REVIEW and link is None:
         link = f"/automation?run={run.id}"
+    if accepted == 0 and run.status in (NEEDS_REVIEW, "done"):
+        # 5.16: zero widgets is not a success and not really a decision either
+        # -- it is "nothing to build", and the reader is owed the reason.
+        why = (run.error or "the scan found no finding strong enough to chart").rstrip(".")
+        return (f"Nothing to build: {why}. "
+                f"{_plural(rejected, 'proposed widget') + ' failed review. ' if rejected else ''}"
+                f"Open the dataset's Insights to see what was checked."), link
     if run.status == NEEDS_REVIEW:
         why = f" {run.error}." if run.error else ""
         return (f"Your automated analysis needs a decision:{why} "
@@ -1276,28 +1301,75 @@ def redact_row_values(text: str | None) -> str:
     return out
 
 
+async def _dataset_is_secured(session, dataset_id: int) -> bool:
+    """Any row- or column-security rule on this dataset (or, for an aggregate,
+    on its source) -- the same test the dataset routes use."""
+    from ..core.rls import _aggregate_source
+    from ..models.models import ColumnSecurityRule, RowSecurityRule
+    from sqlalchemy import select as _select
+    dataset_id, _spec = await _aggregate_source(session, dataset_id)
+    for model in (RowSecurityRule, ColumnSecurityRule):
+        hit = (await session.execute(_select(model.id).where(
+            model.dataset_id == dataset_id).limit(1))).scalar_one_or_none()
+        if hit is not None:
+            return True
+    return False
+
+
+_AGG_WORD = {"avg": "Average", "mean": "Average", "median": "Median", "sum": "Total",
+             "min": "Lowest", "max": "Highest", "count": "Count of",
+             "countd": "Number of", "distinct": "Number of"}
+
+
+def _plain_widget_title(widget: dict) -> str:
+    """A chart's title from its configuration alone -- columns and the
+    aggregation, never a value from the rows."""
+    cfg = widget.get("config") or {}
+
+    def h(c) -> str:
+        return " ".join(str(c).replace("_", " ").split())
+
+    meas, dim = cfg.get("measure"), cfg.get("dimension")
+    agg = _AGG_WORD.get(str(cfg.get("aggregation") or "").lower(), "")
+    wt = widget.get("widget_type") or ""
+    if wt == "histogram" and meas:
+        return f"Distribution of {h(meas)}"
+    head = f"{agg} {h(meas)}".strip() if meas else "Rows"
+    return f"{head} by {h(dim)}" if dim else head
+
+
 def _structural_name_part(findings: list) -> str:
-    """What the leading finding is ABOUT, in schema terms.
+    """What the leading finding is ABOUT, in plain words built from schema.
 
     Columns and finding kinds come from the catalogue; they cannot contain a
     row value. A finding's `title` can and does, which is why it is not used
     here even though it reads better. Redaction alone would leave the name one
     new phrasing in `insights.py` away from leaking again -- so the name is
     built from things that are structurally incapable of carrying data.
+
+    5.17: and it reads as words, not as a schema dump. "salary by hire_date
+    (trend)" became "salary over time"; "final_score by faculty".
     """
-    kinds = {
-        "trend": "trend", "standout": "breakdown", "concentration": "breakdown",
-        "correlation": "relationship", "outlier": "outliers",
-        "missing": "data quality",
-    }
+    def h(col: str) -> str:
+        return " ".join(str(col).replace("_", " ").split())
+
     for finding in findings or []:
         columns = [c for c in (finding.get("columns") or []) if c]
         if not columns:
             continue
-        shape = kinds.get((finding.get("kind") or "").lower(), "overview")
-        if len(columns) >= 2:
-            return f"{columns[0]} by {columns[1]} ({shape})"
-        return f"{columns[0]} ({shape})"
+        kind = (finding.get("kind") or "").lower()
+        if kind == "trend":
+            return f"{h(columns[0])} over time"
+        if kind in ("standout", "laggard", "concentration", "breakdown") and len(columns) >= 2:
+            # standout/laggard findings list [category, measure]
+            return f"{h(columns[1])} by {h(columns[0])}"
+        if kind == "correlation" and len(columns) >= 2:
+            return f"{h(columns[0])} and {h(columns[1])}"
+        if kind == "outlier":
+            return f"unusual {h(columns[0])}"
+        if kind == "missing":
+            return "data quality"
+        return " and ".join(h(c) for c in columns[:2])
     return ""
 
 
@@ -1328,7 +1400,7 @@ def _compose_name(dataset_name: str | None, findings: list, run_id: int,
     """
     source = (dataset_name or "").strip() or "Dataset"
     about = _structural_name_part(findings)
-    base = f"{source} — {about}" if about else f"{source} — automated review"
+    base = f"{source} overview — {about}" if about else f"{source} overview"
 
     #: Reserved so the suffix survives truncation. The first version appended
     #: "(run N)" and THEN truncated to the column width, which on a long base
@@ -1417,6 +1489,19 @@ async def _compose_step(ctx: StepContext, session) -> str:
     narrative = redact_row_values(narrative)
     findings = [{**f, "title": redact_row_values(f.get("title"))}
                 for f in (findings or [])]
+
+    # HR re-test 2026-10-01: the page is written ONCE, from the creator's view,
+    # and then read by everyone the dataset is shared with. On a dataset with
+    # row or column security that is a leak: a Sales-only manager opened the
+    # automated page and read "Across 240,124 rows: Sales has the highest
+    # average salary" -- every department's figures, compared, in fixed text.
+    # Charts re-query per viewer; prose and finding titles cannot. So on a
+    # secured dataset the prose is left out and each chart is titled from its
+    # configuration ("Average salary by dept name"), which states no value.
+    if await _dataset_is_secured(session, ds.id):
+        narrative = ""
+        findings = [{**f, "title": ""} for f in (findings or [])]
+        accepted = [{**w, "title": _plain_widget_title(w)} for w in accepted]
 
     def _page() -> dict:
         from .report_composer import compose_page
@@ -1786,6 +1871,34 @@ async def tick(session, now: datetime | None = None) -> bool:
             await _unlock(session, key)
 
     return False
+
+
+#: 5.21: how long the automation loop waits when there is nothing to do, and
+#: between steps of a run that is moving. One step per tick is kept -- a
+#: restart still loses at most one step -- but ticks are no longer paced by
+#: the 60-second refresh scheduler, which put a minute of idle time between
+#: every two steps (the HR run's ~15 minutes was mostly that).
+IDLE_SECONDS = 10
+BETWEEN_STEPS_SECONDS = 1
+
+
+async def run_automation_loop(session_factory) -> None:
+    """The automation queue's own loop, started with the app.
+
+    It shares the event loop with the refresh scheduler but not its pace: a
+    step does its heavy work in a thread (see StepSpec), so a running step
+    does not hold up dataset refreshes, and the per-run advisory lock inside
+    `tick` still guarantees one worker per run."""
+    while True:
+        did = False
+        try:
+            async with session_factory() as session:
+                did = await tick(session)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 -- never-die, same contract
+            log.warning("Automation runner tick failed: %s", exc)
+        await asyncio.sleep(BETWEEN_STEPS_SECONDS if did else IDLE_SECONDS)
 
 
 # ── restart recovery ─────────────────────────────────────────────────────────

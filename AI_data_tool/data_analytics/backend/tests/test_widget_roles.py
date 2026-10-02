@@ -57,7 +57,7 @@ class TestParityWithTheFrontend:
     def test_the_spec_file_was_actually_read(self):
         """A parser that quietly returns nothing would make every test below
         pass. The catalogue is 65 types and the doc tests already pin that."""
-        assert len(frontend_required()) == 74, sorted(frontend_required())
+        assert len(frontend_required()) == 75, sorted(frontend_required())
 
     def test_every_widget_type_is_covered(self):
         missing = set(frontend_required()) - set(REQUIRED_ROLES)

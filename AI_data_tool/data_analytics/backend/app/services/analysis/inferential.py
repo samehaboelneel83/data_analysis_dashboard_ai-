@@ -105,6 +105,18 @@ def _round(v, places: int = 4):
     return round(f, places)
 
 
+def _est(v):
+    """An estimate (coefficient, interval, odds ratio): four decimals as
+    everywhere else, but SIGNIFICANT digits below 0.01. Salary's coefficient
+    on the odds of being Senior Staff is ~0.00005 per dollar; four decimals
+    made it 0, and the confusion matrix built from it called no one Senior
+    Staff behind an AUC of 0.93 (HR analyst panel, 2026-10-02)."""
+    f = _round(v, 12)
+    if f is None:
+        return None
+    return float(f"{f:.6g}") if abs(f) < 0.01 else round(f, 4)
+
+
 def _numeric(df: pd.DataFrame, col: str) -> pd.Series:
     if col not in df.columns:
         raise StatisticalError(f"Column not found: {col}")
@@ -151,11 +163,39 @@ def _verdict(p: float, effect_label: str, what: str) -> str:
                 f"The data does not support a difference; it does not prove "
                 f"there is none.")
     if effect_label == "negligible":
-        return (f"Statistically significant ({_p_text(p)}) but the effect is "
-                f"negligible. With this many rows almost any difference reaches "
-                f"significance, so this one is unlikely to matter in practice.")
+        # "Negligible" is the STATISTICAL effect -- how separable the two
+        # groups are -- not how big the gap is. 3,300 more people (+15%) is a
+        # negligible Cohen's h and a large business fact; telling an HR lead
+        # it is "unlikely to matter" was wrong. The business size is stated
+        # beside this sentence (see _business_gap), and the reader decides.
+        return (f"Statistically significant {what} ({_p_text(p)}), with a negligible "
+                f"statistical effect size. That measures how much the two groups "
+                f"overlap, not how big the gap is for the business -- see the size of "
+                f"the gap.")
     return (f"Statistically significant {what} ({_p_text(p)}), with a "
             f"{effect_label} effect.")
+
+
+def _business_gap(a_name: str, b_name: str, a_val: float, b_val: float, what: str) -> dict:
+    """The size of the gap in the data's own units: "Development has 3,300
+    more rows than Sales (+15%)". The other half of the answer next to the
+    effect size, which is unitless and says nothing about scale."""
+    diff = float(a_val) - float(b_val)
+    pct = (diff / float(b_val) * 100) if b_val else None
+    def num(v: float) -> str:
+        return f"{v:,.0f}" if abs(v) >= 100 or float(v).is_integer() else f"{v:,.2f}"
+    more = "more" if what == "rows" else "higher"
+    less = "fewer" if what == "rows" else "lower"
+    word = more if diff >= 0 else less
+    unit = " rows" if what == "rows" else ""
+    pct_txt = f" ({'+' if diff >= 0 else '−'}{abs(pct):.1f}%)" if pct is not None else ""
+    if what == "rows":
+        sentence = f"{a_name} has {num(abs(diff))} {word} rows than {b_name}{pct_txt}."
+    else:
+        sentence = (f"{what}: {a_name} {num(a_val)} vs {b_name} {num(b_val)} -- "
+                    f"{num(abs(diff))} {word}{pct_txt}.")
+    return {"absolute": _round(diff), "percent": _round(pct) if pct is not None else None,
+            "sentence": sentence}
 
 
 # ── 1. Compare groups ────────────────────────────────────────────────────────
@@ -217,14 +257,20 @@ def compare_groups(df: pd.DataFrame, value_col: str, group_col: str) -> TestResu
         pooled = math.sqrt(((na - 1) * s1 ** 2 + (nb - 1) * s2 ** 2) / max(na + nb - 2, 1))
         d = (np.mean(a) - np.mean(b)) / pooled if pooled else 0.0
         label = _label(d, 0.2, 0.5, 0.8)
+        # HR re-test: the verdict says "see the size of the gap", so the gap
+        # has to be here -- in salary, not in standard deviations.
+        gap = _business_gap(n1, n2, float(np.mean(a)), float(np.mean(b)),
+                            f"Average {value_col}")
         return TestResult(
             kind="compare_groups", statistic=float(stat), p_value=float(p),
             effect_size=float(d), effect_name="cohens_d", effect_label=label,
             significant=bool(p < ALPHA), n=n,
             detail={"test": "Welch's t-test", "groups": summary,
-                    "difference": _round(float(np.mean(a) - np.mean(b)))},
+                    "difference": _round(float(np.mean(a) - np.mean(b))),
+                    "business": gap},
             interpretation=_verdict(float(p), label,
-                                    f"difference in {value_col} between {n1} and {n2}"),
+                                    f"difference in {value_col} between {n1} and {n2}")
+            + " " + gap["sentence"],
             caveats=caveats + [
                 "Welch's t-test is used, which does not assume equal variances"],
         )
@@ -237,14 +283,19 @@ def compare_groups(df: pd.DataFrame, value_col: str, group_col: str) -> TestResu
     ss_total = sum(float(((v - grand) ** 2).sum()) for v in arrays)
     eta2 = float(ss_between / ss_total) if ss_total else 0.0
     label = _label(eta2, 0.01, 0.06, 0.14)
+    # The widest gap in the data's own units: highest group against lowest.
+    means = sorted(((name, float(np.mean(v))) for name, v in groups), key=lambda x: -x[1])
+    gap = _business_gap(means[0][0], means[-1][0], means[0][1], means[-1][1],
+                        f"Average {value_col}")
     return TestResult(
         kind="compare_groups", statistic=float(stat), p_value=float(p),
         effect_size=eta2, effect_name="eta_squared", effect_label=label,
         significant=bool(p < ALPHA), n=n,
         detail={"test": "One-way ANOVA", "groups": summary,
-                "group_count": len(groups)},
+                "group_count": len(groups), "business": gap},
         interpretation=_verdict(float(p), label,
-                                f"difference in {value_col} across {group_col}"),
+                                f"difference in {value_col} across {group_col}")
+        + " Widest gap -- " + gap["sentence"],
         caveats=caveats + [
             "ANOVA reports that SOME group differs, not which -- compare pairs "
             "individually to find out which"],
@@ -407,12 +458,12 @@ def regression(df: pd.DataFrame, target: str, predictors: list[str]) -> TestResu
     for name in X.columns:
         coefficients.append({
             "term": name,
-            "coefficient": _round(float(model.params[name])),
-            "std_error": _round(float(model.bse[name])),
+            "coefficient": _est(float(model.params[name])),
+            "std_error": _est(float(model.bse[name])),
             "t": _round(float(model.tvalues[name])),
             "p_value": _round(float(model.pvalues[name]), 6),
-            "ci_low": _round(float(conf.loc[name, 0])),
-            "ci_high": _round(float(conf.loc[name, 1])),
+            "ci_low": _est(float(conf.loc[name, 0])),
+            "ci_high": _est(float(conf.loc[name, 1])),
             "significant": bool(model.pvalues[name] < ALPHA),
         })
 
@@ -532,11 +583,11 @@ def glm_logistic(df: pd.DataFrame, target: str, predictors: list[str],
     for name in X.columns:
         coefficients.append({
             "term": name,
-            "coefficient": _round(float(model.params[name])),
-            "odds_ratio": _round(float(np.exp(model.params[name]))),
-            "or_ci_low": _round(float(np.exp(conf.loc[name, 0]))),
-            "or_ci_high": _round(float(np.exp(conf.loc[name, 1]))),
-            "std_error": _round(float(model.bse[name])),
+            "coefficient": _est(float(model.params[name])),
+            "odds_ratio": _est(float(np.exp(model.params[name]))),
+            "or_ci_low": _est(float(np.exp(conf.loc[name, 0]))),
+            "or_ci_high": _est(float(np.exp(conf.loc[name, 1]))),
+            "std_error": _est(float(model.bse[name])),
             "p_value": _round(float(model.pvalues[name]), 6),
             "significant": bool(model.pvalues[name] < ALPHA),
         })
@@ -646,11 +697,11 @@ def mixed_model(df: pd.DataFrame, target: str, predictors: list[str],
             continue
         coefficients.append({
             "term": str(name),
-            "coefficient": _round(float(model.params[name])),
-            "std_error": _round(float(model.bse[name])),
+            "coefficient": _est(float(model.params[name])),
+            "std_error": _est(float(model.bse[name])),
             "p_value": _round(float(model.pvalues[name]), 6),
-            "ci_low": _round(float(conf.loc[name, 0])),
-            "ci_high": _round(float(conf.loc[name, 1])),
+            "ci_low": _est(float(conf.loc[name, 0])),
+            "ci_high": _est(float(conf.loc[name, 1])),
             "significant": bool(model.pvalues[name] < ALPHA),
         })
 
@@ -753,10 +804,10 @@ def survival(df: pd.DataFrame, duration_col: str, event_col: str,
     for i, name in enumerate(predictors):
         coefficients.append({
             "term": name,
-            "coefficient": _round(float(model.params[i])),
-            "hazard_ratio": _round(float(np.exp(model.params[i]))),
-            "hr_ci_low": _round(float(np.exp(conf[i][0]))),
-            "hr_ci_high": _round(float(np.exp(conf[i][1]))),
+            "coefficient": _est(float(model.params[i])),
+            "hazard_ratio": _est(float(np.exp(model.params[i]))),
+            "hr_ci_low": _est(float(np.exp(conf[i][0]))),
+            "hr_ci_high": _est(float(np.exp(conf[i][1]))),
             "p_value": _round(float(model.pvalues[i]), 6),
             "significant": bool(model.pvalues[i] < ALPHA),
         })
@@ -994,6 +1045,7 @@ def difference_check(df: pd.DataFrame, dimension: str, groups: list, measure: st
                 "p_value": _round(p, 6), "p_text": _p_text(p), "significant": bool(p < ALPHA),
                 "effect_name": "cohens_h", "effect_size": _round(h), "effect_label": label,
                 "values": {a_name: na, b_name: nb},
+                "business": _business_gap(a_name, b_name, na, nb, "rows"),
                 "sentence": _verdict(p, label, f"difference in how many rows {a_name} and {b_name} have")}
 
     def value_test(kind: str) -> dict:
@@ -1011,6 +1063,7 @@ def difference_check(df: pd.DataFrame, dimension: str, groups: list, measure: st
                     "p_value": _round(float(p), 6), "p_text": _p_text(float(p)), "significant": bool(p < ALPHA),
                     "effect_name": "rank_biserial", "effect_size": _round(r), "effect_label": label,
                     "values": {a_name: _round(float(np.median(va))), b_name: _round(float(np.median(vb)))},
+                    "business": _business_gap(a_name, b_name, float(np.median(va)), float(np.median(vb)), f"Median {measure}"),
                     "sentence": _verdict(float(p), label, f"difference in a typical {measure} between {a_name} and {b_name}")}
         t, p = stats.ttest_ind(va, vb, equal_var=False)
         s1, s2 = np.std(va, ddof=1), np.std(vb, ddof=1)
@@ -1021,17 +1074,18 @@ def difference_check(df: pd.DataFrame, dimension: str, groups: list, measure: st
                 "p_value": _round(float(p), 6), "p_text": _p_text(float(p)), "significant": bool(p < ALPHA),
                 "effect_name": "cohens_d", "effect_size": _round(float(d)), "effect_label": label,
                 "values": {a_name: _round(float(np.mean(va))), b_name: _round(float(np.mean(vb)))},
+                "business": _business_gap(a_name, b_name, float(np.mean(va)), float(np.mean(vb)), f"Average {measure}"),
                 "sentence": _verdict(float(p), label, f"difference in average {measure} between {a_name} and {b_name}")}
 
     if agg == "count":
         out["tests"].append(count_test())
-        out["summary"] = out["tests"][0]["sentence"]
+        out["summary"] = out["tests"][0]["sentence"] + " " + out["tests"][0]["business"]["sentence"]
     elif agg in ("avg", "mean", "average"):
         out["tests"].append(value_test("mean"))
-        out["summary"] = out["tests"][0]["sentence"]
+        out["summary"] = out["tests"][0]["sentence"] + " " + out["tests"][0]["business"]["sentence"]
     elif agg == "median":
         out["tests"].append(value_test("median"))
-        out["summary"] = out["tests"][0]["sentence"]
+        out["summary"] = out["tests"][0]["sentence"] + " " + out["tests"][0]["business"]["sentence"]
     elif agg == "sum":
         typical, sizes = value_test("mean"), count_test()
         out["tests"] = [typical, sizes]
@@ -1041,18 +1095,23 @@ def difference_check(df: pd.DataFrame, dimension: str, groups: list, measure: st
         if drivers:
             tail = f"The gap is driven by {' and '.join(drivers)}."
         elif tiny:
-            tail = (f"Only {' and '.join(tiny)} differs significantly, and by a negligible amount -- "
-                    f"with this many rows that is expected, so the gap is unlikely to matter.")
+            tail = (f"Only {' and '.join(tiny)} differs significantly, with a negligible "
+                    f"statistical effect -- the groups overlap a lot, but judge the gap by its size.")
         else:
             tail = ("Neither the typical value nor the row count differs beyond noise, "
                     "so the gap between these totals may not be real.")
-        out["summary"] = "A total is rows × typical value. " + tail
+        sa = float(df.loc[in_a, measure].pipe(pd.to_numeric, errors="coerce").sum())
+        sb = float(df.loc[in_b, measure].pipe(pd.to_numeric, errors="coerce").sum())
+        out["business"] = _business_gap(a_name, b_name, sa, sb, f"Total {measure}")
+        out["summary"] = ("A total is rows × typical value. " + tail + " "
+                          + out["business"]["sentence"])
     else:
         raise StatisticalError(f"A '{agg}' bar is one extreme row; there is no spread to test against")
 
     out["caveats"] = [
         f"Tested on the {na + nb:,} rows behind these two bars, after this chart's filters.",
-        f"Significance at {int(ALPHA * 100)}%; with many rows, tiny differences are 'significant' -- read the effect size.",
+        f"Significance at {int(ALPHA * 100)}%; with many rows, tiny differences are 'significant'. "
+        f"The effect size says how much the groups overlap; the size of the gap says how much it matters.",
         "An observed difference, not a cause.",
     ]
     return safe_json(out)

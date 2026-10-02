@@ -4,6 +4,10 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: datalytics_db
+    # Parallel queries take shared memory from /dev/shm, which Docker caps at
+    # 64 MB; two large live reads at once ran it out ("could not resize shared
+    # memory segment"). HR evaluation re-test, 2026-10-01.
+    shm_size: 512mb
     restart: unless-stopped
     environment:
       POSTGRES_DB:       ${POSTGRES_DB:-datalytics}

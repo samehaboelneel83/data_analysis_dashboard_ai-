@@ -130,7 +130,10 @@ def compose_page(findings: list[dict], suggestions: list[dict],
     `{widget_type, title, config, layout}` -- the exact shape `ReportWidget`
     stores, so the router can persist them without translation.
     """
-    by_score = sorted(suggestions, key=lambda s: float(s.get("score") or 0),
+    # KPI ideas are left to `_kpi_widgets`, which builds the summary row
+    # from the findings: two rows of headline numbers would repeat each other.
+    by_score = sorted((s for s in suggestions if s.get("widget_type") != "kpi"),
+                      key=lambda s: float(s.get("score") or 0),
                       reverse=True)[:MAX_CHARTS]
 
     charts: list[dict] = []

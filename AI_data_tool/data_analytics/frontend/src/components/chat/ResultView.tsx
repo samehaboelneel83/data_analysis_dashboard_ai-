@@ -75,13 +75,32 @@ export const cellText = (v: Cell): string => {
  *  made one, otherwise the same heuristic `chartRows` falls back to. Exported
  *  so the axes can be TITLED with them -- a chart whose axes are unnamed
  *  leaves the reader guessing which columns they are looking at. */
+/** 5.x (found in the Chrome re-test): "leavers per department" returned
+ *  dept_no AND dept_name, and the chart labelled its bars d001…d009. When two
+ *  text columns pair one-to-one and the first holds codes, the name labels the
+ *  bars. Otherwise the first text column, as before. */
+function labelIndex(columns: string[], rows: Cell[][], numeric: boolean[]): number {
+  const text = numeric.map((n, i) => (n ? -1 : i)).filter(i => i >= 0)
+  if (text.length < 2) return text[0] ?? -1
+  const [a, b] = text
+  const codeLike = (v: Cell) => typeof v === 'string' && v.length <= 6 && !/\s/.test(v) && /\d/.test(v)
+  const pairs = new Map<string, string>()
+  for (const r of rows) {
+    const k = String(r[a] ?? ''), v = String(r[b] ?? '')
+    if (pairs.has(k) && pairs.get(k) !== v) return a
+    pairs.set(k, v)
+  }
+  const oneToOne = new Set(pairs.values()).size === pairs.size
+  return oneToOne && rows.every(r => codeLike(r[a])) && !rows.every(r => codeLike(r[b])) ? b : a
+}
+
 export function chartColumns(result: AgentResult, x?: string | null, y?: string | null):
   { x?: string; y?: string } {
   const { columns, rows } = result
   if (columns.length === 0 || rows.length === 0) return {}
   if (x && y && columns.includes(x) && columns.includes(y)) return { x, y }
   const numeric = columns.map((_, i) => rows.every(r => r[i] == null || isNumberish(r[i])))
-  const nameIdx = numeric.findIndex(n => !n)
+  const nameIdx = labelIndex(columns, rows, numeric)
   const valueIdx = columns.findIndex(
     (_, i) => numeric[i] && i !== nameIdx && (nameIdx >= 0 || i !== 0))
   return {
@@ -104,7 +123,7 @@ export function chartRows(result: AgentResult, x?: string | null, y?: string | n
     return rows.map(r => ({ name: String(r[namedX] ?? ''), value: Number(r[namedY] ?? 0) }))
   }
   const numeric = columns.map((_, i) => rows.every(r => r[i] == null || isNumberish(r[i])))
-  const nameIdx = numeric.findIndex(n => !n)
+  const nameIdx = labelIndex(columns, rows, numeric)
   const valueIdx = columns.findIndex(
     (_, i) => numeric[i] && i !== nameIdx && (nameIdx >= 0 || i !== 0))
   return rows.map((r, i) => ({
@@ -220,21 +239,63 @@ function ResultChart({ result, format, x, y }: {
   // On a phone, value labels over each bar collide; the axis and the rows
   // under the chart carry the numbers there instead.
   const narrow = typeof window !== 'undefined' && !!window.matchMedia?.('(max-width: 560px)').matches
+  // The server's named axes win; with none, a two-label result is grouped.
+  const grouped = format === 'bar' && !(x && y) ? groupedBars(result) : null
   const rows = chartRows(result, x, y)
-  const axes = chartColumns(result, x, y)
+  const axes = grouped ? { x: grouped.x, y: grouped.y } : chartColumns(result, x, y)
+  const data = grouped ? { type: 'crosstab', columns: grouped.columns, rows: grouped.rows } : { rows }
   const Renderer = format === 'bar' ? BarChartRenderer : format === 'line' ? LineChartRenderer : PieChartRenderer
   return (
-    <div data-testid="result-chart" data-format={format}
+    <div data-testid="result-chart" data-format={format} data-grouped={grouped ? grouped.series : undefined}
       style={{ height: 240, width: '100%', minWidth: 280 }}>
       {/* The chat has no widget config to derive titles from, so it names the
           axes outright with the two columns it is actually drawing. The rows
           are `{name, value}` by then -- without this the axes would read
           "name" and "value", which say nothing about this data. */}
-      <Renderer rows={rows} data={{ rows }} rtl={rtl} broadcasts={false}
-        cfg={{ x_axis_label: axes.x, y_axis_label: axes.y, ...(narrow ? { data_labels: false } : {}) }}
+      <Renderer rows={rows} data={data} rtl={rtl} broadcasts={false}
+        cfg={{ x_axis_label: axes.x, y_axis_label: axes.y,
+          // 5.13: long category names ("Assistant Engineer", department
+          // names) clip with "…" like the Suggestions preview, instead of
+          // tilting into the chart; the full name is in the tooltip.
+          axis_tick_max_chars: 14, labels_compact: true,
+          ...(grouped ? { bar_mode: 'clustered', legend_title: grouped.series } : {}), ...(narrow ? { data_labels: false } : {}) }}
         localSelected={null} onClickPoint={() => {}} />
     </div>
   )
+}
+
+/** Two label columns and a measure ("title, gender, avg_salary") read as a
+ *  grouped bar chart: the first label is the axis, the second the series.
+ *  Charting it as plain bars drew every title twice with no way to tell the
+ *  genders apart. Returns the crosstab the bar renderer draws, or null when
+ *  the result is not that shape (or would be too many bars to read). */
+export function groupedBars(result: AgentResult):
+  { columns: string[]; rows: Cell[][]; x: string; series: string; y: string } | null {
+  const { columns, rows } = result
+  if (columns.length < 3 || rows.length < 2) return null
+  if (result.truncated || rows.length < (Number(result.total) || 0)) return null
+  const numeric = columns.map((_, i) => rows.every(r => r[i] == null || isNumberish(r[i])))
+  const labels = numeric.map((n, i) => (n ? -1 : i)).filter(i => i >= 0)
+  const valueIdx = numeric.findIndex(n => n)
+  if (labels.length !== 2 || valueIdx < 0) return null
+  const [xi, si] = labels
+  const xs: string[] = []
+  const ss: string[] = []
+  for (const r of rows) {
+    const xv = String(r[xi] ?? ''); const sv = String(r[si] ?? '')
+    if (!xs.includes(xv)) xs.push(xv)
+    if (!ss.includes(sv)) ss.push(sv)
+  }
+  if (ss.length < 2 || ss.length > 8 || xs.length < 1 || xs.length > 24) return null
+  if (xs.length === rows.length || ss.length === rows.length) return null
+  const out: Cell[][] = xs.map(xv => {
+    const vals = ss.map(sv => {
+      const hit = rows.find(r => String(r[xi] ?? '') === xv && String(r[si] ?? '') === sv)
+      return hit ? Number(hit[valueIdx] ?? 0) : 0
+    })
+    return [xv, ...vals, vals.reduce((a, b) => a + b, 0)]
+  })
+  return { columns: [columns[xi], ...ss, 'Total'], rows: out, x: columns[xi], series: columns[si], y: columns[valueIdx] }
 }
 
 /** What to draw when the server did not ask for a particular chart.
@@ -247,6 +308,7 @@ export function autoChart(result: AgentResult): 'kpi' | 'bar' | 'line' | null {
   // A partial result would chart as if it were the whole answer; show the grid.
   if (result.truncated || rows.length < (Number(result.total) || 0)) return null
   if (columns.length === 1 && rows.length === 1 && isNumberish(rows[0][0])) return 'kpi'
+  if (groupedBars(result)) return 'bar'
   if (rows.length < 2 || rows.length > 24) return null
   const numeric = columns.map((_, i) => rows.every(r => r[i] == null || isNumberish(r[i])))
   const nameIdx = numeric.findIndex(n => !n)

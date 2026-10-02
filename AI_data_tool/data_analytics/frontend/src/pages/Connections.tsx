@@ -264,7 +264,8 @@ export default function Connections() {
           onQueued={() => setQueueKey(k => k + 1)} />
       )}
       {building && (
-        <QueryBuilderDialog ds={building} onClose={() => setBuilding(null)} />
+        <QueryBuilderDialog ds={building} onClose={() => setBuilding(null)}
+          onCreated={id => goTo(`/datasets/${id}`)} />
       )}
     </div>
   )

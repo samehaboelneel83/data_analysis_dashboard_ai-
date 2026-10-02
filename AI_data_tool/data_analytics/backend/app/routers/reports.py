@@ -1627,6 +1627,60 @@ async def export_report_pdf(report_id: int, paper: str = "A4", orientation: str 
         headers={"Content-Disposition": disposition})
 
 
+@router.get("/{report_id}/xlsx")
+async def export_report_xlsx(report_id: int, db: AsyncSession = Depends(get_db),
+                             current_user: User = Depends(get_current_user)):
+    """The dashboard's data as an Excel workbook, one sheet per chart -- the
+    same workbook a scheduled delivery attaches, built AS THE CALLER (their
+    row and column rules), of the pages they can see. A dataset whose export
+    policy forbids xlsx is left out. HR evaluation, item 3.2: Excel was only
+    reachable through a schedule or an Ask answer."""
+    import io as _io
+    from urllib.parse import quote
+
+    from fastapi.responses import StreamingResponse
+
+    from ..models.models import Dataset
+    from ..services.delivery import build_digest
+    from ..services.report_release import served_release, visible_release_pages
+    from .datasets import _dataset_has_security, _exports_disabled, _policy_dataset
+    from .shared import download_gate
+
+    report = await _get_report(report_id, db, current_user)
+    release = await served_release(db, report_id, current_user)
+    visible = ({p["id"] for p in await visible_release_pages(db, release.snapshot, current_user)}
+               if release is not None else await _visible_page_ids(db, report, current_user))
+    label = await download_gate(db, current_user, report=report)
+    from ..services.sensitivity import report_dataset_ids
+    blocked: set[int] = set()
+    for did in await report_dataset_ids(db, report):
+        ds = await db.get(Dataset, did)
+        if ds is None:
+            continue
+        policy_ds = await _policy_dataset(db, ds)
+        if _exports_disabled(policy_ds, "xlsx", await _dataset_has_security(db, did)):
+            blocked.add(did)
+    payload, sheets = await build_digest(db, report, current_user, context_label=label,
+                                         release=release, skip_dataset_ids=blocked,
+                                         allowed_page_ids=visible)
+    if sheets == 0 and blocked:
+        # HR re-test 2026-10-01: every chart's data was withheld by policy and
+        # the reader still got a workbook saying "No widget produced tabular
+        # data" -- true, and the wrong reason. Say the real one instead.
+        raise HTTPException(
+            403, "Exports are switched off for the data behind this dashboard, "
+                 "so there is nothing to put in the workbook.")
+    raw = (report.name or "dashboard").strip()[:60] or "dashboard"
+    ascii_name = "".join(c for c in raw if (c.isalnum() and c.isascii()) or c in " _-").strip() or "dashboard"
+    disposition = (f'attachment; filename="{ascii_name}.xlsx"; '
+                   f"filename*=UTF-8''{quote(raw + '.xlsx')}")
+    return StreamingResponse(
+        _io.BytesIO(payload),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": disposition, "X-Sheet-Count": str(sheets),
+                 "X-Withheld-Datasets": str(len(blocked))})
+
+
 @router.get("/{report_id}/package")
 async def export_report_package(report_id: int, db: AsyncSession = Depends(get_db),
                                 current_user: User = Depends(get_current_user)):
@@ -1730,8 +1784,9 @@ async def suggest_widgets(report_id: int, db: AsyncSession = Depends(get_db),
     if not report.dataset_id:
         raise HTTPException(400, "Attach a dataset to this report first")
     ds = await db.get(Dataset, report.dataset_id)
-    if ds is None or ds.org_id != report.org_id or not ds.filename or ds.mode == "directquery":
-        raise HTTPException(400, "Suggestions run over import-mode datasets")
+    live = ds is not None and ds.mode == "directquery" and ds.data_source_id
+    if ds is None or ds.org_id != report.org_id or not (ds.filename or live):
+        raise HTTPException(400, "Suggestions need a dataset with data behind it")
     # Read through THIS report, as a widget on it would: the report being
     # viewable is not by itself licence to its dataset (E01).
     await require_dataset_read(db, current_user, ds.id, report_id=report_id)
@@ -1759,23 +1814,40 @@ async def suggest_widgets(report_id: int, db: AsyncSession = Depends(get_db),
                        ds.id, exc_info=True)
         _ineligible = set()
 
+    live_frame = None
+    if live:
+        # A live dataset is read through its SQL (row rule pushed down, denied
+        # columns dropped) -- suggestions used to refuse live data outright,
+        # which left the HR evaluation's main dataset with no insight-driven
+        # ideas (item 3.4).
+        from ..services.analysis_frame import FrameUnavailable, load_directquery_frame
+        try:
+            live_frame = (await load_directquery_frame(
+                db, ds, rls_filter_expr=rls_expr, denied=set(denied or ()))).frame
+        except FrameUnavailable as e:
+            raise HTTPException(400, str(e))
+
     def _run():
         from ..services.analytics import detect_types, load_file
         from ..services.insights import (effective_roles, generate_insights,
                                          suggest_widgets_from_findings)
         from ..services.widget_data import apply_calculated_columns, apply_rls_filter
-        df = load_file(ds.filename)
-        df = apply_rls_filter(df, rls_expr)
-        df = apply_prep_steps(df, _steps, _aux)
-        if denied:
-            df = df.drop(columns=[c for c in denied if c in df.columns])
+        if live_frame is not None:
+            df = live_frame
+        else:
+            df = load_file(ds.filename)
+            df = apply_rls_filter(df, rls_expr)
+            df = apply_prep_steps(df, _steps, _aux)
+            if denied:
+                df = df.drop(columns=[c for c in denied if c in df.columns])
         if ds.calculated_columns:
             df = apply_calculated_columns(df, ds.calculated_columns, ds.custom_functions)
         type_map = detect_types(df)
         result = generate_insights(df, type_map, ds.column_meta or {})
         roles = effective_roles(type_map, ds.column_meta or {})
         return {"suggestions": suggest_widgets_from_findings(
-            result["findings"], roles, description, ineligible=_ineligible)}
+            result["findings"], roles, description, ineligible=_ineligible,
+            column_meta=ds.column_meta or {}, frame=df)}
 
     try:
         return await asyncio.to_thread(_run)
@@ -1855,7 +1927,8 @@ async def auto_compose(report_id: int, db: AsyncSession = Depends(get_db),
         result = generate_insights(df, type_map, ds.column_meta or {})
         roles = effective_roles(type_map, ds.column_meta or {})
         suggestions = suggest_widgets_from_findings(
-            result["findings"], roles, description, ineligible=_ineligible)
+            result["findings"], roles, description, ineligible=_ineligible,
+            column_meta=ds.column_meta or {}, frame=df)
         return compose_page(result["findings"], suggestions,
                             result.get("narrative"), roles)
 
@@ -1902,6 +1975,8 @@ async def list_schedules(report_id: int, db: AsyncSession = Depends(get_db), cur
              "recipients": [x for x in (r.recipients or []) if isinstance(x, str)],
              "calendar": calendar_spec(r.recipients),
              "format": next((r["__format__"] for r in (r.recipients or []) if isinstance(r, dict) and r.get("__format__")), "xlsx"),
+             "per_recipient": any(isinstance(x, dict) and x.get("__per_recipient__") for x in (r.recipients or [])),
+             "only_if_changed": any(isinstance(x, dict) and x.get("__only_if_changed__") for x in (r.recipients or [])),
              "subject": r.subject, "last_run_at": r.last_run_at, "last_status": r.last_status,
              "timezone": r.timezone}
             for r in rows]
@@ -1958,6 +2033,11 @@ async def create_schedule(report_id: int, body: dict, db: AsyncSession = Depends
             raise HTTPException(400, "format must be 'xlsx' or 'pdf'")
         if fmt == "pdf":  # xlsx is the default; store only a real override
             recipients = [*recipients, {"__format__": "pdf"}]
+    # HR evaluation, item 3.3: each recipient's own view, and skip-if-unchanged.
+    if body.get("per_recipient"):
+        recipients = [*recipients, {"__per_recipient__": True}]
+    if body.get("only_if_changed"):
+        recipients = [*recipients, {"__only_if_changed__": True}]
 
     # T3: an IANA zone the scheduler interprets this schedule's calendar
     # hour/minute in (zoneinfo). Validated against the system tz database at
@@ -2187,7 +2267,8 @@ async def list_deliveries(report_id: int, db: AsyncSession = Depends(get_db), cu
     )).scalars().all()
     return [{"id": d.id, "schedule_id": d.schedule_id, "kind": d.kind, "status": d.status,
              "error": d.error, "artifact_kind": d.artifact_kind, "duration_ms": d.duration_ms,
-             "created_at": d.created_at}
+             "created_at": d.created_at, "subject": d.subject, "recipients": d.recipients,
+             "file_name": d.file_name}
             for d in rows]
 
 

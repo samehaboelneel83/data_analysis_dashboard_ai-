@@ -3,7 +3,8 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { StrictMode } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 import SuggestDashboardsDialog from './SuggestDashboardsDialog'
-import { datasetsApi, reportsApi } from '../../services/api'
+import { DirectionProvider } from '../../contexts/DirectionContext'
+import { calcColumnsApi, datasetsApi, jobsApi, measuresApi, reportsApi } from '../../services/api'
 
 /**
  * "Suggest dashboards", from the dataset list.
@@ -63,6 +64,8 @@ beforeEach(() => {
   navigate.mockClear()
   vi.spyOn(datasetsApi, 'suggestDashboards').mockResolvedValue(
     { proposals: [PROPOSAL], reason: '', profile: PROFILE } as never)
+  // A generated page is saved as packed (see fillPage).
+  vi.spyOn(reportsApi, 'updatePage').mockResolvedValue({} as never)
 })
 afterEach(() => vi.restoreAllMocks())
 
@@ -399,5 +402,200 @@ describe('when nothing could be designed', () => {
 
     expect(await screen.findByText(/model endpoint is not configured/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Answer this' })).toBeNull()
+  })
+})
+
+describe('the analyst panel mode', () => {
+  const PANEL = {
+    proposals: [
+      { title: 'Headline numbers', rationale: 'open with these', section: 'summary', source: 'panel',
+        widgets: [{ widget_type: 'kpi', title: 'Median wait', row_count: 1, value: 5, evidence: 0.6,
+                    question: 'What is a typical wait?', takeaway: 'Median wait: 40.',
+                    config: { measure: 'wait_minutes', aggregation: 'median' } }] },
+      { title: 'Levels & drivers', rationale: 'what differs', section: 'measures', source: 'panel',
+        widgets: [{ widget_type: 'bar', title: 'Wait by department', row_count: 12, value: 5, evidence: 0.02,
+                    question: 'Where does the queue build?',
+                    config: { dimension: 'department', measure: 'wait_minutes', aggregation: 'avg' } }] },
+    ],
+    reason: '', profile: PROFILE, source: 'panel',
+    panel: { lenses: ['measures'], candidates: 30, from_model: 20, from_statistics: 10, drawn: 26,
+             rejected: 4, duplicates_merged: 6, selected: 2, size: 12,
+             left_out: { invalid: 3, units: 1 }, not_picked: 18 },
+    facts: ['Average wait by department: highest ENT 60.'],
+    refused: [{ title: 'Wait by region', widget_type: 'bar', why: 'no column called region', code: 'invalid', source: 'model' },
+              { title: 'Total volume', widget_type: 'kpi', why: 'different units', code: 'units', source: 'model' }],
+  }
+
+  it('sends the mode and size, and shows what the panel did', async () => {
+    const spy = vi.spyOn(datasetsApi, 'suggestDashboards').mockResolvedValue(PANEL as never)
+    open()
+    fireEvent.click(screen.getByLabelText(/Analyst panel/))
+    fireEvent.change(screen.getByLabelText('How many visuals'), { target: { value: '12' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Suggest dashboards' }))
+    expect(await screen.findByTestId('panel-stats')).toHaveTextContent('30 ideas')
+    expect(spy.mock.calls[0][1]).toMatchObject({ mode: 'panel', size: 12 })
+    expect(screen.getByText(/Where does the queue build/)).toBeInTheDocument()
+    const left = screen.getByTestId('panel-left-out')
+    expect(left).toHaveTextContent('4 ideas left out, and why')
+    expect(left).toHaveTextContent('3 · did not fit this data\'s columns or chart types')
+    expect(left).toHaveTextContent('18 more drew fine but lost to stronger ideas')
+    expect(left).toHaveTextContent('Total volume — adds up a number recorded in different units')
+    expect(screen.getAllByTestId('proposal-evidence').map(e => e.textContent))
+      .toEqual([' · strong signal', ' · flat: little difference'])
+  })
+
+  it('builds the sections as pages of one dashboard', async () => {
+    vi.spyOn(datasetsApi, 'suggestDashboards').mockResolvedValue(PANEL as never)
+    const create = vi.spyOn(reportsApi, 'create').mockResolvedValue({ id: 9, pages: [{ id: 1 }] } as never)
+    const rename = vi.spyOn(reportsApi, 'updatePage').mockResolvedValue({} as never)
+    const addPage = vi.spyOn(reportsApi, 'addPage').mockResolvedValue({ id: 2 } as never)
+    const add = vi.spyOn(reportsApi, 'addWidget').mockResolvedValue({ id: 50 } as never)
+    open()
+    fireEvent.click(screen.getByLabelText(/Analyst panel/))
+    fireEvent.click(screen.getByRole('button', { name: 'Suggest dashboards' }))
+    fireEvent.click(await screen.findByRole('button', { name: /a page per section \(2 visuals\)/ }))
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/reports/9'))
+    expect(create).toHaveBeenCalledTimes(1)
+    expect(rename).toHaveBeenCalledWith(9, 1, { name: 'Headline numbers' })
+    expect(addPage).toHaveBeenCalledWith(9, { name: 'Levels & drivers', position: 1, layout_mode: 'packed' })
+    // packed, so the builder keeps the arrangement instead of re-flowing it
+    expect(rename).toHaveBeenCalledWith(9, 1, { layout_mode: 'packed' })
+    expect(add.mock.calls.map(c => c[1])).toEqual([1, 2])
+  })
+
+  // Gap review 2026-10-02: a rate of totals or a duration needs a field the
+  // dataset lacks. It is created when the person creates the dashboard -- and
+  // a chart whose field could not be created is left out, not shown broken.
+  const DERIVED = {
+    ...PANEL,
+    proposals: [
+      PANEL.proposals[0],
+      { ...PANEL.proposals[1], widgets: [
+        ...PANEL.proposals[1].widgets,
+        { widget_type: 'line', title: 'Late share by month', row_count: 20, value: 5, evidence: 0.5,
+          config: { dimension: 'arrived_at', dimension_granularity: 'month', measure: 'late_pct_vs_due' } }] },
+    ],
+    derived: {
+      measures: [{ name: 'late_pct_vs_due', expression: 'SUM(IF(seen_at > due_at, 1, 0)) / COUNT(seen_at) * 100' }],
+      calculated_columns: [{ name: 'days_arrived_to_seen', expression: "DATEDIFF(arrived_at, seen_at, 'day')" }],
+    },
+  }
+
+  it('says which fields it will add, and adds them before building', async () => {
+    vi.spyOn(datasetsApi, 'suggestDashboards').mockResolvedValue(DERIVED as never)
+    const order: string[] = []
+    vi.spyOn(calcColumnsApi, 'save').mockImplementation(async () => { order.push('calc'); return [] as never })
+    vi.spyOn(measuresApi, 'save').mockImplementation(async () => { order.push('measure'); return [] as never })
+    vi.spyOn(reportsApi, 'create').mockImplementation(async () => { order.push('report'); return { id: 9, pages: [{ id: 1 }] } as never })
+    vi.spyOn(reportsApi, 'updatePage').mockResolvedValue({} as never)
+    vi.spyOn(reportsApi, 'addPage').mockResolvedValue({ id: 2 } as never)
+    const add = vi.spyOn(reportsApi, 'addWidget').mockResolvedValue({ id: 50 } as never)
+    open()
+    fireEvent.click(screen.getByLabelText(/Analyst panel/))
+    fireEvent.click(screen.getByRole('button', { name: 'Suggest dashboards' }))
+    expect(await screen.findByText(/adds 2 fields to this dataset/)).toHaveTextContent('days_arrived_to_seen, late_pct_vs_due')
+    fireEvent.click(await screen.findByRole('button', { name: /a page per section/ }))
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/reports/9'))
+    expect(order.slice(0, 3)).toEqual(['calc', 'measure', 'report'])
+    expect(add.mock.calls.map(c => (c[2] as { title: string }).title)).toContain('Late share by month')
+  })
+
+  it('leaves out a chart whose field could not be created', async () => {
+    vi.spyOn(datasetsApi, 'suggestDashboards').mockResolvedValue(DERIVED as never)
+    vi.spyOn(calcColumnsApi, 'save').mockResolvedValue([] as never)
+    vi.spyOn(measuresApi, 'save').mockRejectedValue(new Error('403'))
+    vi.spyOn(reportsApi, 'create').mockResolvedValue({ id: 9, pages: [{ id: 1 }] } as never)
+    vi.spyOn(reportsApi, 'updatePage').mockResolvedValue({} as never)
+    vi.spyOn(reportsApi, 'addPage').mockResolvedValue({ id: 2 } as never)
+    const add = vi.spyOn(reportsApi, 'addWidget').mockResolvedValue({ id: 50 } as never)
+    open()
+    fireEvent.click(screen.getByLabelText(/Analyst panel/))
+    fireEvent.click(screen.getByRole('button', { name: 'Suggest dashboards' }))
+    fireEvent.click(await screen.findByRole('button', { name: /a page per section/ }))
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/reports/9'))
+    const titles = add.mock.calls.map(c => (c[2] as { title: string }).title)
+    expect(titles).toEqual(['Median wait', 'Wait by department'])
+  })
+})
+
+
+describe('the analyst panel as a background job', () => {
+  afterEach(() => { try { localStorage.clear() } catch { /* */ } })
+
+  it('queues the panel, remembers the job and shows its stage', async () => {
+    const ask = vi.spyOn(datasetsApi, 'suggestDashboards').mockResolvedValue({ job_id: 41, state: 'queued' } as never)
+    vi.spyOn(jobsApi, 'get').mockResolvedValue({ id: 41, state: 'running',
+      progress: { stage: 'drawing', ideas: 57 } } as never)
+    open()
+    fireEvent.click(screen.getByLabelText(/Analyst panel/))
+    fireEvent.click(screen.getByRole('button', { name: 'Suggest dashboards' }))
+    expect(await screen.findByTestId('panel-stage')).toHaveTextContent('Drawing 57 ideas on the data')
+    expect(ask.mock.calls[0][1]).toMatchObject({ mode: 'panel', background: true })
+    expect(JSON.parse(localStorage.getItem('dl.suggestPanelJob.7')!)).toMatchObject({ id: 41, size: 24 })
+    expect(screen.getByText(/You can close this window/)).toBeInTheDocument()
+  })
+
+  it('reopened, it picks up a finished job and forgets it', async () => {
+    localStorage.setItem('dl.suggestPanelJob.7', '42')
+    const ask = vi.spyOn(datasetsApi, 'suggestDashboards')
+    vi.spyOn(jobsApi, 'get').mockResolvedValue({ id: 42, state: 'succeeded', progress: { stage: 'done' },
+      result: { proposals: [{ title: 'Headline numbers', rationale: '', section: 'summary', source: 'panel',
+        widgets: [{ widget_type: 'kpi', title: 'Median wait', row_count: 1, evidence: 0.6,
+                    config: { measure: 'wait_minutes', aggregation: 'median' },
+                    layout: { x: 0, y: 0, w: 12, h: 2 } }] }],
+        reason: '', profile: PROFILE, source: 'panel',
+        panel: { lenses: [], candidates: 9, from_model: 5, from_statistics: 4, drawn: 8, rejected: 1,
+                 duplicates_merged: 2, selected: 1, size: 12 } } } as never)
+    open()
+    expect(await screen.findByText('Median wait')).toBeInTheDocument()
+    expect(ask).not.toHaveBeenCalled()
+    expect(localStorage.getItem('dl.suggestPanelJob.7')).toBeNull()
+  })
+
+  it('reopened while running, it shows what was asked', async () => {
+    localStorage.setItem('dl.suggestPanelJob.7', JSON.stringify({ id: 44, goal: 'I run HR', size: 50, at: Date.now() - 90000 }))
+    vi.spyOn(jobsApi, 'get').mockResolvedValue({ id: 44, state: 'running', progress: { stage: 'proposing' } } as never)
+    open()
+    expect(await screen.findByTestId('panel-stage')).toHaveTextContent('The analysts are proposing')
+    expect(screen.getByDisplayValue('I run HR')).toBeInTheDocument()
+    expect((screen.getByLabelText('How many visuals') as HTMLSelectElement).value).toBe('50')
+    expect(screen.getByRole('status')).toHaveTextContent(/9\ds/)
+  })
+
+  it('in Arabic, sections and the pages built from them are named in Arabic', async () => {
+    localStorage.setItem('datalytics.language', 'ar')
+    localStorage.setItem('datalytics.direction', 'rtl')
+    localStorage.setItem('dl.suggestPanelJob.7', '45')
+    vi.spyOn(jobsApi, 'get').mockResolvedValue({ id: 45, state: 'succeeded', progress: { stage: 'done' },
+      result: { reason: '', profile: PROFILE, source: 'panel', proposals: [
+        { title: 'Headline numbers', rationale: 'open with these', section: 'summary', source: 'panel',
+          widgets: [{ widget_type: 'kpi', title: 'Median wait', row_count: 1,
+                      config: { measure: 'wait_minutes', aggregation: 'median' }, layout: { x: 0, y: 0, w: 12, h: 2 } }] },
+        { title: 'Fairness & like-for-like', rationale: 'x', section: 'equity', source: 'panel',
+          widgets: [{ widget_type: 'bar', title: 'Wait by sex', row_count: 2,
+                      config: { dimension: 'sex', measure: 'wait_minutes', aggregation: 'avg' }, layout: { x: 0, y: 0, w: 12, h: 4 } }] },
+      ] } } as never)
+    vi.spyOn(reportsApi, 'create').mockResolvedValue({ id: 9, pages: [{ id: 1 }] } as never)
+    const rename = vi.spyOn(reportsApi, 'updatePage').mockResolvedValue({} as never)
+    const addPage = vi.spyOn(reportsApi, 'addPage').mockResolvedValue({ id: 2 } as never)
+    vi.spyOn(reportsApi, 'addWidget').mockResolvedValue({ id: 50 } as never)
+    render(<MemoryRouter><DirectionProvider>
+      <SuggestDashboardsDialog datasetId={7} datasetName="Encounters" onClose={vi.fn()} />
+    </DirectionProvider></MemoryRouter>)
+    expect(await screen.findByText('الأرقام الرئيسية')).toBeInTheDocument()
+    expect(screen.getByText('العدالة والمقارنة المتكافئة')).toBeInTheDocument()
+    expect(screen.queryByText('Headline numbers')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /صفحة لكل قسم/ }))
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/reports/9'))
+    expect(rename).toHaveBeenCalledWith(9, 1, { name: 'الأرقام الرئيسية' })
+    expect(addPage).toHaveBeenCalledWith(9, expect.objectContaining({ name: 'العدالة والمقارنة المتكافئة' }))
+  })
+
+  it('a failed job says why', async () => {
+    localStorage.setItem('dl.suggestPanelJob.7', '43')
+    vi.spyOn(jobsApi, 'get').mockResolvedValue({ id: 43, state: 'failed',
+      error: 'The dataset is gone, or no longer readable by you.' } as never)
+    open()
+    expect(await screen.findByText(/no longer readable by you/)).toBeInTheDocument()
   })
 })
