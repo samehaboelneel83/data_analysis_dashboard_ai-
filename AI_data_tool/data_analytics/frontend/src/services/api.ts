@@ -513,7 +513,7 @@ export const datasetsApi = {
    *  the `size` best by what the data shows: minutes rather than seconds, so
    *  its timeout is longer. */
   suggestDashboards: (id: number, body: { goal?: string; count?: number; mode?: 'quick' | 'panel'; size?: number;
-                                          background?: boolean },
+                                          background?: boolean; fresh?: boolean },
                       signal?: AbortSignal) =>
     api.post<SuggestDashboardsAnswer>(
       `/datasets/${id}/suggest-dashboards`, body,

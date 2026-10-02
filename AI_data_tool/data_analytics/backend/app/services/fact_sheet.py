@@ -186,23 +186,24 @@ def edge_periods(df: pd.DataFrame, date_cols: list[str]) -> dict:
     return out
 
 
-def quality_issues(df: pd.DataFrame, cats: list[str], limit: int = 6) -> list[str]:
-    """Plain sentences about the data's own faults, worst first.
+def quality_findings(df: pd.DataFrame, cats: list[str], limit: int = 6) -> list[dict]:
+    """The data's own faults, worst first, as {kind, text, column, values}.
 
     Call records (2026-10-02): 104 exact duplicate rows, " Catch All Zone"
     with a leading space, and "Mobile to Mobile" / "Mobile To Mobile" as two
     destinations -- the analysts flagged all three, the platform none. Read
-    by the analysts' lenses (to avoid splitting by a broken label) and shown
-    to the person beside the facts."""
+    by the analysts' lenses (to avoid splitting by a broken label), shown to
+    the person beside the facts, and drawn on a "Data quality" page."""
     from .suggest_variety import _h
-    out: list[str] = []
+    out: list[dict] = []
     try:
         dups = int(df.duplicated().sum())
     except TypeError:
         dups = 0
     if dups:
-        out.append(f"{dups:,} rows are exact duplicates of another row ({dups / len(df):.1%}); "
-                   f"totals count them twice.")
+        out.append({"kind": "duplicates", "column": None, "values": [], "count": dups,
+                    "text": f"{dups:,} rows are exact duplicates of another row ({dups / len(df):.1%}); "
+                            f"totals count them twice."})
     for c in cats:
         vals = df[c].dropna().astype(str)
         if vals.empty or vals.nunique() > 200:
@@ -210,20 +211,30 @@ def quality_issues(df: pd.DataFrame, cats: list[str], limit: int = 6) -> list[st
         uniq = vals.unique()
         padded = [v for v in uniq if v != v.strip()]
         if padded:
-            out.append(f"{_h(c)} has values with stray spaces ({', '.join(repr(v) for v in padded[:3])}).")
+            out.append({"kind": "spaces", "column": c, "values": [str(v) for v in padded[:3]],
+                        "text": f"{_h(c)} has values with stray spaces "
+                                f"({', '.join(repr(v) for v in padded[:3])})."})
         groups: dict = {}
         for v in uniq:
             groups.setdefault(" ".join(v.strip().lower().split()), []).append(v)
         same = [g for g in groups.values() if len(g) > 1]
         if same:
-            out.append(f"{_h(c)} spells one value several ways: " +
-                       "; ".join(" / ".join(repr(v) for v in g[:3]) for g in same[:2]) +
-                       " -- they are split into separate groups.")
+            out.append({"kind": "variants", "column": c,
+                        "values": [str(v) for g in same[:2] for v in g[:3]],
+                        "text": f"{_h(c)} spells one value several ways: " +
+                                "; ".join(" / ".join(repr(v) for v in g[:3]) for g in same[:2]) +
+                                " -- they are split into separate groups."})
     for c in df.columns:
         miss = float(df[c].isna().mean())
         if 0.2 <= miss < 1:
-            out.append(f"{_h(c)} is missing on {miss:.0%} of rows; charts of it describe the rest only.")
+            out.append({"kind": "missing", "column": c, "values": [], "share": round(miss, 4),
+                        "text": f"{_h(c)} is missing on {miss:.0%} of rows; charts of it describe the rest only."})
     return out[:limit]
+
+
+def quality_issues(df: pd.DataFrame, cats: list[str], limit: int = 6) -> list[str]:
+    """Plain sentences about the data's own faults, worst first."""
+    return [f["text"] for f in quality_findings(df, cats, limit)]
 
 
 def _fmt(v: float) -> str:
@@ -280,8 +291,9 @@ def build_facts(df: pd.DataFrame | None, roles: dict[str, str],
             [m, u["by"]], 1.0)
 
     # ── the data's own faults ───────────────────────────────────────────────
-    for text in quality_issues(df, list(p.cats)):
-        add("quality", text, [], 0.9)
+    quality = quality_findings(df, list(p.cats))
+    for q in quality:
+        add("quality", q["text"], [], 0.9)
 
     # ── measures ────────────────────────────────────────────────────────────
     for m in p.nums[:3]:
@@ -398,4 +410,4 @@ def build_facts(df: pd.DataFrame | None, roles: dict[str, str],
         size += len(line) + 1
     edges = edge_periods(df, list(p.dates))
     return {"facts": facts, "text": "\n".join(lines), "mixed_units": mixed, "one_to_one": pairs,
-            "identical": twins, "edges": edges}
+            "identical": twins, "edges": edges, "quality": quality}

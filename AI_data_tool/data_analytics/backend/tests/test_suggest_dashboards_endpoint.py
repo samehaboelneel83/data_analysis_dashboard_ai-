@@ -537,6 +537,37 @@ class TestThePanelAsAJob:
         got = await client.get(f"/api/v1/jobs/{job_id}", headers=headers)
         assert got.status_code == 200 and got.json()["state"] == "succeeded"
 
+    async def test_suggesting_again_asks_the_analysts_afresh(self, client, db_session, two_orgs,
+                                                             clinic_csv, monkeypatch, factory):
+        """The first panel reuses kept lens answers; "suggest again" (fresh)
+        asks every lens anew, sampling, and the new answers are kept."""
+        from app.services import jobs
+        lens = LensClient()
+        kws = []
+        orig = lens.complete_json
+
+        async def spy(messages, schema, **kw):
+            kws.append(kw)
+            return await orig(messages, schema, **kw)
+        lens.complete_json = spy
+        monkeypatch.setattr("app.services.llm.get_client", lambda *a, **k: lens)
+        ds, headers = await _dataset(db_session, two_orgs["a"]["org"], clinic_csv)
+
+        async def run(fresh):
+            r = await client.post(f"/api/v1/datasets/{ds.id}/suggest-dashboards",
+                                  json={"goal": "I run the clinic", "mode": "panel", "size": 12,
+                                        "background": True, "fresh": fresh}, headers=headers)
+            assert r.status_code == 200, r.text
+            assert await jobs.run_next(factory, "w1") == jobs.SUCCEEDED
+        await run(False)
+        first = len(kws)
+        assert first and all(k["temperature"] == 0.0 for k in kws)
+        await run(False)
+        assert len(kws) == first                              # kept answers reused
+        await run(True)
+        assert len(kws) == 2 * first                          # asked afresh
+        assert all(k["temperature"] > 0 for k in kws[first:])
+
     async def test_the_job_sees_only_what_the_person_may(self, client, db_session, two_orgs,
                                                          clinic_csv, monkeypatch, factory):
         from app.models.models import Job

@@ -52,6 +52,9 @@ class SuggestDashboardsRequest(BaseModel):
     #: Panel only: queue it as a job and answer with its id at once. The
     #: dialog polls the job and can be closed and reopened meanwhile.
     background: bool = False
+    #: Panel only: "suggest again" -- ask the analysts afresh instead of
+    #: reusing their kept answers for this data (analyst_panel lens cache).
+    fresh: bool = False
 
 
 class CalcColumnPreviewRequest(BaseModel):

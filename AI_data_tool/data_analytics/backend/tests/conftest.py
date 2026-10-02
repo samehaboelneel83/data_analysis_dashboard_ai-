@@ -25,6 +25,16 @@ def _no_embeddings_backend_by_default(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _fresh_lens_answers():
+    """The analyst panel keeps each lens answer for reuse (same model, same
+    prompt); one test's fake model must not answer the next test's panel."""
+    from app.services.analyst_panel import clear_lens_cache
+    clear_lens_cache()
+    yield
+    clear_lens_cache()
+
+
+@pytest.fixture(autouse=True)
 def _no_duckdb_pushdown_by_default(monkeypatch):
     """Pin `widget_duckdb_pushdown` OFF for the suite.
 

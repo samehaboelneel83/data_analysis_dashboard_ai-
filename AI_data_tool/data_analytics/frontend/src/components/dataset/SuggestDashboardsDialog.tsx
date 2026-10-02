@@ -116,7 +116,7 @@ const LEFT_OUT = ['units', 'meaning', 'repeat', 'promise', 'identifier', 'axis',
 const isLeftOut = (c?: string): c is typeof LEFT_OUT[number] => !!c && (LEFT_OUT as readonly string[]).includes(c)
 /** The panel's sections, named in the reader's language. The server's English
  *  title is the fallback for anything else (the quick designer's own titles). */
-const SECTIONS = ['summary', 'composition', 'measures', 'equity', 'time', 'exceptions', 'relationships', 'detail', 'drill'] as const
+const SECTIONS = ['summary', 'composition', 'measures', 'equity', 'time', 'exceptions', 'relationships', 'detail', 'quality', 'drill'] as const
 type SectionKey = typeof SECTIONS[number]
 const isSection = (s?: string): s is SectionKey => !!s && (SECTIONS as readonly string[]).includes(s)
 const STAGES = ['queued', 'reading', 'facts', 'proposing', 'drawing', 'selecting'] as const
@@ -247,11 +247,15 @@ export default function SuggestDashboardsDialog(
   }, [jobId, datasetId])
 
   const ask = async () => {
+    // "Suggest again" over a panel already shown asks the analysts afresh;
+    // the first ask reuses their kept answers, so the same data gives the
+    // same panel.
+    const fresh = mode === 'panel' && proposals !== null
     setBusy(true); setError(''); setReason(''); setProposals(null); setSource(null)
     setQuestion(''); setStats(null); setFacts([]); setStage(null)
     try {
       abortRef.current = new AbortController()
-      const body = mode === 'panel' ? { goal, mode, size, background: true } : { goal, count: 3 }
+      const body = mode === 'panel' ? { goal, mode, size, background: true, fresh } : { goal, count: 3 }
       const got = await datasetsApi.suggestDashboards(datasetId, body, abortRef.current.signal)
       if (!alive.current) return
       if (got.job_id) {
@@ -613,9 +617,10 @@ export default function SuggestDashboardsDialog(
               {proposal.widgets.map((w, j) => (
                 <li key={j} style={{ marginBottom: 4 }}>
                   <strong>{w.title}</strong>{' '}
-                  <span style={muted}>{w.widget_type}</span>{' · '}
-                  <span style={muted}>{w.row_count === 1
-                    ? tr('sdd.row1') : tr('sdd.rows', { n: w.row_count.toLocaleString() })}</span>
+                  <span style={muted}>{w.widget_type}</span>
+                  {/* A note (the data-quality page's text) draws no rows. */}
+                  {typeof w.row_count === 'number' && <>{' · '}<span style={muted}>{w.row_count === 1
+                    ? tr('sdd.row1') : tr('sdd.rows', { n: w.row_count.toLocaleString() })}</span></>}
                   {typeof w.evidence === 'number' && (
                     <span data-testid="proposal-evidence" style={muted}>{' · '}{tr(
                       w.evidence >= 0.3 ? 'sug.evidence.strong'

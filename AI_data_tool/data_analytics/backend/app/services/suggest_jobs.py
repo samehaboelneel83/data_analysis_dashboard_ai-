@@ -47,7 +47,8 @@ async def run_panel_job(ctx: jobs.JobContext) -> None:
 
     try:
         result = await sug.panel(inputs, ctx.inputs.get("goal") or None,
-                                 int(ctx.inputs.get("size") or 24), progress=progress)
+                                 int(ctx.inputs.get("size") or 24), progress=progress,
+                                 fresh=bool(ctx.inputs.get("fresh")))
     except (jobs.JobCancelled, jobs.LeaseLost):
         raise
     except Exception as exc:                                 # noqa: BLE001

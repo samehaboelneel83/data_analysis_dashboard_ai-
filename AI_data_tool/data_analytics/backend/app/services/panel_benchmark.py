@@ -31,8 +31,16 @@ def question(widget_type: str, config: dict, columns: set[str], id_cols: set[str
     cfg = config or {}
     # A list of records answers one question -- "can I look a record up?" --
     # whichever columns it shows.
+    # A short sorted list ("top 10 days by revenue") is a ranking, though:
+    # it asks which rows lead on its sort column, with what beside them.
     if wt in ("table", "list") and isinstance(cfg.get("columns"), list) and not cfg.get("dimension"):
-        return "detail", frozenset()
+        try:
+            short = 0 < int(cfg.get("limit") or 0) <= 25
+        except (TypeError, ValueError):
+            short = False
+        if not (short and cfg.get("sort_col")):
+            return "detail", frozenset()
+        return "compare", frozenset(c for c in cfg["columns"] if c in columns) - set(id_cols)
     used: set[str] = set()
     for k, v in (config or {}).items():
         if k == "filters":

@@ -1046,11 +1046,15 @@ def _identity(w: dict) -> tuple:
     grain = "" if q == "over_time" else str(c.get("dimension_granularity") or "")
     # A distribution draws every value: an aggregation on it changes nothing.
     agg = "" if wt in ("box_plot", "histogram") else str(c.get("aggregation") or "")
+    # A ranked list is a question of what it is ranked by: the top days by
+    # orders and the top days by cancellations show the same columns.
+    rank = str(c.get("sort_col") or "") if wt in _GRIDS and c.get("columns") and c.get("limit") else ""
     return (q, _columns(c), agg,
-            grain, json.dumps(c.get("filters") or [], sort_keys=True))
+            grain, json.dumps(c.get("filters") or [], sort_keys=True), rank)
 
 
-def select(candidates: list[dict], size: int, sections: list[str]) -> tuple[list[dict], dict]:
+def select(candidates: list[dict], size: int, sections: list[str],
+           summary_cap: int = 4) -> tuple[list[dict], dict]:
     """Greedy pick by value x evidence x novelty, under per-type, per-section
     and flat-result quotas. Returns (chosen, stats)."""
     merged: dict[tuple, dict] = {}
@@ -1067,7 +1071,7 @@ def select(candidates: list[dict], size: int, sections: list[str]) -> tuple[list
     pool = list(merged.values())
     per_type = max(2, size // 8)
     per_section = {s: max(2, math.ceil(size / max(1, len(sections))) + 1) for s in sections}
-    per_section["summary"] = min(4, max(2, size // 8))
+    per_section["summary"] = min(summary_cap, max(2, size // 8))
     max_flat = max(1, size // 12)
     # Headline numbers: one per measure and aggregation. Three "headcount"
     # tiles (all staff, then two filtered) opened the live HR page.
@@ -1141,6 +1145,64 @@ def select(candidates: list[dict], size: int, sections: list[str]) -> tuple[list
     return chosen, {"duplicates_merged": dupes, "unique": len(merged)}
 
 
+# ── lens answers, kept ───────────────────────────────────────────────────────
+
+LENS_CACHE_TTL_S = 7 * 24 * 3600
+FRESH_TEMPERATURE = 0.4
+
+
+def _fresh_seed() -> int:
+    import secrets
+    return secrets.randbelow(2**31 - 1) + 1
+_LENS_CACHE = None
+
+
+def _lens_store():
+    """The shared cache when one is configured (every worker reuses an
+    answer), else a small in-process one of its own: lens answers must not
+    compete with widget results for LRU places."""
+    global _LENS_CACHE
+    from ..core.config import settings
+    if getattr(settings, "valkey_url", None):
+        from .widget_shaping import get_cache_backend
+        return get_cache_backend()
+    if _LENS_CACHE is None:
+        from .cache_backend import InProcessCache
+        _LENS_CACHE = InProcessCache(maxsize=256)
+    return _LENS_CACHE
+
+
+def lens_cache_key(client, messages: list) -> str:
+    """Same model, same prompt (which carries the data's profile, facts and
+    the question), same seed: the same answer."""
+    import hashlib
+    who = [type(client).__name__] + [str(getattr(client, a, "") or "") for a in ("provider", "base_url", "model")]
+    body = json.dumps([who, messages, LENS_SCHEMA, LENS_SEED], sort_keys=True, default=str)
+    return "lens:" + hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+def _cache_get(key: str):
+    try:
+        raw = _lens_store().get(key)
+        if raw is None:
+            return None
+        return json.loads(raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw)
+    except Exception:                                        # noqa: BLE001
+        return None          # a cache that fails is a cache miss
+
+
+def _cache_set(key: str, value: dict) -> None:
+    try:
+        _lens_store().set(key, json.dumps(value, default=str).encode("utf-8"), LENS_CACHE_TTL_S)
+    except Exception:                                        # noqa: BLE001
+        log.warning("lens answer could not be cached", exc_info=True)
+
+
+def clear_lens_cache() -> None:
+    global _LENS_CACHE
+    _LENS_CACHE = None
+
+
 # ── the run ──────────────────────────────────────────────────────────────────
 
 Probe = Callable[[str, dict], Awaitable[dict]]
@@ -1164,6 +1226,10 @@ def _size(w: dict, section: str, first_in_section: bool) -> tuple[int, int]:
         return 3, max(3, 1 + len((w.get("config") or {}).get("measures") or []))
     if wt in _FULL or wt.startswith("map_"):
         return 12, _TALL.get(wt, 5)
+    if wt == "text":
+        # A list of findings across the page, a row per two lines of it.
+        lines = str((w.get("config") or {}).get("content") or "").count("\n") + 1
+        return 12, min(6, 1 + math.ceil(lines / 2))
     # The page's lead trend gets the width: a time line squeezed into half a
     # page loses the years it is about.
     if section == "time" and first_in_section and wt in ("line", "area", "step", "bar"):
@@ -1278,6 +1344,96 @@ def date_slicers(profile: dict, limit: int = MAX_SLICERS) -> list[dict]:
             for g in grains][:limit]
 
 
+def series_backbone(profile: dict, ineligible: set[str] | frozenset = frozenset(),
+                    identical: dict | None = None, dates: list[str] | None = None) -> list[dict]:
+    """The visuals every analyst draws for one-row-per-period data, before
+    any lens has an opinion: each total as a headline and as a monthly trend,
+    the main totals by quarter, every rate as a monthly average, the top days,
+    the measures side by side, and which of them move together.
+
+    The lenses drew orders and revenue against each other six ways on daily
+    ops and never plain "revenue by month" or "canceled orders" (65-77%
+    coverage, five-dataset review, 2026-10-02). Candidates only: they go
+    through the same gate, drawing and selection as every lens idea."""
+    from .semantic_guard import non_additive_kind
+    date = next(iter(dates or []), None)
+    if not date:
+        return []
+    twins = identical or {}
+    nums: list[dict] = []
+    for c in profile.get("columns", []):
+        if c.get("role") != "numeric" or c.get("is_identifier") or c["name"] in ineligible \
+                or c.get("is_personal") or non_additive_kind(c["name"]) == "coordinate":
+            continue
+        # One of two columns that always hold the same number is shown once.
+        if any(c["name"] in (twins.get(k["name"]) or ()) for k in nums):
+            continue
+        nums.append(c)
+    additive = [c["name"] for c in nums if not _not_additive(c["name"])]
+    rates = [c["name"] for c in nums if _not_additive(c["name"])]
+    if len(nums) < 3:
+        return []
+    # "total_freight_cost" reads "freight cost": the titles say "Total" themselves.
+    label = lambda m: re.sub(r"^total ", "", m.replace("_", " "))     # noqa: E731
+    out: list[dict] = []
+
+    def add(wt, title, cfg, section, value, why):
+        out.append({"widget_type": wt, "title": title, "question": title, "config": cfg,
+                    "section": section, "value": value, "source": "backbone", "why": why,
+                    "audience": "executive" if section == "summary" else "manager"})
+
+    for m in additive[:6]:
+        add("kpi", f"Total {label(m)}", {"measure": m, "aggregation": "sum"}, "summary", 5,
+            f"The period's total {label(m)}.")
+        add("line", f"{label(m).capitalize()} by month",
+            {"dimension": date, "dimension_granularity": "month", "measure": m, "aggregation": "sum"},
+            "time", 4, f"How {label(m)} moves month to month.")
+    for m in additive[:3]:
+        add("bar", f"{label(m).capitalize()} by quarter",
+            {"dimension": date, "dimension_granularity": "quarter", "measure": m, "aggregation": "sum",
+             "sort": "asc", "sort_by": "dimension"}, "time", 3, f"{label(m).capitalize()}, quarter by quarter.")
+    for m in rates[:4]:
+        add("line", f"Average {re.sub(r'^(avg|mean|average) ', '', label(m))} by month",
+            {"dimension": date, "dimension_granularity": "month", "measure": m, "aggregation": "avg"},
+            "time", 3, f"The daily {label(m)}, averaged per month.")
+    # The main total against each of the next two, on one time axis.
+    for m2 in additive[1:5]:
+        add("dual_axis_bar_line", f"{label(additive[0]).capitalize()} vs {label(m2)} by month",
+                {"dimension": date, "dimension_granularity": "month", "measure": additive[0],
+                 "aggregation": "sum", "measure2": m2, "aggregation2": "sum"}, "exceptions", 4,
+                "Whether the two rise and fall together.")
+    # The top days by the main totals, and by any total the data also keeps
+    # as a rate (canceled orders beside cancellation_rate_pct): what the
+    # dataset itself treats as a problem to watch.
+    def stems(name: str) -> set:
+        return {t[:5] for t in re.split(r"[_\W]+", name.lower()) if len(t) >= 4 and t not in _GENERIC_WORDS}
+    # Only the words a total does not share with the other totals: "orders"
+    # in canceled_orders ties it to every order column, "cancel" to one.
+    def own(m: str) -> set:
+        return stems(m) - set().union(*(stems(x) for x in additive if x != m))
+    watched = [m for m in additive if any(own(m) & stems(r) for r in rates)]
+    for m in list(dict.fromkeys(additive[:2] + watched))[:3]:
+        beside = [x for x in additive[:2] if x != m][:1]
+        beside += [r for r in rates if own(m) & stems(r)][:1] or rates[:1]
+        add("table", f"Top 10 days by {label(m)}",
+            {"columns": [date, m] + beside, "sort_col": m, "sort": "desc", "limit": 10}, "exceptions", 4,
+            f"The days with the most {label(m)}, and what else happened on them.")
+    if len(nums) >= 3:
+        add("correlation_matrix", "Which measures move together",
+            {"measures": (additive + rates)[:10]}, "relationships", 4,
+            "Pairs of daily numbers that rise and fall together.")
+    # What the biggest total moves with: the largest-valued additive measure
+    # (revenue, not counts) explained by the other totals.
+    sized = sorted(((c.get("max") or 0, c["name"]) for c in nums if c["name"] in additive), reverse=True)
+    if sized and len(additive) >= 3:
+        target = sized[0][1]
+        preds = [m for m in additive if m != target][:4]
+        add("model_linear", f"What moves {label(target)}",
+            {"measure": target, "predictors": preds}, "relationships", 3,
+            f"How much of the day-to-day change in {label(target)} the other totals explain.")
+    return out
+
+
 def detail_table(profile: dict, ineligible: set[str] | frozenset = frozenset(),
                  dates: list[str] | None = None, mixed: dict | None = None) -> dict | None:
     """The rows themselves, for looking one up: the record's identifier, its
@@ -1321,6 +1477,36 @@ def with_slicers(placed: list[tuple[dict, dict]], slicers: list[dict]) -> list[t
     return band + [(w, {**slot, "y": slot["y"] + h}) for w, slot in placed]
 
 
+QUALITY = {"key": "quality", "title": "Data quality",
+           "brief": "what in the data itself could mislead a chart, and where to fix it"}
+
+
+def quality_widgets(findings: list[dict]) -> list[dict]:
+    """A "Data quality" page: the faults in words, then each mis-spelt or
+    space-padded label counted side by side, so the person sees how many rows
+    each spelling holds before deciding which to fix.
+
+    The call-record analysts' reference had such a page (duplicates, " Catch
+    All Zone", "Mobile To Mobile"); the panel only stated the facts."""
+    if not findings:
+        return []
+    out = [{"widget_type": "text", "title": "What to check in the data", "section": "quality",
+            "config": {"content": "\n".join(f"- {f['text']}" for f in findings)},
+            "why": "Faults found in the rows themselves; totals and splits include them until fixed.",
+            "source": "panel", "value": 4}]
+    for f in findings:
+        c, vals = f.get("column"), [v for v in f.get("values") or [] if v]
+        if f.get("kind") not in ("variants", "spaces") or not c or not vals:
+            continue
+        what = "spelling" if f["kind"] == "variants" else "padded value"
+        out.append({"widget_type": "bar", "title": f"Rows per {what} of {c.replace('_', ' ')}",
+                    "section": "quality", "source": "panel", "value": 4,
+                    "config": {"dimension": c, "measure": c, "aggregation": "count",
+                               "filters": [{"column": c, "op": "in", "value": vals}]},
+                    "why": f["text"]})
+    return out[:5]
+
+
 def drill_page(proposals: list[dict], categories: list[str]) -> dict | None:
     """A drill-through page for one value of the dashboard's main category.
 
@@ -1343,6 +1529,8 @@ def drill_page(proposals: list[dict], categories: list[str]) -> dict | None:
         return None
     marked = 0
     for p in proposals:
+        if p.get("section") == "quality":
+            continue          # a count of misspellings opens nothing
         for w in p.get("widgets", []):
             if w.get("widget_type") != "slicer" and (w.get("config") or {}).get("dimension") == col:
                 w["drill_to"] = "drill"
@@ -1361,7 +1549,8 @@ def drill_page(proposals: list[dict], categories: list[str]) -> dict | None:
 async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
                     ineligible: set[str], findings: list[dict], facts: dict,
                     goal: str | None, size: int, probe: Probe, client=None,
-                    knowledge=None, progress=None, extra: list[dict] | None = None) -> dict:
+                    knowledge=None, progress=None, extra: list[dict] | None = None,
+                    fresh: bool = False) -> dict:
     from .readback import as_i18n, takeaway
     from .suggest_dataset_dashboard import (PROBE_CONCURRENCY, _probe, polish_widget,
                                             resolve_time_words, validate_widget)
@@ -1371,6 +1560,7 @@ async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
     # 1. proposals: one call per lens, concurrently; plus the engine's own ideas
     proposed: list[dict] = []
     lens_notes: dict[str, str] = {}
+    lens_cached: set[str] = set()
     async def tell(stage: str, **detail) -> None:
         if progress is not None:
             await progress(stage, detail)
@@ -1389,9 +1579,24 @@ async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
             # Greedy and seeded: the same data and question should get the
             # same panel. At 0.2 the coverage of one dataset moved 16 points
             # between identical runs (five-dataset review, 2026-10-02).
-            got = await client.complete_json(
-                lens_messages(lens, profile, facts.get("text") or "", goal, knowledge, n=per_lens),
-                LENS_SCHEMA, max_tokens=8000, enforce=True, temperature=0.0, seed=LENS_SEED)
+            messages = lens_messages(lens, profile, facts.get("text") or "", goal, knowledge, n=per_lens)
+            # Even greedy and seeded, the local model server changed chart
+            # titles between identical runs (batching): the answer to the
+            # same question on the same data and model is kept and reused.
+            key = lens_cache_key(client, messages)
+            hit = None if fresh else _cache_get(key)
+            if hit is not None:
+                lens_cached.add(lens)
+                return lens, hit
+            # "Suggest again" asks for other ideas: greedy with the same seed
+            # would repeat the kept answer, so it samples a little, and the
+            # new answer replaces the kept one (the next plain run shows what
+            # the person last saw).
+            got = await client.complete_json(messages, LENS_SCHEMA, max_tokens=8000, enforce=True,
+                                             temperature=FRESH_TEMPERATURE if fresh else 0.0,
+                                             seed=_fresh_seed() if fresh else LENS_SEED)
+            if isinstance(got, dict) and got.get("widgets"):
+                _cache_set(key, got)
             return lens, got
         answers = await asyncio.gather(*(ask(l) for l in lenses), return_exceptions=True)
         for lens, got in zip(lenses, answers):
@@ -1402,7 +1607,7 @@ async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
                 continue
             got = got[1]
             items = (got or {}).get("widgets") or []
-            lens_notes[lens] = f"{len(items)} proposed"
+            lens_notes[lens] = f"{len(items)} proposed" + (" (reused)" if lens in lens_cached else "")
             for w in items:
                 # A model's answer is data: anything not shaped like a widget
                 # is skipped, not trusted to have the fields it should.
@@ -1431,7 +1636,19 @@ async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
     # The derived fields' own charts (services/derived_fields): a rate of
     # totals, a duration -- through the same gate and selection as the rest.
     extra = [{**w, "value": _value(w.get("value"))} for w in extra or []]
-    candidates = proposed + rules + extra
+    # One row per period: the standard series visuals, so a plain "revenue
+    # by month" never depends on a lens thinking of it.
+    backbone = []
+    if "exceptions" in lenses:
+        from .insights import order_event_dates as _order
+        backbone = series_backbone(profile, ineligible, facts.get("identical") or {},
+                                   _order(sorted(dates)))
+    if backbone:
+        # One row per period: a count of rows by the date counts days, a
+        # flat line of ones ("Rows over day date", daily ops).
+        rules = [w for w in rules if not (str((w.get("config") or {}).get("aggregation")) == "count"
+                                          and (w.get("config") or {}).get("dimension") in dates)]
+    candidates = proposed + rules + extra + backbone
 
     # 2. gate: fix vocabulary, validate, draw
     rejected: list[str] = []
@@ -1486,7 +1703,10 @@ async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
     # 3. select
     await tell("selecting", drawn=len(alive))
     sections = ["summary"] + lenses
-    chosen, stats = select(alive, size, sections)
+    # A series has a headline per total (orders, revenue, cancellations...),
+    # not the four a categorical dataset's summary page holds.
+    chosen, stats = select(alive, size, sections,
+                           summary_cap=6 if backbone else 4)
 
     # 4. the detail page: the rows themselves, drawn like everything else
     from .insights import order_event_dates
@@ -1501,6 +1721,21 @@ async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
         except Exception as exc:                             # noqa: BLE001
             log.warning("detail table could not be drawn: %s", exc)
 
+    # 4b. the data-quality page: the faults in words, the broken labels drawn
+    for w in quality_widgets(facts.get("quality") or []):
+        if w["widget_type"] != "text":
+            try:
+                got = await probe(w["widget_type"], w["config"])
+            except Exception as exc:                         # noqa: BLE001
+                log.warning("quality chart could not be drawn: %s", exc)
+                continue
+            if len((got or {}).get("rows") or []) < 2:
+                continue
+            w = {**w, "row_count": len(got["rows"])}
+        chosen.append(w)
+        if "quality" not in sections:
+            sections.append("quality")
+
     # 5. shape as one proposal per section, in section order, each laid out
     #    as the page it will become, with its filters across the top
     by_section = {sec: [w for w in chosen if (w.get("section") or "composition") == sec]
@@ -1511,16 +1746,19 @@ async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
         widgets = by_section[sec]
         if not widgets:
             continue
-        spec = SUMMARY if sec == "summary" else DETAIL if sec == "detail" else LENSES[sec]
+        spec = SUMMARY if sec == "summary" else DETAIL if sec == "detail" \
+            else QUALITY if sec == "quality" else LENSES[sec]
         # A page that splits by nothing filterable (a trend, a model) still
         # takes the dataset's own: "pay over time, for Sales" is a question.
-        controls = slicers_for(widgets, profile, ineligible, fallback=overall)
+        # The quality page is about the rows as they are: no filters.
+        controls = [] if sec == "quality" else slicers_for(widgets, profile, ineligible, fallback=overall)
         keys = ("widget_type", "title", "why", "config", "row_count", "takeaway", "takeaway_i18n",
                 "question", "value", "audience", "evidence", "source")
         proposals.append({
             "title": spec["title"], "section": sec,
             "rationale": "The numbers to open the page with." if sec == "summary"
             else spec["brief"] if sec == "detail"
+            else f"{spec['brief'][0].upper()}{spec['brief'][1:]}." if sec == "quality"
             else f"Through the {spec['title'].lower()} lens: {spec['brief']}.",
             "widgets": [{**{k: w.get(k) for k in keys}, "layout": slot}
                         for w, slot in with_slicers(layout_section(widgets, sec), controls)],
@@ -1532,7 +1770,8 @@ async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
         "proposals": proposals,
         "panel": {"lenses": lenses, "lens_notes": lens_notes,
                   "candidates": len(candidates), "from_model": len(proposed),
-                  "from_statistics": len(rules), "from_derived": len(extra), "drawn": len(alive),
+                  "from_statistics": len(rules), "from_derived": len(extra),
+                  "from_backbone": len(backbone), "drawn": len(alive),
                   "rejected": len(rejected), "duplicates_merged": stats["duplicates_merged"],
                   "selected": len(chosen), "size": size,
                   # What a reader is told was left out, by kind; "not_picked"

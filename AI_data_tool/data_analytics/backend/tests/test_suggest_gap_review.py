@@ -689,3 +689,127 @@ def test_the_model_client_sends_the_seed():
     from app.services.llm import LLMClient
     assert "seed" in LLMClient.complete.__code__.co_varnames
     assert "seed" in LLMClient.complete_json.__code__.co_varnames
+
+
+# ── round 5 ──────────────────────────────────────────────────────────────────
+
+def _daily_rated(n=400):
+    df = _daily(n)
+    df["cancellation_rate_pct"] = (df.canceled_orders / df.total_orders * 100).round(2)
+    return df
+
+
+def test_one_row_per_period_data_gets_the_standard_series_visuals():
+    """Daily ops: the lenses drew orders against revenue six ways and never
+    plain "revenue by month" or the top cancellation days."""
+    from app.services.analyst_panel import series_backbone
+    df = _daily_rated()
+    got = series_backbone(_profile(df), set(), {}, ["day_date"])
+    by = {(w["widget_type"], w["title"]) for w in got}
+    assert ("kpi", "Total canceled orders") in by and ("line", "Revenue by month") in by
+    assert ("line", "Average order value by month") in by          # a rate is averaged, never summed
+    assert not any(w["config"].get("measure") == "avg_order_value" and w["config"].get("aggregation") == "sum"
+                   for w in got)
+    tops = {w["config"]["sort_col"]: w["config"]["columns"] for w in got if w["widget_type"] == "table"}
+    # canceled orders is ranked because the data also keeps it as a rate
+    assert "cancellation_rate_pct" in tops["canceled_orders"]
+    corr = next(w for w in got if w["widget_type"] == "correlation_matrix")
+    assert {"total_orders", "canceled_orders", "total_revenue"} <= set(corr["config"]["measures"])
+    assert series_backbone(_profile(df), set(), {}, []) == []
+
+
+def test_period_bars_and_regressions_are_offered_without_a_category():
+    from app.services.suggest_dataset_dashboard import usable_widgets, validate_widget
+    from app.services.widget_data import get_widget_data_from_df
+    df = _daily_rated()
+    profile = _profile(df)
+    assert {"bar", "dual_axis_bar_line", "box_plot", "model_linear"} <= set(usable_widgets(profile))
+    bar = {"dimension": "day_date", "dimension_granularity": "quarter", "measure": "total_revenue",
+           "aggregation": "sum"}
+    assert validate_widget({"widget_type": "bar", "title": "Revenue by quarter", "config": bar}, profile)[0]
+    assert len(get_widget_data_from_df(df, bar, "bar")["rows"]) == 5
+
+
+def test_a_short_sorted_list_is_a_ranking_question():
+    from app.services.analyst_panel import _identity
+    from app.services.panel_benchmark import question
+    cols = {"day", "orders", "canceled"}
+    top = {"columns": ["day", "orders", "canceled"], "sort_col": "canceled", "limit": 10}
+    assert question("table", top, cols) == ("compare", frozenset(cols))
+    assert question("table", {**top, "limit": 200}, cols) == ("detail", frozenset())
+    a = {"widget_type": "table", "config": top}
+    b = {"widget_type": "table", "config": {**top, "sort_col": "orders"}}
+    assert _identity(a) != _identity(b)
+
+
+def test_a_lens_answer_is_reused_for_the_same_question_on_the_same_data():
+    import asyncio
+    from app.services import analyst_panel as AP
+    from app.services.suggest_inputs import SuggestInputs, panel
+    AP.clear_lens_cache()
+    calls = []
+
+    class Client:
+        model = "m1"
+
+        async def complete_json(self, messages, schema, **kw):
+            calls.append(1)
+            return {"widgets": [{"widget_type": "histogram", "title": "Score spread",
+                                 "config": {"measure": "final_score"}, "question": "q", "value": 4}]}
+    df = _enrolments()
+    tm = detect_types(df)
+
+    def run(client):
+        inp = SuggestInputs(df=df, type_map=tm, profile=build_profile(df, tm, {}), knowledge=None, measures=[],
+                            column_meta={}, description=None, measured={})
+        return asyncio.run(panel(inp, None, 12, client=client))
+    first = run(Client())
+    n = len(calls)
+    second = run(Client())
+    assert n > 0 and len(calls) == n                          # nothing asked twice
+    assert [w["title"] for p in first["proposals"] for w in p["widgets"]] == \
+           [w["title"] for p in second["proposals"] for w in p["widgets"]]
+    assert all("(reused)" in v for v in second["panel"]["lens_notes"].values())
+
+    class Other(Client):
+        model = "m2"
+    run(Other())
+    assert len(calls) == 2 * n                                # another model is asked afresh
+    AP.clear_lens_cache()
+
+
+def test_a_failed_or_empty_lens_answer_is_not_kept():
+    from app.services import analyst_panel as AP
+    AP.clear_lens_cache()
+    key = AP.lens_cache_key(object(), [{"role": "user", "content": "x"}])
+    assert AP._cache_get(key) is None
+    AP._cache_set(key, {"widgets": [1]})
+    assert AP._cache_get(key) == {"widgets": [1]}
+    assert key != AP.lens_cache_key(object(), [{"role": "user", "content": "y"}])
+    AP.clear_lens_cache()
+
+
+def test_the_datas_faults_get_a_page_of_their_own():
+    import asyncio
+    from app.services.analyst_panel import quality_widgets
+    from app.services.fact_sheet import quality_findings
+    from app.services.suggest_inputs import SuggestInputs, panel
+    df = pd.DataFrame({"dest": (["Mobile to Mobile"] * 6 + ["Mobile To Mobile"] * 3 + ["Local"] * 11) * 3,
+                       "amount": np.arange(60) * 1.5,
+                       "day": pd.date_range("2025-01-01", periods=60, freq="D")})
+    df = pd.concat([df, df.iloc[:4]], ignore_index=True)
+    found = quality_findings(df, ["dest"])
+    assert [f["kind"] for f in found] == ["duplicates", "variants"]
+    ws = quality_widgets(found)
+    assert ws[0]["widget_type"] == "text" and "exact duplicates" in ws[0]["config"]["content"]
+    assert ws[1]["config"]["filters"][0]["value"] == ["Mobile to Mobile", "Mobile To Mobile"]
+    assert quality_widgets([]) == []
+
+    tm = detect_types(df)
+    inp = SuggestInputs(df=df, type_map=tm, profile=build_profile(df, tm, {}), knowledge=None, measures=[],
+                        column_meta={}, description=None, measured={})
+    out = asyncio.run(panel(inp, None, 12, client=None))
+    page = next(p for p in out["proposals"] if p["section"] == "quality")
+    assert [w["widget_type"] for w in page["widgets"]] == ["text", "bar"]   # no slicers on it
+    assert page["widgets"][0]["layout"]["w"] == 12
+    assert not any(w.get("drill_to") for w in page["widgets"])

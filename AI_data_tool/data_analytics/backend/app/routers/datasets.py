@@ -1978,7 +1978,7 @@ async def suggest_dashboards(dataset_id: int, req: SuggestDashboardsRequest,
         goal = (req.goal or "").strip()
         job, _ = await job_service.enqueue(
             db, user=current_user, kind=PANEL_JOB_KIND,
-            inputs={"dataset_id": dataset_id, "goal": goal, "size": req.size},
+            inputs={"dataset_id": dataset_id, "goal": goal, "size": req.size, "fresh": req.fresh},
             subject=f"Analyst panel: {ds.name}", max_attempts=2)
         return {"job_id": job.id, "state": job.state, "source": "panel"}
 
@@ -1991,7 +1991,7 @@ async def suggest_dashboards(dataset_id: int, req: SuggestDashboardsRequest,
 
     goal = (req.goal or "").strip()
     if req.mode == "panel":
-        return await sug.panel(inputs, goal, req.size)
+        return await sug.panel(inputs, goal, req.size, fresh=req.fresh)
     fields: dict = {"facts": []}
     if goal:
         # Measured facts, not column shapes: the designer proposes for the
