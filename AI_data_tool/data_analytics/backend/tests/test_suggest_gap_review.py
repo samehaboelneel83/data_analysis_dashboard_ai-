@@ -813,3 +813,43 @@ def test_the_datas_faults_get_a_page_of_their_own():
     assert [w["widget_type"] for w in page["widgets"]] == ["text", "bar"]   # no slicers on it
     assert page["widgets"][0]["layout"]["w"] == 12
     assert not any(w.get("drill_to") for w in page["widgets"])
+
+
+# ── round 5, live re-score ───────────────────────────────────────────────────
+
+def test_one_overview_matrix_keeps_the_most_measures():
+    """A lens's five-measure matrix beat the seven-measure one on the live
+    daily-ops panel, though only one overview is kept."""
+    from app.services.analyst_panel import select
+    narrow = {"widget_type": "correlation_matrix", "config": {"measures": ["a", "b", "c"]},
+              "value": 5, "evidence": 0.5, "section": "relationships", "source": "model"}
+    wide = {**narrow, "config": {"measures": ["a", "b", "c", "d", "e"]}, "value": 4, "source": "backbone"}
+    chosen, _ = select([narrow, wide], 10, ["summary", "relationships"])
+    assert [len(w["config"]["measures"]) for w in chosen] == [5]
+
+
+def test_a_measure_nothing_shows_gets_its_chart_even_when_flat():
+    from app.services.analyst_panel import select
+    shown = {"widget_type": "line", "config": {"dimension": "d", "measure": "orders", "aggregation": "sum"},
+             "value": 4, "evidence": 0.8, "section": "time"}
+    flat = {"widget_type": "line", "config": {"dimension": "d", "measure": "freight_per_item", "aggregation": "avg"},
+            "value": 3, "evidence": 0.02, "section": "time"}
+    flats = [{**flat, "config": {**flat["config"], "measure": f"other_{i}"}, "value": 2} for i in range(3)]
+    chosen, _ = select([shown, flat] + flats, 10, ["summary", "time"])
+    got = {w["config"]["measure"] for w in chosen}
+    assert "freight_per_item" in got
+    assert not any(m.startswith("other_") for m in got)          # low-valued flat ideas still wait
+
+
+def test_no_drill_through_on_a_period():
+    """Daily ops filtered by year and month slicers: every monthly chart
+    pointed at a "one day date" page its month labels could never fill."""
+    import asyncio
+    from app.services.suggest_inputs import SuggestInputs, panel
+    df = _daily_rated()
+    tm = detect_types(df)
+    inp = SuggestInputs(df=df, type_map=tm, profile=build_profile(df, tm, {}), knowledge=None, measures=[],
+                        column_meta={}, description=None, measured={})
+    out = asyncio.run(panel(inp, None, 24, client=None))
+    assert not any(p.get("page_type") == "drillthrough" for p in out["proposals"])
+    assert not any(w.get("drill_to") for p in out["proposals"] for w in p["widgets"])

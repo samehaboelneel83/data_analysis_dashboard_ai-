@@ -1064,7 +1064,14 @@ def select(candidates: list[dict], size: int, sections: list[str],
         if key in merged:
             dupes += 1
             # Keep the higher-valued copy; a model's question wording wins ties.
-            if (w["value"], w.get("source") == "model") > (merged[key]["value"], merged[key].get("source") == "model"):
+            # One overview of how the measures move together keeps the most
+            # measures: a lens's five-measure matrix beat the seven the daily-
+            # ops analysts drew (live, 2026-10-02).
+            def rank(x):
+                wide = len((x.get("config") or {}).get("measures") or []) if key[0] in (
+                    "correlation_matrix", "parallel_coordinates") else 0
+                return (wide, x["value"], x.get("source") == "model")
+            if rank(w) > rank(merged[key]):
                 merged[key] = w
         else:
             merged[key] = w
@@ -1138,7 +1145,11 @@ def select(candidates: list[dict], size: int, sections: list[str],
         if len(chosen) >= size:
             break
         new_cols = _columns(w["config"]) - seen
-        if not new_cols or w["value"] < 3 or (w["evidence"] < 0.1 and w.get("section") != "equity"):
+        # Flat is a finding too ("freight per item holds at 20"): a measure
+        # that nothing on the dashboard shows yet gets its chart even then.
+        # Average freight per item never appeared on the live daily-ops
+        # panel, against four charts of it in the analysts' reference.
+        if not new_cols or w["value"] < 3:
             continue
         chosen.append(w)
         seen = seen | _columns(w["config"])
@@ -1412,7 +1423,7 @@ def series_backbone(profile: dict, ineligible: set[str] | frozenset = frozenset(
     def own(m: str) -> set:
         return stems(m) - set().union(*(stems(x) for x in additive if x != m))
     watched = [m for m in additive if any(own(m) & stems(r) for r in rates)]
-    for m in list(dict.fromkeys(additive[:2] + watched))[:3]:
+    for m in list(dict.fromkeys(additive[:2] + watched))[:4]:
         beside = [x for x in additive[:2] if x != m][:1]
         beside += [r for r in rates if own(m) & stems(r)][:1] or rates[:1]
         add("table", f"Top 10 days by {label(m)}",
@@ -1763,7 +1774,10 @@ async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
             "widgets": [{**{k: w.get(k) for k in keys}, "layout": slot}
                         for w, slot in with_slicers(layout_section(widgets, sec), controls)],
         })
-    drill = drill_page(proposals, overall)
+    # A drill-through opens one VALUE of a category. A period slicer is not
+    # one: every monthly chart on daily ops pointed at a "one day date" page
+    # that its month labels could never fill (live, 2026-10-02).
+    drill = drill_page(proposals, [c for c in overall if c not in dates])
     if drill:
         proposals.append(drill)
     return {
