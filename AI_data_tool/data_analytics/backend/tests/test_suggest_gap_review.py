@@ -896,3 +896,75 @@ def test_two_daily_averages_are_read_against_each_other():
     got = series_backbone(_profile(df), set(), {}, ["day_date"])
     pairs = [w["config"] for w in got if w["widget_type"] == "numeric_series"]
     assert {"measure": "avg_order_value", "measure2": "avg_freight_cost"} in pairs
+
+
+def test_finished_records_are_counted_by_the_day_they_finished():
+    """Olist: orders placed per month was there; orders delivered per month,
+    by the delivery date, was the analysts' one question the panel missed."""
+    from app.services.analyst_panel import completion_trends
+    prof = {"columns": [{"name": "order_id", "role": "categorical", "is_identifier": True},
+                        {"name": "order_purchase_timestamp", "role": "datetime"},
+                        {"name": "order_delivered_customer_date", "role": "datetime"},
+                        {"name": "order_estimated_delivery_date", "role": "datetime"}]}
+    got = completion_trends(prof)
+    assert [w["config"] for w in got] == [{"dimension": "order_delivered_customer_date",
+                                           "dimension_granularity": "month",
+                                           "measure": "order_id", "aggregation": "countd"}]
+    assert got[0]["title"] == "Orders delivered per month"
+    assert completion_trends({"columns": prof["columns"][:2]}) == []   # nothing finishes
+
+
+def test_the_finished_record_is_the_one_the_date_names_first():
+    from app.services.analyst_panel import completion_trends
+    prof = {"columns": [{"name": "customer_id", "role": "categorical", "is_identifier": True},
+                        {"name": "order_item_id", "role": "numeric", "is_identifier": True},
+                        {"name": "order_id", "role": "categorical", "is_identifier": True},
+                        {"name": "order_purchase_timestamp", "role": "datetime"},
+                        {"name": "order_delivered_customer_date", "role": "datetime"}]}
+    assert completion_trends(prof)[0]["config"]["measure"] == "order_id"
+
+
+def test_a_position_number_is_not_counted_as_the_record():
+    from app.services.analyst_panel import completion_trends
+    prof = {"row_count": 1000,
+            "columns": [{"name": "order_item_id", "role": "numeric", "is_identifier": True, "distinct": 21},
+                        {"name": "order_purchase_timestamp", "role": "datetime"},
+                        {"name": "order_delivered_customer_date", "role": "datetime"}]}
+    got = completion_trends(prof)[0]
+    assert got["config"]["aggregation"] == "count" and got["config"]["measure"] == "order_delivered_customer_date"
+    assert got["title"].startswith("Records delivered")
+
+
+def test_money_is_totalled_and_split_by_the_main_categories():
+    from app.services.analyst_panel import money_totals
+    got = money_totals(_profile(_enrolments()))
+    by = {w["title"]: w["config"] for w in got}
+    assert by["Total tuition fee"] == {"measure": "tuition_fee", "aggregation": "sum"}
+    assert by["Total tuition fee by faculty"]["aggregation"] == "sum"
+    assert not any("final_score" in str(c) for c in by.values())       # a score is not money
+
+
+def test_a_copied_money_column_is_not_totalled_again():
+    from app.services.analyst_panel import money_totals
+    prof = {"columns": [{"name": "price", "role": "numeric"}, {"name": "price (copy)", "role": "numeric"},
+                        {"name": "fee", "role": "numeric"}, {"name": "status", "role": "categorical", "distinct": 5}]}
+    titles = [w["title"] for w in money_totals(prof, identical={"price": ["fee"]})]
+    assert "Total price" in titles and not any("copy" in t or "fee" in t for t in titles)
+
+
+def test_the_detail_table_leaves_out_a_copied_column():
+    from app.services.analyst_panel import detail_table
+    prof = {"columns": [{"name": "order_id", "role": "categorical", "is_identifier": True, "distinct": 100},
+                        {"name": "price", "role": "numeric"}, {"name": "price (copy)", "role": "numeric"},
+                        {"name": "freight", "role": "numeric"}]}
+    assert "price (copy)" not in detail_table(prof)["config"]["columns"]
+
+
+def test_a_column_in_mixed_units_gets_its_unit_check_on_the_quality_page():
+    from app.services.analyst_panel import quality_widgets
+    mixed = {"ROUNDED_VOLUME": {"by": "SERVICE", "high": "GPRS", "high_median": 52000.0,
+                                "low": "Mobile Telephony", "low_median": 60.0}}
+    ws = quality_widgets([], mixed)
+    assert "different units for each SERVICE" in ws[0]["config"]["content"]
+    assert ws[1]["config"] == {"dimension": "SERVICE", "measure": "ROUNDED_VOLUME", "aggregation": "median"}
+    assert quality_widgets([], {}) == []
