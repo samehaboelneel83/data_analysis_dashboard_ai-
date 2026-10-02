@@ -853,3 +853,37 @@ def test_no_drill_through_on_a_period():
     out = asyncio.run(panel(inp, None, 24, client=None))
     assert not any(p.get("page_type") == "drillthrough" for p in out["proposals"])
     assert not any(w.get("drill_to") for p in out["proposals"] for w in p["widgets"])
+
+
+def test_a_measure_only_inside_a_matrix_still_gets_its_own_chart():
+    from app.services.analyst_panel import select
+    matrix = {"widget_type": "correlation_matrix", "config": {"measures": ["orders", "freight_per_item"]},
+              "value": 5, "evidence": 0.6, "section": "relationships"}
+    orders = {"widget_type": "line", "config": {"dimension": "d", "measure": "orders", "aggregation": "sum"},
+              "value": 4, "evidence": 0.8, "section": "time"}
+    flat = {"widget_type": "line", "config": {"dimension": "d", "measure": "freight_per_item", "aggregation": "avg"},
+            "value": 3, "evidence": 0.02, "section": "time"}
+    chosen, _ = select([matrix, orders, flat], 10, ["summary", "time", "relationships"])
+    assert any(w["config"].get("measure") == "freight_per_item" for w in chosen)
+
+
+def test_every_measure_gets_a_chart_before_second_views_fill_the_room():
+    """The live daily-ops panel filled all 50 places with second views of
+    orders and revenue before freight per item had a chart of its own."""
+    from app.services.analyst_panel import select
+    bars = [{"widget_type": "bar", "config": {"dimension": "day", "measure": "orders", "aggregation": agg},
+             "value": 5, "evidence": 0.9, "section": "time"} for agg in ("sum", "avg", "max", "min")]
+    flat = {"widget_type": "line", "config": {"dimension": "day", "measure": "freight_per_item", "aggregation": "avg"},
+            "value": 3, "evidence": 0.02, "section": "time"}
+    chosen, _ = select(bars + [flat], 3, ["summary", "time"])
+    assert len(chosen) == 3
+    assert any(w["config"]["measure"] == "freight_per_item" for w in chosen)
+
+
+def test_rates_get_a_headline_beside_the_totals():
+    from app.services.analyst_panel import series_backbone
+    df = _daily_rated()
+    got = series_backbone(_profile(df), set(), {}, ["day_date"])
+    kpis = {w["title"]: w["config"] for w in got if w["widget_type"] == "kpi"}
+    assert kpis["Average order value per day"] == {"measure": "avg_order_value", "aggregation": "avg"}
+    assert kpis["Average cancellation rate pct per day"]["aggregation"] == "avg"
