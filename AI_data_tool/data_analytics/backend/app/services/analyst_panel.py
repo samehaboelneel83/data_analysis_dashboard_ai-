@@ -1053,6 +1053,11 @@ def _identity(w: dict) -> tuple:
             grain, json.dumps(c.get("filters") or [], sort_keys=True), rank)
 
 
+#: Visuals of many measures at once: they show how the measures relate, not
+#: any one measure on its own.
+_OVERVIEWS = ("correlation_matrix", "parallel_coordinates", "card")
+
+
 def select(candidates: list[dict], size: int, sections: list[str],
            summary_cap: int = 4) -> tuple[list[dict], dict]:
     """Greedy pick by value x evidence x novelty, under per-type, per-section
@@ -1078,7 +1083,9 @@ def select(candidates: list[dict], size: int, sections: list[str],
     pool = list(merged.values())
     per_type = max(2, size // 8)
     per_section = {s: max(2, math.ceil(size / max(1, len(sections))) + 1) for s in sections}
-    per_section["summary"] = min(summary_cap, max(2, size // 8))
+    # A wider headline page (summary_cap above 4: one row per period, a total
+    # and a rate per measure) also grows faster with the size asked for.
+    per_section["summary"] = min(summary_cap, max(2, size // (8 if summary_cap <= 4 else 5)))
     max_flat = max(1, size // 12)
     # Headline numbers: one per measure and aggregation. Three "headcount"
     # tiles (all staff, then two filtered) opened the live HR page.
@@ -1099,10 +1106,47 @@ def select(candidates: list[dict], size: int, sections: list[str],
         fresh = 0.08 if cols - seen else 0.0
         return 0.45 * (w["value"] / 5) + 0.40 * w["evidence"] + 0.15 * (1 - overlap) + fresh
 
+    def take(pick: dict) -> None:
+        nonlocal flat_n
+        pool.remove(pick)
+        chosen.append(pick)
+        fam = _family(pick["widget_type"], pick["config"])
+        type_n[fam] = type_n.get(fam, 0) + 1
+        sec = pick.get("section") or "composition"
+        sec_n[sec] = sec_n.get(sec, 0) + 1
+        flat_n += pick["evidence"] < 0.1 and sec != "equity"
+        used_cols.append(_columns(pick["config"]))
+        if sec == "summary":
+            headlines.add((_columns(pick["config"]), str(pick["config"].get("aggregation") or "")))
+
+    # One chart for each column nothing shows yet, the best that draws it --
+    # before the relaxed pass spends the room on second views of what is
+    # already shown. An overview of many measures at once (a correlation
+    # matrix, a multi-figure card, parallel coordinates) does not show any one
+    # of them: average freight per item sat only in the daily-ops matrix,
+    # against four charts of its own in the analysts' reference, and the
+    # relaxed pass had filled all 50 places first (live, 2026-10-02). Flat is
+    # a finding too ("freight per item holds at 20"), so flat counts here.
+    def own_cols(w: dict) -> frozenset:
+        return frozenset() if str(w["widget_type"]) in _OVERVIEWS else _columns(w["config"])
+
+    def cover() -> None:
+        seen = frozenset().union(*(own_cols(w) for w in chosen)) if chosen else frozenset()
+        for w in sorted(pool, key=score, reverse=True):
+            if len(chosen) >= size:
+                break
+            if str(w["widget_type"]) in _OVERVIEWS or w["value"] < 3:
+                continue
+            if not (_columns(w["config"]) - seen):
+                continue
+            take(w)
+            seen = seen | _columns(w["config"])
+
     # Two passes: the first keeps the page varied (per type, per section);
     # the second fills what the person asked for from what is left, when the
     # variety quotas -- not a lack of good ideas -- stopped it short (39 of 50
-    # on the live HR panel). The flat-result rule holds in both.
+    # on the live HR panel). The flat-result rule holds in both. Between them,
+    # every column gets its chart (cover).
     strict = True
     while pool and len(chosen) < size:
         pool.sort(key=score, reverse=True)
@@ -1126,33 +1170,11 @@ def select(candidates: list[dict], size: int, sections: list[str],
         if pick is None:
             if strict:
                 strict = False
+                cover()
                 continue
             break
-        pool.remove(pick)
-        chosen.append(pick)
-        fam = _family(pick["widget_type"], pick["config"])
-        type_n[fam] = type_n.get(fam, 0) + 1
-        sec = pick.get("section") or "composition"
-        sec_n[sec] = sec_n.get(sec, 0) + 1
-        flat_n += pick["evidence"] < 0.1 and sec != "equity"
-        used_cols.append(_columns(pick["config"]))
-        if sec == "summary":
-            headlines.add((_columns(pick["config"]), str(pick["config"].get("aggregation") or "")))
-    # Room left once the quotas stopped both passes: one chart for each
-    # column nothing shows yet, the best that draws it.
-    seen = frozenset().union(*used_cols) if used_cols else frozenset()
-    for w in sorted(pool, key=score, reverse=True):
-        if len(chosen) >= size:
-            break
-        new_cols = _columns(w["config"]) - seen
-        # Flat is a finding too ("freight per item holds at 20"): a measure
-        # that nothing on the dashboard shows yet gets its chart even then.
-        # Average freight per item never appeared on the live daily-ops
-        # panel, against four charts of it in the analysts' reference.
-        if not new_cols or w["value"] < 3:
-            continue
-        chosen.append(w)
-        seen = seen | _columns(w["config"])
+        take(pick)
+    cover()
     return chosen, {"duplicates_merged": dupes, "unique": len(merged)}
 
 
@@ -1381,7 +1403,11 @@ def series_backbone(profile: dict, ineligible: set[str] | frozenset = frozenset(
             continue
         nums.append(c)
     additive = [c["name"] for c in nums if not _not_additive(c["name"])]
-    rates = [c["name"] for c in nums if _not_additive(c["name"])]
+    # True rates and averages first (avg_freight_cost, cancellation_rate_pct),
+    # then per-day distinct counts (active_sellers): the headline and trend
+    # places go to what the analysts read as the day's rates.
+    rates = sorted((c["name"] for c in nums if _not_additive(c["name"])),
+                   key=lambda m: 0 if _ALREADY_A_RATE.search(m) else 1)
     if len(nums) < 3:
         return []
     # "total_freight_cost" reads "freight cost": the titles say "Total" themselves.
@@ -1399,11 +1425,17 @@ def series_backbone(profile: dict, ineligible: set[str] | frozenset = frozenset(
         add("line", f"{label(m).capitalize()} by month",
             {"dimension": date, "dimension_granularity": "month", "measure": m, "aggregation": "sum"},
             "time", 4, f"How {label(m)} moves month to month.")
+    # The typical day for each rate, beside the totals: the daily-ops
+    # analysts opened with average item value, average freight per item and
+    # the worst cancellation rate (live re-score, 2026-10-02).
+    for m in [r for r in rates if _ALREADY_A_RATE.search(r)][:3]:
+        add("kpi", f"Average {re.sub(r'^(avg|mean|average) ', '', label(m))} per day",
+            {"measure": m, "aggregation": "avg"}, "summary", 4, f"The daily {label(m)}, averaged over the period.")
     for m in additive[:3]:
         add("bar", f"{label(m).capitalize()} by quarter",
             {"dimension": date, "dimension_granularity": "quarter", "measure": m, "aggregation": "sum",
              "sort": "asc", "sort_by": "dimension"}, "time", 3, f"{label(m).capitalize()}, quarter by quarter.")
-    for m in rates[:4]:
+    for m in rates[:6]:
         add("line", f"Average {re.sub(r'^(avg|mean|average) ', '', label(m))} by month",
             {"dimension": date, "dimension_granularity": "month", "measure": m, "aggregation": "avg"},
             "time", 3, f"The daily {label(m)}, averaged per month.")
@@ -1717,7 +1749,7 @@ async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
     # A series has a headline per total (orders, revenue, cancellations...),
     # not the four a categorical dataset's summary page holds.
     chosen, stats = select(alive, size, sections,
-                           summary_cap=6 if backbone else 4)
+                           summary_cap=9 if backbone else 4)
 
     # 4. the detail page: the rows themselves, drawn like everything else
     from .insights import order_event_dates
