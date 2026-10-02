@@ -500,6 +500,38 @@ describe('the analyst panel mode', () => {
     expect(add.mock.calls.map(c => (c[2] as { title: string }).title)).toContain('Late share by month')
   })
 
+  it('builds the drill-through page and points the charts split by its category at it', async () => {
+    const DRILL = {
+      ...PANEL,
+      proposals: [
+        PANEL.proposals[0],
+        { ...PANEL.proposals[1], widgets: [{ ...PANEL.proposals[1].widgets[0], drill_to: 'drill' }] },
+        { title: 'One department', section: 'drill', source: 'panel', rationale: 'one value',
+          page_type: 'drillthrough', prompt_column: 'department', prompt_label: 'Department',
+          widgets: [{ widget_type: 'kpi', title: 'Median wait', row_count: 1,
+                      config: { measure: 'wait_minutes', aggregation: 'median' } }] },
+      ],
+    }
+    vi.spyOn(datasetsApi, 'suggestDashboards').mockResolvedValue(DRILL as never)
+    vi.spyOn(reportsApi, 'create').mockResolvedValue({ id: 9, pages: [{ id: 1 }] } as never)
+    vi.spyOn(reportsApi, 'updatePage').mockResolvedValue({} as never)
+    const addPage = vi.spyOn(reportsApi, 'addPage')
+      .mockResolvedValueOnce({ id: 2 } as never).mockResolvedValueOnce({ id: 3 } as never)
+    let next = 50
+    vi.spyOn(reportsApi, 'addWidget').mockImplementation(async () => ({ id: next++ }) as never)
+    const update = vi.spyOn(reportsApi, 'updateWidget').mockResolvedValue({} as never)
+    open()
+    fireEvent.click(screen.getByLabelText(/Analyst panel/))
+    fireEvent.click(screen.getByRole('button', { name: 'Suggest dashboards' }))
+    fireEvent.click(await screen.findByRole('button', { name: /a page per section/ }))
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/reports/9'))
+    expect(addPage).toHaveBeenLastCalledWith(9, expect.objectContaining(
+      { page_type: 'drillthrough', prompt_column: 'department' }))
+    // the bar on page 2 (widget 51) now opens page 3
+    expect(update).toHaveBeenCalledWith(9, 2, 51, { config: expect.objectContaining(
+      { dimension: 'department', drillthroughPageId: 3 }) })
+  })
+
   it('leaves out a chart whose field could not be created', async () => {
     vi.spyOn(datasetsApi, 'suggestDashboards').mockResolvedValue(DERIVED as never)
     vi.spyOn(calcColumnsApi, 'save').mockResolvedValue([] as never)

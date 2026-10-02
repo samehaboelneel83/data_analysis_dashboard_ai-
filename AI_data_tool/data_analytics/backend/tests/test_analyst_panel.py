@@ -151,7 +151,7 @@ def test_size_is_respected_and_types_are_spread():
     # `size` is the charts chosen; the page controls and the detail page's
     # rows come on top of them.
     widgets = [w for prop in out["proposals"] for w in prop["widgets"]
-               if w["widget_type"] != "slicer" and prop["section"] != "detail"]
+               if w["widget_type"] != "slicer" and prop["section"] not in ("detail", "drill")]
     assert len(widgets) <= 24
     from collections import Counter
     from app.services.analyst_panel import _family

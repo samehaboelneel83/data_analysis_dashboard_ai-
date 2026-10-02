@@ -73,12 +73,31 @@ LENSES: dict[str, dict] = {
                  "`dimension`, the compared group as `dimension2`) over one filtered chart each",
         "needs": "groups",
     },
+    # Added after the five-dataset review (2026-10-02): a dataset of one row
+    # per day (daily ops) has no categories, so only three lenses ran and all
+    # of them drew trends of the top measures; a third of the analysts'
+    # reference -- the days that stand out, cancellations against orders,
+    # days past a threshold -- was never asked.
+    "exceptions": {
+        "title": "Exceptions & pairs",
+        "brief": "the periods that stand out and the measures read against each other: the top "
+                 "and bottom periods as ranked tables of the rows themselves (`columns` = the date "
+                 "and the measures to show side by side, `sort_col` one of them, `sort` desc, "
+                 "`limit` 10), one measure against another per period (numeric_series), "
+                 "two measures on one time axis where one explains the other (dual_axis_bar_line), "
+                 "how many periods pass a threshold (a kpi counting the date with a filter), and "
+                 "the secondary measures nobody else will chart (cancellations, returns, "
+                 "failures) -- every measure in the data should appear somewhere",
+        "needs": "series",
+    },
 }
 SUMMARY = {"key": "summary", "title": "Headline numbers"}
 DETAIL = {"key": "detail", "title": "Detail",
           "brief": "The rows behind the charts, to look up one record."}
 #: Ideas each lens is asked for.
 PER_LENS = 12
+#: The sampling seed every lens call uses (see run_panel).
+LENS_SEED = 20261002
 SIZES = (12, 24, 50)
 
 LENS_SCHEMA = {
@@ -231,8 +250,12 @@ def choose_lenses(profile: dict, facts: list[dict]) -> list[str]:
             c.get("role") == "categorical" and 2 <= (c.get("distinct") or 0) <= 4
             and not c.get("is_identifier") and not c.get("is_personal")
             for c in profile.get("columns", [])),
+        # One row per period: a date, several numbers, nothing to group by.
+        "series": "datetime" in roles and roles.count("numeric") >= 3 and not any(
+            c.get("role") == "categorical" and 2 <= (c.get("distinct") or 0) <= 30
+            and not c.get("is_identifier") for c in profile.get("columns", [])),
     }
-    order = ("composition", "measures", "equity", "time", "relationships")
+    order = ("composition", "measures", "equity", "time", "exceptions", "relationships")
     return [k for k in order if has[LENSES[k]["needs"]]]
 
 
@@ -628,6 +651,21 @@ def _rows_not_groups(w: dict, profile: dict) -> dict:
     dim = cfg.get("dimension")
     known = {c["name"]: c for c in profile.get("columns", [])}
     info = known.get(dim) or {}
+    # A table over a column that is unique per row (a date on one-row-per-
+    # day data) with a list of `measures` is the rows themselves: the table
+    # shaper only reads one measure, and counted rows instead (daily ops,
+    # "top 10 cancellation days").
+    rows = profile.get("row_count") or 0
+    per_row = bool(dim) and rows > 0 and (info.get("distinct") or 0) >= 0.99 * rows
+    if per_row and isinstance(cfg.get("measures"), list) and cfg["measures"] and not cfg.get("measure"):
+        ms = [m for m in cfg["measures"] if m in known]
+        new: dict = {"columns": [dim] + [m for m in ms if m != dim], "limit": int(cfg.get("limit") or 25)}
+        key = cfg.get("sort_by") if cfg.get("sort_by") in ms else (ms[0] if ms else None)
+        if key:
+            new.update({"sort_col": key, "sort": str(cfg.get("sort") or "desc")})
+        if cfg.get("filters"):
+            new["filters"] = cfg["filters"]
+        return {**w, "widget_type": "table", "config": new}
     if not (info.get("is_identifier") and (info.get("distinct") or 0) > HIGH_CARDINALITY):
         return w
     try:
@@ -1212,10 +1250,32 @@ def slicers_for(widgets: list[dict], profile: dict, ineligible: set[str] | froze
     for c in fallback or []:
         if c in ok and c not in ranked:
             ranked.append(c)
+    if not ok:
+        # Nothing in the data to filter by but its date.
+        return date_slicers(profile, limit)
     return [{"widget_type": "slicer", "title": f"Filter by {str(c).replace('_', ' ')}",
              "config": {"dimension": c}, "source": "panel",
              "why": f"Narrows every chart on this page to the {str(c).replace('_', ' ')} values you pick."}
             for c in ranked[:limit]]
+
+
+def date_slicers(profile: dict, limit: int = MAX_SLICERS) -> list[dict]:
+    """Period controls for data with nothing else to filter by.
+
+    Daily ops (one row per day, numbers only) got no filter at all: a slicer
+    lists values, and a date has 616 of them. A slicer of the date's YEARS
+    and of its quarters or months lists a handful; a picked "2017-Q3" is a
+    bucket the engines already filter by (widget_data.infer_date_filter_grains)."""
+    span = ((profile.get("structure") or {}).get("date_range")) or {}
+    col, days = span.get("column"), span.get("days") or 0
+    if not col or days < 60:
+        return []
+    grains = (["year"] if days >= 365 else []) + (["month"] if days <= 3 * 366 else ["quarter"])
+    words = {"year": "year", "quarter": "quarter", "month": "month"}
+    return [{"widget_type": "slicer", "title": f"Filter by {words[g]}",
+             "config": {"dimension": col, "dimension_granularity": g}, "source": "panel",
+             "why": f"Narrows every chart on this page to the {words[g]}s you pick."}
+            for g in grains][:limit]
 
 
 def detail_table(profile: dict, ineligible: set[str] | frozenset = frozenset(),
@@ -1261,6 +1321,43 @@ def with_slicers(placed: list[tuple[dict, dict]], slicers: list[dict]) -> list[t
     return band + [(w, {**slot, "y": slot["y"] + h}) for w, slot in placed]
 
 
+def drill_page(proposals: list[dict], categories: list[str]) -> dict | None:
+    """A drill-through page for one value of the dashboard's main category.
+
+    Every reference dashboard opened one department, one day, one service on
+    a page of its own (five-dataset review, 2026-10-02). The platform has the
+    mechanism -- a `drillthrough` page with a `prompt_column`, reached from a
+    chart that names it (`drillthroughPageId`) -- and the suggester used none
+    of it. This page repeats the headline numbers and the record list for the
+    one value clicked; every chart split by that category is marked to drill
+    to it (`drill_to`), which the dialog turns into the page's id once the
+    page exists."""
+    if not categories:
+        return None
+    col = categories[0]
+    detail = next((p for p in proposals if p.get("section") == "detail"), None)
+    summary = next((p for p in proposals if p.get("section") == "summary"), None)
+    picked = [w for w in (summary or {}).get("widgets", []) if w.get("widget_type") in _HEADLINE][:4]
+    picked += [w for w in (detail or {}).get("widgets", []) if w.get("widget_type") == "table"][:1]
+    if not picked:
+        return None
+    marked = 0
+    for p in proposals:
+        for w in p.get("widgets", []):
+            if w.get("widget_type") != "slicer" and (w.get("config") or {}).get("dimension") == col:
+                w["drill_to"] = "drill"
+                marked += 1
+    if not marked:
+        return None
+    label = col.replace("_", " ")
+    widgets = [{k: v for k, v in w.items() if k != "layout"} for w in picked]
+    return {"title": f"One {label}", "section": "drill", "page_type": "drillthrough",
+            "prompt_column": col, "prompt_label": label.capitalize(),
+            "rationale": f"Opened from any chart split by {label}: the headline numbers and the "
+                         f"records for the {label} you picked.",
+            "widgets": [{**w, "layout": slot} for w, slot in layout_section(widgets, "drill")]}
+
+
 async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
                     ineligible: set[str], findings: list[dict], facts: dict,
                     goal: str | None, size: int, probe: Probe, client=None,
@@ -1289,9 +1386,12 @@ async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
         await tell("proposing", lenses=len(lenses))
 
         async def ask(lens: str):
+            # Greedy and seeded: the same data and question should get the
+            # same panel. At 0.2 the coverage of one dataset moved 16 points
+            # between identical runs (five-dataset review, 2026-10-02).
             got = await client.complete_json(
                 lens_messages(lens, profile, facts.get("text") or "", goal, knowledge, n=per_lens),
-                LENS_SCHEMA, max_tokens=8000, enforce=True)
+                LENS_SCHEMA, max_tokens=8000, enforce=True, temperature=0.0, seed=LENS_SEED)
             return lens, got
         answers = await asyncio.gather(*(ask(l) for l in lenses), return_exceptions=True)
         for lens, got in zip(lenses, answers):
@@ -1316,6 +1416,14 @@ async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
                 # proposed goes where its subject is.
                 if lens == "equity" and section not in ("summary", "time") and groups & _columns(cfg):
                     section = "equity"
+                # The exceptions lens keeps its rankings and pairs on its own
+                # page; a plain trend it proposed goes to Over time.
+                if lens == "exceptions" and (
+                        str(w.get("widget_type")) in ("table", "list", "numeric_series", "dual_axis_bar_line",
+                                                      "dual_axis_bar", "dual_axis_line", "comparative_time_series",
+                                                      "dual_axis_time_series")
+                        or (section == "summary" and cfg.get("filters"))):
+                    section = "exceptions"
                 proposed.append({**w, "section": section,
                                  "source": "model", "lens": lens,
                                  "value": _value(w.get("value"))})
@@ -1417,6 +1525,9 @@ async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
             "widgets": [{**{k: w.get(k) for k in keys}, "layout": slot}
                         for w, slot in with_slicers(layout_section(widgets, sec), controls)],
         })
+    drill = drill_page(proposals, overall)
+    if drill:
+        proposals.append(drill)
     return {
         "proposals": proposals,
         "panel": {"lenses": lenses, "lens_notes": lens_notes,

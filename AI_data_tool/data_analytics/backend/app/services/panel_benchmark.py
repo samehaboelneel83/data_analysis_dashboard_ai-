@@ -78,4 +78,18 @@ def coverage(picks: list[dict], reference: list[dict], columns: set[str],
         # The same, counting each distinct reference question once: several
         # hand-picked visuals ask one question at different grains or filters.
         "question_recall": round(len({k for k in ref_set if k[1] in mine_cols}) / (len(ref_set) or 1), 3),
+        # Near misses count: a reference question is asked when one pick
+        # charts at least two thirds of its columns and nothing unrelated --
+        # "top 10 days by canceled orders" showing orders and cancellations
+        # asks the reference's question even without its third column. Exact
+        # column sets understated daily ops (five-dataset review, 2026-10-02).
+        "overlap_recall": round(len({k for k in ref_set if any(_near(k[1], m) for m in mine_cols)})
+                                / (len(ref_set) or 1), 3),
     }
+
+
+def _near(ref: frozenset, mine: frozenset) -> bool:
+    if not ref or not mine:
+        return ref == mine
+    shared = len(ref & mine)
+    return shared >= max(1, -(-2 * len(ref) // 3)) and shared >= len(mine) / 2

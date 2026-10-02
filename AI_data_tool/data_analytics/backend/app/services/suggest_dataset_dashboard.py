@@ -40,6 +40,7 @@ of them were blank on screen.
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 
 from .dataset_profile import HIGH_CARDINALITY, describe_for_prompt
@@ -1047,70 +1048,109 @@ async def suggest_for_dataset(profile: dict, goal: str | None, count: int = 3,
         return [], "the model endpoint is not configured"
 
     messages = build_messages(profile, goal, count, knowledge, facts)
-    rejected: list[str] = []
 
-    # One generation, then at most one repair. The repair is worth its cost
-    # because the failures are the kind a model fixes when told exactly what was
-    # wrong -- an invented column, a missing field -- and without it the person
-    # asked for help and got an empty panel.
-    for attempt in range(2):
-        got = await client.complete_json(messages, PROPOSALS_SCHEMA,
-                                         max_tokens=12000, enforce=True)
-        if not got or not got.get("proposals"):
-            return [], "the model did not answer"
-
-        kept: list[dict] = []
-        rejected = []
-        for proposal in got["proposals"][:count]:
+    async def gate(proposals: list) -> tuple[list[list[dict]], list[list[str]]]:
+        """Each proposal's drawn widgets, and each one's refusal reasons."""
+        from .analyst_panel import repair_and_check
+        drawn_all: list[list[dict]] = []
+        why_all: list[list[str]] = []
+        for proposal in proposals:
             # Validate first -- it is free -- then probe what survives, several
             # at a time. Probing eighteen widgets one after another took 99
             # seconds in the browser: each one re-reads and re-prepares the
             # frame, so end to end they are the whole wait. Bounded, because the
             # pandas work is GIL-bound and firing them all at once would starve
             # the event loop without finishing sooner.
-            candidates = []
-            for widget in proposal.get("widgets") or []:
+            candidates, whys = [], []
+            for widget in (proposal or {}).get("widgets") or []:
                 if not isinstance(widget, dict):
                     continue
                 # The analyst panel's repairs and checks, for this designer too:
                 # titles that keep their promise, no sums of rates, no totals
                 # across units (analyst_panel.repair_and_check).
-                from .analyst_panel import repair_and_check
                 widget, ok, why = repair_and_check({**widget, "source": "model"}, profile,
                                                    column_meta, mixed_units, one_to_one, identical,
                                                    edges)
                 widget = {k: v for k, v in widget.items() if k != "source"}
                 if not ok:
-                    rejected.append(why)
+                    whys.append(why)
                     continue
                 candidates.append(polish_widget(widget, profile))
 
-            gate = asyncio.Semaphore(PROBE_CONCURRENCY)
+            sem = asyncio.Semaphore(PROBE_CONCURRENCY)
 
             async def _guarded(w):
-                async with gate:
+                async with sem:
                     return await _probe(w, probe)
 
-            results = await asyncio.gather(*(_guarded(w) for w in candidates))                 if candidates else []
-
+            results = await asyncio.gather(*(_guarded(w) for w in candidates)) if candidates else []
             # Zipped back onto `candidates`, so the order the model chose
             # survives being probed out of sequence -- the tiles are laid out in
             # exactly this order.
             widgets = []
             for widget, (drew, rows, why) in zip(candidates, results):
                 if not drew:
-                    rejected.append("{}: {}".format(
-                        widget.get("title"), why or "returned nothing to draw"))
+                    whys.append("{}: {}".format(widget.get("title"), why or "returned nothing to draw"))
                     continue
                 widgets.append({**widget, "row_count": rows})
-            if widgets:
-                kept.append({**proposal, "widgets": widgets})
+            drawn_all.append(widgets)
+            why_all.append(whys)
+        return drawn_all, why_all
 
-        if kept:
+    # One generation, then at most one repair. The repair is worth its cost
+    # because the failures are the kind a model fixes when told exactly what was
+    # wrong -- an invented column, a missing field -- and without it the person
+    # asked for help and got an empty panel.
+    rejected: list[str] = []
+    for attempt in range(2):
+        got = await client.complete_json(messages, PROPOSALS_SCHEMA,
+                                         max_tokens=12000, enforce=True)
+        if not got or not got.get("proposals"):
+            return [], "the model did not answer"
+        proposals = got["proposals"][:count]
+        drawn, whys = await gate(proposals)
+        rejected = [w for ws in whys for w in ws]
+        kept_idx = [i for i, ws in enumerate(drawn) if ws]
+        if kept_idx:
+            replaced = 0
+            if rejected:
+                # The ideas the gate refused are replaced, not just dropped:
+                # quick mode kept what survived one call, so every refusal
+                # was a lost chart (five-dataset review, 2026-10-02). One more
+                # call, told each proposal's refusals, asks for that many new
+                # charts; they pass the same gate.
+                ask = [{"role": "assistant", "content": json.dumps(got)[:12000]},
+                       {"role": "user", "content":
+                        "Some charts could not be used. For EACH proposal below, in the same order, "
+                        "propose replacement widgets only -- the same number as were refused -- that "
+                        "answer the same questions without the problem. Keep each proposal's title.\n"
+                        + "\n".join(
+                            f"{i + 1}. {p.get('title')}: " + ("; ".join(whys[i]) if whys[i] else "nothing refused")
+                            for i, p in enumerate(proposals))}]
+                try:
+                    more = await client.complete_json(messages + ask, PROPOSALS_SCHEMA,
+                                                      max_tokens=8000, enforce=True)
+                except Exception:                            # noqa: BLE001
+                    more = None
+                extra = (more or {}).get("proposals") or []
+                if extra:
+                    extra_drawn, _ = await gate(extra[:len(proposals)])
+                    for i, ws in enumerate(extra_drawn):
+                        if i >= len(drawn) or not whys[i]:
+                            continue
+                        have = {json.dumps(w.get("config"), sort_keys=True) for w in drawn[i]}
+                        add = [w for w in ws if json.dumps(w.get("config"), sort_keys=True) not in have]
+                        add = add[:len(whys[i])]
+                        drawn[i] = drawn[i] + add
+                        replaced += len(add)
+            kept = [{**proposals[i], "widgets": drawn[i]} for i in range(len(proposals)) if drawn[i]]
             # The rejections travel with the answer. A page that quietly contains
             # four widgets when the model proposed seven tells the person nothing;
             # naming what was dropped, and why, lets them judge the rest.
-            return kept, ("; ".join(rejected[:6]) if rejected else "")
+            reason = "; ".join(rejected[:6]) if rejected else ""
+            if replaced:
+                reason = f"{replaced} of {len(rejected)} refused ideas replaced. " + reason
+            return kept, reason
         if attempt == 0:
             messages = messages + [
                 {"role": "assistant", "content": "(previous attempt)"},
