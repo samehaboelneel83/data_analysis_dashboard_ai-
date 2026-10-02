@@ -325,6 +325,18 @@ def usable_widgets(profile: dict) -> list[str]:
         if not categorical and has_date and wt in _NEEDS_DATE + ("table",):
             out.append(wt)
             continue
+        # The periods are its categories: "revenue by quarter" as bars,
+        # "orders vs cancellations by month" on two axes, the spread of a
+        # daily rate per quarter -- each in the daily-ops analysts' reference
+        # and each drawn by its shaper from a date dimension; a regression
+        # of one total on the others needs numbers only (2026-10-02).
+        if not categorical and has_date and wt in ("bar", "dual_axis_bar_line", "dual_axis_bar",
+                                                   "box_plot"):
+            out.append(wt)
+            continue
+        if not categorical and wt == "model_linear" and len(numeric) >= 2:
+            out.append(wt)
+            continue
         if not categorical and wt not in ("kpi", "card", "gauge", "histogram",
                                           "numeric_series", "correlation_matrix",
                                           "parallel_coordinates", "scatter", "table"):

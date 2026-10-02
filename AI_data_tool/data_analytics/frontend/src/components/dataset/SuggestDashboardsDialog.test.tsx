@@ -532,6 +532,33 @@ describe('the analyst panel mode', () => {
       { dimension: 'department', drillthroughPageId: 3 }) })
   })
 
+  it('names the data-quality page and builds its notes as a text widget', async () => {
+    const QUALITY = {
+      ...PANEL,
+      proposals: [
+        PANEL.proposals[0],
+        { title: 'Data quality', section: 'quality', source: 'panel', rationale: 'faults',
+          widgets: [{ widget_type: 'text', title: 'What to check in the data',
+                      config: { content: '- 104 rows are exact duplicates of another row.' },
+                      layout: { x: 0, y: 0, w: 12, h: 2 } }] },
+      ],
+    }
+    vi.spyOn(datasetsApi, 'suggestDashboards').mockResolvedValue(QUALITY as never)
+    vi.spyOn(reportsApi, 'create').mockResolvedValue({ id: 9, pages: [{ id: 1 }] } as never)
+    vi.spyOn(reportsApi, 'updatePage').mockResolvedValue({} as never)
+    const addPage = vi.spyOn(reportsApi, 'addPage').mockResolvedValue({ id: 2 } as never)
+    const add = vi.spyOn(reportsApi, 'addWidget').mockResolvedValue({ id: 70 } as never)
+    open()
+    fireEvent.click(screen.getByLabelText(/Analyst panel/))
+    fireEvent.click(screen.getByRole('button', { name: 'Suggest dashboards' }))
+    expect(await screen.findByText('Data quality')).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: /a page per section/ }))
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/reports/9'))
+    expect(addPage).toHaveBeenCalledWith(9, expect.objectContaining({ name: 'Data quality' }))
+    expect(add).toHaveBeenCalledWith(9, 2, expect.objectContaining(
+      { widget_type: 'text', config: { content: '- 104 rows are exact duplicates of another row.' } }))
+  })
+
   it('leaves out a chart whose field could not be created', async () => {
     vi.spyOn(datasetsApi, 'suggestDashboards').mockResolvedValue(DERIVED as never)
     vi.spyOn(calcColumnsApi, 'save').mockResolvedValue([] as never)
