@@ -247,11 +247,15 @@ export default function SuggestDashboardsDialog(
   }, [jobId, datasetId])
 
   const ask = async () => {
+    // "Suggest again" over a panel already shown asks the analysts afresh;
+    // the first ask reuses their kept answers, so the same data gives the
+    // same panel.
+    const fresh = mode === 'panel' && proposals !== null
     setBusy(true); setError(''); setReason(''); setProposals(null); setSource(null)
     setQuestion(''); setStats(null); setFacts([]); setStage(null)
     try {
       abortRef.current = new AbortController()
-      const body = mode === 'panel' ? { goal, mode, size, background: true } : { goal, count: 3 }
+      const body = mode === 'panel' ? { goal, mode, size, background: true, fresh } : { goal, count: 3 }
       const got = await datasetsApi.suggestDashboards(datasetId, body, abortRef.current.signal)
       if (!alive.current) return
       if (got.job_id) {

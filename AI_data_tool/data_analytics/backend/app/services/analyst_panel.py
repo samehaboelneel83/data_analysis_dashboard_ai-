@@ -1148,6 +1148,12 @@ def select(candidates: list[dict], size: int, sections: list[str],
 # ── lens answers, kept ───────────────────────────────────────────────────────
 
 LENS_CACHE_TTL_S = 7 * 24 * 3600
+FRESH_TEMPERATURE = 0.4
+
+
+def _fresh_seed() -> int:
+    import secrets
+    return secrets.randbelow(2**31 - 1) + 1
 _LENS_CACHE = None
 
 
@@ -1543,7 +1549,8 @@ def drill_page(proposals: list[dict], categories: list[str]) -> dict | None:
 async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
                     ineligible: set[str], findings: list[dict], facts: dict,
                     goal: str | None, size: int, probe: Probe, client=None,
-                    knowledge=None, progress=None, extra: list[dict] | None = None) -> dict:
+                    knowledge=None, progress=None, extra: list[dict] | None = None,
+                    fresh: bool = False) -> dict:
     from .readback import as_i18n, takeaway
     from .suggest_dataset_dashboard import (PROBE_CONCURRENCY, _probe, polish_widget,
                                             resolve_time_words, validate_widget)
@@ -1577,12 +1584,17 @@ async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
             # titles between identical runs (batching): the answer to the
             # same question on the same data and model is kept and reused.
             key = lens_cache_key(client, messages)
-            hit = _cache_get(key)
+            hit = None if fresh else _cache_get(key)
             if hit is not None:
                 lens_cached.add(lens)
                 return lens, hit
+            # "Suggest again" asks for other ideas: greedy with the same seed
+            # would repeat the kept answer, so it samples a little, and the
+            # new answer replaces the kept one (the next plain run shows what
+            # the person last saw).
             got = await client.complete_json(messages, LENS_SCHEMA, max_tokens=8000, enforce=True,
-                                             temperature=0.0, seed=LENS_SEED)
+                                             temperature=FRESH_TEMPERATURE if fresh else 0.0,
+                                             seed=_fresh_seed() if fresh else LENS_SEED)
             if isinstance(got, dict) and got.get("widgets"):
                 _cache_set(key, got)
             return lens, got

@@ -192,7 +192,8 @@ def _with_derived(inputs: "SuggestInputs", roles: dict, ineligible: set[str], mi
 
 
 async def panel(inputs: SuggestInputs, goal: str | None, size: int,
-                progress: Progress | None = None, client: Any = "default") -> dict:
+                progress: Progress | None = None, client: Any = "default",
+                fresh: bool = False) -> dict:
     """Several analyst lenses propose, everything is drawn, the data selects.
 
     Slower than the quick designer (one model call per lens, every idea
@@ -229,7 +230,8 @@ async def panel(inputs: SuggestInputs, goal: str | None, size: int,
     out = await run_panel(df=inputs.df, profile=inputs.profile, roles=roles, column_meta=meta,
                           ineligible=ineligible, findings=result.get("findings") or [],
                           facts=facts, goal=goal or None, size=size, probe=inputs.probe,
-                          client=client, knowledge=inputs.knowledge, progress=progress, extra=extra)
+                          client=client, knowledge=inputs.knowledge, progress=progress, extra=extra,
+                          fresh=fresh)
     from .derived_fields import used_by
     chosen = [w for p in out["proposals"] for w in p["widgets"]]
     return {"proposals": [{**p, "source": "panel"} for p in out["proposals"]],

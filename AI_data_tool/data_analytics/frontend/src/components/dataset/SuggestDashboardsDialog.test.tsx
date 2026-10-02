@@ -532,6 +532,17 @@ describe('the analyst panel mode', () => {
       { dimension: 'department', drillthroughPageId: 3 }) })
   })
 
+  it('asks the analysts afresh only when suggesting again', async () => {
+    const ask = vi.spyOn(datasetsApi, 'suggestDashboards').mockResolvedValue(PANEL as never)
+    open()
+    fireEvent.click(screen.getByLabelText(/Analyst panel/))
+    fireEvent.click(screen.getByRole('button', { name: 'Suggest dashboards' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Suggest again' }))
+    await waitFor(() => expect(ask).toHaveBeenCalledTimes(2))
+    expect(ask.mock.calls[0][1]).toMatchObject({ mode: 'panel', fresh: false })
+    expect(ask.mock.calls[1][1]).toMatchObject({ mode: 'panel', fresh: true })
+  })
+
   it('names the data-quality page and builds its notes as a text widget', async () => {
     const QUALITY = {
       ...PANEL,
