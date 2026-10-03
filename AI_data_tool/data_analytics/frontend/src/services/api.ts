@@ -548,6 +548,12 @@ export const datasetsApi = {
   combine: (body: { name: string; how: string; on?: string[];
                     sources: { data_source_id: number; table: string; label?: string }[] }) =>
     api.post<Dataset>('/datasets/combine', body).then(r => r.data),
+  /** Pipeline phase 2: is this dataset's refresh working, and its freshness target. */
+  pipelineHealth: (id: number) =>
+    api.get<PipelineHealth>(`/datasets/${id}/pipeline-health`).then(r => r.data),
+  /** Freshness target (hours, or null for none) and extra alert recipients. */
+  setPipelineWatch: (id: number, body: { freshness_hours?: number | null; recipients?: string[] }) =>
+    api.patch<PipelineHealth>(`/datasets/${id}/pipeline-watch`, body).then(r => r.data),
   /** Set the automatic refresh interval, or null to clear it. Minimum 5 minutes;
    *  the server refuses DirectQuery (nothing is cached to refresh). */
   setSchedule: (id: number, interval_minutes: number | null) =>
@@ -1605,6 +1611,21 @@ export const notificationsApi = {
   markRead: () => api.post<{ marked: number }>('/notifications/mark-read').then(r => r.data),
 }
 
+export interface PipelineHealth {
+  state: 'ok' | 'failing' | 'stale' | 'unknown'
+  last_refreshed_at: string | null
+  freshness_hours: number | null
+  /** Emails and https:// webhooks told as well as the owner (editors only). */
+  recipients: string[]
+  last_run: { status: string; trigger: string; started_at: string | null; rows: number | null
+              duration_ms: number | null; error: string | null } | null
+  next_retry_at: string | null
+  can_edit: boolean
+  /** Who the in-app notices go to (the creator, or the org admins): editors only. */
+  owners?: string[]
+  freshness_choices: number[]
+}
+
 export interface LineageGraph {
   sources: { id: number; name: string; type: string }[]
   datasets: {
@@ -1612,6 +1633,10 @@ export interface LineageGraph {
     extraction_kind: string
     transform: { count: number; kinds: string[] }
     load: { last_refreshed_at: string | null; strategy: string | null; cursor_column: string | null; staleness: 'fresh' | 'stale' | 'never' }
+    /** A materialized dataset's sources (snapshot edges). */
+    derived_from?: number[]
+    /** Pipeline phase 2: the refresh is failing, or the data is past its freshness target. */
+    health?: 'ok' | 'failing' | 'stale' | null
   }[]
   reports: { id: number; name: string; dataset_ids: number[] }[]
 }

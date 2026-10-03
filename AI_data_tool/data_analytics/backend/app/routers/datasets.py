@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from ..models.models import (AnalysisResult, Dataset, DatasetColumn, DataSource,
                              SourceColumn, SourceObject, User)
 from sqlalchemy.orm.attributes import flag_modified
-from ..schemas.schemas import DataViewDefault, SuggestDashboardsRequest, DatasetOut, BatchUploadItem, BatchUploadOut, MaterializeRequest, CalcColumnDef, CalcColumnPreviewRequest, ColumnFormatRequest, DataPreviewRequest, FilterExprUpdate, FilterPreviewRequest, MeasureDef, MeasurePreviewRequest, ColumnMetaUpdate, RefreshScheduleUpdate, DatasetRefreshRequest, DatasetShareOut, CustomFunctionDef, CustomFunctionPreviewRequest, AggregateCreateRequest, AggregateUpdateRequest
+from ..schemas.schemas import DataViewDefault, SuggestDashboardsRequest, DatasetOut, BatchUploadItem, BatchUploadOut, MaterializeRequest, CalcColumnDef, CalcColumnPreviewRequest, ColumnFormatRequest, DataPreviewRequest, FilterExprUpdate, FilterPreviewRequest, MeasureDef, MeasurePreviewRequest, ColumnMetaUpdate, RefreshScheduleUpdate, PipelineWatchUpdate, DatasetRefreshRequest, DatasetShareOut, CustomFunctionDef, CustomFunctionPreviewRequest, AggregateCreateRequest, AggregateUpdateRequest
 from ..services.analytics import load_file, detect_types
 from ..services.frame_cache import remove_parquet_sidecar, write_parquet_sidecar
 from ..services.widget_data import preview_expression, apply_filter_expr
@@ -1749,6 +1749,67 @@ async def set_refresh_schedule(dataset_id: int, req: RefreshScheduleUpdate, db: 
     return result.scalar_one()
 
 
+@router.get("/{dataset_id}/pipeline-health")
+async def get_pipeline_health(dataset_id: int, db: AsyncSession = Depends(get_db),
+                              current_user: User = Depends(get_current_user)):
+    """Whether this dataset's refresh is working, and its freshness target
+    (pipeline plan, phase 2). The error text and the recipient list are for
+    the people who may edit the dataset: a reader may not be someone who
+    should see a connection's host or file path, or colleagues' addresses."""
+    from ..services.pipeline_alerts import FRESHNESS_CHOICES, health, owner_emails
+    await require_dataset_read(db, current_user, dataset_id)
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    out = await health(db, ds)
+    try:
+        await require_dataset_write(db, current_user, ds, "edit")
+        out["can_edit"] = True
+        out["owners"] = await owner_emails(db, "dataset", ds.id)
+    except HTTPException:
+        out["can_edit"] = False
+        out["owners"] = []
+        out["recipients"] = []
+        if out["last_run"]:
+            out["last_run"] = {**out["last_run"], "error": None}
+    out["freshness_choices"] = list(FRESHNESS_CHOICES)
+    return out
+
+
+@router.patch("/{dataset_id}/pipeline-watch")
+async def set_pipeline_watch(dataset_id: int, req: PipelineWatchUpdate,
+                             db: AsyncSession = Depends(get_db),
+                             current_user: User = Depends(get_current_user)):
+    """Set a dataset's freshness target and extra alert recipients."""
+    from ..services.delivery import valid_recipients
+    from ..services.pipeline_alerts import FRESHNESS_CHOICES, forget_brief, get_watch
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_write(db, current_user, ds, "edit")
+    if ds.mode == "directquery" and "freshness_hours" in req.model_fields_set and req.freshness_hours:
+        raise HTTPException(400, "A live (DirectQuery) dataset reads its source on every query, "
+                                 "so it has no refresh to go stale")
+    watch = await get_watch(db, "dataset", ds.id, create=True, org_id=ds.org_id)
+    if "freshness_hours" in req.model_fields_set:
+        h = req.freshness_hours
+        if h is not None and h not in FRESHNESS_CHOICES:
+            raise HTTPException(400, f"freshness_hours must be one of {', '.join(map(str, FRESHNESS_CHOICES))}, or null")
+        watch.freshness_hours = h
+        watch.stale_alerted_at = None      # a new target is judged afresh
+    if req.recipients is not None:
+        cleaned = [r.strip() for r in req.recipients if isinstance(r, str) and r.strip()]
+        bad = [r for r in cleaned if r not in valid_recipients(cleaned)]
+        if bad:
+            raise HTTPException(400, f"Not an email address or https:// webhook: {', '.join(bad[:3])}")
+        if len(cleaned) > 20:
+            raise HTTPException(400, "At most 20 recipients")
+        watch.recipients = cleaned
+    await audit(db, current_user, "dataset.pipeline_watch", "dataset", ds.id,
+                f"freshness {watch.freshness_hours or 'off'} h, {len(watch.recipients or [])} extra recipient(s)")
+    await db.commit()
+    forget_brief(ds.id)
+    return await get_pipeline_health(dataset_id, db, current_user)
+
+
 # ── Column metadata (data item properties) ────────────────────────────────────
 
 #: `geography` is a CATEGORY that also says what it is a category OF, so a map
@@ -2642,6 +2703,27 @@ async def lineage_graph(db: AsyncSession = Depends(get_db), current_user: User =
                     used.add(wid_ds)
         report_nodes.append({"id": r.id, "name": r.name, "dataset_ids": sorted(used)})
 
+    # Pipeline plan, phase 2: each node says whether its refresh is failing
+    # or its data is past its freshness target, so the graph can show which
+    # reports a broken refresh reaches.
+    from ..models.models import PipelineWatch as _PW
+    from ..services.pipeline_alerts import is_stale as _is_stale
+    from ..services.refresh_runs import latest_runs as _latest_runs
+    _ids = [d.id for d in datasets]
+    _last = await _latest_runs(db, "dataset", _ids)
+    _targets = {w.item_id: w.freshness_hours for w in (await db.execute(
+        select(_PW).where(_PW.kind == "dataset", _PW.item_id.in_(_ids or [-1])))).scalars().all()}
+    _now = datetime.utcnow()
+
+    def _health(d: Dataset) -> str | None:
+        run = _last.get(d.id)
+        if run is not None and run.status == "failed":
+            return "failing"
+        if d.mode != "directquery" and _is_stale(d.last_refreshed_at or d.created_at,
+                                                 _targets.get(d.id), _now):
+            return "stale"
+        return "ok" if run is not None else None
+
     def _dataset_node(d: Dataset) -> dict:
         active_steps = [s for s in prep_steps_of(d) if not (isinstance(s, dict) and s.get("disabled"))]
         wm = watermark_by_ds.get(d.id)
@@ -2673,6 +2755,7 @@ async def lineage_graph(db: AsyncSession = Depends(get_db), current_user: User =
             # been uploaded, not refreshed from a connection).
             "materialized": mat is not None,
             "materialized_row_count": mat.row_count if mat else None,
+            "health": _health(d),
         }
 
     return {

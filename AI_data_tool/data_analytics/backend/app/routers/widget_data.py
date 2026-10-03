@@ -845,7 +845,17 @@ async def query_widget(
     db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
     await _guard_script_execution(db, current_user, req)
-    return await _resolve_widget_data(dataset_id, req, db, current_user, request=request)
+    result = await _resolve_widget_data(dataset_id, req, db, current_user, request=request)
+    # Pipeline plan, phase 2: a widget on data whose refresh is failing, or
+    # that is past its freshness target, says so beside the chart. Added
+    # here, after any cache, so the badge follows the dataset's health rather
+    # than whichever response was cached.
+    if isinstance(result, dict) and result.get("type") != "error":
+        from ..services.pipeline_alerts import health_brief
+        brief = await health_brief(db, dataset_id)
+        if brief is not None:
+            result = {**result, "data_health": brief}
+    return result
 
 
 def _export_frame(data: dict, config: dict):

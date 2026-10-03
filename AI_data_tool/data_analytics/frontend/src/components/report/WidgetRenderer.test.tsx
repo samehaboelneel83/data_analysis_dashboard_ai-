@@ -35,6 +35,24 @@ function renderWidget(props: Partial<React.ComponentProps<typeof WidgetRenderer>
   )
 }
 
+describe('WidgetRenderer data health (pipeline phase 2)', () => {
+  it('says when the data behind a chart has stopped refreshing', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'A', value: 1 }], sampled: false,
+      data_health: { state: 'failing', last_refreshed_at: '2026-10-03T06:21:00Z', freshness_hours: null } } as never)
+    renderWidget()
+    const chip = await screen.findByTestId('data-health-chip')
+    expect(chip).toHaveTextContent('refresh failing')
+    expect(chip.getAttribute('title')).toMatch(/Showing data from/)
+  })
+
+  it('shows nothing for healthy data', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'A', value: 1 }], sampled: false })
+    renderWidget()
+    await waitFor(() => expect(widgetDataApi.query).toHaveBeenCalled())
+    expect(screen.queryByTestId('data-health-chip')).toBeNull()
+  })
+})
+
 describe('WidgetRenderer performance reporting', () => {
   it('reports fetch duration and row count via onFetchComplete', async () => {
     vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'A', value: 1 }, { name: 'B', value: 2 }], sampled: false })

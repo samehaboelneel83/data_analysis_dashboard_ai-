@@ -1206,6 +1206,24 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
                 overflow: 'hidden', textOverflow: 'ellipsis' }}>{cfg.subtitle}</span>
           )}
         </span>
+        {/* Pipeline phase 2: the data behind this chart stopped refreshing,
+            or is past its freshness target. The chart still draws the last
+            good data -- this says so, and since when. */}
+        {(data as { data_health?: { state: string; last_refreshed_at: string | null } } | null)?.data_health && (() => {
+          const h = (data as { data_health: { state: string; last_refreshed_at: string | null } }).data_health
+          const failing = h.state === 'failing'
+          const since = h.last_refreshed_at ? new Date(h.last_refreshed_at).toLocaleString() : null
+          return (
+            <span data-testid="data-health-chip" role="status"
+              title={t(failing ? 'health.tip.failing' : 'health.tip.stale')
+                + (since ? ` ${t('health.tip.since', { when: since })}` : '')}
+              style={{ fontSize: 9, padding: '1px 5px', borderRadius: 99, whiteSpace: 'nowrap',
+                background: failing ? 'rgba(226,96,108,.16)' : 'rgba(230,160,60,.18)',
+                color: failing ? 'color-mix(in oklab, #e2606c 75%, var(--text))' : 'color-mix(in oklab, #e6a03c 70%, var(--text))' }}>
+              {t(failing ? 'health.chip.failing' : 'health.chip.stale')}
+            </span>
+          )
+        })()}
         {data?.sampled && (
           <span title={`Showing a sample of ${data.sample_size} out of ${data.total_rows} rows`}
             style={{ fontSize: 9, background: 'rgba(230,160,60,.18)', color: '#e6a03c', padding: '1px 5px', borderRadius: 99 }}>

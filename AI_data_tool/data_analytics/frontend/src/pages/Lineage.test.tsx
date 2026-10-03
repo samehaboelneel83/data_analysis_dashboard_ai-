@@ -31,6 +31,26 @@ beforeEach(() => {
 })
 
 describe('Lineage', () => {
+  it('marks a failing dataset and every report it reaches, through joins (pipeline phase 2)', async () => {
+    vi.mocked(lineageApi.graph).mockResolvedValue({
+      sources: [],
+      datasets: [
+        { id: 5, name: 'Orders', mode: 'import', source_id: null, joins: [6], extraction_kind: 'query',
+          transform: { count: 0, kinds: [] }, health: 'ok',
+          load: { last_refreshed_at: null, strategy: null, cursor_column: null, staleness: 'never' } },
+        { id: 6, name: 'Customers', mode: 'import', source_id: null, joins: [], extraction_kind: 'query',
+          transform: { count: 0, kinds: [] }, health: 'failing',
+          load: { last_refreshed_at: null, strategy: null, cursor_column: null, staleness: 'never' } },
+      ],
+      reports: [{ id: 9, name: 'Sales', dataset_ids: [5] }, { id: 10, name: 'Other', dataset_ids: [] }],
+    })
+    render(<MemoryRouter><Lineage /></MemoryRouter>)
+    await screen.findByText('Sales')
+    expect(screen.getByTitle('Refresh failing')).toBeInTheDocument()
+    // Sales reads Orders, which joins the failing Customers.
+    expect(screen.getAllByTitle('Uses data whose refresh is failing')).toHaveLength(1)
+  })
+
   it('renders the three columns with nodes and edge annotations', async () => {
     render(<MemoryRouter><Lineage /></MemoryRouter>)
     expect(await screen.findByText('Warehouse')).toBeInTheDocument()
