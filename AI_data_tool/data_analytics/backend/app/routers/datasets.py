@@ -1784,7 +1784,7 @@ async def get_pipeline_health(dataset_id: int, db: AsyncSession = Depends(get_db
     (pipeline plan, phase 2). The error text and the recipient list are for
     the people who may edit the dataset: a reader may not be someone who
     should see a connection's host or file path, or colleagues' addresses."""
-    from ..services.pipeline_alerts import FRESHNESS_CHOICES, health, owner_emails
+    from ..services.pipeline_alerts import FRESHNESS_CHOICES, get_watch, health, owner_emails
     await require_dataset_read(db, current_user, dataset_id)
     ds = await db.get(Dataset, dataset_id)
     check_org(ds, current_user, "Dataset not found")
@@ -1793,9 +1793,15 @@ async def get_pipeline_health(dataset_id: int, db: AsyncSession = Depends(get_db
         await require_dataset_write(db, current_user, ds, "edit")
         out["can_edit"] = True
         out["owners"] = await owner_emails(db, "dataset", ds.id)
+        watch = await get_watch(db, "dataset", ds.id)
+        out["following"] = current_user.id in ((watch.followers if watch else None) or [])
+        # Without a mail server, addresses in `recipients` get nothing; say so
+        # where they are typed rather than only in a server log.
+        out["email_ready"] = bool(settings.smtp_host)
     except HTTPException:
         out["can_edit"] = False
         out["owners"] = []
+        out["following"] = False
         out["recipients"] = []
         if out["last_run"]:
             out["last_run"] = {**out["last_run"], "error": None}
@@ -1807,7 +1813,8 @@ async def get_pipeline_health(dataset_id: int, db: AsyncSession = Depends(get_db
 async def set_pipeline_watch(dataset_id: int, req: PipelineWatchUpdate,
                              db: AsyncSession = Depends(get_db),
                              current_user: User = Depends(get_current_user)):
-    """Set a dataset's freshness target and extra alert recipients."""
+    """Set a dataset's freshness target, extra alert recipients, and whether
+    the caller gets the in-app notices too (`follow`)."""
     from ..services.delivery import valid_recipients
     from ..services.pipeline_alerts import FRESHNESS_CHOICES, forget_brief, get_watch
     ds = await db.get(Dataset, dataset_id)
@@ -1831,6 +1838,10 @@ async def set_pipeline_watch(dataset_id: int, req: PipelineWatchUpdate,
         if len(cleaned) > 20:
             raise HTTPException(400, "At most 20 recipients")
         watch.recipients = cleaned
+    if req.follow is not None:
+        # Reassigned, not mutated: a JSON column only notices a new value.
+        others = [f for f in (watch.followers or []) if f != current_user.id]
+        watch.followers = others + [current_user.id] if req.follow else others
     await audit(db, current_user, "dataset.pipeline_watch", "dataset", ds.id,
                 f"freshness {watch.freshness_hours or 'off'} h, {len(watch.recipients or [])} extra recipient(s)")
     await db.commit()

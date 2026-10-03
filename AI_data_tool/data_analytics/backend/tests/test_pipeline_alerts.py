@@ -184,3 +184,62 @@ class TestTheApi:
         graph = (await client.get("/api/v1/datasets/lineage/graph", headers=auth_headers["a"])).json()
         [node] = [d for d in graph["datasets"] if d["id"] == ds.id]
         assert node["health"] == "failing"
+
+
+class TestFollowers:
+    """Loose end after the pipeline plan: "Notify me" for an editor who is not
+    the creator, so a dataset whose creator account nobody reads still reaches
+    a person."""
+
+    async def _user(self, db_session, two_orgs, email, *, org="a", active=True):
+        from app.models.models import User
+        u = User(org_id=two_orgs[org]["org"].id, role_id=two_orgs[org]["role"].id,
+                 email=email, password_hash="x", is_active=active)
+        db_session.add(u)
+        await db_session.commit()
+        return u
+
+    async def test_followers_are_told_besides_the_owner(self, db_session, two_orgs, tmp_path):
+        ds = await _dataset(db_session, two_orgs, tmp_path)
+        fan = await self._user(db_session, two_orgs, "fan@example.com")
+        gone = await self._user(db_session, two_orgs, "gone@example.com", active=False)
+        stranger = await self._user(db_session, two_orgs, "other@example.com", org="b")
+        owner = two_orgs["a"]["user"].id
+        db_session.add(PipelineWatch(kind="dataset", item_id=ds.id, org_id=ds.org_id, state="ok",
+                                     recipients=[], followers=[fan.id, gone.id, stranger.id, owner]))
+        await db_session.commit()
+
+        await _run(db_session, ds, "failed", "boom")
+
+        told = [n.user_id for n in await _notices(db_session)]
+        assert told == [owner, fan.id], "owner once, then live followers of the same org only"
+        assert await pipeline_alerts.owner_emails(db_session, "dataset", ds.id) == [
+            two_orgs["a"]["user"].email, "fan@example.com"]
+
+    async def test_follow_and_unfollow_through_the_api(self, client, db_session, two_orgs, auth_headers, tmp_path):
+        ds = await _dataset(db_session, two_orgs, tmp_path, owner=False)
+        url = f"/api/v1/datasets/{ds.id}/pipeline-watch"
+        r = await client.patch(url, json={"follow": True}, headers=auth_headers["a"])
+        assert r.status_code == 200, r.text
+        assert r.json()["following"] is True
+        r = await client.patch(url, json={"follow": True}, headers=auth_headers["a"])
+        watch = await pipeline_alerts.get_watch(db_session, "dataset", ds.id)
+        await db_session.refresh(watch)
+        assert watch.followers == [two_orgs["a"]["user"].id], "following twice is still once"
+        r = await client.patch(url, json={"follow": False}, headers=auth_headers["a"])
+        assert r.json()["following"] is False
+
+    async def test_another_org_cannot_follow(self, client, db_session, two_orgs, auth_headers, tmp_path):
+        ds = await _dataset(db_session, two_orgs, tmp_path)
+        r = await client.patch(f"/api/v1/datasets/{ds.id}/pipeline-watch", json={"follow": True},
+                               headers=auth_headers["b"])
+        assert r.status_code == 404
+
+    @pytest.mark.parametrize("host, ready", [("", False), ("smtp.example.com", True)])
+    async def test_health_says_whether_email_can_be_sent(self, client, db_session, two_orgs, auth_headers,
+                                                         tmp_path, monkeypatch, host, ready):
+        from app.core.config import settings
+        monkeypatch.setattr(settings, "smtp_host", host)
+        ds = await _dataset(db_session, two_orgs, tmp_path)
+        r = await client.get(f"/api/v1/datasets/{ds.id}/pipeline-health", headers=auth_headers["a"])
+        assert r.json()["email_ready"] is ready

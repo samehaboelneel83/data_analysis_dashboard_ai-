@@ -571,7 +571,7 @@ export const datasetsApi = {
   pipelineHealth: (id: number) =>
     api.get<PipelineHealth>(`/datasets/${id}/pipeline-health`).then(r => r.data),
   /** Freshness target (hours, or null for none) and extra alert recipients. */
-  setPipelineWatch: (id: number, body: { freshness_hours?: number | null; recipients?: string[] }) =>
+  setPipelineWatch: (id: number, body: { freshness_hours?: number | null; recipients?: string[]; follow?: boolean }) =>
     api.patch<PipelineHealth>(`/datasets/${id}/pipeline-watch`, body).then(r => r.data),
   /** Set the automatic refresh interval, or null to clear it. Minimum 5 minutes;
    *  the server refuses DirectQuery (nothing is cached to refresh). */
@@ -1703,8 +1703,13 @@ export interface PipelineHealth {
               duration_ms: number | null; error: string | null } | null
   next_retry_at: string | null
   can_edit: boolean
-  /** Who the in-app notices go to (the creator, or the org admins): editors only. */
+  /** Who the in-app notices go to (the creator, or the org admins, then
+   *  anyone who chose "Notify me"): editors only. */
   owners?: string[]
+  /** Whether the caller chose "Notify me" (editors only). */
+  following?: boolean
+  /** False when no mail server is set, so email recipients get nothing. */
+  email_ready?: boolean
   freshness_choices: number[]
 }
 

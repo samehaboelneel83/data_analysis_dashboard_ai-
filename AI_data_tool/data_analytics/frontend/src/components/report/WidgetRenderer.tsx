@@ -24,6 +24,7 @@ import { getChildNode, walkToDepth } from '../../lib/hierarchyUtils'
 import { WidgetBody } from './WidgetBody'
 const ReconcileDialog = lazy(() => import('./ReconcileDialog'))
 import { ASSIGN_DATA_EVENT, missingRequiredRoles } from './WidgetPlaceholder'
+import { rangeLabel, type RangeValue } from './SlicerRange'
 
 /** Charts whose bars/points are groups of rows two of which can be tested (Phase 7.2). */
 const DIFFERENCE_TYPES: string[] = ['bar', 'line', 'area', 'pie', 'donut', 'dot_plot', 'step', 'treemap', 'funnel']
@@ -308,11 +309,14 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
       return column
     }
     const crossFilters = incomingFilters.flatMap(f => {
-      const between = (f.value as { between?: [number, number] } | null)?.between
+      const between = (f.value as { between?: [number | null, number | null] } | null)?.between
       // A map area arrives as a range on each coordinate axis.
       if (Array.isArray(between) && between.length === 2) {
-        return [{ column: translate(f.column), op: 'gte', value: between[0] },
-                { column: translate(f.column), op: 'lte', value: between[1] }]
+        // An open end (a range slicer with one bound) is null: no predicate.
+        return [
+          ...(between[0] != null ? [{ column: translate(f.column), op: 'gte', value: between[0] }] : []),
+          ...(between[1] != null ? [{ column: translate(f.column), op: 'lte', value: between[1] }] : []),
+        ]
       }
       return [{ column: translate(f.column), op: Array.isArray(f.value) ? 'in' : 'eq', value: f.value }]
     })
@@ -787,6 +791,22 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
     if (!column) return
     if (value) emitFilter(widget.id, widget.page_id, column, value, `${column} = ${value}`)
     else clearFilter(column, widget.id)
+  }, [widget.id, widget.page_id, emitFilter, clearFilter])
+
+  /** A range slicer's bounds, read back from the page's filters so a chip
+   *  cleared elsewhere empties the boxes too. */
+  const rangeFilter = useMemo((): RangeValue | null => {
+    const mine = activeFilters.find(f => f.sourceWidgetId === widget.id
+      && Array.isArray((f.value as { between?: unknown } | null)?.between))
+    return mine ? (mine.value as { between: RangeValue }).between : null
+  }, [activeFilters, widget.id])
+
+  /** Bounds become one `between` filter; an open end is null. Both empty
+   *  clears it, like an empty text box. */
+  const handleSubmitRangeFilter = useCallback((range: RangeValue | null, column: string) => {
+    if (!column) return
+    if (!range) { clearFilter(column, widget.id); return }
+    emitFilter(widget.id, widget.page_id, column, { between: range }, rangeLabel(column, range))
   }, [widget.id, widget.page_id, emitFilter, clearFilter])
 
   // Slicer: toggling a checkbox re-emits the full checked set as a multi-value filter.
@@ -1423,6 +1443,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
                   : zoomSel ? { ...data, rows: baseRows!.slice(zoomSel.a, zoomSel.b + 1) } : data}
                 fetchError={fetchError} onRetry={() => { void fetchData(true) }} localSelected={localSelected} onClickPoint={handleClick} broadcasts={broadcasts} allFormats={allFormats} checked={checked} onToggleSlicerValue={handleToggleSlicerValue} onButtonClick={handleButtonClick} ruleStyles={ruleStyles} parameters={parameters} geography={geography}
                 textFilter={textFilter} onSubmitTextFilter={handleSubmitTextFilter}
+            rangeFilter={rangeFilter} onSubmitRangeFilter={handleSubmitRangeFilter}
                 onBrushChange={undefined} brushNonce={brushNonce} onAnimationFrame={setAnimFrame} />
               {zoomLoading && (
                 <span data-testid="zoom-loading" role="status" style={{ position: 'absolute', top: 2, insetInlineEnd: 4, fontSize: 10, color: 'var(--muted)' }}>
@@ -1437,6 +1458,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
         {!loading && !hiddenByRule && !smartZoom && (
           <WidgetBody onLoadMore={loadMore} loadingMore={loadingMore} widget={viewAs && !editMode ? { ...widget, widget_type: viewAs as Widget['widget_type'] } : widget} data={data} fetchError={fetchError} onRetry={() => { void fetchData(true) }} localSelected={localSelected} onClickPoint={handleClick} broadcasts={broadcasts} allFormats={allFormats} checked={checked} onToggleSlicerValue={handleToggleSlicerValue} onButtonClick={handleButtonClick} ruleStyles={ruleStyles} parameters={parameters} geography={geography}
             textFilter={textFilter} onSubmitTextFilter={handleSubmitTextFilter}
+            rangeFilter={rangeFilter} onSubmitRangeFilter={handleSubmitRangeFilter}
             onBrushChange={setBrushRange} brushNonce={brushNonce} onAnimationFrame={setAnimFrame}
             onAssignData={editMode ? () => window.dispatchEvent(new CustomEvent(ASSIGN_DATA_EVENT, { detail: { widgetId: widget.id } })) : undefined}
             onApplyFix={editMode ? (patch, label) => window.dispatchEvent(new CustomEvent(PATCH_WIDGET_EVENT, { detail: { widgetId: widget.id, patch, label } })) : undefined} />

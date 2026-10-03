@@ -304,7 +304,7 @@ VOCABULARIES: dict[str, frozenset] = {
     "totals_position": frozenset({"before", "after"}),
     "totals_scope": frozenset({"all", "shown"}),
     "bar_mode": frozenset({"clustered", "stacked", "stacked100"}),
-    "slicer_mode": frozenset({"auto", "buttons", "list", "dropdown", "search", "text"}),
+    "slicer_mode": frozenset({"auto", "buttons", "list", "dropdown", "search", "text", "range"}),
     "legend_position": frozenset({"top", "bottom", "left", "right"}),
     "y_scale": frozenset({"linear", "log"}),
     "gauge_shape": frozenset({"arc", "speedometer", "bullet", "thermometer", "progress"}),

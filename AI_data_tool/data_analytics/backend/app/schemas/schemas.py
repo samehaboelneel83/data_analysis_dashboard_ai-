@@ -112,6 +112,8 @@ class PipelineWatchUpdate(BaseModel):
     its owner hears about failures. Fields not sent are left as they are."""
     freshness_hours: Optional[int] = None
     recipients: Optional[list[str]] = None
+    #: True adds the caller to the in-app notices, False removes them.
+    follow: Optional[bool] = None
 
 
 class DatasetRefreshRequest(BaseModel):

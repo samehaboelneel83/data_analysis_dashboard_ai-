@@ -9,6 +9,7 @@ import { DEFAULT_SPEC, parseSpec, specProblem } from '../../lib/relativeDates'
 import type { Widget, WidgetType, ReportPage, HierarchyNode, Bookmark } from '../../types/report'
 import BoundarySetPicker from './BoundarySetPicker'
 import GeoMatchStatus from './GeoMatchStatus'
+import { usePanelLabel } from './panelLabels'
 // Lazy: matching a column against map regions needs the bundled world geometry.
 const GeoMatchLine = lazy(() => import('./GeoMatchLine'))
 import { boundarySetsApi, calendarSettingsApi } from '../../services/api'
@@ -96,6 +97,9 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
     [widget.config])
   const cfg = migrated as any
   const wt  = widget.widget_type
+  // The panel's own words in the reader's language (panelLabels.ts). Field
+  // names, option values and anything from the data stay as they are.
+  const L = usePanelLabel()
 
   // Panel search box — not part of the widget config, so it is never seeded/reset by
   // the widget-switch effect and never written by the save effect.
@@ -555,9 +559,16 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
     if (!mounted.current) { mounted.current = true; return }
 
     let config: Record<string, unknown>
-    if (wt === 'text')   { config = { content, rtl } }
+    // Written only when they say something. The panel shows "Descending" and
+    // an unticked RTL box for a config that has neither, and writing those
+    // defaults back on the first unrelated edit changed meaning: a time axis
+    // with no `sort` runs oldest first, and a stored `rtl: false` reads as
+    // "force left to right" to anything that does not know better.
+    const sortPart = cfg.sort !== undefined || sort !== 'desc' ? { sort } : {}
+    const rtlPart = rtl ? { rtl: true } : {}
+    if (wt === 'text')   { config = { content, ...rtlPart } }
     else if (wt === 'button') {
-      config = { label, rtl }
+      config = { label, ...rtlPart }
       if (action) config.action = action
       if (action === 'navigate' && actionPageId) config.actionPageId = Number(actionPageId)
       if (action === 'navigate' && actionPageId && carryFilters) config.carry_filters = true
@@ -576,7 +587,7 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
       // A grid (a second dimension) reads neither a sort column nor a running
       // metric, and the panel hides both there: not written either (E08).
       const isGrid = !!roleValues.category2
-      config = { aggregation: agg, ...(limit ? { limit } : {}), sort, ...(sortBy ? { sort_by: sortBy } : {}), ...(sortCol && !isGrid ? { sort_col: sortCol } : {}), rtl, ...(running && !isGrid ? { running } : {}) }
+      config = { aggregation: agg, ...(limit ? { limit } : {}), ...sortPart, ...(sortBy ? { sort_by: sortBy } : {}), ...(sortCol && !isGrid ? { sort_col: sortCol } : {}), ...rtlPart, ...(running && !isGrid ? { running } : {}) }
       if (wt === 'slicer' && slicerMode !== 'auto') config.slicer_mode = slicerMode
       // Only when set: an absent key means countries, and writing an explicit
       // null would make "unset" and "countries" two states that look different
@@ -875,11 +886,11 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
    *  a wedge is a share of its parent. */
   const aggOptionGroups = (current: string, partitionRule: boolean) =>
     Object.entries(aggGroups).map(([group, items]) => (
-      <optgroup key={group} label={`── ${group} ──`}>
+      <optgroup key={group} label={`── ${L(group)} ──`}>
         {items
           .filter(a => !partitionRule || !PARTITION_WIDGETS.includes(wt) || ADDITIVE_AGGREGATIONS.includes(a.value))
           .filter(a => aggregationOffered(wt, a.value) || a.value === current)
-          .map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
+          .map(a => <option key={a.value} value={a.value}>{L(a.label)}</option>)}
       </optgroup>
     ))
 
@@ -896,23 +907,23 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
     // (Phase 7.5): tabular Hijri, labelled 1448-03, month
     // named on the axis in the reader's language.
     <div style={{ margin:'-6px 0 10px' }}>
-      <label htmlFor="date-granularity" style={{ fontSize: 11, color:'var(--muted)' }}>Group dates by</label>
-      <select id="date-granularity" aria-label="Group dates by" value={dimensionGranularity}
+      <label htmlFor="date-granularity" style={{ fontSize: 11, color:'var(--muted)' }}>{L("Group dates by")}</label>
+      <select id="date-granularity" aria-label={L("Group dates by")} value={dimensionGranularity}
         onChange={e => setDimensionGranularity(e.target.value)} style={{ width:'100%', fontSize:11 }}>
-        <option value="">each date</option>
+        <option value="">{L("each date")}</option>
         {['day', 'week', 'month', 'quarter', 'year'].map(g => <option key={g} value={g}>{g}</option>)}
-        <option value="hour">hour</option>
-        <option value="hour_of_day">hour of day (00–23)</option>
-        <option value="hijri_month">Hijri month (هجري)</option>
-        <option value="hijri_year">Hijri year (هجري)</option>
+        <option value="hour">{L("hour")}</option>
+        <option value="hour_of_day">{L("hour of day (00–23)")}</option>
+        <option value="hijri_month">{L("Hijri month (هجري)")}</option>
+        <option value="hijri_year">{L("Hijri year (هجري)")}</option>
         {/* A forecast continues a calendar sequence (next month, next
             quarter); fiscal labels are not one it can extend. */}
-        {wt !== 'forecast' && <option value="fiscal_quarter">fiscal quarter</option>}
-        {wt !== 'forecast' && <option value="fiscal_year">fiscal year</option>}
+        {wt !== 'forecast' && <option value="fiscal_quarter">{L("fiscal quarter")}</option>}
+        {wt !== 'forecast' && <option value="fiscal_year">{L("fiscal year")}</option>}
       </select>
       {dimensionGranularity.startsWith('fiscal') && (
         <div style={{ marginTop: 4 }}>
-          <label htmlFor="fiscal-start-month" style={{ fontSize: 11, color:'var(--muted)' }}>Fiscal year starts in</label>
+          <label htmlFor="fiscal-start-month" style={{ fontSize: 11, color:'var(--muted)' }}>{L("Fiscal year starts in")}</label>
           <select id="fiscal-start-month" value={fiscalStart} onChange={e => setFiscalStart(e.target.value)}
             style={{ width:'100%', fontSize:11 }}>
             <option value="">{orgFiscalStart
@@ -923,13 +934,13 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
             ))}
           </select>
           <div style={{ fontSize: 11, color:'var(--muted)', marginTop:2 }}>
-            Labelled FY2025/26 and FY2025/26-Q1 (FY2025 when the year starts in January). Admin → Calendar sets the organisation's month.
+            {L("Labelled FY2025/26 and FY2025/26-Q1 (FY2025 when the year starts in January). Admin → Calendar sets the organisation's month.")}
           </div>
         </div>
       )}
       {dimensionGranularity.startsWith('hijri') && (
         <div style={{ fontSize: 11, color:'var(--muted)', marginTop:2 }}>
-          Tabular Hijri calendar: may differ by a day from Umm al-Qura at a month's start.
+          {L("Tabular Hijri calendar: may differ by a day from Umm al-Qura at a month's start.")}
         </div>
       )}
     </div>
@@ -939,7 +950,7 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
     const id = 'fld-' + lbl.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
     return (
       <div style={{ marginBottom: 12 }}>
-        <label htmlFor={id} style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>{lbl}</label>
+        <label htmlFor={id} style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>{L(lbl)}</label>
         {/* An id already set by the caller wins, so a field that needs a specific id
             for other reasons is not silently renamed. */}
         {cloneElement(el, { id: (el.props as { id?: string }).id ?? id })}
@@ -954,7 +965,7 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
     const groups = [...new Set(options.map(o => o.group).filter((g): g is string => !!g))]
     return (
       <select value={value} onChange={e => onChange(e.target.value)} style={{ width:'100%' }}>
-        <option value="">{ph}</option>
+        <option value="">{L(ph)}</option>
         {options.filter(o => !o.group).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         {groups.map(g => (
           <optgroup key={g} label={g}>
@@ -1173,7 +1184,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
   const detailLabel = { display:'block', fontSize: 12, color:'var(--muted)', marginBottom:3 } as const
   const nameField = (id: string, value: string, set: (v: string) => void, placeholder: string) => (
     <div style={{ marginBottom: 8 }}>
-      <label htmlFor={id} style={detailLabel}>Name:</label>
+      <label htmlFor={id} style={detailLabel}>{L("Name:")}</label>
       <input id={id} value={value} placeholder={placeholder} onChange={e => set(e.target.value)} style={{ width:'100%' }} />
     </div>
   )
@@ -1186,20 +1197,20 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
       const first = f === roleValues.measure
       return (<>
         {axes && first && nameField('data-role-name-measure', yAxisLabel, setYAxisLabel, f)}
-        <label htmlFor="data-role-aggregation" style={detailLabel}>Aggregation:</label>
+        <label htmlFor="data-role-aggregation" style={detailLabel}>{L("Aggregation:")}</label>
         <select id="data-role-aggregation" value={agg} onChange={e => setAgg(e.target.value)} style={{ width:'100%' }}>
           {aggOptionGroups(agg, true)}
         </select>
         {extraMeasures.length > 0 && multiMeasure && (
-          <div style={{ fontSize: 11, color:'var(--muted)', marginTop: 4 }}>Every measure on this chart uses it.</div>
+          <div style={{ fontSize: 11, color:'var(--muted)', marginTop: 4 }}>{L("Every measure on this chart uses it.")}</div>
         )}
       </>)
     }
     if (role === 'measure2' && DUAL_MEASURE_WIDGETS.includes(wt)) return (<>
       {axes && nameField('data-role-name-measure2', y2AxisLabel, setY2AxisLabel, f)}
-      <label htmlFor="data-role-aggregation2" style={detailLabel}>Aggregation:</label>
+      <label htmlFor="data-role-aggregation2" style={detailLabel}>{L("Aggregation:")}</label>
       <select id="data-role-aggregation2" value={agg2} onChange={e => setAgg2(e.target.value)} style={{ width:'100%' }}>
-        <option value="">Same as first measure</option>
+        <option value="">{L("Same as first measure")}</option>
         {aggOptionGroups(agg2, false)}
       </select>
     </>)
@@ -1212,7 +1223,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
         {hierarchyNodeId && (
           <button type="button" onClick={() => setShowHierarchyEditor(s => !s)}
             style={{ marginTop:4, background:'none', border:'none', color:'var(--accent)', cursor:'pointer', fontSize:11, padding:0 }}>
-            ✎ Edit hierarchy
+            {L("✎ Edit hierarchy")}
           </button>
         )}
         {hierarchyNodeId && showHierarchyEditor && (
@@ -1228,7 +1239,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
   const dataRolesPane = (
     <div data-testid="data-roles-pane" style={{ marginBottom: 8 }}>
       {pageWidgets.length > 1 && (
-        <select aria-label="Object" value={widget.id} style={{ width:'100%', marginBottom:10 }}
+        <select aria-label={L("Object")} value={widget.id} style={{ width:'100%', marginBottom:10 }}
           onChange={e => window.dispatchEvent(new CustomEvent(ASSIGN_DATA_EVENT,
             { detail: { widgetId: Number(e.target.value), open: false } }))}>
           {pageWidgets.map(w => <option key={w.id} value={w.id}>{objectLabel(w)}</option>)}
@@ -1237,7 +1248,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
       <button type="button" onClick={() => openAssign(null)}
         style={{ display:'flex', alignItems:'center', gap:6, background:'none', border:'none', padding:'4px 0',
           margin:'0 0 8px', cursor:'pointer', font:'inherit', fontSize:13, color:'var(--text)' }}>
-        <span aria-hidden style={{ fontSize:17, lineHeight:1 }}>+</span> Assign data
+        <span aria-hidden style={{ fontSize:17, lineHeight:1 }}>+</span> {L("Assign data")}
       </button>
       <DataRolesList specs={roleSpecs} values={assignedFields} kindOf={fieldKind} displayName={displayName}
         onAdd={role => setAddRole(role)} onRemove={removeField} renderDetails={fieldDetails} addBlocked={addBlocked} />
@@ -1288,7 +1299,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
     <div ref={bodyRef} style={{ fontSize:13 }}>
       <div style={{ padding:'14px 14px 0' }}>
         <div style={{ fontWeight:650, marginBottom:14, fontSize:14, display:'flex', alignItems:'center', gap:6, color:'var(--text)' }}>
-          {widgetIcon(wt)} {wt === 'kpi' ? 'KPI' : wt.charAt(0).toUpperCase() + wt.slice(1).replace(/_/g, ' ')} settings
+          {widgetIcon(wt)} {L('{type} settings', { type: L(wt === 'kpi' ? 'KPI' : wt.charAt(0).toUpperCase() + wt.slice(1).replace(/_/g, ' ')) })}
         </div>
 
         <div style={{ marginBottom: 12 }}>
@@ -1296,20 +1307,20 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
             type="search"
             value={filterText}
             onChange={e => setFilterText(e.target.value)}
-            placeholder="Filter settings…"
-            aria-label="Filter settings"
+            placeholder={L("Filter settings…")}
+            aria-label={L("Filter settings")}
             style={{ width:'100%' }}
           />
           {filterActive && settingsTab !== 'all' && (
             <div style={{ fontSize: 11, color:'var(--muted)', marginTop:4 }}>
-              Searching all tabs — clear the box to return to {settingsTab}.
+              {L('Searching all tabs — clear the box to return to {tab}.', { tab: L(settingsTab) })}
             </div>
           )}
         </div>
 
         {/* One object's settings under the headings an author already looks
             for them under, rather than ten accordions in a single column. */}
-        <div role="tablist" aria-label="Settings sections"
+        <div role="tablist" aria-label={L("Settings sections")}
           style={{ display:'flex', flexWrap:'wrap', gap:2, margin:'8px 0 2px' }}>
           {SETTINGS_TABS.map(t => {
             const key = t === 'All' ? 'all' : t
@@ -1324,14 +1335,14 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                   background: on ? 'var(--accent)' : 'transparent',
                   color: on ? 'var(--mc-accent-fg)' : 'var(--muted)',
                 }}>
-                {t}
+                {L(t)}
               </button>
             )
           })}
         </div>
         {tabEmpty && !filterActive && settingsTab !== 'all' && (
           <div style={{ fontSize:11, color:'var(--muted)', padding:'10px 0 2px' }}>
-            No {settingsTab} settings for this object.
+            {L('No {tab} settings for this object.', { tab: L(settingsTab) })}
           </div>
         )}
 
@@ -1355,7 +1366,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
             setSortCol('')
             setTableCols([])
           }} style={{ width:'100%' }}>
-            <option value="">{primaryDatasetId && datasets[primaryDatasetId] ? `${datasets[primaryDatasetId].name} (default)` : '— report default —'}</option>
+            <option value="">{primaryDatasetId && datasets[primaryDatasetId] ? L('{name} (default)', { name: datasets[primaryDatasetId].name }) : L('— report default —')}</option>
             {Object.values(datasets).map(ds => (
               <option key={ds.id} value={ds.id}>{ds.name}{ds.aggregate_of_dataset_id ? ' · pre-aggregated' : ''}</option>
             ))}
@@ -1364,10 +1375,10 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
 
         {/* `title` carries the whole value: the box cannot grow, and reading a
             long title otherwise means selecting the text and scrolling it. */}
-        {fld('Title', <input value={title} title={title} onChange={e => setTitle(e.target.value)} style={{ width:'100%' }} placeholder="Widget title" />)}
+        {fld('Title', <input value={title} title={title} onChange={e => setTitle(e.target.value)} style={{ width:'100%' }} placeholder={L("Widget title")} />)}
         {/* One line under the title saying what the numbers are: the scope
             ("Share of total · all time") or the unit ("Count of orders"). */}
-        {fld('Subtitle', <input value={subtitle} title={subtitle} onChange={e => setSubtitle(e.target.value)} style={{ width:'100%' }} placeholder="Optional — e.g. Share of total · all time" />)}
+        {fld('Subtitle', <input value={subtitle} title={subtitle} onChange={e => setSubtitle(e.target.value)} style={{ width:'100%' }} placeholder={L("Optional — e.g. Share of total · all time")} />)}
 
         <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
           <input
@@ -1377,19 +1388,19 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
             onChange={e => setRtl(e.target.checked)}
           />
           <label htmlFor="rtl-toggle" style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', cursor: 'pointer' }}>
-            RTL (Right to Left)
+            {L("RTL (Right to Left)")}
           </label>
         </div>
 
         {/* Text / Button */}
-        {wt === 'text'   && fld('Content', <textarea value={content} onChange={e => setContent(e.target.value)} rows={4} style={{ width:'100%', resize:'vertical' }} placeholder="Enter text…" />)}
+        {wt === 'text'   && fld('Content', <textarea value={content} onChange={e => setContent(e.target.value)} rows={4} style={{ width:'100%', resize:'vertical' }} placeholder={L("Enter text…")} />)}
         {wt === 'button' && fld('Button label', <input value={label} onChange={e => setLabel(e.target.value)} style={{ width:'100%' }} />)}
 
         {/* Image */}
         {wt === 'image' && (<>
           <div style={{ marginBottom: 12 }}>
             <label htmlFor="image-url-input" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-              Image URL
+              {L("Image URL")}
             </label>
             <input id="image-url-input" value={imageUrl} onChange={e => setImageUrl(e.target.value)} style={{ width:'100%' }} placeholder="https://…" />
           </div>
@@ -1399,18 +1410,18 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 widget's aria-label (cfg.alt_text). Both are visible on an image
                 widget at once, so the labels must say what each actually does. */}
             <label htmlFor="image-alt-input" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-              Image alt text
+              {L("Image alt text")}
             </label>
             <input id="image-alt-input" value={imageAlt} onChange={e => setImageAlt(e.target.value)} style={{ width:'100%' }} />
           </div>
           <div style={{ marginBottom: 12 }}>
             <label htmlFor="image-fit-select" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-              Fit
+              {L("Fit")}
             </label>
             <select id="image-fit-select" value={imageFit} onChange={e => setImageFit(e.target.value)} style={{ width:'100%' }}>
-              <option value="contain">Contain</option>
-              <option value="cover">Cover</option>
-              <option value="fill">Fill</option>
+              <option value="contain">{L("Contain")}</option>
+              <option value="cover">{L("Cover")}</option>
+              <option value="fill">{L("Fill")}</option>
             </select>
           </div>
         </>)}
@@ -1418,11 +1429,11 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
         {wt === 'web_content' && (
           <div style={{ marginBottom: 12 }}>
             <label htmlFor="web-url-input" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-              Web page URL
+              {L("Web page URL")}
             </label>
             <input id="web-url-input" value={webUrl} onChange={e => setWebUrl(e.target.value)} style={{ width:'100%' }} placeholder="https://…" />
             <div style={{ fontSize: 11, color:'var(--muted)', marginTop:4 }}>
-              Embedded in a sandboxed frame. Only http(s) URLs load; some sites block being framed.
+              {L("Embedded in a sandboxed frame. Only http(s) URLs load; some sites block being framed.")}
             </div>
           </div>
         )}
@@ -1430,13 +1441,12 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
         {wt === 'custom_visual' && (
           <div style={{ marginBottom: 12 }}>
             <label htmlFor="custom-url-input" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-              Visualisation URL
+              {L("Visualisation URL")}
             </label>
             <input id="custom-url-input" value={customUrl} onChange={e => setCustomUrl(e.target.value)} style={{ width:'100%' }} placeholder="https://…" />
             <div style={{ fontSize: 11, color:'var(--muted)', marginTop:4 }}>
-              A sandboxed page that receives this widget's data via <code>postMessage</code>
-              (<code>{'{ type: "datalytics:data", version: 1, data, context }'}</code>). Bind a dimension/measure below to choose the data.
-              Build one with the SDK, <code>/sdk/datalytics-visual-1.js</code>; <code>/sdk/example-bars.html</code> is a working example.
+              {L("A sandboxed page that receives this widget's data via")} <code>postMessage</code>
+              (<code>{'{ type: "datalytics:data", version: 1, data, context }'}</code>{L("). Bind a dimension/measure below to choose the data. Build one with the SDK,")} <code>/sdk/datalytics-visual-1.js</code>; <code>/sdk/example-bars.html</code> {L("is a working example.")}
             </div>
           </div>
         )}
@@ -1447,10 +1457,10 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           <label style={{ display:'flex', alignItems:'center', gap:6, fontSize:11 }}>
             <input type="checkbox" checked={transparent}
               onChange={e => setTransparent(e.target.checked)} style={{ margin:0 }} />
-            Transparent background
+            {L("Transparent background")}
           </label>
           <div style={{ fontSize: 10.5, color:'var(--muted)', marginTop:3 }}>
-            No panel and no border, so the page's background image shows through.
+            {L("No panel and no border, so the page's background image shows through.")}
           </div>
         </div>
 
@@ -1459,16 +1469,16 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
             <label style={{ display:'flex', alignItems:'center', gap:6, fontSize:11 }}>
               <input type="checkbox" checked={donutTotal}
                 onChange={e => setDonutTotal(e.target.checked)} style={{ margin:0 }} />
-              Total in the centre
+              {L("Total in the centre")}
             </label>
             {donutTotal && (
               <div style={{ marginTop: 6 }}>
                 <label htmlFor="donut-total-label" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                  Caption under the total
+                  {L("Caption under the total")}
                 </label>
                 <input id="donut-total-label" value={donutTotalLabel}
                   onChange={e => setDonutTotalLabel(e.target.value)}
-                  placeholder="defaults to the measure's name" style={{ width:'100%' }} />
+                  placeholder={L("defaults to the measure's name")} style={{ width:'100%' }} />
               </div>
             )}
           </div>
@@ -1486,17 +1496,10 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               style={{ width:'100%', fontFamily:'var(--mono)', fontSize:11.5,
                 boxSizing:'border-box', resize:'vertical' }} />
             <div style={{ fontSize: 11, color:'var(--muted)', marginTop:4 }}>
-              Runs on the server over this widget's own filtered, row- and
-              column-secured frame, which arrives as <code>df</code>. Assign what
-              the tile should show to <code>result</code> — a DataFrame, a Series
-              or a single number. <code>print()</code> output is shown under the
-              table.
+              {L("Runs on the server over this widget's own filtered, row- and column-secured frame, which arrives as")} <code>df</code>{L(". Assign what the tile should show to")} <code>result</code> {L("— a DataFrame, a Series or a single number.")} <code>print()</code> {L("output is shown under the table.")}
             </div>
             <div style={{ fontSize: 11, color:'var(--muted)', marginTop:4 }}>
-              Only an organisation admin can save a script tile: this is code
-              running on the server, in a separate process with no access to the
-              application's credentials, but with whatever access the server
-              itself has.
+              {L("Only an organisation admin can save a script tile: this is code running on the server, in a separate process with no access to the application's credentials, but with whatever access the server itself has.")}
             </div>
           </div>
         )}
@@ -1504,24 +1507,24 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
         {/* Shape */}
         {wt === 'shape' && (<>
           <label htmlFor="shape-kind-select" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-            Shape
+            {L("Shape")}
           </label>
           <div style={{ marginBottom: 12 }}>
             <select id="shape-kind-select" value={shapeKind} onChange={e => setShapeKind(e.target.value)} style={{ width:'100%' }}>
-              <option value="rectangle">Rectangle</option>
-              <option value="rounded">Rounded rectangle</option>
-              <option value="circle">Circle / Oval</option>
-              <option value="line">Line</option>
+              <option value="rectangle">{L("Rectangle")}</option>
+              <option value="rounded">{L("Rounded rectangle")}</option>
+              <option value="circle">{L("Circle / Oval")}</option>
+              <option value="line">{L("Line")}</option>
             </select>
           </div>
           <div style={{ display:'flex', gap:8, marginBottom:12 }}>
             <label style={{ display:'flex', flexDirection:'column', gap:2 }}>
-              <span style={{ fontSize: 10.5, color:'var(--muted)' }}>Fill</span>
+              <span style={{ fontSize: 10.5, color:'var(--muted)' }}>{L("Fill")}</span>
               <input type="color" value={shapeFill} onChange={e => setShapeFill(e.target.value)}
                 style={{ width:36, height:26, padding:2, border:'1px solid var(--border)', borderRadius:4, cursor:'pointer', background:'var(--surface)' }} />
             </label>
             <label style={{ display:'flex', flexDirection:'column', gap:2 }}>
-              <span style={{ fontSize: 10.5, color:'var(--muted)' }}>Border</span>
+              <span style={{ fontSize: 10.5, color:'var(--muted)' }}>{L("Border")}</span>
               <input type="color" value={shapeStroke} onChange={e => setShapeStroke(e.target.value)}
                 style={{ width:36, height:26, padding:2, border:'1px solid var(--border)', borderRadius:4, cursor:'pointer', background:'var(--surface)' }} />
             </label>
@@ -1531,27 +1534,26 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
         {wt === 'container' && (
           <div style={{ marginBottom: 12 }}>
             <label htmlFor="container-mode-select" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-              Container style
+              {L("Container style")}
             </label>
             <select id="container-mode-select" value={containerMode} onChange={e => setContainerMode(e.target.value)} style={{ width:'100%' }}>
-              <option value="group">Group (fixed layout)</option>
-              <option value="tabs">Tabs (one child at a time)</option>
-              <option value="scroll">Scrolling</option>
-              <option value="prompt">Collapsible</option>
-              <option value="precision">Precision (free positioning, overlapping)</option>
+              <option value="group">{L("Group (fixed layout)")}</option>
+              <option value="tabs">{L("Tabs (one child at a time)")}</option>
+              <option value="scroll">{L("Scrolling")}</option>
+              <option value="prompt">{L("Collapsible")}</option>
+              <option value="precision">{L("Precision (free positioning, overlapping)")}</option>
             </select>
             {containerMode === 'precision' && (
               <div style={{ marginTop: 8 }}>
                 <label htmlFor="container-background" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                  Background image
+                  {L("Background image")}
                 </label>
                 <input id="container-background" value={containerBackground}
                   onChange={e => setContainerBackground(e.target.value)}
-                  placeholder="https://… floorplan or schematic"
+                  placeholder={L("https://… floorplan or schematic")}
                   style={{ width:'100%' }} />
                 <div style={{ fontSize: 10.5, color:'var(--muted)', marginTop:3 }}>
-                  Widgets are placed freely over it and may overlap. Use each
-                  widget's Layer to decide what sits in front.
+                  {L("Widgets are placed freely over it and may overlap. Use each widget's Layer to decide what sits in front.")}
                 </div>
               </div>
             )}
@@ -1565,10 +1567,10 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           return (
             <div style={{ marginBottom: 12 }}>
               <label htmlFor="container-parent-select" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                Place inside container
+                {L("Place inside container")}
               </label>
               <select id="container-parent-select" value={containerId} onChange={e => setContainerId(e.target.value)} style={{ width:'100%' }}>
-                <option value="">— on the page —</option>
+                <option value="">{L("— on the page —")}</option>
                 {containers.map(c => <option key={c.id} value={c.id}>{c.title || `Container ${c.id}`}</option>)}
               </select>
               {/* Stacking only means something where widgets can overlap, so
@@ -1582,13 +1584,13 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 return (
                   <div style={{ marginTop: 8 }}>
                     <label htmlFor="widget-layer" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                      Layer
+                      {L("Layer")}
                     </label>
                     <input id="widget-layer" type="number" value={layer}
                       onChange={e => setLayer(e.target.value)}
                       placeholder="0" style={{ width:'100%' }} />
                     <div style={{ fontSize: 10.5, color:'var(--muted)', marginTop:3 }}>
-                      Higher sits in front. Leave empty for the default.
+                      {L("Higher sits in front. Leave empty for the default.")}
                     </div>
                   </div>
                 )
@@ -1600,20 +1602,23 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
         {wt === 'slicer' && (
           <div style={{ marginBottom: 12 }}>
             <label htmlFor="slicer-mode-select" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-              Control type
+              {L("Control type")}
             </label>
             <select id="slicer-mode-select" value={slicerMode} onChange={e => setSlicerMode(e.target.value)} style={{ width:'100%' }}>
-              <option value="auto">Auto (by value count)</option>
-              <option value="buttons">Button bar</option>
-              <option value="list">Checkbox list</option>
-              <option value="dropdown">Drop-down (multi)</option>
-              <option value="search">Searchable list</option>
+              <option value="auto">{L("Auto (by value count)")}</option>
+              <option value="buttons">{L("Button bar")}</option>
+              <option value="list">{L("Checkbox list")}</option>
+              <option value="dropdown">{L("Drop-down (multi)")}</option>
+              <option value="search">{L("Searchable list")}</option>
               {/* For a column whose value list is useless — Customer ID with
                   hundreds of thousands of values. The server returns no values
                   for this mode at all, which is the cost being avoided. */}
-              <option value="text">Text input (type a value)</option>
+              <option value="text">{L("Text input (type a value)")}</option>
+              {/* A number column as from–to bounds: the server sends its min
+                  and max, never the value list. */}
+              <option value="range">{L("Number range (from – to)")}</option>
             </select>
-            <span style={{ fontSize: 11, color:'var(--muted)' }}>Auto picks by cardinality: buttons under 5 values, list to 40, searchable beyond.</span>
+            <span style={{ fontSize: 11, color:'var(--muted)' }}>{L("Auto picks by how many values there are: buttons under 5, a list up to 10, a searchable list beyond. A number column with more than 20 values gets a from – to range.")}</span>
           </div>
         )}
 
@@ -1628,32 +1633,32 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
             searchTerms={ACTIONS_SEARCH_TERMS} {...groupFilterProps('Actions', ACTIONS_SEARCH_TERMS)}>
             <div style={{ marginBottom: 12 }}>
               <label htmlFor="button-action-select" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                Button action
+                {L("Button action")}
               </label>
               <select id="button-action-select" value={action} onChange={e => setAction(e.target.value)} style={{ width:'100%' }}>
-                <option value="">— none —</option>
-                <option value="navigate">Navigate to page</option>
-                <option value="bookmark">Apply bookmark</option>
-                <option value="url">Open external URL</option>
-                <option value="report">Go to another report</option>
-                <option value="set_param">Set a parameter</option>
+                <option value="">{L("— none —")}</option>
+                <option value="navigate">{L("Navigate to page")}</option>
+                <option value="bookmark">{L("Apply bookmark")}</option>
+                <option value="url">{L("Open external URL")}</option>
+                <option value="report">{L("Go to another report")}</option>
+                <option value="set_param">{L("Set a parameter")}</option>
               </select>
             </div>
 
             {action === 'navigate' && (
               <div style={{ marginBottom: 12 }}>
                 <label htmlFor="button-action-page-select" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                  Target page
+                  {L("Target page")}
                 </label>
                 <select id="button-action-page-select" value={actionPageId} onChange={e => setActionPageId(e.target.value)} style={{ width:'100%' }}>
-                  <option value="">— none —</option>
+                  <option value="">{L("— none —")}</option>
                   {(pages ?? []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
                 {actionPageId && (
                   <label style={{ display:'flex', alignItems:'center', gap:6, fontSize:11, marginTop:6 }}
-                    title="The reader arrives on the target page filtered the way they left this one">
+                    title={L("The reader arrives on the target page filtered the way they left this one")}>
                     <input type="checkbox" checked={carryFilters} onChange={e => setCarryFilters(e.target.checked)} />
-                    Carry the reader's selections to that page
+                    {L("Carry the reader's selections to that page")}
                   </label>
                 )}
               </div>
@@ -1662,48 +1667,48 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
             {action === 'url' && (
               <div style={{ marginBottom: 12 }}>
                 <label htmlFor="button-action-url-input" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                  Target URL
+                  {L("Target URL")}
                 </label>
                 <input id="button-action-url-input" value={actionUrl} onChange={e => setActionUrl(e.target.value)}
                   placeholder="https://…" style={{ width:'100%' }} />
-                <span style={{ fontSize: 11, color:'var(--muted)' }}>Opens in a new tab. Only http(s) links are allowed.</span>
+                <span style={{ fontSize: 11, color:'var(--muted)' }}>{L("Opens in a new tab. Only http(s) links are allowed.")}</span>
               </div>
             )}
 
             {action === 'report' && (
               <div style={{ marginBottom: 12 }}>
                 <label htmlFor="button-action-report-input" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                  Target report ID
+                  {L("Target report ID")}
                 </label>
                 <input id="button-action-report-input" type="number" min={1} value={actionReportId}
                   onChange={e => setActionReportId(e.target.value)} style={{ width:'100%' }} placeholder="e.g. 12" />
-                <span style={{ fontSize: 11, color:'var(--muted)' }}>The number in the report's URL: /reports/12. Viewers keep their own permissions on the target.</span>
+                <span style={{ fontSize: 11, color:'var(--muted)' }}>{L("The number in the report's URL: /reports/12. Viewers keep their own permissions on the target.")}</span>
               </div>
             )}
 
             {action === 'set_param' && (
               <div style={{ marginBottom: 12 }}>
                 <label htmlFor="button-action-param-name" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                  Parameter name
+                  {L("Parameter name")}
                 </label>
                 <input id="button-action-param-name" value={actionParamName}
-                  onChange={e => setActionParamName(e.target.value)} style={{ width:'100%' }} placeholder="e.g. threshold" />
+                  onChange={e => setActionParamName(e.target.value)} style={{ width:'100%' }} placeholder={L("e.g. threshold")} />
                 <label htmlFor="button-action-param-value" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', margin:'8px 0 4px' }}>
-                  Value to set
+                  {L("Value to set")}
                 </label>
                 <input id="button-action-param-value" value={actionParamValue}
                   onChange={e => setActionParamValue(e.target.value)} style={{ width:'100%' }} placeholder="e.g. 100" />
-                <span style={{ fontSize: 11, color:'var(--muted)' }}>Clicking the button sets this report parameter for the viewer, refreshing every widget that uses it.</span>
+                <span style={{ fontSize: 11, color:'var(--muted)' }}>{L("Clicking the button sets this report parameter for the viewer, refreshing every widget that uses it.")}</span>
               </div>
             )}
 
             {action === 'bookmark' && (
               <div style={{ marginBottom: 12 }}>
                 <label htmlFor="button-action-bookmark-select" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                  Target bookmark
+                  {L("Target bookmark")}
                 </label>
                 <select id="button-action-bookmark-select" value={actionBookmarkId} onChange={e => setActionBookmarkId(e.target.value)} style={{ width:'100%' }}>
-                  <option value="">— none —</option>
+                  <option value="">{L("— none —")}</option>
                   {(bookmarks ?? []).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                 </select>
               </div>
@@ -1729,12 +1734,12 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           {wt === 'bar' && (
             <div style={{ marginBottom: 12 }}>
               <label htmlFor="bar-mode-select" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                Bar layout
+                {L("Bar layout")}
               </label>
               <select id="bar-mode-select" value={barMode} onChange={e => setBarMode(e.target.value)} style={{ width:'100%' }}>
-                <option value="clustered">Clustered</option>
-                <option value="stacked">Stacked</option>
-                <option value="stacked100">100% Stacked</option>
+                <option value="clustered">{L("Clustered")}</option>
+                <option value="stacked">{L("Stacked")}</option>
+                <option value="stacked100">{L("100% Stacked")}</option>
               </select>
             </div>
           )}
@@ -1782,25 +1787,25 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           {HIERARCHY_WIDGETS.includes(wt as typeof HIERARCHY_WIDGETS[number]) && (
             <div style={{ marginBottom: 12 }}>
               <label style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', marginBottom:4 }}>
-                Hierarchy source
+                {L("Hierarchy source")}
               </label>
               <div style={{ display:'flex', gap:12, marginBottom:8, fontSize:12 }}>
                 <label style={{ display:'flex', alignItems:'center', gap:4, cursor:'pointer' }}>
                   <input type="radio" name="hier-mode" checked={hierMode === 'levels'}
                     onChange={() => setHierMode('levels')} />
-                  Level columns
+                  {L("Level columns")}
                 </label>
                 <label style={{ display:'flex', alignItems:'center', gap:4, cursor:'pointer' }}>
                   <input type="radio" name="hier-mode" checked={hierMode === 'parent_child'}
                     onChange={() => setHierMode('parent_child')} />
-                  Parent-child
+                  {L("Parent-child")}
                 </label>
               </div>
 
               {hierMode === 'levels' ? (
                 <>
                   <label style={{ display:'block', fontSize: 11, color:'var(--muted)', marginBottom:3 }}>
-                    Levels — click in order, outer first (max {HIER_MAX_DEPTH})
+                    {L('Levels — click in order, outer first (max {n})', { n: HIER_MAX_DEPTH })}
                   </label>
                   <div style={{ maxHeight:130, overflowY:'auto', display:'flex', flexDirection:'column',
                                 gap:3, background:'var(--bg)', padding:6, borderRadius:4 }}>
@@ -1832,45 +1837,43 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
                   <div>
                     <label htmlFor="hier-id" style={{ display:'block', fontSize: 11, color:'var(--muted)' }}>
-                      ID column
+                      {L("ID column")}
                     </label>
                     <select id="hier-id" value={hierIdCol} onChange={e => setHierIdCol(e.target.value)}
                       style={{ width:'100%' }}>
-                      <option value="">— choose —</option>
+                      <option value="">{L("— choose —")}</option>
                       {effectiveCols.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
                     </select>
                   </div>
                   <div>
                     <label htmlFor="hier-parent" style={{ display:'block', fontSize: 11, color:'var(--muted)' }}>
-                      Parent column
+                      {L("Parent column")}
                     </label>
                     <select id="hier-parent" value={hierParentCol}
                       onChange={e => setHierParentCol(e.target.value)} style={{ width:'100%' }}>
-                      <option value="">— choose —</option>
+                      <option value="">{L("— choose —")}</option>
                       {effectiveCols.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
                     </select>
                   </div>
                   <div>
                     <label htmlFor="hier-label" style={{ display:'block', fontSize: 11, color:'var(--muted)' }}>
-                      Label column (optional)
+                      {L("Label column (optional)")}
                     </label>
                     <select id="hier-label" value={hierLabelCol}
                       onChange={e => setHierLabelCol(e.target.value)} style={{ width:'100%' }}>
-                      <option value="">— use the ID —</option>
+                      <option value="">{L("— use the ID —")}</option>
                       {effectiveCols.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
                     </select>
                   </div>
                   <div style={{ fontSize: 11, color:'var(--muted)' }}>
-                    A row whose parent is missing becomes a root, so a hierarchy you
-                    can only partly see still renders.
+                    {L("A row whose parent is missing becomes a root, so a hierarchy you can only partly see still renders.")}
                   </div>
                 </div>
               )}
 
               {PARTITION_WIDGETS.includes(wt) && (
                 <div style={{ fontSize: 11, color:'var(--muted)', marginTop:6 }}>
-                  A {wt} draws each value as a share of its parent, so only
-                  adding-up aggregations are offered.
+                  {L('This chart draws each value as a share of its parent, so only adding-up aggregations are offered.')}
                 </div>
               )}
             </div>
@@ -1883,17 +1886,17 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
             <div style={{ marginBottom: 12, display:'flex', flexDirection:'column', gap:6 }}>
               <div>
                 <label htmlFor="facet-by" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)' }}>
-                  Facet by
+                  {L("Facet by")}
                 </label>
                 <select id="facet-by" value={facetBy} onChange={e => setFacetBy(e.target.value)}
                   style={{ width:'100%' }}>
-                  <option value="">— choose a column —</option>
+                  <option value="">{L("— choose a column —")}</option>
                   {effectiveCols.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
                 </select>
               </div>
               <div>
                 <label htmlFor="facet-inner" style={{ display:'block', fontSize: 11, color:'var(--muted)' }}>
-                  Panel chart type
+                  {L("Panel chart type")}
                 </label>
                 <select id="facet-inner" value={facetInner} onChange={e => setFacetInner(e.target.value)}
                   style={{ width:'100%' }}>
@@ -1902,14 +1905,14 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               </div>
               <div>
                 <label htmlFor="facet-limit" style={{ display:'block', fontSize: 11, color:'var(--muted)' }}>
-                  Max panels (1–{FACET_MAX_PANELS})
+                  {L('Max panels (1–{n})', { n: FACET_MAX_PANELS })}
                 </label>
                 <input id="facet-limit" type="number" min={1} max={FACET_MAX_PANELS}
                   value={facetLimit} onChange={e => setFacetLimit(e.target.value)}
                   style={{ width:'100%' }} />
               </div>
               <div style={{ fontSize: 11, color:'var(--muted)' }}>
-                Every panel shares one scale — comparing them is the point.
+                {L("Every panel shares one scale — comparing them is the point.")}
               </div>
             </div>
           )}
@@ -1917,7 +1920,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           {wt === 'forecast' && (
             <div style={{ marginBottom: 12 }}>
               <label htmlFor="forecast-periods" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)' }}>
-                Periods ahead ({FORECAST_MIN_PERIODS}–{FORECAST_MAX_PERIODS})
+                {L('Periods ahead ({min}–{max})', { min: FORECAST_MIN_PERIODS, max: FORECAST_MAX_PERIODS })}
               </label>
               <input id="forecast-periods" type="number"
                 min={FORECAST_MIN_PERIODS} max={FORECAST_MAX_PERIODS}
@@ -1931,14 +1934,14 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           {wt === 'network' && (
             <div style={{ marginBottom: 12 }}>
               <label htmlFor="centrality-metric" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                Node size
+                {L("Node size")}
               </label>
               <select id="centrality-metric" value={centralityMetric}
                 onChange={e => setCentralityMetric(e.target.value)} style={{ width:'100%' }}>
-                <option value="degree">Degree — how many it connects to</option>
-                <option value="closeness">Closeness — how near it is to everything</option>
-                <option value="betweenness">Betweenness — how much traffic must pass through it</option>
-                <option value="reach">Reach — how much of the network it can get to</option>
+                <option value="degree">{L("Degree — how many it connects to")}</option>
+                <option value="closeness">{L("Closeness — how near it is to everything")}</option>
+                <option value="betweenness">{L("Betweenness — how much traffic must pass through it")}</option>
+                <option value="reach">{L("Reach — how much of the network it can get to")}</option>
               </select>
             </div>
           )}
@@ -1946,14 +1949,13 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           {wt === 'forecast' && (
             <div style={{ marginBottom: 12 }}>
               <label htmlFor="forecast-target" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                Reach target
+                {L("Reach target")}
               </label>
               <input id="forecast-target" type="number" value={forecastTarget}
                 onChange={e => setForecastTarget(e.target.value)}
                 placeholder="e.g. 500000" style={{ width:'100%' }} />
               <div style={{ fontSize: 10.5, color:'var(--muted)', marginTop:3 }}>
-                Answers when the projection reaches this value, with the range
-                its confidence interval allows. Leave empty for no target.
+                {L("Answers when the projection reaches this value, with the range its confidence interval allows. Leave empty for no target.")}
               </div>
             </div>
           )}
@@ -1961,11 +1963,11 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           {wt === 'forecast' && (
             <div style={{ marginBottom: 12 }}>
               <label htmlFor="forecast-method-select" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                Forecast method
+                {L("Forecast method")}
               </label>
               <select id="forecast-method-select" value={forecastMethod} onChange={e => setForecastMethod(e.target.value)} style={{ width:'100%' }}>
-                <option value="ets">AutoETS (StatsForecast)</option>
-                <option value="simple">Simple smoothing</option>
+                <option value="ets">{L("AutoETS (StatsForecast)")}</option>
+                <option value="simple">{L("Simple smoothing")}</option>
               </select>
             </div>
           )}
@@ -1973,23 +1975,23 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           {(wt === 'bar' || wt === 'line') && (
             <div style={{ marginBottom: 12, border: '1px solid var(--border)', borderRadius: 6, padding: 8 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
-                Analytics
+                {L("Analytics")}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
                 <input id="average-line-toggle" type="checkbox" checked={showAverageLine} onChange={e => setShowAverageLine(e.target.checked)} />
-                <label htmlFor="average-line-toggle" style={{ fontSize: 12, cursor: 'pointer' }}>Show average line</label>
+                <label htmlFor="average-line-toggle" style={{ fontSize: 12, cursor: 'pointer' }}>{L("Show average line")}</label>
               </div>
               <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1 }}>
-                  <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>Reference line value</span>
-                  <input id="reference-line-value" type="number" value={referenceValue} onChange={e => setReferenceValue(e.target.value)} style={{ width: '100%' }} placeholder="e.g. 100" aria-label="Reference line value" />
+                  <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>{L("Reference line value")}</span>
+                  <input id="reference-line-value" type="number" value={referenceValue} onChange={e => setReferenceValue(e.target.value)} style={{ width: '100%' }} placeholder="e.g. 100" aria-label={L("Reference line value")} />
                 </label>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1 }}>
-                  <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>Reference line label</span>
-                  <input id="reference-line-label" value={referenceLabel} onChange={e => setReferenceLabel(e.target.value)} style={{ width: '100%' }} placeholder="Target" aria-label="Reference line label" />
+                  <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>{L("Reference line label")}</span>
+                  <input id="reference-line-label" value={referenceLabel} onChange={e => setReferenceLabel(e.target.value)} style={{ width: '100%' }} placeholder={L("Target")} aria-label={L("Reference line label")} />
                 </label>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>Color</span>
+                  <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>{L("Color")}</span>
                   <input type="color" value={referenceColor} onChange={e => setReferenceColor(e.target.value)}
                     style={{ width: 36, height: 26, padding: 2, border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', background: 'var(--surface)' }} />
                 </label>
@@ -2000,11 +2002,11 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           {/* Aggregation — grouped select */}
           <div style={{ marginBottom:12 }}>
             <label htmlFor="cfg-aggregation" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-              Aggregation
+              {L("Aggregation")}
             </label>
             <select id="cfg-aggregation" value={agg} onChange={e => setAgg(e.target.value)} style={{ width:'100%' }}>
               {Object.entries(aggGroups).map(([group, items]) => (
-                <optgroup key={group} label={`── ${group} ──`}>
+                <optgroup key={group} label={`── ${L(group)} ──`}>
                   {items
                     // A sunburst/icicle wedge is a share of its parent, so an
                     // aggregation that does not add up would make the geometry
@@ -2015,13 +2017,14 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                     // "Percentage %" only where the chart computes shares; a
                     // stored one stays visible so it is not silently replaced.
                     .filter(a => aggregationOffered(wt, a.value) || a.value === agg)
-                    .map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
+                    .map(a => <option key={a.value} value={a.value}>{L(a.label)}</option>)}
                 </optgroup>
               ))}
             </select>
             <div style={{ fontSize: 11, color:'var(--muted)', marginTop:3 }}>
-              {AGGREGATIONS.find(a => a.value === agg)?.label ?? agg}
-              {roleValues.measure ? ` of ${roleValues.measure}` : ' (row count)'}
+              {roleValues.measure
+                ? L('{agg} of {measure}', { agg: L(AGGREGATIONS.find(a => a.value === agg)?.label ?? agg), measure: roleValues.measure })
+                : L('{agg} (row count)', { agg: L(AGGREGATIONS.find(a => a.value === agg)?.label ?? agg) })}
             </div>
             {warning && (
               <div role="note" style={{ fontSize: 11, color:'var(--accent)', marginTop:4 }}>
@@ -2042,7 +2045,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                   {sem}{' '}
                   <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize:11, padding:'0 6px' }}
                     onClick={() => setAgg(fix.value)}>
-                    Use {fix.label}
+                    {L('Use {name}', { name: fix.label })}
                   </button>
                 </div>
               )
@@ -2056,19 +2059,19 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           {DUAL_MEASURE_WIDGETS.includes(wt) && roleValues.measure2 && (
             <div style={{ marginBottom:12 }}>
               <label htmlFor="cfg-aggregation2" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                Aggregation · second measure
+                {L("Aggregation · second measure")}
               </label>
               <select id="cfg-aggregation2" value={agg2} onChange={e => setAgg2(e.target.value)} style={{ width:'100%' }}>
-                <option value="">Same as above</option>
+                <option value="">{L("Same as above")}</option>
                 {Object.entries(aggGroups).map(([group, items]) => (
-                  <optgroup key={group} label={`── ${group} ──`}>
+                  <optgroup key={group} label={`── ${L(group)} ──`}>
                     {items.filter(a => aggregationOffered(wt, a.value) || a.value === agg2)
-                      .map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
+                      .map(a => <option key={a.value} value={a.value}>{L(a.label)}</option>)}
                   </optgroup>
                 ))}
               </select>
               <div style={{ fontSize: 11, color:'var(--muted)', marginTop:3 }}>
-                {(AGGREGATIONS.find(a => a.value === (agg2 || agg))?.label ?? (agg2 || agg))}
+                {L(AGGREGATIONS.find(a => a.value === (agg2 || agg))?.label ?? (agg2 || agg))}
                 {` of ${roleValues.measure2}`}
               </div>
             </div>
@@ -2086,7 +2089,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                   rather than a <label> -- a <label> pointing at nothing gives a screen
                   reader no association and is invalid besides. */}
               <div id="cfg-visible-columns-label" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                Visible columns
+                {L("Visible columns")}
               </div>
               <div role="group" aria-labelledby="cfg-visible-columns-label" style={{ maxHeight:130, overflowY:'auto', display:'flex', flexDirection:'column', gap:3, background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:6, padding:'6px 8px' }}>
                 {effectiveCols.map(c => (
@@ -2107,25 +2110,25 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           <ExpandableGroup id="lattice" title="Lattice (small multiples)"
             searchTerms={LATTICE_SEARCH_TERMS} {...groupFilterProps('Lattice (small multiples)', LATTICE_SEARCH_TERMS)}>
             <p style={{ fontSize: 11, color:'var(--muted)', marginBottom:8 }}>
-              Repeat this chart once per value — a grid of panels on one shared axis, so panels compare honestly.
+              {L("Repeat this chart once per value — a grid of panels on one shared axis, so panels compare honestly.")}
             </p>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:8 }}>
-              <label style={{ fontSize: 11, color:'var(--muted)' }}>Rows
-                <select aria-label="Lattice rows" value={latticeRows} onChange={e => setLatticeRows(e.target.value)} style={{ width:'100%' }}>
-                  <option value="">— none —</option>
+              <label style={{ fontSize: 11, color:'var(--muted)' }}>{L("Rows")}
+                <select aria-label={L("Lattice rows")} value={latticeRows} onChange={e => setLatticeRows(e.target.value)} style={{ width:'100%' }}>
+                  <option value="">{L("— none —")}</option>
                   {colOptions.filter(o => o.value !== latticeCols).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
               </label>
-              <label style={{ fontSize: 11, color:'var(--muted)' }}>Columns
-                <select aria-label="Lattice columns" value={latticeCols} onChange={e => setLatticeCols(e.target.value)} style={{ width:'100%' }}>
-                  <option value="">— none —</option>
+              <label style={{ fontSize: 11, color:'var(--muted)' }}>{L("Columns")}
+                <select aria-label={L("Lattice columns")} value={latticeCols} onChange={e => setLatticeCols(e.target.value)} style={{ width:'100%' }}>
+                  <option value="">{L("— none —")}</option>
                   {colOptions.filter(o => o.value !== latticeRows).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
               </label>
             </div>
             {(latticeRows || latticeCols) && (
               <div style={{ fontSize: 11, color:'var(--muted)', marginBottom:6 }}>
-                Up to 8 rows × 8 columns (60 panels), the values with the most rows first; anything cut is named under the chart.
+                {L("Up to 8 rows × 8 columns (60 panels), the values with the most rows first; anything cut is named under the chart.")}
               </div>
             )}
           </ExpandableGroup>
@@ -2135,19 +2138,19 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           <ExpandableGroup id="animation" title="Animation (play through)"
             searchTerms={ANIMATION_SEARCH_TERMS} {...groupFilterProps('Animation (play through)', ANIMATION_SEARCH_TERMS)}>
             <p style={{ fontSize: 11, color:'var(--muted)', marginBottom:8 }}>
-              Play this chart through an ordered field — a date, a year — one frame per value, on one fixed axis.
+              {L("Play this chart through an ordered field — a date, a year — one frame per value, on one fixed axis.")}
             </p>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:8 }}>
-              <label style={{ fontSize: 11, color:'var(--muted)' }}>Play through
-                <select aria-label="Animate by" value={animateBy} onChange={e => setAnimateBy(e.target.value)} style={{ width:'100%' }}>
-                  <option value="">— off —</option>
+              <label style={{ fontSize: 11, color:'var(--muted)' }}>{L("Play through")}
+                <select aria-label={L("Animate by")} value={animateBy} onChange={e => setAnimateBy(e.target.value)} style={{ width:'100%' }}>
+                  <option value="">{L("— off —")}</option>
                   {colOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
               </label>
               {animateBy && effectiveCols.find(c => c.name === animateBy)?.dtype === 'datetime' && (
-                <label style={{ fontSize: 11, color:'var(--muted)' }}>One frame per
-                  <select aria-label="Animation step" value={animateGran} onChange={e => setAnimateGran(e.target.value)} style={{ width:'100%' }}>
-                    <option value="">date</option>
+                <label style={{ fontSize: 11, color:'var(--muted)' }}>{L("One frame per")}
+                  <select aria-label={L("Animation step")} value={animateGran} onChange={e => setAnimateGran(e.target.value)} style={{ width:'100%' }}>
+                    <option value="">{L("date")}</option>
                     {['week', 'month', 'quarter', 'year'].map(g => <option key={g} value={g}>{g}</option>)}
                   </select>
                 </label>
@@ -2159,14 +2162,14 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           <ExpandableGroup id="objfilters" title="Filters"
             searchTerms={FILTERS_SEARCH_TERMS} {...groupFilterProps('Filters', FILTERS_SEARCH_TERMS)}>
           <p style={{ fontSize: 11, color:'var(--muted)', marginBottom:8 }}>
-            This object's own row filters — applied before aggregation, on top of dataset filters and cross-filters.
+            {L("This object's own row filters — applied before aggregation, on top of dataset filters and cross-filters.")}
           </p>
           {objFilters.map((f, i) => (
             <div key={i} style={{ display:'flex', gap:4, marginBottom:6, flexWrap:'wrap' }}>
               <select aria-label={`Filter ${i + 1} column`} value={f.column}
                 onChange={e => setObjFilters(p => p.map((x, k) => k === i ? { ...x, column: e.target.value } : x))}
                 style={{ fontSize:11, flex:1, minWidth:90 }}>
-                <option value="">— column —</option>
+                <option value="">{L("— column —")}</option>
                 {colOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
               <select aria-label={`Filter ${i + 1} operator`} value={f.op}
@@ -2178,7 +2181,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 }}
                 style={{ fontSize:11 }}>
                 {['eq','neq','gt','gte','lt','lte','like','in'].map(o => <option key={o} value={o}>{o}</option>)}
-                <option value="relative">relative date</option>
+                <option value="relative">{L("relative date")}</option>
               </select>
               {f.op === 'relative' ? (
                 <RelativeDateEditor label={`Filter ${i + 1}`} value={parseSpec(f.value)}
@@ -2195,7 +2198,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
             </div>
           ))}
           <button className="btn" style={{ fontSize: 11, marginBottom:8 }}
-            onClick={() => setObjFilters(p => [...p, { column: '', op: 'eq', value: '' }])}>+ Add filter</button>
+            onClick={() => setObjFilters(p => [...p, { column: '', op: 'eq', value: '' }])}>{L("+ Add filter")}</button>
           </ExpandableGroup>
 
           {!isModel && (<>
@@ -2205,22 +2208,22 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           {sortOpts === 'all' && (
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:8 }}>
             <div>
-              <label htmlFor="cfg-sort-order" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>Sort order</label>
+              <label htmlFor="cfg-sort-order" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>{L("Sort order")}</label>
               <select id="cfg-sort-order" value={sort} onChange={e => setSort(e.target.value)} style={{ width:'100%' }}>
-                <option value="desc">Descending</option>
-                <option value="asc">Ascending</option>
+                <option value="desc">{L("Descending")}</option>
+                <option value="asc">{L("Ascending")}</option>
               </select>
             </div>
             <div>
-              <label htmlFor="cfg-sort-by" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>Sort by</label>
+              <label htmlFor="cfg-sort-by" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>{L("Sort by")}</label>
               <select id="cfg-sort-by" value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ width:'100%' }}>
-                <option value="">Automatic</option>
-                <option value="value">By Value</option>
-                <option value="name">By Name</option>
+                <option value="">{L("Automatic")}</option>
+                <option value="value">{L("By Value")}</option>
+                <option value="name">{L("By Name")}</option>
               </select>
               {!sortBy && (
                 <div style={{ fontSize: 11, color:'var(--muted)', marginTop:3 }}>
-                  {dimension2 ? 'Rows in label order' : 'Dates in time order, everything else by value'}
+                  {dimension2 ? L('Rows in label order') : L('Dates in time order, everything else by value')}
                 </div>
               )}
             </div>
@@ -2231,7 +2234,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               the control would save and do nothing (E08). */}
           {sortOpts === 'all' && !dimension2 && fld('Sort column (overrides sort by)',
             <select value={sortCol} onChange={e => setSortCol(e.target.value)} style={{ width:'100%' }}>
-              <option value="">— use sort by above —</option>
+              <option value="">{L("— use sort by above —")}</option>
               {colOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           )}
@@ -2239,21 +2242,21 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           {(wt === 'table' || wt === 'list') && (
             <div style={{ marginBottom: 12 }}>
               <label style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                Multi-column sort (priority order)
+                {L("Multi-column sort (priority order)")}
               </label>
               {sortKeys.map((k, i) => (
                 <div key={i} style={{ display:'flex', gap:4, marginBottom:6, flexWrap:'wrap' }}>
                   <select aria-label={`Sort key ${i + 1} column`} value={k.col}
                     onChange={e => setSortKeys(p => p.map((x, j) => j === i ? { ...x, col: e.target.value } : x))}
                     style={{ fontSize:11, flex:1, minWidth:90 }}>
-                    <option value="">— column —</option>
+                    <option value="">{L("— column —")}</option>
                     {colOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
                   <select aria-label={`Sort key ${i + 1} direction`} value={k.dir}
                     onChange={e => setSortKeys(p => p.map((x, j) => j === i ? { ...x, dir: e.target.value } : x))}
                     style={{ fontSize:11 }}>
-                    <option value="asc">Asc</option>
-                    <option value="desc">Desc</option>
+                    <option value="asc">{L("Asc")}</option>
+                    <option value="desc">{L("Desc")}</option>
                   </select>
                   <button aria-label={`Remove sort key ${i + 1}`}
                     onClick={() => setSortKeys(p => p.filter((_, j) => j !== i))}
@@ -2261,84 +2264,84 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 </div>
               ))}
               <button className="btn" style={{ fontSize: 11 }}
-                onClick={() => setSortKeys(p => [...p, { col: '', dir: 'asc' }])}>+ Add sort column</button>
+                onClick={() => setSortKeys(p => [...p, { col: '', dir: 'asc' }])}>{L("+ Add sort column")}</button>
               {sortKeys.filter(k => k.col).length > 0 && (
                 <div style={{ fontSize: 11, color:'var(--muted)', marginTop:6 }}>
-                  Rows sort by the first column, ties broken by the next. Supersedes the single sort column above.
+                  {L("Rows sort by the first column, ties broken by the next. Supersedes the single sort column above.")}
                 </div>
               )}
             </div>
           )}
 
           {sortOpts !== 'none' && fld('Row limit',
-            <input type="number" value={limit ?? ''} min={1} placeholder="All (full data)"
+            <input type="number" value={limit ?? ''} min={1} placeholder={L("All (full data)")}
               onChange={e => setLimit(e.target.value === '' ? null : Math.max(1, Math.round(Number(e.target.value))))}
               style={{ width:'100%' }} />
           )}
 
           {fld('Auto-reload (seconds)',
             <>
-              <input type="number" value={autoReload} min={5} placeholder="off"
+              <input type="number" value={autoReload} min={5} placeholder={L("off")}
                 onChange={e => setAutoReload(e.target.value)}
-                aria-label="Auto-reload seconds" style={{ width:'100%' }} />
-              <span style={{ fontSize: 11, color:'var(--muted)' }}>Refetches this widget's data on the interval. Minimum 5s; blank turns it off.</span>
+                aria-label={L("Auto-reload seconds")} style={{ width:'100%' }} />
+              <span style={{ fontSize: 11, color:'var(--muted)' }}>{L("Refetches this widget's data on the interval. Minimum 5s; blank turns it off.")}</span>
             </>
           )}
 
           {sortOpts === 'all' && fld('Custom order (comma-separated)',
             <input value={sortCustom} onChange={e => setSortCustom(e.target.value)} style={{ width:'100%' }}
-              placeholder="e.g. Low, Medium, High" aria-label="Custom category order" />
+              placeholder={L("e.g. Low, Medium, High")} aria-label={L("Custom category order")} />
           )}
           {sortOpts === 'all' && sortCustom.trim() !== '' && (
             <div style={{ fontSize: 11, color:'var(--muted)', marginTop:-8, marginBottom:12 }}>
-              Categories listed here come first, in this order; the rest follow. Overrides the sort above.
+              {L("Categories listed here come first, in this order; the rest follow. Overrides the sort above.")}
             </div>
           )}
 
           {sortOpts === 'all' && (
           <div style={{ marginBottom: 12 }}>
             <label htmlFor="cfg-having-op" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-              Filter aggregated values
+              {L("Filter aggregated values")}
             </label>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
               <select id="cfg-having-op" value={havingOp} onChange={e => setHavingOp(e.target.value)} style={{ width:'100%' }}>
-                <option value="">— no filter —</option>
-                <option value="gt">greater than</option>
-                <option value="gte">at least</option>
-                <option value="lt">less than</option>
-                <option value="lte">at most</option>
-                <option value="eq">equal to</option>
+                <option value="">{L("— no filter —")}</option>
+                <option value="gt">{L("greater than")}</option>
+                <option value="gte">{L("at least")}</option>
+                <option value="lt">{L("less than")}</option>
+                <option value="lte">{L("at most")}</option>
+                <option value="eq">{L("equal to")}</option>
               </select>
               <input type="number" value={havingValue} onChange={e => setHavingValue(e.target.value)}
-                aria-label="Aggregate filter value" style={{ width:'100%' }} placeholder="value" disabled={!havingOp} title={!havingOp ? 'Choose a condition first' : undefined} />
+                aria-label={L("Aggregate filter value")} style={{ width:'100%' }} placeholder={L("value")} disabled={!havingOp} title={!havingOp ? 'Choose a condition first' : undefined} />
             </div>
-            <span style={{ fontSize: 11, color:'var(--muted)' }}>Applies to the aggregated value of each category — e.g. keep regions whose total exceeds 1000.</span>
+            <span style={{ fontSize: 11, color:'var(--muted)' }}>{L("Applies to the aggregated value of each category — e.g. keep regions whose total exceeds 1000.")}</span>
           </div>
           )}
 
           {sortOpts === 'all' && fld('Quick calculation',
-            <select value={quickCalc} onChange={e => setQuickCalc(e.target.value)} style={{ width:'100%' }} aria-label="Quick calculation">
-              <option value="">— none —</option>
-              <option value="percent_of_total">Percent of total</option>
-              <option value="difference">Difference from previous</option>
-              <option value="percent_change">Percent change from previous</option>
-              <option value="rank">Rank (1 = largest)</option>
+            <select value={quickCalc} onChange={e => setQuickCalc(e.target.value)} style={{ width:'100%' }} aria-label={L("Quick calculation")}>
+              <option value="">{L("— none —")}</option>
+              <option value="percent_of_total">{L("Percent of total")}</option>
+              <option value="difference">{L("Difference from previous")}</option>
+              <option value="percent_change">{L("Percent change from previous")}</option>
+              <option value="rank">{L("Rank (1 = largest)")}</option>
             </select>
           )}
 
           {sortOpts === 'all' && (
           <div style={{ marginBottom: 12 }}>
             <label htmlFor="cfg-suppress" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-              Suppress small groups
+              {L("Suppress small groups")}
             </label>
             <input id="cfg-suppress" type="number" min={0} value={suppressBelow}
-              onChange={e => setSuppressBelow(e.target.value)} style={{ width:'100%' }} placeholder="minimum rows per group (off)" />
+              onChange={e => setSuppressBelow(e.target.value)} style={{ width:'100%' }} placeholder={L("minimum rows per group (off)")} />
             <label style={{ display:'flex', alignItems:'center', gap:6, fontSize:11, marginTop:6, cursor:'pointer' }}>
               <input type="checkbox" checked={suppressComplement} onChange={e => setSuppressComplement(e.target.checked)}
                 disabled={suppressBelow === '' || Number(suppressBelow) <= 0} title={suppressBelow === '' || Number(suppressBelow) <= 0 ? 'Set a minimum group size above first' : undefined} />
-              Also hide the smallest surviving group (blocks back-computation)
+              {L("Also hide the smallest surviving group (blocks back-computation)")}
             </label>
-            <span style={{ fontSize: 11, color:'var(--muted)' }}>Hides any category aggregated from fewer rows than this — confidentiality suppression for small cells.</span>
+            <span style={{ fontSize: 11, color:'var(--muted)' }}>{L("Hides any category aggregated from fewer rows than this — confidentiality suppression for small cells.")}</span>
           </div>
           )}
 
@@ -2352,43 +2355,43 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
 
           {wt === 'bubble' && fld('Fit Line',
             sel(fitLine, setFitLine, [
-              { value: 'linear',    label: 'Linear' },
-              { value: 'quadratic', label: 'Quadratic' },
-              { value: 'cubic',     label: 'Cubic' },
-              { value: 'best_fit',  label: 'Best Fit' },
+              { value: 'linear',    label: L("Linear") },
+              { value: 'quadratic', label: L("Quadratic") },
+              { value: 'cubic',     label: L("Cubic") },
+              { value: 'best_fit',  label: L("Best Fit") },
             ], '— none —')
           )}
 
           {wt === 'gauge' && fld('Target value (fixed, optional)',
-            <input type="number" value={targetValue} onChange={e => setTargetValue(e.target.value)} style={{ width:'100%' }} placeholder="leave blank to use Target column" />
+            <input type="number" value={targetValue} onChange={e => setTargetValue(e.target.value)} style={{ width:'100%' }} placeholder={L("leave blank to use Target column")} />
           )}
           {wt === 'bubble_change' && fld('Animation value',
             <>
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:6 }}>
-                <select aria-label="Animation value position" value={animPos} onChange={e => setAnimPos(e.target.value)}>
-                  <option value="none">— hidden —</option>
+                <select aria-label={L("Animation value position")} value={animPos} onChange={e => setAnimPos(e.target.value)}>
+                  <option value="none">{L("— hidden —")}</option>
                   {['top-left','top-center','top-right','middle-left','center','middle-right','bottom-left','bottom-center','bottom-right']
                     .map(p => <option key={p} value={p}>{p.replace('-', ' ')}</option>)}
                 </select>
-                <select aria-label="Frame order" value={animOrder} onChange={e => setAnimOrder(e.target.value)}>
-                  <option value="asc">Order: ascending</option>
-                  <option value="desc">Order: descending</option>
+                <select aria-label={L("Frame order")} value={animOrder} onChange={e => setAnimOrder(e.target.value)}>
+                  <option value="asc">{L("Order: ascending")}</option>
+                  <option value="desc">{L("Order: descending")}</option>
                 </select>
               </div>
               {animPos !== 'none' && (
                 <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8, alignItems:'center' }}>
-                  <input type="number" aria-label="Animation value size" min={10} max={120}
-                    value={animSize} onChange={e => setAnimSize(e.target.value)} placeholder="size px" />
-                  <select aria-label="Animation value style" value={animStyle} onChange={e => setAnimStyle(e.target.value)}>
-                    <option value="bold">Bold</option>
-                    <option value="normal">Normal</option>
-                    <option value="italic">Italic</option>
+                  <input type="number" aria-label={L("Animation value size")} min={10} max={120}
+                    value={animSize} onChange={e => setAnimSize(e.target.value)} placeholder={L("size px")} />
+                  <select aria-label={L("Animation value style")} value={animStyle} onChange={e => setAnimStyle(e.target.value)}>
+                    <option value="bold">{L("Bold")}</option>
+                    <option value="normal">{L("Normal")}</option>
+                    <option value="italic">{L("Italic")}</option>
                   </select>
-                  <input type="number" aria-label="Animation value opacity" min={0} max={1} step={0.05}
-                    value={animOpacity} onChange={e => setAnimOpacity(e.target.value)} placeholder="opacity" />
+                  <input type="number" aria-label={L("Animation value opacity")} min={0} max={1} step={0.05}
+                    value={animOpacity} onChange={e => setAnimOpacity(e.target.value)} placeholder={L("opacity")} />
                   <label style={{ fontSize:11, display:'flex', alignItems:'center', gap:4, gridColumn:'1 / -1' }}>
                     <input type="checkbox" checked={animBox} onChange={e => setAnimBox(e.target.checked)} />
-                    Contrast box behind the value
+                    {L("Contrast box behind the value")}
                   </label>
                 </div>
               )}
@@ -2397,11 +2400,11 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
 
           {wt === 'gauge' && fld('Gauge shape',
             sel(gaugeShape, setGaugeShape, [
-              { value: 'arc', label: 'Arc (half donut)' },
-              { value: 'speedometer', label: 'Speedometer (dial + needle)' },
-              { value: 'bullet', label: 'Bullet (bar + target tick)' },
-              { value: 'thermometer', label: 'Thermometer' },
-              { value: 'progress', label: 'Progress bar' },
+              { value: 'arc', label: L("Arc (half donut)") },
+              { value: 'speedometer', label: L("Speedometer (dial + needle)") },
+              { value: 'bullet', label: L("Bullet (bar + target tick)") },
+              { value: 'thermometer', label: L("Thermometer") },
+              { value: 'progress', label: L("Progress bar") },
             ], 'Arc (half donut)')
           )}
           </ExpandableGroup>
@@ -2420,28 +2423,28 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
 
           <div style={{ marginBottom: 12 }}>
             <label htmlFor="cfg-rank-mode" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-              Rank
+              {L("Rank")}
             </label>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
               <select id="cfg-rank-mode" value={rankMode} onChange={e => setRankMode(e.target.value)} style={{ width:'100%' }}>
-                <option value="">— all values —</option>
-                <option value="top">Top N</option>
-                <option value="bottom">Bottom N</option>
+                <option value="">{L("— all values —")}</option>
+                <option value="top">{L("Top N")}</option>
+                <option value="bottom">{L("Bottom N")}</option>
               </select>
               <input type="text" value={rankN} onChange={e => setRankN(e.target.value)}
-                aria-label="Rank count" style={{ width:'100%' }} placeholder="N or @parameter" disabled={!rankMode} title={!rankMode ? 'Choose Top or Bottom first' : undefined} />
+                aria-label={L("Rank count")} style={{ width:'100%' }} placeholder={L("N or @parameter")} disabled={!rankMode} title={!rankMode ? 'Choose Top or Bottom first' : undefined} />
             </div>
             <div style={{ display:'flex', gap:12, marginTop:4 }}>
               <label style={{ fontSize:11, display:'flex', alignItems:'center', gap:4 }}>
                 <input type="checkbox" checked={rankPercent} onChange={e => setRankPercent(e.target.checked)} disabled={!rankMode} title={!rankMode ? 'Choose Top or Bottom first' : undefined} />
-                N is a percent of categories
+                {L("N is a percent of categories")}
               </label>
               <label style={{ fontSize:11, display:'flex', alignItems:'center', gap:4 }}>
                 <input type="checkbox" checked={rankOther} onChange={e => setRankOther(e.target.checked)} disabled={!rankMode} title={!rankMode ? 'Choose Top or Bottom first' : undefined} />
-                Bucket the rest as “All Other”
+                {L("Bucket the rest as “All Other”")}
               </label>
             </div>
-            <span style={{ fontSize: 11, color:'var(--muted)' }}>Selected by aggregated value, shown in the sort order above. Ties at the boundary are kept. “All Other” aggregates the excluded categories’ raw rows.</span>
+            <span style={{ fontSize: 11, color:'var(--muted)' }}>{L("Selected by aggregated value, shown in the sort order above. Ties at the boundary are kept. “All Other” aggregates the excluded categories’ raw rows.")}</span>
           </div>
           </ExpandableGroup>
           )}
@@ -2456,15 +2459,15 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               {formatCaps.includes('axes') && (<>
                 <div style={{ marginBottom: 12 }}>
                   <label htmlFor="format-x-axis-label" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                    X axis label
+                    {L("X axis label")}
                   </label>
-                  <input id="format-x-axis-label" value={xAxisLabel} onChange={e => setXAxisLabel(e.target.value)} style={{ width:'100%' }} placeholder="(none)" />
+                  <input id="format-x-axis-label" value={xAxisLabel} onChange={e => setXAxisLabel(e.target.value)} style={{ width:'100%' }} placeholder={L("(none)")} />
                 </div>
                 <div style={{ marginBottom: 12 }}>
                   <label htmlFor="format-y-axis-label" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                    Y axis label
+                    {L("Y axis label")}
                   </label>
-                  <input id="format-y-axis-label" value={yAxisLabel} onChange={e => setYAxisLabel(e.target.value)} style={{ width:'100%' }} placeholder="(none)" />
+                  <input id="format-y-axis-label" value={yAxisLabel} onChange={e => setYAxisLabel(e.target.value)} style={{ width:'100%' }} placeholder={L("(none)")} />
                 </div>
                 {/* Only where a second axis exists. Offering it elsewhere would
                     be a control wired to nothing. */}
@@ -2472,24 +2475,24 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                   'dual_axis_time_series', 'comparative_time_series'].includes(wt) && (
                   <div style={{ marginBottom: 12 }}>
                     <label htmlFor="format-y2-axis-label" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                      Right axis label
+                      {L("Right axis label")}
                     </label>
                     <input id="format-y2-axis-label" value={y2AxisLabel}
                       onChange={e => setY2AxisLabel(e.target.value)}
-                      style={{ width:'100%' }} placeholder="(none)" />
+                      style={{ width:'100%' }} placeholder={L("(none)")} />
                   </div>
                 )}
                 <div style={{ display:'flex', gap:8, marginBottom:12 }}>
                   <div style={{ flex:1 }}>
                     <label htmlFor="format-tick-size" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                      Tick size
+                      {L("Tick size")}
                     </label>
                     <input id="format-tick-size" type="number" min={6} max={24} value={axisTickSize}
                       onChange={e => setAxisTickSize(e.target.value)} style={{ width:'100%' }} placeholder="10" />
                   </div>
                   <div>
                     <label htmlFor="format-tick-color" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                      Tick colour
+                      {L("Tick colour")}
                     </label>
                     <input id="format-tick-color" type="color" value={axisTickColor || '#94a3b8'} onChange={e => setAxisTickColor(e.target.value)}
                       style={{ width:36, height:26, padding:2, border:'1px solid var(--border)', borderRadius:4, cursor:'pointer', background:'var(--surface)' }} />
@@ -2498,7 +2501,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 {formatCaps.includes('xCategoryAxis') && (
                 <div style={{ marginBottom: 12 }}>
                   <label htmlFor="format-x-axis-angle" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                    Category label angle
+                    {L("Category label angle")}
                   </label>
                   {/* Automatic is the default and the right answer nearly always:
                       the axis draws its labels upright while they fit, tilts them
@@ -2510,17 +2513,17 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                   <select id="format-x-axis-angle" value={xAxisAngle ?? ''}
                     onChange={e => setXAxisAngle(e.target.value === '' ? undefined : Number(e.target.value))}
                     style={{ width:'100%' }}>
-                    <option value="">Automatic (fit to the labels)</option>
-                    <option value="0">Horizontal</option>
-                    <option value="-30">Tilted 30°</option>
-                    <option value="-45">Tilted 45°</option>
-                    <option value="-90">Vertical</option>
+                    <option value="">{L("Automatic (fit to the labels)")}</option>
+                    <option value="0">{L("Horizontal")}</option>
+                    <option value="-30">{L("Tilted 30°")}</option>
+                    <option value="-45">{L("Tilted 45°")}</option>
+                    <option value="-90">{L("Vertical")}</option>
                   </select>
                 </div>
                 )}
                 <div style={{ marginBottom: 12 }}>
                   <label htmlFor="format-y-axis-angle" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                    Value label angle
+                    {L("Value label angle")}
                   </label>
                   {/* Automatic leaves value labels upright, which is almost always
                       right -- they are short and read left to right. The gutter is
@@ -2528,10 +2531,10 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                   <select id="format-y-axis-angle" value={yAxisAngle ?? ''}
                     onChange={e => setYAxisAngle(e.target.value === '' ? undefined : Number(e.target.value))}
                     style={{ width:'100%' }}>
-                    <option value="">Automatic (upright)</option>
-                    <option value="-30">Tilted 30°</option>
-                    <option value="-45">Tilted 45°</option>
-                    <option value="-90">Vertical</option>
+                    <option value="">{L("Automatic (upright)")}</option>
+                    <option value="-30">{L("Tilted 30°")}</option>
+                    <option value="-45">{L("Tilted 45°")}</option>
+                    <option value="-90">{L("Vertical")}</option>
                   </select>
                 </div>
                 <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -2539,25 +2542,25 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                       look before the user touches it -- axisLine itself stays undefined
                       (and unsaved) until they do; see the state-declaration comment above. */}
                   <input id="format-axis-line" type="checkbox" checked={axisLine ?? false} onChange={e => setAxisLine(e.target.checked)} />
-                  <label htmlFor="format-axis-line" style={{ fontSize: 12, cursor: 'pointer' }}>Show axis line</label>
+                  <label htmlFor="format-axis-line" style={{ fontSize: 12, cursor: 'pointer' }}>{L("Show axis line")}</label>
                 </div>
                 <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
                   <input id="format-tick-line" type="checkbox" checked={tickLine ?? false} onChange={e => setTickLine(e.target.checked)} />
-                  <label htmlFor="format-tick-line" style={{ fontSize: 12, cursor: 'pointer' }}>Show tick marks</label>
+                  <label htmlFor="format-tick-line" style={{ fontSize: 12, cursor: 'pointer' }}>{L("Show tick marks")}</label>
                 </div>
               </>)}
 
               {formatCaps.includes('yScale') && (
                 <div style={{ marginBottom: 12 }}>
                   <label htmlFor="format-y-scale" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                    Y axis scale
+                    {L("Y axis scale")}
                   </label>
                   <select id="format-y-scale" value={yScale ?? 'linear'} onChange={e => setYScale(e.target.value as 'linear' | 'log')} style={{ width:'100%' }}>
-                    <option value="linear">Linear</option>
-                    <option value="log">Logarithmic</option>
+                    <option value="linear">{L("Linear")}</option>
+                    <option value="log">{L("Logarithmic")}</option>
                   </select>
                   <div style={{ fontSize: 11, color:'var(--muted)', marginTop:3 }}>
-                    A log axis cannot show zero or negative values; the axis falls back to linear when the data contains one.
+                    {L("A log axis cannot show zero or negative values; the axis falls back to linear when the data contains one.")}
                   </div>
                 </div>
               )}
@@ -2566,15 +2569,15 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 <div style={{ display:'flex', gap:8, marginBottom:12 }}>
                   <div style={{ flex:1 }}>
                     <label htmlFor="format-y-min" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                      Y axis min
+                      {L("Y axis min")}
                     </label>
-                    <input id="format-y-min" type="number" value={yMin} onChange={e => setYMin(e.target.value)} style={{ width:'100%' }} placeholder="auto" />
+                    <input id="format-y-min" type="number" value={yMin} onChange={e => setYMin(e.target.value)} style={{ width:'100%' }} placeholder={L("auto")} />
                   </div>
                   <div style={{ flex:1 }}>
                     <label htmlFor="format-y-max" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                      Y axis max
+                      {L("Y axis max")}
                     </label>
-                    <input id="format-y-max" type="number" value={yMax} onChange={e => setYMax(e.target.value)} style={{ width:'100%' }} placeholder="auto" />
+                    <input id="format-y-max" type="number" value={yMax} onChange={e => setYMax(e.target.value)} style={{ width:'100%' }} placeholder={L("auto")} />
                   </div>
                 </div>
               )}
@@ -2582,28 +2585,28 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               {formatCaps.includes('grid') && (<>
                 <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
                   <input id="format-grid-toggle" type="checkbox" checked={showGrid ?? true} onChange={e => setShowGrid(e.target.checked)} />
-                  <label htmlFor="format-grid-toggle" style={{ fontSize: 12, cursor: 'pointer' }}>Show gridlines</label>
+                  <label htmlFor="format-grid-toggle" style={{ fontSize: 12, cursor: 'pointer' }}>{L("Show gridlines")}</label>
                 </div>
                 {(showGrid ?? true) && (<>
                   <div style={{ marginBottom: 12 }}>
                     <label htmlFor="format-grid-style" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                      Gridline style
+                      {L("Gridline style")}
                     </label>
                     <select id="format-grid-style" value={gridStyle ?? 'solid'} onChange={e => setGridStyle(e.target.value as 'dashed' | 'solid')} style={{ width:'100%' }}>
-                      <option value="dashed">Dashed</option>
-                      <option value="solid">Solid</option>
+                      <option value="dashed">{L("Dashed")}</option>
+                      <option value="solid">{L("Solid")}</option>
                     </select>
                   </div>
                   <div style={{ marginBottom: 12 }}>
                     <label htmlFor="format-grid-color" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                      Gridline colour
+                      {L("Gridline colour")}
                     </label>
                     <input id="format-grid-color" type="color" value={gridColor || '#e2e8f0'} onChange={e => setGridColor(e.target.value)}
                       style={{ width:36, height:26, padding:2, border:'1px solid var(--border)', borderRadius:4, cursor:'pointer', background:'var(--surface)' }} />
                   </div>
                   <div>
                     <label htmlFor="format-wall-color" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                      Wall colour
+                      {L("Wall colour")}
                     </label>
                     <input id="format-wall-color" type="color" value={wallColor || '#f8fafc'} onChange={e => setWallColor(e.target.value)}
                       style={{ width:36, height:26, padding:2, border:'1px solid var(--border)', borderRadius:4, cursor:'pointer', background:'var(--surface)' }} />
@@ -2614,33 +2617,32 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               {formatCaps.includes('legend') && (<>
                 <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
                   <input id="format-legend-toggle" type="checkbox" checked={showLegend ?? true} onChange={e => setShowLegend(e.target.checked)} />
-                  <label htmlFor="format-legend-toggle" style={{ fontSize: 12, cursor: 'pointer' }}>Show legend</label>
+                  <label htmlFor="format-legend-toggle" style={{ fontSize: 12, cursor: 'pointer' }}>{L("Show legend")}</label>
                 </div>
                 {(showLegend ?? true) && (
                   <div style={{ marginBottom: 12 }}>
                     <label htmlFor="format-legend-position" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                      Legend position
+                      {L("Legend position")}
                     </label>
                     <select id="format-legend-position" value={legendPosition ?? 'bottom'}
                       onChange={e => setLegendPosition(e.target.value as 'top' | 'bottom' | 'left' | 'right')} style={{ width:'100%' }}>
-                      <option value="top">Top</option>
-                      <option value="bottom">Bottom</option>
-                      <option value="left">Left</option>
-                      <option value="right">Right</option>
+                      <option value="top">{L("Top")}</option>
+                      <option value="bottom">{L("Bottom")}</option>
+                      <option value="left">{L("Left")}</option>
+                      <option value="right">{L("Right")}</option>
                     </select>
                   </div>
                 )}
                 {(showLegend ?? true) && (
                   <div style={{ marginBottom: 12 }}>
                     <label htmlFor="format-legend-title" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                      Legend title
+                      {L("Legend title")}
                     </label>
                     <input id="format-legend-title" value={legendTitle}
                       onChange={e => setLegendTitle(e.target.value)}
-                      style={{ width:'100%' }} placeholder="e.g. Customer Age Group" />
+                      style={{ width:'100%' }} placeholder={L("e.g. Customer Age Group")} />
                     <div style={{ fontSize: 10.5, color:'var(--muted)', marginTop:3 }}>
-                      Names the FIELD the entries are values of — the swatches
-                      already say which value each colour is.
+                      {L("Names the FIELD the entries are values of — the swatches already say which value each colour is.")}
                     </div>
                   </div>
                 )}
@@ -2650,21 +2652,21 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
                   <input id="format-overview-axis" type="checkbox" checked={overviewAxis ?? false}
                     onChange={e => setOverviewAxis(e.target.checked)} />
-                  <label htmlFor="format-overview-axis" style={{ fontSize: 12, cursor: 'pointer' }}>Overview axis (zoom brush)</label>
+                  <label htmlFor="format-overview-axis" style={{ fontSize: 12, cursor: 'pointer' }}>{L("Overview axis (zoom brush)")}</label>
                 </div>
               )}
 
               {formatCaps.includes('dataLabels') && (
                 <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
                   <input id="format-data-labels-toggle" type="checkbox" checked={dataLabels ?? false} onChange={e => setDataLabels(e.target.checked)} />
-                  <label htmlFor="format-data-labels-toggle" style={{ fontSize: 12, cursor: 'pointer' }}>Show data labels</label>
+                  <label htmlFor="format-data-labels-toggle" style={{ fontSize: 12, cursor: 'pointer' }}>{L("Show data labels")}</label>
                 </div>
               )}
 
               {formatCaps.includes('patterns') && (
                 <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
                   <input id="format-series-patterns" type="checkbox" checked={seriesPatterns ?? false} onChange={e => setSeriesPatterns(e.target.checked)} />
-                  <label htmlFor="format-series-patterns" style={{ fontSize: 12, cursor: 'pointer' }}>Distinguish groups by pattern (accessible)</label>
+                  <label htmlFor="format-series-patterns" style={{ fontSize: 12, cursor: 'pointer' }}>{L("Distinguish groups by pattern (accessible)")}</label>
                 </div>
               )}
 
@@ -2672,7 +2674,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
                   <input id="format-show-as-table" type="checkbox" checked={showAsTable ?? false}
                     onChange={e => setShowAsTable(e.target.checked)} />
-                  <label htmlFor="format-show-as-table" style={{ fontSize: 12, cursor: 'pointer' }}>Show as table (accessible alternative)</label>
+                  <label htmlFor="format-show-as-table" style={{ fontSize: 12, cursor: 'pointer' }}>{L("Show as table (accessible alternative)")}</label>
                 </div>
               )}
               {formatCaps.includes('tableOptions') && (<>
@@ -2684,7 +2686,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                     NEVER written back on its own; only an explicit click persists. */}
                 <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
                   <input id="format-show-totals" type="checkbox" checked={showTotals ?? false} onChange={e => setShowTotals(e.target.checked)} />
-                  <label htmlFor="format-show-totals" style={{ fontSize: 12, cursor: 'pointer' }}>Show totals</label>
+                  <label htmlFor="format-show-totals" style={{ fontSize: 12, cursor: 'pointer' }}>{L("Show totals")}</label>
                 </div>
                 {/* The `__total__` row-subtotal column exists only on the pivoted
                     crosstab branch of shape_series, which is reached only when a
@@ -2699,7 +2701,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 {dimension2 && (
                   <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
                     <input id="format-show-subtotals" type="checkbox" checked={showSubtotals ?? true} onChange={e => setShowSubtotals(e.target.checked)} />
-                    <label htmlFor="format-show-subtotals" style={{ fontSize: 12, cursor: 'pointer' }}>Show row subtotals</label>
+                    <label htmlFor="format-show-subtotals" style={{ fontSize: 12, cursor: 'pointer' }}>{L("Show row subtotals")}</label>
                   </div>
                 )}
                 {/* Where totals sit, and what the grand total covers. Offered only
@@ -2708,47 +2710,47 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 {((showTotals ?? false) || (dimension2 && (showSubtotals ?? true))) && (
                   <div style={{ marginBottom: 12 }}>
                     <label htmlFor="format-totals-position" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                      Totals placement
+                      {L("Totals placement")}
                     </label>
                     <select id="format-totals-position" value={totalsPosition ?? 'after'}
                       onChange={e => setTotalsPosition(e.target.value as 'before' | 'after')} style={{ width:'100%' }}>
-                      <option value="before">Before the data</option>
-                      <option value="after">After the data</option>
+                      <option value="before">{L("Before the data")}</option>
+                      <option value="after">{L("After the data")}</option>
                     </select>
                   </div>
                 )}
                 {(showTotals ?? false) && (
                   <div style={{ marginBottom: 12 }}>
                     <label htmlFor="format-totals-scope" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                      Total covers
+                      {L("Total covers")}
                     </label>
                     <select id="format-totals-scope" value={totalsScope ?? 'all'}
                       onChange={e => setTotalsScope(e.target.value as 'all' | 'shown')} style={{ width:'100%' }}>
-                      <option value="all">All rows</option>
-                      <option value="shown">Only the rows shown</option>
+                      <option value="all">{L("All rows")}</option>
+                      <option value="shown">{L("Only the rows shown")}</option>
                     </select>
                   </div>
                 )}
                 <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
                   <input id="format-table-row-numbers" type="checkbox" checked={tableRowNumbers ?? false} onChange={e => setTableRowNumbers(e.target.checked)} />
-                  <label htmlFor="format-table-row-numbers" style={{ fontSize: 12, cursor: 'pointer' }}>Row numbers</label>
+                  <label htmlFor="format-table-row-numbers" style={{ fontSize: 12, cursor: 'pointer' }}>{L("Row numbers")}</label>
                 </div>
                 <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
                   <input id="format-table-row-lines" type="checkbox" checked={tableRowLines ?? false} onChange={e => setTableRowLines(e.target.checked)} />
-                  <label htmlFor="format-table-row-lines" style={{ fontSize: 12, cursor: 'pointer' }}>Row lines</label>
+                  <label htmlFor="format-table-row-lines" style={{ fontSize: 12, cursor: 'pointer' }}>{L("Row lines")}</label>
                 </div>
                 <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
                   <input id="format-table-banding" type="checkbox" checked={tableBanding ?? false} onChange={e => setTableBanding(e.target.checked)} />
-                  <label htmlFor="format-table-banding" style={{ fontSize: 12, cursor: 'pointer' }}>Banded rows</label>
+                  <label htmlFor="format-table-banding" style={{ fontSize: 12, cursor: 'pointer' }}>{L("Banded rows")}</label>
                 </div>
                 <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
                   <input id="format-table-condensed" type="checkbox" checked={tableCondensed ?? false} onChange={e => setTableCondensed(e.target.checked)} />
-                  <label htmlFor="format-table-condensed" style={{ fontSize: 12, cursor: 'pointer' }}>Condensed</label>
+                  <label htmlFor="format-table-condensed" style={{ fontSize: 12, cursor: 'pointer' }}>{L("Condensed")}</label>
                 </div>
                 {(wt === 'crosstab' || wt === 'matrix') && (
                   <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
                     <input id="format-table-sparkline" type="checkbox" checked={tableSparkline ?? false} onChange={e => setTableSparkline(e.target.checked)} />
-                    <label htmlFor="format-table-sparkline" style={{ fontSize: 12, cursor: 'pointer' }}>Row trend sparkline</label>
+                    <label htmlFor="format-table-sparkline" style={{ fontSize: 12, cursor: 'pointer' }}>{L("Row trend sparkline")}</label>
                   </div>
                 )}
               </>)}
@@ -2766,14 +2768,14 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           <div style={{ display:'flex', gap:8, marginBottom:12 }}>
             <div>
               <label htmlFor="appearance-background" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                Background
+                {L("Background")}
               </label>
               <input id="appearance-background" type="color" value={widgetBackground || defaultSurfaceColor} onChange={e => setWidgetBackground(e.target.value)}
                 style={{ width:36, height:26, padding:2, border:'1px solid var(--border)', borderRadius:4, cursor:'pointer', background:'var(--surface)' }} />
             </div>
             <div>
               <label htmlFor="appearance-border-color" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                Border colour
+                {L("Border colour")}
               </label>
               <input id="appearance-border-color" type="color" value={widgetBorderColor || defaultBorderColor} onChange={e => setWidgetBorderColor(e.target.value)}
                 style={{ width:36, height:26, padding:2, border:'1px solid var(--border)', borderRadius:4, cursor:'pointer', background:'var(--surface)' }} />
@@ -2782,38 +2784,38 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           <div style={{ display:'flex', gap:8, marginBottom:12 }}>
             <div style={{ flex:1 }}>
               <label htmlFor="appearance-border-width" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                Border width
+                {L("Border width")}
               </label>
               <input id="appearance-border-width" type="number" min={0} max={20} value={widgetBorderWidth}
                 onChange={e => setWidgetBorderWidth(e.target.value)} style={{ width:'100%' }} placeholder="1" />
             </div>
             <div style={{ flex:1 }}>
               <label htmlFor="appearance-radius" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-                Corner radius
+                {L("Corner radius")}
               </label>
               <input id="appearance-radius" type="number" min={0} max={40} value={widgetRadius}
-                onChange={e => setWidgetRadius(e.target.value)} style={{ width:'100%' }} placeholder="auto" />
+                onChange={e => setWidgetRadius(e.target.value)} style={{ width:'100%' }} placeholder={L("auto")} />
             </div>
           </div>
           <div style={{ marginBottom: 12 }}>
             <label htmlFor="appearance-padding" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-              Padding
+              {L("Padding")}
             </label>
             <input id="appearance-padding" type="number" min={0} max={60} value={widgetPadding}
-              onChange={e => setWidgetPadding(e.target.value)} style={{ width:'100%' }} placeholder="auto" />
+              onChange={e => setWidgetPadding(e.target.value)} style={{ width:'100%' }} placeholder={L("auto")} />
           </div>
           <div style={{ marginBottom: 12 }}>
             <label htmlFor="appearance-skin" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-              Skin
+              {L("Skin")}
             </label>
             <select id="appearance-skin" value={widgetSkin} onChange={e => setWidgetSkin(e.target.value)} style={{ width:'100%' }}>
-              <option value="none">None</option>
-              <option value="flat">Flat</option>
-              <option value="raised">Raised</option>
-              <option value="recessed">Recessed</option>
-              <option value="sheen">Sheen</option>
-              <option value="gloss">Gloss</option>
-              <option value="matte">Matte</option>
+              <option value="none">{L("None")}</option>
+              <option value="flat">{L("Flat")}</option>
+              <option value="raised">{L("Raised")}</option>
+              <option value="recessed">{L("Recessed")}</option>
+              <option value="sheen">{L("Sheen")}</option>
+              <option value="gloss">{L("Gloss")}</option>
+              <option value="matte">{L("Matte")}</option>
             </select>
           </div>
           <div style={{ marginBottom: 12 }}>
@@ -2823,19 +2825,19 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 container (cfg.alt_text), not an <img> alt attribute. An image widget
                 shows both controls at once, so the labels must not read the same. */}
             <label htmlFor="appearance-alt-text" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-              Widget description (screen readers)
+              {L("Widget description (screen readers)")}
             </label>
-            <input id="appearance-alt-text" value={altText} onChange={e => setAltText(e.target.value)} style={{ width:'100%' }} placeholder="Describes this widget for screen readers" />
+            <input id="appearance-alt-text" value={altText} onChange={e => setAltText(e.target.value)} style={{ width:'100%' }} placeholder={L("Describes this widget for screen readers")} />
           </div>
         </ExpandableGroup>
 
         {pages?.some(p => p.page_type === 'drillthrough') && (
           <div style={{ marginBottom: 12 }}>
             <label htmlFor="drillthrough-page-select" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-              Drillthrough page
+              {L("Drillthrough page")}
             </label>
             <select id="drillthrough-page-select" value={drillthroughPageId} onChange={e => setDrillthroughPageId(e.target.value)} style={{ width:'100%' }}>
-              <option value="">— none —</option>
+              <option value="">{L("— none —")}</option>
               {pages.filter(p => p.page_type === 'drillthrough').map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </div>
@@ -2844,10 +2846,10 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
         {pages?.some(p => p.page_type === 'tooltip') && (
           <div style={{ marginBottom: 12 }}>
             <label htmlFor="tooltip-page-select" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-              Tooltip page
+              {L("Tooltip page")}
             </label>
             <select id="tooltip-page-select" value={tooltipPageId} onChange={e => setTooltipPageId(e.target.value)} style={{ width:'100%' }}>
-              <option value="">— none —</option>
+              <option value="">{L("— none —")}</option>
               {pages.filter(p => p.page_type === 'tooltip').map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           </div>

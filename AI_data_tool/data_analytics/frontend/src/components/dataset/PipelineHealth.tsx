@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useContext, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { datasetsApi, type PipelineHealth } from '../../services/api'
 import { useT } from '../../i18n'
+import { AuthContext } from '../../contexts/AuthContext'
 
 /**
  * Pipeline plan, phase 2, on the dataset page: whether its refresh is working,
@@ -55,6 +57,7 @@ export function PipelineAlertsForm({ datasetId, health, onSaved }: {
   const [hours, setHours] = useState<number | null>(health.freshness_hours)
   const [recipients, setRecipients] = useState(health.recipients.join(', '))
   const [saving, setSaving] = useState(false)
+  const isAdmin = !!useContext(AuthContext)?.user?.role?.is_org_admin
   useEffect(() => {
     setHours(health.freshness_hours)
     setRecipients(health.recipients.join(', '))
@@ -74,6 +77,16 @@ export function PipelineAlertsForm({ datasetId, health, onSaved }: {
     }
   }
 
+  const follow = async (on: boolean) => {
+    try {
+      onSaved(await datasetsApi.setPipelineWatch(datasetId, { follow: on }))
+    } catch (e) {
+      toast.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? String(e))
+    }
+  }
+  // An address typed while no mail server is set would silently get nothing.
+  const typedEmail = /@/.test(recipients)
+
   return (
     <div style={{ borderTop: '1px solid var(--border)', marginTop: 12, paddingTop: 10 }}>
       <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>{t('health.title')}</div>
@@ -90,6 +103,19 @@ export function PipelineAlertsForm({ datasetId, health, onSaved }: {
       </label>
       <input id="health-recipients" className="input" dir="ltr" style={{ width: '100%', fontSize: 12, marginBottom: 6 }}
         value={recipients} onChange={e => setRecipients(e.target.value)} placeholder="ops@example.com" />
+      {health.email_ready === false && typedEmail && (
+        <div role="status" data-testid="health-email-off" style={{ fontSize: 11, color: WARN, marginBottom: 6 }}>
+          {t('health.emailOff')}{' '}
+          {isAdmin
+            ? <Link to="/admin/settings">{t('health.emailSetUp')}</Link>
+            : t('health.emailAskAdmin')}
+        </div>
+      )}
+      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginBottom: 6, cursor: 'pointer' }}>
+        <input type="checkbox" data-testid="health-follow" checked={!!health.following}
+          onChange={e => void follow(e.target.checked)} />
+        {t('health.notifyMe')}
+      </label>
       <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>
         {health.owners?.length
           ? t('health.ownerNamed', { who: health.owners.join(', ') })
