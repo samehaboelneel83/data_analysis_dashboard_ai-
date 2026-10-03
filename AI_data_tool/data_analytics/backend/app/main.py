@@ -58,6 +58,8 @@ async def _migrate(conn):
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS tokens_valid_after TIMESTAMP WITH TIME ZONE",
         # 0039: duplicate-upload detection (see Dataset.content_sha256).
         "ALTER TABLE datasets ADD COLUMN IF NOT EXISTS content_sha256 VARCHAR(64)",
+        # 0056: each refresh run's check results (see RefreshRun.checks).
+        "ALTER TABLE refresh_runs ADD COLUMN IF NOT EXISTS checks JSON",
         "CREATE INDEX IF NOT EXISTS ix_datasets_content_sha256 ON datasets (content_sha256)",
         # 0042: AI budgets (see Quota.max_ai_tokens_per_day); ai_usage itself
         # is a new table, which create_all provisions.

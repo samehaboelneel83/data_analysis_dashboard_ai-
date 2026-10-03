@@ -446,6 +446,21 @@ async def _rebuild_derived(session, ds) -> bool:
 
         out = await _asyncio.to_thread(_run)
 
+        # Phase 3: the dataset's checks run before the rebuild replaces it.
+        from .data_checks import (ChecksBlocked, blocking_failures, describe,
+                                  known_types, load_checks, make_validator)
+        outcome: dict = {}
+        validate = make_validator(await load_checks(session, ds_id), ds.row_count,
+                                  await known_types(session, ds_id), outcome)
+        try:
+            validate(out)
+        except ChecksBlocked as e:
+            msg = "Not published: " + "; ".join(describe(r) for r in blocking_failures(e.results))
+            await record_failure(session, "dataset", ds_id, msg)
+            await finish_run(session, run_id, "blocked", error=msg, error_code="checks_blocked",
+                             checks=e.results)
+            return True
+
         # Written in place: the dataset keeps its path, so every report and
         # widget pointing at it picks the new rows up with no rewiring.
         await _asyncio.to_thread(write_csv_atomic, out, ds.filename)
@@ -482,7 +497,7 @@ async def _rebuild_derived(session, ds) -> bool:
     rows = int(ds.row_count or 0)
     await session.commit()
     await clear_failure(session, "dataset", ds_id)
-    await finish_run(session, run_id, "ok", rows=rows)
+    await finish_run(session, run_id, "ok", rows=rows, checks=outcome.get("checks"))
     return True
 
 
@@ -769,9 +784,15 @@ async def refresh_one(session, ds: Dataset) -> bool:
         # makes exactly the call it always made.
         guard = {"required_columns": required} if required else {}
         filename, table, query = ds.filename, ds.source_table, ds.source_query
+        # Phase 3: the dataset's saved checks run on the fetched frame before
+        # it replaces the file; a blocking failure keeps the old one.
+        from .data_checks import ChecksBlocked, describe, blocking_failures, load_checks, known_types, make_validator
+        outcome: dict = {}
+        validate = make_validator(await load_checks(session, ds_id), ds.row_count,
+                                  await known_types(session, ds_id), outcome)
         try:
             df, _type_map = await asyncio.to_thread(
-                rewrite_dataset_file, cfg, filename, table, query, **guard)
+                rewrite_dataset_file, cfg, filename, table, query, validate=validate, **guard)
             # O3: rewrite_dataset_file is always a full rewrite (no watermark
             # here -- see module docstring), so the manifest kind is "full"
             # and there is no cursor value to carry.
@@ -784,6 +805,14 @@ async def refresh_one(session, ds: Dataset) -> bool:
             return await _failed(run_id, f"Not refreshed: {e}, still used on this dataset. "
                                  "Refresh it by hand to map the new column names.",
                                  "schema_break")
+        except ChecksBlocked as e:
+            log.warning("Scheduled refresh blocked for dataset %s: %s", ds_id, e)
+            await _discard(session, ds)
+            msg = "Not published: " + "; ".join(describe(r) for r in blocking_failures(e.results))
+            await record_failure(session, "dataset", ds_id, msg)
+            await finish_run(session, run_id, "blocked", error=msg, error_code="checks_blocked",
+                             checks=e.results)
+            return True
         except Exception as e:  # noqa: BLE001 - see docstring
             log.warning("Scheduled refresh failed for dataset %s: %s", ds_id, e)
             await _discard(session, ds)
@@ -795,7 +824,7 @@ async def refresh_one(session, ds: Dataset) -> bool:
         ds.row_count, ds.col_count = int(len(df)), int(len(df.columns))
         await session.commit()
         await clear_failure(session, "dataset", ds_id)
-        await finish_run(session, run_id, "ok", rows=int(len(df)))
+        await finish_run(session, run_id, "ok", rows=int(len(df)), checks=outcome.get("checks"))
         # The data just changed; the stored insight baseline describes the OLD
         # data. Still under this dataset's advisory lock, so a user-triggered
         # scan cannot interleave.

@@ -253,6 +253,12 @@ EXCUSED_ROUTES = {
     ("POST", "/api/v1/datasets/{dataset_id}/alerts/test"): "one number, no rows: the alert's metric over alerts.alert_frame, which applies the caller's row rules and denied columns like every frame read; test_alert_changes.py",
     ("POST", "/api/v1/datasets/{dataset_id}/live-count"): "a row COUNT only, before row rules -- the same total an imported dataset's row_count shows every reader on the list; needs dataset read; test_live_counts.py",
     ("POST", "/api/v1/datasets/{dataset_id}/certify"): "admin-only metadata toggle (column_meta.__certified__); returns no row content; test_live_counts.py",
+    # Pipeline plan, phases 2-3:
+    ("GET", "/api/v1/datasets/{dataset_id}/pipeline-health"): "refresh status and the freshness target; error text, owners and recipients only for editors; no row content; test_pipeline_alerts.py",
+    ("GET", "/api/v1/datasets/{dataset_id}/checks"): "the saved check definitions an editor wrote; no row content; test_data_checks.py",
+    ("POST", "/api/v1/datasets/{dataset_id}/checks"): "creates a check definition (edit capability); no row content; test_data_checks.py",
+    ("POST", "/api/v1/datasets/{dataset_id}/checks/try"): "editors only; check results are counts and column names, never values from the data (services/data_checks.py); test_data_checks.py",
+    ("GET", "/api/v1/datasets/{dataset_id}/refresh-runs"): "editors only; run status, row totals and count-only check results; test_data_checks.py",
 }
 
 

@@ -1810,6 +1810,137 @@ async def set_pipeline_watch(dataset_id: int, req: PipelineWatchUpdate,
     return await get_pipeline_health(dataset_id, db, current_user)
 
 
+class DataCheckIn(BaseModel):
+    """Phase 3: one saved quality check (services/data_checks.py)."""
+    kind: str
+    column: str | None = None
+    params: dict = Field(default_factory=dict)
+    severity: str = "warn"
+    enabled: bool = True
+
+
+def _check_out(c) -> dict:
+    return {"id": c.id, "kind": c.kind, "column": c.column, "params": c.params or {},
+            "severity": c.severity, "enabled": bool(c.enabled), "created_at": c.created_at}
+
+
+async def _check_dataset(db, current_user, dataset_id: int, write: bool) -> Dataset:
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    if write:
+        await require_dataset_write(db, current_user, ds, "edit")
+    else:
+        await require_dataset_read(db, current_user, dataset_id)
+    return ds
+
+
+@router.get("/{dataset_id}/checks")
+async def list_data_checks(dataset_id: int, db: AsyncSession = Depends(get_db),
+                           current_user: User = Depends(get_current_user)):
+    """A dataset's saved quality checks (pipeline plan, phase 3)."""
+    from ..models.models import DataCheck
+    await _check_dataset(db, current_user, dataset_id, write=False)
+    rows = (await db.execute(select(DataCheck).where(DataCheck.dataset_id == dataset_id)
+                             .order_by(DataCheck.id))).scalars().all()
+    return [_check_out(c) for c in rows]
+
+
+@router.post("/{dataset_id}/checks", status_code=201)
+async def create_data_check(dataset_id: int, body: DataCheckIn, db: AsyncSession = Depends(get_db),
+                            current_user: User = Depends(get_current_user)):
+    from sqlalchemy import func as _func
+    from ..models.models import DataCheck
+    from ..services.data_checks import MAX_CHECKS_PER_DATASET, InvalidCheck, validate_check
+    ds = await _check_dataset(db, current_user, dataset_id, write=True)
+    if ds.mode == "directquery":
+        raise HTTPException(400, "A live (DirectQuery) dataset is never refreshed into a file, "
+                                 "so there is no new data to check before it is published")
+    n = (await db.execute(select(_func.count()).select_from(DataCheck)
+                          .where(DataCheck.dataset_id == dataset_id))).scalar() or 0
+    if n >= MAX_CHECKS_PER_DATASET:
+        raise HTTPException(400, f"At most {MAX_CHECKS_PER_DATASET} checks per dataset")
+    try:
+        params = validate_check(body.kind, body.column, body.params, body.severity)
+    except InvalidCheck as e:
+        raise HTTPException(400, str(e))
+    row = DataCheck(org_id=ds.org_id, dataset_id=ds.id, kind=body.kind,
+                    column=(body.column or None) if body.kind in ("not_null", "unique", "accepted_values") else None,
+                    params=params, severity=body.severity, enabled=body.enabled,
+                    created_by=current_user.id)
+    db.add(row)
+    await db.flush()
+    await audit(db, current_user, "dataset.check_add", "dataset", ds.id,
+                f"{body.severity} {body.kind}{' on ' + body.column if row.column else ''}")
+    await db.commit()
+    return _check_out(row)
+
+
+@router.patch("/{dataset_id}/checks/{check_id}")
+async def update_data_check(dataset_id: int, check_id: int, body: DataCheckIn,
+                            db: AsyncSession = Depends(get_db),
+                            current_user: User = Depends(get_current_user)):
+    from ..models.models import DataCheck
+    from ..services.data_checks import InvalidCheck, validate_check
+    ds = await _check_dataset(db, current_user, dataset_id, write=True)
+    row = await db.get(DataCheck, check_id)
+    if row is None or row.dataset_id != ds.id:
+        raise HTTPException(404, "Check not found")
+    try:
+        params = validate_check(body.kind, body.column, body.params, body.severity)
+    except InvalidCheck as e:
+        raise HTTPException(400, str(e))
+    row.kind, row.params, row.severity, row.enabled = body.kind, params, body.severity, body.enabled
+    row.column = (body.column or None) if body.kind in ("not_null", "unique", "accepted_values") else None
+    await audit(db, current_user, "dataset.check_edit", "dataset", ds.id, f"check {row.id}: {body.severity} {body.kind}")
+    await db.commit()
+    return _check_out(row)
+
+
+@router.delete("/{dataset_id}/checks/{check_id}", status_code=204)
+async def delete_data_check(dataset_id: int, check_id: int, db: AsyncSession = Depends(get_db),
+                            current_user: User = Depends(get_current_user)):
+    from ..models.models import DataCheck
+    ds = await _check_dataset(db, current_user, dataset_id, write=True)
+    row = await db.get(DataCheck, check_id)
+    if row is None or row.dataset_id != ds.id:
+        raise HTTPException(404, "Check not found")
+    await db.delete(row)
+    await audit(db, current_user, "dataset.check_delete", "dataset", ds.id, f"check {check_id}: {row.kind}")
+    await db.commit()
+
+
+@router.post("/{dataset_id}/checks/try")
+async def try_data_checks(dataset_id: int, db: AsyncSession = Depends(get_db),
+                          current_user: User = Depends(get_current_user)):
+    """Every saved check on the data the dataset holds NOW -- "would my
+    checks pass?" without waiting for a refresh. Read only."""
+    from ..services.data_checks import evaluate, load_checks
+    ds = await _check_dataset(db, current_user, dataset_id, write=True)
+    if not ds.filename:
+        raise HTTPException(400, "This dataset has no data file to check")
+    df = await asyncio.to_thread(load_file, ds.filename)
+    results = evaluate(df, await load_checks(db, ds.id), previous_rows=None)
+    import json as _json
+    return {"rows": int(len(df)), "results": _json.loads(_json.dumps(results, default=str))}
+
+
+@router.get("/{dataset_id}/refresh-runs")
+async def list_dataset_refresh_runs(dataset_id: int, limit: int = 30,
+                                    db: AsyncSession = Depends(get_db),
+                                    current_user: User = Depends(get_current_user)):
+    """This dataset's recent refreshes with their check results (editors:
+    error text and check details can describe the data and its source)."""
+    from ..models.models import RefreshRun
+    ds = await _check_dataset(db, current_user, dataset_id, write=True)
+    limit = max(1, min(int(limit or 30), 200))
+    runs = (await db.execute(select(RefreshRun).where(
+        RefreshRun.kind == "dataset", RefreshRun.item_id == ds.id
+    ).order_by(RefreshRun.id.desc()).limit(limit))).scalars().all()
+    return [{"id": r.id, "trigger": r.trigger, "status": r.status, "started_at": r.started_at,
+             "rows": r.rows, "duration_ms": r.duration_ms, "error": r.error,
+             "error_code": r.error_code, "checks": r.checks or []} for r in runs]
+
+
 # ── Column metadata (data item properties) ────────────────────────────────────
 
 #: `geography` is a CATEGORY that also says what it is a category OF, so a map
@@ -2717,7 +2848,7 @@ async def lineage_graph(db: AsyncSession = Depends(get_db), current_user: User =
 
     def _health(d: Dataset) -> str | None:
         run = _last.get(d.id)
-        if run is not None and run.status == "failed":
+        if run is not None and run.status in ("failed", "blocked"):
             return "failing"
         if d.mode != "directquery" and _is_stale(d.last_refreshed_at or d.created_at,
                                                  _targets.get(d.id), _now):
@@ -3973,7 +4104,7 @@ async def refresh_dataset(
     file at once is what the queue exists to prevent.
     """
     from fastapi.responses import JSONResponse
-    from ..services.refresh_jobs import (RefreshRefused, SchemaBreakRefused,
+    from ..services.refresh_jobs import (ChecksRefused, RefreshRefused, SchemaBreakRefused,
                                          active_refresh_job, refresh_now)
 
     if await active_refresh_job(db, current_user.org_id, dataset_id) is not None:
@@ -3982,9 +4113,11 @@ async def refresh_dataset(
     try:
         _dataset, warning = await refresh_now(
             db, current_user, dataset_id, mode=body.mode, cursor_column=body.cursor_column,
-            column_map=body.column_map, force=body.force)
-    except SchemaBreakRefused as e:
-        return JSONResponse(status_code=409, content=e.payload)
+            column_map=body.column_map, force=body.force,
+            publish_anyway=body.publish_anyway)
+    except (SchemaBreakRefused, ChecksRefused) as e:
+        import json as _json
+        return JSONResponse(status_code=409, content=_json.loads(_json.dumps(e.payload, default=str)))
     except RefreshRefused as e:
         raise HTTPException(e.status_code, str(e))
 
@@ -4039,7 +4172,7 @@ async def queue_refresh(
         job, _created = await job_service.enqueue(
             db, user=current_user, kind=REFRESH_JOB_KIND,
             inputs=job_inputs(dataset_id, body.mode, body.cursor_column,
-                              body.column_map, body.force),
+                              body.column_map, body.force, body.publish_anyway),
             subject=f"{dataset.name} · {what} from {src.name}",
             idempotency_key=idempotency_key)
     except job_service.IdempotencyConflict as e:

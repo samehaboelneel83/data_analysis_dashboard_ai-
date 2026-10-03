@@ -5,6 +5,7 @@ import ColumnMeaningPanel from '../components/dataset/ColumnMeaningPanel'
 import AlertsPanel from '../components/dataset/AlertsPanel'
 import PredictionModelsPanel from '../components/dataset/PredictionModelsPanel'
 import { PipelineAlertsForm, PipelineHealthLine, usePipelineHealth } from '../components/dataset/PipelineHealth'
+import ChecksPanel, { ChecksBlockedDialog } from '../components/dataset/ChecksPanel'
 import StatisticsPanel from '../components/StatisticsPanel'
 import DatasetSensitivity from '../components/DatasetSensitivity'
 import NotebookSnippet from '../components/NotebookSnippet'
@@ -21,13 +22,13 @@ import OutlierDetailsDialog from '../components/report/OutlierDetailsDialog'
 import IconLabel from '../components/ui/IconLabel'
 import {
   Bot, Plug, FolderOpen, LayoutDashboard as OverviewIcon, Table2, Ruler, RefreshCw, Sparkles,
-  Pin, Link2, TriangleAlert, Search, BellRing, Brain, Layers, BookOpen,
+  Pin, Link2, TriangleAlert, Search, BellRing, Brain, Layers, BookOpen, ShieldCheck,
 } from 'lucide-react'
 import { insightsApi, datasetsApi, analysisApi, dataPreviewApi, filterExprApi, dataSourcesApi, prepApi } from '../services/api'
 import type { PrepStep } from '../services/api'
 import { mergeCellEdit } from '../lib/cellEdits'
 import FindingChart from '../components/insights/FindingChart'
-import type { Dataset, CalcColumn, DataPreviewFilter, DataSource, AssociationRulesResult, KeyInfluencersResult, SegmentResult } from '../services/api'
+import type { Dataset, CalcColumn, CheckResult, DataPreviewFilter, DataSource, AssociationRulesResult, KeyInfluencersResult, SegmentResult } from '../services/api'
 import CalcColumnsPanel from '../components/report/CalcColumnsPanel'
 import PrepPipelinePanel from '../components/report/PrepPipelinePanel'
 import MeasuresPanel from '../components/report/MeasuresPanel'
@@ -110,7 +111,7 @@ export default function DatasetDetail() {
   const [searchParams] = useSearchParams()
   const urlTab = searchParams.get('tab')
   const [tab,      setTab]      = useState<Tab>(
-    urlTab === 'statistics' || urlTab === 'data' || urlTab === 'alerts' ||
+    urlTab === 'statistics' || urlTab === 'data' || urlTab === 'alerts' || urlTab === 'checks' ||
     urlTab === 'models' || urlTab === 'aggregates' || urlTab === 'meaning'
       ? urlTab : 'overview')
 
@@ -418,11 +419,12 @@ export default function DatasetDetail() {
   }
 
   const handleRefresh = async (mode: 'full' | 'incremental' = 'full', cursorColumn?: string,
-                               resolve?: { column_map?: Record<string, string>; force?: boolean }) => {
+                               resolve?: { column_map?: Record<string, string>; force?: boolean; publish_anyway?: boolean }) => {
     setQueueing(true)
     setPvError(null)
     setShowRefreshMenu(false)
     setSchemaBreak(null)
+    setChecksBlocked(null)
     refreshReq.current = { mode, cursorColumn }
     try {
       // Queued, not awaited: the reload runs in the server's worker, so a
@@ -461,6 +463,12 @@ export default function DatasetDetail() {
                 dependents: job.result.dependents ?? {} },
         mode: refreshReq.current.mode, cursorColumn: refreshReq.current.cursorColumn,
       })
+    } else if (job.state === 'failed' && job.error_code === 'checks_blocked') {
+      // Phase 3: a blocking check refused the new data; the old file stands.
+      // Say which check, and let an editor publish anyway.
+      setChecksBlocked({ detail: job.error ?? '', checks: job.result?.checks ?? [],
+                         mode: refreshReq.current.mode, cursorColumn: refreshReq.current.cursorColumn })
+      void datasetsApi.pipelineHealth(dsId).then(setPipelineHealth).catch(() => {})
     } else if (job.state === 'failed') {
       toast.error(job.error ?? tr('refreshJob.failed'))
     } else if (job.state === 'cancelled') {
@@ -488,6 +496,8 @@ export default function DatasetDetail() {
       : tr('refreshJob.querying')
   const [schemaBreak, setSchemaBreak] = useState<
     { info: SchemaBreak; mode: 'full' | 'incremental'; cursorColumn?: string } | null>(null)
+  const [checksBlocked, setChecksBlocked] = useState<
+    { detail: string; checks: CheckResult[]; mode: 'full' | 'incremental'; cursorColumn?: string } | null>(null)
 
   /** Minutes, or null to clear. The server owns the 5-minute floor -- repeating
    *  the number here would be a second place to update when it changes, so the
@@ -647,6 +657,11 @@ export default function DatasetDetail() {
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      {checksBlocked && (
+        <ChecksBlockedDialog detail={checksBlocked.detail} checks={checksBlocked.checks}
+          onKeep={() => setChecksBlocked(null)}
+          onPublish={() => void handleRefresh(checksBlocked.mode, checksBlocked.cursorColumn, { publish_anyway: true })} />
+      )}
       {schemaBreak && (
         <SchemaBreakDialog info={schemaBreak.info}
           onMap={column_map => void handleRefresh(schemaBreak.mode, schemaBreak.cursorColumn, { column_map })}
@@ -828,8 +843,10 @@ export default function DatasetDetail() {
           still lands on that explanation. Scrolls sideways rather than
           wrapping on a phone. */}
       <div role="tablist" aria-label={tr('dataset.sections')} className="dl-tabs">
-        {(['overview', 'data', 'meaning', 'statistics', 'alerts', 'models', 'aggregates'] as Tab[])
+        {(['overview', 'data', 'meaning', 'statistics', 'alerts', 'checks', 'models', 'aggregates'] as Tab[])
           .filter(t => t !== 'aggregates' || ds?.mode === 'directquery' || tab === 'aggregates')
+          // Checks run before a refreshed file is published: a live dataset has none.
+          .filter(t => t !== 'checks' || ds?.mode !== 'directquery')
           .map(t => (
           <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}
             className={`dl-tabs__tab${tab === t ? ' dl-tabs__tab--on' : ''}`}>
@@ -838,6 +855,7 @@ export default function DatasetDetail() {
                       : t === 'meaning' ? <IconLabel icon={BookOpen}>{tr('dataset.tab.meaning')}</IconLabel>
                       : t === 'statistics' ? <IconLabel icon={Ruler}>{tr('dataset.tab.analysis')}</IconLabel>
                       : t === 'alerts' ? <IconLabel icon={BellRing}>{tr('dataset.tab.alerts')}</IconLabel>
+                      : t === 'checks' ? <IconLabel icon={ShieldCheck}>{tr('dataset.tab.checks')}</IconLabel>
                       // Named explicitly rather than falling off the end of the
                       // chain: the catch-all labelled every future tab "Alerts",
                       // and two tabs with one name is a tab bar that lies.
@@ -881,6 +899,12 @@ export default function DatasetDetail() {
           person who made it — with their row-level security, not an admin's. */}
       {tab === 'alerts' && ds && (
         <AlertsPanel datasetId={ds.id} columns={ds.columns ?? []} />
+      )}
+
+      {/* Pipeline phase 3: what every refresh must pass before it is published. */}
+      {tab === 'checks' && ds && (
+        <ChecksPanel datasetId={ds.id} columns={(ds.columns ?? []).map(c => c.name)}
+          canEdit={!!pipelineHealth?.can_edit} />
       )}
 
       {/* Saved models, beside the analyses they come from. Every other analysis

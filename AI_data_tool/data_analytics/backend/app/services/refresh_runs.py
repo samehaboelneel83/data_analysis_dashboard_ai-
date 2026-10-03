@@ -40,8 +40,10 @@ async def start_run(session, kind: str, item_id: int, org_id: int | None,
 
 
 async def finish_run(session, run_id: int | None, status: str, *, rows: int | None = None,
-                     error: str | None = None, error_code: str | None = None) -> None:
-    """Close a run as ok | failed | skipped, with its row count or error."""
+                     error: str | None = None, error_code: str | None = None,
+                     checks: list | None = None) -> None:
+    """Close a run as ok | failed | skipped | blocked, with its row count or
+    error, and the data checks' results when any ran (phase 3)."""
     if run_id is None:
         return
     from sqlalchemy import delete, select
@@ -56,6 +58,8 @@ async def finish_run(session, run_id: int | None, status: str, *, rows: int | No
         run.rows = rows
         run.error = (error or "")[:2000] or None
         run.error_code = error_code
+        if checks is not None:
+            run.checks = _json_safe(checks)
         started = run.started_at
         if started is not None:
             if started.tzinfo is not None:
@@ -84,6 +88,13 @@ async def finish_run(session, run_id: int | None, status: str, *, rows: int | No
     # success that ends a failure -- is announced. Never raises.
     from .pipeline_alerts import on_run_finished
     await on_run_finished(session, kind, item_id, status, error)
+
+
+def _json_safe(value):
+    """Check results carry pandas/numpy scalars in their samples; a JSON
+    column wants plain ones."""
+    import json
+    return json.loads(json.dumps(value, default=str))
 
 
 async def reap_running(session) -> int:
