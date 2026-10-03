@@ -14,7 +14,9 @@ said. Alert fatigue is how alerts stop being read.
 
 The OWNER is the item's creator; with none (or one who has left) it is the
 org's admins, so a failure is never addressed to nobody. The owner always gets
-an in-app notice; `PipelineWatch.recipients` adds emails and https webhooks.
+an in-app notice; so does anyone who chose "Notify me" (`followers`), which is
+how an editor hears about an item whose creator account nobody reads.
+`PipelineWatch.recipients` adds emails and https webhooks.
 
 Like everything the scheduler calls, nothing here may raise into the refresh
 it reports on.
@@ -82,6 +84,21 @@ async def owner_ids(session, org_id: int | None, creator_id: int | None) -> list
     return [r for (r,) in rows]
 
 
+async def notice_ids(session, org_id: int | None, creator_id: int | None, watch) -> list[int]:
+    """Everyone the in-app notice goes to: the owner(s) plus followers who
+    are still active members of the org, each once, owners first."""
+    from ..models.models import User
+    ids = await owner_ids(session, org_id, creator_id)
+    wanted = [f for f in ((watch.followers if watch else None) or [])
+              if isinstance(f, int) and f not in ids]
+    if wanted:
+        rows = (await session.execute(select(User.id).where(
+            User.id.in_(wanted), User.org_id == org_id, User.is_active.is_(True)))).all()
+        live = {r for (r,) in rows}
+        ids += [f for f in wanted if f in live]
+    return ids
+
+
 async def _announce(session, kind: str, item_id: int, watch, subject: str, text: str) -> None:
     from .delivery import send_email, split_recipients, valid_recipients
     from .alerts import post_webhook
@@ -90,7 +107,7 @@ async def _announce(session, kind: str, item_id: int, watch, subject: str, text:
     if item is None:
         return
     org_id, _name, link, creator = item
-    for uid in await owner_ids(session, org_id, creator):
+    for uid in await notice_ids(session, org_id, creator, watch):
         await notify(session, org_id, uid, "refresh", text, link)
     await session.commit()
     emails, hooks = split_recipients(valid_recipients((watch.recipients if watch else None) or []))
@@ -208,17 +225,18 @@ async def check_freshness(session, now: datetime | None = None) -> int:
 
 
 async def owner_emails(session, kind: str, item_id: int) -> list[str]:
-    """Who the in-app notices go to, by email: shown to editors so "the owner
-    is told" names someone."""
+    """Who the in-app notices go to (owners, then followers), by email:
+    shown to editors so "the owner is told" names someone."""
     from ..models.models import User
     item = await _item(session, kind, item_id)
     if item is None:
         return []
     org_id, _n, _l, creator = item
-    ids = await owner_ids(session, org_id, creator)
+    ids = await notice_ids(session, org_id, creator, await get_watch(session, kind, item_id))
     if not ids:
         return []
-    return [e for (e,) in (await session.execute(select(User.email).where(User.id.in_(ids)))).all()]
+    emails = dict((await session.execute(select(User.id, User.email).where(User.id.in_(ids)))).all())
+    return [emails[i] for i in ids if i in emails]
 
 
 async def health(session, ds) -> dict:

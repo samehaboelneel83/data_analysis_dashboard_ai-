@@ -2136,6 +2136,9 @@ class PipelineWatch(Base):
     freshness_hours = Column(Integer, nullable=True)
     #: Emails and https:// webhook URLs told as well as the owner.
     recipients = Column(JSON, default=list)
+    #: User ids who asked for the in-app notices too ("Notify me"), besides
+    #: the owner. Only active members of the item's org are told.
+    followers  = Column(JSON, default=list)
     #: ok | failing -- the last state announced.
     state      = Column(String(20), nullable=False, default="ok")
     state_since = Column(DateTime(timezone=True), nullable=True)

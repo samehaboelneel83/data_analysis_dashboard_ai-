@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { PipelineAlertsForm, PipelineHealthLine } from './PipelineHealth'
 import type { PipelineHealth } from '../../services/api'
+import { MemoryRouter } from 'react-router-dom'
+import { AuthContext } from '../../contexts/AuthContext'
 
 vi.mock('../../services/api', () => ({
   datasetsApi: { pipelineHealth: vi.fn(), setPipelineWatch: vi.fn() },
@@ -57,12 +59,41 @@ describe('PipelineAlertsForm', () => {
 
   it('names who is always told', () => {
     render(<PipelineAlertsForm datasetId={7} health={{ ...base, owners: ['owner@example.com'] }} onSaved={vi.fn()} />)
-    expect(screen.getByText(/owner@example.com is always told/)).toBeInTheDocument()
+    expect(screen.getByText(/works again: owner@example.com\./)).toBeInTheDocument()
   })
 
   it('offers the server choices, days for the long ones', () => {
     render(<PipelineAlertsForm datasetId={7} health={base} onSaved={vi.fn()} />)
     const options = Array.from((screen.getByLabelText('Warn when older than') as HTMLSelectElement).options).map(o => o.text)
     expect(options).toEqual(['No target', '2 hours', '6 hours', '26 hours', '3 days', '8 days'])
+  })
+
+  it('"Notify me" adds the caller to the in-app notices', async () => {
+    const onSaved = vi.fn()
+    vi.mocked(datasetsApi.setPipelineWatch).mockResolvedValue({ ...base, following: true })
+    render(<PipelineAlertsForm datasetId={7} health={base} onSaved={onSaved} />)
+    fireEvent.click(screen.getByLabelText('Notify me in the app too'))
+    await waitFor(() => expect(datasetsApi.setPipelineWatch).toHaveBeenCalledWith(7, { follow: true }))
+    expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ following: true }))
+  })
+
+  it('warns that typed emails go nowhere while email is not set up', () => {
+    render(<PipelineAlertsForm datasetId={7} health={{ ...base, email_ready: false }} onSaved={vi.fn()} />)
+    expect(screen.queryByTestId('health-email-off')).toBeNull()
+    fireEvent.change(screen.getByLabelText(/Also tell/), { target: { value: 'ops@example.com' } })
+    expect(screen.getByTestId('health-email-off')).toHaveTextContent('Ask an admin')
+  })
+
+  it('links an admin to the email settings', () => {
+    const auth = { user: { role: { is_org_admin: true } } } as unknown as React.ContextType<typeof AuthContext>
+    render(<MemoryRouter><AuthContext.Provider value={auth}>
+      <PipelineAlertsForm datasetId={7} health={{ ...base, email_ready: false, recipients: ['ops@example.com'] }} onSaved={vi.fn()} />
+    </AuthContext.Provider></MemoryRouter>)
+    expect(screen.getByRole('link', { name: 'Set up email' })).toHaveAttribute('href', '/admin/settings')
+  })
+
+  it('says nothing about email when it is set up', () => {
+    render(<PipelineAlertsForm datasetId={7} health={{ ...base, email_ready: true, recipients: ['ops@example.com'] }} onSaved={vi.fn()} />)
+    expect(screen.queryByTestId('health-email-off')).toBeNull()
   })
 })

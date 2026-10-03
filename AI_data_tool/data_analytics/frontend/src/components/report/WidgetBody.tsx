@@ -16,6 +16,7 @@ import { CustomVisual } from './CustomVisual'
 import { seriesName } from './chartRenderers/axisOptions'
 import { WidgetPlaceholder, missingRequiredRoles, missingWidgetOptions, familyOf } from './WidgetPlaceholder'
 import { MeasuredChart } from './MeasuredChart'
+import SlicerRange, { type RangeValue } from './SlicerRange'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // WidgetBody — pure rendering, receives onClick callback
@@ -142,9 +143,11 @@ function FetchErrorState({ err, onRetry }: { err: { detail: string; code?: strin
   return <EmptyState msg={msg} action={retry ? { label: t('widget.err.retry'), onClick: onRetry! } : undefined} />
 }
 
-export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, onClickPoint, broadcasts, allFormats, checked, onToggleSlicerValue, onButtonClick, ruleStyles, parameters, geography, textFilter, onSubmitTextFilter, onAssignData, onBrushChange, brushNonce, onAnimationFrame, onApplyFix, onLoadMore, loadingMore }:
+export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, onClickPoint, broadcasts, allFormats, checked, onToggleSlicerValue, onButtonClick, ruleStyles, parameters, geography, textFilter, onSubmitTextFilter, rangeFilter, onSubmitRangeFilter, onAssignData, onBrushChange, brushNonce, onAnimationFrame, onApplyFix, onLoadMore, loadingMore }:
   { widget: Widget; data: any; fetchError?: { detail: string; code?: string } | null; onRetry?: () => void; localSelected: unknown; onClickPoint: (v: unknown) => void; broadcasts: boolean; allFormats?: Record<string, CalcColumnFormat | undefined>; checked?: Set<unknown>; onToggleSlicerValue?: (v: unknown) => void; onButtonClick?: () => void; ruleStyles?: RuleStyles; parameters?: Record<string, unknown>; geography?: Record<string, number>;
     textFilter?: string; onSubmitTextFilter?: (value: string, column: string) => void
+    /** A range slicer's current bounds, and how it applies new ones. */
+    rangeFilter?: RangeValue | null; onSubmitRangeFilter?: (range: RangeValue | null, column: string) => void
     /** Edit mode only: select this widget and open its Data roles. */
     onAssignData?: () => void
     /** Overview-axis zoom reports; bumping brushNonce remounts the chart to reset it. */
@@ -385,6 +388,11 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
     // `auto` never resolves to text: a reader who CAN see their options should
     // be shown them, and a control that silently stopped listing reads as
     // broken rather than deliberate. Text is always a deliberate choice.
+    // A range comes from the server: chosen, or picked by `auto` for a number
+    // column with many values. It carries bounds, not a value list.
+    if (data?.type === 'slicer_range') {
+      return <SlicerRange data={data} value={rangeFilter ?? null} rtl={rtl} onApply={onSubmitRangeFilter} />
+    }
     const effective = mode !== 'auto' ? mode
       : rows.length < 5 ? 'buttons' : rows.length <= 10 ? 'list' : 'search'
     if (effective === 'text') {

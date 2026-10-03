@@ -1789,3 +1789,38 @@ describe('WidgetConfigPanel accessibility', () => {
     expect(await axeViolations(container)).toEqual([])
   }, 30000)   // the panel is large; axe walks all of it
 })
+
+describe('only what the author set is written (live check item 14)', () => {
+  const lastConfig = (fn: ReturnType<typeof vi.fn>) => fn.mock.calls[fn.mock.calls.length - 1][0]
+
+  it('an unrelated edit writes no sort and no rtl', () => {
+    const onUpdate = vi.fn()
+    render(<CrossFilterProvider><WidgetConfigPanel widget={widget()} columns={columns} onUpdate={onUpdate} /></CrossFilterProvider>)
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Revenue' } })
+    act(() => { vi.advanceTimersByTime(700) })
+    const config = lastConfig(onUpdate)
+    expect(config).not.toHaveProperty('sort')
+    expect(config).not.toHaveProperty('rtl')
+  })
+
+  it('a chosen sort and a ticked RTL are written', () => {
+    const onUpdate = vi.fn()
+    render(<CrossFilterProvider><WidgetConfigPanel widget={widget()} columns={columns} onUpdate={onUpdate} /></CrossFilterProvider>)
+    fireEvent.click(screen.getByRole('button', { name: /Sort & limit/i }))
+    fireEvent.change(screen.getByLabelText('Sort order'), { target: { value: 'asc' } })
+    fireEvent.click(screen.getByLabelText('RTL (Right to Left)'))
+    act(() => { vi.advanceTimersByTime(700) })
+    expect(lastConfig(onUpdate)).toMatchObject({ sort: 'asc', rtl: true })
+  })
+
+  it('a stored sort is kept, and unticking RTL removes the key', () => {
+    const onUpdate = vi.fn()
+    render(<CrossFilterProvider><WidgetConfigPanel widget={widget({ config: { dimension: 'region', sort: 'desc', rtl: true } })}
+      columns={columns} onUpdate={onUpdate} /></CrossFilterProvider>)
+    fireEvent.click(screen.getByLabelText('RTL (Right to Left)'))
+    act(() => { vi.advanceTimersByTime(700) })
+    const config = lastConfig(onUpdate)
+    expect(config.sort).toBe('desc')
+    expect(config).not.toHaveProperty('rtl')
+  })
+})

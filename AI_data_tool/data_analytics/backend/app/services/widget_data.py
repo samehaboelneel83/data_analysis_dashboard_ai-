@@ -1404,7 +1404,8 @@ def shape_slicer(df: pd.DataFrame, config: dict) -> dict:
     whole column to build a list nobody can use. SAS offers a TEXT INPUT for
     exactly this, where the reader types the value they already know.
 
-    So `slicer_mode: "text"` returns early, before any grouping. That is the
+    So `slicer_mode: "text"` returns early, before any grouping, and so does
+    `range` (a number column's min and max; see `_slicer_range`). That is the
     whole point of the mode -- a control that skipped the list and still paid
     for it would be the same cost wearing a smaller widget.
 
@@ -1412,11 +1413,51 @@ def shape_slicer(df: pd.DataFrame, config: dict) -> dict:
     be shown them, and a control that silently stopped listing would read as
     broken rather than deliberate.
     """
-    if str(config.get("slicer_mode") or "").lower() == "text":
+    mode = str(config.get("slicer_mode") or "").lower()
+    if mode == "text":
         roles = resolve_roles(config)
         column = roles.get("category") or config.get("dimension")
         return {"type": "slicer_text", "rows": [], "total": 0, "column": column}
+    if mode in ("range", "auto", ""):
+        ranged = _slicer_range(df, config, chosen=mode == "range")
+        if ranged is not None:
+            return ranged
     return shape_series(df, config)
+
+
+#: On `auto`, a number column with more distinct values than this is offered
+#: as a from-to range: a list of 100+ single prices is unreadable, and nobody
+#: filters to "exactly 41.37".
+SLICER_RANGE_AUTO_DISTINCT = 20
+
+
+def _slicer_range(df: pd.DataFrame, config: dict, *, chosen: bool) -> dict | None:
+    """A number slicer as a range: the column's min and max, no value list.
+
+    Chosen explicitly (`slicer_mode: "range"`) it always answers, and says so
+    when the column is not numeric. On `auto` it answers only for a numeric
+    column with many distinct values, and otherwise returns None so the
+    ordinary list is built. Never groups the column, so a range over a
+    high-cardinality column costs one min and one max."""
+    roles = resolve_roles(config)
+    column = roles.get("category") or config.get("dimension")
+    if not column or column not in df.columns:
+        return None
+    s = df[column]
+    numeric = pd.api.types.is_numeric_dtype(s) and not pd.api.types.is_bool_dtype(s)
+    if not numeric:
+        if not chosen:
+            return None
+        return {"type": "slicer_range", "rows": [], "total": 0, "column": column,
+                "min": None, "max": None, "error": "not_numeric"}
+    if not chosen and s.nunique(dropna=True) <= SLICER_RANGE_AUTO_DISTINCT:
+        return None
+    s = s.dropna()
+    lo, hi = (None, None) if s.empty else (s.min(), s.max())
+    as_num = lambda v: None if v is None else (int(v) if float(v).is_integer() else float(v))
+    return {"type": "slicer_range", "rows": [], "total": 0, "column": column,
+            "min": as_num(lo), "max": as_num(hi),
+            "integer": bool(pd.api.types.is_integer_dtype(df[column]))}
 
 
 def shape_custom_graph(df: pd.DataFrame, config: dict) -> dict:

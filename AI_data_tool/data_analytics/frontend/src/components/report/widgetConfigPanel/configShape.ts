@@ -78,7 +78,7 @@ export const SETTING_VOCABULARIES: Record<string, readonly string[]> = {
   totals_position: ['before', 'after'],
   totals_scope: ['all', 'shown'],
   bar_mode: ['clustered', 'stacked', 'stacked100'],
-  slicer_mode: ['auto', 'buttons', 'list', 'dropdown', 'search', 'text'],
+  slicer_mode: ['auto', 'buttons', 'list', 'dropdown', 'search', 'text', 'range'],
   legend_position: ['top', 'bottom', 'left', 'right'],
   y_scale: ['linear', 'log'],
   gauge_shape: ['arc', 'speedometer', 'bullet', 'thermometer', 'progress'],

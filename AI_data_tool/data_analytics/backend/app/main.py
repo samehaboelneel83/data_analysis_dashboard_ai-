@@ -67,6 +67,7 @@ async def _migrate(conn):
         "ALTER TABLE watermarks ADD COLUMN IF NOT EXISTS last_full_at TIMESTAMP WITH TIME ZONE",
         "ALTER TABLE pipeline_watches ADD COLUMN IF NOT EXISTS run_after_source BOOLEAN NOT NULL DEFAULT FALSE",
         "ALTER TABLE pipeline_watches ADD COLUMN IF NOT EXISTS trigger_pending BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE pipeline_watches ADD COLUMN IF NOT EXISTS followers JSON",
         "CREATE INDEX IF NOT EXISTS ix_datasets_content_sha256 ON datasets (content_sha256)",
         # 0042: AI budgets (see Quota.max_ai_tokens_per_day); ai_usage itself
         # is a new table, which create_all provisions.
