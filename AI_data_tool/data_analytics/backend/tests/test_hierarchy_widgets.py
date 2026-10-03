@@ -266,3 +266,36 @@ class TestThePanelsOutputActuallyRenders:
                                         "levels": ["country"],
                                         "measure": "revenue", "aggregation": agg})
             assert r["additive"] is True, agg
+
+
+class TestItHonoursItsFilters:
+    """Live QA 2026-10-03: the hierarchy shaper never applied the widget's own
+    filters, so a tree filtered to two countries drew all three and the
+    unfiltered total. Every layout shares the shaper, so each is pinned."""
+
+    @pytest.mark.parametrize("widget", ["tree", "sunburst", "icicle",
+                                        "circle_pack", "dendrogram"])
+    def test_a_value_filter_narrows_the_tree(self, sales, widget):
+        r = shape_hierarchy(sales, {"widget_type": widget,
+                                    "levels": ["country", "region"],
+                                    "measure": "revenue", "aggregation": "sum",
+                                    "filters": [{"column": "country", "op": "in",
+                                                 "value": ["UK", "Spain"]}]})
+        assert sorted(c["name"] for c in r["root"]["children"]) == ["Spain", "UK"]
+        kept = sales[sales["country"].isin(["UK", "Spain"])]["revenue"].sum()
+        assert r["root"]["value"] == pytest.approx(kept)
+
+    def test_a_number_filter_narrows_the_total(self, sales):
+        r = shape_hierarchy(sales, {"widget_type": "tree", "levels": ["country"],
+                                    "measure": "revenue", "aggregation": "sum",
+                                    "filters": [{"column": "revenue", "op": "gt",
+                                                 "value": 50}]})
+        assert r["root"]["value"] == pytest.approx(
+            sales.loc[sales["revenue"] > 50, "revenue"].sum())
+
+    def test_a_filter_that_keeps_nothing_is_empty(self, sales):
+        r = shape_hierarchy(sales, {"widget_type": "sunburst", "levels": ["country"],
+                                    "measure": "revenue", "aggregation": "sum",
+                                    "filters": [{"column": "country", "op": "in",
+                                                 "value": ["Peru"]}]})
+        assert r["type"] == "empty"

@@ -513,6 +513,33 @@ describe('WidgetRenderer parameter placeholders in text', () => {
     )
     expect(screen.getByText('Cutoff: —')).toBeInTheDocument()
   })
+
+  it('draws **bold** and _italic_ instead of printing the markers', () => {
+    const { container } = render(
+      <CrossFilterProvider>
+        <WidgetRenderer widget={barWidget({ widget_type: 'text',
+          config: { content: 'A **big** and _small_ word in snake_case, see [the **docs**](https://example.com)' } })}
+          datasetId={10} />
+      </CrossFilterProvider>
+    )
+    expect(container.querySelector('strong')?.textContent).toBe('big')
+    expect(container.querySelector('em')?.textContent).toBe('small')
+    expect(container.textContent).toContain('snake_case')
+    expect(container.textContent).not.toContain('**')
+    expect(container.querySelector('a strong')?.textContent).toBe('docs')
+  })
+
+  it('says so when an image will not load', () => {
+    const { container } = render(
+      <CrossFilterProvider>
+        <WidgetRenderer widget={barWidget({ widget_type: 'image', config: { url: 'https://example.com/missing.png' } })}
+          datasetId={10} />
+      </CrossFilterProvider>
+    )
+    fireEvent.error(container.querySelector('img')!)
+    expect(container.querySelector('img')).toBeNull()
+    expect(container.textContent).toMatch(/could not be loaded/)
+  })
 })
 
 describe('WidgetRenderer multi-select', () => {

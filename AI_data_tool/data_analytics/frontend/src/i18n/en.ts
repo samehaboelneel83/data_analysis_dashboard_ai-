@@ -386,6 +386,7 @@ export const en = {
   'widget.err.busy': "The data source '{name}' is reachable but was busy answering this. Refresh in a moment.",
   'widget.err.unreachable': "Could not reach the data source '{name}'. It may be down or unreachable from this server; the dashboard will work again once it responds.",
   'widget.err.retry': 'Try again',
+  'widget.image.failed': 'The image could not be loaded. Check the image URL.',
   'models.dqTrainNote': 'This dataset queries its source live: training reads up to 250,000 rows from it, as you are allowed to see them, and the model card says if it used a sample.',
   'gallery.tile.dot_plot': 'Dot Plot',
   'gallery.tile.needle': 'Needle Plot',

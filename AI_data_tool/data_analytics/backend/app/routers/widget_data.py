@@ -312,12 +312,15 @@ async def _apply_report_parameters(req: WidgetDataRequest, db: AsyncSession, cur
     return req.model_copy(update={"config": config, "calculated_columns": calc_cols})
 
 
-def _direct_query_relative_dates(req: WidgetDataRequest) -> WidgetDataRequest:
-    """DirectQuery gets relative date filters as a plain >= / < pair, resolved
-    against today. Anchoring to the latest date would need a MAX() round trip
-    per filter; until that exists it is refused with a sentence rather than
-    quietly anchored to today -- a silent anchor is the defect this feature
-    exists to fix."""
+async def _direct_query_relative_dates(req: WidgetDataRequest, latest=None) -> WidgetDataRequest:
+    """DirectQuery gets relative date filters as a plain >= / < pair.
+
+    A `today` anchor resolves against today. A `data_max` anchor -- the
+    default the panel and the report's date presets write -- reads the
+    column's latest date with one MAX() at the source (`latest(column)`, an
+    awaitable). Live QA 2026-10-03: until that round trip existed, every such
+    filter on a live source was refused at render, so a "Last 30 days" preset
+    turned a whole live report into error tiles."""
     from datetime import date
     from ..services.relative_dates import RelativeDateError, has_relative, validate_spec, window
     filters = (req.config or {}).get("filters") or []
@@ -332,11 +335,15 @@ def _direct_query_relative_dates(req: WidgetDataRequest) -> WidgetDataRequest:
             spec = validate_spec(f.get("value"))
         except RelativeDateError as e:
             raise widget_error(400, "bad_filter", str(e))
+        anchor_date = date.today()
         if spec["anchor"] == "data_max":
-            raise widget_error(400, "unsupported",
-                               "On a live (DirectQuery) source, relative dates count back from today; "
-                               "anchoring to the latest date in the data needs an import dataset")
-        start, end, _label, _inc = window(spec, date.today())
+            col = f.get("column")
+            found = await latest(col) if (latest is not None and isinstance(col, str) and col) else None
+            if found is None:
+                raise widget_error(400, "bad_filter",
+                                   f"'{col}' holds no dates, so there is no latest date to count back from")
+            anchor_date = found
+        start, end, _label, _inc = window(spec, anchor_date)
         out.append({"column": f.get("column"), "op": "gte", "value": start.isoformat()})
         out.append({"column": f.get("column"), "op": "lt", "value": end.isoformat()})
     return req.model_copy(update={"config": {**req.config, "filters": out}})
@@ -509,7 +516,6 @@ async def _resolve_widget_data(
         if ds.default_filter_expr:
             raise widget_error(400, "unsupported", "Report-level filter expressions are not yet supported for DirectQuery datasets")
 
-        req = _direct_query_relative_dates(req)
         if (req.config or {}).get("animate_by"):
             raise widget_error(400, "unsupported",
                                "Animation needs an import dataset for now; on a live (DirectQuery) "
@@ -567,6 +573,17 @@ async def _resolve_widget_data(
                         and referenced_names(m.get("expression") or "") & set(denied)):
                     raise widget_error(403, "forbidden_column",
                                        "This widget references a column your role cannot access")
+
+        # Relative dates, after row security and column security are known: a
+        # `data_max` anchor is read from the rows this reader may see.
+        from ..services.direct_query import latest_date as _latest_date
+
+        async def _latest(column: str):
+            try:
+                return await asyncio.to_thread(_latest_date, source_cfg, dq_ds, column, rls_filter_expr)
+            except DirectQueryUnsupported:
+                return None     # not a column of this dataset: "holds no dates"
+        req = await _direct_query_relative_dates(req, _latest)
 
         # Auto-bin (services/auto_bin.py): too many values on the axis are
         # grouped BY THE SOURCE -- one small stats query picks the buckets,

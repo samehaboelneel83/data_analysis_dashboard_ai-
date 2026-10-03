@@ -357,7 +357,7 @@ class TestLogisticRegression:
     def test_a_multi_valued_target_is_refused_without_a_choice(self, churn_frame):
         rng = np.random.default_rng(5)
         three = churn_frame.assign(churn=rng.integers(0, 3, len(churn_frame)))
-        with pytest.raises(I.StatisticalError, match="binary outcome"):
+        with pytest.raises(I.StatisticalError, match="binary \\(yes/no\\) outcome"):
             I.glm_logistic(three, "churn", ["tenure"])
 
     def test_too_few_events_is_refused(self, churn_frame):

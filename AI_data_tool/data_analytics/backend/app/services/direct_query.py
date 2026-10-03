@@ -1110,7 +1110,12 @@ def _fetch_and_compute(
     # drawing cap it came back 69,934 / 69,915 on two loads for a true 69,805.
     measure_col = next((c for c in (getattr(dataset, "columns", None) or [])
                         if getattr(c, "name", None) == config.get("measure")), None)
+    # A GROUPED table or list (a dimension and an aggregation) is an aggregate
+    # per row, like a bubble. On the drawing cap, live QA 2026-10-03 read the
+    # average price of "unavailable" orders differently on two identical
+    # widgets (724.45 and 249.9): two random samples of the same table.
     aggregating = (widget_type in AGGREGATING_ROW_CAPPED_TYPES
+                   or (widget_type in ("table", "list") and not _is_raw_table(config))
                    or (widget_type in ("kpi", "card")
                        and (str(config.get("aggregation") or "").lower() not in _SCALAR_SQL
                             # Years since a date are computed from the rows,
@@ -1652,6 +1657,30 @@ def _remeasure_scalar(conn, dataset, plan, dialect: str, result: dict,
         value = int(value)
     rows[0]["value"] = value
     return True
+
+
+def latest_date(source_cfg: dict, dataset, column: str,
+                rls_filter_expr: str | None = None):
+    """The latest date in `column` that this reader may see: the `data_max`
+    anchor of a relative date filter, as one MAX() at the source.
+
+    Read under the reader's row security and before the widget's own filters,
+    as import mode reads it (services/relative_dates.resolve_filters): "latest
+    data" is the dataset's coverage, not the last row some other filter left.
+    None when the column holds no dates.
+    """
+    _validate_known_columns(dataset, [column], [])
+    rls_where, rls_params = _translate_rls(dataset, rls_filter_expr)
+    dialect = connectors.sql_family_of(source_cfg)
+    sql = _finalize_for_dialect(
+        f"SELECT MAX({_quote(column)}) FROM ({_base_query_sql(dataset, rls_where)}) AS src",
+        dialect)
+    with get_engine(source_cfg).connect() as conn:
+        value = conn.execute(text(sql), rls_params or {}).scalar()
+    if value is None:
+        return None
+    stamp = pd.to_datetime(value, errors="coerce")
+    return None if pd.isna(stamp) else stamp.date()
 
 
 def _build_count_series_sql(

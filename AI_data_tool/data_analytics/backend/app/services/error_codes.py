@@ -27,6 +27,7 @@ from __future__ import annotations
 #: second later.
 WIDGET_ERROR_CODES = frozenset({
     "parameter",           # a report parameter is missing, unknown or the wrong type
+    "bad_filter",          # a filter that cannot be applied as written: a bad relative-date spec, a date column with no dates
     "unsupported",         # the feature does not exist here: a DirectQuery engine, an export format
     "forbidden_column",    # the widget references a column this role cannot see
     "forbidden",           # this role may not read the dataset at all

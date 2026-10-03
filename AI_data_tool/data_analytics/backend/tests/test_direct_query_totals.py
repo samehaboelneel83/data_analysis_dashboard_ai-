@@ -115,13 +115,17 @@ def test_raw_table_without_show_totals_runs_no_totals_query(sales_sqlite_source)
     assert "totals_unavailable" not in result
 
 
-def test_sampled_grouped_table_suppresses_the_totals_row_and_says_so(sales_sqlite_source):
+def test_sampled_grouped_table_suppresses_the_totals_row_and_says_so(sales_sqlite_source, monkeypatch):
     """A table configured the way the Fields pane requires (Dimension set) shapes as a
     grouped series, and `_run_row_capped` plans no aggregation it could push down --
     so there is no true total available on this path. The row is DROPPED rather than
     shown wrong, and the client is told why so the author does not read a missing row
     as a checkbox that did nothing."""
     config = {"dimension": "region", "measure": "sales", "aggregation": "sum", "show_totals": True}
+    # A grouped table reads the ANALYSIS cap (its rows are aggregates, like a
+    # bubble's), so that is the cap shrunk here to force a sample.
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "analysis_row_cap", 5)
 
     result = run_direct_query(
         sales_sqlite_source, _dataset(), config, widget_type="table", row_cap=5, cache_ttl_seconds=0,
