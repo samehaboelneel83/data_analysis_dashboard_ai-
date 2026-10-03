@@ -110,7 +110,7 @@ def _short(error: str | None) -> str:
     # The run's error already says what failed ("Refresh failed: ..."); the
     # notice says it too, so the prefix would read twice.
     import re as _re
-    first = _re.sub(r"^(Refresh|Rebuild|Dataflow) failed:\s*", "", first) or first
+    first = _re.sub(r"^((Refresh|Rebuild|Dataflow) failed|Not published):\s*", "", first) or first
     return first[:300]
 
 
@@ -125,17 +125,27 @@ async def on_run_finished(session, kind: str, item_id: int, status: str,
             return
         org_id, name, _link, _creator = item
         noun = "Dataflow" if kind == "dataflow" else "Refresh of"
-        if status == "failed":
+        if status in ("failed", "blocked"):
             watch = await get_watch(session, kind, item_id, create=True, org_id=org_id)
             if watch.state == "failing":
                 await session.commit()
                 return
             watch.state, watch.state_since = "failing", datetime.utcnow()
             await session.commit()
-            await _announce(
-                session, kind, item_id, watch, f"Refresh failed: {name}",
-                f"{noun} “{name}” failed: {_short(error)}. Dashboards built on "
-                f"it keep showing the last good data until it works again.")
+            if status == "blocked":
+                # Phase 3: the refresh ran, but a blocking check refused the
+                # new data. Nothing in the pipeline is broken -- the DATA needs
+                # a look, or an editor's "publish anyway".
+                await _announce(
+                    session, kind, item_id, watch, f"Refresh blocked by a check: {name}",
+                    f"New data for “{name}” was not published. {_short(error)}. "
+                    f"Dashboards keep showing the previous data; open the dataset to "
+                    f"review its checks or publish anyway.")
+            else:
+                await _announce(
+                    session, kind, item_id, watch, f"Refresh failed: {name}",
+                    f"{noun} “{name}” failed: {_short(error)}. Dashboards built on "
+                    f"it keep showing the last good data until it works again.")
         elif status == "ok":
             watch = await get_watch(session, kind, item_id)
             if watch is None or (watch.state != "failing" and watch.stale_alerted_at is None):
@@ -224,7 +234,7 @@ async def health(session, ds) -> dict:
     failure = (await session.execute(select(ScheduleFailure).where(
         ScheduleFailure.kind == "dataset", ScheduleFailure.item_id == ds.id))).scalars().first()
     target = watch.freshness_hours if watch else None
-    if last_run is not None and last_run.status == "failed":
+    if last_run is not None and last_run.status in ("failed", "blocked"):
         state = "failing"
     elif is_stale(ds.last_refreshed_at or ds.created_at, target, datetime.utcnow()):
         state = "stale"

@@ -530,7 +530,9 @@ export const datasetsApi = {
    *  `schema_break` and the mapping details as its `result`. If one is already
    *  queued or running for this dataset, its owner gets that job back. */
   queueRefresh: (id: number, body: { mode?: 'full' | 'incremental'; cursor_column?: string | null;
-                                     column_map?: Record<string, string>; force?: boolean },
+                                     column_map?: Record<string, string>; force?: boolean
+                                     /** Phase 3: publish although a blocking data check failed. */
+                                     publish_anyway?: boolean },
                  idempotencyKey?: string) =>
     api.post<Job>(`/datasets/${id}/refresh-jobs`, body,
       idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : undefined).then(r => r.data),
@@ -548,6 +550,19 @@ export const datasetsApi = {
   combine: (body: { name: string; how: string; on?: string[];
                     sources: { data_source_id: number; table: string; label?: string }[] }) =>
     api.post<Dataset>('/datasets/combine', body).then(r => r.data),
+  /** Phase 3: the dataset's saved quality checks. */
+  checks: (id: number) => api.get<DataCheck[]>(`/datasets/${id}/checks`).then(r => r.data),
+  addCheck: (id: number, body: DataCheckInput) =>
+    api.post<DataCheck>(`/datasets/${id}/checks`, body).then(r => r.data),
+  updateCheck: (id: number, checkId: number, body: DataCheckInput) =>
+    api.patch<DataCheck>(`/datasets/${id}/checks/${checkId}`, body).then(r => r.data),
+  deleteCheck: (id: number, checkId: number) => api.delete(`/datasets/${id}/checks/${checkId}`),
+  /** Every saved check on the data the dataset holds now. */
+  tryChecks: (id: number) =>
+    api.post<{ rows: number; results: CheckResult[] }>(`/datasets/${id}/checks/try`).then(r => r.data),
+  /** This dataset's recent refreshes with their check results (editors). */
+  refreshRuns: (id: number, limit = 30) =>
+    api.get<DatasetRefreshRun[]>(`/datasets/${id}/refresh-runs`, { params: { limit } }).then(r => r.data),
   /** Pipeline phase 2: is this dataset's refresh working, and its freshness target. */
   pipelineHealth: (id: number) =>
     api.get<PipelineHealth>(`/datasets/${id}/pipeline-health`).then(r => r.data),
@@ -1611,6 +1626,45 @@ export const notificationsApi = {
   markRead: () => api.post<{ marked: number }>('/notifications/mark-read').then(r => r.data),
 }
 
+export type DataCheckKind = 'not_null' | 'unique' | 'accepted_values' | 'row_count' | 'row_drop' | 'rule'
+
+export interface DataCheckInput {
+  kind: DataCheckKind
+  column?: string | null
+  params?: { values?: string[]; min?: number | null; max?: number | null; max_drop_pct?: number; expression?: string }
+  severity: 'warn' | 'block'
+  enabled?: boolean
+}
+
+export interface DataCheck extends DataCheckInput {
+  id: number
+  enabled: boolean
+  created_at: string | null
+}
+
+/** One check's outcome on one load (`kind: 'schema'` for column-change notes). */
+export interface CheckResult {
+  id?: number | null
+  kind: DataCheckKind | 'schema'
+  column: string | null
+  severity: 'warn' | 'block'
+  passed: boolean
+  failing?: number
+  detail: string | null
+}
+
+export interface DatasetRefreshRun {
+  id: number
+  trigger: 'schedule' | 'manual'
+  status: 'running' | 'ok' | 'failed' | 'skipped' | 'blocked'
+  started_at: string | null
+  rows: number | null
+  duration_ms: number | null
+  error: string | null
+  error_code: string | null
+  checks: CheckResult[]
+}
+
 export interface PipelineHealth {
   state: 'ok' | 'failing' | 'stale' | 'unknown'
   last_refreshed_at: string | null
@@ -2065,7 +2119,7 @@ export interface RefreshRunRow {
   /** null when the dataset or dataflow has since been deleted. */
   name: string | null
   trigger: 'schedule' | 'manual'
-  status: 'running' | 'ok' | 'failed' | 'skipped'
+  status: 'running' | 'ok' | 'failed' | 'skipped' | 'blocked'
   started_at: string | null
   finished_at: string | null
   rows: number | null
@@ -2437,7 +2491,9 @@ export interface Job {
             mode?: 'full' | 'incremental'; rows_added?: number; warning?: string | null
             /** A refresh refused by a schema break (error_code `schema_break`). */
             missing?: string[]; suggestions?: Record<string, string[]>; available?: string[]
-            dependents?: Record<string, { kind: string; label: string }[]> } | null
+            dependents?: Record<string, { kind: string; label: string }[]>
+            /** Phase 3: a refresh refused by a blocking data check -- every check's result. */
+            checks?: CheckResult[] } | null
   error: string | null
   error_code: string | null
   attempt: number

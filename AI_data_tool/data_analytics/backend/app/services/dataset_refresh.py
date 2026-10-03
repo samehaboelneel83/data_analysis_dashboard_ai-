@@ -78,17 +78,22 @@ def guard_schema(df: pd.DataFrame, required: set[str] | None,
 def rewrite_dataset_file(
     source_cfg: dict, filename: str, source_table: str | None, source_query: str | None,
     required_columns: set[str] | None = None,
+    validate=None,
 ) -> tuple[pd.DataFrame, dict]:
     """Re-fetch from the connection and overwrite the cached CSV in place.
 
     Returns the fresh frame and its detected type map so the caller can update
     DatasetColumn rows. Synchronous and blocking — callers run it in a thread.
     `required_columns`: raise SchemaBreak, writing nothing, if any is gone.
+    `validate(df)`: called on the new frame before anything is written; it
+    raises (services/data_checks.ChecksBlocked) to keep the old file.
     """
     from .ingest import detect_types
     from .connections import import_to_dataframe
 
     df = guard_schema(import_to_dataframe(source_cfg, source_table, source_query), required_columns)
+    if validate is not None:
+        validate(df)
     path = Path(filename)
     path.parent.mkdir(parents=True, exist_ok=True)
     write_csv_atomic(df, path)
@@ -166,8 +171,13 @@ def refresh_dataset(
     required_columns: set[str] | None = None,
     column_map: dict[str, str] | None = None,
     write: bool = True,
+    validate=None,
 ) -> dict:
     """Full or incremental refresh of one source-backed dataset's cached file.
+
+    `validate(df)` (pipeline plan, phase 3) is called on the frame the
+    dataset would hold -- after an incremental append, the whole of it --
+    before anything is written, so a blocking check keeps the old file.
 
     E12: `write=False` fetches and builds the new frame but leaves the file
     alone; the caller writes it with `write_dataset_files` once it knows its
@@ -203,7 +213,7 @@ def refresh_dataset(
         result = _refresh_dataset_body(
             source_cfg, filename, source_table, source_query, mode,
             cursor_column, cursor_value, valid_columns, required_columns, column_map,
-            write,
+            write, validate,
         )
         span.set_attribute("status", "ok")
         span.set_attribute("effective_mode", result["mode"])
@@ -224,6 +234,7 @@ def _refresh_dataset_body(
     required_columns: set[str] | None = None,
     column_map: dict[str, str] | None = None,
     write: bool = True,
+    validate=None,
 ) -> dict:
     from .ingest import detect_types
     from .timezones import normalize_instants
@@ -269,6 +280,8 @@ def _refresh_dataset_body(
             # like a full load over it would, rather than growing unchecked.
             from .connections import _checked, _import_cap
             _checked(df, _import_cap())
+            if validate is not None:
+                validate(df)
             converted: list[str] = []
             if path is not None and write:
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -286,6 +299,8 @@ def _refresh_dataset_body(
     # cursor yet), or any of the fallbacks above.
     df = guard_schema(import_to_dataframe(source_cfg, source_table, source_query),
                       required_columns, column_map)
+    if validate is not None:
+        validate(df)
     converted: list[str] = []
     if path is not None and write:
         path.parent.mkdir(parents=True, exist_ok=True)

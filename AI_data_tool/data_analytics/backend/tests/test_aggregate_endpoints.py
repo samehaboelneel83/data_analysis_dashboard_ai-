@@ -66,7 +66,7 @@ def fake_refresh(monkeypatch):
     writes what a real one would: a CSV plus its parquet sidecar."""
     calls = []
 
-    def _rewrite(cfg, filename, source_table, source_query):
+    def _rewrite(cfg, filename, source_table, source_query, **_kw):
         calls.append(source_query)
         df = pd.DataFrame([{"tenant": "acme", "region": "N", "amount_sum": 10.0, "row_count": 2}])
         df.to_csv(filename, index=False)
@@ -638,7 +638,7 @@ async def test_editing_an_aggregate_serves_the_new_frame_with_no_cache_clear(
     after the edit reads the NEW frame's values, not the first refresh's."""
     calls = []
 
-    def _rewrite(cfg, filename, source_table, source_query):
+    def _rewrite(cfg, filename, source_table, source_query, **_kw):
         df = pd.DataFrame([{"tenant": "acme", "region": "N",
                             "amount_sum": 10.0 if not calls else 99.0, "row_count": 2}])
         calls.append(df)

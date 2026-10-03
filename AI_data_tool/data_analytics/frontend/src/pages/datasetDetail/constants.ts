@@ -1,6 +1,6 @@
 import type { DataPreviewFilter } from '../../services/api'
 
-export type Tab = 'overview' | 'data' | 'meaning' | 'statistics' | 'alerts' | 'models'
+export type Tab = 'overview' | 'data' | 'meaning' | 'statistics' | 'alerts' | 'checks' | 'models'
          | 'aggregates'
 
 export const OPS: { value: DataPreviewFilter['op']; label: string }[] = [

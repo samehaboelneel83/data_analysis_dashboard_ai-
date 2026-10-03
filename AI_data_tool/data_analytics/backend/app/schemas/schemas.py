@@ -110,6 +110,9 @@ class DatasetRefreshRequest(BaseModel):
     # (new name -> the old name everything uses); `force` refreshes anyway.
     column_map: Optional[dict[str, str]] = None
     force: bool = False
+    # Pipeline plan, phase 3: a blocking data check that fails answers 409
+    # `checks_blocked` with every check's result; this publishes anyway.
+    publish_anyway: bool = False
 
 
 class ColumnMeta(BaseModel):

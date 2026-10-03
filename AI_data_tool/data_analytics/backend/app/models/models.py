@@ -2059,7 +2059,8 @@ class RefreshRun(Base):
     item_id    = Column(Integer, nullable=False, index=True)
     #: schedule | manual
     trigger    = Column(String(20), nullable=False, default="schedule")
-    #: running | ok | failed | skipped
+    #: running | ok | failed | skipped | blocked (a blocking check failed;
+    #: the previous data stayed live -- pipeline plan, phase 3)
     status     = Column(String(20), nullable=False, default="running")
     started_at = Column(DateTime(timezone=True), default=datetime.utcnow, index=True)
     finished_at = Column(DateTime(timezone=True), nullable=True)
@@ -2067,6 +2068,34 @@ class RefreshRun(Base):
     duration_ms = Column(Integer, nullable=True)
     error      = Column(Text, nullable=True)
     error_code = Column(String(40), nullable=True)
+    #: Phase 3: each saved check's result on the data this run fetched, and
+    #: schema notes -- [{id, kind, column, severity, passed, detail}, ...].
+    checks     = Column(JSON, nullable=True)
+
+
+class DataCheck(Base):
+    """A saved quality check on a dataset, run on every refresh BEFORE the new
+    data replaces the old (pipeline plan, phase 3).
+
+    `kind` is one of not_null | unique | accepted_values | row_count |
+    row_drop | rule; `params` holds what the kind needs (values, min/max,
+    max_drop_pct, expression). A `block` check that fails keeps the previous
+    data live and records the run as blocked; a `warn` check only records.
+    """
+    __tablename__ = "data_checks"
+    id         = Column(Integer, primary_key=True)
+    org_id     = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"),
+                        nullable=True, index=True)
+    dataset_id = Column(Integer, ForeignKey("datasets.id", ondelete="CASCADE"),
+                        nullable=False, index=True)
+    kind       = Column(String(30), nullable=False)
+    column     = Column(String(255), nullable=True)
+    params     = Column(JSON, default=dict)
+    #: warn | block
+    severity   = Column(String(10), nullable=False, default="warn")
+    enabled    = Column(Boolean, nullable=False, default=True)
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
 
 
 class PipelineWatch(Base):
