@@ -147,20 +147,65 @@ def test_this_month_on_weekly_data_ending_near_month_end_is_not_incomplete():
     assert notes[0]["incomplete"] is False
 
 
-def test_directquery_gets_a_plain_range_from_today_and_refuses_data_max():
-    from fastapi import HTTPException
+async def test_directquery_gets_a_plain_range_from_today():
     from app.routers.widget_data import _direct_query_relative_dates
     from app.schemas.schemas import WidgetDataRequest
     req = WidgetDataRequest(widget_type="bar", config={"filters": [
         {"column": "d", "op": "relative", "value": {"mode": "last", "unit": "day", "n": 7, "anchor": "today"}},
         {"column": "r", "op": "eq", "value": "x"}]})
-    out = _direct_query_relative_dates(req).config["filters"]
+    out = (await _direct_query_relative_dates(req)).config["filters"]
     assert [f["op"] for f in out] == ["gte", "lt", "eq"]
-    bad = WidgetDataRequest(widget_type="bar", config={"filters": [
+
+
+async def test_directquery_reads_data_max_from_the_source():
+    """Live QA 2026-10-03: a data_max anchor (the panel's default) was refused
+    on every render of a live source. It now counts back from the column's
+    latest date, read at the source."""
+    from datetime import date
+    from app.routers.widget_data import _direct_query_relative_dates
+    from app.schemas.schemas import WidgetDataRequest
+    asked = []
+
+    async def latest(col):
+        asked.append(col)
+        return date(2018, 10, 17)
+    req = WidgetDataRequest(widget_type="bar", config={"filters": [
+        {"column": "d", "op": "relative", "value": {"mode": "last", "unit": "day", "n": 7, "anchor": "data_max"}}]})
+    out = (await _direct_query_relative_dates(req, latest)).config["filters"]
+    assert asked == ["d"]
+    assert out == [{"column": "d", "op": "gte", "value": "2018-10-11"},
+                   {"column": "d", "op": "lt", "value": "2018-10-18"}]
+
+
+async def test_directquery_data_max_on_a_column_with_no_dates_says_so():
+    from fastapi import HTTPException
+    from app.routers.widget_data import _direct_query_relative_dates
+    from app.schemas.schemas import WidgetDataRequest
+
+    async def latest(col):
+        return None
+    req = WidgetDataRequest(widget_type="bar", config={"filters": [
         {"column": "d", "op": "relative", "value": {"mode": "last", "unit": "day", "n": 7, "anchor": "data_max"}}]})
     with pytest.raises(HTTPException) as e:
-        _direct_query_relative_dates(bad)
-    assert "latest date" in str(e.value.detail)
+        await _direct_query_relative_dates(req, latest)
+    assert "no dates" in str(e.value.detail)
+
+
+def test_latest_date_is_one_max_at_the_source(tmp_path):
+    """The data_max anchor's round trip, against a real SQLite source."""
+    import sqlite3
+    from types import SimpleNamespace
+    from app.services.direct_query import latest_date
+    db = tmp_path / "src.db"
+    con = sqlite3.connect(db)
+    con.execute("create table t (d text, region text)")
+    con.executemany("insert into t values (?, ?)",
+                    [("2024-01-05", "N"), ("2024-03-09", "S"), (None, "N")])
+    con.commit(); con.close()
+    ds = SimpleNamespace(source_table="t", source_query=None, data_source_id=None, id=None,
+                         columns=[SimpleNamespace(name="d"), SimpleNamespace(name="region")])
+    from datetime import date
+    assert latest_date({"type": "sqlite", "filepath": str(db)}, ds, "d") == date(2024, 3, 9)
 
 
 def test_hijri_buckets_are_tabular_and_sort_as_text():

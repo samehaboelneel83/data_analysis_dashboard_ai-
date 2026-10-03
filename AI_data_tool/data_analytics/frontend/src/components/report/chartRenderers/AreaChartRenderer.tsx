@@ -23,7 +23,7 @@ export default function AreaChartRenderer({ rows, data, cfg, rtl, broadcasts, on
     : rows.map((r: any) => r.value)
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <AreaChart data={plotted} margin={chartMargin(rtl, { top: 4, right: 8, bottom: 20, left: 0 })}
+      <AreaChart data={plotted} margin={chartMargin(rtl, { top: labels ? 20 : 4, right: 8, bottom: 20, left: 0 })}
         onClick={broadcasts ? (d: any) => d?.activePayload?.[0] && onClickPoint(d.activePayload[0].payload.name) : undefined}
         style={{ cursor: broadcasts ? 'pointer' : 'default' }}
       >

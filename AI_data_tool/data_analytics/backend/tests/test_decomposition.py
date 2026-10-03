@@ -247,3 +247,15 @@ class TestItRefusesIdColumns:
         # ...and it splits.
         r = shape_decomposition(df, cfg(split_by="sku", limit=5))
         assert r["children"]
+
+
+class TestABadSplitIsExplained:
+    def test_a_list_of_fields_is_refused_with_a_message(self):
+        """Live QA 2026-10-03: `split_by` as a list reached pandas and came back
+        a bare 500. The tree splits one level at a time; the error says so."""
+        from app.services.widget_data import get_widget_data_from_df
+        r = get_widget_data_from_df(
+            sales(), {"measure": "revenue", "aggregation": "sum",
+                      "split_by": ["region", "product"]}, "decomposition")
+        assert r["type"] == "error"
+        assert "one field" in r["message"]

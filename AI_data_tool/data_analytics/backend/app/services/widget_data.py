@@ -906,7 +906,12 @@ def shape_series(df: pd.DataFrame, config: dict) -> dict:
     sort        = (config.get("sort") or "desc").lower()
     sort_by     = (config.get("sort_by") or "value").lower()
     sort_col    = config.get("sort_col") or None
-    running     = (config.get("running") or "").lower()
+    running     = config.get("running") or ""
+    # A config written by hand or through the API can carry `running: true`;
+    # `.lower()` on it was an unexplained 500. Say what the key takes instead.
+    if not isinstance(running, str) or running.lower() not in ("", "sum", "avg"):
+        raise ValueError(f"'running' must be 'sum' or 'avg', not {running!r}")
+    running = running.lower()
     explicit_cols = config.get("columns") or []
 
     # 1. Apply filters
@@ -1037,6 +1042,15 @@ def shape_series(df: pd.DataFrame, config: dict) -> dict:
 
     # 3. Crosstab (dim + dim2)
     if dim and dim2 and dim in df.columns and dim2 in df.columns:
+        # The same field down the side and across the top is a grid with
+        # values only on its diagonal. pandas refused it with "The name x
+        # occurs multiple times, use a level number", which reached the
+        # reader word for word (live QA 2026-10-03). Say what to change.
+        if dim == dim2:
+            return {"type": "error", "code": "same_rows_and_columns",
+                    "message": f"Rows and Columns are both '{dim}'. Choose a "
+                               f"different field for one of them.",
+                    "rows": [], "total": 0}
         return _shape_grid(df, config, dim=dim, dim2=dim2, meas=meas, measure_def=measure_def,
                            agg=agg, agg_fn=agg_fn, sort=sort, sort_by=sort_by, limit=limit)
 
@@ -3280,6 +3294,11 @@ def shape_decomposition(df: pd.DataFrame, config: dict) -> dict:
             candidates.append(c)
 
     split_by = config.get("split_by")
+    # The tree splits one level at a time, so `split_by` names ONE field. A
+    # list (written through the API) was an unexplained 500 from pandas.
+    if split_by is not None and not isinstance(split_by, str):
+        raise ValueError("'split_by' names one field to split the next level by, "
+                         f"not {split_by!r}")
     auto = False
     if not split_by and config.get("auto_split"):
         split_by = _decomp_best_field(node, candidates, measure, aggregation)
@@ -4979,6 +4998,14 @@ def shape_hierarchy(df: pd.DataFrame, config: dict) -> dict:
     measure = config.get("measure")
     aggregation = str(config.get("aggregation") or "sum").lower()
     max_depth = min(int(config.get("max_depth") or HIER_MAX_DEPTH), HIER_MAX_DEPTH)
+    # The widget's own filters narrow the rows first, as in every other
+    # shaper. Live QA 2026-10-03: this one never applied them, so a tree
+    # filtered to "faculty in Law, Arts" still drew all four faculties and the
+    # unfiltered total -- a chart answering a different question than the one
+    # set up, with nothing on it to say so.
+    df = _apply_filters(df, config.get("filters") or [])
+    if df.empty:
+        return {"type": "empty", "rows": [], "total": 0}
 
     # A distinct count of a column that is unique per row (one employee
     # number per row) adds up exactly like a count: each child's people are
@@ -4989,7 +5016,7 @@ def shape_hierarchy(df: pd.DataFrame, config: dict) -> dict:
         aggregation = "count"
     if widget in PARTITION_WIDGETS and measure and aggregation not in ADDITIVE_AGGREGATIONS:
         raise HierarchyError(
-            f"A {widget} draws each value as a share of its parent, so it needs "
+            f"{'An' if widget[0] in 'aeiou' else 'A'} {widget.replace('_', ' ')} draws each value as a share of its parent, so it needs "
             f"an additive aggregation ({', '.join(sorted(ADDITIVE_AGGREGATIONS))}). "
             f"'{aggregation}' does not add up across levels -- use a tree or "
             f"dendrogram to show it instead.")

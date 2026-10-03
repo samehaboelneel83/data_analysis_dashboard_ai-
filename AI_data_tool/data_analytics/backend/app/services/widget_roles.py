@@ -572,6 +572,20 @@ def validate_widget_payload(widget_type: str | None, config: dict | None, *,
         if v and widget_type is not None and widget_type not in PIVOT_WIDGETS:
             raise InvalidWidget(f"{key} is for a crosstab or matrix, not a {widget_type} widget")
 
+    # Live QA 2026-10-03: both of these, in the wrong shape, saved fine and
+    # then failed every render with a bare 500. The panel writes a string
+    # for each; the API, the copilot or an import can write anything.
+    def _changing(key):
+        return changed_keys is None or key in changed_keys
+    running = config.get("running")
+    if _changing("running") and running not in (None, "") and (not isinstance(running, str)
+                                      or running.lower() not in ("sum", "avg")):
+        raise InvalidWidget("running must be 'sum' or 'avg'")
+    split_by = config.get("split_by")
+    if _changing("split_by") and split_by not in (None, "") and not isinstance(split_by, str):
+        raise InvalidWidget("split_by names one field: the decomposition tree "
+                            "splits one level at a time")
+
     roles = config.get("roles")
     if roles is not None and not isinstance(roles, dict):
         raise InvalidWidget("roles must be an object")

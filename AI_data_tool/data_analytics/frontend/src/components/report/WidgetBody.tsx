@@ -1,6 +1,6 @@
 import { semanticAggregationWarning, nonAdditiveKind, SAFE_AGGREGATION } from '../../lib/semanticGuard'
 import PivotTable, { type PivotData } from './PivotTable'
-import { Suspense, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Fragment, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useDirection, widgetIsRtl } from '../../contexts/DirectionContext'
 import { useT } from '../../i18n'
 import type { CalcColumnFormat } from '../../services/api'
@@ -88,19 +88,43 @@ function SlicerList({ rows, rtl, checked, onToggle, searchable }: {
   )
 }
 
+/** **bold**, __bold__, *italic* and _italic_ inside a text block. Built by
+ *  splitting, like the links: the author's words stay text, and only the
+ *  markers become formatting (live QA 2026-10-03 found them printed raw).
+ *  An underscore inside a word (snake_case) is not a marker. */
+function renderInlineEmphasis(text: string, keyBase: string): ReactNode[] {
+  const re = /(\*\*[^*\n]+\*\*|__[^_\n]+__|(?<![\w*])\*[^*\s][^*\n]*?\*(?![\w*])|(?<![\w_])_[^_\s][^_\n]*?_(?![\w_]))/g
+  return text.split(re).map((part, i) => {
+    const key = `${keyBase}-${i}`
+    if (/^(\*\*|__).+(\*\*|__)$/.test(part) && part.length > 4) return <strong key={key}>{part.slice(2, -2)}</strong>
+    if (/^([*_]).+\1$/.test(part) && part.length > 2) return <em key={key}>{part.slice(1, -1)}</em>
+    return part
+  })
+}
+
 function renderTextWithLinks(content: string): ReactNode {
   const parts = content.split(/(\[[^\]]+\]\((?:https?:)\/\/[^\s)]+\))/g)
-  if (parts.length === 1) return content
   return parts.map((part, i) => {
     const m = /^\[([^\]]+)\]\(((?:https?:)\/\/[^\s)]+)\)$/.exec(part)
-    if (!m) return part
+    if (!m) return <Fragment key={i}>{renderInlineEmphasis(part, String(i))}</Fragment>
     return (
       <a key={i} href={m[2]} target="_blank" rel="noopener noreferrer"
         style={{ color: 'var(--accent)' }}>
-        {m[1]}
+        {renderInlineEmphasis(m[1], `l${i}`)}
       </a>
     )
   })
+}
+
+/** An image widget that says so when its picture does not load: a broken
+ *  URL used to leave a blank 0x0 box with nothing to tell the author why. */
+function ImageWidget({ url, alt, fit }: { url: string; alt: string; fit?: string }) {
+  const t = useT()
+  const [failed, setFailed] = useState(false)
+  useEffect(() => setFailed(false), [url])
+  if (failed) return <EmptyState msg={t('widget.image.failed')} />
+  return <img src={url} alt={alt} onError={() => setFailed(true)}
+    style={{ width: '100%', height: '100%', objectFit: (fit || 'contain') as any }} />
 }
 
 /** A widget's fetch error, in the reader's language where the code says what
@@ -186,7 +210,7 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
     </div>
   )
   if (wt === 'image') return cfg.url ? (
-    <img src={cfg.url} alt={cfg.alt || ''} style={{ width: '100%', height: '100%', objectFit: cfg.fit || 'contain' }} />
+    <ImageWidget url={cfg.url} alt={cfg.alt || ''} fit={cfg.fit} />
   ) : (
     <EmptyState msg="No image URL set" />
   )

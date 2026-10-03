@@ -542,8 +542,9 @@ def glm_logistic(df: pd.DataFrame, target: str, predictors: list[str],
     if len(uniques) > 2 and target_value is None:
         raise StatisticalError(
             f"'{target}' has {len(uniques)} distinct values; logistic "
-            f"regression needs a binary outcome. Pass target_value to model one "
-            f"value against the rest.")
+            f"regression needs a binary (yes/no) outcome. Set the Event, the "
+            f"outcome being predicted (target_value), to model one value "
+            f"against the rest.")
 
     if target_value is not None:
         positive = str(target_value)
