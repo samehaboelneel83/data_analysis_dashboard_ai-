@@ -2040,6 +2040,34 @@ class ScheduleFailure(Base):
                         onupdate=datetime.utcnow)
 
 
+class RefreshRun(Base):
+    """One attempt to refresh a dataset or run a dataflow: its history.
+
+    `ScheduleFailure` holds only the CURRENT failure streak and is deleted on
+    success, and `Dataflow.last_run_*` holds one run. Neither answers "did
+    last night's refresh run, how long did it take, how many rows, and why
+    did Tuesday's fail?" (pipeline plan, phase 1, 2026-10-03). Every refresh
+    path -- the scheduler and a manual refresh -- writes one row here.
+    """
+    __tablename__ = "refresh_runs"
+    id         = Column(Integer, primary_key=True)
+    org_id     = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"),
+                        nullable=True, index=True)
+    #: dataset | dataflow
+    kind       = Column(String(20), nullable=False)
+    item_id    = Column(Integer, nullable=False, index=True)
+    #: schedule | manual
+    trigger    = Column(String(20), nullable=False, default="schedule")
+    #: running | ok | failed | skipped
+    status     = Column(String(20), nullable=False, default="running")
+    started_at = Column(DateTime(timezone=True), default=datetime.utcnow, index=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    rows       = Column(Integer, nullable=True)
+    duration_ms = Column(Integer, nullable=True)
+    error      = Column(Text, nullable=True)
+    error_code = Column(String(40), nullable=True)
+
+
 class WorkspaceFolderGrant(Base):
     """Shares one workspace folder — live and interactive — with a person, a
     role, or a team (org unit), at a capability level.

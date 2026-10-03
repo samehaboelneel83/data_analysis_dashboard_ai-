@@ -14,16 +14,46 @@ import MonitoringActivity from './MonitoringActivity'
  */
 
 vi.mock('../../services/api', () => ({
-  monitoringApi: { jobs: vi.fn(), deliveries: vi.fn(), activity: vi.fn() },
+  monitoringApi: { jobs: vi.fn(), deliveries: vi.fn(), activity: vi.fn(), refreshRuns: vi.fn() },
 }))
 
 import { monitoringApi } from '../../services/api'
 
 const renderIn = (ui: React.ReactElement) => render(<MemoryRouter>{ui}</MemoryRouter>)
 
-beforeEach(() => vi.clearAllMocks())
+beforeEach(() => {
+  vi.clearAllMocks()
+  vi.mocked(monitoringApi.refreshRuns).mockResolvedValue([])
+})
 
 describe('MonitoringJobs', () => {
+  it('shows the refresh history, and a failing job says when it is tried next (pipeline phase 1)', async () => {
+    vi.mocked(monitoringApi.jobs).mockResolvedValue([
+      { kind: 'dataset_refresh', id: 1, name: 'Orders', interval_minutes: 60,
+        last_run_at: '2026-10-03T06:00:00Z', status: 'failed', error: 'Refresh failed: source down',
+        next_retry_at: '2026-10-03T06:05:00Z' },
+    ])
+    vi.mocked(monitoringApi.refreshRuns).mockResolvedValue([
+      { id: 2, kind: 'dataset', item_id: 1, name: 'Orders', trigger: 'schedule', status: 'failed',
+        started_at: '2026-10-03T06:00:00Z', finished_at: '2026-10-03T06:00:01Z', rows: null,
+        duration_ms: 1200, error: 'Refresh failed: source down', error_code: 'refresh_failed' },
+      { id: 1, kind: 'dataset', item_id: 1, name: null, trigger: 'manual', status: 'ok',
+        started_at: '2026-10-02T06:00:00Z', finished_at: '2026-10-02T06:00:03Z', rows: 1500,
+        duration_ms: 3400, error: null, error_code: null },
+    ])
+    renderIn(<MonitoringJobs />)
+    const table = await screen.findByTestId('refresh-history')
+    expect(table).toHaveTextContent('1,500')
+    expect(table).toHaveTextContent('1.2 s')
+    expect(table).toHaveTextContent('(deleted)')
+    expect(table).toHaveTextContent('manual')
+    expect(screen.getAllByText('Refresh failed: source down').length).toBe(2)
+    expect(screen.getByText(/next try/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByLabelText('Failed only'))
+    await waitFor(() => expect(monitoringApi.refreshRuns).toHaveBeenLastCalledWith({ status: 'failed' }))
+  })
+
   it('lists every job kind under its human label, with "never" for an unrun job', async () => {
     vi.mocked(monitoringApi.jobs).mockResolvedValue([
       { kind: 'dataset_refresh', id: 1, name: 'Orders', interval_minutes: 60,

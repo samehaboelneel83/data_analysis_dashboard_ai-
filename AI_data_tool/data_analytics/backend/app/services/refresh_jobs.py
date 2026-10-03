@@ -97,8 +97,54 @@ async def active_refresh_job(db: AsyncSession, org_id: int, dataset_id: int) -> 
     return next((j for j in rows if (j.inputs or {}).get("dataset_id") == dataset_id), None)
 
 
-async def refresh_now(
+async def refresh_now(db: AsyncSession, user: User, dataset_id: int, **kwargs
+                      ) -> tuple[Dataset, str | None]:
+    """A manual refresh (see `_refresh_now`), recorded as a `RefreshRun`.
+
+    Pipeline plan, phase 1: the manual path left one `QueryRun` row on
+    success and nothing on failure. The run starts only once the dataset is
+    known to be refreshable, so a refusal ("a DirectQuery dataset has
+    nothing to refresh") is an answer, not a failed run."""
+    from .refresh_runs import finish_run, start_run
+    run: dict = {"id": None, "mutating": False}
+
+    async def _started() -> None:
+        run["id"] = await start_run(db, "dataset", dataset_id, user.org_id, "manual")
+
+    try:
+        dataset, warning = await _refresh_now(db, user, dataset_id, _on_loaded=_started,
+                                              _state=run, **kwargs)
+    except BaseException as e:
+        if run["id"] is not None:
+            # Only a failure AFTER the dataset rows were changed has anything
+            # to discard -- and must discard it, or recording the run would
+            # commit a half-applied refresh. Earlier failures leave the
+            # session clean, and the caller's instances usable.
+            if run["mutating"]:
+                try:
+                    await db.rollback()
+                except Exception:  # noqa: BLE001
+                    pass
+            if isinstance(e, (jobs.LeaseLost, jobs.JobCancelled)):
+                await finish_run(db, run["id"], "skipped",
+                                 error="Cancelled" if isinstance(e, jobs.JobCancelled)
+                                 else "Another worker took this refresh over",
+                                 error_code="cancelled")
+            else:
+                detail = e.payload.get("detail") if isinstance(e, SchemaBreakRefused) else str(e)
+                code = ("schema_break" if isinstance(e, SchemaBreakRefused)
+                        else getattr(e, "code", None) or "refresh_failed")
+                await finish_run(db, run["id"], "failed", error=detail or type(e).__name__,
+                                 error_code=str(code)[:40])
+        raise
+    await finish_run(db, run["id"], "ok", rows=dataset.row_count)
+    return dataset, warning
+
+
+async def _refresh_now(
     db: AsyncSession, user: User, dataset_id: int, *,
+    _on_loaded: Callable[[], Awaitable[None]] | None = None,
+    _state: dict | None = None,
     mode: str = "full", cursor_column: str | None = None,
     column_map: dict[str, str] | None = None, force: bool = False,
     checkpoint: Callable[..., Awaitable[None]] | None = None,
@@ -126,6 +172,8 @@ async def refresh_now(
     from ..services.query_log import log_query_run_sync
 
     dataset, src = await load_refreshable(db, user, dataset_id)
+    if _on_loaded is not None:
+        await _on_loaded()
     cfg = dict(src.config)
     cfg['type'] = src.type
 
@@ -182,6 +230,8 @@ async def refresh_now(
         await checkpoint("saving", rows=len(outcome["df"]))
 
     df, type_map = outcome["df"], outcome["type_map"]
+    if _state is not None:
+        _state["mutating"] = True
     dataset.row_count = len(df)
     dataset.col_count = len(df.columns)
     dataset.last_refreshed_at = datetime.utcnow()

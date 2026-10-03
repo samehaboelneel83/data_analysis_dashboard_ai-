@@ -444,6 +444,9 @@ async def lifespan(app: FastAPI):
                 from .services.refresh_scheduler import reap_orphaned_failures, reap_stuck_sync_runs
                 await reap_stuck_sync_runs(session)
                 await reap_orphaned_failures(session)
+                # A refresh run a restart interrupted still says "running".
+                from .services.refresh_runs import reap_running
+                await reap_running(session)
                 # Same class of orphan, one table over: `automation_runner.tick`
                 # marks a step `running` before threading it, so a process that
                 # died mid-step leaves a row that says `running` forever. It has
