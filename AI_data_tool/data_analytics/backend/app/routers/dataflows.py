@@ -62,6 +62,9 @@ class DataflowPatch(BaseModel):
     steps: list[dict] | None = None
     refresh_interval_minutes: int | None = None
     snapshot: dict | None = None
+    # Pipeline plan, phase 4: run when the source dataset refreshes, instead
+    # of on its own timer (services/pipeline_deps.py).
+    run_after_source: bool | None = None
 
 
 class RunRequest(BaseModel):
@@ -104,8 +107,9 @@ def _iso_z(dt: datetime | None) -> str | None:
 
 
 def _out(flow: Dataflow, outputs: list[dict] | None = None,
-         capability: str | None = None) -> dict:
+         capability: str | None = None, after_source: bool = False) -> dict:
     return {
+        "run_after_source": bool(after_source),
         "id": flow.id, "name": flow.name, "description": flow.description,
         "source_dataset_id": flow.source_dataset_id,
         "join_dataset_ids": flow.join_dataset_ids or [],
@@ -148,14 +152,25 @@ async def list_dataflows(db: AsyncSession = Depends(get_db),
     flows = (await db.execute(
         select(Dataflow).where(Dataflow.org_id == current_user.org_id)
         .order_by(Dataflow.id.desc()))).scalars().all()
+    after = await _after_source_ids(db, [f.id for f in flows])
     out = []
     for f in flows:
         cap = await effective_dataflow_capability(db, current_user, f.id)
         out.append(_out(f, outputs=[{"id": d.id, "name": d.name,
                                      "row_count": d.row_count}
                                     for d in await _outputs_of(db, f.id, current_user.org_id)],
-                        capability=cap))
+                        capability=cap, after_source=f.id in after))
     return out
+
+
+async def _after_source_ids(db, ids: list[int]) -> set[int]:
+    """The dataflows set to run after their source (phase 4)."""
+    from ..models.models import PipelineWatch
+    if not ids:
+        return set()
+    return {w for (w,) in (await db.execute(select(PipelineWatch.item_id).where(
+        PipelineWatch.kind == "dataflow", PipelineWatch.item_id.in_(ids),
+        PipelineWatch.run_after_source.is_(True)))).all()}
 
 
 @router.post("", status_code=201)
@@ -241,7 +256,8 @@ async def get_dataflow(flow_id: int, db: AsyncSession = Depends(get_db),
                 outputs=[{"id": d.id, "name": d.name, "row_count": d.row_count,
                           "last_refreshed_at": _iso_z(d.last_refreshed_at)}
                          for d in outputs],
-                capability=await effective_dataflow_capability(db, current_user, flow_id))
+                capability=await effective_dataflow_capability(db, current_user, flow_id),
+                after_source=flow_id in await _after_source_ids(db, [flow_id]))
 
 
 @router.put("/{flow_id}")
@@ -294,10 +310,30 @@ async def update_dataflow(flow_id: int, req: DataflowPatch,
             raise HTTPException(400, f"Minimum refresh interval is {MIN_INTERVAL_MINUTES} minutes")
         flow.refresh_interval_minutes = req.refresh_interval_minutes or None
 
+    from ..services.pipeline_alerts import get_watch
+    from ..services.pipeline_deps import would_loop
+    watch = await get_watch(db, "dataflow", flow.id)
+    if req.run_after_source is not None:
+        if req.run_after_source:
+            if flow.source_dataset_id is None:
+                raise HTTPException(400, "This dataflow has no source dataset to follow")
+            if await would_loop(db, "dataflow", flow.id, flow.org_id):
+                raise HTTPException(400, "This dataflow's output feeds back into its own source, "
+                                         "so running it after the source would never stop")
+            # One trigger, not two: following the source replaces the timer.
+            flow.refresh_interval_minutes = None
+        watch = await get_watch(db, "dataflow", flow.id, create=True, org_id=flow.org_id)
+        watch.run_after_source = bool(req.run_after_source)
+        watch.trigger_pending = False
+    elif req.refresh_interval_minutes and watch is not None and watch.run_after_source:
+        # Choosing a timer stops following the source.
+        watch.run_after_source, watch.trigger_pending = False, False
+
     await audit(db, current_user, "dataflow.update", "dataflow", flow.id, flow.name)
     await db.commit()
     await db.refresh(flow)
-    return _out(flow, capability=await effective_dataflow_capability(db, current_user, flow_id))
+    return _out(flow, capability=await effective_dataflow_capability(db, current_user, flow_id),
+                after_source=bool(watch and watch.run_after_source))
 
 
 @router.delete("/{flow_id}", status_code=204)

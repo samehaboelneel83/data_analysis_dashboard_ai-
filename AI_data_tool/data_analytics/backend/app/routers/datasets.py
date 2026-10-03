@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from ..models.models import (AnalysisResult, Dataset, DatasetColumn, DataSource,
                              SourceColumn, SourceObject, User)
 from sqlalchemy.orm.attributes import flag_modified
-from ..schemas.schemas import DataViewDefault, SuggestDashboardsRequest, DatasetOut, BatchUploadItem, BatchUploadOut, MaterializeRequest, CalcColumnDef, CalcColumnPreviewRequest, ColumnFormatRequest, DataPreviewRequest, FilterExprUpdate, FilterPreviewRequest, MeasureDef, MeasurePreviewRequest, ColumnMetaUpdate, RefreshScheduleUpdate, PipelineWatchUpdate, DatasetRefreshRequest, DatasetShareOut, CustomFunctionDef, CustomFunctionPreviewRequest, AggregateCreateRequest, AggregateUpdateRequest
+from ..schemas.schemas import DataViewDefault, SuggestDashboardsRequest, DatasetOut, BatchUploadItem, BatchUploadOut, MaterializeRequest, CalcColumnDef, CalcColumnPreviewRequest, ColumnFormatRequest, DataPreviewRequest, FilterExprUpdate, FilterPreviewRequest, MeasureDef, MeasurePreviewRequest, ColumnMetaUpdate, RefreshScheduleUpdate, PipelineWatchUpdate, IncrementalSettings, DatasetRefreshRequest, DatasetShareOut, CustomFunctionDef, CustomFunctionPreviewRequest, AggregateCreateRequest, AggregateUpdateRequest
 from ..services.analytics import load_file, detect_types
 from ..services.frame_cache import remove_parquet_sidecar, write_parquet_sidecar
 from ..services.widget_data import preview_expression, apply_filter_expr
@@ -1726,6 +1726,28 @@ async def set_refresh_schedule(dataset_id: int, req: RefreshScheduleUpdate, db: 
     check_org(ds, current_user, "Dataset not found")
     await require_dataset_write(db, current_user, ds, "edit")
 
+    if req.after_source is not None:
+        # Phase 4: a dataset rebuilt from another, run when that source refreshes.
+        from ..services.pipeline_alerts import get_watch
+        from ..services.pipeline_deps import would_loop
+        prov = derived_from_of(ds) or {}
+        if req.after_source:
+            if prov.get("dataflow_id") is not None:
+                raise HTTPException(400, "This dataset is a dataflow's output: set the dataflow "
+                                         "to run after its source instead")
+            if not isinstance(prov.get("source_dataset_id"), int):
+                raise HTTPException(400, "Only a dataset built from another dataset can run after its source")
+            if await would_loop(db, "dataset", ds.id, ds.org_id):
+                raise HTTPException(400, "This dataset feeds back into its own source, so running "
+                                         "it after the source would never stop")
+            ds.refresh_interval_minutes = None
+        watch = await get_watch(db, "dataset", ds.id, create=True, org_id=ds.org_id)
+        watch.run_after_source, watch.trigger_pending = bool(req.after_source), False
+        await db.commit()
+        result = await db.execute(
+            select(Dataset).options(selectinload(Dataset.columns)).where(Dataset.id == dataset_id))
+        return result.scalar_one()
+
     if req.interval_minutes is not None:
         if ds.mode == "directquery":
             raise HTTPException(400, "DirectQuery datasets read the live source on every query — there is nothing to schedule")
@@ -1739,6 +1761,12 @@ async def set_refresh_schedule(dataset_id: int, req: RefreshScheduleUpdate, db: 
             raise HTTPException(400, f"Minimum refresh interval is {MIN_INTERVAL_MINUTES} minutes")
 
     ds.refresh_interval_minutes = req.interval_minutes
+    if req.interval_minutes:
+        # A timer replaces following the source (phase 4): one trigger, not two.
+        from ..services.pipeline_alerts import get_watch
+        watch = await get_watch(db, "dataset", ds.id)
+        if watch is not None and watch.run_after_source:
+            watch.run_after_source, watch.trigger_pending = False, False
     await db.commit()
     # Re-select rather than db.refresh(): refresh expires the eagerly-loaded
     # `columns` relationship, and serializing DatasetOut would then try to lazy-load
@@ -1939,6 +1967,88 @@ async def list_dataset_refresh_runs(dataset_id: int, limit: int = 30,
     return [{"id": r.id, "trigger": r.trigger, "status": r.status, "started_at": r.started_at,
              "rows": r.rows, "duration_ms": r.duration_ms, "error": r.error,
              "error_code": r.error_code, "checks": r.checks or []} for r in runs]
+
+
+def _incremental_out(wm, after_source: bool) -> dict:
+    return {"strategy": (wm.strategy if wm else None) or "full",
+            "cursor_column": wm.cursor_column if wm else None,
+            "cursor_value": wm.cursor_value if wm else None,
+            "key_column": wm.key_column if wm else None,
+            "lookback_hours": wm.lookback_hours if wm else None,
+            "full_reload_days": wm.full_reload_days if wm else None,
+            "last_full_at": wm.last_full_at if wm else None,
+            "after_source": after_source}
+
+
+@router.get("/{dataset_id}/incremental")
+async def get_incremental(dataset_id: int, db: AsyncSession = Depends(get_db),
+                          current_user: User = Depends(get_current_user)):
+    """How scheduled refreshes load this dataset (pipeline plan, phase 4)."""
+    from ..models.models import Watermark
+    from ..services.pipeline_alerts import get_watch
+    await require_dataset_read(db, current_user, dataset_id)
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    wm = (await db.execute(select(Watermark).where(Watermark.dataset_id == ds.id))).scalar_one_or_none()
+    watch = await get_watch(db, "dataset", ds.id)
+    out = _incremental_out(wm, bool(watch and watch.run_after_source))
+    try:
+        await require_dataset_write(db, current_user, ds, "edit")
+    except HTTPException:
+        # The cursor is a value from the data (the newest date or id
+        # loaded), read before any row rule: editors only.
+        out["cursor_value"] = None
+    return out
+
+
+@router.put("/{dataset_id}/incremental")
+async def set_incremental(dataset_id: int, req: IncrementalSettings,
+                          db: AsyncSession = Depends(get_db),
+                          current_user: User = Depends(get_current_user)):
+    """Set how scheduled refreshes load this dataset: full each time, or
+    incremental -- past a cursor column, merged on a key, with an optional
+    look-back and a periodic full reload."""
+    from ..models.models import Watermark
+    from ..services.pipeline_alerts import get_watch
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_write(db, current_user, ds, "edit")
+    if not ds.data_source_id or ds.mode == "directquery":
+        raise HTTPException(400, "Only a dataset imported from a database connection loads incrementally")
+    if req.strategy not in ("full", "incremental"):
+        raise HTTPException(400, "strategy must be 'full' or 'incremental'")
+    known = {c.name for c in (await db.execute(
+        select(DatasetColumn).where(DatasetColumn.dataset_id == ds.id))).scalars().all()}
+    if req.strategy == "incremental":
+        if not req.cursor_column or req.cursor_column not in known:
+            raise HTTPException(400, "Choose the column that grows with new rows (a date or an increasing id)")
+        if req.key_column and req.key_column not in known:
+            raise HTTPException(400, f"'{req.key_column}' is not a column of this dataset")
+        if req.lookback_hours is not None and not (1 <= req.lookback_hours <= 24 * 31):
+            raise HTTPException(400, "lookback_hours must be between 1 and 744")
+        if req.lookback_hours and not req.key_column:
+            raise HTTPException(400, "A look-back re-reads rows already loaded; it needs a key "
+                                     "column to replace them instead of duplicating them")
+        if req.full_reload_days is not None and not (1 <= req.full_reload_days <= 365):
+            raise HTTPException(400, "full_reload_days must be between 1 and 365")
+    wm = (await db.execute(select(Watermark).where(Watermark.dataset_id == ds.id))).scalar_one_or_none()
+    if wm is None:
+        wm = Watermark(dataset_id=ds.id)
+        db.add(wm)
+    if wm.cursor_column != req.cursor_column:
+        # A cursor measured on another column means nothing on this one.
+        wm.cursor_value = None
+    wm.strategy = req.strategy
+    wm.cursor_column = req.cursor_column if req.strategy == "incremental" else wm.cursor_column
+    wm.key_column = req.key_column if req.strategy == "incremental" else None
+    wm.lookback_hours = req.lookback_hours if req.strategy == "incremental" else None
+    wm.full_reload_days = req.full_reload_days if req.strategy == "incremental" else None
+    await audit(db, current_user, "dataset.incremental", "dataset", ds.id,
+                f"{req.strategy}" + (f" on {req.cursor_column}, key {req.key_column or '-'}"
+                                     if req.strategy == "incremental" else ""))
+    await db.commit()
+    watch = await get_watch(db, "dataset", ds.id)
+    return _incremental_out(wm, bool(watch and watch.run_after_source))
 
 
 # ── Column metadata (data item properties) ────────────────────────────────────

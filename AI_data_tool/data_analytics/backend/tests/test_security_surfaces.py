@@ -259,6 +259,7 @@ EXCUSED_ROUTES = {
     ("POST", "/api/v1/datasets/{dataset_id}/checks"): "creates a check definition (edit capability); no row content; test_data_checks.py",
     ("POST", "/api/v1/datasets/{dataset_id}/checks/try"): "editors only; check results are counts and column names, never values from the data (services/data_checks.py); test_data_checks.py",
     ("GET", "/api/v1/datasets/{dataset_id}/refresh-runs"): "editors only; run status, row totals and count-only check results; test_data_checks.py",
+    ("GET", "/api/v1/datasets/{dataset_id}/incremental"): "load settings; the watermark (the newest cursor value loaded) only for editors; test_incremental_merge.py",
 }
 
 

@@ -25,6 +25,9 @@ const SCHEDULES: { minutes: number; key: 'flows.scheduleOff' | 'flows.hourly' | 
   { minutes: 1440, key: 'flows.daily' }, { minutes: 10080, key: 'flows.weekly' },
 ]
 
+/** The schedule choice "after its source refreshes" (pipeline phase 4). */
+const AFTER_SOURCE = -1
+
 const detail = (e: unknown, fallback: string) =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? fallback
 
@@ -204,8 +207,9 @@ export default function Dataflows() {
                     <div className="dl-cell-sub">{t('flows.steps', { n: f.steps.length })}</div>
                   </td>
                   <td>{f.source_dataset_id ? <Link to={`/datasets/${f.source_dataset_id}`}>{nameOf(f.source_dataset_id)}</Link> : '—'}</td>
-                  <td>{t(SCHEDULES.find(s => s.minutes === (f.refresh_interval_minutes ?? 0))?.key ?? 'flows.custom',
-                    { n: f.refresh_interval_minutes ?? 0 })}</td>
+                  <td>{f.run_after_source ? t('flows.afterSource')
+                    : t(SCHEDULES.find(s => s.minutes === (f.refresh_interval_minutes ?? 0))?.key ?? 'flows.custom',
+                      { n: f.refresh_interval_minutes ?? 0 })}</td>
                   <td className={f.last_run_status === 'failed' ? 'dl-fresh--bad' : undefined}>{lastRun(f)}</td>
                   <td>
                     {f.outputs.length === 0 ? <span style={{ color: 'var(--muted)' }}>{t('flows.noOutputs')}</span>
@@ -261,9 +265,12 @@ function FlowEditor({ flow, datasets, onChanged, onDeleted, onReload, confirm }:
     }
   }
 
+  /** -1 = after the source refreshes (phase 4); 0 = off; else a timer. */
   const setSchedule = async (minutes: number) => {
     try {
-      const f = await dataflowsApi.update(flow.id, { refresh_interval_minutes: minutes })
+      const f = await dataflowsApi.update(flow.id, minutes === AFTER_SOURCE
+        ? { run_after_source: true }
+        : { refresh_interval_minutes: minutes, ...(minutes === 0 ? { run_after_source: false } : {}) })
       onChanged({ ...flow, ...f, outputs: flow.outputs })
     } catch (e) {
       toast.error(detail(e, t('flows.saveFailed')))
@@ -320,9 +327,10 @@ function FlowEditor({ flow, datasets, onChanged, onDeleted, onReload, confirm }:
         <div style={{ flex: '0 1 300px', display: 'flex', flexDirection: 'column', gap: 12 }}>
           <label style={{ fontSize: 13 }}>
             <span style={{ display: 'block', fontWeight: 600, marginBottom: 4 }}>{t('flows.schedule')}</span>
-            <select value={flow.refresh_interval_minutes ?? 0} disabled={!canEdit}
+            <select value={flow.run_after_source ? AFTER_SOURCE : flow.refresh_interval_minutes ?? 0} disabled={!canEdit}
               onChange={e => void setSchedule(Number(e.target.value))} style={{ width: '100%' }}>
               {SCHEDULES.map(s => <option key={s.minutes} value={s.minutes}>{t(s.key)}</option>)}
+              {flow.source_dataset_id != null && <option value={AFTER_SOURCE}>{t('flows.afterSource')}</option>}
               {flow.refresh_interval_minutes && !SCHEDULES.some(s => s.minutes === flow.refresh_interval_minutes) && (
                 <option value={flow.refresh_interval_minutes}>{t('flows.custom', { n: flow.refresh_interval_minutes })}</option>
               )}

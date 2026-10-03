@@ -60,6 +60,13 @@ async def _migrate(conn):
         "ALTER TABLE datasets ADD COLUMN IF NOT EXISTS content_sha256 VARCHAR(64)",
         # 0056: each refresh run's check results (see RefreshRun.checks).
         "ALTER TABLE refresh_runs ADD COLUMN IF NOT EXISTS checks JSON",
+        # 0057: incremental merge and run-after-source (pipeline plan, phase 4).
+        "ALTER TABLE watermarks ADD COLUMN IF NOT EXISTS key_column VARCHAR(255)",
+        "ALTER TABLE watermarks ADD COLUMN IF NOT EXISTS lookback_hours INTEGER",
+        "ALTER TABLE watermarks ADD COLUMN IF NOT EXISTS full_reload_days INTEGER",
+        "ALTER TABLE watermarks ADD COLUMN IF NOT EXISTS last_full_at TIMESTAMP WITH TIME ZONE",
+        "ALTER TABLE pipeline_watches ADD COLUMN IF NOT EXISTS run_after_source BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE pipeline_watches ADD COLUMN IF NOT EXISTS trigger_pending BOOLEAN NOT NULL DEFAULT FALSE",
         "CREATE INDEX IF NOT EXISTS ix_datasets_content_sha256 ON datasets (content_sha256)",
         # 0042: AI budgets (see Quota.max_ai_tokens_per_day); ai_usage itself
         # is a new table, which create_all provisions.

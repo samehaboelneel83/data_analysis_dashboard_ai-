@@ -172,8 +172,16 @@ def refresh_dataset(
     column_map: dict[str, str] | None = None,
     write: bool = True,
     validate=None,
+    key_column: str | None = None,
+    lookback_hours: int | None = None,
 ) -> dict:
     """Full or incremental refresh of one source-backed dataset's cached file.
+
+    Phase 4: `key_column` makes an incremental load a MERGE -- an incoming
+    row whose key the file already holds replaces it, so an updated order
+    appears once with its new values instead of twice. `lookback_hours`
+    re-reads that far behind a date cursor to catch late updates (only with
+    a key; the re-read rows are then replaced, not duplicated).
 
     `validate(df)` (pipeline plan, phase 3) is called on the frame the
     dataset would hold -- after an incremental append, the whole of it --
@@ -213,7 +221,7 @@ def refresh_dataset(
         result = _refresh_dataset_body(
             source_cfg, filename, source_table, source_query, mode,
             cursor_column, cursor_value, valid_columns, required_columns, column_map,
-            write, validate,
+            write, validate, key_column, lookback_hours,
         )
         span.set_attribute("status", "ok")
         span.set_attribute("effective_mode", result["mode"])
@@ -235,6 +243,8 @@ def _refresh_dataset_body(
     column_map: dict[str, str] | None = None,
     write: bool = True,
     validate=None,
+    key_column: str | None = None,
+    lookback_hours: int | None = None,
 ) -> dict:
     from .ingest import detect_types
     from .timezones import normalize_instants
@@ -265,17 +275,33 @@ def _refresh_dataset_body(
         # names) — either way, `cursor_column` must be an actual column, not
         # arbitrary attacker-settable SQL-identifier text.
         cols = set(existing_df.columns) if existing_df is not None else valid_columns
+        # A key the file does not hold cannot be merged on: append, and say so.
+        if key_column and existing_df is not None and key_column not in existing_df.columns:
+            warning = f"Key column '{key_column}' not found on the dataset — appended without merging."
+            key_column = None
+        fetch_from = lookback_cursor(cursor_value, lookback_hours) if key_column else cursor_value
         try:
             incr_sql = build_incremental_query(source_table, source_query, cursor_column, cursor_value, cols)
-            new_rows = import_to_dataframe(source_cfg, None, incr_sql, params={"cursor_val": cursor_value})
+            new_rows = import_to_dataframe(source_cfg, None, incr_sql, params={"cursor_val": fetch_from})
             if column_map:
                 new_rows = new_rows.rename(columns={n: o for n, o in column_map.items() if n in new_rows.columns})
         except Exception as e:  # noqa: BLE001 - bad cursor/query: fall back, don't 500
             effective_mode = "full"
             warning = f"Incremental query failed ({e}) — ran a full refresh instead."
         else:
-            df = (pd.concat([existing_df, new_rows], ignore_index=True)
-                  if existing_df is not None and len(existing_df) else new_rows)
+            rows_updated = 0
+            if key_column and existing_df is not None and len(existing_df) and key_column in new_rows.columns:
+                # Merge: the incoming row wins. Keys are compared as text so
+                # 7 and "7" (a CSV round trip) are one key.
+                held = set(existing_df[key_column].astype(str))
+                incoming = new_rows[key_column].astype(str)
+                rows_updated = int(incoming.isin(held).sum())
+                kept = existing_df[~existing_df[key_column].astype(str).isin(set(incoming))]
+                df = pd.concat([kept, new_rows], ignore_index=True)
+                df = df.drop_duplicates(subset=[key_column], keep="last").reset_index(drop=True)
+            else:
+                df = (pd.concat([existing_df, new_rows], ignore_index=True)
+                      if existing_df is not None and len(existing_df) else new_rows)
             # The cap is on what the dataset HOLDS: appending past it refuses
             # like a full load over it would, rather than growing unchecked.
             from .connections import _checked, _import_cap
@@ -292,7 +318,8 @@ def _refresh_dataset_body(
             return {
                 "df": df, "type_map": detect_types(df), "mode": "incremental",
                 "cursor_value": _max_cursor(df, cursor_column, cursor_value, converted),
-                "warning": warning, "rows_added": len(new_rows),
+                "warning": warning, "rows_added": len(new_rows) - rows_updated,
+                "rows_updated": rows_updated,
             }
 
     # Full load: explicitly requested, the first incremental run (no baseline
@@ -314,6 +341,31 @@ def _refresh_dataset_body(
         "df": df, "type_map": detect_types(df), "mode": "full",
         "cursor_value": new_cursor, "warning": warning, "rows_added": len(df),
     }
+
+
+def lookback_cursor(cursor_value, lookback_hours: int | None):
+    """The cursor to fetch from: `lookback_hours` before a DATE cursor.
+
+    A numeric or opaque cursor is returned as it is -- "six hours before
+    order 1,042" means nothing. The stored watermark is never moved back;
+    only this fetch reads further."""
+    if not lookback_hours or cursor_value in (None, ""):
+        return cursor_value
+    text = str(cursor_value)
+    try:
+        float(text)
+        return cursor_value               # a number, not a date
+    except ValueError:
+        pass
+    try:
+        stamp = pd.Timestamp(text)
+    except (ValueError, TypeError):
+        return cursor_value
+    if pd.isna(stamp):
+        return cursor_value
+    back = stamp - pd.Timedelta(hours=int(lookback_hours))
+    # Same shape as the stored value: a date stays a date, a time a time.
+    return back.date().isoformat() if len(text) <= 10 else back.isoformat(sep=" ")
 
 
 def write_dataset_files(df: pd.DataFrame, filename: str) -> None:

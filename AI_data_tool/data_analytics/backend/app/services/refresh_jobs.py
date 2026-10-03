@@ -231,6 +231,9 @@ async def _refresh_now(
             refresh_dataset, cfg, dataset.filename, dataset.source_table, dataset.source_query,
             requested_mode, cursor_column, cursor_value, known_columns,
             required, column_map, not defer_write, validate,
+            # Phase 4: the merge key and look-back saved on the watermark.
+            (watermark.key_column if watermark else None),
+            (watermark.lookback_hours if watermark else None),
         )
     except ChecksBlocked as e:
         failed = blocking_failures(e.results)
@@ -279,9 +282,19 @@ async def _refresh_now(
         if watermark is None:
             watermark = Watermark(dataset_id=dataset_id)
             db.add(watermark)
-        watermark.strategy = outcome["mode"]
+        # The strategy is what the dataset is SET to do (phase 4: the
+        # scheduler follows it), not what this run happened to do. Asking for
+        # an incremental load sets it -- even when this first run had to load
+        # everything to set the baseline; a one-off full reload by hand does
+        # not switch a scheduled incremental dataset back to full loads.
+        if requested_mode == "incremental":
+            watermark.strategy = "incremental"
+        elif not watermark.strategy:
+            watermark.strategy = "full"
         watermark.cursor_column = cursor_column
         watermark.cursor_value = outcome["cursor_value"]
+    if watermark is not None and outcome["mode"] == "full":
+        watermark.last_full_at = datetime.utcnow()
 
     if dataset.filename:
         await write_materialization(

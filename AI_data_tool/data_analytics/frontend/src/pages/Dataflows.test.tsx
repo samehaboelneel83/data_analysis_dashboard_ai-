@@ -116,7 +116,17 @@ describe('Dataflows (E12)', () => {
     vi.mocked(dataflowsApi.update).mockImplementation(async (_id, body) => flow({ refresh_interval_minutes: null, ...body }) as never)
     renderAt('/dataflows?flow=5')
     fireEvent.change(await screen.findByRole('combobox', { name: 'Refresh' }), { target: { value: '0' } })
-    await waitFor(() => expect(dataflowsApi.update).toHaveBeenCalledWith(5, { refresh_interval_minutes: 0 }))
+    // Off also stops following the source (pipeline phase 4).
+    await waitFor(() => expect(dataflowsApi.update).toHaveBeenCalledWith(5, { refresh_interval_minutes: 0, run_after_source: false }))
+  })
+
+  it('can run after its source refreshes instead of on a timer (pipeline phase 4)', async () => {
+    vi.mocked(dataflowsApi.update).mockImplementation(async (_id, body) =>
+      flow({ refresh_interval_minutes: null, run_after_source: true, ...body }) as never)
+    renderAt('/dataflows?flow=5')
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Refresh' }), { target: { value: '-1' } })
+    await waitFor(() => expect(dataflowsApi.update).toHaveBeenCalledWith(5, { run_after_source: true }))
+    expect(await screen.findAllByText('After its source refreshes')).not.toHaveLength(0)
   })
 
   it('a dataflow with no outputs cannot be refreshed, only run into a new dataset', async () => {

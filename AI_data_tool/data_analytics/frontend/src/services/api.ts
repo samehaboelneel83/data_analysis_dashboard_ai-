@@ -313,6 +313,8 @@ export interface Dataflow {
   join_dataset_ids: number[]
   steps: Record<string, unknown>[]
   refresh_interval_minutes: number | null
+  /** Pipeline phase 4: runs when its source dataset refreshes, not on a timer. */
+  run_after_source?: boolean
   /** 4.6: a snapshot dataflow appends a row per period (and group). */
   snapshot?: DataflowSnapshot | null
   created_by: number | null
@@ -346,7 +348,9 @@ export const dataflowsApi = {
     api.post<Dataflow>('/dataflows', body).then(r => r.data),
   update: (id: number, body: Partial<{ name: string; description: string
                                        steps: Record<string, unknown>[]
-                                       refresh_interval_minutes: number | null }>) =>
+                                       refresh_interval_minutes: number | null
+                                       /** Phase 4: run when the source dataset refreshes. */
+                                       run_after_source: boolean }>) =>
     api.put<Dataflow>(`/dataflows/${id}`, body).then(r => r.data),
   remove: (id: number) => api.delete(`/dataflows/${id}`),
   run:    (id: number, output_name?: string) =>
@@ -574,6 +578,14 @@ export const datasetsApi = {
   setSchedule: (id: number, interval_minutes: number | null) =>
     api.patch<Dataset>(`/datasets/${id}/refresh-schedule`,
                        { interval_minutes }).then(r => r.data),
+  /** Phase 4: a dataset rebuilt from another runs when that source refreshes. */
+  setAfterSource: (id: number, after_source: boolean) =>
+    api.patch<Dataset>(`/datasets/${id}/refresh-schedule`, { after_source }).then(r => r.data),
+  /** Phase 4: how scheduled refreshes load this dataset. */
+  incremental: (id: number) =>
+    api.get<IncrementalSettings>(`/datasets/${id}/incremental`).then(r => r.data),
+  setIncremental: (id: number, body: IncrementalSettingsInput) =>
+    api.put<IncrementalSettings>(`/datasets/${id}/incremental`, body).then(r => r.data),
   // `sheet`: which sheet of a workbook becomes the dataset (E07). Needed only
   // when the server refused a workbook with data on several sheets.
   upload: (file: File, name: string, desc = '', sheet?: string) => {
@@ -1624,6 +1636,22 @@ export interface AppNotification {
 export const notificationsApi = {
   list: () => api.get<{ unread: number; notifications: AppNotification[] }>('/notifications').then(r => r.data),
   markRead: () => api.post<{ marked: number }>('/notifications/mark-read').then(r => r.data),
+}
+
+export interface IncrementalSettingsInput {
+  strategy: 'full' | 'incremental'
+  cursor_column?: string | null
+  key_column?: string | null
+  lookback_hours?: number | null
+  full_reload_days?: number | null
+}
+
+export interface IncrementalSettings extends IncrementalSettingsInput {
+  /** The newest cursor value loaded (editors only). */
+  cursor_value: string | null
+  last_full_at: string | null
+  /** A rebuilt dataset set to run after its source refreshes. */
+  after_source: boolean
 }
 
 export type DataCheckKind = 'not_null' | 'unique' | 'accepted_values' | 'row_count' | 'row_drop' | 'rule'
