@@ -88,6 +88,16 @@ async def finish_run(session, run_id: int | None, status: str, *, rows: int | No
     # success that ends a failure -- is announced. Never raises.
     from .pipeline_alerts import on_run_finished
     await on_run_finished(session, kind, item_id, status, error)
+    if status == "ok":
+        # Phase 4: whatever is set to run after this data now has new input.
+        from .pipeline_deps import flow_outputs, mark_dependents
+        if kind == "dataset":
+            await mark_dependents(session, item_id)
+        elif kind == "dataflow":
+            from ..models.models import Dataflow
+            flow = await session.get(Dataflow, item_id)
+            for out in (await flow_outputs(session, item_id, flow.org_id) if flow else []):
+                await mark_dependents(session, out)
 
 
 def _json_safe(value):

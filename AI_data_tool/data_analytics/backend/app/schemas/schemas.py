@@ -90,6 +90,21 @@ class CustomFunctionPreviewRequest(BaseModel):
 
 class RefreshScheduleUpdate(BaseModel):
     interval_minutes: Optional[int] = None
+    # Pipeline plan, phase 4: a dataset rebuilt from another can run when that
+    # source refreshes, instead of on a timer.
+    after_source: Optional[bool] = None
+
+
+class IncrementalSettings(BaseModel):
+    """Phase 4: how scheduled refreshes load this dataset. `strategy`
+    full | incremental; an incremental load reads rows past `cursor_column`,
+    merges on `key_column` when set, re-reads `lookback_hours` behind a date
+    cursor (needs a key), and does a full reload every `full_reload_days`."""
+    strategy: str = "full"
+    cursor_column: Optional[str] = None
+    key_column: Optional[str] = None
+    lookback_hours: Optional[int] = None
+    full_reload_days: Optional[int] = None
 
 
 class PipelineWatchUpdate(BaseModel):

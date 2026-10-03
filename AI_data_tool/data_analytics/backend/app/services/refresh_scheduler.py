@@ -790,15 +790,44 @@ async def refresh_one(session, ds: Dataset) -> bool:
         outcome: dict = {}
         validate = make_validator(await load_checks(session, ds_id), ds.row_count,
                                   await known_types(session, ds_id), outcome)
+        # Phase 4: a dataset set to incremental loads follows its watermark --
+        # only rows past the cursor, merged on the key when it has one --
+        # with a full reload every `full_reload_days` to correct what an
+        # incremental table cannot see (deleted rows).
+        from ..models.models import Watermark
+        from .dataset_refresh import refresh_dataset
+        wm = (await session.execute(select(Watermark).where(
+            Watermark.dataset_id == ds_id))).scalar_one_or_none()
+        incremental = bool(wm and wm.strategy == "incremental" and wm.cursor_column)
+        if incremental and wm.full_reload_days:
+            last_full = _as_utc_naive(wm.last_full_at)
+            if last_full is None or datetime.utcnow() - last_full >= timedelta(days=wm.full_reload_days):
+                incremental = False
+        wm_cursor = (wm.cursor_column, wm.cursor_value, wm.key_column, wm.lookback_hours) if wm else None
         try:
-            df, _type_map = await asyncio.to_thread(
-                rewrite_dataset_file, cfg, filename, table, query, validate=validate, **guard)
-            # O3: rewrite_dataset_file is always a full rewrite (no watermark
-            # here -- see module docstring), so the manifest kind is "full"
-            # and there is no cursor value to carry.
+            if wm is not None and wm.cursor_column:
+                cursor_col, cursor_val, key_col, lookback = wm_cursor
+                result = await asyncio.to_thread(
+                    refresh_dataset, cfg, filename, table, query,
+                    "incremental" if incremental else "full", cursor_col, cursor_val,
+                    set(known), guard.get("required_columns"), None, True, validate,
+                    key_col, lookback)
+                df, load_kind = result["df"], result["mode"]
+                wm = await session.get(Watermark, wm.id)
+                wm.cursor_value = result["cursor_value"]
+                if load_kind == "full":
+                    wm.last_full_at = datetime.utcnow()
+            else:
+                df, _type_map = await asyncio.to_thread(
+                    rewrite_dataset_file, cfg, filename, table, query, validate=validate, **guard)
+                load_kind, result = "full", None
+                if wm is not None:
+                    wm = await session.get(Watermark, wm.id)
+                    wm.last_full_at = datetime.utcnow()
             if filename:
                 await write_materialization(
-                    session, ds_id, filename, "full", len(df), list(df.columns), None)
+                    session, ds_id, filename, load_kind, len(df), list(df.columns),
+                    result["cursor_value"] if result else None)
         except SchemaBreak as e:
             log.warning("Scheduled refresh refused for dataset %s: %s", ds_id, e)
             await _discard(session, ds)
@@ -1004,6 +1033,26 @@ async def run_scheduler(session_factory) -> None:
                     except Exception as e:  # noqa: BLE001 - never-die, per item
                         await session.rollback()
                         await record_failure(session, "dataflow", flow_id, str(e), now)
+
+                # Phase 4: dataflows and rebuilt datasets set to run after
+                # their source, whose source has refreshed since. Cleared
+                # BEFORE the run, so a run that fails is not retried every
+                # tick -- the next source refresh marks it again.
+                from .pipeline_deps import clear_pending, pending_items
+                for kind, item_id in (await pending_items(session))[:MAX_ITEMS_PER_TICK]:
+                    try:
+                        await clear_pending(session, kind, item_id)
+                        if kind == "dataflow":
+                            flow_row = await session.get(Dataflow, item_id)
+                            if flow_row is not None:
+                                await refresh_dataflow(session, flow_row)
+                        else:
+                            ds_row = await session.get(Dataset, item_id)
+                            if ds_row is not None:
+                                await refresh_one(session, ds_row)
+                    except Exception as e:  # noqa: BLE001 - never-die, per item
+                        await session.rollback()
+                        await record_failure(session, kind, item_id, str(e), now)
 
                 scheds = (await session.execute(
                     select(ReportSchedule).where(ReportSchedule.interval_minutes.isnot(None))

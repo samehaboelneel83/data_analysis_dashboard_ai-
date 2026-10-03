@@ -6,6 +6,7 @@ import AlertsPanel from '../components/dataset/AlertsPanel'
 import PredictionModelsPanel from '../components/dataset/PredictionModelsPanel'
 import { PipelineAlertsForm, PipelineHealthLine, usePipelineHealth } from '../components/dataset/PipelineHealth'
 import ChecksPanel, { ChecksBlockedDialog } from '../components/dataset/ChecksPanel'
+import IncrementalSettingsForm from '../components/dataset/IncrementalSettings'
 import StatisticsPanel from '../components/StatisticsPanel'
 import DatasetSensitivity from '../components/DatasetSensitivity'
 import NotebookSnippet from '../components/NotebookSnippet'
@@ -644,6 +645,25 @@ export default function DatasetDetail() {
   // so a fixed source clears the warning without a page reload.
   const [pipelineHealth, setPipelineHealth] = usePipelineHealth(
     badId || !ds || ds.mode === 'directquery' ? null : dsId, ds?.last_refreshed_at)
+  // Phase 4: a dataset rebuilt from another can run after that source refreshes.
+  const [afterSource, setAfterSource] = useState(false)
+  useEffect(() => {
+    if (badId || !ds || ds.data_source_id || ds.mode === 'directquery') return
+    let live = true
+    Promise.resolve().then(() => datasetsApi.incremental(dsId))
+      .then(v => { if (live && v) setAfterSource(!!v.after_source) }).catch(() => {})
+    return () => { live = false }
+  }, [dsId, ds?.id, ds?.data_source_id])
+  const chooseAfterSource = async () => {
+    setSavingSchedule(true)
+    try {
+      setDs(await datasetsApi.setAfterSource(dsId, true))
+      setAfterSource(true)
+      toast.success(tr('dataset.afterSourceSet'))
+    } catch (e) {
+      toast.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? String(e))
+    } finally { setSavingSchedule(false) }
+  }
 
   if (badId) return <NotFound />
   if (loadError) {
@@ -791,10 +811,16 @@ export default function DatasetDetail() {
                   <select
                     aria-label="Automatic refresh interval"
                     disabled={savingSchedule}
-                    value={ds.refresh_interval_minutes ?? ''}
-                    onChange={e => handleSchedule(e.target.value ? Number(e.target.value) : null)}
+                    value={afterSource ? 'after' : ds.refresh_interval_minutes ?? ''}
+                    onChange={e => {
+                      const v = e.target.value
+                      if (v === 'after') { void chooseAfterSource(); return }
+                      if (afterSource) setAfterSource(false)
+                      void handleSchedule(v ? Number(v) : null)
+                    }}
                     className="input" style={{ width: '100%', fontSize: 12 }}>
                     <option value="">{tr('dataset.autoOff')}</option>
+                    {!ds.data_source_id && <option value="after">{tr('dataset.afterSource')}</option>}
                     <option value="5">{tr('dataset.every5')}</option>
                     <option value="15">{tr('dataset.every15')}</option>
                     <option value="60">{tr('dataset.everyHour')}</option>
@@ -807,6 +833,9 @@ export default function DatasetDetail() {
                     </div>
                   ) : null}
                 </div>
+                {pipelineHealth?.can_edit && ds.data_source_id && (
+                  <IncrementalSettingsForm datasetId={ds.id} columns={(ds.columns ?? []).map(c => c.name)} />
+                )}
                 {pipelineHealth?.can_edit && (
                   <PipelineAlertsForm datasetId={ds.id} health={pipelineHealth} onSaved={setPipelineHealth} />
                 )}

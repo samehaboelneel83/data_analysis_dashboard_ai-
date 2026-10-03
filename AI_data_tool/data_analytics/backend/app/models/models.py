@@ -1434,6 +1434,18 @@ class Watermark(Base):
     cursor_column = Column(String(255), nullable=True)
     cursor_value  = Column(Text, nullable=True)
     updated_at    = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+    # Pipeline plan, phase 4 (2026-10-03). `key_column`: an incremental load
+    # MERGES on it -- a row whose key is already held replaces the old one
+    # instead of being appended as a duplicate. `lookback_hours`: re-read
+    # that far behind a date cursor, to catch rows updated late (needs a key,
+    # or the re-read rows would duplicate). `full_reload_days`: every N days
+    # the scheduled refresh does a full load instead, to correct any drift an
+    # incremental table builds up (deletes it cannot see). `last_full_at`:
+    # when the last full load ran.
+    key_column       = Column(String(255), nullable=True)
+    lookback_hours   = Column(Integer, nullable=True)
+    full_reload_days = Column(Integer, nullable=True)
+    last_full_at     = Column(DateTime(timezone=True), nullable=True)
 
 
 class Materialization(Base):
@@ -2129,6 +2141,12 @@ class PipelineWatch(Base):
     state_since = Column(DateTime(timezone=True), nullable=True)
     #: When staleness was announced; cleared by the next successful refresh.
     stale_alerted_at = Column(DateTime(timezone=True), nullable=True)
+    #: Phase 4: a dataflow, or a dataset rebuilt from another, that runs when
+    #: its SOURCE refreshes successfully instead of on its own timer.
+    run_after_source = Column(Boolean, nullable=False, default=False)
+    #: Set when the source has refreshed since this item last ran; the
+    #: scheduler runs the item on its next tick and clears it.
+    trigger_pending  = Column(Boolean, nullable=False, default=False)
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow,
                         onupdate=datetime.utcnow)
 
