@@ -2,7 +2,7 @@ import asyncio
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -561,6 +561,28 @@ async def list_admin_audit(
 # "what runs in this org, and when did it last work" was previously answerable
 # only by opening every report and every dataset one at a time.
 
+async def _latest_runs(db: AsyncSession, kind: str, ids: list[int]) -> dict:
+    """The newest RefreshRun per item, by item id."""
+    from ..models.models import RefreshRun
+    if not ids:
+        return {}
+    newest = (select(RefreshRun.item_id, func.max(RefreshRun.id).label("rid"))
+              .where(RefreshRun.kind == kind, RefreshRun.item_id.in_(ids))
+              .group_by(RefreshRun.item_id).subquery())
+    rows = (await db.execute(select(RefreshRun).join(newest, RefreshRun.id == newest.c.rid))).scalars().all()
+    return {r.item_id: r for r in rows}
+
+
+async def _next_retries(db: AsyncSession, kind: str, ids: list[int]) -> dict:
+    """When each failing item will next be tried (its backoff), by item id."""
+    from ..models.models import ScheduleFailure
+    if not ids:
+        return {}
+    rows = (await db.execute(select(ScheduleFailure).where(
+        ScheduleFailure.kind == kind, ScheduleFailure.item_id.in_(ids)))).scalars().all()
+    return {r.item_id: r.next_attempt_at for r in rows}
+
+
 @router.get("/monitoring/jobs")
 async def list_monitoring_jobs(
     db: AsyncSession = Depends(get_db),
@@ -582,24 +604,32 @@ async def list_monitoring_jobs(
         select(Dataset).where(Dataset.org_id == admin.org_id,
                               Dataset.refresh_interval_minutes.isnot(None))
     )).scalars().all()
+    # Pipeline plan, phase 1: every refresh now leaves a RefreshRun, so a
+    # dataset's row says how its LAST ATTEMPT went -- and a failing one when
+    # it will be retried -- instead of no status at all.
+    latest = await _latest_runs(db, "dataset", [d.id for d in ds_rows])
+    retry = await _next_retries(db, "dataset", [d.id for d in ds_rows])
     for d in ds_rows:
+        run = latest.get(d.id)
         jobs.append({"kind": "dataset_refresh", "id": d.id, "name": d.name,
                      "interval_minutes": d.refresh_interval_minutes,
-                     "last_run_at": d.last_refreshed_at,
-                     # The refresh loop advances last_refreshed_at on failure too
-                     # (retry on schedule, not every tick) and keeps no status
-                     # column -- so none is invented here.
-                     "status": None, "error": None})
+                     "last_run_at": (run.started_at if run else None) or d.last_refreshed_at,
+                     "last_refreshed_at": d.last_refreshed_at,
+                     "status": run.status if run else None,
+                     "error": run.error if run and run.status != "ok" else None,
+                     "next_retry_at": retry.get(d.id)})
 
     df_rows = (await db.execute(
         select(Dataflow).where(Dataflow.org_id == admin.org_id,
                                Dataflow.refresh_interval_minutes.isnot(None))
     )).scalars().all()
+    flow_retry = await _next_retries(db, "dataflow", [f.id for f in df_rows])
     for f in df_rows:
         jobs.append({"kind": "dataflow", "id": f.id, "name": f.name,
                      "interval_minutes": f.refresh_interval_minutes,
                      "last_run_at": f.last_run_at,
-                     "status": f.last_run_status, "error": f.last_run_error})
+                     "status": f.last_run_status, "error": f.last_run_error,
+                     "next_retry_at": flow_retry.get(f.id)})
 
     sched_rows = (await db.execute(
         select(ReportSchedule, Report.name)
@@ -634,6 +664,50 @@ async def list_monitoring_jobs(
     jobs.sort(key=lambda j: (j["last_run_at"] is None,
                              -(j["last_run_at"].timestamp() if j["last_run_at"] else 0)))
     return jobs
+
+
+@router.get("/monitoring/refresh-runs")
+async def list_refresh_runs(
+    status: str | None = None,
+    kind: str | None = None,
+    item_id: int | None = None,
+    limit: int = 200,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_org_admin),
+):
+    """The org's refresh history -- every dataset refresh and dataflow run,
+    scheduled or manual -- newest first (pipeline plan, phase 1).
+
+    `status=failed` answers "what broke"; `kind` + `item_id` narrow it to one
+    dataset or dataflow. Names are joined here so a deleted item still shows
+    its runs, labelled as gone, rather than vanishing from the history."""
+    from ..models.models import Dataflow, RefreshRun
+    limit = max(1, min(int(limit or 200), 1000))
+    q = select(RefreshRun).where(RefreshRun.org_id == admin.org_id)
+    if status:
+        q = q.where(RefreshRun.status == status)
+    if kind in ("dataset", "dataflow"):
+        q = q.where(RefreshRun.kind == kind)
+    if item_id is not None:
+        q = q.where(RefreshRun.item_id == item_id)
+    runs = (await db.execute(q.order_by(RefreshRun.id.desc()).limit(limit))).scalars().all()
+    ds_ids = {r.item_id for r in runs if r.kind == "dataset"}
+    flow_ids = {r.item_id for r in runs if r.kind == "dataflow"}
+    names: dict = {}
+    if ds_ids:
+        for i, n in (await db.execute(select(Dataset.id, Dataset.name).where(
+                Dataset.id.in_(ds_ids), Dataset.org_id == admin.org_id))).all():
+            names[("dataset", i)] = n
+    if flow_ids:
+        for i, n in (await db.execute(select(Dataflow.id, Dataflow.name).where(
+                Dataflow.id.in_(flow_ids), Dataflow.org_id == admin.org_id))).all():
+            names[("dataflow", i)] = n
+    return [{"id": r.id, "kind": r.kind, "item_id": r.item_id,
+             "name": names.get((r.kind, r.item_id)),
+             "trigger": r.trigger, "status": r.status,
+             "started_at": r.started_at, "finished_at": r.finished_at,
+             "rows": r.rows, "duration_ms": r.duration_ms,
+             "error": r.error, "error_code": r.error_code} for r in runs]
 
 
 @router.get("/monitoring/deliveries")

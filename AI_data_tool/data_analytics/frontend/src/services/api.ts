@@ -2026,6 +2026,27 @@ export interface MonitoringJobRow {
   error: string | null
   report_id?: number
   dataset_id?: number
+  /** A failing dataset refresh or dataflow: when it is next tried (backoff). */
+  next_retry_at?: string | null
+  /** A dataset: when its data last actually changed (a failed run leaves it). */
+  last_refreshed_at?: string | null
+}
+
+/** One dataset refresh or dataflow run, scheduled or manual. */
+export interface RefreshRunRow {
+  id: number
+  kind: 'dataset' | 'dataflow'
+  item_id: number
+  /** null when the dataset or dataflow has since been deleted. */
+  name: string | null
+  trigger: 'schedule' | 'manual'
+  status: 'running' | 'ok' | 'failed' | 'skipped'
+  started_at: string | null
+  finished_at: string | null
+  rows: number | null
+  duration_ms: number | null
+  error: string | null
+  error_code: string | null
 }
 
 export interface MonitoringDeliveryRow extends DeliveryRow {
@@ -2035,6 +2056,8 @@ export interface MonitoringDeliveryRow extends DeliveryRow {
 
 export const monitoringApi = {
   jobs: () => api.get<MonitoringJobRow[]>('/admin/monitoring/jobs').then(r => r.data),
+  refreshRuns: (params: { status?: string; kind?: string; item_id?: number; limit?: number } = {}) =>
+    api.get<RefreshRunRow[]>('/admin/monitoring/refresh-runs', { params }).then(r => r.data),
   deliveries: (limit = 200) =>
     api.get<MonitoringDeliveryRow[]>('/admin/monitoring/deliveries', { params: { limit } }).then(r => r.data),
   activity: (limit = 200) =>

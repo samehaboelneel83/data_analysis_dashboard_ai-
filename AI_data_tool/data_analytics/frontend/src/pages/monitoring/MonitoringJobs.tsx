@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useT, type MessageKey } from '../../i18n'
 import { Link } from 'react-router-dom'
 import { monitoringApi } from '../../services/api'
-import type { MonitoringJobRow } from '../../services/api'
+import type { MonitoringJobRow, RefreshRunRow } from '../../services/api'
 import { useListFilter } from '../../components/ui/ListFilter'
 import { RefreshCw, GitBranch, Mail, Bell, CalendarClock, type LucideIcon } from 'lucide-react'
 import EmptyState from '../../components/ui/EmptyState'
@@ -77,6 +77,88 @@ const TONE_COLOR = {
   ok: 'color-mix(in oklab, var(--positive, #4caf82) 65%, var(--text))',
   bad: 'color-mix(in oklab, var(--negative, #e2606c) 70%, var(--text))',
   info: 'color-mix(in oklab, #d9a441 55%, var(--text))',
+}
+
+function duration(ms: number | null): string {
+  if (ms == null) return '—'
+  if (ms < 1000) return `${ms} ms`
+  const s = ms / 1000
+  return s < 60 ? `${s.toFixed(1)} s` : `${Math.floor(s / 60)} min ${Math.round(s % 60)} s`
+}
+
+/** Pipeline plan, phase 1: every refresh and dataflow run, newest first, so
+ *  "why did Tuesday's refresh fail, and how long do they take?" has an answer
+ *  on one page. "Failed only" is the question most visits ask. */
+function RefreshHistory() {
+  const t = useT()
+  const [runs, setRuns] = useState<RefreshRunRow[]>([])
+  const [failedOnly, setFailedOnly] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<unknown>(null)
+  const load = () => {
+    setLoading(true)
+    setLoadError(null)
+    return monitoringApi.refreshRuns(failedOnly ? { status: 'failed' } : {})
+      .then(setRuns).catch(setLoadError).finally(() => setLoading(false))
+  }
+  useEffect(() => { load() }, [failedOnly])
+  const statusText = (st: string) => { const k = `jobs.status.${st}` as MessageKey; const v = t(k); return v && v !== k ? v : st }
+  const link = (r: RefreshRunRow) => r.kind === 'dataset' ? `/datasets/${r.item_id}` : `/dataflows?flow=${r.item_id}`
+
+  return (
+    <section style={{ marginTop: 28 }} aria-labelledby="refresh-history-title">
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, marginBottom: 8 }}>
+        <h2 id="refresh-history-title" style={{ margin: 0, fontSize: 16 }}>{t('jobs.history.title')}</h2>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+          <input type="checkbox" checked={failedOnly} onChange={e => setFailedOnly(e.target.checked)} />
+          {t('jobs.history.failedOnly')}
+        </label>
+      </div>
+      {loading && <LoadingState />}
+      {!loading && loadError != null && <LoadError what="refresh history" error={loadError} onRetry={load} />}
+      {!loading && loadError == null && runs.length === 0 && (
+        <p style={{ color: 'var(--muted)' }}>{failedOnly ? t('jobs.history.noFailures') : t('jobs.history.empty')}</p>
+      )}
+      {!loading && loadError == null && runs.length > 0 && (
+        <div className="card dl-table-card"><table className="dl-table" data-testid="refresh-history">
+          <thead>
+            <tr>
+              <th>{t('jobs.history.started')}</th>
+              <th>{t('col.name')}</th>
+              <th>{t('jobs.history.trigger')}</th>
+              <th>{t('col.status')}</th>
+              <th style={{ textAlign: 'end' }}>{t('jobs.history.rows')}</th>
+              <th style={{ textAlign: 'end' }}>{t('jobs.history.duration')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {runs.map(r => {
+              const tone = statusTone(r.status)
+              return (
+                <tr key={r.id}>
+                  <td style={{ whiteSpace: 'nowrap' }}>{r.started_at ? new Date(r.started_at).toLocaleString() : '—'}</td>
+                  <td style={{ fontWeight: 600 }}>
+                    {r.name != null
+                      ? <Link to={link(r)} className="row-name" style={{ color: 'var(--text)' }}>{r.name}</Link>
+                      : <span style={{ color: 'var(--muted)' }}>{t('jobs.history.deleted')}</span>}
+                  </td>
+                  <td>{t(r.trigger === 'manual' ? 'jobs.history.manual' : 'jobs.history.schedule')}</td>
+                  <td style={{ color: tone ? TONE_COLOR[tone] : 'var(--muted)' }}>
+                    {statusText(r.status)}
+                    {r.error && r.status !== 'ok' && (
+                      <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 2, whiteSpace: 'normal' }}>{r.error}</div>
+                    )}
+                  </td>
+                  <td style={{ textAlign: 'end', fontVariantNumeric: 'tabular-nums' }}>{r.rows != null ? r.rows.toLocaleString() : '—'}</td>
+                  <td style={{ textAlign: 'end', whiteSpace: 'nowrap' }}>{duration(r.duration_ms)}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table></div>
+      )}
+    </section>
+  )
 }
 
 export default function MonitoringJobs() {
@@ -170,6 +252,11 @@ export default function MonitoringJobs() {
                         {skipReason(j.error)}
                       </div>
                     )}
+                    {j.next_retry_at && (
+                      <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 2 }}>
+                        {t('jobs.nextRetry', { when: new Date(j.next_retry_at).toLocaleString() })}
+                      </div>
+                    )}
                   </td>
                 </tr>
               )
@@ -177,6 +264,8 @@ export default function MonitoringJobs() {
           </tbody>
         </table></div>
       )}
+
+      {!loading && loadError == null && <RefreshHistory />}
     </div>
   )
 }
