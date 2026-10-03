@@ -941,6 +941,11 @@ async def run_scheduler(session_factory) -> None:
                         await session.rollback()
                         await record_failure(session, "dataset", ds_id, str(e), now)
 
+                # Pipeline plan, phase 2: each dataset that has just gone
+                # past its freshness target is announced, once.
+                from .pipeline_alerts import check_freshness
+                await check_freshness(session, now)
+
                 # E13: each champion's daily drift check, queued as a job
                 # (services/model_drift.py); the worker runs it.
                 if settings.job_worker_enabled:

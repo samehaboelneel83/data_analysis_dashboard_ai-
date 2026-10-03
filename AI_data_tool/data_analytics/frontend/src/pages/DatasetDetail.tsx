@@ -4,6 +4,7 @@ import AggregatesPanel from '../components/dataset/AggregatesPanel'
 import ColumnMeaningPanel from '../components/dataset/ColumnMeaningPanel'
 import AlertsPanel from '../components/dataset/AlertsPanel'
 import PredictionModelsPanel from '../components/dataset/PredictionModelsPanel'
+import { PipelineAlertsForm, PipelineHealthLine, usePipelineHealth } from '../components/dataset/PipelineHealth'
 import StatisticsPanel from '../components/StatisticsPanel'
 import DatasetSensitivity from '../components/DatasetSensitivity'
 import NotebookSnippet from '../components/NotebookSnippet'
@@ -629,6 +630,11 @@ export default function DatasetDetail() {
     runInfluencers(target.name)
   }, [ds, runInfluencers])
 
+  // Pipeline phase 2: re-read on every finished refresh (the stamp moves),
+  // so a fixed source clears the warning without a page reload.
+  const [pipelineHealth, setPipelineHealth] = usePipelineHealth(
+    badId || !ds || ds.mode === 'directquery' ? null : dsId, ds?.last_refreshed_at)
+
   if (badId) return <NotFound />
   if (loadError) {
     return <LoadError what="this dataset" error={loadError} onRetry={loadDataset} />
@@ -707,6 +713,7 @@ export default function DatasetDetail() {
                 {tr('dataset.lastRefreshed', { when: refreshedWhen(ds.last_refreshed_at) })}
               </div>
             )}
+            <PipelineHealthLine health={pipelineHealth} />
             <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
               <button onClick={() => setShowRefreshMenu(v => !v)} disabled={refreshing || refreshByOther}
                 className="btn btn-ghost btn-sm">
@@ -785,6 +792,9 @@ export default function DatasetDetail() {
                     </div>
                   ) : null}
                 </div>
+                {pipelineHealth?.can_edit && (
+                  <PipelineAlertsForm datasetId={ds.id} health={pipelineHealth} onSaved={setPipelineHealth} />
+                )}
               </div>
             )}
           </div>

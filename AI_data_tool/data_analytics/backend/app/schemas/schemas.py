@@ -92,6 +92,13 @@ class RefreshScheduleUpdate(BaseModel):
     interval_minutes: Optional[int] = None
 
 
+class PipelineWatchUpdate(BaseModel):
+    """Pipeline plan, phase 2: a dataset's freshness target and who besides
+    its owner hears about failures. Fields not sent are left as they are."""
+    freshness_hours: Optional[int] = None
+    recipients: Optional[list[str]] = None
+
+
 class DatasetRefreshRequest(BaseModel):
     """F3: manual refresh trigger. `mode` picks full reload vs. watermark-driven
     incremental append; `cursor_column` is optional — when omitted, an already

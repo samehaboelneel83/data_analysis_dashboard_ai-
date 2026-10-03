@@ -42,8 +42,9 @@ class Dataset(Base):
     # one-way -- see QueryBuilderDialog).
     query_model         = Column(JSON, nullable=True)
     mode                = Column(String(20), nullable=False, default="import", server_default="import")
-    # Scheduled refresh. NULL means unscheduled; last_refreshed_at is advanced even on
-    # a failed attempt so a broken source retries on its schedule, not every tick.
+    # Scheduled refresh. NULL means unscheduled. last_refreshed_at is when the data
+    # last actually changed: a failed attempt leaves it (pipeline plan, phase 1);
+    # backoff in ScheduleFailure, not this stamp, spaces out the retries.
     refresh_interval_minutes = Column(Integer, nullable=True)
     last_refreshed_at        = Column(DateTime(timezone=True), nullable=True)
     # E07: SHA-256 of the file as uploaded, so a second upload of the same bytes
@@ -2066,6 +2067,41 @@ class RefreshRun(Base):
     duration_ms = Column(Integer, nullable=True)
     error      = Column(Text, nullable=True)
     error_code = Column(String(40), nullable=True)
+
+
+class PipelineWatch(Base):
+    """Who hears about a dataset's or dataflow's refresh health, and when.
+
+    Pipeline plan, phase 2 (2026-10-03). The owner (the item's creator, or the
+    org admins when there is none) always gets an in-app notice; `recipients`
+    adds emails and https webhooks, the same one list report schedules use.
+    `freshness_hours` is the age past which the data counts as stale.
+
+    `state` remembers what was last SAID, so one failure streak is one notice
+    and one recovery notice -- never one per retry. A new table, not columns
+    on datasets and dataflows, for the reason ScheduleFailure gives: create_all
+    provisions a table on every install, while a column needs an ALTER. A row
+    exists only once something was configured or went wrong.
+    """
+    __tablename__ = "pipeline_watches"
+    __table_args__ = (UniqueConstraint("kind", "item_id", name="uq_pipeline_watch_item"),)
+    id         = Column(Integer, primary_key=True)
+    org_id     = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"),
+                        nullable=True, index=True)
+    #: dataset | dataflow
+    kind       = Column(String(20), nullable=False)
+    item_id    = Column(Integer, nullable=False)
+    #: Data older than this many hours is stale. NULL: no freshness target.
+    freshness_hours = Column(Integer, nullable=True)
+    #: Emails and https:// webhook URLs told as well as the owner.
+    recipients = Column(JSON, default=list)
+    #: ok | failing -- the last state announced.
+    state      = Column(String(20), nullable=False, default="ok")
+    state_since = Column(DateTime(timezone=True), nullable=True)
+    #: When staleness was announced; cleared by the next successful refresh.
+    stale_alerted_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow,
+                        onupdate=datetime.utcnow)
 
 
 class WorkspaceFolderGrant(Base):

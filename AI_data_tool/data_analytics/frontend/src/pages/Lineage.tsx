@@ -244,8 +244,44 @@ export default function Lineage() {
     </span>
   )
 
+  // Pipeline phase 2: which datasets are unhealthy, and -- through joins and
+  // snapshot edges -- which datasets and reports that reaches, so a failed
+  // refresh shows every dashboard it is quietly holding back.
+  const reach = (() => {
+    const failing = new Set<number>(), stale = new Set<number>()
+    for (const d of graph?.datasets ?? []) {
+      if (d.health === 'failing') failing.add(d.id)
+      else if (d.health === 'stale') stale.add(d.id)
+    }
+    const spread = (seed: Set<number>) => {
+      const out = new Set(seed)
+      let grew = true
+      while (grew) {
+        grew = false
+        for (const d of graph?.datasets ?? []) {
+          if (out.has(d.id)) continue
+          if ([...d.joins, ...(d.derived_from ?? [])].some(x => out.has(x))) { out.add(d.id); grew = true }
+        }
+      }
+      return out
+    }
+    return { failing: spread(failing), stale: spread(stale) }
+  })()
+
+  const healthBadge = (d: LineageGraph['datasets'][number]) =>
+    d.health === 'failing' ? badge('!', t('lineage.failing'), 'var(--negative, #e2606c)')
+      : d.health === 'stale' ? badge('!', t('lineage.staleTarget'), 'var(--warning)')
+        : null
+
+  const reportBadges = (r: LineageGraph['reports'][number]) =>
+    r.dataset_ids.some(id => reach.failing.has(id)) ? [badge('!', t('lineage.usesFailing'), 'var(--negative, #e2606c)')]
+      : r.dataset_ids.some(id => reach.stale.has(id)) ? [badge('!', t('lineage.usesStale'), 'var(--warning)')]
+        : undefined
+
   const etlBadges = (d: LineageGraph['datasets'][number]) => {
     const out: React.ReactNode[] = []
+    const hb = healthBadge(d)
+    if (hb) out.push(hb)
     if (d.extraction_kind) out.push(badge('E', `Extracted from: ${d.extraction_kind}`))
     const t = d.transform ?? { count: 0, kinds: [] }
     if (t.count > 0) {
@@ -320,7 +356,7 @@ export default function Lineage() {
         {col(t('lineage.reports'), graph.reports.length
           ? graph.reports.map(r =>
               node(`rep:${r.id}`, r.name, (r.dataset_ids.length === 1 ? t('lineage.readsOne') : t('lineage.readsN', { n: r.dataset_ids.length })),
-                `/reports/${r.id}`))
+                `/reports/${r.id}`, reportBadges(r)))
           : <p style={{ fontSize: 12, color: 'var(--muted)' }}>{t('lineage.noReports')}</p>)}
       </div>
     </div>

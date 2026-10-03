@@ -71,6 +71,7 @@ async def finish_run(session, run_id: int | None, status: str, *, rows: int | No
             await session.execute(delete(RefreshRun).where(
                 RefreshRun.kind == run.kind, RefreshRun.item_id == run.item_id,
                 RefreshRun.id < min(keep_ids)))
+        kind, item_id = run.kind, run.item_id
         await session.commit()
     except Exception as e:  # noqa: BLE001 -- bookkeeping must not break the run
         log.warning("Could not record the end of refresh run %s: %s", run_id, e)
@@ -78,6 +79,11 @@ async def finish_run(session, run_id: int | None, status: str, *, rows: int | No
             await session.rollback()
         except Exception:  # noqa: BLE001
             pass
+        return
+    # Phase 2: a run that changes the item's state -- first failure, or the
+    # success that ends a failure -- is announced. Never raises.
+    from .pipeline_alerts import on_run_finished
+    await on_run_finished(session, kind, item_id, status, error)
 
 
 async def reap_running(session) -> int:
@@ -94,3 +100,18 @@ async def reap_running(session) -> int:
     if rows:
         await session.commit()
     return len(rows)
+
+
+async def latest_runs(session, kind: str, ids) -> dict:
+    """The newest RefreshRun per item, by item id, in one query."""
+    from sqlalchemy import func, select
+    from ..models.models import RefreshRun
+    ids = list(ids or [])
+    if not ids:
+        return {}
+    newest = (select(RefreshRun.item_id, func.max(RefreshRun.id).label("rid"))
+              .where(RefreshRun.kind == kind, RefreshRun.item_id.in_(ids))
+              .group_by(RefreshRun.item_id).subquery())
+    rows = (await session.execute(
+        select(RefreshRun).join(newest, RefreshRun.id == newest.c.rid))).scalars().all()
+    return {r.item_id: r for r in rows}

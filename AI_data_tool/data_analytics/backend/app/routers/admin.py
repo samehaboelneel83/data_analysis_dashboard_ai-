@@ -563,14 +563,8 @@ async def list_admin_audit(
 
 async def _latest_runs(db: AsyncSession, kind: str, ids: list[int]) -> dict:
     """The newest RefreshRun per item, by item id."""
-    from ..models.models import RefreshRun
-    if not ids:
-        return {}
-    newest = (select(RefreshRun.item_id, func.max(RefreshRun.id).label("rid"))
-              .where(RefreshRun.kind == kind, RefreshRun.item_id.in_(ids))
-              .group_by(RefreshRun.item_id).subquery())
-    rows = (await db.execute(select(RefreshRun).join(newest, RefreshRun.id == newest.c.rid))).scalars().all()
-    return {r.item_id: r for r in rows}
+    from ..services.refresh_runs import latest_runs
+    return await latest_runs(db, kind, ids)
 
 
 async def _next_retries(db: AsyncSession, kind: str, ids: list[int]) -> dict:
