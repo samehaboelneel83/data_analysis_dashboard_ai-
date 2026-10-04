@@ -952,16 +952,13 @@ async def _suggest_dashboards(db, run: AgentRun, started: float, source, user,
     # is a fact about permissions, not about the job the dashboard serves --
     # "i am a department manager" was designed for a Platform Admin until the
     # request itself was read for this.
-    role_name = (await stated_persona(question, client)
-                 or getattr(getattr(user, "role", None), "name", None)
-                 or "analyst")
+    #: Read who they are while the database is measured: the two do not
+    #: depend on each other, and together they were a minute before the brief.
+    persona_task = asyncio.create_task(stated_persona(question, client))
+    role_fallback = (getattr(getattr(user, "role", None), "name", None) or "analyst")
     catalog = await load_catalog(db, source.id)
     joins = await load_joins(db, source.id)
     data_range = await load_data_range(db, source.id)
-    if not catalog:
-        return _finish(run, started, status="failed",
-                       error="no catalog for this source — run a metadata sync first")
-
     cfg = dict(source.config)
     cfg["type"] = source.type
 
@@ -987,58 +984,127 @@ async def _suggest_dashboards(db, run: AgentRun, started: float, source, user,
         shapes[sql] = {"columns": got.get("columns") or [], "row": rows[0]}
         return None
 
-    proposals, why = await suggest_dashboards(catalog, role_name, question,
-                                              count=3, probe=probe, joins=joins,
-                                              data_range=data_range)
+    # The analyst's way (services/source_brief.py): measured facts first, a
+    # brief of who this person is and what they decide, dashboards that answer
+    # the brief, and every chart judged on the rows it will draw. The old path
+    # below only checked that a query returned a row -- on the food database
+    # that offered "highest risk governorate = max(governorate)" and prices
+    # averaged across kilos, eggs and bottles of oil (live, 2026-10-03).
+    from ..llm import get_client as _get_llm
+    from ..source_brief import design, load_catalog_facts
+    from .. import connectors as _connectors
+    _family = _connectors.sql_family_of(cfg) or cfg["type"]
+    #: One designer query may take this long; a query that takes longer is
+    #: refused like any other, and the model is asked for a cheaper one.
+    QUERY_DEADLINE_S = 90
+
+    async def run_query(sql: str, limit: int) -> dict:
+        """The designer's queries, always bounded: rows by the dialect's own
+        limit clause, time by a deadline. There is no unbounded fallback: the
+        query "as written" pulled an Olist join of millions of rows into
+        pandas and froze the server for minutes (live, 2026-10-03)."""
+        from ..connections import preview_table
+        from ..source_brief import wrap_limit
+        return await asyncio.wait_for(
+            asyncio.to_thread(preview_table, cfg, None, wrap_limit(sql, limit, _family), limit),
+            timeout=QUERY_DEADLINE_S)
+
+    # Reach the database before spending minutes of model time on it: the
+    # Moodle connection points at a file that no longer exists, and the
+    # reviewer pointed at a host that is gone (live, 2026-10-03).
+    try:
+        await run_query("SELECT 1 AS ok", 1)
+    except Exception as exc:                              # noqa: BLE001
+        reason = "it did not answer in time" if isinstance(exc, (TimeoutError, asyncio.TimeoutError)) \
+            else str(exc).splitlines()[0][:300]
+        persona_task.cancel()
+        return _finish(run, started, status="failed",
+                       error=f"This connection cannot be reached right now ({reason}). "
+                             f"Fix the connection settings, then ask again.")
+    # Reachable but never described: the catalog comes from a metadata sync.
+    # Checked after the ping, so an unreachable host is reported as that
+    # rather than as a missing sync (QA Conn 1125, 2026-10-03).
+    if not catalog:
+        persona_task.cancel()
+        return _finish(run, started, status="failed",
+                       error="no catalog for this source — run a metadata sync first")
+    facts_catalog = await load_catalog_facts(db, source.id)
+    from ..metadata.profile import quote_identifier
+    from ..source_brief import enrich_facts
+    _quote = lambda name: quote_identifier(name, _family)    # noqa: E731
+    _t0 = time.monotonic()
+    said, _ = await asyncio.gather(persona_task, enrich_facts(facts_catalog, run_query, _quote),
+                                   return_exceptions=True)
+    facts_s = round(time.monotonic() - _t0, 1)
+    if isinstance(_, BaseException):
+        log.warning("measuring the catalog failed: %r", _)
+    role_name = (said if isinstance(said, str) and said else None) or role_fallback
+    brief = None
+    try:
+        proposals, brief, why = await design(
+            client=client or _get_llm(), catalog=facts_catalog, persona=role_name,
+            request=question, joins=joins, run_query=run_query, count=3,
+            quote=_quote, enriched=True)
+        if isinstance(brief, dict) and isinstance(brief.get("_timings"), dict):
+            brief["_timings"]["facts_s"] = facts_s
+    except Exception as exc:                              # noqa: BLE001
+        log.exception("brief-first designer failed")
+        proposals, why = [], f"the designer failed ({type(exc).__name__})"
+    if not proposals and brief is None:
+        # No brief at all (model unreachable or unusable): the older designer,
+        # which needs less of the model, rather than nothing.
+        proposals, why = await suggest_dashboards(catalog, role_name, question,
+                                                  count=3, probe=probe, joins=joins,
+                                                  data_range=data_range)
     if not proposals:
+        if brief:
+            run.presentation = {"kind": "dashboard_proposals", "source_id": source.id,
+                                "for_role": role_name, "proposals": [], "brief": brief}
         return _finish(run, started, status="failed",
                        error=why or "no dashboard could be designed for this data")
 
-    # Every proposal is valid by here. This second pass makes each chart READABLE
-    # -- a limit on the bar chart of 400 courses, a sort on the ranking table, a
-    # monthly bucket on the line chart of raw timestamps -- and attaches the
-    # reason to each widget so the person can disagree with it.
-    from ..ingest import detect_types
-    from ..widget_review import review_attributes
+    if brief is None:
+        # Older designer only: tune the drawing settings it left unset.
+        from ..ingest import detect_types
+        from ..widget_review import review_attributes
 
-    import pandas as pd
+        import pandas as pd
 
-    async def _review(proposal: dict) -> None:
-        shape = shapes.get(proposal["sql"])
-        if not shape or not shape["columns"]:
-            log.warning("no probed shape for %r (probed %d queries) -- skipping "
-                        "attribute review", proposal.get("title"), len(shapes))
-            return
-        try:
-            frame = pd.DataFrame([shape["row"]], columns=shape["columns"])
-            column_types = detect_types(frame)
-            sample = dict(zip(shape["columns"], shape["row"]))
-            proposal["widgets"] = await review_attributes(
-                proposal["widgets"], column_types, sample)
-        except Exception:                                 # noqa: BLE001
-            # An improvement, never a requirement -- a proposal with plain
-            # attributes is still a proposal. But LOGGED: a silent `continue`
-            # here cost an hour of guessing why every widget came back untuned.
-            log.exception("attribute review failed for %r", proposal.get("title"))
+        async def _review(proposal: dict) -> None:
+            shape = shapes.get(proposal["sql"])
+            if not shape or not shape["columns"]:
+                return
+            try:
+                frame = pd.DataFrame([shape["row"]], columns=shape["columns"])
+                proposal["widgets"] = await review_attributes(
+                    proposal["widgets"], detect_types(frame),
+                    dict(zip(shape["columns"], shape["row"])))
+            except Exception:                             # noqa: BLE001
+                log.exception("attribute review failed for %r", proposal.get("title"))
 
-    # Concurrently, not one after another. Three proposals reviewed in sequence
-    # pushed a request that took 25s past six minutes, which is not a feature
-    # anybody waits for. The model endpoint already bounds its own concurrency
-    # (llm_max_concurrency), so this queues there rather than piling on.
-    await asyncio.gather(*(_review(p) for p in proposals))
+        await asyncio.gather(*(_review(p) for p in proposals))
 
     run.presentation = {"kind": "dashboard_proposals",
                         "source_id": source.id,
                         "for_role": role_name,
-                        "proposals": proposals}
+                        "proposals": proposals,
+                        "brief": brief,
+                        # What was designed but failed its check, and why.
+                        "not_built": why or None,
+                        # Where the minutes went: facts, brief, each dashboard.
+                        "timings": (brief or {}).get("_timings")}
     one = len(proposals) == 1
-    # "a Instructor" reads as a bug in the very first sentence the feature shows.
-    article = "an" if role_name[:1].lower() in "aeiou" else "a"
-    return _finish(run, started, status="ok",
-                   answer=f"Here {'is' if one else 'are'} {len(proposals)} "
-                          f"{'dashboard' if one else 'dashboards'} I would build "
-                          f"for {article} {role_name} from this data. "
-                          f"Pick one to create it.")
+    if brief and str(brief.get("language") or "").lower().startswith("ar"):
+        answer = (f"قرأت البيانات وفكرت في قراراتك أولاً، ثم صممت "
+                  f"{'لوحة واحدة' if one else f'{len(proposals)} لوحات'} لـ{role_name}. "
+                  f"كل رسم يجيب عن سؤال محدد، واختُبر على البيانات الفعلية. اختر لوحة لإنشائها.")
+    else:
+        article = "an" if role_name[:1].lower() in "aeiou" else "a"
+        answer = (f"Here {'is' if one else 'are'} {len(proposals)} "
+                  f"{'dashboard' if one else 'dashboards'} I would build "
+                  f"for {article} {role_name} from this data. Each chart answers one of the "
+                  f"questions above and was checked on the real rows. Pick one to create it.")
+    return _finish(run, started, status="ok", answer=answer)
 
 
 def _finish(run: AgentRun, started: float, *, status: str,
@@ -1115,3 +1181,4 @@ def _analysis_answer(analysed: dict) -> str:
                     f"{factors[0]['column']}. These factors move with the "
                     f"outcome; that is not proof they cause it.")
     return "Here is what the analysis found."
+

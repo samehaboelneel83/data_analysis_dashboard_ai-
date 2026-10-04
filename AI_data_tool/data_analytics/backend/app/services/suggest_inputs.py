@@ -239,5 +239,6 @@ async def panel(inputs: SuggestInputs, goal: str | None, size: int,
             "derived": used_by(chosen, fields),
             "reason": out["reason"], "question": None, "profile": inputs.profile,
             "source": "panel", "panel": out["panel"], "refused": out.get("refused") or [],
+            "questions": out.get("questions"),
             "facts": [f["text"] for f in facts["facts"]][:40],
             "measured": inputs.measured}
