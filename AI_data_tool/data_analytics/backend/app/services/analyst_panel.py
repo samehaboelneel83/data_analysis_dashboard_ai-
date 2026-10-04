@@ -91,6 +91,20 @@ LENSES: dict[str, dict] = {
         "needs": "series",
     },
 }
+# Added after the food review (2026-10-03): asked by "وزير التموين" (the
+# Minister of Supply), every lens drew the shape of the data -- "rows by
+# governorate", poverty against itself, a histogram of outliers -- and not one
+# chart answered a question a minister acts on. When the person says who they
+# are, their questions are written first (`person_questions`) and this lens
+# answers them, on its own page, ahead of the shape-driven lenses.
+DECISIONS = {
+    "title": "Your questions",
+    "brief": "the questions this person asked themselves, answered one by one: for each "
+             "question below, the ONE visual that answers it best (two when a level and its "
+             "change over time are both needed). A visual that answers none of them is not "
+             "proposed. Say the answer's subject in the title in the person's language",
+    "needs": "goal",
+}
 SUMMARY = {"key": "summary", "title": "Headline numbers"}
 DETAIL = {"key": "detail", "title": "Detail",
           "brief": "The rows behind the charts, to look up one record."}
@@ -259,14 +273,83 @@ def choose_lenses(profile: dict, facts: list[dict]) -> list[str]:
     return [k for k in order if has[LENSES[k]["needs"]]]
 
 
+QUESTIONS_SCHEMA = {
+    "type": "object",
+    "required": ["language", "questions"],
+    "properties": {
+        "language": {"type": "string"},
+        "questions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["question", "decision", "columns"],
+                "properties": {"question": {"type": "string"}, "decision": {"type": "string"},
+                               "columns": {"type": "array", "items": {"type": "string"}}},
+            },
+        },
+        "cannot_answer": {"type": "array", "items": {"type": "string"}},
+    },
+}
+
+QUESTIONS_SYSTEM = """You are a senior analyst. Before any chart, write the 5 \
+to 8 questions whose answers would change a decision this person takes, and \
+that THIS dataset can answer with its columns. For each: the question, the \
+decision it informs, and the exact columns it needs. Prefer questions that \
+reveal what the person does not already know: what changed most, where most \
+people or money are, what is out of line, what moves together. Ask about the \
+world the data describes, never about the data itself (row counts, codes, \
+quality). Read the facts: a column with one value, mostly empty, or in mixed \
+units is not compared across rows. Also list what this person would want \
+but this data cannot answer. Write in the language of the person's own \
+words (`language` = its ISO code)."""
+
+
+async def person_questions(client, profile: dict, facts_text: str, goal: str,
+                           knowledge=None, fresh: bool = False) -> dict | None:
+    """The questions that matter to the person who described themselves, or
+    None. One model call, kept and reused like the lens answers -- an answer
+    with no questions is kept too, so a plain re-run asks nothing new; "Suggest
+    again" (`fresh`) asks afresh, sampling, like the lenses."""
+    from .dataset_profile import describe_for_prompt
+    messages = [{"role": "system", "content": QUESTIONS_SYSTEM},
+                {"role": "user", "content": f'The person: "{goal.strip()}"\n\n'
+                                            f"THE DATA\n{describe_for_prompt(profile, knowledge)}\n\n"
+                                            f"MEASURED FACTS (exact)\n{facts_text}"}]
+    key = lens_cache_key(client, messages)
+    hit = None if fresh else _cache_get(key)
+    if hit is not None:
+        return hit if hit.get("questions") else None
+    got = await client.complete_json(messages, QUESTIONS_SCHEMA, max_tokens=2000, enforce=True,
+                                     temperature=FRESH_TEMPERATURE if fresh else 0.0,
+                                     seed=_fresh_seed() if fresh else LENS_SEED)
+    got = got if isinstance(got, dict) and isinstance(got.get("questions"), list) \
+        and got["questions"] else {"questions": []}
+    _cache_set(key, got)
+    return got if got["questions"] else None
+
+
+def questions_text(questions: dict | None) -> str:
+    if not questions:
+        return ""
+    lines = [f"{i + 1}. {q.get('question')} (decision: {q.get('decision')}; columns: "
+             f"{', '.join(q.get('columns') or [])})"
+             for i, q in enumerate(questions.get("questions") or []) if isinstance(q, dict)]
+    no = [f"- {x}" for x in questions.get("cannot_answer") or []]
+    return ("THIS PERSON'S QUESTIONS (a visual that answers one of them is worth value 5; one "
+            "that answers none of them is worth at most 2)\n" + "\n".join(lines)
+            + ("\nTHE DATA CANNOT ANSWER (do not try)\n" + "\n".join(no) if no else "")
+            + f"\nWrite titles in the language of the person's words "
+              f"({questions.get('language') or 'en'}).\n\n")
+
+
 def lens_messages(lens: str, profile: dict, facts_text: str, goal: str | None,
-                  knowledge=None, n: int = PER_LENS) -> list[dict]:
+                  knowledge=None, n: int = PER_LENS, questions: dict | None = None) -> list[dict]:
     from .dataset_profile import describe_for_prompt
     from .suggest_dataset_dashboard import _menu_text
-    spec = LENSES[lens]
+    spec = DECISIONS if lens == "decisions" else LENSES[lens]
     who = (f'The person this is for describes themselves: "{goal.strip()}".\n'
            if goal and goal.strip() else "")
-    user = (f"{who}THE DATA\n{describe_for_prompt(profile, knowledge)}\n\n"
+    user = (f"{who}{questions_text(questions)}THE DATA\n{describe_for_prompt(profile, knowledge)}\n\n"
             f"MEASURED FACTS (exact)\n{facts_text}\n\n"
             f"WIDGETS YOU MAY USE\n{_menu_text(profile)}\n\n"
             f"Return {n} widgets for the {spec['title']} lens.")
@@ -1059,7 +1142,7 @@ _OVERVIEWS = ("correlation_matrix", "parallel_coordinates", "card")
 
 
 def select(candidates: list[dict], size: int, sections: list[str],
-           summary_cap: int = 4) -> tuple[list[dict], dict]:
+           summary_cap: int = 4, quota: dict | None = None) -> tuple[list[dict], dict]:
     """Greedy pick by value x evidence x novelty, under per-type, per-section
     and flat-result quotas. Returns (chosen, stats)."""
     merged: dict[tuple, dict] = {}
@@ -1086,6 +1169,9 @@ def select(candidates: list[dict], size: int, sections: list[str],
     # A wider headline page (summary_cap above 4: one row per period, a total
     # and a rate per measure) also grows faster with the size asked for.
     per_section["summary"] = min(summary_cap, max(2, size // (8 if summary_cap <= 4 else 5)))
+    for sec, n in (quota or {}).items():
+        if sec in per_section:
+            per_section[sec] = max(per_section[sec], n)
     max_flat = max(1, size // 12)
     # Headline numbers: one per measure and aggregation. Three "headcount"
     # tiles (all staff, then two filtered) opened the live HR page.
@@ -1747,6 +1833,16 @@ async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
     dates = {c["name"] for c in profile.get("columns", []) if c.get("role") == "datetime"}
     groups = {c["name"] for c in profile.get("columns", []) if c.get("role") == "categorical"
               and 2 <= (c.get("distinct") or 0) <= 4 and not c.get("is_identifier")}
+    questions = None
+    if client is not None and goal and goal.strip():
+        await tell("questions")
+        try:
+            questions = await person_questions(client, profile, facts.get("text") or "", goal, knowledge,
+                                               fresh=fresh)
+        except Exception as exc:                             # noqa: BLE001
+            log.warning("person questions failed: %s", exc)
+        if questions:
+            lenses = ["decisions"] + lenses
     if client is not None and lenses:
         await tell("proposing", lenses=len(lenses))
 
@@ -1754,7 +1850,9 @@ async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
             # Greedy and seeded: the same data and question should get the
             # same panel. At 0.2 the coverage of one dataset moved 16 points
             # between identical runs (five-dataset review, 2026-10-02).
-            messages = lens_messages(lens, profile, facts.get("text") or "", goal, knowledge, n=per_lens)
+            messages = lens_messages(lens, profile, facts.get("text") or "", goal, knowledge,
+                                     n=(len(questions.get("questions") or []) + 4 if lens == "decisions"
+                                        else per_lens), questions=questions)
             # Even greedy and seeded, the local model server changed chart
             # titles between identical runs (batching): the answer to the
             # same question on the same data and model is kept and reused.
@@ -1796,6 +1894,10 @@ async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
                 # proposed goes where its subject is.
                 if lens == "equity" and section not in ("summary", "time") and groups & _columns(cfg):
                     section = "equity"
+                # The person's own questions stay together, on the first page
+                # after the headline numbers, whatever kind of chart answers them.
+                if lens == "decisions" and section != "summary":
+                    section = "decisions"
                 # The exceptions lens keeps its rankings and pairs on its own
                 # page; a plain trend it proposed goes to Over time.
                 if lens == "exceptions" and (
@@ -1886,7 +1988,9 @@ async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
     # A series has a headline per total (orders, revenue, cancellations...),
     # not the four a categorical dataset's summary page holds.
     chosen, stats = select(alive, size, sections,
-                           summary_cap=9 if series else 4)
+                           summary_cap=9 if series else 4,
+                           quota={"decisions": len((questions or {}).get("questions") or []) + 2}
+                           if questions else None)
 
     # 4. the detail page: the rows themselves, drawn like everything else
     from .insights import order_event_dates
@@ -1927,7 +2031,7 @@ async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
         if not widgets:
             continue
         spec = SUMMARY if sec == "summary" else DETAIL if sec == "detail" \
-            else QUALITY if sec == "quality" else LENSES[sec]
+            else QUALITY if sec == "quality" else DECISIONS if sec == "decisions" else LENSES[sec]
         # A page that splits by nothing filterable (a trend, a model) still
         # takes the dataset's own: "pay over time, for Sales" is a question.
         # The quality page is about the rows as they are: no filters.
@@ -1962,6 +2066,9 @@ async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
                   "left_out": dict(Counter(refusal_code(r.get("why")) for r in refused)),
                   "not_picked": max(0, stats.get("unique", len(alive)) - len(chosen))},
         "reason": "; ".join(rejected[:6]),
+        # The person's questions the "Your questions" page answers, when they
+        # described themselves -- shown so they can disagree with them.
+        "questions": questions,
         # Every refused idea with the config it arrived in: what the next
         # normaliser or prompt rule should be built from.
         "refused": [{**r, "code": refusal_code(r.get("why"))} for r in refused[:60]],

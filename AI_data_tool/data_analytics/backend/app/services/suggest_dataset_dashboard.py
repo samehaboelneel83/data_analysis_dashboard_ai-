@@ -393,7 +393,7 @@ you care about, rather than writing a condition into a field."""
 
 
 def build_messages(profile: dict, goal: str | None, count: int,
-                   knowledge=None, facts: str | None = None) -> list[dict]:
+                   knowledge=None, facts: str | None = None, questions: str = "") -> list[dict]:
     """The full exchange sent to the model.
 
     `knowledge` (a `services.knowledge.DatasetKnowledge`) is what turns this from
@@ -403,13 +403,20 @@ def build_messages(profile: dict, goal: str | None, count: int,
     all anything knows about it.
     """
     who = (goal or "").strip()
+    # The person's decisions first, inside the same call (no extra round
+    # trip): asked by a minister of supply, the designer offered "Number of
+    # rows by total population" (food review, 2026-10-03).
     person = ('The person asking describes themselves like this, in their own words:\n'
-              '"""\n{}\n"""\n'.format(who) if who else
+              '"""\n{}\n"""\n'
+              'Before designing, work out the 5 to 8 questions whose answers would change a '
+              'decision THIS person takes, and that these columns can answer. Every widget '
+              'answers one of them, and its `why` names it. Never a chart of row counts or of '
+              'one number against itself. Write titles in the language of their words.\n'.format(who) if who else
               "The person asking has not described their role. Propose dashboards "
               "that would suit whoever owns this data, and say who you think that is "
               "in each rationale.\n")
     user = """{person}
-THE DATA
+{questions}THE DATA
 {data}
 {facts}
 WIDGETS YOU MAY USE
@@ -419,7 +426,7 @@ Propose {count} different dashboards. Make them genuinely different from each \
 other -- different questions, not the same page reordered. Each needs a title, a \
 one-sentence rationale naming who it is for and what it answers, and 4 to 8 \
 widgets. Give every widget a `why`: the question it answers, in one short \
-sentence.""".format(person=person, data=describe_for_prompt(profile, knowledge),
+sentence.""".format(person=person, questions=questions, data=describe_for_prompt(profile, knowledge),
                     menu=_menu_text(profile), count=count,
                     facts=("\nMEASURED FACTS (exact, computed on the rows this person may see)\n"
                            + facts + "\n\nBuild on these facts. Prefer charts that show a "

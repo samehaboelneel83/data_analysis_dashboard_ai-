@@ -565,8 +565,11 @@ async def load_joins(db, source_id: int) -> list[dict]:
             continue
         left, right = names.get(r.from_object_id), names.get(r.to_object_id)
         if left and right:
+            # Cardinality travels too: the designer's checks use it to see a
+            # join that repeats rows (orders x payments) before they are counted.
             out.append({"from_table": left, "from_column": r.from_column,
-                        "to_table": right, "to_column": r.to_column})
+                        "to_table": right, "to_column": r.to_column,
+                        "cardinality": r.cardinality})
     return out
 
 

@@ -476,7 +476,8 @@ class TestThePanelMode:
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["source"] == "panel" and body["panel"]["size"] == 12
-        assert len(lens.seen) == len(body["panel"]["lenses"]) >= 1
+        # One call per lens, plus the person's questions first (a goal was given).
+        assert len(lens.seen) == len(body["panel"]["lenses"]) + 1 >= 2
         widgets = [w for p in body["proposals"] for w in p["widgets"]]
         # the same idea from every lens is offered once, with what it showed
         assert [w["title"] for w in widgets].count("Average wait by department") == 1
