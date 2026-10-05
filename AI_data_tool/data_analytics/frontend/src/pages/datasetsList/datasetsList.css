@@ -57,8 +57,10 @@
 }
 .dl-dsl__facet select {
   border: 0; background: transparent; color: var(--text); font-weight: 600; font-size: 12.5px;
-  padding: 0; width: auto; cursor: pointer;
+  padding: 0; cursor: pointer; flex: none; inline-size: auto !important; min-inline-size: 0;
 }
+/* The two facet pickers stay compact; the sort keeps its full label. */
+.dl-dsl__toolbar > .dl-dsl__facet select { max-inline-size: 104px; }
 .dl-dsl__toggle[aria-pressed=true] {
   background: var(--mc-accent-soft, var(--surface2)); border-color: var(--mc-accent-line, var(--accent));
   color: var(--mc-accent-ink, var(--accent)); font-weight: 600;
@@ -67,8 +69,8 @@
 .dl-dsl__toolbar-end { margin-inline-start: auto; display: inline-flex; align-items: center; gap: 10px; }
 
 /* Body: table + preview */
-.dl-dsl__body { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
-.dl-dsl__main { min-height: 420px; display: flex; flex-direction: column; }
+.dl-dsl__body { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
+.dl-dsl__main { min-block-size: max(420px, calc(100vh - 330px)); display: flex; flex-direction: column; }
 .dl-dsl__main .dl-pager { margin-top: auto; }
 .dl-dsl__row { cursor: pointer; }
 .dl-dsl__row[data-previewed] > td { background: var(--mc-accent-soft, var(--surface2)); }
@@ -76,7 +78,14 @@
 [dir=rtl] .dl-dsl__row[data-previewed] > td:first-child { box-shadow: inset -3px 0 0 var(--mc-accent, var(--accent)); }
 .dl-dsl__source { white-space: nowrap; color: var(--text); }
 .dl-dsl__source svg { vertical-align: -2px; color: var(--muted); margin-inline-end: 6px; }
-.dl-dsl__fresh { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+/* !important: a table-cell rule elsewhere resets white-space on its children. */
+.dl-dsl__fresh { white-space: nowrap !important; }
+.dl-dsl__fresh .dl-dsl__dot { margin-inline-end: 6px; vertical-align: 1px; }
+/* Neutral text with a toned dot for the ordinary case; only stale, failing
+   and live take the colour into the words. */
+.dl-dsl__fresh.dl-fresh--ok { color: var(--text); font-weight: 400; }
+.dl-dsl__fresh.dl-fresh--warn { color: var(--mc-warning, #a46b16); font-weight: 600; }
+.dl-dsl__fresh.dl-fresh--bad { color: var(--mc-danger, #b42318); font-weight: 600; }
 .dl-fresh--live { color: var(--mc-accent-ink, var(--accent)); font-weight: 600; }
 
 /* Preview panel */
@@ -85,7 +94,7 @@
   padding: 16px; display: flex; flex-direction: column; gap: 14px; position: sticky; top: 12px;
 }
 .dl-dsl__preview--empty {
-  min-height: 420px; align-items: center; justify-content: center; color: var(--muted); font-size: 13px;
+  min-block-size: max(420px, calc(100vh - 330px)); align-items: center; justify-content: center; color: var(--muted); font-size: 13px;
 }
 .dl-dsl__eyebrow { font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 .dl-dsl__pv-title { font-size: 17px; font-weight: 700; margin: -8px 0 0; color: var(--text); }
@@ -140,7 +149,7 @@
 .dl-dsl__sk--wide { width: 90px; flex: none; }
 .dl-dsl__firstrun {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
-  min-height: 560px; padding: 32px 16px; text-align: center; border-style: dashed;
+  min-block-size: max(560px, calc(100vh - 200px)); padding: 32px 16px; text-align: center; border-style: dashed;
 }
 .dl-dsl__firstrun-icon {
   display: inline-flex; align-items: center; justify-content: center; width: 52px; height: 52px;
@@ -164,65 +173,24 @@
   .dl-dsl__search input[type=search] { min-width: 0; width: 100%; }
 }
 
-/* Fit the table beside the preview: one-line descriptions and freshness,
-   compact facets, cards that reach the bottom of the window. The phone rule
-   in index.css (two-line descriptions under 700px) still applies there. */
-@media (min-width: 700px) {
-  .dl-dsl .dl-cell-sub { max-inline-size: 240px; }
-  .dl-dsl__fresh { max-inline-size: 170px; overflow: hidden; text-overflow: ellipsis; display: inline-block; vertical-align: middle; }
-  .dl-dsl__fresh .dl-dsl__dot { margin-inline-end: 6px; vertical-align: 1px; }
-}
-.dl-dsl__facet select { flex: none; inline-size: auto !important; min-inline-size: 0; max-inline-size: 170px; }
-.dl-dsl__main, .dl-dsl__preview--empty { min-block-size: max(420px, calc(100vh - 330px)); }
-.dl-dsl__firstrun { min-block-size: max(560px, calc(100vh - 200px)); }
-.dl-dsl .dl-table td, .dl-dsl .dl-table th { padding-inline: 10px; }
-.dl-dsl__fresh { white-space: nowrap !important; }
-/* Neutral text with a toned dot for the ordinary case; only stale, failing
-   and live take the colour into the words. */
-.dl-dsl__fresh.dl-fresh--ok { color: var(--text); font-weight: 400; }
-.dl-dsl__fresh.dl-fresh--warn { color: var(--mc-warning, #a46b16); font-weight: 600; }
-.dl-dsl__fresh.dl-fresh--bad { color: var(--mc-danger, #b42318); font-weight: 600; }
-.dl-dsl__facet select { max-inline-size: 140px; }
-@media (min-width: 700px) {
-  .dl-dsl .dl-cell-sub { max-inline-size: 210px; }
-  .dl-dsl__fresh { max-inline-size: 150px; }
-  .dl-dsl .dl-table th, .dl-dsl .dl-table td { padding-inline: 8px; }
-}
-.dl-dsl__body { grid-template-columns: minmax(0, 1fr) 300px; }
-@media (max-width: 1100px) { .dl-dsl__body { grid-template-columns: minmax(0, 1fr); } }
-/* Fixed layout on desktop: the name column takes what is left, every other
-   column a width that fits its content, so nothing runs past the card. */
+/* Desktop: a fixed table layout. The name column takes what is left and every
+   other column a width that fits its content, so nothing runs past the card
+   beside the preview. Phones keep index.css's scrolling table. */
 @media (min-width: 700px) {
   .dl-dsl__table { table-layout: fixed; }
+  /* .dl-dsl prefix: outranks index.css's `.dl-table td` padding. */
+  .dl-dsl .dl-dsl__table td, .dl-dsl .dl-dsl__table th { padding-inline: 8px; overflow: hidden; text-overflow: ellipsis; }
   .dl-dsl__c-check { inline-size: 36px; }
-  .dl-dsl__c-source { inline-size: 132px; }
-  .dl-dsl__c-num { inline-size: 70px; }
-  .dl-dsl__c-size { inline-size: 76px; }
-  .dl-dsl__c-fresh { inline-size: 168px; }
-  .dl-dsl__c-boards { inline-size: 88px; }
-  .dl-dsl__c-act { inline-size: 44px; }
-  .dl-dsl__table td, .dl-dsl__table th { overflow: hidden; text-overflow: ellipsis; }
-  .dl-dsl__table .dl-cell-sub { max-inline-size: none; }
-  .dl-dsl__table .dl-cell-name { flex-wrap: nowrap; min-inline-size: 0; }
-  .dl-dsl__table .row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .dl-dsl__fresh { max-inline-size: 100%; }
-  .dl-dsl__source { overflow: hidden; text-overflow: ellipsis; }
-}
-@media (min-width: 700px) {
-  .dl-dsl__c-source { inline-size: 124px; }
-  .dl-dsl__c-num { inline-size: 62px; }
-  .dl-dsl__c-size { inline-size: 70px; }
-  .dl-dsl__c-fresh { inline-size: 150px; }
-  .dl-dsl__c-boards { inline-size: 78px; }
-  .dl-dsl__c-act { inline-size: 40px; }
-  .dl-dsl__fresh { display: block; overflow: hidden; text-overflow: ellipsis; }
-}
-@media (min-width: 700px) {
+  .dl-dsl__c-source { inline-size: 120px; }
   .dl-dsl__c-num { inline-size: 66px; }
   .dl-dsl__c-num + .dl-dsl__c-num { inline-size: 76px; }
   .dl-dsl__c-size { inline-size: 80px; }
-  .dl-dsl__c-boards { inline-size: 92px; }
-  .dl-dsl__c-source { inline-size: 120px; }
   .dl-dsl__c-fresh { inline-size: 148px; }
+  .dl-dsl__c-boards { inline-size: 92px; }
+  .dl-dsl__c-act { inline-size: 40px; }
+  .dl-dsl__table .dl-cell-name { flex-wrap: nowrap; min-inline-size: 0; }
+  .dl-dsl__table .row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dl-dsl__table .dl-cell-sub { max-inline-size: none; }
+  .dl-dsl__source { overflow: hidden; text-overflow: ellipsis; }
+  .dl-dsl__fresh { display: block; overflow: hidden; text-overflow: ellipsis; }
 }
-.dl-dsl__facet select { max-inline-size: 104px; }
