@@ -667,18 +667,24 @@ export default function DatasetDetail() {
     // never renders for one, and an effect is not tied to that JSX, so this
     // guard has to be restated here or a DirectQuery dataset would still
     // fire a call the backend has nothing to answer for that section.
+    // Redesign 3c: the automatic analyses start when the Analysis tab is first
+    // opened -- where their results are shown -- not on every visit to any tab,
+    // where they held up the requests the open tab was waiting for.
+    if (tab !== 'analysis') return
     if (!ds || ds.mode === 'directquery' || segmentAutoRanFor.current === ds.id) return
     segmentAutoRanFor.current = ds.id
     runSegment()
-  }, [ds, runSegment])
+  }, [ds, runSegment, tab])
 
   useEffect(() => {
+    if (tab !== 'analysis') return
     if (!ds || patternsAutoRanFor.current === ds.id) return
     patternsAutoRanFor.current = ds.id
     runPatterns()
-  }, [ds, runPatterns])
+  }, [ds, runPatterns, tab])
 
   useEffect(() => {
+    if (tab !== 'analysis') return
     if (!ds || influencersAutoRanFor.current === ds.id) return
     // The outcome to open on: a column marked worth explaining, then an
     // authored measure, then a numeric quantity -- never an identifier (KI-1,
@@ -692,7 +698,7 @@ export default function DatasetDetail() {
     if (!pick.target) return
     setInfluencerTarget(pick.target)
     runInfluencers(pick.target)
-  }, [ds, runInfluencers])
+  }, [ds, runInfluencers, tab])
 
   // Pipeline phase 2: re-read on every finished refresh (the stamp moves),
   // so a fixed source clears the warning without a page reload.
@@ -1818,7 +1824,8 @@ export default function DatasetDetail() {
         </div>
       )}
       {showShareDialog && (
-        <DatasetShareDialog datasetId={dsId} onClose={() => setShowShareDialog(false)} />
+        <DatasetShareDialog datasetId={dsId} onClose={() => setShowShareDialog(false)}
+          datasetName={ds.name} createdByMe={ds.created_by != null && ds.created_by === meId} />
       )}
       {outlierOpen && outlierColumn && (
         <OutlierDetailsDialog datasetId={dsId} column={outlierColumn}

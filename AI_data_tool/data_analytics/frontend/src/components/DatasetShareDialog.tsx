@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { adminRolesApi, adminUsersApi, datasetSharesApi, orgUnitsApi } from '../services/api'
+import { adminRolesApi, adminUsersApi, datasetSharesApi, lineageApi, orgUnitsApi } from '../services/api'
+import { Shield, X } from 'lucide-react'
+import '../pages/datasetDetail/share.css'
+import { useT } from '../i18n'
 import type { DatasetShare, User } from '../services/api'
 import toast from 'react-hot-toast'
 import { useConfirm } from './ui/ConfirmDialog'
@@ -17,10 +20,15 @@ type Level = 'view' | 'edit'
  * person at a time, and choose VIEW (look only) or EDIT (may also re-model
  * the data). Rows are still filtered by each viewer's own row rules.
  */
-export default function DatasetShareDialog({ datasetId, onClose }: {
+export default function DatasetShareDialog({ datasetId, onClose, datasetName, createdByMe }: {
   datasetId: number
   onClose: () => void
+  /** For the title: Share "Demo — Sales". */
+  datasetName?: string
+  /** Whether the viewer created it, for the "Can also open it" list. */
+  createdByMe?: boolean
 }) {
+  const t = useT()
   const dialogRef = useModalDialog<HTMLDivElement>(onClose)
   const confirm = useConfirm()
   const [shares, setShares] = useState<DatasetShare[]>([])
@@ -32,6 +40,8 @@ export default function DatasetShareDialog({ datasetId, onClose }: {
   const [level, setLevel] = useState<Level>('view')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  // Dashboards built on it, for "anyone who can open its N dashboards".
+  const [boards, setBoards] = useState<number | null>(null)
 
   useEffect(() => {
     Promise.all([datasetSharesApi.list(datasetId), adminUsersApi.list()])
@@ -41,6 +51,8 @@ export default function DatasetShareDialog({ datasetId, onClose }: {
     // Roles and units are optional extras: a failure leaves user sharing working.
     adminRolesApi?.list?.().then(r => setRoles(r as never)).catch(() => {})
     orgUnitsApi?.list?.().then(u => setUnits(u as never)).catch(() => {})
+    Promise.resolve().then(() => lineageApi?.graph?.())
+      .then(g => { if (g) setBoards(g.reports.filter(r => r.dataset_ids.includes(datasetId)).length) }).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [datasetId])
 
@@ -92,53 +104,41 @@ export default function DatasetShareDialog({ datasetId, onClose }: {
     }
   }
 
-  const sel: React.CSSProperties = { fontSize: 12, padding: '5px 8px', background: 'var(--surface2)',
-    border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)' }
-  const KIND_LABEL: Record<Kind, string> = { user: 'Person', role: 'Role', org_unit: 'Org unit' }
+  const KIND_LABEL: Record<Kind, string> = { user: t('share3.person'), role: t('share3.role'), org_unit: t('share3.unit') }
+  const initials = (n: string) => (n.split(/[\s@._-]+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('') || '?').toUpperCase()
+  const subOf = (s: DatasetShare) => kindOf(s) === 'user' ? (s.email && s.email !== nameOf(s) ? s.email : t('share3.person'))
+    : kindOf(s) === 'role' ? t('share3.role') : t('share3.unitBelow')
 
   return (
-    <div onClick={onClose}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 1000,
-        display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <div onClick={onClose} className="dl-share__backdrop">
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Share dataset"
-          onClick={e => e.stopPropagation()}
-        style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10,
-          padding: 18, width: 500, maxWidth: '92vw' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <strong style={{ fontSize: 13 }}>Share dataset</strong>
-          <button onClick={onClose} aria-label="Close"
-            style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 14, color: 'var(--muted)' }}>✕</button>
-        </div>
-        <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 12 }}>
-          Gives a person, a role or an org unit (and everyone placed under it) access to this
-          dataset — its rows are otherwise visible only to whoever created it, your admins, and
-          anyone opening a dashboard built on it. They see it filtered by <strong>their own</strong>{' '}
-          row-security rules, not yours. <em>View</em> lets them read it; <em>Edit</em> also lets
-          them change its calculations and model.
-        </p>
+        onClick={e => e.stopPropagation()} className="dl-share">
+        <header className="dl-share__head">
+          <h2>{datasetName ? t('share3.title', { name: datasetName }) : t('share3.titlePlain')}</h2>
+          <button onClick={onClose} aria-label="Close" className="dl-share__close"><X size={16} aria-hidden /></button>
+        </header>
 
         {loading ? (
-          <p style={{ fontSize: 12, color: 'var(--muted)' }}>Loading…</p>
+          <p className="dl-share__muted">Loading…</p>
         ) : (
           <>
-            <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
-              <select aria-label="Share with" value={kind} style={sel}
-                onChange={e => { setKind(e.target.value as Kind); setPicked('') }}>
-                <option value="user">Person</option>
-                <option value="role">Role</option>
-                <option value="org_unit">Org unit</option>
-              </select>
+            <div className="dl-share__add">
+              <span role="radiogroup" aria-label="Share with" className="dl-share__seg">
+                {(['user', 'role', 'org_unit'] as Kind[]).map(k => (
+                  <button key={k} type="button" role="radio" aria-checked={kind === k}
+                    onClick={() => { setKind(k); setPicked('') }}>{KIND_LABEL[k]}</button>
+                ))}
+              </span>
               <select aria-label={kind === 'user' ? 'User to share with' : kind === 'role' ? 'Role to share with' : 'Org unit to share with'}
-                value={picked}
-                onChange={e => setPicked(e.target.value ? Number(e.target.value) : '')}
-                style={{ ...sel, flex: 1, minWidth: 160 }}>
-                <option value="">{kind === 'user' ? 'Select a user…' : kind === 'role' ? 'Select a role…' : 'Select an org unit…'}</option>
+                value={picked} className="dl-share__pick"
+                onChange={e => setPicked(e.target.value ? Number(e.target.value) : '')}>
+                <option value="">{kind === 'user' ? t('share3.addPerson') : kind === 'role' ? t('share3.addRole') : t('share3.addUnit')}</option>
                 {options.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
               </select>
-              <select aria-label="Access level" value={level} style={sel}
+              <select aria-label="Access level" value={level} className="dl-share__level"
                 onChange={e => setLevel(e.target.value as Level)}>
-                <option value="view">View</option>
-                <option value="edit">Edit</option>
+                <option value="view">{t('share3.view')}</option>
+                <option value="edit">{t('share3.edit')}</option>
               </select>
               <button className="btn btn-primary btn-sm" onClick={handleShare} disabled={picked === '' || saving}
                 title={picked === '' ? 'Choose who to share with first' : undefined}>
@@ -146,25 +146,53 @@ export default function DatasetShareDialog({ datasetId, onClose }: {
               </button>
             </div>
 
+            <h3 className="dl-share__label">{t('share3.direct')}</h3>
             {shares.length === 0 ? (
-              <p style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center', padding: '8px 0' }}>
-                Not shared with anyone yet.
-              </p>
+              <p className="dl-share__muted dl-share__none">Not shared with anyone yet.</p>
             ) : (
-              <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 220, overflowY: 'auto' }}>
+              <ul className="dl-share__list">
                 {shares.map(s => (
-                  <li key={`${kindOf(s)}-${s.id}`} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11,
-                    border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px' }}>
-                    <span style={{ fontSize: 10, color: 'var(--muted)', minWidth: 54 }}>{KIND_LABEL[kindOf(s)]}</span>
-                    <span style={{ flex: 1 }}>{nameOf(s)}</span>
-                    <span style={{ fontSize: 10, color: 'var(--muted)' }}>{(s.level ?? 'edit') === 'view' ? 'View' : 'Edit'}</span>
-                    <button aria-label={`Remove share for ${nameOf(s)}`} className="btn btn-ghost btn-sm"
-                      style={{ fontSize: 11, color: 'var(--danger)' }}
-                      onClick={() => handleRemove(s)}>Remove</button>
+                  <li key={`${kindOf(s)}-${s.id}`}>
+                    <span className={`dl-share__avatar dl-share__avatar--${kindOf(s)}`} aria-hidden>{initials(nameOf(s))}</span>
+                    <span className="dl-share__who"><strong dir="auto">{nameOf(s)}</strong><span>{subOf(s)}</span></span>
+                    <span className="dl-share__lvl">{(s.level ?? 'edit') === 'view' ? t('share3.view') : t('share3.edit')}</span>
+                    <button aria-label={`Remove share for ${nameOf(s)}`} className="dl-share__remove"
+                      onClick={() => handleRemove(s)}><X size={14} aria-hidden /></button>
                   </li>
                 ))}
               </ul>
             )}
+
+            {/* Static on purpose (N9): who else can open it, in words, with no
+                counts of admins or viewers the server does not report. */}
+            <h3 className="dl-share__label">{t('share3.also')}</h3>
+            <ul className="dl-share__list">
+              <li>
+                <span className="dl-share__avatar" aria-hidden>{createdByMe ? 'YOU' : 'CR'}</span>
+                <span className="dl-share__who"><strong>{createdByMe ? t('share3.you') : t('share3.creator')}</strong>
+                  <span>{createdByMe ? t('share3.youMade') : t('share3.creatorBody')}</span></span>
+                <span className="dl-share__lvl dl-share__muted">{t('share3.creatorTag')}</span>
+              </li>
+              <li>
+                <span className="dl-share__avatar dl-share__avatar--role" aria-hidden>AD</span>
+                <span className="dl-share__who"><strong>{t('share3.admins')}</strong><span>{t('share3.adminsBody')}</span></span>
+                <span className="dl-share__lvl dl-share__muted">{t('share3.edit')}</span>
+              </li>
+              {boards != null && boards > 0 && (
+                <li>
+                  <span className="dl-share__avatar dl-share__avatar--role" aria-hidden>{boards}</span>
+                  <span className="dl-share__who"><strong>{t(boards === 1 ? 'share3.boardsOne' : 'share3.boards', { n: boards })}</strong>
+                    <span>{t('share3.boardsBody')}</span></span>
+                  <span className="dl-share__lvl dl-share__muted">{t('share3.viaBoards')}</span>
+                </li>
+              )}
+            </ul>
+
+            <p className="dl-share__rls">
+              <Shield size={15} aria-hidden />
+              <span>{t('share3.rls')}</span>
+            </p>
+            <p className="dl-share__muted dl-share__foot">{t('share3.foot')}</p>
           </>
         )}
       </div>

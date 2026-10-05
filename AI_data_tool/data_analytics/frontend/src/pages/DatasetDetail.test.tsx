@@ -1392,3 +1392,18 @@ describe('the Analysis tab questions (redesign 3c)', () => {
     expect(screen.queryByRole('button', { name: /What looks unusual\?/ })).toBeNull()
   })
 })
+
+describe('the automatic analyses wait for the Analysis tab (redesign 3c)', () => {
+  it('does not run them on the Overview, and runs them once Analysis opens', async () => {
+    const ds = importDataset()
+    ds.columns = [{ id: 1, name: 'revenue', dtype: 'numeric', missing_pct: 0, stats: {} } as any]
+    vi.mocked(datasetsApi.get).mockResolvedValue(ds)
+    renderDetail(29)
+    await screen.findByRole('heading', { name: 'CSV Upload' })
+    expect(analysisApi.segment).not.toHaveBeenCalled()
+    expect(analysisApi.keyInfluencers).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('tab', { name: /^Analysis/ }))
+    await waitFor(() => expect(analysisApi.segment).toHaveBeenCalledTimes(1))
+    expect(analysisApi.keyInfluencers).toHaveBeenCalledWith(29, 'revenue')
+  })
+})

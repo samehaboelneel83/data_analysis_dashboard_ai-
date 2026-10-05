@@ -26,3 +26,5 @@
 .dl-data3__type--fx { color: var(--accent); border-color: transparent; font-style: italic; font-family: inherit; font-size: 11px; }
 .dl-data3__rownum { color: var(--muted); font-size: 11px; text-align: end; inline-size: 36px; font-variant-numeric: tabular-nums; }
 .dl-data3__num { text-align: end; font-variant-numeric: tabular-nums; }
+/* One line per cell, as the board: a date broke across two lines ("2024-06-" / "17"). */
+.dl-data3__main td, .dl-data3__main th { white-space: nowrap; }

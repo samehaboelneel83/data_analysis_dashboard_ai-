@@ -1,0 +1,41 @@
+/* Dataset share dialog (redesign step 3c). */
+.dl-share__backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, .45); z-index: 1000; display: flex; align-items: center; justify-content: center; }
+.dl-share {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--dl-radius-card, 12px);
+  box-shadow: var(--dl-shadow-overlay, 0 12px 40px rgba(0, 0, 0, .25)); padding: 20px 22px; inline-size: 560px; max-inline-size: 94vw;
+  max-block-size: 90vh; overflow-y: auto;
+}
+.dl-share__head { display: flex; justify-content: space-between; align-items: center; margin-block-end: 14px; }
+.dl-share__head h2 { font-size: 18px; margin: 0; color: var(--text); }
+.dl-share__close { border: 0; background: none; cursor: pointer; color: var(--muted); display: inline-flex; padding: 4px; border-radius: 6px; }
+.dl-share__muted { color: var(--muted); font-size: 12.5px; }
+.dl-share__add { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-block-end: 16px; }
+.dl-share__seg { display: inline-flex; padding: 3px; gap: 2px; border: 1px solid var(--border); border-radius: var(--dl-radius-control, 8px); }
+.dl-share__seg button { border: 0; background: none; padding: 4px 10px; font-size: 12.5px; border-radius: 6px; color: var(--text); cursor: pointer; }
+.dl-share__seg button[aria-checked=true] { background: var(--mc-canvas-2, var(--surface2)); font-weight: 600; }
+.dl-share__pick, .dl-share__level {
+  font-size: 13px; block-size: 34px; padding: 0 10px; border-radius: var(--dl-radius-control, 8px);
+  border: 1px solid var(--border); background: var(--mc-canvas-2, var(--surface2)); color: var(--text);
+}
+.dl-share__pick { flex: 1; min-inline-size: 170px; }
+.dl-share__label { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 6px 0 4px; }
+.dl-share__none { padding: 6px 0 10px; margin: 0; }
+.dl-share__list { list-style: none; margin: 0 0 12px; padding: 0; }
+.dl-share__list li { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-block-start: 1px solid var(--border); font-size: 13px; }
+.dl-share__avatar {
+  inline-size: 30px; block-size: 30px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; flex: none;
+  font-size: 10.5px; font-weight: 700; background: var(--mc-accent-soft, var(--surface2)); color: var(--mc-accent-ink, var(--accent));
+}
+.dl-share__avatar--role, .dl-share__avatar--org_unit { background: var(--mc-info-soft, #e6f0fb); color: var(--mc-info, #2f6fb0); }
+.dl-share__who { flex: 1; display: flex; flex-direction: column; min-inline-size: 0; }
+.dl-share__who strong { font-weight: 600; color: var(--text); }
+.dl-share__who span { font-size: 12px; color: var(--muted); }
+.dl-share__lvl { font-size: 12.5px; color: var(--text); white-space: nowrap; }
+.dl-share__remove { border: 0; background: none; cursor: pointer; color: var(--muted); display: inline-flex; padding: 4px; border-radius: 6px; }
+.dl-share__remove:hover { color: var(--danger); }
+.dl-share__rls {
+  display: flex; gap: 10px; align-items: flex-start; margin: 4px 0 8px; padding: 12px 14px; font-size: 13px; color: var(--text);
+  background: var(--mc-canvas-2, var(--surface2)); border-radius: var(--dl-radius-control, 8px); line-height: 1.5;
+}
+.dl-share__rls svg { color: var(--muted); flex: none; margin-block-start: 2px; }
+.dl-share__foot { margin: 0; }

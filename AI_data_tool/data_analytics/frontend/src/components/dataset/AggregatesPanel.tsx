@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Info, Lock, Plus } from 'lucide-react'
 import { aggregatesApi } from '../../services/api'
+import { useT } from '../../i18n'
 import '../../pages/datasetDetail/aggregates.css'
 import type { AggregateListItem, AggregatePreflight } from '../../services/api'
 
@@ -26,6 +27,7 @@ const AGGS = ['sum', 'count', 'min', 'max'] as const
 const REBUILD_HINT = /query changed/
 
 export default function AggregatesPanel({ datasetId, mode }: { datasetId: number; mode?: string }) {
+  const t = useT()
   const [pre, setPre] = useState<AggregatePreflight | null>(null)
   const [items, setItems] = useState<AggregateListItem[]>([])
   const [name, setName] = useState('')
@@ -131,16 +133,12 @@ export default function AggregatesPanel({ datasetId, mode }: { datasetId: number
     <div className="dl-aggs">
       <header className="dl-aggs__head">
         <div>
-          <h3>Aggregates</h3>
-          <p>
-            Pre-computed summaries of this live dataset: a GROUP BY run in the source database on a schedule
-            and saved as its own dataset, so a dashboard built on it reads thousands of pre-summed rows instead of
-            scanning millions. <code>row_count</code> is always included, so an average is <code>sum / row_count</code>.
-          </p>
+          <h3>{t('agg3.title')}</h3>
+          <p>{t('agg3.copy')}</p>
         </div>
         <button type="button" className="btn btn-primary btn-sm"
           onClick={() => { resetForm(); document.getElementById('agg-name')?.focus() }}>
-          <Plus size={14} aria-hidden /> New aggregate
+          <Plus size={14} aria-hidden /> {t('agg3.new')}
         </button>
       </header>
 
@@ -148,8 +146,8 @@ export default function AggregatesPanel({ datasetId, mode }: { datasetId: number
         <div className="dl-aggs__card dl-aggs__table-card">
           <table className="dl-aggs__table">
             <thead><tr>
-              <th>Name</th><th>Grouped by</th><th>Measures</th><th className="dl-ov__num">Rows</th>
-              <th>Refresh</th><th>Status</th><th aria-label="Actions" />
+              <th>{t('agg3.col.name')}</th><th>{t('agg3.col.grain')}</th><th>{t('agg3.col.measures')}</th><th className="dl-ov__num">{t('agg3.col.rows')}</th>
+              <th>{t('agg3.col.refresh')}</th><th>{t('agg3.col.status')}</th><th aria-label="Actions" />
             </tr></thead>
             <tbody>
               {items.map(it => {
@@ -165,12 +163,12 @@ export default function AggregatesPanel({ datasetId, mode }: { datasetId: number
                     </td>
                     <td className="dl-aggs__mono">{[...(spec?.measures ?? []).map(m => `${m.agg}(${m.column})`), 'row_count'].join(', ')}</td>
                     <td className="dl-ov__num">{it.dataset.row_count.toLocaleString()}</td>
-                    <td>{it.dataset.refresh_interval_minutes ? `every ${it.dataset.refresh_interval_minutes} min` : 'not scheduled'}</td>
+                    <td>{it.dataset.refresh_interval_minutes ? t('agg3.every', { n: it.dataset.refresh_interval_minutes }) : t('agg3.notScheduled')}</td>
                     <td>
                       {it.last_error
-                        ? <span className="dl-aggs__status dl-aggs__status--bad">Failed — {it.last_error}</span>
+                        ? <span className="dl-aggs__status dl-aggs__status--bad">{t('agg3.failed', { why: it.last_error })}</span>
                         : <span className="dl-aggs__status">{it.dataset.last_refreshed_at
-                            ? `Refreshed ${new Date(it.dataset.last_refreshed_at).toLocaleString()}` : 'Not refreshed yet'}</span>}
+                            ? t('agg3.refreshed', { when: new Date(it.dataset.last_refreshed_at).toLocaleString() }) : t('agg3.notRefreshed')}</span>}
                     </td>
                     <td className="dl-aggs__row-actions">
                       <button type="button" className="btn btn-sm" onClick={() => editItem(it)} disabled={busy}>Edit</button>
@@ -188,13 +186,12 @@ export default function AggregatesPanel({ datasetId, mode }: { datasetId: number
 
       <p className="dl-aggs__info">
         <Info size={14} aria-hidden />
-        <span><strong>Dashboards don’t switch to aggregates on their own.</strong> Pick the aggregate as a dashboard’s
-          dataset to get the speed. The source’s row rules still apply to everyone reading it.</span>
+        <span><strong>{t('agg3.noteTitle')}</strong> {t('agg3.noteBody')}</span>
       </p>
 
       <section className="dl-aggs__card">
-        <h4>{editing ? `Edit ${name}` : 'New aggregate'}</h4>
-        <p className="dl-aggs__sub">Group by the columns your charts break down by; measures are summed, counted or min/max’d at the source.</p>
+        <h4>{editing ? t('agg3.edit', { name }) : t('agg3.new')}</h4>
+        <p className="dl-aggs__sub">{t('agg3.formSub')}</p>
         <fieldset className="dl-aggs__set">
           <legend>Grain</legend>
           <div className="dl-aggs__checks">

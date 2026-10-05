@@ -306,6 +306,8 @@ export default function PredictionModelsPanel({ datasetId, columns, mode, datase
     }
   }
 
+  /** "r2" as people write it. */
+  const scoreName = (n?: string | null) => (!n ? 'score' : /^r2$/i.test(n) ? 'R²' : n)
   /** The fit as a 0..1 bar when the score is one (R², accuracy, AUC). */
   const fitShare = (m: PredictionModelSummary) =>
     m.score != null && m.score >= 0 && m.score <= 1 ? m.score : null
@@ -314,10 +316,10 @@ export default function PredictionModelsPanel({ datasetId, columns, mode, datase
     if (share == null) return null
     const pct = Math.round(share * 100)
     if (/r2|r²/i.test(m.score_name ?? '')) {
-      return `Explains ${pct}% of the variation in ${m.target} on rows it did not train on.`
-        + (m.card?.beats_baseline === false ? ' It does not beat always guessing the average.' : '')
+      return t('mdl3.explains', { pct, target: m.target })
+        + (m.card?.beats_baseline === false ? ` ${t('mdl3.noBeatAvg')}` : '')
     }
-    return m.card?.beats_baseline === false ? 'It does not beat always guessing the usual answer.' : null
+    return m.card?.beats_baseline === false ? t('mdl3.noBeat') : null
   }
 
   return (
@@ -330,34 +332,31 @@ export default function PredictionModelsPanel({ datasetId, columns, mode, datase
       )}
       <section className="dl-models__card dl-models__train">
         <div className="dl-models__train-row">
-          <strong>Train a model</strong>
-          <label htmlFor="pm-target">Predict</label>
+          <strong>{t('mdl3.train')}</strong>
+          <label htmlFor="pm-target">{t('mdl3.predict')}</label>
           <select id="pm-target" value={target} onChange={e => setTarget(e.target.value)}>
-            <option value="">Choose a column…</option>
+            <option value="">{t('mdl3.chooseColumn')}</option>
             {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
           </select>
-          <span>from all suitable columns</span>
+          <span>{t('mdl3.fromAll')}</span>
           {partitionCols.length > 0 && (
             <>
-              <label htmlFor="pm-partition">Train on</label>
+              <label htmlFor="pm-partition">{t('mdl3.trainOn')}</label>
               <select id="pm-partition" value={partition} onChange={e => setPartition(e.target.value)}>
-                <option value="">All rows</option>
-                {partitionCols.map(c => <option key={c} value={c}>Training rows of {c}</option>)}
+                <option value="">{t('mdl3.allRows')}</option>
+                {partitionCols.map(c => <option key={c} value={c}>{t('mdl3.trainingRowsOf', { col: c })}</option>)}
               </select>
             </>
           )}
-          <label htmlFor="pm-name" className="dl-sr-only">Name</label>
+          <label htmlFor="pm-name" className="dl-sr-only">{t('mdl3.name')}</label>
           <input id="pm-name" value={name} onChange={e => setName(e.target.value)}
-            placeholder={target ? `${target} model` : 'Name (optional)'} />
+            placeholder={target ? `${target} model` : t('mdl3.nameOptional')} />
           <button onClick={train} disabled={!target || training} title={!target ? 'Choose what to predict first' : undefined}
             className="btn btn-primary btn-sm">
-            {training ? 'Training…' : 'Train and save'}
+            {training ? t('mdl3.training') : t('mdl3.trainSave')}
           </button>
         </div>
-        <p>
-          A saved model scores rows whose outcome isn’t known yet. Datalytics tries several approaches,
-          keeps the one that does best on rows it held out, and records how it was chosen.
-        </p>
+        <p>{t('mdl3.trainNote')}</p>
       </section>
 
       {loading ? (
@@ -385,19 +384,19 @@ export default function PredictionModelsPanel({ datasetId, columns, mode, datase
                     ? <span className="dl-models__pill dl-models__pill--champ">Champion</span>
                     : <span className="dl-models__pill">candidate</span>}
                 </div>
-                <p className="dl-models__predicts">Predicts {m.target} from {m.features.join(', ')}.</p>
+                <p className="dl-models__predicts">{t('mdl3.predicts', { target: m.target, from: m.features.join(', ') })}</p>
                 <div className="dl-models__fit">
                   <div className="dl-models__fit-head">
-                    <strong>How well it fits</strong>
-                    <span>{m.score != null ? <>{m.score_name || 'score'} {m.score}</> : '—'}</span>
+                    <strong>{t('mdl3.fit')}</strong>
+                    <span>{m.score != null ? <>{scoreName(m.score_name)} {m.score}</> : '—'}</span>
                   </div>
                   {share != null && <div className="dl-models__bar"><span style={{ inlineSize: `${share * 100}%` }} /></div>}
                   {words && <p>{words}</p>}
                 </div>
                 {changed && (
                   <p role="status" className="dl-models__warn">
-                    <strong>The data changed since training.</strong> It now has {dataset?.row_count?.toLocaleString()} rows
-                    (it was trained on {then?.row_count?.toLocaleString()}). Train it again under the same name to use the new rows.
+                    <strong>{t('mdl3.changed')}</strong>{' '}
+                    {t('mdl3.changedBody', { now: dataset?.row_count?.toLocaleString() ?? '?', then: then?.row_count?.toLocaleString() ?? '?' })}
                   </p>
                 )}
                 {scoreJobs[m.id] && (
@@ -437,16 +436,16 @@ export default function PredictionModelsPanel({ datasetId, columns, mode, datase
               </div>
               <aside className="dl-models__facts">
                 <dl>
-                  <div><dt>Approach</dt><dd>{m.model_family}</dd></div>
-                  <div><dt>Baseline (always the usual answer)</dt><dd>{c?.baseline_score != null ? `${m.score_name || 'score'} ${fmt(c.baseline_score)}` : '—'}</dd></div>
-                  <div><dt>Tested on</dt><dd>{c?.n_test != null ? `${c.n_test.toLocaleString()} held-out rows` : '—'}</dd></div>
-                  <div><dt>Trained on</dt><dd>{c?.n_fitted != null ? `${c.n_fitted.toLocaleString()} rows` : '—'}</dd></div>
-                  <div><dt>Input drift</dt><dd>{m.last_drift ? DRIFT_WORD[m.last_drift.overall] : 'Not checked yet'}</dd></div>
-                  <div><dt>Trained by</dt><dd>{c?.trained_by ?? '—'}{c?.trained_at ? ` · ${new Date(c.trained_at).toLocaleDateString()}` : ''}</dd></div>
+                  <div><dt>{t('mdl3.approach')}</dt><dd>{m.model_family}</dd></div>
+                  <div><dt>{t('mdl3.baseline')}</dt><dd>{c?.baseline_score != null ? `${scoreName(m.score_name)} ${fmt(c.baseline_score)}` : '—'}</dd></div>
+                  <div><dt>{t('mdl3.testedOn')}</dt><dd>{c?.n_test != null ? t('mdl3.heldOut', { n: c.n_test.toLocaleString() }) : '—'}</dd></div>
+                  <div><dt>{t('mdl3.trainedOn')}</dt><dd>{c?.n_fitted != null ? t('mdl3.rows', { n: c.n_fitted.toLocaleString() }) : '—'}</dd></div>
+                  <div><dt>{t('mdl3.drift')}</dt><dd>{m.last_drift ? DRIFT_WORD[m.last_drift.overall] : t('mdl3.notChecked')}</dd></div>
+                  <div><dt>{t('mdl3.trainedBy')}</dt><dd>{c?.trained_by ?? '—'}{c?.trained_at ? ` · ${new Date(c.trained_at).toLocaleDateString()}` : ''}</dd></div>
                 </dl>
                 {(c?.candidates?.length ?? 0) > 1 && (
-                  <p>Also tried: {c!.candidates!.filter(k => k.model !== c!.model_family)
-                    .map(k => `${k.model} (${c!.score_name || 'score'} ${fmt(k.score)})`).join(', ')}.</p>
+                  <p>{t('mdl3.alsoTried', { list: c!.candidates!.filter(k => k.model !== c!.model_family)
+                    .map(k => `${k.model} (${scoreName(c!.score_name)} ${fmt(k.score)})`).join(', ') })}</p>
                 )}
               </aside>
             </section>
