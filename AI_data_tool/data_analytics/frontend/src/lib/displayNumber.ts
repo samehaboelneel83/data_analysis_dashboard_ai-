@@ -17,6 +17,24 @@ function sig3(v: number): string {
   return /e/i.test(s) ? String(Number(s)) : trimZeros(s)
 }
 
+/** The prose rounding of a non-negative value: 1 dp from 10 up, 2 dp from 1
+ *  to 10, 3 significant digits below 1. */
+function readable(v: number): string {
+  return v >= 10 ? trimZeros(v.toFixed(1)) : v >= 1 ? trimZeros(v.toFixed(2)) : sig3(v)
+}
+
+/**
+ * A chart value with the prose rule applied, for the value labels the chat's
+ * charts print: only values with more than 2 decimals change, so the label
+ * over a bar reads like the sentence above it (83.9, not 83.89).
+ */
+export function readingValue(v: number): number {
+  if (!Number.isFinite(v) || Number.isInteger(v)) return v
+  const decimals = (String(Math.abs(v)).split('.')[1] ?? '').length
+  if (decimals <= 2 || /e/i.test(String(v))) return v
+  return Math.sign(v) * Number(readable(Math.abs(v)))
+}
+
 /**
  * A number token from a sentence or a chart value label ("61.53500000000001",
  * "-3.14159%"). Only tokens with MORE than 2 decimal places change: 1 dp from
@@ -29,7 +47,7 @@ export function formatProseNumber(token: string): string {
   if (!m || !m[3] || m[3].length <= 2) return localDigits(token)
   const v = Number(`${m[2].replace(/,/g, '')}.${m[3]}`)
   if (!Number.isFinite(v)) return localDigits(token)
-  let r = v >= 10 ? trimZeros(v.toFixed(1)) : v >= 1 ? trimZeros(v.toFixed(2)) : sig3(v)
+  let r = readable(v)
   if (m[2].includes(',')) r = r.replace(/^\d+/, d => d.replace(/\B(?=(\d{3})+(?!\d))/g, ','))
   return localDigits(`${m[1]}${r}${m[4]}`)
 }

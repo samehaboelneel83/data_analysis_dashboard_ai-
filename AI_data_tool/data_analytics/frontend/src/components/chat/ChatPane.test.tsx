@@ -62,6 +62,19 @@ describe('asking a question', () => {
     expect(screen.getByText(/needs more detail/i)).toBeInTheDocument()
   })
 
+  it('renders the clarification\'s markdown, laid out by its own script (redesign 1a, 1c)', async () => {
+    vi.spyOn(agentApi, 'ask').mockResolvedValue({
+      run_id: 4, status: 'needs_clarification',
+      answer: 'Did you mean the average final score by **faculty**, or a **department** column?',
+      intent: null, error: null })
+    await send('average final score by department')
+    const bold = await screen.findByText('faculty')
+    expect(bold.tagName).toBe('STRONG')
+    const p = bold.closest('p')!
+    expect(p.textContent).not.toContain('*')
+    expect(p).toHaveAttribute('dir', 'ltr')
+  })
+
   it('a failure reads as a failure, never as an answer', async () => {
     vi.spyOn(agentApi, 'ask').mockResolvedValue({
       run_id: 3, status: 'failed', answer: null, intent: null,

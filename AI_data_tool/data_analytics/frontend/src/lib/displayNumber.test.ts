@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { formatCell, formatProseNumber } from './displayNumber'
+import { formatCell, formatProseNumber, readingValue } from './displayNumber'
 import { resetDigitsCache, setDigits } from './arabicFormats'
 
 beforeEach(() => { localStorage.clear(); resetDigitsCache() })
@@ -40,5 +40,14 @@ describe('formatCell (redesign 1b)', () => {
   it('keeps integers exactly, with no thousands separators', () => {
     expect(formatCell(8632597)).toBe('8632597')
     expect(formatCell('101')).toBe('101')
+  })
+})
+
+describe('readingValue (chart value labels)', () => {
+  it('rounds long decimals like the sentence, and leaves short ones alone', () => {
+    expect(readingValue(83.88833333333332)).toBe(83.9)
+    expect(readingValue(-61.53500000000001)).toBe(-61.5)
+    expect(readingValue(18.04)).toBe(18.04)
+    expect(readingValue(2024)).toBe(2024)
   })
 })

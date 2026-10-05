@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useDirection } from '../../contexts/DirectionContext'
 import { useT } from '../../i18n'
 import { localDigits } from '../../lib/arabicFormats'
-import { formatCell } from '../../lib/displayNumber'
+import { formatCell, readingValue } from '../../lib/displayNumber'
 import BarChartRenderer from '../report/chartRenderers/BarChartRenderer'
 import LineChartRenderer from '../report/chartRenderers/LineChartRenderer'
 import PieChartRenderer from '../report/chartRenderers/PieChartRenderer'
@@ -237,9 +237,15 @@ function ResultChart({ result, format, x, y }: {
   const narrow = typeof window !== 'undefined' && !!window.matchMedia?.('(max-width: 560px)').matches
   // The server's named axes win; with none, a two-label result is grouped.
   const grouped = format === 'bar' && !(x && y) ? groupedBars(result) : null
-  const rows = chartRows(result, x, y)
+  // Values with long decimals are rounded the way the sentence rounds them
+  // (redesign 1b), so the label over a bar reads 83.9, not 83.89. Display
+  // only: the rows, exports and Add to dashboard keep the raw result.
+  const rows = chartRows(result, x, y).map(r => ({ ...r, value: readingValue(r.value) }))
   const axes = grouped ? { x: grouped.x, y: grouped.y } : chartColumns(result, x, y)
-  const data = grouped ? { type: 'crosstab', columns: grouped.columns, rows: grouped.rows } : { rows }
+  const data = grouped
+    ? { type: 'crosstab', columns: grouped.columns,
+        rows: grouped.rows.map(r => r.map(v => (typeof v === 'number' ? readingValue(v) : v))) }
+    : { rows }
   const Renderer = format === 'bar' ? BarChartRenderer : format === 'line' ? LineChartRenderer : PieChartRenderer
   return (
     <div data-testid="result-chart" data-format={format} data-grouped={grouped ? grouped.series : undefined}
