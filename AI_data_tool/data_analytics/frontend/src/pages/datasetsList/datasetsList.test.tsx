@@ -144,7 +144,7 @@ describe('Datasets list facets (3a)', () => {
 
   it('"Mine only" keeps what the signed-in user created; "Certified only" the certified ones', async () => {
     renderList()
-    await screen.findByTestId('source-2')
+    await waitFor(() => expect(screen.getByTestId('dashboards-1')).toHaveTextContent('2'))
     fireEvent.click(screen.getByRole('button', { name: /Mine only/ }))
     expect(tableNames()).toEqual(['Demo — Routes'])
     fireEvent.click(screen.getByRole('button', { name: /Mine only/ }))
@@ -198,10 +198,10 @@ describe('Datasets list states (3a)', () => {
 
   it('selecting a row moves the preview to it', async () => {
     renderList()
-    const preview = await screen.findByTestId('dataset-preview')
-    expect(within(preview).getByRole('heading', { name: 'Demo — Sales' })).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByTestId('dashboards-1')).toHaveTextContent('2'))
+    expect(await within(screen.getByTestId('dataset-preview')).findByRole('heading', { name: 'Demo — Sales' })).toBeInTheDocument()
     fireEvent.click(screen.getByTestId('source-3'))
-    expect(within(screen.getByTestId('dataset-preview')).getByRole('heading', { name: 'Demo — Feedback' })).toBeInTheDocument()
+    expect(await within(screen.getByTestId('dataset-preview')).findByRole('heading', { name: 'Demo — Feedback' })).toBeInTheDocument()
   })
 })
 
