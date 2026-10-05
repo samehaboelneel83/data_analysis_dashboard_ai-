@@ -21,7 +21,7 @@ Nothing is pushed.
 - [x] 1 Ask AI quick fixes
 - [x] 2 Key influencers stopgap
 - [x] 3a Datasets list
-- [ ] 3b Dataset detail shell + Overview + tab map
+- [x] 3b Dataset detail shell + Overview + tab map
 - [ ] 3c Remaining tabs + Share dialog
   - >> GATE A: stop, report the whole Datasets screen
 - [ ] 4a Ask AI Phase 1: layout, thread, column panel, answer card
@@ -76,3 +76,27 @@ live counts and the shared/certified chips are unchanged.
 - Health uses the lineage graph only, not one `pipeline-health` call per dataset.
 - Health strip hidden while loading and on error (the board shows it): totals of nothing are pinned as a lie by an existing test.
 - All of the above approved by the owner.
+
+### 3b Dataset detail shell + Overview + tab map — `de71f78`
+
+**Changed:** new tab set (Overview, Columns, Data, Analysis, Rules & alerts,
+Models, Aggregates) with counts; old `?tab=` keys redirect and the URL is
+rewritten. Header restyled (pills, meta line, ⋯ menu, primary Build a
+dashboard; connection refresh controls unchanged). New
+`pages/datasetDetail/Overview.tsx`: facts, trust checks, columns at a glance,
+Used by, lineage, insights, admin-only Recent activity, first-run steps, and
+profiling / error / empty states. The former Overview sections moved, unchanged,
+to Analysis (insights, influencers, associations, segment, anomalies), Columns
+(column profile) and Rules & alerts (quality rules box); 3c restyles them.
+
+**Deviations from the boards:**
+- No automatic profile on a normal visit: the existing code deliberately scans only right after an import, so Columns at a glance offers "Profile the columns" when no profile is saved. The profiling skeleton says "Profiling 13 columns…" without a done-count: the endpoint reports no progress.
+- Checks line: "View checks" opens Rules & alerts instead of "View 3 rows": the try call returns counts, not rows.
+- Insights card: generates on demand and links to the full list on the Analysis tab ("Open in Analysis"); there is no stored "last week" scan to summarise without running one.
+- Recent activity shows upload, label change and share events only, per the handoff; the general log's 200 rows are org-wide, so a quiet dataset can show none.
+- Models tab shows no count: it would need an extra request on every visit.
+- The ⋯ menu holds Certify (admins), Edit query (admins, builder datasets) and Run analysis.
+
+**Environment note (2026-10-06):** the machine rebooted mid-step and the data
+drive came back as `/media/saeed/New Volume1`. Docker left an empty, root-owned
+`/media/saeed/New Volume/projects/...` skeleton behind; removing it needs sudo.
