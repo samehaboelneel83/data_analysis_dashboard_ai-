@@ -5,8 +5,6 @@ import { useDirection } from '../../contexts/DirectionContext'
 import { formatTimeAgo, useT, type MessageKey } from '../../i18n'
 import { localDigits } from '../../lib/arabicFormats'
 import { certificationOf, isCertified } from '../../lib/cleanDatasets'
-import { fmtStr } from '../../components/report/chartUtils'
-import { nonAdditiveKind } from '../../lib/semanticGuard'
 import { summary as checkSummary } from '../../components/dataset/ChecksPanel'
 import {
   adminAuditApi, datasetsApi, lineageApi, monitoringApi,
@@ -14,6 +12,7 @@ import {
 } from '../../services/api'
 import type { Tab } from './constants'
 import { typeName } from '../datasetsList/classify'
+import { typeTag, useColumnProfile, type Analysis } from './columnProfile'
 import './overview.css'
 
 /**
@@ -24,14 +23,7 @@ import './overview.css'
  * audit logs. Nothing is stubbed: a fact with no source is left out.
  */
 
-type Analysis = {
-  numeric?: { columns?: Record<string, Record<string, number | null>> }
-  categorical?: { columns?: Record<string, { top_values?: { value: string; count: number; pct: number }[]; n_unique?: number; missing_pct?: number }> }
-  datetime?: { columns?: Record<string, { min?: string; max?: string; monthly_counts?: { period: string; count: number }[]; missing_pct?: number }> }
-  overview?: { missing_pct?: number }
-} | null
 
-const TYPE_TAG: Record<string, string> = { numeric: 'NUM', datetime: 'DATE', categorical: 'TXT', boolean: 'BOOL', text: 'TXT' }
 const GLANCE_ROWS = 6
 const ACTIVITY_ACTIONS = /^(dataset\.upload|dataset\.classify|dataset\.share_created|dataset\.share_revoked|dataset_share\.create|dataset_share\.revoke)$/
 
@@ -377,58 +369,14 @@ function ColumnsGlance({ ds, analysis, empty, profiling, profileError, onProfile
 function GlanceRow({ ds, name, dtype, missing, analysis, flagged }: {
   ds: Dataset; name: string; dtype: string; missing: number; analysis: NonNullable<Analysis>; flagged: boolean
 }) {
-  const t = useT()
-  const fmt = ds.column_formats?.[name]
-  const num = analysis.numeric?.columns?.[name]
-  const cat = analysis.categorical?.columns?.[name]
-  const dt = analysis.datetime?.columns?.[name]
-  // A year or an id is a label, not a quantity: "2024", never "2,024".
-  const plain = !fmt && (nonAdditiveKind(name) === 'year' || nonAdditiveKind(name) === 'identifier')
-  const f = (v: number | null | undefined) => (v == null ? '—' : plain ? localDigits(String(Math.round(v))) : fmtStr(v, fmt))
-  let dist: React.ReactNode = null
-  let sum = ''
-  if (num) {
-    dist = <RangeBar s={num} />
-    sum = t('ov3.glance.numSum', { min: f(num.min), max: f(num.max), median: f(num.median) })
-  } else if (dt) {
-    const months = (dt.monthly_counts ?? []).slice(-21)
-    const max = Math.max(1, ...months.map(m => m.count))
-    dist = <span className="dl-ov__months">{months.map(m => <i key={m.period} title={`${m.period}: ${m.count}`} style={{ blockSize: `${Math.max(12, (m.count / max) * 100)}%` }} />)}</span>
-    const d = (s?: string) => (s ? new Date(s).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—')
-    sum = `${localDigits(d(dt.min))} – ${localDigits(d(dt.max))}`
-  } else if (cat) {
-    const top = (cat.top_values ?? []).slice(0, 3)
-    dist = (
-      <span className="dl-ov__tops">
-        {top.map(v => (
-          <span key={v.value}><em dir="auto">{v.value}</em><b style={{ inlineSize: `${Math.max(4, v.pct * 0.4)}px` }} /><small>{localDigits(String(Math.round(v.pct)))}%</small></span>
-        ))}
-      </span>
-    )
-    sum = t('ov3.glance.values', { n: localDigits(String(cat.n_unique ?? top.length)) })
-  }
+  const { dist, sum } = useColumnProfile(ds, name, analysis)
   return (
     <tr data-flagged={flagged || undefined}>
-      <td><span className="dl-ov__colname" dir="auto">{name}</span><span className="dl-ov__tag">{TYPE_TAG[dtype] ?? dtype.slice(0, 4).toUpperCase()}</span></td>
+      <td><span className="dl-ov__colname" dir="auto">{name}</span><span className="dl-ov__tag">{typeTag(dtype)}</span></td>
       <td>{dist}</td>
       <td className="dl-ov__num">{localDigits(`${Math.round(missing)}%`)}</td>
       <td className="dl-ov__sum">{sum}</td>
     </tr>
-  )
-}
-
-/** p5–p95 line, p25–p75 box, median tick, on the column's min–max scale. */
-function RangeBar({ s }: { s: Record<string, number | null> }) {
-  const lo = s.min ?? 0, hi = s.max ?? 0
-  const span = hi - lo || 1
-  const x = (v: number | null | undefined) => `${(((v ?? lo) - lo) / span) * 100}%`
-  return (
-    <svg className="dl-ov__range" viewBox="0 0 120 14" preserveAspectRatio="none" aria-hidden>
-      <line x1="0" x2="120" y1="7" y2="7" className="dl-ov__range-axis" />
-      <line x1={x(s.p5)} x2={x(s.p95)} y1="7" y2="7" className="dl-ov__range-whisker" />
-      <rect x={x(s.p25)} y="3" width={`${Math.max(1, (((s.p75 ?? lo) - (s.p25 ?? lo)) / span) * 100)}%`} height="8" rx="1.5" className="dl-ov__range-box" />
-      <line x1={x(s.median)} x2={x(s.median)} y1="1" y2="13" className="dl-ov__range-median" />
-    </svg>
   )
 }
 

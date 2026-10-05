@@ -55,7 +55,11 @@ describe('ColumnMeaningPanel', () => {
   })
 
   it('says plainly when a column has nothing written about it', () => {
-    render(<ColumnMeaningPanel dataset={DATASET} canEdit />)
+    // An editor is invited to write one (redesign 3c); a reader is told there is none.
+    const { unmount } = render(<ColumnMeaningPanel dataset={DATASET} canEdit />)
+    expect(screen.getByRole('button', { name: 'Describe total' })).toHaveTextContent('Add a description…')
+    unmount()
+    render(<ColumnMeaningPanel dataset={DATASET} canEdit={false} />)
     expect(screen.getByText('Not described yet')).toBeInTheDocument()
   })
 
@@ -104,5 +108,65 @@ describe('ColumnMeaningPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(toastError).toHaveBeenCalledWith(
       'You may only view this dataset'))
+  })
+})
+
+describe('the Columns tab (redesign 3c)', () => {
+  const WIDE = {
+    ...DATASET,
+    columns: [
+      { id: 1, name: 'status', dtype: 'numeric', missing_pct: 0 },
+      { id: 2, name: 'total', dtype: 'numeric', missing_pct: 2 },
+      { id: 3, name: 'region', dtype: 'categorical', missing_pct: 0 },
+      { id: 4, name: 'ordered_at', dtype: 'datetime', missing_pct: 0 },
+      { id: 5, name: 'notes', dtype: 'categorical', missing_pct: 40 },
+    ],
+    column_meta: { notes: { hidden: true }, total: { role: 'measure', aggregation: 'avg' } },
+  } as unknown as Dataset
+  const ANALYSIS = {
+    numeric: { columns: { total: { min: 1, p5: 2, p25: 5, median: 9, p75: 14, p95: 30, max: 40 } } },
+    categorical: { columns: { region: { n_unique: 4, top_values: [{ value: 'West', count: 10, pct: 40 }] } } },
+  }
+
+  it('shows one row per visible column with its distribution, empty share, summary and use', () => {
+    render(<ColumnMeaningPanel dataset={WIDE} canEdit analysis={ANALYSIS} />)
+    const row = screen.getByText('total').closest('tr')!
+    expect(row).toHaveTextContent('2%')
+    expect(row).toHaveTextContent('1 – 40 · median 9')
+    expect(row).toHaveTextContent('Measure · average')
+    expect(screen.getByText('region').closest('tr')).toHaveTextContent('Dimension')
+    expect(screen.getByText('ordered_at').closest('tr')).toHaveTextContent('Time')
+    expect(screen.queryByText('notes')).toBeNull()
+    expect(screen.getByText('1 of 5 described')).toBeInTheDocument()
+  })
+
+  it('filters by type and by name', () => {
+    render(<ColumnMeaningPanel dataset={WIDE} canEdit />)
+    fireEvent.click(screen.getByRole('radio', { name: /^Date/ }))
+    expect(screen.getByText('ordered_at')).toBeInTheDocument()
+    expect(screen.queryByText('region')).toBeNull()
+    fireEvent.click(screen.getByRole('radio', { name: /^All/ }))
+    fireEvent.change(screen.getByLabelText('Find a column'), { target: { value: 'reg' } })
+    expect(screen.getAllByRole('row')).toHaveLength(2)
+  })
+
+  it('lists hidden columns apart, behind their own button', () => {
+    render(<ColumnMeaningPanel dataset={WIDE} canEdit />)
+    fireEvent.click(screen.getByRole('button', { name: 'Hidden columns (1)' }))
+    expect(screen.getByText('notes')).toBeInTheDocument()
+    expect(screen.queryByText('region')).toBeNull()
+  })
+
+  it('opens the role, summary, outcome, suggestion and hidden settings from the Use as pill', () => {
+    render(<ColumnMeaningPanel dataset={WIDE} canEdit />)
+    fireEvent.click(screen.getByRole('button', { name: 'How total is used' }))
+    for (const label of ['Role for total', 'Summary for total', 'Explain total', 'Suggest total', 'Hide total']) {
+      expect(screen.getByLabelText(label)).toBeInTheDocument()
+    }
+  })
+
+  it('offers a reader no settings', () => {
+    render(<ColumnMeaningPanel dataset={WIDE} canEdit={false} />)
+    expect(screen.queryByRole('button', { name: 'How total is used' })).toBeNull()
   })
 })

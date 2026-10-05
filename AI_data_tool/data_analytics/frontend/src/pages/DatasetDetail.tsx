@@ -23,11 +23,15 @@ import { formatTimeAgo, useT, type MessageKey } from '../i18n'
 import ActionMenu from '../components/ActionMenu'
 import { localDigits } from '../lib/arabicFormats'
 import Overview, { fmtBytes } from './datasetDetail/Overview'
+import { typeTag } from './datasetDetail/columnProfile'
+import AnalysisNav, { HASH_PICK, analysesFor, type AnalysisPick } from './datasetDetail/AnalysisNav'
+import './datasetDetail/analysis.css'
+import './datasetDetail/data.css'
 import OutlierDetailsDialog from '../components/report/OutlierDetailsDialog'
 import IconLabel from '../components/ui/IconLabel'
 import {
   Bot, Plug, FolderOpen, RefreshCw, Sparkles, Pin, Link2, TriangleAlert, Search, ShieldCheck,
-  Database, FileText, Pencil,
+  Database, FileText, Pencil, Filter, X,
 } from 'lucide-react'
 import { insightsApi, datasetsApi, analysisApi, dataPreviewApi, filterExprApi, dataSourcesApi, prepApi, alertsApi } from '../services/api'
 import type { DataAlert, DataCheck } from '../services/api'
@@ -137,6 +141,7 @@ export default function DatasetDetail() {
     // anomalies) live on the Analysis tab now; switch there first, then
     // scroll once React has painted them. jsdom has no scrollIntoView.
     setTab('analysis')
+    if (HASH_PICK[anchor]) setAnalysisPick(HASH_PICK[anchor])
     const t = setTimeout(() => {
       const el = document.getElementById(anchor)
       el?.scrollIntoView?.({ block: 'start' })
@@ -144,7 +149,10 @@ export default function DatasetDetail() {
     return () => clearTimeout(t)
   }, [location.hash, loading])
 
-  // Data tab state
+  // Analysis tab: which question is open. A deep-link anchor picks its own.
+  const [analysisPick, setAnalysisPick] = useState<AnalysisPick>(() => HASH_PICK[location.hash.replace('#', '')] ?? 'drives')
+  // Data tab state. `dataPanel`: which toolbar tool is open under the toolbar.
+  const [dataPanel, setDataPanel] = useState<'filters' | 'global' | 'pipeline' | 'calc' | 'bin' | 'measures' | null>(null)
   const [calcCols,   setCalcCols]   = useState<CalcColumn[]>([])
   const [filterRows, setFilterRows] = useState<{ id: number; column: string; op: DataPreviewFilter['op']; value: string }[]>([])
   const [nextFid,    setNextFid]    = useState(1)
@@ -558,6 +566,7 @@ export default function DatasetDetail() {
   ]
 
   const calcColNames = new Set(calcCols.map(c => c.name))
+  const colTypes: Record<string, string> = Object.fromEntries((ds?.columns ?? []).map(c => [c.name, c.dtype]))
 
   // hooks live above the loading return -- a hook below it renders conditionally
   const [insights, setInsights] = useState<{ findings: { kind: string; score: number; title: string; detail: string; columns: string[]; novelty?: 'new' | 'changed' | 'unchanged' }[]; narrative: string } | null>(null)
@@ -914,17 +923,20 @@ export default function DatasetDetail() {
           })}
       </div>
 
-      {/* Columns: what each column is FOR (every AI path reads these
-          descriptions), with the column profile under it until 3c merges the
-          two into one row per column. */}
+      {/* Columns (redesign 3c): one row per column -- meaning, distribution,
+          empty share, summary and use -- with v1's full per-column statistics
+          kept underneath, folded. */}
       {tab === 'columns' && ds && (
         <div>
-          <ColumnMeaningPanel dataset={ds} canEdit onSaved={loadDataset} />
             {analysis?.sampled && (
               <div style={{ marginBottom: 12, fontSize: 12, color: 'var(--muted)', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px' }}>
                 Based on a live sample of {analysis.sample_size?.toLocaleString()} of {analysis.total_rows?.toLocaleString()} rows.
               </div>
             )}
+          <ColumnMeaningPanel dataset={ds} canEdit onSaved={loadDataset} analysis={analysis} />
+          {analysis && (numCols.length > 0 || dtCols.length > 0 || catCols.length > 0) && (
+            <details className="dl-cols__details">
+              <summary>{tr('cols3.detailed')}</summary>
             {numCols.length > 0 && (
               <section style={{ marginBottom: 24 }}>
                 <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>
@@ -1041,6 +1053,8 @@ export default function DatasetDetail() {
                 </div>
               </section>
             )}
+            </details>
+          )}
         </div>
       )}
 
@@ -1049,237 +1063,263 @@ export default function DatasetDetail() {
           Overview -- insights, key influencers, associations, segments and
           anomalies. Keyed `analysis`; the old `?tab=statistics` redirects. */}
       {tab === 'analysis' && ds && (
-        <div>
-          <StatisticsPanel mode={ds.mode} datasetId={ds.id} columns={ds.columns ?? []} />
-            {/* Live datasets too (HR evaluation, item 3.4): the scan reads up to
-                250K rows from the source, and only when this button is pressed. */}
-            {(
-              <section id="insights" style={{ marginBottom: 24 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                  <h2 style={{ fontSize: 15, fontWeight: 700 }}>{tr('dataset.insights')}</h2>
-                  <button className="btn btn-sm" disabled={insightsBusy}
-                    onClick={() => {
-                      setInsightsBusy(true)
-                      insightsApi.run(ds.id).then(setInsights).finally(() => setInsightsBusy(false))
-                    }}>
-                    {insightsBusy ? tr('ov.scanning')
-                      : insights ? <IconLabel icon={RefreshCw}>{tr('ov.rescan')}</IconLabel>
-                      : <IconLabel icon={Sparkles}>{tr('ov.genInsights')}</IconLabel>}
-                  </button>
-                </div>
-                {insights && (
-                  <>
-                    <p data-testid="insights-narrative" style={{ fontSize: 13, background: 'var(--surface)', border: '1px solid var(--border)',
-                      borderRadius: 'var(--radius)', padding: '10px 14px', marginBottom: 10 }}>
-                      {insights.narrative}
-                    </p>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 10 }}>
-                      {insights.findings.map((f, i) => (
-                        <div key={i} data-testid={`insight-${f.kind}`}
-                          style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12 }}>
-                          <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', marginBottom: 4 }}>
-                            <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em',
-                              color: f.kind === 'data_quality' ? '#e6a03c' : 'var(--accent)' }}>
-                              {f.kind.replace('_', ' ')}
-                            </span>
-                            {(f.novelty === 'new' || f.novelty === 'changed') && (
-                              <span style={{ background: 'var(--accent)', color: 'var(--surface)',
-                                borderRadius: 3, padding: '0 4px', fontSize: 8, fontWeight: 700 }}>
-                                {f.novelty === 'new' ? 'NEW' : 'CHANGED'}
-                              </span>
-                            )}
-                            <button aria-label={`Pin finding: ${f.title}`}
-                              title="Pin to your dashboard — re-evaluated live on every visit"
-                              onClick={() => void pinsApi
-                                .create({ dataset_id: ds.id,
-                                          finding_key: findingKey(f) })
-                                .then(r => toast.success(r.already_pinned
-                                  ? 'Already on your dashboard' : 'Pinned to your dashboard'))
-                                .catch(() => toast.error('Could not pin this finding'))}
-                              style={{ background: 'none', border: 'none', cursor: 'pointer',
-                                fontSize: 11, padding: 0, marginInlineStart: 'auto' }}><Pin size={12} /></button>
-                            <span style={{ fontSize: 10.5, color: 'var(--muted)', marginInlineStart: 'auto' }}>{Math.round(f.score * 100)}</span>
-                          </div>
-                          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 3 }}>{f.title}</div>
-                          <div style={{ fontSize: 11, color: 'var(--muted)' }}>{f.detail}</div>
-                          <FindingChart datasetId={ds.id} finding={f}
-                            columnTypes={Object.fromEntries(ds.columns.map(c => [c.name, c.dtype ?? '']))} />
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </section>
-            )}
-            <section id="influencers" style={{ marginBottom: 24 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
-                <h2 style={{ fontSize: 15, fontWeight: 700 }}>{tr('ov.keyInfluencers')}</h2>
-                <select value={influencerTarget} aria-label="Outcome to explain"
-                  onChange={e => { setInfluencerTarget(e.target.value); setInfluencers(null); setInfluencerNeedsPick(false) }}
-                  style={{ fontSize: 12 }}>
-                  <option value="">{tr('ki.chooseOutcome')}</option>
-                  {ds.columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
-                </select>
-                <button className="btn btn-sm" disabled={influencerBusy || !influencerTarget} title={!influencerTarget ? 'Choose the column to explain first' : undefined}
-                  onClick={() => runInfluencers(influencerTarget)}>
-                  {influencerBusy ? tr('ov.analysing')
-                      : influencers ? <IconLabel icon={RefreshCw}>{tr('ov.rerun')}</IconLabel>
-                      : <IconLabel icon={Sparkles}>{tr('ov.whatDrives')}</IconLabel>}
-                </button>
-              </div>
-              {influencerNeedsPick && !influencerTarget && (
-                <p data-testid="influencers-pick" style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
-                  {tr('ki.pickPrompt')}
-                </p>
-              )}
-              {influencerError && (
-                <p style={{ fontSize: 12, color: 'var(--danger)' }}>{influencerError}</p>
-              )}
-              {influencers && (
-                <KeyInfluencersResultView result={influencers}
-                  leftOut={influencerSkipped.filter(c => c !== influencers.meta.target)} />
-              )}
-            </section>
-
-            <section id="associations" style={{ marginBottom: 24 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                <h2 style={{ fontSize: 15, fontWeight: 700 }}>{tr('ov.travelTogether')}</h2>
-                <button className="btn btn-sm" disabled={rulesBusy} onClick={runPatterns}>
-                  {rulesBusy ? tr('ov.mining')
-                      : rules ? <IconLabel icon={RefreshCw}>{tr('ov.rerun')}</IconLabel>
-                      : <IconLabel icon={Sparkles}>{tr('ov.findPatterns')}</IconLabel>}
-                </button>
-              </div>
-              {rulesError && (
-                <p role="alert" style={{ fontSize: 12, color: 'var(--danger)' }}>{rulesError}</p>
-              )}
-              {rules && rules.rows.length === 0 && (
-                <p style={{ fontSize: 12, color: 'var(--muted)' }}>
-                  {tr('ar.none')}
-                </p>
-              )}
-              {rules && rules.rows.length > 0 && (
-                <div style={{ background: 'var(--surface)', border: '1px solid var(--border)',
-                  borderRadius: 8, padding: 14, overflowX: 'auto' }}>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>{tr('ki.when')}</th>
-                        <th>{tr('ar.then')}</th>
-                        {/* Lift first: it is the number that means something.
-                            Confidence alone is unreadable without the base rate
-                            beside it, which is why both are shown. */}
-                        <th>{tr('ar.lift')}</th>
-                        <th>{tr('ar.confidence')}</th>
-                        <th>{tr('ar.baseRate')}</th>
-                        <th>{tr('ki.rowsCol')}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rules.rows.map((r, i) => (
-                        <tr key={i}>
-                          <td><strong>{r.if}</strong></td>
-                          <td>{r.then}</td>
-                          <td style={{ fontFamily: 'var(--mono)', color: 'var(--accent)' }}>
-                            {r.lift.toFixed(2)}×
-                          </td>
-                          <td style={{ fontFamily: 'var(--mono)' }}>
-                            {(r.confidence * 100).toFixed(0)}%
-                          </td>
-                          <td style={{ fontFamily: 'var(--mono)', color: 'var(--muted)' }}>
-                            {(r.base_rate * 100).toFixed(0)}%
-                          </td>
-                          <td style={{ fontFamily: 'var(--mono)' }}>
-                            {r.support_rows.toLocaleString()}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {rules.warnings.length > 0 && (
-                    <ul style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10, paddingInlineStart: 18 }}>
-                      {rules.warnings.map((w, i) => <li key={i}>{w}</li>)}
-                    </ul>
-                  )}
-                </div>
-              )}
-            </section>
-
-            {ds.mode !== 'directquery' && (
-              <section id="segment" style={{ marginBottom: 24 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                  <h2 style={{ fontSize: 15, fontWeight: 700 }}>{tr('ov.segment')}</h2>
-                  <button className="btn btn-sm" disabled={segmentBusy} onClick={runSegment}>
-                    {segmentBusy ? tr('ov.clustering')
-                      : segment ? <IconLabel icon={RefreshCw}>{tr('ov.rerunSegment')}</IconLabel>
-                      : <IconLabel icon={Sparkles}>{tr('ov.segmentRows')}</IconLabel>}
-                  </button>
-                </div>
-                {segmentError && (
-                  <p style={{ fontSize: 12, color: 'var(--danger)' }}>{segmentError}</p>
-                )}
-                {segment && (
-                  <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 14 }}>
-                    <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
-                      k = {segment.meta.params.k} clusters over {segment.meta.params.columns.join(', ')}
-                      {' · '}silhouette {segment.meta.silhouette.toFixed(3)}
-                      {' · '}{segment.meta.n_rows_used.toLocaleString()} rows clustered
-                    </div>
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Cluster</th>
-                          <th>Size</th>
-                          {segment.meta.params.columns.map(c => <th key={c}>{c} (mean)</th>)}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {segment.meta.centroids.map((c: any) => (
-                          <tr key={c.cluster}>
-                            <td style={{ fontWeight: 600 }}>{c.cluster}</td>
-                            <td style={{ fontFamily: 'var(--mono)' }}>{c.size}</td>
-                            {segment.meta.params.columns.map(col => (
-                              <td key={col} style={{ fontFamily: 'var(--mono)' }}>{Number(c[col]).toFixed(2)}</td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+        <div className="dl-an3">
+          <AnalysisNav pick={analysisPick} onPick={setAnalysisPick} live={ds.mode === 'directquery'}
+            hasNumeric={ds.columns.some(c => c.dtype === 'numeric')} />
+          <div className="dl-an3__body">
+              {analysisPick === 'drives' && (
+                <>
+                <section id="influencers" style={{ marginBottom: 24 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+                    <h2 style={{ fontSize: 15, fontWeight: 700 }}>{tr('ov.keyInfluencers')}</h2>
+                    <select value={influencerTarget} aria-label="Outcome to explain"
+                      onChange={e => { setInfluencerTarget(e.target.value); setInfluencers(null); setInfluencerNeedsPick(false) }}
+                      style={{ fontSize: 12 }}>
+                      <option value="">{tr('ki.chooseOutcome')}</option>
+                      {ds.columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                    </select>
+                    <button className="btn btn-sm" disabled={influencerBusy || !influencerTarget} title={!influencerTarget ? 'Choose the column to explain first' : undefined}
+                      onClick={() => runInfluencers(influencerTarget)}>
+                      {influencerBusy ? tr('ov.analysing')
+                          : influencers ? <IconLabel icon={RefreshCw}>{tr('ov.rerun')}</IconLabel>
+                          : <IconLabel icon={Sparkles}>{tr('ov.whatDrives')}</IconLabel>}
+                    </button>
                   </div>
+                  {influencerNeedsPick && !influencerTarget && (
+                    <p data-testid="influencers-pick" style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+                      {tr('ki.pickPrompt')}
+                    </p>
+                  )}
+                  {influencerError && (
+                    <p style={{ fontSize: 12, color: 'var(--danger)' }}>{influencerError}</p>
+                  )}
+                  {influencers && (
+                    <KeyInfluencersResultView result={influencers}
+                      leftOut={influencerSkipped.filter(c => c !== influencers.meta.target)} />
+                  )}
+                </section>
+                </>
+              )}
+              {analysisPick === 'together' && (
+                <>
+                <section id="associations" style={{ marginBottom: 24 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                    <h2 style={{ fontSize: 15, fontWeight: 700 }}>{tr('ov.travelTogether')}</h2>
+                    <button className="btn btn-sm" disabled={rulesBusy} onClick={runPatterns}>
+                      {rulesBusy ? tr('ov.mining')
+                          : rules ? <IconLabel icon={RefreshCw}>{tr('ov.rerun')}</IconLabel>
+                          : <IconLabel icon={Sparkles}>{tr('ov.findPatterns')}</IconLabel>}
+                    </button>
+                  </div>
+                  {rulesError && (
+                    <p role="alert" style={{ fontSize: 12, color: 'var(--danger)' }}>{rulesError}</p>
+                  )}
+                  {rules && rules.rows.length === 0 && (
+                    <p style={{ fontSize: 12, color: 'var(--muted)' }}>
+                      {tr('ar.none')}
+                    </p>
+                  )}
+                  {rules && rules.rows.length > 0 && (
+                    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)',
+                      borderRadius: 8, padding: 14, overflowX: 'auto' }}>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>{tr('ki.when')}</th>
+                            <th>{tr('ar.then')}</th>
+                            {/* Lift first: it is the number that means something.
+                                Confidence alone is unreadable without the base rate
+                                beside it, which is why both are shown. */}
+                            <th>{tr('ar.lift')}</th>
+                            <th>{tr('ar.confidence')}</th>
+                            <th>{tr('ar.baseRate')}</th>
+                            <th>{tr('ki.rowsCol')}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rules.rows.map((r, i) => (
+                            <tr key={i}>
+                              <td><strong>{r.if}</strong></td>
+                              <td>{r.then}</td>
+                              <td style={{ fontFamily: 'var(--mono)', color: 'var(--accent)' }}>
+                                {r.lift.toFixed(2)}×
+                              </td>
+                              <td style={{ fontFamily: 'var(--mono)' }}>
+                                {(r.confidence * 100).toFixed(0)}%
+                              </td>
+                              <td style={{ fontFamily: 'var(--mono)', color: 'var(--muted)' }}>
+                                {(r.base_rate * 100).toFixed(0)}%
+                              </td>
+                              <td style={{ fontFamily: 'var(--mono)' }}>
+                                {r.support_rows.toLocaleString()}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {rules.warnings.length > 0 && (
+                        <ul style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10, paddingInlineStart: 18 }}>
+                          {rules.warnings.map((w, i) => <li key={i}>{w}</li>)}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+                </section>
+                </>
+              )}
+              {analysisPick === 'alike' && (
+                <>
+                {ds.mode !== 'directquery' && (
+                  <section id="segment" style={{ marginBottom: 24 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                      <h2 style={{ fontSize: 15, fontWeight: 700 }}>{tr('ov.segment')}</h2>
+                      <button className="btn btn-sm" disabled={segmentBusy} onClick={runSegment}>
+                        {segmentBusy ? tr('ov.clustering')
+                          : segment ? <IconLabel icon={RefreshCw}>{tr('ov.rerunSegment')}</IconLabel>
+                          : <IconLabel icon={Sparkles}>{tr('ov.segmentRows')}</IconLabel>}
+                      </button>
+                    </div>
+                    {segmentError && (
+                      <p style={{ fontSize: 12, color: 'var(--danger)' }}>{segmentError}</p>
+                    )}
+                    {segment && (
+                      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 14 }}>
+                        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
+                          k = {segment.meta.params.k} clusters over {segment.meta.params.columns.join(', ')}
+                          {' · '}silhouette {segment.meta.silhouette.toFixed(3)}
+                          {' · '}{segment.meta.n_rows_used.toLocaleString()} rows clustered
+                        </div>
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Cluster</th>
+                              <th>Size</th>
+                              {segment.meta.params.columns.map(c => <th key={c}>{c} (mean)</th>)}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {segment.meta.centroids.map((c: any) => (
+                              <tr key={c.cluster}>
+                                <td style={{ fontWeight: 600 }}>{c.cluster}</td>
+                                <td style={{ fontFamily: 'var(--mono)' }}>{c.size}</td>
+                                {segment.meta.params.columns.map(col => (
+                                  <td key={col} style={{ fontFamily: 'var(--mono)' }}>{Number(c[col]).toFixed(2)}</td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </section>
                 )}
-              </section>
-            )}
-
-            {/* Anomalies -- the report builder's outlier-details dialog, opened
-                from the data itself. The dialog owns the detector picker
-                (IQR / Isolation Forest / ECOD); this section only chooses the
-                column, because that is the one input the dialog does not own. */}
-            {/* Import-only, like Insights and Segments: /outlier-details 400s on
-                DirectQuery identically to /insights and /segment -- this guard
-                was missing, so a DirectQuery user could pick a column and click
-                straight into a guaranteed error the other two sections never expose. */}
-            {ds.mode !== 'directquery' && ds.columns.some(c => c.dtype === 'numeric') && (
-              <section id="anomalies" style={{ marginBottom: 24 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                  <h2 style={{ fontSize: 15, fontWeight: 700 }}>{tr('ov.anomalies')}</h2>
-                  <select value={outlierColumn} aria-label="Column to inspect for outliers"
-                    onChange={e => setOutlierColumn(e.target.value)} style={{ fontSize: 12 }}>
-                    <option value="">choose a numeric column…</option>
-                    {ds.columns.filter(c => c.dtype === 'numeric').map(c => (
-                      <option key={c.name} value={c.name}>{c.name}</option>
-                    ))}
-                  </select>
-                  <button className="btn btn-sm" disabled={!outlierColumn} title={!outlierColumn ? 'Choose a numeric column first' : undefined}
-                    onClick={() => setOutlierOpen(true)}>
-                    <IconLabel icon={TriangleAlert}>{tr('ov.inspectOutliers')}</IconLabel>
-                  </button>
-                </div>
-                <p style={{ fontSize: 12, color: 'var(--muted)' }}>
-                  Box-plot fences, the outlying rows themselves, and what they do to the total
-                  and the mean — on the same secured data widgets read.
-                </p>
-              </section>
-            )}
+                </>
+              )}
+              {analysisPick === 'insights' && (
+                <>
+                {/* Live datasets too (HR evaluation, item 3.4): the scan reads up to
+                    250K rows from the source, and only when this button is pressed. */}
+                {(
+                  <section id="insights" style={{ marginBottom: 24 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                      <h2 style={{ fontSize: 15, fontWeight: 700 }}>{tr('dataset.insights')}</h2>
+                      <button className="btn btn-sm" disabled={insightsBusy}
+                        onClick={() => {
+                          setInsightsBusy(true)
+                          insightsApi.run(ds.id).then(setInsights).finally(() => setInsightsBusy(false))
+                        }}>
+                        {insightsBusy ? tr('ov.scanning')
+                          : insights ? <IconLabel icon={RefreshCw}>{tr('ov.rescan')}</IconLabel>
+                          : <IconLabel icon={Sparkles}>{tr('ov.genInsights')}</IconLabel>}
+                      </button>
+                    </div>
+                    {insights && (
+                      <>
+                        <p data-testid="insights-narrative" style={{ fontSize: 13, background: 'var(--surface)', border: '1px solid var(--border)',
+                          borderRadius: 'var(--radius)', padding: '10px 14px', marginBottom: 10 }}>
+                          {insights.narrative}
+                        </p>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 10 }}>
+                          {insights.findings.map((f, i) => (
+                            <div key={i} data-testid={`insight-${f.kind}`}
+                              style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12 }}>
+                              <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', marginBottom: 4 }}>
+                                <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em',
+                                  color: f.kind === 'data_quality' ? '#e6a03c' : 'var(--accent)' }}>
+                                  {f.kind.replace('_', ' ')}
+                                </span>
+                                {(f.novelty === 'new' || f.novelty === 'changed') && (
+                                  <span style={{ background: 'var(--accent)', color: 'var(--surface)',
+                                    borderRadius: 3, padding: '0 4px', fontSize: 8, fontWeight: 700 }}>
+                                    {f.novelty === 'new' ? 'NEW' : 'CHANGED'}
+                                  </span>
+                                )}
+                                <button aria-label={`Pin finding: ${f.title}`}
+                                  title="Pin to your dashboard — re-evaluated live on every visit"
+                                  onClick={() => void pinsApi
+                                    .create({ dataset_id: ds.id,
+                                              finding_key: findingKey(f) })
+                                    .then(r => toast.success(r.already_pinned
+                                      ? 'Already on your dashboard' : 'Pinned to your dashboard'))
+                                    .catch(() => toast.error('Could not pin this finding'))}
+                                  style={{ background: 'none', border: 'none', cursor: 'pointer',
+                                    fontSize: 11, padding: 0, marginInlineStart: 'auto' }}><Pin size={12} /></button>
+                                <span style={{ fontSize: 10.5, color: 'var(--muted)', marginInlineStart: 'auto' }}>{Math.round(f.score * 100)}</span>
+                              </div>
+                              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 3 }}>{f.title}</div>
+                              <div style={{ fontSize: 11, color: 'var(--muted)' }}>{f.detail}</div>
+                              <FindingChart datasetId={ds.id} finding={f}
+                                columnTypes={Object.fromEntries(ds.columns.map(c => [c.name, c.dtype ?? '']))} />
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </section>
+                )}
+                </>
+              )}
+              {analysisPick === 'unusual' && (
+                <>
+                {/* Anomalies -- the report builder's outlier-details dialog, opened
+                    from the data itself. The dialog owns the detector picker
+                    (IQR / Isolation Forest / ECOD); this section only chooses the
+                    column, because that is the one input the dialog does not own. */}
+                {/* Import-only, like Insights and Segments: /outlier-details 400s on
+                    DirectQuery identically to /insights and /segment -- this guard
+                    was missing, so a DirectQuery user could pick a column and click
+                    straight into a guaranteed error the other two sections never expose. */}
+                {ds.mode !== 'directquery' && ds.columns.some(c => c.dtype === 'numeric') && (
+                  <section id="anomalies" style={{ marginBottom: 24 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                      <h2 style={{ fontSize: 15, fontWeight: 700 }}>{tr('ov.anomalies')}</h2>
+                      <select value={outlierColumn} aria-label="Column to inspect for outliers"
+                        onChange={e => setOutlierColumn(e.target.value)} style={{ fontSize: 12 }}>
+                        <option value="">choose a numeric column…</option>
+                        {ds.columns.filter(c => c.dtype === 'numeric').map(c => (
+                          <option key={c.name} value={c.name}>{c.name}</option>
+                        ))}
+                      </select>
+                      <button className="btn btn-sm" disabled={!outlierColumn} title={!outlierColumn ? 'Choose a numeric column first' : undefined}
+                        onClick={() => setOutlierOpen(true)}>
+                        <IconLabel icon={TriangleAlert}>{tr('ov.inspectOutliers')}</IconLabel>
+                      </button>
+                    </div>
+                    <p style={{ fontSize: 12, color: 'var(--muted)' }}>
+                      Box-plot fences, the outlying rows themselves, and what they do to the total
+                      and the mean — on the same secured data widgets read.
+                    </p>
+                  </section>
+                )}
+                </>
+              )}
+              {analysesFor(analysisPick) && (
+                <StatisticsPanel mode={ds.mode} datasetId={ds.id} columns={ds.columns ?? []} only={analysesFor(analysisPick)} />
+              )}
+              {analysisPick === 'all' && (
+                <StatisticsPanel mode={ds.mode} datasetId={ds.id} columns={ds.columns ?? []} />
+              )}
+          </div>
         </div>
       )}
 
@@ -1322,12 +1362,92 @@ export default function DatasetDetail() {
       )}
 
       {/* ── Data tab ── */}
+      {/* ── Data tab ── (redesign 3c: v1's left panel became a toolbar; each
+          tool opens its own unchanged panel under it) */}
       {tab === 'data' && (
-        <div className="dl-data-tab" style={{ display: 'flex', gap: 14, flex: 1, minHeight: 0 }}>
+        <div className="dl-data-tab dl-data3">
+          {/* Built from other datasets: a snapshot, so it needs to say when it
+                was taken and offer the only thing that moves it forward. */}
+            {derivedFrom && (
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 12,
+                            display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 12 }}>
+                  Built from {derivedSourceNames || 'other datasets'}
+                  {derivedFrom.built_at && <> · {new Date(String(derivedFrom.built_at)).toLocaleString()}</>}
+                </span>
+                <button className="btn btn-ghost" style={{ fontSize: 12 }}
+                  disabled={rebuilding}
+                  onClick={async () => {
+                    setRebuilding(true)
+                    try {
+                      const updated = await prepApi.rebuild(dsId)
+                      setDs(updated)
+                      toast.success('Rebuilt from the current source data')
+                    } catch (e: any) {
+                      // 409s name what broke (a deleted source, a vanished join
+                      // key); showing the server's words is the whole point.
+                      toast.error(e?.response?.data?.detail || 'Rebuild failed')
+                    } finally {
+                      setRebuilding(false)
+                    }
+                  }}>
+                  {rebuilding ? 'Rebuilding…' : 'Rebuild'}
+                </button>
+                <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+                  This does not update on its own.
+                </span>
+              </div>
+            )}
 
-          {/* Left panel: Filters + CalcColumns */}
-          <div className="dl-data-tab__panels" style={{ width: 260, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto' }}>
-
+          <div className="dl-data3__toolbar" role="toolbar" aria-label={tr('data3.tools')}>
+            <button type="button" className="dl-data3__tool" aria-pressed={dataPanel === 'filters'}
+              onClick={() => { if (!filterRows.length) addFilter(); setDataPanel(v => (v === 'filters' ? null : 'filters')) }}>
+              <Filter size={14} aria-hidden /> {tr('data3.filter')}
+            </button>
+            {filterRows.filter(f => f.column && f.value !== '').map(f => (
+              <span key={f.id} className="dl-data3__chip" dir="ltr">
+                {f.column} {OPS.find(o => o.value === f.op)?.label ?? f.op} {f.value}
+                <button type="button" aria-label={tr('data3.removeFilter', { what: `${f.column} ${f.value}` })}
+                  onClick={() => {
+                    const rest = filterRows.filter(x => x.id !== f.id)
+                    removeFilter(f.id)
+                    setPage(0)
+                    loadPreview(0, rest, calcCols, sortBy, sortDir, search)
+                  }}><X size={12} aria-hidden /></button>
+              </span>
+            ))}
+            {sortBy && (
+              <button type="button" className="dl-data3__tool" onClick={() => handleSort(sortBy)}
+                title={tr('data3.sortFlip')}>
+                {tr('data3.sort', { col: sortBy })} {sortDir === 'asc' ? '↑' : '↓'}
+              </button>
+            )}
+            <button type="button" className={`dl-data3__tool${savedFilter ? ' dl-data3__tool--on' : ''}`} aria-pressed={dataPanel === 'global'}
+              onClick={() => setDataPanel(v => (v === 'global' ? null : 'global'))}>
+              {tr('data3.rowFilter')}{savedFilter ? ` · ${tr('data3.active')}` : ''}
+            </button>
+            <button type="button" className="dl-data3__tool" aria-pressed={dataPanel === 'calc'}
+              onClick={() => setDataPanel(v => (v === 'calc' ? null : 'calc'))}>
+              <span className="dl-data3__fx">ƒx</span> {tr('data3.column')}
+            </button>
+            <button type="button" className="dl-data3__tool" aria-pressed={dataPanel === 'bin'}
+              onClick={() => setDataPanel(v => (v === 'bin' ? null : 'bin'))}>{tr('data3.groupBin')}</button>
+            <button type="button" className="dl-data3__tool" aria-pressed={dataPanel === 'measures'}
+              onClick={() => setDataPanel(v => (v === 'measures' ? null : 'measures'))}>{tr('data3.measures')}</button>
+            {ds.mode !== 'directquery' && (
+              <button type="button" className="dl-data3__tool" aria-pressed={dataPanel === 'pipeline'}
+                onClick={() => setDataPanel(v => (v === 'pipeline' ? null : 'pipeline'))}>
+                {tr('data3.steps')}
+              </button>
+            )}
+            <label className="dl-data3__search">
+              <Search size={14} aria-hidden />
+              <input type="search" value={search} onChange={e => handleSearch(e.target.value)}
+                placeholder={tr('data3.search')} aria-label={tr('data3.search')} />
+            </label>
+          </div>
+          {dataPanel === 'filters' && (
+            <div className="dl-data3__panel">
             {/* Filters */}
             <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 12 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
@@ -1374,6 +1494,10 @@ export default function DatasetDetail() {
               )}
             </div>
 
+            </div>
+          )}
+          {dataPanel === 'global' && (
+            <div className="dl-data3__panel">
             {/* Global Filter */}
             <div style={{ background: 'var(--surface)', border: `1px solid ${savedFilter ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 8, padding: 12 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
@@ -1432,39 +1556,10 @@ export default function DatasetDetail() {
               </div>
             </div>
 
-            {/* Built from other datasets: a snapshot, so it needs to say when it
-                was taken and offer the only thing that moves it forward. */}
-            {derivedFrom && (
-              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 12,
-                            display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 12 }}>
-                  Built from {derivedSourceNames || 'other datasets'}
-                  {derivedFrom.built_at && <> · {new Date(String(derivedFrom.built_at)).toLocaleString()}</>}
-                </span>
-                <button className="btn btn-ghost" style={{ fontSize: 12 }}
-                  disabled={rebuilding}
-                  onClick={async () => {
-                    setRebuilding(true)
-                    try {
-                      const updated = await prepApi.rebuild(dsId)
-                      setDs(updated)
-                      toast.success('Rebuilt from the current source data')
-                    } catch (e: any) {
-                      // 409s name what broke (a deleted source, a vanished join
-                      // key); showing the server's words is the whole point.
-                      toast.error(e?.response?.data?.detail || 'Rebuild failed')
-                    } finally {
-                      setRebuilding(false)
-                    }
-                  }}>
-                  {rebuilding ? 'Rebuilding…' : 'Rebuild'}
-                </button>
-                <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-                  This does not update on its own.
-                </span>
-              </div>
-            )}
-
+            </div>
+          )}
+          {dataPanel === 'pipeline' && (
+            <div className="dl-data3__panel">
             {/* Transform pipeline (F2) — sort/filter/aggregate/etc, ordered, previewable */}
             {ds.mode !== 'directquery' && (
               <div id="prep-pipeline" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 12 }}>
@@ -1472,6 +1567,10 @@ export default function DatasetDetail() {
               </div>
             )}
 
+            </div>
+          )}
+          {dataPanel === 'calc' && (
+            <div className="dl-data3__panel">
             {/* Calculated columns */}
             <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 12 }}>
               <CalcColumnsPanel
@@ -1481,6 +1580,10 @@ export default function DatasetDetail() {
               />
             </div>
 
+            </div>
+          )}
+          {dataPanel === 'bin' && (
+            <div className="dl-data3__panel">
             {/* Group & Bin — compiles to a calculated column, so it belongs beside them */}
             <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 12 }}>
               <CustomCategoryPanel
@@ -1490,6 +1593,10 @@ export default function DatasetDetail() {
               />
             </div>
 
+            </div>
+          )}
+          {dataPanel === 'measures' && (
+            <div className="dl-data3__panel">
             {/* Measures — post-aggregation, so they sit below the row-level calc columns */}
             <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 12 }}>
               <MeasuresPanel
@@ -1498,22 +1605,11 @@ export default function DatasetDetail() {
                 onChanged={() => {}}
               />
             </div>
-          </div>
-
-          {/* Right panel: Data table */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-            {/* Search bar */}
-            <div style={{ marginBottom: 8, flexShrink: 0 }}>
-              <input
-                value={search}
-                onChange={e => handleSearch(e.target.value)}
-                placeholder="Search all columns…"
-                style={{ width: '100%', fontSize: 12, padding: '6px 10px',
-                  background: 'var(--surface)', border: '1px solid var(--border)',
-                  borderRadius: 6, color: 'var(--text)', boxSizing: 'border-box' }}
-              />
             </div>
+          )}
 
+          {/* Data table */}
+          <div className="dl-data3__main">
             {/* In-place editing. Import datasets only: prep steps do not run on
                 DirectQuery, so a correction would save and never appear. */}
             {ds.mode !== 'directquery' && preview && preview.columns.length > 1 && (
@@ -1571,6 +1667,7 @@ export default function DatasetDetail() {
                   <table style={{ fontSize: 12 }}>
                     <thead>
                       <tr>
+                        <th className="dl-data3__rownum" aria-label={tr('data3.rowNumber')} />
                         {preview.columns.map(c => {
                           const isSorted = sortBy === c
                           return (
@@ -1585,7 +1682,9 @@ export default function DatasetDetail() {
                                 // onClick is neither.
                                 style={{ background: 'none', border: 'none', padding: 0, font: 'inherit',
                                   color: 'inherit', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}>
-                              {calcColNames.has(c) && <span style={{ color: 'var(--accent)', marginInlineEnd: 4, fontSize: 11 }}>ƒx</span>}
+                              {calcColNames.has(c)
+                                ? <span className="dl-data3__type dl-data3__type--fx">ƒx</span>
+                                : <span className="dl-data3__type">{typeTag(colTypes[c] ?? '')}</span>}
                               {c}
                               <span aria-hidden="true" style={{ marginInlineStart: 4, color: isSorted ? 'var(--accent)' : 'var(--border)', fontSize: 11 }}>
                                 {isSorted ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}
@@ -1603,6 +1702,7 @@ export default function DatasetDetail() {
                         const rowKey = String((row as unknown[])[keyAt] ?? '')
                         return (
                         <tr key={i}>
+                          <td className="dl-data3__rownum">{localDigits(String(page * PAGE_SIZE + i + 1))}</td>
                           {(row as unknown[]).map((v, j) => {
                             const column = preview.columns[j]
                             // Never the key column: it is how the edit finds its
@@ -1610,7 +1710,7 @@ export default function DatasetDetail() {
                             const canEdit = editCells && column !== activeKey && rowKey !== ''
                             const isEditing = editingAt?.row === i && editingAt?.column === column
                             return (
-                            <td key={j} style={{ fontFamily: typeof v === 'number' ? 'var(--mono)' : undefined,
+                            <td key={j} className={typeof v === 'number' ? 'dl-data3__num' : undefined} style={{
                               cursor: canEdit && !isEditing ? 'text' : undefined,
                               background: canEdit && !isEditing
                                 ? 'color-mix(in srgb, var(--accent) 5%, transparent)' : undefined }}
@@ -1643,7 +1743,12 @@ export default function DatasetDetail() {
                 {/* Pagination */}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', flexShrink: 0 }}>
                   <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-                    Rows {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, preview.total)} of {preview.total.toLocaleString()}
+                    {tr('data3.rows', { from: localDigits(String(page * PAGE_SIZE + 1)),
+                      to: localDigits(String(Math.min((page + 1) * PAGE_SIZE, preview.total))),
+                      total: localDigits(preview.total.toLocaleString('en-US')) })}
+                    {/* B4: the preview's own total against the dataset's rows. */}
+                    {ds.mode !== 'directquery' && preview.total !== ds.row_count
+                      && ` ${tr('data3.filteredFrom', { n: localDigits(ds.row_count.toLocaleString('en-US')) })}`}
                   </span>
                   <div style={{ display: 'flex', gap: 6 }}>
                     <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}

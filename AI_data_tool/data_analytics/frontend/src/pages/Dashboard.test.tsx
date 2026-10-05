@@ -538,17 +538,18 @@ describe('the Datasets table on a phone (BUG-041)', () => {
 })
 
 describe("a dataset's Data tab on a narrow screen (BUG-037)", () => {
-  it('index.css stacks it with the preview table on top, and leaves wide screens alone', async () => {
+  it('keeps the table first and full width: the tools are a wrapping toolbar above it', async () => {
     const fs = await import('node:fs')
     const path = await import('node:path')
     const url = await import('node:url')
     const here = path.dirname(url.fileURLToPath(import.meta.url))
-    const css = fs.readFileSync(path.resolve(here, '../index.css'), 'utf8')
+    const css = fs.readFileSync(path.resolve(here, './datasetDetail/data.css'), 'utf8')
     const detail = fs.readFileSync(path.resolve(here, './DatasetDetail.tsx'), 'utf8')
-    expect(css).toMatch(/@media \(max-width: 899px\) \{\s*\.dl-data-tab \{ flex-direction: column-reverse; \}/)
-    // The panels come first in the DOM, so column-reverse is what puts the table on top.
-    expect(detail.indexOf('className="dl-data-tab__panels"')).toBeGreaterThan(detail.indexOf('className="dl-data-tab"'))
-    expect(css).not.toMatch(/@media \(min-width[^)]*\) \{\s*\.dl-data-tab/)
+    // Redesign 3c: no side panel column to squeeze the table any more -- the
+    // tools are a toolbar ABOVE the table, and it wraps on a narrow screen.
+    expect(detail).not.toContain('dl-data-tab__panels')
+    expect(detail.indexOf('className="dl-data3__toolbar"')).toBeLessThan(detail.indexOf('className="dl-data3__main"'))
+    expect(css).toMatch(/\.dl-data3__toolbar \{[^}]*flex-wrap: wrap/)
   })
 })
 

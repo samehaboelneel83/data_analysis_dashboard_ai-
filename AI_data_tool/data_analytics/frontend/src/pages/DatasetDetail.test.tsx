@@ -126,7 +126,7 @@ describe('DatasetDetail insights engine', () => {
         { kind: 'data_quality', score: 0.5, title: 'notes is 52% missing', detail: 'Aggregations ignore the gaps.', columns: ['notes'] },
       ],
     })
-    renderDetail(29, 'analysis')
+    renderDetail(29, 'analysis#insights')
     fireEvent.click(await screen.findByRole('button', { name: /Generate insights/ }))
     expect(await screen.findByTestId('insights-narrative')).toHaveTextContent('Across 2,000 rows')
     expect(screen.getByTestId('insight-standout')).toHaveTextContent('Software carries 40% of revenue')
@@ -149,7 +149,7 @@ describe('DatasetDetail insights engine', () => {
       rows: [{ name: 'Software', value: 40 }, { name: 'Hardware', value: 10 }],
     } as any)
 
-    renderDetail(29, 'analysis')
+    renderDetail(29, 'analysis#insights')
     fireEvent.click(await screen.findByRole('button', { name: /Generate insights/ }))
 
     expect(await screen.findByTestId('insight-standout'))
@@ -217,7 +217,7 @@ describe('DatasetDetail segment (A2)', () => {
       warnings: [],
     })
 
-    renderDetail(29, 'analysis')
+    renderDetail(29, 'analysis#segment')
 
     expect(await screen.findByText(/k = 2 clusters/)).toBeInTheDocument()
     expect(screen.getByText(/silhouette 0.870/)).toBeInTheDocument()
@@ -235,7 +235,7 @@ describe('DatasetDetail segment (A2)', () => {
         silhouette: 0.5, centroids: [], n_rows_used: 1, n_rows_total: 1 },
       warnings: [],
     })
-    renderDetail(29, 'analysis')
+    renderDetail(29, 'analysis#segment')
     await screen.findByRole('button', { name: /Re-run segmentation/ })
 
     fireEvent.click(screen.getByRole('button', { name: /Re-run segmentation/ }))
@@ -248,7 +248,7 @@ describe('DatasetDetail segment (A2)', () => {
     vi.mocked(analysisApi.get).mockRejectedValue(new Error('none'))
     vi.mocked(analysisApi.segment).mockRejectedValue({ response: { data: { detail: 'Segmentation needs at least 2 usable numeric columns' } } })
 
-    renderDetail(29, 'analysis')
+    renderDetail(29, 'analysis#segment')
 
     expect(await screen.findByText('Segmentation needs at least 2 usable numeric columns')).toBeInTheDocument()
   })
@@ -256,7 +256,7 @@ describe('DatasetDetail segment (A2)', () => {
   it('does not offer segmentation for a DirectQuery dataset', async () => {
     vi.mocked(datasetsApi.get).mockResolvedValue(directQueryDataset())
 
-    renderDetail(28, 'analysis')
+    renderDetail(28, 'analysis#segment')
 
     await screen.findByRole('heading', { name: 'Live Sales' })
     expect(screen.queryByRole('button', { name: /Segment rows/ })).not.toBeInTheDocument()
@@ -278,7 +278,7 @@ describe('DatasetDetail patterns / association rules', () => {
     vi.mocked(analysisApi.get).mockRejectedValue(new Error('none'))
     vi.mocked(analysisApi.associationRules).mockResolvedValue(RULES_RESULT)
 
-    renderDetail(29, 'analysis')
+    renderDetail(29, 'analysis#associations')
 
     expect(await screen.findByText('region = West')).toBeInTheDocument()
     expect(analysisApi.associationRules).toHaveBeenCalledTimes(1)
@@ -289,7 +289,7 @@ describe('DatasetDetail patterns / association rules', () => {
     vi.mocked(datasetsApi.get).mockResolvedValue(importDataset())
     vi.mocked(analysisApi.get).mockRejectedValue(new Error('none'))
     vi.mocked(analysisApi.associationRules).mockResolvedValue(RULES_RESULT)
-    renderDetail(29, 'analysis')
+    renderDetail(29, 'analysis#associations')
     await screen.findByRole('button', { name: /Re-run/ })
 
     fireEvent.click(screen.getByRole('button', { name: /Re-run/ }))
@@ -302,7 +302,7 @@ describe('DatasetDetail patterns / association rules', () => {
     vi.mocked(analysisApi.get).mockRejectedValue(new Error('none'))
     vi.mocked(analysisApi.associationRules).mockRejectedValue({ response: { data: { detail: 'Too few rows to mine' } } })
 
-    renderDetail(29, 'analysis')
+    renderDetail(29, 'analysis#associations')
 
     expect(await screen.findByText('Too few rows to mine')).toBeInTheDocument()
   })
@@ -312,7 +312,7 @@ describe('DatasetDetail patterns / association rules', () => {
     vi.mocked(datasetsApi.get).mockResolvedValue(ds)
     vi.mocked(analysisApi.associationRules).mockResolvedValue(RULES_RESULT)
 
-    renderDetail(28, 'analysis')
+    renderDetail(28, 'analysis#associations')
 
     expect(await screen.findByText('region = West')).toBeInTheDocument()
   })
@@ -892,10 +892,11 @@ describe('DatasetDetail deep links from the Insights hub', () => {
     vi.mocked(datasetsApi.get).mockResolvedValue(ds)
     vi.mocked(analysisApi.get).mockRejectedValue(new Error('none'))
 
-    const { container } = renderDetailAt('/datasets/29#insights')
-    await screen.findByRole('heading', { name: 'Anomalies' })
+    // Each anchor opens its own question on the Analysis tab (redesign 3c).
     for (const id of ['insights', 'influencers', 'associations', 'segment', 'anomalies']) {
-      expect(container.querySelector(`#${id}`), id).not.toBeNull()
+      const { container, unmount } = renderDetailAt(`/datasets/29#${id}`)
+      await waitFor(() => expect(container.querySelector(`#${id}`), id).not.toBeNull())
+      unmount()
     }
   })
 
@@ -904,6 +905,8 @@ describe('DatasetDetail deep links from the Insights hub', () => {
     vi.mocked(analysisApi.get).mockRejectedValue(new Error('none'))
 
     renderDetailAt('/datasets/29?tab=statistics')
+    // The Analysis tab opens on its questions; "All analyses" is the full runner.
+    fireEvent.click(await screen.findByRole('button', { name: /^All .*analyses$/ }))
     expect(await screen.findByTestId('statistics-panel')).toBeInTheDocument()
   })
 })
@@ -1360,5 +1363,32 @@ describe('the tab map (redesign 3b)', () => {
     vi.mocked(datasetsApi.get).mockResolvedValue(importDataset())
     renderDetailAt('/datasets/29#influencers')
     expect(await screen.findByRole('tab', { name: /^Analysis/, selected: true })).toBeInTheDocument()
+  })
+})
+
+describe('the Analysis tab questions (redesign 3c)', () => {
+  it('opens on "What drives it?" and switches to the patterns question', async () => {
+    vi.mocked(datasetsApi.get).mockResolvedValue(importDataset())
+    renderDetail(29, 'analysis')
+    expect(await screen.findByRole('button', { name: /What drives it\?/ })).toHaveAttribute('aria-current', 'true')
+    expect(screen.getByLabelText('Outcome to explain')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /What appears together\?/ }))
+    expect(document.querySelector('#associations')).not.toBeNull()
+    expect(screen.queryByLabelText('Outcome to explain')).toBeNull()
+  })
+
+  it('a registry question opens the runner limited to its analyses', async () => {
+    vi.mocked(datasetsApi.get).mockResolvedValue(importDataset())
+    renderDetail(29, 'analysis')
+    fireEvent.click(await screen.findByRole('button', { name: /Do groups differ\?/ }))
+    expect(await screen.findByTestId('statistics-panel')).toBeInTheDocument()
+  })
+
+  it('offers no segments or anomalies for a DirectQuery dataset', async () => {
+    vi.mocked(datasetsApi.get).mockResolvedValue(directQueryDataset())
+    renderDetail(28, 'analysis')
+    await screen.findByRole('button', { name: /What drives it\?/ })
+    expect(screen.queryByRole('button', { name: /Which rows are alike\?/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /What looks unusual\?/ })).toBeNull()
   })
 })

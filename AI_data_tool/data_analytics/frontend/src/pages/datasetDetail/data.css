@@ -1,0 +1,28 @@
+/* Data tab (redesign step 3c): v1's left panel as a toolbar. */
+.dl-data3 { display: flex; flex-direction: column; gap: 10px; flex: 1; min-block-size: 0; }
+.dl-data3__toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dl-data3__tool {
+  display: inline-flex; align-items: center; gap: 6px; block-size: 32px; padding: 0 11px; font-size: 12.5px; font-weight: 500;
+  border: 1px solid var(--border); border-radius: var(--dl-radius-control, 8px); background: var(--surface); color: var(--text); cursor: pointer;
+}
+.dl-data3__tool[aria-pressed=true] { border-color: var(--mc-accent-line, var(--accent)); background: var(--mc-accent-soft, var(--surface2)); }
+.dl-data3__tool--on { color: var(--mc-accent-ink, var(--accent)); }
+.dl-data3__fx { font-weight: 700; font-style: italic; }
+.dl-data3__chip {
+  display: inline-flex; align-items: center; gap: 6px; block-size: 28px; padding: 0 6px 0 10px; font-size: 12.5px;
+  border-radius: 99px; background: var(--mc-accent-soft, var(--surface2)); color: var(--mc-accent-ink, var(--accent));
+  border: 1px solid var(--mc-accent-line, var(--border));
+}
+.dl-data3__chip button { display: inline-flex; border: 0; background: none; color: inherit; cursor: pointer; padding: 2px; }
+.dl-data3__search {
+  margin-inline-start: auto; display: inline-flex; align-items: center; gap: 8px; block-size: 32px; padding: 0 10px; min-inline-size: 220px;
+  border-radius: var(--dl-radius-control, 8px); background: var(--mc-canvas-2, var(--surface2)); border: 1px solid var(--border); color: var(--muted);
+}
+.dl-data3__search input { border: 0 !important; background: transparent !important; padding: 0 !important; font-size: 13px; color: var(--text); inline-size: 100%; outline: none; }
+.dl-data3__panel { max-inline-size: 720px; }
+.dl-data3__panel > div { background: var(--surface); border: 1px solid var(--border); border-radius: var(--dl-radius-card, 12px); padding: 12px; }
+.dl-data3__main { display: flex; flex-direction: column; flex: 1; min-block-size: 0; min-inline-size: 0; }
+.dl-data3__type { font-family: var(--mono); font-size: 9.5px; color: var(--muted); border: 1px solid var(--border); border-radius: 3px; padding: 0 3px; margin-inline-end: 6px; font-weight: 500; }
+.dl-data3__type--fx { color: var(--accent); border-color: transparent; font-style: italic; font-family: inherit; font-size: 11px; }
+.dl-data3__rownum { color: var(--muted); font-size: 11px; text-align: end; inline-size: 36px; font-variant-numeric: tabular-nums; }
+.dl-data3__num { text-align: end; font-variant-numeric: tabular-nums; }

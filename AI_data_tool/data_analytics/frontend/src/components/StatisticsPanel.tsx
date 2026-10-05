@@ -78,9 +78,12 @@ export function paramLabel(key: string, t: (k: MessageKey) => string): string {
   return key.replace(/_cols?$/, '').replace(/_/g, ' ').trim()
 }
 
-export default function StatisticsPanel({ datasetId, columns, mode }: {
+export default function StatisticsPanel({ datasetId, columns, mode, only }: {
   datasetId: number
   columns: DatasetColumn[]
+  /** Limit the picker to these analyses (the Analysis tab's questions); with
+   *  one, it is chosen straight away. Omitted: every runnable analysis. */
+  only?: string[]
   /** The dataset's mode. These analyses read the whole frame, so they are
    *  import-only — and a picker that cannot run anything must say so rather
    *  than refuse after the parameters are filled in. */
@@ -101,10 +104,15 @@ export default function StatisticsPanel({ datasetId, columns, mode }: {
     analysisCatalogueApi.registry()
       // `runnable`, not a result kind: an entry with no handler behind it is
       // real and documented, but choosing it could only ever produce a 400.
-      .then(all => setSpecs(all.filter(a => a.runnable)))
+      .then(all => setSpecs(all.filter(a => a.runnable && (!only || only.includes(a.name)))))
       .catch(e => setSpecError(e ?? new Error('failed')))
   }
-  useEffect(loadSpecs, [])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(loadSpecs, [only?.join(',')])
+  // A question with a single analysis opens straight onto its form.
+  useEffect(() => {
+    setChosen(only?.length === 1 ? only[0] : ''); setParams({}); setRan(null); setRunError(null)
+  }, [only?.join(',')])
 
   const spec = useMemo(
     () => specs?.find(s => s.name === chosen) ?? null, [specs, chosen])
