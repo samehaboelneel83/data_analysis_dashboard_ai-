@@ -108,14 +108,14 @@ describe('Dashboard', () => {
     vi.mocked(datasetsApi.list).mockRejectedValue(new Error('boom'))
     wrap(<Dashboard />)
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/could not load/i)
-    expect(screen.queryByText(/no datasets yet/i)).toBeNull()
+    expect(await screen.findByRole('alert')).toHaveTextContent(/couldn.t load your datasets/i)
+    expect(screen.queryByText(/add your first dataset/i)).toBeNull()
   })
 
   it('still shows the genuine empty state when the server says empty', async () => {
     vi.mocked(datasetsApi.list).mockResolvedValue([])
     wrap(<Dashboard />)
-    expect(await screen.findByText(/no datasets yet/i)).toBeInTheDocument()
+    expect(await screen.findByText(/add your first dataset/i)).toBeInTheDocument()
   })
 })
 

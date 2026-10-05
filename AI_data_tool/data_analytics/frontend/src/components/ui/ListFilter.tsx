@@ -74,6 +74,8 @@ export function useListFilter<T>(
     /** The search box, or null when the list is short enough not to need one. */
     input,
     query,
+    /** Clears or replaces the search ("Clear search" on a no-match state). */
+    setQuery,
     /** True when a search is active but matched nothing -- distinct from an
      *  empty collection, which needs the page's own "nothing yet" copy. */
     noMatches: query.trim().length > 0 && filtered.length === 0,
