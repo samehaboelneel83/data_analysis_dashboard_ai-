@@ -19,7 +19,8 @@ const GOOD = 'color-mix(in oklab, var(--positive, #4caf82) 65%, var(--text))'
 const BAD = 'color-mix(in oklab, var(--negative, #e2606c) 75%, var(--text))'
 const WARN = 'color-mix(in oklab, #d9a441 60%, var(--text))'
 
-function summary(c: DataCheckInput, t: ReturnType<typeof useT>): string {
+/** A check in words ("margin_pct ≤ 100"); the Overview's trust card names a failing one with it. */
+export function summary(c: DataCheckInput, t: ReturnType<typeof useT>): string {
   const p = c.params ?? {}
   switch (c.kind) {
     case 'not_null': return t('checks.sum.not_null', { col: c.column ?? '' })

@@ -1,7 +1,19 @@
 import type { DataPreviewFilter } from '../../services/api'
 
-export type Tab = 'overview' | 'data' | 'meaning' | 'statistics' | 'alerts' | 'checks' | 'models'
-         | 'aggregates'
+/** The dataset page's tabs (redesign step 3 tab map). */
+export type Tab = 'overview' | 'columns' | 'data' | 'analysis' | 'rules' | 'models' | 'aggregates'
+
+const TABS: readonly Tab[] = ['overview', 'columns', 'data', 'analysis', 'rules', 'models', 'aggregates']
+/** v1 tab keys people bookmarked: Meaning became Columns, Statistics became
+ *  Analysis, and Alerts + Checks became Rules & alerts. */
+const OLD_TABS: Record<string, Tab> = { meaning: 'columns', statistics: 'analysis', alerts: 'rules', checks: 'rules' }
+
+/** The tab a `?tab=` key opens, old keys included; null for anything else. */
+export function tabFromKey(key: string | null | undefined): Tab | null {
+  if (!key) return null
+  if ((TABS as readonly string[]).includes(key)) return key as Tab
+  return OLD_TABS[key] ?? null
+}
 
 export const OPS: { value: DataPreviewFilter['op']; label: string }[] = [
   { value: 'eq',         label: '=='         },

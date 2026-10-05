@@ -19,14 +19,18 @@ import { navArrows, useDirection } from '../contexts/DirectionContext'
 import { useParams, Link, useLocation, useSearchParams, useNavigate } from 'react-router-dom'
 import { useCrumbTitle } from '../lib/crumb'
 import NotFound from './NotFound'
-import { useT } from '../i18n'
+import { formatTimeAgo, useT, type MessageKey } from '../i18n'
+import ActionMenu from '../components/ActionMenu'
+import { localDigits } from '../lib/arabicFormats'
+import Overview, { fmtBytes } from './datasetDetail/Overview'
 import OutlierDetailsDialog from '../components/report/OutlierDetailsDialog'
 import IconLabel from '../components/ui/IconLabel'
 import {
-  Bot, Plug, FolderOpen, LayoutDashboard as OverviewIcon, Table2, Ruler, RefreshCw, Sparkles,
-  Pin, Link2, TriangleAlert, Search, BellRing, Brain, Layers, BookOpen, ShieldCheck,
+  Bot, Plug, FolderOpen, RefreshCw, Sparkles, Pin, Link2, TriangleAlert, Search, ShieldCheck,
+  Database, FileText, Pencil,
 } from 'lucide-react'
-import { insightsApi, datasetsApi, analysisApi, dataPreviewApi, filterExprApi, dataSourcesApi, prepApi } from '../services/api'
+import { insightsApi, datasetsApi, analysisApi, dataPreviewApi, filterExprApi, dataSourcesApi, prepApi, alertsApi } from '../services/api'
+import type { DataAlert, DataCheck } from '../services/api'
 import type { PrepStep } from '../services/api'
 import { mergeCellEdit } from '../lib/cellEdits'
 import FindingChart from '../components/insights/FindingChart'
@@ -46,7 +50,8 @@ import { newIdempotencyKey } from '../components/jobs/idempotency'
 import { isJobActive, jobsApi, type Job } from '../services/api'
 import DataQualityPanel from '../components/dataset/DataQualityPanel'
 
-import { type Tab, OPS, FILTER_FUNC_CATS, PAGE_SIZE } from './datasetDetail/constants'
+import { type Tab, OPS, FILTER_FUNC_CATS, PAGE_SIZE, tabFromKey } from './datasetDetail/constants'
+import './datasetDetail/overview.css'
 import { certificationOf, isCertified } from '../lib/cleanDatasets'
 
 /** 5.5: a server error in an analysis panel reads as "run analysis first",
@@ -104,12 +109,21 @@ export default function DatasetDetail() {
   // `#anomalies` land on an Overview section (scrolled to below, once the
   // sections exist in the DOM).
   const location = useLocation()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const urlTab = searchParams.get('tab')
-  const [tab,      setTab]      = useState<Tab>(
-    urlTab === 'statistics' || urlTab === 'data' || urlTab === 'alerts' || urlTab === 'checks' ||
-    urlTab === 'models' || urlTab === 'aggregates' || urlTab === 'meaning'
-      ? urlTab : 'overview')
+  const [tab,      setTab]      = useState<Tab>(tabFromKey(urlTab) ?? 'overview')
+  // Old tab keys (meaning, statistics, alerts, checks) open their new tab, and
+  // the address is rewritten so a copied link carries the new key.
+  useEffect(() => {
+    const to = tabFromKey(urlTab)
+    if (!urlTab || !to || to === urlTab) return
+    const next = new URLSearchParams(searchParams)
+    next.set('tab', to)
+    setSearchParams(next, { replace: true })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlTab])
+  // Straight after an upload (`?new=1`) the Overview opens with first steps.
+  const [firstRun] = useState(() => searchParams.get('new') === '1')
 
   // Anomaly inspection (the report builder's OutlierDetailsDialog, mounted
   // here too so it is reachable from the data itself, not only from a widget).
@@ -119,9 +133,10 @@ export default function DatasetDetail() {
   useEffect(() => {
     const anchor = location.hash.replace('#', '')
     if (!anchor || loading) return
-    // Anchors live on the Overview tab; switch there first, then scroll once
-    // React has painted the sections. jsdom has no scrollIntoView -- guarded.
-    setTab('overview')
+    // The anchored sections (insights, influencers, associations, segment,
+    // anomalies) live on the Analysis tab now; switch there first, then
+    // scroll once React has painted them. jsdom has no scrollIntoView.
+    setTab('analysis')
     const t = setTimeout(() => {
       const el = document.getElementById(anchor)
       el?.scrollIntoView?.({ block: 'start' })
@@ -180,7 +195,10 @@ export default function DatasetDetail() {
   // Reads the context directly (not the throwing useAuth()) so this page still
   // renders standalone in tests that don't wrap it in an AuthProvider -- an
   // absent context degrades to "not admin" (hide Share) rather than crashing.
-  const isAdmin = !!useContext(AuthContext)?.user?.role?.is_org_admin
+  const authUser = useContext(AuthContext)?.user
+  const isAdmin = !!authUser?.role?.is_org_admin
+  const meId = authUser?.id ?? null
+  const meEmail = authUser?.email ?? null
   const [showShareDialog, setShowShareDialog] = useState(false)
   const [rebuilding, setRebuilding] = useState(false)
   const [otherNames, setOtherNames] = useState<Record<number, string>>({})
@@ -330,13 +348,19 @@ export default function DatasetDetail() {
   }, [tab, ds])
 
   const runAnalysisRef = useRef<(() => Promise<void>) | null>(null)
+  const [profileError, setProfileError] = useState<string | null>(null)
   const runAnalysis = async () => {
     setRunning(true)
+    setProfileError(null)
     try {
       const r = await analysisApi.run(dsId)
       setAnalysis(r)
       toast.success('Analysis complete')
-    } catch { toast.error('Analysis failed') }
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      setProfileError(typeof detail === 'string' ? detail : (e as Error)?.message || 'no response')
+      toast.error('Analysis failed')
+    }
     finally { setRunning(false) }
   }
   runAnalysisRef.current = runAnalysis
@@ -538,6 +562,40 @@ export default function DatasetDetail() {
   // hooks live above the loading return -- a hook below it renders conditionally
   const [insights, setInsights] = useState<{ findings: { kind: string; score: number; title: string; detail: string; columns: string[]; novelty?: 'new' | 'changed' | 'unchanged' }[]; narrative: string } | null>(null)
   const [insightsBusy, setInsightsBusy] = useState(false)
+  const generateInsights = () => {
+    if (!ds) return
+    setInsightsBusy(true)
+    insightsApi.run(ds.id).then(setInsights).finally(() => setInsightsBusy(false))
+  }
+  // Saved checks and alerts: the Rules & alerts tab count, and the Overview's
+  // trust card and "Used by" list.
+  const [ruleChecks, setRuleChecks] = useState<DataCheck[] | null>(null)
+  const [ruleAlerts, setRuleAlerts] = useState<DataAlert[]>([])
+  useEffect(() => {
+    if (!ds) return
+    let live = true
+    Promise.resolve().then(() => alertsApi?.list?.(ds.id))
+      .then(a => { if (live) setRuleAlerts(a ?? []) }).catch(() => {})
+    if (ds.mode !== 'directquery') {
+      Promise.resolve().then(() => datasetsApi?.checks?.(ds.id))
+        .then(c => { if (live) setRuleChecks(c ?? []) }).catch(() => { if (live) setRuleChecks(null) })
+    }
+    return () => { live = false }
+  }, [ds?.id, ds?.mode])
+  const ruleCount = ds ? ruleAlerts.length + (ruleChecks?.length ?? 0) : null
+  const toggleCertify = async () => {
+    if (!ds) return
+    const on = !isCertified(ds)
+    try {
+      await datasetsApi.certify(ds.id, on)
+      setDs(prev => prev ? { ...prev, column_meta: (() => {
+        const m = { ...((prev.column_meta ?? {}) as unknown as Record<string, unknown>) }
+        if (on) m['__certified__'] = { by_email: '', at: new Date().toISOString() }
+        else delete m['__certified__']
+        return m as unknown as typeof prev.column_meta
+      })() } : prev)
+    } catch { toast.error(tr('dsf.certify')) }
+  }
 
   // A2: KMeans segmentation (automatic k) over the dataset's numeric columns.
   const [segment, setSegment] = useState<SegmentResult | null>(null)
@@ -675,58 +733,39 @@ export default function DatasetDetail() {
           onClose={() => setSchemaBreak(null)} />
       )}
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexShrink: 0 }}>
-        <Link to="/datasets" style={{ color: 'var(--muted)', fontSize: 12, textDecoration: 'none' }}>{arrows.back} {tr('dataset.back')}</Link>
-        <h1 className="dl-page-title" style={{ flex: 1 }}>
-          {ds.name}
-          {ds.shared && (
-            <span title={tr('dataset.sharedTitle')}
-              style={{ fontSize: 11, fontWeight: 400, color: 'var(--accent)', marginInlineStart: 10,
-                background: 'color-mix(in srgb, var(--accent) 15%, transparent)', borderRadius: 99, padding: '2px 8px', verticalAlign: 'middle' }}>
-              <IconLabel icon={Link2}>{tr('dataset.sharedWithYou')}</IconLabel>
+      <Link to="/datasets" className="dl-dsd__back">{arrows.back} {tr('dataset.back')}</Link>
+      <div className="dl-dsd__head">
+        <div className="dl-dsd__title-block">
+          <div className="dl-dsd__title-row">
+            <h1 className="dl-page-title dl-dsd__title" dir="auto">{ds.name}</h1>
+            <span className={`dl-dsd__pill${ds.mode === 'directquery' ? ' dl-dsd__pill--live' : ''}`} title={ds.mode === 'directquery' ? tr('dataset.liveTitle') : undefined}>
+              {ds.mode === 'directquery' ? <Plug size={13} aria-hidden /> : ds.data_source_id ? <Database size={13} aria-hidden /> : <FileText size={13} aria-hidden />}
+              {ds.mode === 'directquery' ? tr('dataset.live') : ds.data_source_id ? tr('dsl.src.import') : tr('dsl.srcw.upload')}
             </span>
-          )}
-        </h1>
-        <DatasetSensitivity datasetId={ds.id} />
-        {ds.mode !== 'directquery' && <NotebookSnippet datasetId={ds.id} datasetName={ds.name} />}
-        {isAdmin && (
-          <button className="btn btn-ghost btn-sm" onClick={() => setShowShareDialog(true)}>
-            {tr('dataset.share')}
-          </button>
-        )}
-        {isCertified(ds) && (
-          <span data-testid="certified-badge" style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--success, #15803d)' }}
-            title={tr('dsf.certifiedBy', { who: certificationOf(ds)?.by_email ?? '' })}>✓ {tr('dsf.badge')}</span>
-        )}
-        {isAdmin && (
-          <button className="btn btn-ghost btn-sm" onClick={async () => {
-            const on = !isCertified(ds)
-            try {
-              await datasetsApi.certify(ds.id, on)
-              setDs(prev => prev ? { ...prev, column_meta: (() => {
-                const m = { ...((prev.column_meta ?? {}) as unknown as Record<string, unknown>) }
-                if (on) m['__certified__'] = { by_email: '', at: new Date().toISOString() }
-                else delete m['__certified__']
-                return m as unknown as typeof prev.column_meta
-              })() } : prev)
-            } catch { toast.error(tr('dsf.certify')) }
-          }}>{isCertified(ds) ? tr('dsf.uncertify') : tr('dsf.certify')}</button>
-        )}
-        {ds.mode === 'directquery' && (
-          <span title={tr('dataset.liveTitle')}
-            style={{ fontSize: 11, color: 'var(--muted)', background: 'var(--surface2)',
-              border: '1px solid var(--border)', borderRadius: 99, padding: '3px 10px' }}>
-            <IconLabel icon={Plug}>{tr('dataset.live')}</IconLabel>
-          </span>
-        )}
-        {/* E06 freshness: WHEN this data was loaded, for every imported
-            dataset -- an uploaded file used to show nothing, so a stale
-            upload read exactly like a fresh one. */}
-        {!(ds.data_source_id || canSchedule) && ds.mode !== 'directquery' && ds.last_refreshed_at && (
-          <div data-testid="dataset-freshness" style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'end' }}>
-            {tr('dataset.lastRefreshed', { when: refreshedWhen(ds.last_refreshed_at) })}
+            {isCertified(ds)
+              ? <span data-testid="certified-badge" className="dl-dsd__pill dl-dsd__pill--ok"
+                  title={tr('dsf.certifiedBy', { who: certificationOf(ds)?.by_email ?? '' })}>✓ {tr('dsf.badge')}</span>
+              : <span className="dl-dsd__pill">{tr('ov3.notCertified')}</span>}
+            <DatasetSensitivity datasetId={ds.id} />
+            {ds.shared && (
+              <span className="dl-dsd__pill" title={tr('dataset.sharedTitle')}>
+                <IconLabel icon={Link2}>{tr('dataset.sharedWithYou')}</IconLabel>
+              </span>
+            )}
           </div>
-        )}
+          {/* E06 freshness: WHEN this data was loaded, for every dataset, in
+              the line under the name. */}
+          <div className="dl-dsd__meta" data-testid="dataset-freshness">
+            {[
+              ds.created_by != null && ds.created_by === meId ? tr('dsl.pv.byYou') : null,
+              ds.mode === 'directquery' ? tr('fresh.live')
+                : ds.data_source_id ? (ds.last_refreshed_at ? tr('dataset.lastRefreshed', { when: refreshedWhen(ds.last_refreshed_at) }) : null)
+                : tr('ov3.uploadedAgo', { ago: formatTimeAgo(ds.last_refreshed_at ?? ds.created_at, tr) ?? '' }),
+              ds.mode !== 'directquery' ? fmtBytes(ds.file_size) : null,
+            ].filter(Boolean).join(' · ')}
+          </div>
+        </div>
+        <div className="dl-dsd__actions">
         {(ds.data_source_id || canSchedule) && ds.mode !== 'directquery' && (
           <div style={{ position: 'relative' }}>
             {ds.last_refreshed_at && (
@@ -829,102 +868,437 @@ export default function DatasetDetail() {
             )}
           </div>
         )}
-        {/* Admins only: the builder previews and re-imports straight from the
-            source, and both are admin-only on the server (E01). */}
-        {isAdmin && ds.data_source_id && ds.query_model && (
-          <button onClick={openEditQuery} disabled={queryEditLoading} className="btn btn-ghost btn-sm">
-            {queryEditLoading ? tr('common.loading') : tr('ds.editQuery')}
+          <Link to={`/ask?dataset=${dsId}`} className="btn btn-sm" title={tr('dataset.askTitle')}>
+            <Bot size={14} aria-hidden /> {tr('ov3.askAbout')}
+          </Link>
+          {ds.mode !== 'directquery' && <NotebookSnippet datasetId={ds.id} datasetName={ds.name} />}
+          {isAdmin && (
+            <button className="btn btn-sm" onClick={() => setShowShareDialog(true)}>
+              {tr('dataset.share')}
+            </button>
+          )}
+          <ActionMenu label={tr('ov3.moreActions')} items={[
+            ...(isAdmin ? [{ key: 'certify', label: isCertified(ds) ? tr('dsf.uncertify') : tr('dsf.certify'),
+              icon: <ShieldCheck size={16} />, onSelect: () => void toggleCertify() }] : []),
+            // Admins only: the builder previews and re-imports straight from
+            // the source, and both are admin-only on the server (E01).
+            ...(isAdmin && ds.data_source_id && ds.query_model ? [{ key: 'query', label: tr('ds.editQuery'),
+              icon: <Pencil size={16} />, onSelect: () => void openEditQuery() }] : []),
+            { key: 'profile', label: analysis ? tr('dataset.rerun') : tr('dataset.runAnalysis'),
+              icon: <RefreshCw size={16} />, onSelect: () => void runAnalysis() },
+          ]} />
+          <button type="button" onClick={() => void buildDashboard()} disabled={building}
+            className="btn btn-primary btn-sm" title={tr('dataset.buildTitle')}>
+            {building ? tr('dataset.building') : tr('ov3.build')}
           </button>
-        )}
-        <button type="button" onClick={() => void buildDashboard()} disabled={building}
-          className="btn btn-sm" title={tr('dataset.buildTitle')}>
-          {building ? tr('dataset.building') : tr('dataset.build')}
-        </button>
-        <Link to={`/ask?dataset=${dsId}`} className="btn btn-ghost btn-sm"
-          title={tr('dataset.askTitle')}>
-          <IconLabel icon={Bot}>{tr('dataset.ask')}</IconLabel>
-        </Link>
-        {tab === 'overview' && (
-          <button onClick={runAnalysis} disabled={running} className="btn btn-primary btn-sm">
-            {running ? tr('dataset.running') : analysis ? tr('dataset.rerun') : tr('dataset.runAnalysis')}
-          </button>
-        )}
+        </div>
       </div>
 
-      {/* Tab bar */}
-      {/* Aggregates is offered only where it can do something: it is a
-          DirectQuery feature, and on an import dataset the tab opened onto a
-          paragraph explaining why it was empty. A bookmarked ?tab=aggregates
-          still lands on that explanation. Scrolls sideways rather than
-          wrapping on a phone. */}
-      <div role="tablist" aria-label={tr('dataset.sections')} className="dl-tabs">
-        {(['overview', 'data', 'meaning', 'statistics', 'alerts', 'checks', 'models', 'aggregates'] as Tab[])
+      {/* Tab bar (redesign tab map). Aggregates is offered only where it can
+          do something -- a DirectQuery feature; a bookmarked ?tab=aggregates
+          still lands on its explanation. Scrolls sideways on a phone. */}
+      <div role="tablist" aria-label={tr('dataset.sections')} className="dl-tabs dl-dsd__tabs">
+        {(['overview', 'columns', 'data', 'analysis', 'rules', 'models', 'aggregates'] as Tab[])
           .filter(t => t !== 'aggregates' || ds?.mode === 'directquery' || tab === 'aggregates')
-          // Checks run before a refreshed file is published: a live dataset has none.
-          .filter(t => t !== 'checks' || ds?.mode !== 'directquery')
-          .map(t => (
-          <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}
-            className={`dl-tabs__tab${tab === t ? ' dl-tabs__tab--on' : ''}`}>
-            {t === 'overview' ? <IconLabel icon={OverviewIcon}>{tr('dataset.tab.overview')}</IconLabel>
-                      : t === 'data' ? <IconLabel icon={Table2}>{tr('dataset.tab.data')}</IconLabel>
-                      : t === 'meaning' ? <IconLabel icon={BookOpen}>{tr('dataset.tab.meaning')}</IconLabel>
-                      : t === 'statistics' ? <IconLabel icon={Ruler}>{tr('dataset.tab.analysis')}</IconLabel>
-                      : t === 'alerts' ? <IconLabel icon={BellRing}>{tr('dataset.tab.alerts')}</IconLabel>
-                      : t === 'checks' ? <IconLabel icon={ShieldCheck}>{tr('dataset.tab.checks')}</IconLabel>
-                      // Named explicitly rather than falling off the end of the
-                      // chain: the catch-all labelled every future tab "Alerts",
-                      // and two tabs with one name is a tab bar that lies.
-                      : t === 'models' ? <IconLabel icon={Brain}>{tr('dataset.tab.models')}</IconLabel>
-                      : <IconLabel icon={Layers}>{tr('dataset.tab.aggregates')}</IconLabel>}
-          </button>
-        ))}
+          .map(t => {
+            const count = t === 'columns' ? (ds.columns ?? []).length
+              : t === 'data' && ds.mode !== 'directquery' ? ds.row_count
+              : t === 'rules' && ruleCount != null ? ruleCount : null
+            return (
+              <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}
+                className={`dl-tabs__tab${tab === t ? ' dl-tabs__tab--on' : ''}`}>
+                {tr(`dataset.tab.${t}` as MessageKey)}
+                {count != null && <span className="dl-dsd__count">{localDigits(count.toLocaleString('en-US'))}</span>}
+              </button>
+            )
+          })}
       </div>
 
-      {/* ── Analysis tab ──
-          Dataset-scoped and RLS-filtered against this dataset's frame, so this
-          is where the analyses belong: the user is already looking at the
-          columns they are about to name.
-
-          Labelled "Analysis" but keyed `statistics`: the key is in the URL
-          (`?tab=statistics`) and people have bookmarked it, so it stays. The
-          LABEL had to change — the panel ran eight statistical tests when it
-          was named, and now runs segmentation, association rules, key
-          influencers, the SAS-style explanation and goal seek as well. A tab
-          called Statistics is a tab nobody opens looking for those. */}
-      {/* Meaning: what each column is FOR. Every AI path in this product now
-          reads these -- the designer's prompt, the agent's context, the words
-          the insights engine writes its findings in -- and until this tab there
-          was nowhere in the product to write one for a dataset. A description on
-          a column that came from a connected table is written to the SOURCE
-          catalog, so it is written once and read by every dataset built from
-          that table; the panel says so when that is what happened. */}
-      {tab === 'meaning' && ds && (
-        <ColumnMeaningPanel dataset={ds} canEdit onSaved={loadDataset} />
+      {/* Columns: what each column is FOR (every AI path reads these
+          descriptions), with the column profile under it until 3c merges the
+          two into one row per column. */}
+      {tab === 'columns' && ds && (
+        <div>
+          <ColumnMeaningPanel dataset={ds} canEdit onSaved={loadDataset} />
+            {analysis?.sampled && (
+              <div style={{ marginBottom: 12, fontSize: 12, color: 'var(--muted)', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px' }}>
+                Based on a live sample of {analysis.sample_size?.toLocaleString()} of {analysis.total_rows?.toLocaleString()} rows.
+              </div>
+            )}
+            {numCols.length > 0 && (
+              <section style={{ marginBottom: 24 }}>
+                <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>
+                  {tr('ov.numericCols')} <span className="badge badge-numeric" style={{ marginInlineStart: 6 }}>{numCols.length}</span>
+                </h2>
+                <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
+                  <table>
+                    <thead><tr><th>Column</th><th>Count</th><th>Mean</th><th>Std</th><th>Min</th><th>Median</th><th>Max</th><th>Missing%</th></tr></thead>
+                    <tbody>
+                      {numCols.map(([col, s]: [string, any]) => (
+                        <tr key={col}>
+                          <td style={{ fontWeight: 600 }}>{col}</td>
+                          <td style={{ fontFamily: 'var(--mono)' }}>{s.count}</td>
+                          <td style={{ fontFamily: 'var(--mono)' }}>{s.mean?.toFixed(2)}</td>
+                          <td style={{ fontFamily: 'var(--mono)' }}>{s.std?.toFixed(2)}</td>
+                          <td style={{ fontFamily: 'var(--mono)' }}>{s.min?.toFixed(2)}</td>
+                          <td style={{ fontFamily: 'var(--mono)' }}>{s.median?.toFixed(2)}</td>
+                          <td style={{ fontFamily: 'var(--mono)' }}>{s.max?.toFixed(2)}</td>
+                          <td style={{ color: s.missing_pct > 10 ? 'var(--danger)' : 'var(--muted)', fontFamily: 'var(--mono)' }}>{s.missing_pct}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )}
+            {dtCols.length > 0 && (
+              <section style={{ marginBottom: 24 }}>
+                <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>
+                  {tr('ov.dateCols')} <span className="badge badge-datetime" style={{ marginInlineStart: 6 }}>{dtCols.length}</span>
+                </h2>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
+                  {dtCols.map(([col, s]: [string, any]) => (
+                    <div key={col} data-testid={`dt-card-${col}`} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 14 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {col}
+                        {s.granularity && (
+                          <span style={{ fontSize: 10.5, fontWeight: 400, color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: 6, padding: '0 5px', textTransform: 'uppercase' }}>
+                            {s.granularity}
+                          </span>
+                        )}
+                      </div>
+                      {s.note ? (
+                        <div style={{ fontSize: 12, color: 'var(--muted)' }}>{s.note}</div>
+                      ) : (
+                        <>
+                          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+                            {String(s.min).slice(0, s.granularity === 'date' ? 10 : 16)} → {String(s.max).slice(0, s.granularity === 'date' ? 10 : 16)}
+                            <span style={{ fontFamily: 'var(--mono)' }}> · {s.range_days}d span · {s.n_unique} unique</span>
+                            {s.missing_pct > 0 && <span style={{ color: s.missing_pct > 10 ? 'var(--danger)' : undefined }}> · {s.missing_pct}% missing</span>}
+                            {s.gaps_over_7d > 0 && <span> · {s.gaps_over_7d} gap{s.gaps_over_7d === 1 ? '' : 's'} &gt;7d</span>}
+                          </div>
+                          {s.monthly_counts && (() => {
+                            const max = Math.max(...s.monthly_counts.map((m: any) => m.count), 1)
+                            return (
+                              <div style={{ marginBottom: 8 }}>
+                                <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 3 }}>
+                                  {tr('ov.byMonth')}{s.busiest_period ? ` — busiest ${s.busiest_period.period} (${s.busiest_period.count.toLocaleString()})` : ''}
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 1, height: 28 }}>
+                                  {s.monthly_counts.map((m: any) => (
+                                    <span key={m.period} title={`${m.period}: ${m.count.toLocaleString()}`}
+                                      style={{ flex: 1, minWidth: 2, background: 'var(--accent)', opacity: 0.75,
+                                        height: `${Math.max(8, (m.count / max) * 100)}%`, borderRadius: 1 }} />
+                                  ))}
+                                </div>
+                              </div>
+                            )
+                          })()}
+                          {s.weekday_counts && (() => {
+                            const max = Math.max(...s.weekday_counts.map((w: any) => w.count), 1)
+                            return (
+                              <div>
+                                <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 3 }}>{tr('ov.byWeekday')}</div>
+                                <div style={{ display: 'flex', gap: 3 }}>
+                                  {s.weekday_counts.map((w: any) => (
+                                    <div key={w.day} style={{ flex: 1, textAlign: 'center' }}>
+                                      <div style={{ height: 22, display: 'flex', alignItems: 'flex-end' }}>
+                                        <span title={`${w.day}: ${w.count.toLocaleString()}`}
+                                          style={{ width: '100%', background: 'var(--accent)', opacity: 0.6,
+                                            height: `${Math.max(4, (w.count / max) * 100)}%`, borderRadius: 1 }} />
+                                      </div>
+                                      <div style={{ fontSize: 8, color: 'var(--muted)' }}>{w.day[0]}</div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )
+                          })()}
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+            {catCols.length > 0 && (
+              <section>
+                <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>
+                  {tr('ov.catCols')} <span className="badge badge-categorical" style={{ marginInlineStart: 6 }}>{catCols.length}</span>
+                </h2>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+                  {catCols.map(([col, s]: [string, any]) => (
+                    <div key={col} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 14 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6 }}>{col} <span style={{ color: 'var(--muted)', fontSize: 12, fontWeight: 400 }}>({s.n_unique} unique)</span></div>
+                      {(s.top_values ?? []).slice(0, 5).map((v: any) => (
+                        <div key={v.value} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '2px 0', color: 'var(--muted)' }}>
+                          <span style={{ color: 'var(--text)' }}>{v.value}</span>
+                          <span style={{ fontFamily: 'var(--mono)' }}>{v.pct}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+        </div>
       )}
 
-      {tab === 'statistics' && ds && (
-        <StatisticsPanel mode={ds.mode} datasetId={ds.id} columns={ds.columns ?? []} />
+      {/* Analysis: the dataset-scoped analyses (RLS-filtered against this
+          dataset's frame), and the automatic ones that used to sit on the
+          Overview -- insights, key influencers, associations, segments and
+          anomalies. Keyed `analysis`; the old `?tab=statistics` redirects. */}
+      {tab === 'analysis' && ds && (
+        <div>
+          <StatisticsPanel mode={ds.mode} datasetId={ds.id} columns={ds.columns ?? []} />
+            {/* Live datasets too (HR evaluation, item 3.4): the scan reads up to
+                250K rows from the source, and only when this button is pressed. */}
+            {(
+              <section id="insights" style={{ marginBottom: 24 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                  <h2 style={{ fontSize: 15, fontWeight: 700 }}>{tr('dataset.insights')}</h2>
+                  <button className="btn btn-sm" disabled={insightsBusy}
+                    onClick={() => {
+                      setInsightsBusy(true)
+                      insightsApi.run(ds.id).then(setInsights).finally(() => setInsightsBusy(false))
+                    }}>
+                    {insightsBusy ? tr('ov.scanning')
+                      : insights ? <IconLabel icon={RefreshCw}>{tr('ov.rescan')}</IconLabel>
+                      : <IconLabel icon={Sparkles}>{tr('ov.genInsights')}</IconLabel>}
+                  </button>
+                </div>
+                {insights && (
+                  <>
+                    <p data-testid="insights-narrative" style={{ fontSize: 13, background: 'var(--surface)', border: '1px solid var(--border)',
+                      borderRadius: 'var(--radius)', padding: '10px 14px', marginBottom: 10 }}>
+                      {insights.narrative}
+                    </p>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 10 }}>
+                      {insights.findings.map((f, i) => (
+                        <div key={i} data-testid={`insight-${f.kind}`}
+                          style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12 }}>
+                          <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', marginBottom: 4 }}>
+                            <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em',
+                              color: f.kind === 'data_quality' ? '#e6a03c' : 'var(--accent)' }}>
+                              {f.kind.replace('_', ' ')}
+                            </span>
+                            {(f.novelty === 'new' || f.novelty === 'changed') && (
+                              <span style={{ background: 'var(--accent)', color: 'var(--surface)',
+                                borderRadius: 3, padding: '0 4px', fontSize: 8, fontWeight: 700 }}>
+                                {f.novelty === 'new' ? 'NEW' : 'CHANGED'}
+                              </span>
+                            )}
+                            <button aria-label={`Pin finding: ${f.title}`}
+                              title="Pin to your dashboard — re-evaluated live on every visit"
+                              onClick={() => void pinsApi
+                                .create({ dataset_id: ds.id,
+                                          finding_key: findingKey(f) })
+                                .then(r => toast.success(r.already_pinned
+                                  ? 'Already on your dashboard' : 'Pinned to your dashboard'))
+                                .catch(() => toast.error('Could not pin this finding'))}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer',
+                                fontSize: 11, padding: 0, marginInlineStart: 'auto' }}><Pin size={12} /></button>
+                            <span style={{ fontSize: 10.5, color: 'var(--muted)', marginInlineStart: 'auto' }}>{Math.round(f.score * 100)}</span>
+                          </div>
+                          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 3 }}>{f.title}</div>
+                          <div style={{ fontSize: 11, color: 'var(--muted)' }}>{f.detail}</div>
+                          <FindingChart datasetId={ds.id} finding={f}
+                            columnTypes={Object.fromEntries(ds.columns.map(c => [c.name, c.dtype ?? '']))} />
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </section>
+            )}
+            <section id="influencers" style={{ marginBottom: 24 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+                <h2 style={{ fontSize: 15, fontWeight: 700 }}>{tr('ov.keyInfluencers')}</h2>
+                <select value={influencerTarget} aria-label="Outcome to explain"
+                  onChange={e => { setInfluencerTarget(e.target.value); setInfluencers(null); setInfluencerNeedsPick(false) }}
+                  style={{ fontSize: 12 }}>
+                  <option value="">{tr('ki.chooseOutcome')}</option>
+                  {ds.columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                </select>
+                <button className="btn btn-sm" disabled={influencerBusy || !influencerTarget} title={!influencerTarget ? 'Choose the column to explain first' : undefined}
+                  onClick={() => runInfluencers(influencerTarget)}>
+                  {influencerBusy ? tr('ov.analysing')
+                      : influencers ? <IconLabel icon={RefreshCw}>{tr('ov.rerun')}</IconLabel>
+                      : <IconLabel icon={Sparkles}>{tr('ov.whatDrives')}</IconLabel>}
+                </button>
+              </div>
+              {influencerNeedsPick && !influencerTarget && (
+                <p data-testid="influencers-pick" style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+                  {tr('ki.pickPrompt')}
+                </p>
+              )}
+              {influencerError && (
+                <p style={{ fontSize: 12, color: 'var(--danger)' }}>{influencerError}</p>
+              )}
+              {influencers && (
+                <KeyInfluencersResultView result={influencers}
+                  leftOut={influencerSkipped.filter(c => c !== influencers.meta.target)} />
+              )}
+            </section>
+
+            <section id="associations" style={{ marginBottom: 24 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                <h2 style={{ fontSize: 15, fontWeight: 700 }}>{tr('ov.travelTogether')}</h2>
+                <button className="btn btn-sm" disabled={rulesBusy} onClick={runPatterns}>
+                  {rulesBusy ? tr('ov.mining')
+                      : rules ? <IconLabel icon={RefreshCw}>{tr('ov.rerun')}</IconLabel>
+                      : <IconLabel icon={Sparkles}>{tr('ov.findPatterns')}</IconLabel>}
+                </button>
+              </div>
+              {rulesError && (
+                <p role="alert" style={{ fontSize: 12, color: 'var(--danger)' }}>{rulesError}</p>
+              )}
+              {rules && rules.rows.length === 0 && (
+                <p style={{ fontSize: 12, color: 'var(--muted)' }}>
+                  {tr('ar.none')}
+                </p>
+              )}
+              {rules && rules.rows.length > 0 && (
+                <div style={{ background: 'var(--surface)', border: '1px solid var(--border)',
+                  borderRadius: 8, padding: 14, overflowX: 'auto' }}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>{tr('ki.when')}</th>
+                        <th>{tr('ar.then')}</th>
+                        {/* Lift first: it is the number that means something.
+                            Confidence alone is unreadable without the base rate
+                            beside it, which is why both are shown. */}
+                        <th>{tr('ar.lift')}</th>
+                        <th>{tr('ar.confidence')}</th>
+                        <th>{tr('ar.baseRate')}</th>
+                        <th>{tr('ki.rowsCol')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rules.rows.map((r, i) => (
+                        <tr key={i}>
+                          <td><strong>{r.if}</strong></td>
+                          <td>{r.then}</td>
+                          <td style={{ fontFamily: 'var(--mono)', color: 'var(--accent)' }}>
+                            {r.lift.toFixed(2)}×
+                          </td>
+                          <td style={{ fontFamily: 'var(--mono)' }}>
+                            {(r.confidence * 100).toFixed(0)}%
+                          </td>
+                          <td style={{ fontFamily: 'var(--mono)', color: 'var(--muted)' }}>
+                            {(r.base_rate * 100).toFixed(0)}%
+                          </td>
+                          <td style={{ fontFamily: 'var(--mono)' }}>
+                            {r.support_rows.toLocaleString()}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {rules.warnings.length > 0 && (
+                    <ul style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10, paddingInlineStart: 18 }}>
+                      {rules.warnings.map((w, i) => <li key={i}>{w}</li>)}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </section>
+
+            {ds.mode !== 'directquery' && (
+              <section id="segment" style={{ marginBottom: 24 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                  <h2 style={{ fontSize: 15, fontWeight: 700 }}>{tr('ov.segment')}</h2>
+                  <button className="btn btn-sm" disabled={segmentBusy} onClick={runSegment}>
+                    {segmentBusy ? tr('ov.clustering')
+                      : segment ? <IconLabel icon={RefreshCw}>{tr('ov.rerunSegment')}</IconLabel>
+                      : <IconLabel icon={Sparkles}>{tr('ov.segmentRows')}</IconLabel>}
+                  </button>
+                </div>
+                {segmentError && (
+                  <p style={{ fontSize: 12, color: 'var(--danger)' }}>{segmentError}</p>
+                )}
+                {segment && (
+                  <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 14 }}>
+                    <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
+                      k = {segment.meta.params.k} clusters over {segment.meta.params.columns.join(', ')}
+                      {' · '}silhouette {segment.meta.silhouette.toFixed(3)}
+                      {' · '}{segment.meta.n_rows_used.toLocaleString()} rows clustered
+                    </div>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Cluster</th>
+                          <th>Size</th>
+                          {segment.meta.params.columns.map(c => <th key={c}>{c} (mean)</th>)}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {segment.meta.centroids.map((c: any) => (
+                          <tr key={c.cluster}>
+                            <td style={{ fontWeight: 600 }}>{c.cluster}</td>
+                            <td style={{ fontFamily: 'var(--mono)' }}>{c.size}</td>
+                            {segment.meta.params.columns.map(col => (
+                              <td key={col} style={{ fontFamily: 'var(--mono)' }}>{Number(c[col]).toFixed(2)}</td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+            )}
+
+            {/* Anomalies -- the report builder's outlier-details dialog, opened
+                from the data itself. The dialog owns the detector picker
+                (IQR / Isolation Forest / ECOD); this section only chooses the
+                column, because that is the one input the dialog does not own. */}
+            {/* Import-only, like Insights and Segments: /outlier-details 400s on
+                DirectQuery identically to /insights and /segment -- this guard
+                was missing, so a DirectQuery user could pick a column and click
+                straight into a guaranteed error the other two sections never expose. */}
+            {ds.mode !== 'directquery' && ds.columns.some(c => c.dtype === 'numeric') && (
+              <section id="anomalies" style={{ marginBottom: 24 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                  <h2 style={{ fontSize: 15, fontWeight: 700 }}>{tr('ov.anomalies')}</h2>
+                  <select value={outlierColumn} aria-label="Column to inspect for outliers"
+                    onChange={e => setOutlierColumn(e.target.value)} style={{ fontSize: 12 }}>
+                    <option value="">choose a numeric column…</option>
+                    {ds.columns.filter(c => c.dtype === 'numeric').map(c => (
+                      <option key={c.name} value={c.name}>{c.name}</option>
+                    ))}
+                  </select>
+                  <button className="btn btn-sm" disabled={!outlierColumn} title={!outlierColumn ? 'Choose a numeric column first' : undefined}
+                    onClick={() => setOutlierOpen(true)}>
+                    <IconLabel icon={TriangleAlert}>{tr('ov.inspectOutliers')}</IconLabel>
+                  </button>
+                </div>
+                <p style={{ fontSize: 12, color: 'var(--muted)' }}>
+                  Box-plot fences, the outlying rows themselves, and what they do to the total
+                  and the mean — on the same secured data widgets read.
+                </p>
+              </section>
+            )}
+        </div>
       )}
 
-      {/* ── Alerts tab ──
-          The evaluator has run on every scheduler tick for months and nothing
-          could create an alert, so the platform had none. This is the missing
-          half. It lives beside the data rather than in Admin because an alert
-          is a question about THIS dataset's columns, and it is checked as the
-          person who made it — with their row-level security, not an admin's. */}
-      {tab === 'alerts' && ds && (
-        <AlertsPanel datasetId={ds.id} columns={ds.columns ?? []} />
+      {/* Rules & alerts: the quality rules (formerly on the Overview), the
+          checks every refresh must pass before it is published (none for a
+          live dataset) and the alerts -- checked as the person who made each
+          one, with their row-level security. */}
+      {tab === 'rules' && ds && (
+        <div>
+          {ds.mode !== 'directquery' && <DataQualityPanel datasetId={dsId} />}
+          {ds.mode !== 'directquery' && (
+            <ChecksPanel datasetId={ds.id} columns={(ds.columns ?? []).map(c => c.name)}
+              canEdit={!!pipelineHealth?.can_edit} />
+          )}
+          <AlertsPanel datasetId={ds.id} columns={ds.columns ?? []} />
+        </div>
       )}
 
-      {/* Pipeline phase 3: what every refresh must pass before it is published. */}
-      {tab === 'checks' && ds && (
-        <ChecksPanel datasetId={ds.id} columns={(ds.columns ?? []).map(c => c.name)}
-          canEdit={!!pipelineHealth?.can_edit} />
-      )}
-
-      {/* Saved models, beside the analyses they come from. Every other analysis
-          here refits and discards; these are the ones kept so they can score
-          rows whose outcome is not known yet. */}
+      {/* Saved models, beside the analyses they come from. */}
       {tab === 'models' && ds && (
         <PredictionModelsPanel datasetId={ds.id} columns={ds.columns ?? []} mode={ds.mode}
           dataset={{ row_count: ds.row_count ?? null, content_sha256: (ds as { content_sha256?: string | null }).content_sha256 ?? null,
@@ -932,406 +1306,19 @@ export default function DatasetDetail() {
       )}
 
       {/* Aggregates: a GROUP BY run at the source on a schedule, saved as a
-          dataset dashboards can read in milliseconds. DirectQuery-only, since
-          an import dataset's dashboards already read its file directly. */}
+          dataset dashboards can read in milliseconds. DirectQuery-only. */}
       {tab === 'aggregates' && ds && (
         <AggregatesPanel datasetId={ds.id} mode={ds.mode} />
       )}
 
       {/* ── Overview tab ── */}
       {tab === 'overview' && (
-        <div>
-          {ds.mode !== 'directquery' && <DataQualityPanel datasetId={dsId} />}
-          {analysis?.sampled && (
-            <div style={{ marginBottom: 12, fontSize: 12, color: 'var(--muted)', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px' }}>
-              Based on a live sample of {analysis.sample_size?.toLocaleString()} of {analysis.total_rows?.toLocaleString()} rows.
-            </div>
-          )}
-          {analysis && (
-            // The same stat-card grammar as the Datasets page: label on top in
-            // sentence case, the figure in the body face with tabular digits.
-            // It was caps labels over teal monospace, which read as log output
-            // and made "numeric: 4 · datetime: 1 · categorical: 2" wrap to
-            // three ragged lines. Types are now the column-type badges used
-            // everywhere else a type is shown.
-            <div className="dl-stats" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
-              {[
-                { label: tr('dataset.stat.rows'), value: analysis.overview?.rows?.toLocaleString() },
-                { label: tr('dataset.stat.columns'), value: analysis.overview?.cols },
-                { label: tr('dataset.stat.missing'), value: `${analysis.overview?.missing_pct}%` },
-              ].map(card => (
-                <div key={card.label} className="card dl-stat dl-stat--plain">
-                  <div>
-                    <div className="dl-stat__label">{card.label}</div>
-                    <div className="dl-stat__figure">{card.value}</div>
-                  </div>
-                </div>
-              ))}
-              <div className="card dl-stat dl-stat--plain">
-                <div>
-                  <div className="dl-stat__label">{tr('dataset.stat.types')}</div>
-                  <div className="dl-stat__badges">
-                    {Object.entries(analysis.overview?.type_counts ?? {}).map(([k, v]) => (
-                      <span key={k} className={`badge badge-${['numeric', 'datetime', 'categorical'].includes(k) ? k : 'text'}`}>
-                        {k}: {String(v)}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-          {!analysis && !loading && (
-            <div style={{ padding: 40, textAlign: 'center', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', color: 'var(--muted)' }}>
-              {tr('dataset.noAnalysis')}
-            </div>
-          )}
-          {/* Live datasets too (HR evaluation, item 3.4): the scan reads up to
-              250K rows from the source, and only when this button is pressed. */}
-          {(
-            <section id="insights" style={{ marginBottom: 24 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                <h2 style={{ fontSize: 15, fontWeight: 700 }}>{tr('dataset.insights')}</h2>
-                <button className="btn btn-sm" disabled={insightsBusy}
-                  onClick={() => {
-                    setInsightsBusy(true)
-                    insightsApi.run(ds.id).then(setInsights).finally(() => setInsightsBusy(false))
-                  }}>
-                  {insightsBusy ? tr('ov.scanning')
-                    : insights ? <IconLabel icon={RefreshCw}>{tr('ov.rescan')}</IconLabel>
-                    : <IconLabel icon={Sparkles}>{tr('ov.genInsights')}</IconLabel>}
-                </button>
-              </div>
-              {insights && (
-                <>
-                  <p data-testid="insights-narrative" style={{ fontSize: 13, background: 'var(--surface)', border: '1px solid var(--border)',
-                    borderRadius: 'var(--radius)', padding: '10px 14px', marginBottom: 10 }}>
-                    {insights.narrative}
-                  </p>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 10 }}>
-                    {insights.findings.map((f, i) => (
-                      <div key={i} data-testid={`insight-${f.kind}`}
-                        style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12 }}>
-                        <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', marginBottom: 4 }}>
-                          <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em',
-                            color: f.kind === 'data_quality' ? '#e6a03c' : 'var(--accent)' }}>
-                            {f.kind.replace('_', ' ')}
-                          </span>
-                          {(f.novelty === 'new' || f.novelty === 'changed') && (
-                            <span style={{ background: 'var(--accent)', color: 'var(--surface)',
-                              borderRadius: 3, padding: '0 4px', fontSize: 8, fontWeight: 700 }}>
-                              {f.novelty === 'new' ? 'NEW' : 'CHANGED'}
-                            </span>
-                          )}
-                          <button aria-label={`Pin finding: ${f.title}`}
-                            title="Pin to your dashboard — re-evaluated live on every visit"
-                            onClick={() => void pinsApi
-                              .create({ dataset_id: ds.id,
-                                        finding_key: findingKey(f) })
-                              .then(r => toast.success(r.already_pinned
-                                ? 'Already on your dashboard' : 'Pinned to your dashboard'))
-                              .catch(() => toast.error('Could not pin this finding'))}
-                            style={{ background: 'none', border: 'none', cursor: 'pointer',
-                              fontSize: 11, padding: 0, marginInlineStart: 'auto' }}><Pin size={12} /></button>
-                          <span style={{ fontSize: 10.5, color: 'var(--muted)', marginInlineStart: 'auto' }}>{Math.round(f.score * 100)}</span>
-                        </div>
-                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 3 }}>{f.title}</div>
-                        <div style={{ fontSize: 11, color: 'var(--muted)' }}>{f.detail}</div>
-                        <FindingChart datasetId={ds.id} finding={f}
-                          columnTypes={Object.fromEntries(ds.columns.map(c => [c.name, c.dtype ?? '']))} />
-                      </div>
-                    ))}
-                  </div>
-                </>
-              )}
-            </section>
-          )}
-          <section id="influencers" style={{ marginBottom: 24 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
-              <h2 style={{ fontSize: 15, fontWeight: 700 }}>{tr('ov.keyInfluencers')}</h2>
-              <select value={influencerTarget} aria-label="Outcome to explain"
-                onChange={e => { setInfluencerTarget(e.target.value); setInfluencers(null); setInfluencerNeedsPick(false) }}
-                style={{ fontSize: 12 }}>
-                <option value="">{tr('ki.chooseOutcome')}</option>
-                {ds.columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
-              </select>
-              <button className="btn btn-sm" disabled={influencerBusy || !influencerTarget} title={!influencerTarget ? 'Choose the column to explain first' : undefined}
-                onClick={() => runInfluencers(influencerTarget)}>
-                {influencerBusy ? tr('ov.analysing')
-                    : influencers ? <IconLabel icon={RefreshCw}>{tr('ov.rerun')}</IconLabel>
-                    : <IconLabel icon={Sparkles}>{tr('ov.whatDrives')}</IconLabel>}
-              </button>
-            </div>
-            {influencerNeedsPick && !influencerTarget && (
-              <p data-testid="influencers-pick" style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
-                {tr('ki.pickPrompt')}
-              </p>
-            )}
-            {influencerError && (
-              <p style={{ fontSize: 12, color: 'var(--danger)' }}>{influencerError}</p>
-            )}
-            {influencers && (
-              <KeyInfluencersResultView result={influencers}
-                leftOut={influencerSkipped.filter(c => c !== influencers.meta.target)} />
-            )}
-          </section>
-
-          <section id="associations" style={{ marginBottom: 24 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-              <h2 style={{ fontSize: 15, fontWeight: 700 }}>{tr('ov.travelTogether')}</h2>
-              <button className="btn btn-sm" disabled={rulesBusy} onClick={runPatterns}>
-                {rulesBusy ? tr('ov.mining')
-                    : rules ? <IconLabel icon={RefreshCw}>{tr('ov.rerun')}</IconLabel>
-                    : <IconLabel icon={Sparkles}>{tr('ov.findPatterns')}</IconLabel>}
-              </button>
-            </div>
-            {rulesError && (
-              <p role="alert" style={{ fontSize: 12, color: 'var(--danger)' }}>{rulesError}</p>
-            )}
-            {rules && rules.rows.length === 0 && (
-              <p style={{ fontSize: 12, color: 'var(--muted)' }}>
-                {tr('ar.none')}
-              </p>
-            )}
-            {rules && rules.rows.length > 0 && (
-              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)',
-                borderRadius: 8, padding: 14, overflowX: 'auto' }}>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>{tr('ki.when')}</th>
-                      <th>{tr('ar.then')}</th>
-                      {/* Lift first: it is the number that means something.
-                          Confidence alone is unreadable without the base rate
-                          beside it, which is why both are shown. */}
-                      <th>{tr('ar.lift')}</th>
-                      <th>{tr('ar.confidence')}</th>
-                      <th>{tr('ar.baseRate')}</th>
-                      <th>{tr('ki.rowsCol')}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rules.rows.map((r, i) => (
-                      <tr key={i}>
-                        <td><strong>{r.if}</strong></td>
-                        <td>{r.then}</td>
-                        <td style={{ fontFamily: 'var(--mono)', color: 'var(--accent)' }}>
-                          {r.lift.toFixed(2)}×
-                        </td>
-                        <td style={{ fontFamily: 'var(--mono)' }}>
-                          {(r.confidence * 100).toFixed(0)}%
-                        </td>
-                        <td style={{ fontFamily: 'var(--mono)', color: 'var(--muted)' }}>
-                          {(r.base_rate * 100).toFixed(0)}%
-                        </td>
-                        <td style={{ fontFamily: 'var(--mono)' }}>
-                          {r.support_rows.toLocaleString()}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {rules.warnings.length > 0 && (
-                  <ul style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10, paddingInlineStart: 18 }}>
-                    {rules.warnings.map((w, i) => <li key={i}>{w}</li>)}
-                  </ul>
-                )}
-              </div>
-            )}
-          </section>
-
-          {ds.mode !== 'directquery' && (
-            <section id="segment" style={{ marginBottom: 24 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                <h2 style={{ fontSize: 15, fontWeight: 700 }}>{tr('ov.segment')}</h2>
-                <button className="btn btn-sm" disabled={segmentBusy} onClick={runSegment}>
-                  {segmentBusy ? tr('ov.clustering')
-                    : segment ? <IconLabel icon={RefreshCw}>{tr('ov.rerunSegment')}</IconLabel>
-                    : <IconLabel icon={Sparkles}>{tr('ov.segmentRows')}</IconLabel>}
-                </button>
-              </div>
-              {segmentError && (
-                <p style={{ fontSize: 12, color: 'var(--danger)' }}>{segmentError}</p>
-              )}
-              {segment && (
-                <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 14 }}>
-                  <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
-                    k = {segment.meta.params.k} clusters over {segment.meta.params.columns.join(', ')}
-                    {' · '}silhouette {segment.meta.silhouette.toFixed(3)}
-                    {' · '}{segment.meta.n_rows_used.toLocaleString()} rows clustered
-                  </div>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Cluster</th>
-                        <th>Size</th>
-                        {segment.meta.params.columns.map(c => <th key={c}>{c} (mean)</th>)}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {segment.meta.centroids.map((c: any) => (
-                        <tr key={c.cluster}>
-                          <td style={{ fontWeight: 600 }}>{c.cluster}</td>
-                          <td style={{ fontFamily: 'var(--mono)' }}>{c.size}</td>
-                          {segment.meta.params.columns.map(col => (
-                            <td key={col} style={{ fontFamily: 'var(--mono)' }}>{Number(c[col]).toFixed(2)}</td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </section>
-          )}
-
-          {/* Anomalies -- the report builder's outlier-details dialog, opened
-              from the data itself. The dialog owns the detector picker
-              (IQR / Isolation Forest / ECOD); this section only chooses the
-              column, because that is the one input the dialog does not own. */}
-          {/* Import-only, like Insights and Segments: /outlier-details 400s on
-              DirectQuery identically to /insights and /segment -- this guard
-              was missing, so a DirectQuery user could pick a column and click
-              straight into a guaranteed error the other two sections never expose. */}
-          {ds.mode !== 'directquery' && ds.columns.some(c => c.dtype === 'numeric') && (
-            <section id="anomalies" style={{ marginBottom: 24 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                <h2 style={{ fontSize: 15, fontWeight: 700 }}>{tr('ov.anomalies')}</h2>
-                <select value={outlierColumn} aria-label="Column to inspect for outliers"
-                  onChange={e => setOutlierColumn(e.target.value)} style={{ fontSize: 12 }}>
-                  <option value="">choose a numeric column…</option>
-                  {ds.columns.filter(c => c.dtype === 'numeric').map(c => (
-                    <option key={c.name} value={c.name}>{c.name}</option>
-                  ))}
-                </select>
-                <button className="btn btn-sm" disabled={!outlierColumn} title={!outlierColumn ? 'Choose a numeric column first' : undefined}
-                  onClick={() => setOutlierOpen(true)}>
-                  <IconLabel icon={TriangleAlert}>{tr('ov.inspectOutliers')}</IconLabel>
-                </button>
-              </div>
-              <p style={{ fontSize: 12, color: 'var(--muted)' }}>
-                Box-plot fences, the outlying rows themselves, and what they do to the total
-                and the mean — on the same secured data widgets read.
-              </p>
-            </section>
-          )}
-          {numCols.length > 0 && (
-            <section style={{ marginBottom: 24 }}>
-              <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>
-                {tr('ov.numericCols')} <span className="badge badge-numeric" style={{ marginInlineStart: 6 }}>{numCols.length}</span>
-              </h2>
-              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
-                <table>
-                  <thead><tr><th>Column</th><th>Count</th><th>Mean</th><th>Std</th><th>Min</th><th>Median</th><th>Max</th><th>Missing%</th></tr></thead>
-                  <tbody>
-                    {numCols.map(([col, s]: [string, any]) => (
-                      <tr key={col}>
-                        <td style={{ fontWeight: 600 }}>{col}</td>
-                        <td style={{ fontFamily: 'var(--mono)' }}>{s.count}</td>
-                        <td style={{ fontFamily: 'var(--mono)' }}>{s.mean?.toFixed(2)}</td>
-                        <td style={{ fontFamily: 'var(--mono)' }}>{s.std?.toFixed(2)}</td>
-                        <td style={{ fontFamily: 'var(--mono)' }}>{s.min?.toFixed(2)}</td>
-                        <td style={{ fontFamily: 'var(--mono)' }}>{s.median?.toFixed(2)}</td>
-                        <td style={{ fontFamily: 'var(--mono)' }}>{s.max?.toFixed(2)}</td>
-                        <td style={{ color: s.missing_pct > 10 ? 'var(--danger)' : 'var(--muted)', fontFamily: 'var(--mono)' }}>{s.missing_pct}%</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          )}
-          {dtCols.length > 0 && (
-            <section style={{ marginBottom: 24 }}>
-              <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>
-                {tr('ov.dateCols')} <span className="badge badge-datetime" style={{ marginInlineStart: 6 }}>{dtCols.length}</span>
-              </h2>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
-                {dtCols.map(([col, s]: [string, any]) => (
-                  <div key={col} data-testid={`dt-card-${col}`} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 14 }}>
-                    <div style={{ fontWeight: 700, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
-                      {col}
-                      {s.granularity && (
-                        <span style={{ fontSize: 10.5, fontWeight: 400, color: 'var(--muted)', border: '1px solid var(--border)', borderRadius: 6, padding: '0 5px', textTransform: 'uppercase' }}>
-                          {s.granularity}
-                        </span>
-                      )}
-                    </div>
-                    {s.note ? (
-                      <div style={{ fontSize: 12, color: 'var(--muted)' }}>{s.note}</div>
-                    ) : (
-                      <>
-                        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
-                          {String(s.min).slice(0, s.granularity === 'date' ? 10 : 16)} → {String(s.max).slice(0, s.granularity === 'date' ? 10 : 16)}
-                          <span style={{ fontFamily: 'var(--mono)' }}> · {s.range_days}d span · {s.n_unique} unique</span>
-                          {s.missing_pct > 0 && <span style={{ color: s.missing_pct > 10 ? 'var(--danger)' : undefined }}> · {s.missing_pct}% missing</span>}
-                          {s.gaps_over_7d > 0 && <span> · {s.gaps_over_7d} gap{s.gaps_over_7d === 1 ? '' : 's'} &gt;7d</span>}
-                        </div>
-                        {s.monthly_counts && (() => {
-                          const max = Math.max(...s.monthly_counts.map((m: any) => m.count), 1)
-                          return (
-                            <div style={{ marginBottom: 8 }}>
-                              <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 3 }}>
-                                {tr('ov.byMonth')}{s.busiest_period ? ` — busiest ${s.busiest_period.period} (${s.busiest_period.count.toLocaleString()})` : ''}
-                              </div>
-                              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 1, height: 28 }}>
-                                {s.monthly_counts.map((m: any) => (
-                                  <span key={m.period} title={`${m.period}: ${m.count.toLocaleString()}`}
-                                    style={{ flex: 1, minWidth: 2, background: 'var(--accent)', opacity: 0.75,
-                                      height: `${Math.max(8, (m.count / max) * 100)}%`, borderRadius: 1 }} />
-                                ))}
-                              </div>
-                            </div>
-                          )
-                        })()}
-                        {s.weekday_counts && (() => {
-                          const max = Math.max(...s.weekday_counts.map((w: any) => w.count), 1)
-                          return (
-                            <div>
-                              <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 3 }}>{tr('ov.byWeekday')}</div>
-                              <div style={{ display: 'flex', gap: 3 }}>
-                                {s.weekday_counts.map((w: any) => (
-                                  <div key={w.day} style={{ flex: 1, textAlign: 'center' }}>
-                                    <div style={{ height: 22, display: 'flex', alignItems: 'flex-end' }}>
-                                      <span title={`${w.day}: ${w.count.toLocaleString()}`}
-                                        style={{ width: '100%', background: 'var(--accent)', opacity: 0.6,
-                                          height: `${Math.max(4, (w.count / max) * 100)}%`, borderRadius: 1 }} />
-                                    </div>
-                                    <div style={{ fontSize: 8, color: 'var(--muted)' }}>{w.day[0]}</div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )
-                        })()}
-                      </>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
-          {catCols.length > 0 && (
-            <section>
-              <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>
-                {tr('ov.catCols')} <span className="badge badge-categorical" style={{ marginInlineStart: 6 }}>{catCols.length}</span>
-              </h2>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
-                {catCols.map(([col, s]: [string, any]) => (
-                  <div key={col} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 14 }}>
-                    <div style={{ fontWeight: 700, marginBottom: 6 }}>{col} <span style={{ color: 'var(--muted)', fontSize: 12, fontWeight: 400 }}>({s.n_unique} unique)</span></div>
-                    {(s.top_values ?? []).slice(0, 5).map((v: any) => (
-                      <div key={v.value} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '2px 0', color: 'var(--muted)' }}>
-                        <span style={{ color: 'var(--text)' }}>{v.value}</span>
-                        <span style={{ fontFamily: 'var(--mono)' }}>{v.pct}%</span>
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
-        </div>
+        <Overview ds={ds} analysis={analysis} profiling={running} profileError={profileError}
+          onProfile={() => void runAnalysis()} isAdmin={isAdmin} me={{ id: meId, email: meEmail }}
+          pipelineHealth={pipelineHealth} onCertify={() => void toggleCertify()} goTab={setTab}
+          alerts={ruleAlerts} checks={ruleChecks}
+          insights={insights} insightsBusy={insightsBusy} onGenerateInsights={generateInsights}
+          firstRun={firstRun} onBuild={() => void buildDashboard()} />
       )}
 
       {/* ── Data tab ── */}
