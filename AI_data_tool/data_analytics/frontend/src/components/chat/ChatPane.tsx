@@ -11,6 +11,9 @@ import ChoiceOptions, { isChoices } from './ChoiceOptions'
 import DashboardProposals, { type DashboardProposalsPresentation }
   from './DashboardProposals'
 import { useT, translate, type TranslateFn } from '../../i18n'
+import { useDirection } from '../../contexts/DirectionContext'
+import { majorityDir } from '../../lib/autoDir'
+import { renderTextWithLinks } from '../../lib/inlineMarkup'
 import { aiLimitMessage } from '../../lib/aiLimit'
 import Composer from './Composer'
 import AnswerText from './AnswerText'
@@ -132,6 +135,9 @@ function isProposals(p: unknown): p is DashboardProposalsPresentation {
 export default function ChatPane({ dataSourceId, datasetIds, conversationId, onConversationCreated,
   suggestions, datasetColumns, onAddToPage }: ChatPaneProps) {
   const t = useT()
+  const { direction } = useDirection()
+  // Model and server text: markup rendered, laid out by its majority script.
+  const modelText = (text: string) => renderTextWithLinks(text, { httpsOnly: true })
   const owned = conversationId !== undefined
   const [convId, setConvId] = useState<number | null>(conversationId ?? null)
   // What the pane itself created or last loaded -- so a parent echoing the
@@ -452,7 +458,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
                         <p className="dl-answer-error__title">
                           <AlertTriangle size={16} aria-hidden /> {t('ai.limit.title')}
                         </p>
-                        <p className="dl-answer-error__hint">{msg.text}</p>
+                        <p className="dl-answer-error__hint" dir={majorityDir(msg.text, direction)}>{modelText(msg.text)}</p>
                       </div>
                     ) : msg.kind === 'error' ? (
                       <div className="dl-answer-error">
@@ -470,7 +476,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
                         )}
                         <details className="dl-answer-error__details">
                           <summary>{t('ask.err.details')}</summary>
-                          <div dir="ltr" className="dl-answer-error__raw">{msg.text}</div>
+                          <div dir="ltr" className="dl-answer-error__raw">{modelText(msg.text)}</div>
                         </details>
                         {turn.question && (
                           <div className="dl-actions">
@@ -484,7 +490,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
                     ) : msg.kind === 'clarify' ? (
                       <div className="dl-answer-clarify">
                         <span className="dl-answer-clarify__tag">{t('ask.needsDetail')}</span>
-                        <p>{msg.text}</p>
+                        <p dir={majorityDir(msg.text, direction)}>{modelText(msg.text)}</p>
                         {isChoices(msg.presentation) && (
                           <ChoiceOptions presentation={msg.presentation} disabled={busy}
                             onChoose={option => void send(option)} />

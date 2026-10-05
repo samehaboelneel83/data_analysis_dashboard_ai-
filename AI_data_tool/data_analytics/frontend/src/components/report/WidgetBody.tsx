@@ -1,6 +1,7 @@
 import { semanticAggregationWarning, nonAdditiveKind, SAFE_AGGREGATION } from '../../lib/semanticGuard'
 import PivotTable, { type PivotData } from './PivotTable'
-import { Fragment, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
+import { renderTextWithLinks } from '../../lib/inlineMarkup'
 import { useDirection, widgetIsRtl } from '../../contexts/DirectionContext'
 import { useT } from '../../i18n'
 import type { CalcColumnFormat } from '../../services/api'
@@ -22,12 +23,6 @@ import SlicerRange, { type RangeValue } from './SlicerRange'
 // WidgetBody — pure rendering, receives onClick callback
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Render markdown-style [label](https://url) links inside a text block.
-
-    Built by splitting rather than by innerHTML: the content is author input, and this
-    way it stays text except for the explicit link syntax -- there is no HTML parsing
-    to escape from. Only http(s) targets become anchors; any other scheme renders as
-    the literal text it was, so a `javascript:` "link" is inert. */
 /**
  * The type size a big single number can take without spilling out of its card.
  *
@@ -87,34 +82,6 @@ function SlicerList({ rows, rtl, checked, onToggle, searchable }: {
       ))}
     </div>
   )
-}
-
-/** **bold**, __bold__, *italic* and _italic_ inside a text block. Built by
- *  splitting, like the links: the author's words stay text, and only the
- *  markers become formatting (live QA 2026-10-03 found them printed raw).
- *  An underscore inside a word (snake_case) is not a marker. */
-function renderInlineEmphasis(text: string, keyBase: string): ReactNode[] {
-  const re = /(\*\*[^*\n]+\*\*|__[^_\n]+__|(?<![\w*])\*[^*\s][^*\n]*?\*(?![\w*])|(?<![\w_])_[^_\s][^_\n]*?_(?![\w_]))/g
-  return text.split(re).map((part, i) => {
-    const key = `${keyBase}-${i}`
-    if (/^(\*\*|__).+(\*\*|__)$/.test(part) && part.length > 4) return <strong key={key}>{part.slice(2, -2)}</strong>
-    if (/^([*_]).+\1$/.test(part) && part.length > 2) return <em key={key}>{part.slice(1, -1)}</em>
-    return part
-  })
-}
-
-function renderTextWithLinks(content: string): ReactNode {
-  const parts = content.split(/(\[[^\]]+\]\((?:https?:)\/\/[^\s)]+\))/g)
-  return parts.map((part, i) => {
-    const m = /^\[([^\]]+)\]\(((?:https?:)\/\/[^\s)]+)\)$/.exec(part)
-    if (!m) return <Fragment key={i}>{renderInlineEmphasis(part, String(i))}</Fragment>
-    return (
-      <a key={i} href={m[2]} target="_blank" rel="noopener noreferrer"
-        style={{ color: 'var(--accent)' }}>
-        {renderInlineEmphasis(m[1], `l${i}`)}
-      </a>
-    )
-  })
 }
 
 /** An image widget that says so when its picture does not load: a broken

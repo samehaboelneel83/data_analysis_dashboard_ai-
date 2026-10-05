@@ -13,6 +13,8 @@
  * share is how an answer LOOKS.
  */
 import type { StatisticalTestResult } from '../../services/api'
+import { useDirection } from '../../contexts/DirectionContext'
+import { majorityDir } from '../../lib/autoDir'
 
 export interface Factor {
   column: string
@@ -359,11 +361,12 @@ function RowTable({ rows }: { rows: Record<string, unknown>[] }) {
 function ResultCard({ result }: { result: StatisticalTestResult }) {
   const coefficients = (result.detail?.coefficients as Record<string, unknown>[]) ?? null
   const test = (result.detail?.test as string) ?? result.kind
+  const { direction } = useDirection()
 
   return (
     <div className="card" style={{ padding: 18 }}>
       <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>{test}</div>
-      <p style={{ fontSize: 14, fontWeight: 500, marginTop: 0 }}>{result.interpretation}</p>
+      <p dir={majorityDir(result.interpretation, direction)} style={{ fontSize: 14, fontWeight: 500, marginTop: 0 }}>{result.interpretation}</p>
 
       <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', margin: '14px 0' }}>
         <Stat label={result.effect_name.replace(/_/g, ' ')}

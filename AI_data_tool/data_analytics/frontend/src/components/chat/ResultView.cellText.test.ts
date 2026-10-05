@@ -33,10 +33,21 @@ describe('cellText', () => {
     expect(cellText(true)).toBe('true')
   })
 
-  it('exports the same text it shows', () => {
-    const csv = toCsv([{ columns: ['region', 'revenue'],
-      rows: [['Europe', 2010526.4600000004]] } as any])
-    expect(csv).toContain('2010526.46')
-    expect(csv).not.toContain('4600000004')
+  it('rounds long floats for reading (redesign 1b)', () => {
+    expect(cellText(61.53500000000001)).toBe('61.54')
+    expect(cellText(83.8883333333)).toBe('83.89')
+    expect(cellText(2024)).toBe('2024')
+    expect(cellText(0.123456)).toBe('0.123')
+  })
+})
+
+describe('toCsv', () => {
+  // Owner decision (redesign 1b): exports carry raw values at full precision;
+  // the screen rounds for reading.
+  it('exports raw values at full precision', () => {
+    const csv = toCsv([{ columns: ['faculty', 'average_final_score'],
+      rows: [['Arts', 61.53500000000001], ['Region', 2010526.4600000004]] } as any])
+    expect(csv).toContain('61.53500000000001')
+    expect(csv).toContain('2010526.4600000004')
   })
 })

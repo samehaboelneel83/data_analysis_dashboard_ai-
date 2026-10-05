@@ -17,8 +17,8 @@
  */
 
 const TEXT_TYPES = new Set(['', 'text', 'search', 'email', 'url', 'tel'])
-const RTL_CHAR = /[֐-ࣿיִ-﷿ﹰ-﻿]/
-const LTR_CHAR = /[A-Za-zÀ-ɏͰ-ϿЀ-ӿ]/
+export const RTL_CHAR = /[֐-ࣿיִ-﷿ﹰ-﻿]/
+export const LTR_CHAR = /[A-Za-zÀ-ɏͰ-ϿЀ-ӿ]/
 const MANAGED = 'data-autodir'
 
 function firstStrongDir(text: string): 'ltr' | 'rtl' | null {
@@ -27,6 +27,26 @@ function firstStrongDir(text: string): 'ltr' | 'rtl' | null {
     if (LTR_CHAR.test(ch)) return 'ltr'
   }
   return null
+}
+
+/**
+ * The direction of model-written text by MAJORITY script (redesign step 1c).
+ *
+ * `dir="auto"` takes the first strong character, so an Arabic answer that
+ * opens with a data value ("Medicine الأعلى بمتوسط 83.9") was laid out LTR.
+ * Counts Arabic/Hebrew letters against Latin ones; `fallback` (the UI
+ * direction) wins a tie and text with no letters. User-typed text -- questions,
+ * titles -- keeps `dir="auto"`.
+ */
+export function majorityDir(text: string, fallback: 'ltr' | 'rtl'): 'ltr' | 'rtl' {
+  let rtl = 0
+  let ltr = 0
+  for (const ch of text ?? '') {
+    if (!/\p{L}/u.test(ch)) continue
+    if (RTL_CHAR.test(ch)) rtl++
+    else if (LTR_CHAR.test(ch)) ltr++
+  }
+  return rtl > ltr ? 'rtl' : ltr > rtl ? 'ltr' : fallback
 }
 
 function fix(el: Element): void {

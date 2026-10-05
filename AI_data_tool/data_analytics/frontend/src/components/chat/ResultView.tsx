@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useDirection } from '../../contexts/DirectionContext'
 import { useT } from '../../i18n'
 import { localDigits } from '../../lib/arabicFormats'
+import { formatCell } from '../../lib/displayNumber'
 import BarChartRenderer from '../report/chartRenderers/BarChartRenderer'
 import LineChartRenderer from '../report/chartRenderers/LineChartRenderer'
 import PieChartRenderer from '../report/chartRenderers/PieChartRenderer'
@@ -13,10 +14,13 @@ import './answerEvidence.css'
  *
  * The answer used to be prose only: the rows existed for one run on the
  * server and were summarised into a sentence. Now they arrive as a capped
- * snapshot (`AgentResult`) and are drawn as a grid, or -- when the run was a
- * presentation follow-up ("as a bar chart") -- through the same chart
- * renderers the dashboards use, so a chart in the chat looks like a chart on
- * a report. A chart keeps its rows one click away.
+ * snapshot (`AgentResult`) and are drawn through the same chart renderers the
+ * dashboards use, so a chart in the chat looks like a chart on a report: the
+ * chart the server asked for (a presentation follow-up, "as a bar chart"), or
+ * else the one `autoChart` picks for an unambiguous shape -- one number is a
+ * KPI, a label column with a measure is a bar (a line for dates), including a
+ * label column of numeric-looking codes. Any other shape is a grid. A chart
+ * keeps its rows one click away.
  */
 
 type Cell = string | number | boolean | null
@@ -44,22 +48,15 @@ const isNumberish = (v: Cell) =>
   typeof v === 'number' || (typeof v === 'string' && v.trim() !== '' && !isNaN(Number(v)))
 
 /**
- * A cell as text, without the binary-float noise.
- *
- * A summed currency column arrives as 2010526.4600000004 -- IEEE-754's honest
- * answer to adding .46 a few hundred times, and a number nobody reads as a
- * total. 12 significant digits sits well inside a double's ~15-17 and well
- * outside where that artefact lives, so rounding there drops the tail without
- * altering a value anyone actually typed.
+ * A cell as the grid shows it: non-integer floats at most 2 dp (3 significant
+ * digits below 1), so neither 2010526.4600000004 -- IEEE-754's honest answer
+ * to adding .46 a few hundred times -- nor an average like 83.8883333333
+ * reaches the reader. See `formatCell`.
  *
  * Deliberately no thousands separators: this grid shows whatever columns the
  * question returned, ids included, and "2,024" for a year is its own wrong.
  */
-export const cellText = (v: Cell): string => {
-  if (v == null) return ''
-  if (typeof v !== 'number' || !Number.isFinite(v) || Number.isInteger(v)) return String(v)
-  return String(Number.parseFloat(v.toPrecision(12)))
-}
+export const cellText = (v: Cell): string => formatCell(v)
 
 /** `{name, value}` rows for the chart renderers: the first non-numeric
  *  column names the mark, the first numeric column sizes it. A result with
@@ -135,10 +132,9 @@ export function chartRows(result: AgentResult, x?: string | null, y?: string | n
 /** RFC 4180 rows, CRLF-terminated, with a byte-order mark so Excel reads
  *  UTF-8 (Arabic cells otherwise open as mojibake). */
 export function toCsv(results: AgentResult[]): string {
-  // Same text the grid shows: an export that disagrees with the screen sends
-  // the reader hunting for which one is the real number.
+  // Exports carry raw values at full precision; the screen rounds for reading.
   const cell = (v: Cell) => {
-    const s = cellText(v)
+    const s = v == null ? '' : String(v)
     return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
   }
   const blocks = results.map(r =>
@@ -301,7 +297,8 @@ export function groupedBars(result: AgentResult):
 /** What to draw when the server did not ask for a particular chart.
  *  Only shapes that read unambiguously get a chart: one number is a KPI;
  *  a label column with one numeric column and 2-24 rows is a bar chart, or a
- *  line when the labels are dates. Everything else stays a grid. */
+ *  line when the labels are dates. Two numeric columns whose first is unique
+ *  count as label + value. Everything else stays a grid. */
 export function autoChart(result: AgentResult): 'kpi' | 'bar' | 'line' | null {
   const { columns, rows } = result
   if (!columns.length || !rows.length) return null
@@ -311,7 +308,11 @@ export function autoChart(result: AgentResult): 'kpi' | 'bar' | 'line' | null {
   if (groupedBars(result)) return 'bar'
   if (rows.length < 2 || rows.length > 24) return null
   const numeric = columns.map((_, i) => rows.every(r => r[i] == null || isNumberish(r[i])))
-  const nameIdx = numeric.findIndex(n => !n)
+  let nameIdx = numeric.findIndex(n => !n)
+  // A label column of numeric-looking codes (faculty 1-4, "101", Arabic-Indic
+  // digits) is still a label when it names each row once: chart it by column
+  // 0, as `chartColumns` already does, instead of falling back to the grid.
+  if (nameIdx < 0 && columns.length === 2 && new Set(rows.map(r => r[0])).size === rows.length) nameIdx = 0
   const valueIdx = numeric.findIndex((n, i) => n && i !== nameIdx)
   if (nameIdx < 0 || valueIdx < 0) return null
   const dated = rows.every(r => typeof r[nameIdx] === 'string' && /^\d{4}-\d{2}/.test(r[nameIdx] as string))
