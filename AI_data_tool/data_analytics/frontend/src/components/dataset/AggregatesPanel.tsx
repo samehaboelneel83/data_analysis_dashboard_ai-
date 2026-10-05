@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Info, Lock, Plus } from 'lucide-react'
 import { aggregatesApi } from '../../services/api'
+import '../../pages/datasetDetail/aggregates.css'
 import type { AggregateListItem, AggregatePreflight } from '../../services/api'
 
 const AGGS = ['sum', 'count', 'min', 'max'] as const
@@ -124,120 +126,149 @@ export default function AggregatesPanel({ datasetId, mode }: { datasetId: number
   }
   const label: React.CSSProperties = { display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--muted)' }
 
+  const lock = (c: string) => pre.rls_columns.includes(c)
   return (
-    <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div>
-        <h3 style={{ fontSize: 13, margin: '0 0 4px' }}>Aggregates</h3>
-        <p style={{ fontSize: 11, color: 'var(--muted)', margin: 0, maxWidth: 640 }}>
-          A GROUP BY run in the source database on a schedule and saved as a dataset, so a dashboard
-          reads thousands of pre-summed rows instead of scanning millions. Measures are pre-aggregated;
-          <code> row_count</code> is always included, so an average is <code>sum / row_count</code>.
-        </p>
-      </div>
-
-      <fieldset style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 10 }}>
-        <legend style={{ fontSize: 11, fontWeight: 700 }}>Grain</legend>
-        {pre.rls_columns.length > 0 && (
-          <p style={{ fontSize: 11, color: 'var(--muted)', margin: '0 0 6px' }}>
-            {pre.rls_columns.join(', ')} {pre.rls_columns.length === 1 ? 'is' : 'are'} locked in: a
-            row-level security rule reads {pre.rls_columns.length === 1 ? 'it' : 'them'}, and the aggregate
-            is governed by the source's rules at read time.
+    <div className="dl-aggs">
+      <header className="dl-aggs__head">
+        <div>
+          <h3>Aggregates</h3>
+          <p>
+            Pre-computed summaries of this live dataset: a GROUP BY run in the source database on a schedule
+            and saved as its own dataset, so a dashboard built on it reads thousands of pre-summed rows instead of
+            scanning millions. <code>row_count</code> is always included, so an average is <code>sum / row_count</code>.
           </p>
-        )}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {pre.grain_candidates.map(c => (
-            <label key={c} style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
-              <input type="checkbox" aria-label={c} checked={grain.includes(c)}
-                disabled={pre.rls_columns.includes(c)} title={pre.rls_columns.includes(c) ? 'Always kept: row-level security filters on this column' : undefined} onChange={() => toggle(c)} />
-              {c}
-            </label>
-          ))}
         </div>
-      </fieldset>
-
-      <fieldset style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 10 }}>
-        <legend style={{ fontSize: 11, fontWeight: 700 }}>Measures</legend>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <div>
-            <label htmlFor="agg-mcol" style={label}>Measure column</label>
-            <select id="agg-mcol" value={mCol} onChange={e => setMCol(e.target.value)} style={{ fontSize: 12 }}>
-              <option value="">Choose…</option>
-              {pre.measure_candidates.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </div>
-          <div>
-            <label htmlFor="agg-magg" style={label}>Aggregation</label>
-            <select id="agg-magg" value={mAgg} onChange={e => setMAgg(e.target.value)} style={{ fontSize: 12 }}>
-              {AGGS.map(a => <option key={a} value={a}>{a}</option>)}
-            </select>
-          </div>
-          <button type="button" className="btn btn-ghost btn-sm" disabled={!mCol} title={!mCol ? 'Choose a column to aggregate first' : undefined}
-            onClick={() => { setMeasures(m => [...m, { column: mCol, agg: mAgg }]); setMCol('') }}>
-            Add measure
-          </button>
-        </div>
-        <ul style={{ fontSize: 12, margin: '8px 0 0', paddingLeft: 18 }}>
-          {measures.map((m, i) => (
-            <li key={i}>{m.agg}({m.column}) → <code>{m.name ?? `${m.column}_${m.agg}`}</code>{' '}
-              <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}
-                onClick={() => setMeasures(ms => ms.filter((_, j) => j !== i))}>remove</button>
-            </li>
-          ))}
-        </ul>
-      </fieldset>
-
-      <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-        <div>
-          <label htmlFor="agg-name" style={label}>Name</label>
-          <input id="agg-name" value={name} onChange={e => setName(e.target.value)}
-            disabled={!!editing} title={editing ? 'The name is fixed once an aggregate exists' : undefined} style={{ fontSize: 12 }} />
-        </div>
-        <div>
-          <label htmlFor="agg-every" style={label}>Refresh every (minutes)</label>
-          <input id="agg-every" type="number" min={5} value={every} onChange={e => setEvery(e.target.value)}
-            placeholder="never" style={{ fontSize: 12, width: 90 }} />
-        </div>
-        <button type="button" className="btn btn-sm" onClick={submit}
-          disabled={busy || !name.trim() || grain.length === 0 || measures.length === 0} title={!name.trim() ? 'Name the aggregate first' : grain.length === 0 ? 'Choose at least one column to group by' : measures.length === 0 ? 'Add at least one measure' : undefined}>
-          {busy ? (editing ? 'Saving…' : 'Creating…') : (editing ? 'Save changes' : 'Create aggregate')}
+        <button type="button" className="btn btn-primary btn-sm"
+          onClick={() => { resetForm(); document.getElementById('agg-name')?.focus() }}>
+          <Plus size={14} aria-hidden /> New aggregate
         </button>
-        {editing && (
-          <button type="button" className="btn btn-ghost btn-sm" onClick={resetForm} disabled={busy}>
-            Cancel
-          </button>
-        )}
-      </div>
-      {error && <p style={{ fontSize: 11, color: 'var(--danger)', margin: 0 }}>{error}</p>}
+      </header>
 
       {items.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {items.map(it => (
-            <div key={it.dataset.id} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 10 }}>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
-                <strong style={{ fontSize: 12 }}>{it.dataset.name}</strong>
-                <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-                  {(it.dataset.aggregate_spec?.grain ?? []).join(' × ')} ·{' '}
-                  {it.dataset.row_count.toLocaleString()} rows ·{' '}
-                  {it.dataset.refresh_interval_minutes ? `every ${it.dataset.refresh_interval_minutes} min` : 'not scheduled'}
-                </span>
-                <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}
-                  onClick={() => editItem(it)} disabled={busy}>
-                  Edit
-                </button>
-                {REBUILD_HINT.test(it.last_error ?? '') && (
-                  <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}
-                    onClick={() => void rebuild(it)} disabled={busy}>
-                    Rebuild
-                  </button>
-                )}
-              </div>
-              {it.last_error && (
-                <p style={{ fontSize: 11, color: 'var(--danger)', margin: '6px 0 0' }}>{it.last_error}</p>
-              )}
-            </div>
-          ))}
+        <div className="dl-aggs__card dl-aggs__table-card">
+          <table className="dl-aggs__table">
+            <thead><tr>
+              <th>Name</th><th>Grouped by</th><th>Measures</th><th className="dl-ov__num">Rows</th>
+              <th>Refresh</th><th>Status</th><th aria-label="Actions" />
+            </tr></thead>
+            <tbody>
+              {items.map(it => {
+                const spec = it.dataset.aggregate_spec
+                return (
+                  <tr key={it.dataset.id}>
+                    <td><strong dir="auto">{it.dataset.name}</strong></td>
+                    <td className="dl-aggs__grain">
+                      {(spec?.grain ?? []).map((g, k) => (
+                        <span key={g}>{k > 0 && <span className="dl-aggs__x"> × </span>}
+                          <code className={lock(g) ? 'dl-aggs__locked' : undefined}>{lock(g) && <Lock size={10} aria-hidden />}{g}</code></span>
+                      ))}
+                    </td>
+                    <td className="dl-aggs__mono">{[...(spec?.measures ?? []).map(m => `${m.agg}(${m.column})`), 'row_count'].join(', ')}</td>
+                    <td className="dl-ov__num">{it.dataset.row_count.toLocaleString()}</td>
+                    <td>{it.dataset.refresh_interval_minutes ? `every ${it.dataset.refresh_interval_minutes} min` : 'not scheduled'}</td>
+                    <td>
+                      {it.last_error
+                        ? <span className="dl-aggs__status dl-aggs__status--bad">Failed — {it.last_error}</span>
+                        : <span className="dl-aggs__status">{it.dataset.last_refreshed_at
+                            ? `Refreshed ${new Date(it.dataset.last_refreshed_at).toLocaleString()}` : 'Not refreshed yet'}</span>}
+                    </td>
+                    <td className="dl-aggs__row-actions">
+                      <button type="button" className="btn btn-sm" onClick={() => editItem(it)} disabled={busy}>Edit</button>
+                      {REBUILD_HINT.test(it.last_error ?? '') && (
+                        <button type="button" className="btn btn-sm" onClick={() => void rebuild(it)} disabled={busy}>Rebuild</button>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
       )}
+
+      <p className="dl-aggs__info">
+        <Info size={14} aria-hidden />
+        <span><strong>Dashboards don’t switch to aggregates on their own.</strong> Pick the aggregate as a dashboard’s
+          dataset to get the speed. The source’s row rules still apply to everyone reading it.</span>
+      </p>
+
+      <section className="dl-aggs__card">
+        <h4>{editing ? `Edit ${name}` : 'New aggregate'}</h4>
+        <p className="dl-aggs__sub">Group by the columns your charts break down by; measures are summed, counted or min/max’d at the source.</p>
+        <fieldset className="dl-aggs__set">
+          <legend>Grain</legend>
+          <div className="dl-aggs__checks">
+            {pre.grain_candidates.map(c => (
+              <label key={c} className={grain.includes(c) ? 'dl-aggs__chip dl-aggs__chip--on' : 'dl-aggs__chip'}>
+                <input type="checkbox" aria-label={c} checked={grain.includes(c)}
+                  disabled={lock(c)} title={lock(c) ? 'Always kept: row-level security filters on this column' : undefined} onChange={() => toggle(c)} />
+                {lock(c) && <Lock size={10} aria-hidden />}{c}
+              </label>
+            ))}
+          </div>
+          {pre.rls_columns.length > 0 && (
+            <p className="dl-aggs__sub">
+              <Lock size={11} aria-hidden /> {pre.rls_columns.join(', ')} {pre.rls_columns.length === 1 ? 'is' : 'are'} locked in: a
+              row-level security rule reads {pre.rls_columns.length === 1 ? 'it' : 'them'}, and the aggregate
+              is governed by the source's rules at read time.
+            </p>
+          )}
+        </fieldset>
+
+        <fieldset className="dl-aggs__set">
+          <legend>Measures</legend>
+          <div className="dl-aggs__row">
+            <div>
+              <label htmlFor="agg-mcol" style={label}>Measure column</label>
+              <select id="agg-mcol" value={mCol} onChange={e => setMCol(e.target.value)}>
+                <option value="">Choose…</option>
+                {pre.measure_candidates.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="agg-magg" style={label}>Aggregation</label>
+              <select id="agg-magg" value={mAgg} onChange={e => setMAgg(e.target.value)}>
+                {AGGS.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </div>
+            <button type="button" className="btn btn-sm" disabled={!mCol} title={!mCol ? 'Choose a column to aggregate first' : undefined}
+              onClick={() => { setMeasures(m => [...m, { column: mCol, agg: mAgg }]); setMCol('') }}>
+              Add measure
+            </button>
+          </div>
+          <div className="dl-aggs__checks">
+            {measures.map((m, i) => (
+              <span key={i} className="dl-aggs__chip dl-aggs__chip--on">
+                {m.agg}({m.column}) → <code>{m.name ?? `${m.column}_${m.agg}`}</code>
+                <button type="button" className="dl-ov__linkish" aria-label={`remove ${m.agg}(${m.column})`}
+                  onClick={() => setMeasures(ms => ms.filter((_, j) => j !== i))}>remove</button>
+              </span>
+            ))}
+            <span className="dl-aggs__chip">row_count</span>
+          </div>
+        </fieldset>
+
+        <div className="dl-aggs__row">
+          <div>
+            <label htmlFor="agg-name" style={label}>Name</label>
+            <input id="agg-name" value={name} onChange={e => setName(e.target.value)}
+              disabled={!!editing} title={editing ? 'The name is fixed once an aggregate exists' : undefined} />
+          </div>
+          <div>
+            <label htmlFor="agg-every" style={label}>Refresh every (minutes)</label>
+            <input id="agg-every" type="number" min={5} value={every} onChange={e => setEvery(e.target.value)}
+              placeholder="never" style={{ inlineSize: 110 }} />
+          </div>
+          <button type="button" className="btn btn-primary btn-sm" onClick={submit}
+            disabled={busy || !name.trim() || grain.length === 0 || measures.length === 0} title={!name.trim() ? 'Name the aggregate first' : grain.length === 0 ? 'Choose at least one column to group by' : measures.length === 0 ? 'Add at least one measure' : undefined}>
+            {busy ? (editing ? 'Saving…' : 'Creating…') : (editing ? 'Save changes' : 'Create aggregate')}
+          </button>
+          {editing && (
+            <button type="button" className="btn btn-sm" onClick={resetForm} disabled={busy}>Cancel</button>
+          )}
+        </div>
+        {error && <p className="dl-aggs__error">{error}</p>}
+      </section>
     </div>
   )
 }

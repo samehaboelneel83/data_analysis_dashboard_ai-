@@ -212,6 +212,18 @@ describe('on a DirectQuery dataset', () => {
       expect(c).not.toHaveTextContent('has changed since')
     })
 
+    it('lays its facts out beside it, with the approaches it also tried (redesign 3c)', async () => {
+      vi.mocked(predictionModelsApi.list).mockResolvedValue([v1])
+      render(<PredictionModelsPanel datasetId={1} columns={columns}
+        dataset={{ row_count: 360, content_sha256: null, last_refreshed_at: null }} />)
+      const m = await screen.findByTestId('model-7')
+      expect(m).toHaveTextContent('Approachrandom forest')
+      expect(m).toHaveTextContent('Tested on75 held-out rows')
+      expect(m).toHaveTextContent('Trained on300 rows')
+      expect(m).toHaveTextContent('Also tried: logistic (accuracy 0.840).')
+      expect(within(m).getByRole('status')).toHaveTextContent('The data changed since training.')
+    })
+
     it('says when the dataset has changed since the model was trained', async () => {
       vi.mocked(predictionModelsApi.list).mockResolvedValue([v1])
       render(<PredictionModelsPanel datasetId={1} columns={columns}

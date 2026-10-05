@@ -5,6 +5,7 @@ import EmptyState from '../ui/EmptyState'
 import { useT } from '../../i18n'
 import { isJobActive, jobsApi, predictionModelsApi } from '../../services/api'
 import { Link } from 'react-router-dom'
+import '../../pages/datasetDetail/models.css'
 import type { DatasetColumn, DatasetSummaryForCard, DriftSnapshot, Job, ModelDrift, PredictionModelSummary, ScoreResult } from '../../services/api'
 
 /**
@@ -305,147 +306,164 @@ export default function PredictionModelsPanel({ datasetId, columns, mode, datase
     }
   }
 
-  return (
-    <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div>
-        <h3 style={{ fontSize: 13, margin: '0 0 4px' }}>Saved models</h3>
-        <p style={{ fontSize: 11, color: 'var(--muted)', margin: 0, maxWidth: 640 }}>
-          A saved model can score rows whose outcome is not known yet. Every other
-          analysis here refits and throws the model away, which answers what
-          <em> could</em> be predicted rather than what a new row is likely to do.
-        </p>
-      </div>
+  /** The fit as a 0..1 bar when the score is one (R², accuracy, AUC). */
+  const fitShare = (m: PredictionModelSummary) =>
+    m.score != null && m.score >= 0 && m.score <= 1 ? m.score : null
+  const fitWords = (m: PredictionModelSummary) => {
+    const share = fitShare(m)
+    if (share == null) return null
+    const pct = Math.round(share * 100)
+    if (/r2|r²/i.test(m.score_name ?? '')) {
+      return `Explains ${pct}% of the variation in ${m.target} on rows it did not train on.`
+        + (m.card?.beats_baseline === false ? ' It does not beat always guessing the average.' : '')
+    }
+    return m.card?.beats_baseline === false ? 'It does not beat always guessing the usual answer.' : null
+  }
 
+  return (
+    <div className="dl-models">
       {mode === 'directquery' && (
         // HR re-test 2026-10-01: training used to be refused here while every
         // model WIDGET fitted on the same live data. It now reads the rows
         // live, secured as the reader, up to the analysis cap.
-        <p data-testid="models-dq-note" style={{ fontSize: 12, color: 'var(--muted)', margin: 0,
-          border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px' }}>
-          {t('models.dqTrainNote')}
-        </p>
+        <p data-testid="models-dq-note" className="dl-models__note">{t('models.dqTrainNote')}</p>
       )}
-      <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-        <div>
-          <label htmlFor="pm-target" style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--muted)' }}>
-            Predict
-          </label>
-          <select id="pm-target" value={target} onChange={e => setTarget(e.target.value)}
-            style={{ fontSize: 12, padding: '4px 6px' }}>
+      <section className="dl-models__card dl-models__train">
+        <div className="dl-models__train-row">
+          <strong>Train a model</strong>
+          <label htmlFor="pm-target">Predict</label>
+          <select id="pm-target" value={target} onChange={e => setTarget(e.target.value)}>
             <option value="">Choose a column…</option>
             {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
           </select>
-        </div>
-        <div>
-          <label htmlFor="pm-name" style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--muted)' }}>
-            Name
-          </label>
+          <span>from all suitable columns</span>
+          {partitionCols.length > 0 && (
+            <>
+              <label htmlFor="pm-partition">Train on</label>
+              <select id="pm-partition" value={partition} onChange={e => setPartition(e.target.value)}>
+                <option value="">All rows</option>
+                {partitionCols.map(c => <option key={c} value={c}>Training rows of {c}</option>)}
+              </select>
+            </>
+          )}
+          <label htmlFor="pm-name" className="dl-sr-only">Name</label>
           <input id="pm-name" value={name} onChange={e => setName(e.target.value)}
-            placeholder={target ? `${target} model` : 'Optional'}
-            style={{ fontSize: 12, padding: '4px 6px' }} />
+            placeholder={target ? `${target} model` : 'Name (optional)'} />
+          <button onClick={train} disabled={!target || training} title={!target ? 'Choose what to predict first' : undefined}
+            className="btn btn-primary btn-sm">
+            {training ? 'Training…' : 'Train and save'}
+          </button>
         </div>
-        {partitionCols.length > 0 && (
-          <div>
-            <label htmlFor="pm-partition" style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--muted)' }}>
-              Train on
-            </label>
-            <select id="pm-partition" value={partition} onChange={e => setPartition(e.target.value)}
-              style={{ fontSize: 12, padding: '4px 6px' }}>
-              <option value="">All rows</option>
-              {partitionCols.map(c => <option key={c} value={c}>Training rows of {c}</option>)}
-            </select>
-          </div>
-        )}
-        <button onClick={train} disabled={!target || training} title={!target ? 'Choose what to predict first' : undefined} className="btn btn-sm"
-          style={{ fontSize: 11, padding: '5px 10px' }}>
-          {training ? 'Training…' : 'Train and save'}
-        </button>
-      </div>
+        <p>
+          A saved model scores rows whose outcome isn’t known yet. Datalytics tries several approaches,
+          keeps the one that does best on rows it held out, and records how it was chosen.
+        </p>
+      </section>
 
       {loading ? (
-        <p style={{ fontSize: 12, color: 'var(--muted)' }}>Loading…</p>
+        <p className="dl-models__note">Loading…</p>
       ) : models.length === 0 ? (
-        <EmptyState icon={Brain}
-          title={mode === 'directquery' ? t('models.emptyDq') : t('models.empty')}
-          description={mode === 'directquery' ? undefined
-            : t('models.emptyBody')} />
+        <section className="dl-models__card">
+          <EmptyState icon={Brain}
+            title={mode === 'directquery' ? t('models.emptyDq') : t('models.empty')}
+            description={mode === 'directquery' ? undefined : t('models.emptyBody')} />
+        </section>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {ordered.map(m => (
-            <div key={m.id} data-testid={`model-${m.id}`} style={{
-              border: '1px solid var(--border)', borderRadius: 8, padding: 10,
-              display: 'flex', flexDirection: 'column', gap: 6,
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <strong style={{ fontSize: 12 }}>{m.name}</strong>
-                <span style={{ fontSize: 11, color: 'var(--muted)' }}>v{m.version ?? 1}</span>
-                {m.status === 'champion'
-                  ? <span style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--accent)', border: '1px solid var(--accent)',
-                      borderRadius: 999, padding: '0 6px' }}>Champion</span>
-                  : <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>candidate</span>}
-                <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-                  predicts <code>{m.target}</code> from {m.features.join(', ')}
-                </span>
-                <span style={{ marginInlineStart: 'auto', display: 'flex', gap: 6 }}>
+        ordered.map(m => {
+          const c = m.card
+          const share = fitShare(m)
+          const words = fitWords(m)
+          const then = c?.dataset
+          const changed = !!(then && dataset && then.row_count != null && dataset.row_count != null && then.row_count !== dataset.row_count)
+          return (
+            <section key={m.id} data-testid={`model-${m.id}`} className="dl-models__card dl-models__model">
+              <div className="dl-models__main">
+                <div className="dl-models__title">
+                  <h3 dir="auto">{m.name}</h3>
+                  <span className="dl-models__pill">v{m.version ?? 1}</span>
+                  {m.status === 'champion'
+                    ? <span className="dl-models__pill dl-models__pill--champ">Champion</span>
+                    : <span className="dl-models__pill">candidate</span>}
+                </div>
+                <p className="dl-models__predicts">Predicts {m.target} from {m.features.join(', ')}.</p>
+                <div className="dl-models__fit">
+                  <div className="dl-models__fit-head">
+                    <strong>How well it fits</strong>
+                    <span>{m.score != null ? <>{m.score_name || 'score'} {m.score}</> : '—'}</span>
+                  </div>
+                  {share != null && <div className="dl-models__bar"><span style={{ inlineSize: `${share * 100}%` }} /></div>}
+                  {words && <p>{words}</p>}
+                </div>
+                {changed && (
+                  <p role="status" className="dl-models__warn">
+                    <strong>The data changed since training.</strong> It now has {dataset?.row_count?.toLocaleString()} rows
+                    (it was trained on {then?.row_count?.toLocaleString()}). Train it again under the same name to use the new rows.
+                  </p>
+                )}
+                {scoreJobs[m.id] && (
+                  <div data-testid={`score-job-${m.id}`} role="status" className="dl-models__note">
+                    {isJobActive(scoreJobs[m.id]) ? <>Scoring… ({String(scoreJobs[m.id].progress?.stage ?? scoreJobs[m.id].state)})</>
+                      : scoreJobs[m.id].state === 'succeeded' && scoreJobs[m.id].result?.dataset_id ? (
+                        <>Scored {Number((scoreJobs[m.id].result as { rows?: number } | null)?.rows ?? 0).toLocaleString()} rows:{' '}
+                          <Link to={`/datasets/${scoreJobs[m.id].result!.dataset_id}`}>open the scored dataset</Link></>
+                      ) : <span style={{ color: 'var(--danger)' }}>Scoring failed: {scoreJobs[m.id].error ?? scoreJobs[m.id].state}</span>}
+                  </div>
+                )}
+                <div className="dl-models__actions">
+                  <button onClick={() => void score(m)} disabled={scoringId === m.id} className="btn btn-primary btn-sm">
+                    {scoringId === m.id ? 'Scoring…' : 'Score this dataset'}
+                  </button>
+                  {mode !== 'directquery' && (
+                    <button onClick={() => void queueScore(m)} disabled={!!scoreJobs[m.id] && isJobActive(scoreJobs[m.id])}
+                      className="btn btn-sm" title="Predict every row you can see and keep the result as a new dataset">
+                      Save predictions as a dataset
+                    </button>
+                  )}
                   {m.status !== 'champion' && (
-                    <button onClick={() => void promote(m)} className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '3px 8px' }}
+                    <button onClick={() => void promote(m)} className="btn btn-sm"
                       title="Dashboards that follow the champion score with this version from now on">
                       Make champion
                     </button>
                   )}
-                  <button onClick={() => setCardFor(cardFor === m.id ? null : m.id)} aria-expanded={cardFor === m.id}
-                    className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '3px 8px' }}>
+                  <button onClick={() => setCardFor(cardFor === m.id ? null : m.id)} aria-expanded={cardFor === m.id} className="btn btn-sm">
                     Model card
                   </button>
-                  {mode !== 'directquery' && (
-                    <button onClick={() => void queueScore(m)} disabled={!!scoreJobs[m.id] && isJobActive(scoreJobs[m.id])}
-                      className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '3px 8px' }}
-                      title="Predict every row you can see and keep the result as a new dataset">
-                      Save predictions as a dataset
-                    </button>
-                  )}
-                  <button onClick={() => void score(m)} disabled={scoringId === m.id}
-                    className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '3px 8px' }}>
-                    {scoringId === m.id ? 'Scoring…' : 'Score this dataset'}
-                  </button>
-                  <button onClick={() => void remove(m)}
-                    aria-label={`Delete ${m.name}`} title={`Delete ${m.name}`}
-                    className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '3px 8px' }}>
+                  <button onClick={() => void remove(m)} aria-label={`Delete ${m.name}`} title={`Delete ${m.name}`}
+                    className="dl-ov__linkish dl-models__delete">
                     Delete
                   </button>
-                </span>
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                {m.model_family}
-                {m.score != null && <> · {m.score_name || 'score'} {m.score}</>}
-              </div>
-              {scoreJobs[m.id] && (
-                <div data-testid={`score-job-${m.id}`} role="status" style={{ fontSize: 11.5 }}>
-                  {isJobActive(scoreJobs[m.id]) ? <>Scoring… ({String(scoreJobs[m.id].progress?.stage ?? scoreJobs[m.id].state)})</>
-                    : scoreJobs[m.id].state === 'succeeded' && scoreJobs[m.id].result?.dataset_id ? (
-                      <>Scored {Number((scoreJobs[m.id].result as { rows?: number } | null)?.rows ?? 0).toLocaleString()} rows:{' '}
-                        <Link to={`/datasets/${scoreJobs[m.id].result!.dataset_id}`}>open the scored dataset</Link></>
-                    ) : <span style={{ color: 'var(--danger)' }}>Scoring failed: {scoreJobs[m.id].error ?? scoreJobs[m.id].state}</span>}
                 </div>
-              )}
-              {cardFor === m.id && <ModelCardView m={m} dataset={dataset} datasetId={datasetId} />}
-            </div>
-          ))}
-        </div>
+                {cardFor === m.id && <ModelCardView m={m} dataset={dataset} datasetId={datasetId} />}
+              </div>
+              <aside className="dl-models__facts">
+                <dl>
+                  <div><dt>Approach</dt><dd>{m.model_family}</dd></div>
+                  <div><dt>Baseline (always the usual answer)</dt><dd>{c?.baseline_score != null ? `${m.score_name || 'score'} ${fmt(c.baseline_score)}` : '—'}</dd></div>
+                  <div><dt>Tested on</dt><dd>{c?.n_test != null ? `${c.n_test.toLocaleString()} held-out rows` : '—'}</dd></div>
+                  <div><dt>Trained on</dt><dd>{c?.n_fitted != null ? `${c.n_fitted.toLocaleString()} rows` : '—'}</dd></div>
+                  <div><dt>Input drift</dt><dd>{m.last_drift ? DRIFT_WORD[m.last_drift.overall] : 'Not checked yet'}</dd></div>
+                  <div><dt>Trained by</dt><dd>{c?.trained_by ?? '—'}{c?.trained_at ? ` · ${new Date(c.trained_at).toLocaleDateString()}` : ''}</dd></div>
+                </dl>
+                {(c?.candidates?.length ?? 0) > 1 && (
+                  <p>Also tried: {c!.candidates!.filter(k => k.model !== c!.model_family)
+                    .map(k => `${k.model} (${c!.score_name || 'score'} ${fmt(k.score)})`).join(', ')}.</p>
+                )}
+              </aside>
+            </section>
+          )
+        })
       )}
 
-      {scoreError && (
-        <p style={{ fontSize: 11, color: 'var(--danger)', margin: 0 }}>{scoreError}</p>
-      )}
+      {scoreError && <p className="dl-models__error">{scoreError}</p>}
 
       {result && (
-        <div style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 10 }}>
-          <div style={{ fontSize: 12 }}>
+        <section className="dl-models__card">
+          <div style={{ fontSize: 13 }}>
             Scored <strong>{result.n_scored} rows</strong> for <code>{result.target}</code>
             {result.model && <> with {result.model.name} v{result.model.version}</>}.
           </div>
           {Object.keys(result.unseen_values).length > 0 && (
-            <p style={{ fontSize: 11, color: '#f59e0b', margin: '6px 0 0' }}>
+            <p style={{ fontSize: 12, color: 'var(--mc-warning, #a46b16)', margin: '6px 0 0' }}>
               The model never saw some of these values, so it has no opinion about
               them and treated them as none of the categories it knows:{' '}
               {Object.entries(result.unseen_values)
@@ -453,7 +471,7 @@ export default function PredictionModelsPanel({ datasetId, columns, mode, datase
                 .join(' · ')}
             </p>
           )}
-        </div>
+        </section>
       )}
     </div>
   )
