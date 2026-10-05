@@ -12,7 +12,8 @@
  * interaction; the panel builds its inputs from the schema instead. What they
  * share is how an answer LOOKS.
  */
-import type { StatisticalTestResult } from '../../services/api'
+import type { KeyInfluencersResult as KeyInfluencersPayload, StatisticalTestResult } from '../../services/api'
+import KeyInfluencersResult from './KeyInfluencersResult'
 import { useDirection } from '../../contexts/DirectionContext'
 import { majorityDir } from '../../lib/autoDir'
 
@@ -238,6 +239,10 @@ export function ResultFor({ kind, result, params }: {
   }
   if (kind === 'decision_tree') {
     return <DecisionTree result={result as DecisionTreeResult} />
+  }
+  if (kind === 'key_influencers' && Array.isArray((result as KeyInfluencersPayload | null)?.rows)
+      && (result as KeyInfluencersPayload).meta) {
+    return <KeyInfluencersResult result={result as KeyInfluencersPayload} />
   }
   return <GenericResult kind={kind} result={result} />
 }

@@ -13,6 +13,13 @@ describe('nonAdditiveKind', () => {
       expect(nonAdditiveKind(c)).toBe('identifier')
     }
   })
+  it('recognises the identifier suffixes Key influencers relies on (redesign KI-2)', () => {
+    expect(nonAdditiveKind('cohort_ref')).toBe('identifier')
+    expect(nonAdditiveKind('invoice_no')).toBe('identifier')
+    expect(nonAdditiveKind('order_key')).toBe('identifier')
+    expect(nonAdditiveKind('region_code')).toBe('identifier')
+    expect(nonAdditiveKind('preference')).toBeNull()
+  })
   it('leaves quantities alone', () => {
     for (const c of ['revenue', 'units', 'margin_pct', 'plateau', 'yearly_revenue', 'longevity', 'valid',
                      'number_of_calls', 'phone_calls', 'lace', 'imei_count', 'casino']) {

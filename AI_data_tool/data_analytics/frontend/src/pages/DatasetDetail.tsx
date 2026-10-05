@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef, useContext } from 'react'
-import { nonAdditiveKind } from '../lib/semanticGuard'
+import KeyInfluencersResultView from '../components/analysis/KeyInfluencersResult'
+import { pickInfluencerOutcome } from './datasetDetail/influencerOutcome'
 import AggregatesPanel from '../components/dataset/AggregatesPanel'
 import ColumnMeaningPanel from '../components/dataset/ColumnMeaningPanel'
 import AlertsPanel from '../components/dataset/AlertsPanel'
@@ -59,13 +60,7 @@ const notReadyOr = (err: any, fallback: string, notReady: string): string => {
   return typeof detail === 'string' ? detail : fallback
 }
 
-/** HR re-test: a mean salary read "88,604.645". Whole units from 100 up,
- *  two decimals below -- the precision a reader can use. */
-export function fmtMean(v: number): string {
-  return Math.abs(v) >= 100
-    ? Math.round(v).toLocaleString()
-    : v.toLocaleString(undefined, { maximumFractionDigits: 2 })
-}
+export { fmtMean } from '../components/analysis/KeyInfluencersResult'
 
 export default function DatasetDetail() {
   const arrows = navArrows(useDirection().rtl)
@@ -552,6 +547,10 @@ export default function DatasetDetail() {
   const [influencerTarget, setInfluencerTarget] = useState('')
   const [influencerBusy, setInfluencerBusy] = useState(false)
   const [influencerError, setInfluencerError] = useState<string | null>(null)
+  // Numeric columns the default skipped as identifiers ("Left out"), and
+  // whether there was no outcome to default to (then the reader picks).
+  const [influencerSkipped, setInfluencerSkipped] = useState<string[]>([])
+  const [influencerNeedsPick, setInfluencerNeedsPick] = useState(false)
   const [rules, setRules] = useState<AssociationRulesResult | null>(null)
   const [rulesBusy, setRulesBusy] = useState(false)
   const [rulesError, setRulesError] = useState<string | null>(null)
@@ -614,31 +613,18 @@ export default function DatasetDetail() {
 
   useEffect(() => {
     if (!ds || influencersAutoRanFor.current === ds.id) return
-    // No column is a self-evidently right "outcome" to explain, but the
-    // first numeric one is a reasonable free first look -- EXCEPT a row
-    // identifier, which is technically valid and answers nobody's question
-    // ("what drives sample_id?"). There is no cardinality/uniqueness signal
-    // exposed to the frontend to catch this statistically (the backend's own
-    // high-cardinality guard in analysis/influencers.py works on the
-    // FACTOR columns, not the target, and is not run ahead of time here), so
-    // the column's name is the one honest signal available. An
-    // identifier-shaped column is still used as a last resort over staying
-    // fully manual -- a guessable-but-imperfect default beats none, and the
-    // "Re-run" control right there is exactly how a reader corrects it.
-    const looksLikeIdentifier = (name: string) =>
-      /(^|_)(id|uuid|guid|pk)$/i.test(name) || /^(id|index|row_?num(ber)?)$/i.test(name)
-    // A quantity first: not an identifier, coordinate or year by the semantic
-    // veto's rules (IMEI, A_NUMBER), and not an all-empty column. Live QA
-    // 2026-09-28 opened on A_NUMBER, one constant phone number, and showed
-    // "has only one value, so nothing distinguishes its rows".
-    const numericCols = ds.columns.filter(c => c.dtype === 'numeric')
-    const target = numericCols.find(c => !looksLikeIdentifier(c.name) && nonAdditiveKind(c.name) === null
-                                         && (c.missing_pct ?? 0) < 100)
-      ?? numericCols.find(c => !looksLikeIdentifier(c.name)) ?? numericCols[0]
-    if (!target) return
+    // The outcome to open on: a column marked worth explaining, then an
+    // authored measure, then a numeric quantity -- never an identifier (KI-1,
+    // see pickInfluencerOutcome). With none of those, nothing auto-runs and
+    // the picker asks; a 1.00x table explaining `cohort_ref` was worse than
+    // asking.
     influencersAutoRanFor.current = ds.id
-    setInfluencerTarget(target.name)
-    runInfluencers(target.name)
+    const pick = pickInfluencerOutcome(ds)
+    setInfluencerSkipped(pick.skipped)
+    setInfluencerNeedsPick(!pick.target)
+    if (!pick.target) return
+    setInfluencerTarget(pick.target)
+    runInfluencers(pick.target)
   }, [ds, runInfluencers])
 
   // Pipeline phase 2: re-read on every finished refresh (the stamp moves),
@@ -1064,7 +1050,7 @@ export default function DatasetDetail() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
               <h2 style={{ fontSize: 15, fontWeight: 700 }}>{tr('ov.keyInfluencers')}</h2>
               <select value={influencerTarget} aria-label="Outcome to explain"
-                onChange={e => { setInfluencerTarget(e.target.value); setInfluencers(null) }}
+                onChange={e => { setInfluencerTarget(e.target.value); setInfluencers(null); setInfluencerNeedsPick(false) }}
                 style={{ fontSize: 12 }}>
                 <option value="">{tr('ki.chooseOutcome')}</option>
                 {ds.columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
@@ -1076,63 +1062,17 @@ export default function DatasetDetail() {
                     : <IconLabel icon={Sparkles}>{tr('ov.whatDrives')}</IconLabel>}
               </button>
             </div>
+            {influencerNeedsPick && !influencerTarget && (
+              <p data-testid="influencers-pick" style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+                {tr('ki.pickPrompt')}
+              </p>
+            )}
             {influencerError && (
               <p style={{ fontSize: 12, color: 'var(--danger)' }}>{influencerError}</p>
             )}
             {influencers && (
-              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 14 }}>
-                <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
-                  {influencers.meta.measure === 'rate'
-                    ? <>{tr('ki.baselineRate')} <strong>{(influencers.meta.baseline * 100).toFixed(1)}%</strong>
-                        {' '}<strong dir="ltr">{influencers.meta.target} = {influencers.meta.target_value}</strong></>
-                    : <>{tr('ki.baselineMean')} <strong>{fmtMean(influencers.meta.baseline)}</strong> {tr('ki.for')}
-                        {' '}<strong>{influencers.meta.target}</strong></>}
-                  {' · '}{tr('ki.rows', { n: influencers.meta.n_rows_used.toLocaleString() })}
-                </div>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>{tr('ki.when')}</th>
-                      <th>{influencers.meta.measure === 'rate' ? tr('ki.rate') : tr('ki.mean')}</th>
-                      <th>{tr('ki.vsBaseline')}</th>
-                      <th>{tr('ki.rowsCol')}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {influencers.rows.map((r, i) => (
-                      <tr key={i}>
-                        {/* The rule can hold an interval, "(64.5, 70.1]": an LTR
-                            isolate keeps its brackets in maths order under RTL,
-                            where they otherwise swapped ends with the text. */}
-                        <td><span dir="ltr" style={{ unicodeBidi: 'isolate' }}><strong>{r.factor}</strong> {tr('ki.is')} {r.group}</span></td>
-                        <td style={{ fontFamily: 'var(--mono)' }}>
-                          {influencers.meta.measure === 'rate'
-                            ? `${((r.rate ?? 0) * 100).toFixed(1)}%`
-                            : fmtMean(r.mean ?? 0)}
-                        </td>
-                        {/* Direction stated in words: "1.9x" alone reads as good
-                            news even when the outcome is churn. And NO red/green:
-                            the app cannot know whether more of a target is good
-                            (salary, tenure) or bad (churn), so colouring "more"
-                            red told an HR lead a higher salary was a problem. */}
-                        <td data-testid="influencer-lift" style={{ fontFamily: 'var(--mono)', color: 'var(--text)' }}>
-                          <span aria-hidden style={{ color: 'var(--accent)' }}>{r.lift >= 1 ? '▲' : '▼'}</span>{' '}
-                          {r.lift.toFixed(2)}× {r.lift >= 1 ? tr('ki.more') : tr('ki.less')}
-                        </td>
-                        <td style={{ fontFamily: 'var(--mono)' }}>{r.rows.toLocaleString()}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>
-                  {influencers.meta.caveat}
-                </p>
-                {influencers.warnings.length > 0 && (
-                  <ul style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6, paddingInlineStart: 18 }}>
-                    {influencers.warnings.map((w, i) => <li key={i}>{w}</li>)}
-                  </ul>
-                )}
-              </div>
+              <KeyInfluencersResultView result={influencers}
+                leftOut={influencerSkipped.filter(c => c !== influencers.meta.target)} />
             )}
           </section>
 

@@ -52,3 +52,42 @@ describe('automated prediction split (follow-up)', () => {
     expect(screen.getByTestId('prediction-split').textContent).toContain('_Partition_ (150 training rows)')
   })
 })
+
+describe('key influencers renderer (redesign KI-7)', () => {
+  const ki = {
+    kind: 'key_influencers',
+    columns: [{ name: 'units', dtype: 'int64' }],
+    rows: [
+      { factor: 'region', group: 'Africa', grouped_by: 'value', mean: 3755, baseline: 4316, lift: 0.87, rows: 400, share_of_rows: 0.2 },
+      { factor: 'units', group: '251 – 420', grouped_by: 'quantile', mean: 6992, baseline: 4316, lift: 1.62, rows: 500, share_of_rows: 0.25 },
+      { factor: 'product', group: 'Water bottles', grouped_by: 'value', mean: 2244, baseline: 4316, lift: 0.52, rows: 171, share_of_rows: 0.09 },
+    ],
+    meta: { method: 'group lift', target: 'revenue', target_value: null, measure: 'mean', baseline: 4316,
+            n_rows_used: 2000, n_rows_total: 2000, sampled: false, groups_considered: 12,
+            caveat: 'These factors move with the outcome; that is not proof they cause it.' },
+    warnings: [],
+  }
+
+  it('draws a ranked chart instead of the generic table, strongest effect first', () => {
+    render(<ResultFor kind="key_influencers" result={ki} params={{}} />)
+    expect(screen.getByTestId('key-influencers')).toBeInTheDocument()
+    const lifts = screen.getAllByTestId('influencer-lift').map(e => e.textContent)
+    expect(lifts[0]).toMatch(/1\.62× more/)
+    expect(lifts[1]).toMatch(/0\.52× less/)
+    expect(lifts[2]).toMatch(/0\.87× less/)
+    expect(screen.getAllByTestId('influencer-bar')).toHaveLength(3)
+  })
+
+  it('marks a group under 10% of the rows as a small group, and shows rows with their share', () => {
+    render(<ResultFor kind="key_influencers" result={ki} params={{}} />)
+    expect(screen.getAllByText('small group')).toHaveLength(1)
+    expect(screen.getByText('Water bottles', { exact: false }).closest('tr')).toHaveAttribute('data-small', 'true')
+    expect(screen.getByText(/· 25%/)).toBeInTheDocument()
+  })
+
+  it('invents no p-values and keeps the not-causation caveat', () => {
+    render(<ResultFor kind="key_influencers" result={ki} params={{}} />)
+    expect(screen.queryByText(/p[- ]?value/i)).toBeNull()
+    expect(screen.getByText(/not proof they cause it/)).toBeInTheDocument()
+  })
+})

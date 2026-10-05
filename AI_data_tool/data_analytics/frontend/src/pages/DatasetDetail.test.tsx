@@ -622,10 +622,9 @@ describe('DatasetDetail key influencers', () => {
       expect(analysisApi.keyInfluencers).toHaveBeenCalledWith(29, 'RATED_AMOUNT')
     })
 
-    it('falls back to an identifier-shaped column rather than staying manual, if it is the only numeric one', async () => {
-      // An imperfect default beats none: the "Re-run" button is right there
-      // to retarget once the reader sees it, and "no numeric column at all"
-      // (the churn-columns case above) is the only situation left fully manual.
+    it('does not auto-run on an identifier when it is the only numeric column, and asks instead (KI-1)', async () => {
+      // Reversed decision (redesign step 2): the old last-resort default ran
+      // on the identifier and showed a 1.00x table explaining nobody's question.
       const ds = importDataset()
       ds.columns = [{ id: 1, name: 'user_id', dtype: 'numeric', missing_pct: 0, stats: {} }]
       vi.mocked(datasetsApi.get).mockResolvedValue(ds)
@@ -634,8 +633,61 @@ describe('DatasetDetail key influencers', () => {
 
       renderDetail(29)
 
-      expect(await screen.findByText(/is many/)).toBeInTheDocument()
-      expect(analysisApi.keyInfluencers).toHaveBeenCalledWith(29, 'user_id')
+      expect(await screen.findByText('Pick what to explain')).toBeInTheDocument()
+      expect(analysisApi.keyInfluencers).not.toHaveBeenCalled()
+      expect((screen.getByLabelText('Outcome to explain') as HTMLSelectElement).value).toBe('')
+    })
+
+    it('opens on the column marked worth explaining, highest priority first (KI-1)', async () => {
+      const ds = importDataset()
+      ds.columns = [
+        { id: 1, name: 'revenue', dtype: 'numeric', missing_pct: 0, stats: {} },
+        { id: 2, name: 'completion_rate', dtype: 'numeric', missing_pct: 0, stats: {} },
+        { id: 3, name: 'enrolled', dtype: 'numeric', missing_pct: 0, stats: {} },
+      ]
+      ds.column_targets = { enrolled: 1, completion_rate: 5 }
+      vi.mocked(datasetsApi.get).mockResolvedValue(ds)
+      vi.mocked(analysisApi.get).mockResolvedValue(null)
+      vi.mocked(analysisApi.keyInfluencers).mockResolvedValue(result)
+
+      renderDetail(29)
+
+      await waitFor(() => expect(analysisApi.keyInfluencers).toHaveBeenCalledWith(29, 'completion_rate'))
+    })
+
+    it('opens on an authored measure before the inferred rule (KI-1)', async () => {
+      const ds = importDataset()
+      ds.columns = [
+        { id: 1, name: 'units', dtype: 'numeric', missing_pct: 0, stats: {} },
+        { id: 2, name: 'score', dtype: 'categorical', missing_pct: 0, stats: {} },
+      ]
+      ds.column_meta = { score: { role: 'measure' } }
+      vi.mocked(datasetsApi.get).mockResolvedValue(ds)
+      vi.mocked(analysisApi.get).mockResolvedValue(null)
+      vi.mocked(analysisApi.keyInfluencers).mockResolvedValue(result)
+
+      renderDetail(29)
+
+      await waitFor(() => expect(analysisApi.keyInfluencers).toHaveBeenCalledWith(29, 'score'))
+    })
+
+    it('skips cohort_ref for the real measure and lists it under "Left out" (KI-1, KI-2)', async () => {
+      const ds = importDataset()
+      ds.columns = [
+        { id: 1, name: 'cohort_ref', dtype: 'numeric', missing_pct: 0, stats: {} },
+        { id: 2, name: 'campus', dtype: 'categorical', missing_pct: 0, stats: {} },
+        { id: 3, name: 'completed', dtype: 'numeric', missing_pct: 0, stats: {} },
+      ]
+      vi.mocked(datasetsApi.get).mockResolvedValue(ds)
+      vi.mocked(analysisApi.get).mockResolvedValue(null)
+      vi.mocked(analysisApi.keyInfluencers).mockResolvedValue({ ...result, meta: { ...result.meta, target: 'completed' } })
+
+      renderDetail(29)
+
+      await waitFor(() => expect(analysisApi.keyInfluencers).toHaveBeenCalledWith(29, 'completed'))
+      const leftOut = await screen.findByTestId('influencers-left-out')
+      expect(leftOut).toHaveTextContent('cohort_ref')
+      expect(leftOut).toHaveTextContent('Left out')
     })
 
     it('changing the outcome after the automatic run still re-runs manually', async () => {
@@ -1260,4 +1312,18 @@ describe('the first look after an upload', () => {
     await new Promise(r => setTimeout(r, 50))
     expect(analysisApi.run).toHaveBeenCalledTimes(1)
   })
+})
+
+describe('identifier names for Key influencers (redesign KI-2)', () => {
+  it.each(['cohort_ref', 'ref', 'invoice_no', 'item_num', 'region_code', 'order_key', 'sample_id', 'id'])(
+    '%s reads as an identifier', async name => {
+      const { looksLikeIdentifier } = await import('./datasetDetail/influencerOutcome')
+      expect(looksLikeIdentifier(name)).toBe(true)
+    })
+
+  it.each(['revenue', 'reference_price', 'number_of_calls', 'keynote_score', 'no_show_rate', 'units'])(
+    '%s does not', async name => {
+      const { looksLikeIdentifier } = await import('./datasetDetail/influencerOutcome')
+      expect(looksLikeIdentifier(name)).toBe(false)
+    })
 })
