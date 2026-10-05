@@ -36,7 +36,9 @@ describe('ChecksPanel (pipeline phase 3)', () => {
     vi.mocked(datasetsApi.addCheck).mockResolvedValue({ ...unique, id: 2, kind: 'accepted_values', column: 'status' })
     render(<ChecksPanel datasetId={5} columns={['id', 'status']} canEdit />)
     await screen.findByText('id values are unique')
-    fireEvent.change(screen.getAllByRole('combobox')[1], { target: { value: 'accepted_values' } })
+    // The form opens from "+ Rule" (redesign 3c).
+    fireEvent.click(screen.getByRole('button', { name: 'Add a check' }))
+    fireEvent.change(screen.getByLabelText('Check'), { target: { value: 'accepted_values' } })
     fireEvent.change(screen.getByLabelText(/^Column/), { target: { value: 'status' } })
     fireEvent.change(screen.getByLabelText(/Allowed values/), { target: { value: 'open, closed' } })
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
@@ -70,5 +72,27 @@ describe('ChecksBlockedDialog', () => {
     expect(screen.getByRole('alertdialog')).toHaveTextContent('rows fell 70%')
     fireEvent.click(screen.getByRole('button', { name: 'Publish anyway' }))
     expect(onPublish).toHaveBeenCalled()
+  })
+})
+
+describe('the Quality rules card (redesign 3c)', () => {
+  it('shows each rule with its state, its result after Run now, and a Warn/Block pill', async () => {
+    vi.mocked(datasetsApi.tryChecks).mockResolvedValue({ rows: 120, results: [
+      { id: 1, kind: 'unique', column: 'id', severity: 'block', passed: false, detail: '2 repeated id values' }] })
+    render(<ChecksPanel datasetId={5} columns={['id']} canEdit />)
+    await screen.findByText('id values are unique')
+    expect(screen.getByTestId('checks-table')).toHaveTextContent('Not run yet')
+    expect((screen.getByLabelText('If it fails') as HTMLSelectElement).value).toBe('block')
+    fireEvent.click(screen.getByRole('button', { name: 'Try the checks on the current data' }))
+    await waitFor(() => expect(screen.getByTestId('checks-table')).toHaveTextContent('2 repeated id values'))
+  })
+
+  it('the add form closes again once the rule is saved', async () => {
+    vi.mocked(datasetsApi.addCheck).mockResolvedValue({ ...unique, id: 2 })
+    render(<ChecksPanel datasetId={5} columns={['id', 'status']} canEdit />)
+    await screen.findByText('id values are unique')
+    fireEvent.click(screen.getByRole('button', { name: 'Add a check' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Add' })).toBeNull())
   })
 })

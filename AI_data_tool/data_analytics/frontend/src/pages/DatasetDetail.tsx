@@ -1328,13 +1328,36 @@ export default function DatasetDetail() {
           live dataset) and the alerts -- checked as the person who made each
           one, with their row-level security. */}
       {tab === 'rules' && ds && (
-        <div>
-          {ds.mode !== 'directquery' && <DataQualityPanel datasetId={dsId} />}
+        <div className="dl-rules">
           {ds.mode !== 'directquery' && (
             <ChecksPanel datasetId={ds.id} columns={(ds.columns ?? []).map(c => c.name)}
-              canEdit={!!pipelineHealth?.can_edit} />
+              canEdit={!!pipelineHealth?.can_edit}>
+              {/* The Overview's old quality-rules box: a one-off report over
+                  the whole dataset with rules typed for this run only. */}
+              <details className="dl-rules__details">
+                <summary>{tr('rules3.oneOff')}</summary>
+                <DataQualityPanel datasetId={dsId} />
+              </details>
+            </ChecksPanel>
           )}
           <AlertsPanel datasetId={ds.id} columns={ds.columns ?? []} />
+          <section className="dl-rules__card" data-testid="rules-freshness">
+            <header className="dl-rules__head">
+              <div><h3>{tr('rules3.freshness')}</h3><p>{tr('rules3.freshnessCopy')}</p></div>
+            </header>
+            {ds.mode === 'directquery' ? (
+              <div className="dl-rules__fresh">{tr('rules3.expect')} <span className="dl-rules__fresh-value">{tr('rules3.naLive')}</span></div>
+            ) : !ds.data_source_id && !canSchedule ? (
+              <div className="dl-rules__fresh">{tr('rules3.expect')} <span className="dl-rules__fresh-value">{tr('rules3.naFiles')}</span></div>
+            ) : pipelineHealth?.can_edit ? (
+              <PipelineAlertsForm datasetId={ds.id} health={pipelineHealth} onSaved={setPipelineHealth} />
+            ) : (
+              <div className="dl-rules__fresh">{tr('rules3.expect')} <span className="dl-rules__fresh-value">
+                {pipelineHealth?.freshness_hours
+                  ? tr('rules3.everyHours', { n: localDigits(String(pipelineHealth.freshness_hours)) })
+                  : tr('rules3.noTarget')}</span></div>
+            )}
+          </section>
         </div>
       )}
 

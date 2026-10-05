@@ -28,11 +28,14 @@ vi.mock('react-hot-toast', () => ({ default: { success: vi.fn(), error: vi.fn() 
 const t = (k: string, p?: Record<string, unknown>) => translate('en', k as never, p as never)
 const hoursAgo = (h: number) => new Date(Date.now() - h * 3600_000).toISOString()
 
+// One timestamp for every fixture: computed per call, they differed by
+// milliseconds and "Recently updated" then reordered the rows at random.
+const ONE_HOUR_AGO = hoursAgo(1)
 const ds = (over: Record<string, unknown> = {}) => ({
   id: 1, name: 'Demo — Sales', description: 'Orders by region', row_count: 2000, col_count: 13,
-  file_size: 226_918, created_at: hoursAgo(1), updated_at: hoursAgo(1), mode: 'import',
+  file_size: 226_918, created_at: ONE_HOUR_AGO, updated_at: ONE_HOUR_AGO, mode: 'import',
   columns: [], column_meta: {}, data_source_id: null,
-  catalog: { kind: 'upload', freshness: 'fixed', as_of: hoursAgo(1), next_due: null, refresh_every_minutes: null },
+  catalog: { kind: 'upload', freshness: 'fixed', as_of: ONE_HOUR_AGO, next_due: null, refresh_every_minutes: null },
   ...over,
 }) as never
 
@@ -71,7 +74,8 @@ function renderList(user: Record<string, unknown> | null = { id: 5, role: { is_o
   )
   return render(wrap(<Dashboard />))
 }
-const tableNames = () => within(screen.getByRole('table')).getAllByRole('row').slice(1)
+// The list's own table: the preview's "first rows" table is a second one.
+const tableNames = () => within(document.querySelector('table.dl-dsl__table') as HTMLElement).getAllByRole('row').slice(1)
   .map(r => within(within(r).getAllByRole('cell')[1]).getByRole('link').textContent)
 
 beforeEach(() => {

@@ -4,7 +4,8 @@ import ExpressionBuilder from '../expr/ExpressionBuilder'
 import LoadError from '../ui/LoadError'
 import EmptyState from '../ui/EmptyState'
 import { useT } from '../../i18n'
-import { BellRing } from 'lucide-react'
+import { Bell, BellRing } from 'lucide-react'
+import '../../pages/datasetDetail/rules.css'
 import { useConfirm } from '../ui/ConfirmDialog'
 
 /**
@@ -167,21 +168,18 @@ export default function AlertsPanel({ datasetId, columns }: {
   if (!alerts) return <p style={{ color: 'var(--muted)' }}>Loading…</p>
 
   return (
-    <div style={{ maxWidth: 760 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    marginBottom: 12 }}>
+    <section className="dl-rules__card">
+      <header className="dl-rules__head">
         <div>
-          <div style={{ fontSize: 13, fontWeight: 600 }}>{t('alerts.title')}</div>
-          <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-            {t('alerts.desc')}
-          </div>
+          <h3>{t('alerts.title')}</h3>
+          <p>{t('alerts.desc')}</p>
         </div>
         {!adding && (
           <button className="btn btn-primary btn-sm" onClick={() => setAdding(true)}>
             {t('alerts.new')}
           </button>
         )}
-      </div>
+      </header>
 
       {adding && (
         <div className="card" style={{ padding: 16, marginBottom: 16 }}>
@@ -295,7 +293,7 @@ export default function AlertsPanel({ datasetId, columns }: {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {alerts.map(a => <AlertRow key={a.id} alert={a} onDelete={() => void remove(a)} />)}
       </div>
-    </div>
+    </section>
   )
 }
 
@@ -307,8 +305,8 @@ function AlertRow({ alert, onDelete }: { alert: DataAlert; onDelete: () => void 
   const failed = /failed|disabled|error|skipped/i.test(status) && !/^fired/i.test(status)
   const firing = alert.last_state === 'firing' || alert.last_state === true
   return (
-    <div className="card" style={{ padding: 12, display: 'flex', gap: 12,
-                                   alignItems: 'flex-start' }}>
+    <div className="dl-rules__alert">
+      <span className="dl-ov__state dl-ov__state--none" aria-hidden><Bell size={12} /></span>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 13, fontWeight: 600 }}>{alert.name}</div>
         <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)',
