@@ -16,14 +16,10 @@ Nothing is pushed.
   without touching untouched areas, or a change would need backend work.
 - Small design questions: pick the option closest to the boards, log it, continue.
 
-## Done before this plan
-
-- Step 1 — Ask AI quick fixes (1a–1d): `405b2b2`, `6ec9358`.
-- Capture script committed, with Ask AI states 02-05..02-08: `fc166e5`.
-- Step 2 — Key influencers stopgap (KI-1, KI-2, KI-7): `e7c8627`.
-
 ## Plan
 
+- [x] 1 Ask AI quick fixes
+- [x] 2 Key influencers stopgap
 - [x] 3a Datasets list
 - [ ] 3b Dataset detail shell + Overview + tab map
 - [ ] 3c Remaining tabs + Share dialog
@@ -39,10 +35,23 @@ Nothing is pushed.
   - >> GATE D: stop, report Home + Viewer; the owner decides on the Builder gaps
 - [ ] 6a Builder layout restyle (top bar, Fields panel, canvas, Inspector)
 - [ ] 6b Builder copilot tab, AI offline, and all states
-- [ ] FINAL Full regression: all tests, build, capture every screen, compare against all boards, final summary, and a clean-up list (test datasets 7 and 8, chat threads, the uncommitted init.sql edit)
+- [ ] FINAL Full regression: all tests, build, capture every screen, compare against all boards, final summary, fix the flaky `Lineage.test.tsx`, and a clean-up list (test datasets 7 and 8, chat threads, the uncommitted init.sql edit)
   - >> GATE E: stop, final report
 
 ## Log
+
+### 1 Ask AI quick fixes — `405b2b2`, `6ec9358`
+
+1a markdown via shared `lib/inlineMarkup`, 1b `lib/displayNumber` (prose and
+grid rounding; exports keep raw values), 1c `majorityDir`, 1d autoChart for
+numeric-looking labels; chat chart value labels rounded like the sentence.
+Capture script committed with Ask AI states 02-05..02-08: `fc166e5`.
+
+### 2 Key influencers stopgap — `e7c8627`
+
+KI-1 default outcome (marked, then measure, then inferred; no identifier
+fallback, picker prompt instead), KI-2 identifier suffixes, KI-7 ranked
+renderer. Kept no red/green and "named like an identifier" wording (approved).
 
 ### 3a Datasets list — `6f61866`, `e85cbad`, `2b37a64`
 
@@ -66,3 +75,4 @@ live counts and the shared/certified chips are unchanged.
 - No "Check system status" on the error card: there is no status page every user can open.
 - Health uses the lineage graph only, not one `pipeline-health` call per dataset.
 - Health strip hidden while loading and on error (the board shows it): totals of nothing are pinned as a lie by an existing test.
+- All of the above approved by the owner.
