@@ -92,8 +92,8 @@ Nothing is pushed.
 - [x] 7a Home *(Home design approved 2026-10-06)*: hero with the ask box (Ask AI gains `?q=`), chips from dataset columns, stat tiles, quick actions, Continue (dashboards only), Dashboards and Datasets sections, admin-only Activity and Refresh & jobs, first run, loading, an error per section (whole page only when reports or datasets fail), AI offline
 - [x] 7b Dashboards list *(Part 1 approved 2026-10-06)*: Views/Folders column over the workspace tree, filters, grid/list, cards with schematic thumbnails, ⋯ menu, New dashboard dialog, bulk actions, every state including error and folders-failed; v1's subfolders, folder rename/delete, move confirm and publish toggle kept
   - >> GATE C: stop, report Home and the Dashboards list
-- [ ] 7c Share, Export, Version history *(after Part 4 approval)*: restyle over the existing grants, guest links, embed configs, schedules, PDF/Excel export and versions; v1-only features kept
-- [ ] 7d View and Present *(after Part 3 approval)*: view header, focus mode, view-mode AI panel (Ask, Insights, Suggest charts), Present controls (header hidden, Esc and hover controls exit), AI offline, v1 viewer gating
+- [x] 7c Share, Export, Version history *(Part 4 approved 2026-10-06)*: restyle over the existing grants, guest links, embed configs, schedules, PDF/Excel export and versions; v1-only features kept
+- [x] 7d View and Present *(Part 3 approved 2026-10-06)*: view header, focus mode, view-mode AI panel (Ask, Insights, Suggest charts), Present controls (header hidden, Esc and hover controls exit), AI offline, v1 viewer gating
   - >> GATE D: stop, report View, Present and Part 4
 - [ ] 7e1 Builder: header and toolbars (save state, Edit/View, page tab menu, Layout menu with v1's recipes), icon-only rail on entry
 - [ ] 7e2 Builder: left panel (Insert gallery with preview, Fields, Templates; v1's widget templates, report filters and calculated columns re-homed)
@@ -456,3 +456,95 @@ errors). The owner's decisions are in the note above the 7a–7e list.
   - On a touch screen (no hover) the card and row controls and the folder menus are now always shown.
   - Folder headings wrap instead of truncating.
 - Totals: `Reports.test.tsx` 66 tests; full suite 278 files / 3696 tests; build passes.
+
+### 7c Share, Export, Version history — `71537f9`
+
+**Changed:**
+- New `components/report/share/`:
+  - `ShareDashboardDialog.tsx`, used by the builder's header, the Dashboards list and Home.
+  - `ShareSections.tsx`: v1's guest links and embedding, translated and restyled.
+  - `ExportDialog.tsx`.
+  - `share.css`.
+  - Replaced `ShareLinksDialog.tsx`, `PdfOptionsDialog.tsx` and the list's `ShareDialog`. Their tests were carried over (`ShareSections.test.tsx`; the PDF-options behaviour is pinned in `ExportDialog.test.tsx`).
+- Share, People tab:
+  - Invite by email at Can view / Can edit / Can edit + data.
+  - The owner row; each person's level as a select (re-sending a grant changes it); remove.
+  - General access, Restricted or Everyone in your organisation: the publish flag, with the publish gate's message on refusal.
+  - The link to this page.
+  - "Anyone with a guest link": v1's model (1 / 7 / 30 / 90 days, pin layout, URL shown once, list with views, revoke with the confirmation). It is greyed with the server's reason when `share_link` is refused.
+  - Only the author or an admin manages people and access; others are told so. A legacy dashboard says it has no individual sharing.
+- Share, Embed tab: v1's host-signed embed configs (secret once, iframe / Python / Node samples, enable / disable / delete).
+- Share, Schedule tab: v1's SchedulePanel.
+- Share, footer: Your access, and why · Access by role (admins).
+- A viewer without edit rights has no Share button (v1 gating); "View only · why?" stays.
+- Export:
+  - PDF: A4 / Letter / A3, landscape / portrait, contents page, pages; zero pages blocked.
+  - Data (Excel, one sheet per chart, says what was withheld).
+  - Offline package, and Print (the print view).
+  - A schematic preview of the first chosen page.
+  - States: preparing (spinner), file ready, error (the server's reason, read from the Blob, plus Try again).
+  - The export policy greys every download with its reason; Print stays.
+- Version history:
+  - Grouped Today / Yesterday / Earlier, with the current marker, author, copilot note, and page / widget counts.
+  - Selecting a version offers Restore; there is none on the current version.
+  - Restore asks through the app's confirmation instead of `window.confirm`, with "saved as a new version first, viewers see it straight away, name and sharing unchanged" and v1's missing-dependency warning.
+- All strings in `en.ts` / `ar.ts`; the embed and guest-link copy is now translated.
+
+**Deviations from the prototype:**
+- Left out (backend, see follow-ups):
+  - Can comment, user suggestions, groups, pending invitations, Resend, invitation email and message, Transfer ownership.
+  - A never-expiring link, a link carrying the current filters, embed display options (tabs / filters / Ask AI / theme / size).
+  - Schedule on/off, Pause, Edit; multi-day picker; PNG format; pages selector; AI summary.
+  - PowerPoint, page PNG, CSV zip, choosing widgets, filter summary / page numbers / AI appendix, "uses current filters", live preview, background export, step progress, 24 h download link, "export without it".
+  - Named versions, the Named-only filter, preview and compare, per-version change summaries, Make a copy, version PDF.
+- General access is a two-card choice, not a dropdown menu (two options).
+- The Schedule tab keeps v1's form (its fields differ from the prototype's and are all real).
+- Export preview is a schematic of the page (as in the prototype), not a rendered PDF.
+
+### 7d View and Present — `65fe98a`
+
+**Changed:**
+- Header:
+  - A ⋮ More menu in both modes, just before the mode button so that button never moves (v1's rule, pinned by a test). Items: Print, Version history and Report settings (editors; from reading they switch to edit mode), Your access, and why, and Access by role.
+  - Share and Export are buttons opening the 7c dialogs.
+- Widget hover toolbar (reading only): Ask AI about this widget, and Focus. It straddles the card's top edge so the widget's own controls (cross-filter arrows, ⋮) stay as they are. It is always shown on touch screens.
+- Focus: the widget full screen, rendered by the same WidgetRenderer, with three questions to ask about it.
+- AI panel (reading and Present), opened by the Ask AI button on the canvas or Ctrl+/:
+  - Ask: ChatPane on the dashboard's datasets, one thread per dashboard, locked with one line while the model server is unreachable. Starters come from the columns, and "Ask AI about this widget" puts a question in the box, unsent.
+  - Insights: InsightsPane; it works offline.
+  - Suggest: SuggestionsPane, editors only.
+  - Viewers get Ask and Insights, with nothing that adds to the page. InsightsPane's `onAdd` became optional for that.
+- Present:
+  - The header, the editor's page bar, the Filters line and the status bar are hidden (S7). Title and page name sit at the top, keyboard hints top-right.
+  - Bottom controls: previous / next, counter, dots, Auto-play (on, as v1's kiosk, now 15 s with a progress line, pausable), Ask AI, Exit (Esc).
+  - Arrows, Space and Page Up / Down page through (mirrored in Arabic). Esc closes the AI panel, then exits.
+  - The controls fade after 2.5 s idle.
+  - v1 exited on any key, which made the arrows useless; that is replaced.
+- Present stays editors-only (v1 gating). View-only readers keep "View only · why?".
+- New `e2e/capture/redesign/cap_step7c.mjs` and `cap_step7d.mjs`.
+
+**Deviations from the prototype:**
+- Left out (backend):
+  - A reader's "Bookmark this view" (bookmarks need edit rights).
+  - Widget-aware AI ("Reading 12 widgets", "N widgets read", "Based on" chips, page-specific questions).
+  - Insights "Generated N ago" and saved dismissals.
+  - Author-defined default filter chips.
+- Left out (would touch WidgetRenderer or its query):
+  - "Data behind this chart" in Focus.
+  - Drill down and Copy image in the hover menu. The widget's own ⋮ menu keeps v1's export, View as and analyses, and Focus says so.
+- Subscribe stays its own header button (v1 component); the prototype lists it under More.
+- The Present stage is not scaled to fit; it keeps the page's width.
+- Present title, controls and hints follow the prototype. The Ask AI panel in Present is the same panel as in reading.
+
+**Seen while capturing, not changed (existing code):**
+- Present renders every widget eagerly, which surfaces two v1 console messages: a React key warning from `CustomGraphRenderer` (chart renderers stay untouched) and the sandboxed Live embed widget's localStorage error.
+- The v1 Suggestions pane proposes "average year by category", whose preview the server refuses (422); it does the same in edit mode.
+
+**Checks:**
+- Builder tests 138 (Present now exits by its controls and by Esc, not any key; reading, focus, the AI panel, Ctrl+/, a viewer's panel, Present paging and auto-play are pinned).
+- Share 12, Export 5, guest links / embed 10, version history 8.
+- Full suite 279 files / 3720 tests; the only failure was the known flaky `Lineage.test.tsx`, which passes alone.
+- The build passes.
+- Captures for 7c and 7d in light, dark, Arabic and Arabic dark were compared with the prototype. Fixed during the comparison: the Present stage padding, editor chrome showing in Present, and a doubled name in the AI panel's context line.
+- Fixed before commit: the Focus view had been mounted outside the cross-filter provider, which would have crashed it.
+- Captures used browser-only data for grants, guest links, versions, export responses, an unreachable model and a view-only reader. They are copied to `/media/saeed/New Volume1/projects/redesign-captures/7c/` and `…/7d/`.
