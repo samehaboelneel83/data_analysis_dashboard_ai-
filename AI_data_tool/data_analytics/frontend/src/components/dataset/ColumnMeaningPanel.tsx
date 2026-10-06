@@ -83,17 +83,18 @@ const kindOf = (dtype: string): Exclude<Kind, 'all'> =>
   dtype === 'numeric' ? 'number' : dtype === 'datetime' ? 'date' : 'text'
 
 /** What the column is used as, in the words of the board's pill. */
-function useAs(name: string, dtype: string, meta: ColumnMeta | undefined): { label: string; measure: boolean } {
+function useAs(name: string, dtype: string, meta: ColumnMeta | undefined, t: ReturnType<typeof useT>): { label: string; measure: boolean } {
   const role = meta?.role
   if (role === 'measure' || (!role && dtype === 'numeric' && nonAdditiveKind(name) === null)) {
     const agg = meta?.aggregation ?? defaultSummary(name)
-    return { label: `Measure · ${(SUMMARY_LABEL[agg] ?? agg).toLowerCase()}`, measure: true }
+    const aggWord = SUMMARY_LABEL[agg] ? t(`cols3.agg.${agg}` as MessageKey) : agg
+    return { label: t('cols3.use.measure', { agg: aggWord }), measure: true }
   }
-  if (role === 'temporal' || (!role && dtype === 'datetime')) return { label: 'Time', measure: false }
-  if (role === 'identifier' || (!role && nonAdditiveKind(name) === 'identifier')) return { label: 'Identifier', measure: false }
-  if (role === 'freetext') return { label: 'Free text', measure: false }
-  if (role === 'geography') return { label: 'Geography', measure: false }
-  return { label: 'Dimension', measure: false }
+  if (role === 'temporal' || (!role && dtype === 'datetime')) return { label: t('cols3.use.time'), measure: false }
+  if (role === 'identifier' || (!role && nonAdditiveKind(name) === 'identifier')) return { label: t('cols3.use.id'), measure: false }
+  if (role === 'freetext') return { label: t('cols3.use.text'), measure: false }
+  if (role === 'geography') return { label: t('cols3.use.geo'), measure: false }
+  return { label: t('cols3.use.dim'), measure: false }
 }
 
 /**
@@ -238,7 +239,7 @@ function ColumnRow(p: {
 }) {
   const t = useT()
   const { dist, sum } = useColumnProfile(p.dataset, p.name, p.analysis)
-  const use = useAs(p.name, p.dtype, p.meta)
+  const use = useAs(p.name, p.dtype, p.meta, t)
   const c = { name: p.name, dtype: p.dtype }
   // Only glosses that SAY something: "d001 = Marketing", never
   // "Marketing = Marketing" (HR evaluation).

@@ -89,7 +89,8 @@ describe('Overview columns at a glance (3b)', () => {
   it('draws a range bar for numbers, top values for text and a range for dates', () => {
     show()
     const glance = screen.getByTestId('overview-glance')
-    expect(within(glance).getByText('-4.1 – 104.2 · median 19')).toBeInTheDocument()
+    // Each value is bidi-isolated (LRI…PDI) so it keeps its shape in Arabic.
+    expect(within(glance).getByText('\u2066-4.1\u2069 – \u2066104.2\u2069 · median \u206619\u2069')).toBeInTheDocument()
     expect(within(glance).getByText('4 values')).toBeInTheDocument()
     expect(within(glance).getByText('Asia Pacific')).toBeInTheDocument()
     expect(glance.querySelector('.dl-ov__range')).not.toBeNull()
@@ -172,6 +173,6 @@ describe('Overview number formats (3b)', () => {
   it('shows a year column without thousands separators', () => {
     show({ ds: { ...DS, columns: [{ id: 9, name: 'year', dtype: 'numeric', missing_pct: 0, stats: {} }] } as Dataset,
       analysis: { numeric: { columns: { year: { min: 2024, p5: 2024, p25: 2024, median: 2024, p75: 2025, p95: 2025, max: 2025 } } } } })
-    expect(screen.getByText('2024 – 2025 · median 2024')).toBeInTheDocument()
+    expect(screen.getByText('\u20662024\u2069 – \u20662025\u2069 · median \u20662024\u2069')).toBeInTheDocument()
   })
 })

@@ -132,7 +132,8 @@ describe('the Columns tab (redesign 3c)', () => {
     render(<ColumnMeaningPanel dataset={WIDE} canEdit analysis={ANALYSIS} />)
     const row = screen.getByText('total').closest('tr')!
     expect(row).toHaveTextContent('2%')
-    expect(row).toHaveTextContent('1 – 40 · median 9')
+    // Each value is bidi-isolated (LRI…PDI) so it keeps its shape in Arabic.
+    expect(row).toHaveTextContent('\u20661\u2069 – \u206640\u2069 · median \u20669\u2069')
     expect(row).toHaveTextContent('Measure · average')
     expect(screen.getByText('region').closest('tr')).toHaveTextContent('Dimension')
     expect(screen.getByText('ordered_at').closest('tr')).toHaveTextContent('Time')

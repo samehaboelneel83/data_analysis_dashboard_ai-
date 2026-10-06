@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useDirection } from '../../contexts/DirectionContext'
 import { useT } from '../../i18n'
 import { localDigits } from '../../lib/arabicFormats'
 import { nonAdditiveKind } from '../../lib/semanticGuard'
@@ -25,6 +26,7 @@ export const typeTag = (dtype: string) => TYPE_TAG[dtype] ?? dtype.slice(0, 4).t
 /** Range bar for numbers, monthly bars for dates, top values for text. */
 export function useColumnProfile(ds: Dataset, name: string, analysis: Analysis): { dist: ReactNode; sum: string } {
   const t = useT()
+  const { language } = useDirection()
   if (!analysis) return { dist: null, sum: '' }
   const fmt = ds.column_formats?.[name]
   const num = analysis.numeric?.columns?.[name]
@@ -32,14 +34,17 @@ export function useColumnProfile(ds: Dataset, name: string, analysis: Analysis):
   const dt = analysis.datetime?.columns?.[name]
   // A year or an id is a label, not a quantity: "2024", never "2,024".
   const plain = !fmt && (nonAdditiveKind(name) === 'year' || nonAdditiveKind(name) === 'identifier')
-  const f = (v: number | null | undefined) => (v == null ? '—' : plain ? localDigits(String(Math.round(v))) : fmtStr(v, fmt))
+  // Each value isolated (LRI…PDI): inside an Arabic sentence a range like
+  // "$ -12,012 – $ 16,069" otherwise reorders around its signs and symbols.
+  const iso = (x: string) => `\u2066${x}\u2069`
+  const f = (v: number | null | undefined) => iso(v == null ? '—' : plain ? localDigits(String(Math.round(v))) : fmtStr(v, fmt))
   if (num) {
     return { dist: <RangeBar s={num} />, sum: t('ov3.glance.numSum', { min: f(num.min), max: f(num.max), median: f(num.median) }) }
   }
   if (dt) {
     const months = (dt.monthly_counts ?? []).slice(-21)
     const max = Math.max(1, ...months.map(m => m.count))
-    const d = (s?: string) => (s ? new Date(s).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—')
+    const d = (s?: string) => iso(s ? new Date(s).toLocaleDateString(language === 'ar' ? 'ar-u-nu-latn' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—')
     return {
       dist: <span className="dl-ov__months">{months.map(m => <i key={m.period} title={`${m.period}: ${m.count}`} style={{ blockSize: `${Math.max(12, (m.count / max) * 100)}%` }} />)}</span>,
       sum: `${localDigits(d(dt.min))} – ${localDigits(d(dt.max))}`,
