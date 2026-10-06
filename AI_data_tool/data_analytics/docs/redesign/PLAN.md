@@ -24,9 +24,17 @@ Nothing is pushed.
 - [x] 3b Dataset detail shell + Overview + tab map
 - [x] 3c Remaining tabs + Share dialog
   - >> GATE A: stop, report the whole Datasets screen
-- [x] 4a Ask AI Phase 1: layout, thread, column panel, answer card
-- [x] 4b Ask AI Phase 1: all states (first run, no dataset, thinking, clarification, offline, error)
+- [x] 4a Ask AI Phase 1: layout, thread, column panel, answer card (visual redesign reverted at the owner's request, see 4-revert)
+- [x] 4b Ask AI Phase 1: all states (first run, no dataset, thinking, clarification, offline, error) (visual redesign reverted, see 4-revert)
+- [x] 4-revert Ask AI back to the v1 layout with fixes; Datasets menu clipping fixes
   - >> GATE B: stop, report Ask AI
+
+> **Ask AI decision (2026-10-06, owner):** the Ask AI page uses the v1 layout and look
+> (as at `120e0ef`) with fixes. The step 4 boards in `boards/step4-ask-ai-phase1/` are
+> no longer the spec for it. Kept from step 4: translations, Pending without timed
+> stages, the themed delete dialog, offline detection (locks the question box with one
+> line), clarification column chips, "What was wrong?" after 👎, and Edit question on
+> an error.
 - [ ] 5-gap Gap pass for Home and Viewer (no code). List what has no backend data.
   - >> GATE C: stop, the owner decides what to hide
 - [ ] 5a Home
@@ -179,4 +187,28 @@ suite and build; the screen comparison ran once over all of 3c before ticking.
 - Captures used browser-only sample data (conversations, the stored answer, a never-answering ask for Thinking, a "down" `/llm/endpoints` for Offline).
 
 **Clean-up for FINAL:** `pages/ask/AskIllustration.tsx` and the `.dl-ask--hero` / `.dl-ask__hero*` CSS are now unused.
+
+### 4-revert Ask AI back to v1 with fixes; Datasets menus — `7b50e5c`, `8818373`, and the commit that adds this entry
+
+**Owner's decision:** no 4a/4b visual redesign. Ask AI looks like v1 (`120e0ef`); the step 4 boards are no longer its spec.
+
+**Reverted to v1:** the three-column layout and edge-to-edge page, the columns panel, the answer card (key numbers, "How it was worked out", Export/⋯ menus, "Ask next", compact older answers, dotted underlines, highlighted top bar), the no-dataset chooser (v1's hero and Step 1 picker are back), the first-run cards (v1's chips are back), the clarification and error cards, the conversation search, the dataset size beside the picker, the placeholder naming the dataset, and scroll-to-start (v1 scrolls to the bottom). Removed files: `AnswerCard.tsx` (+test, css), `pageStates.tsx`, `ColumnPanel.tsx`, `DataChooser.tsx`; their unused strings were pruned from `en.ts`/`ar.ts`.
+
+**Kept, in v1's look:**
+- Translations of the chat's hardcoded English (pending texts, load/reach errors, result caption, "No rows.", "Tables considered", Save-as-dataset prompts and toasts, copy/download toasts, aria-labels, "Saving…").
+- Pending without the timer-driven stages: v1's dot, counter, skeleton and long-wait note.
+- Themed delete dialog instead of `window.confirm`.
+- Offline: read from the top bar's `/llm/endpoints` poll (broadcast by `llmApi.endpoints`, no second poller). While the model is down, v1's question box is locked ("New questions are paused while the model server is unreachable") with one line above it in v1's error-text style. No banner. The builder mount never locks.
+- Clarification: "Use <column>" chips for the columns the reply names in bold, code or quotes, beside the server's choices, in v1's chip style (`clarifyColumns.ts`).
+- "What was wrong?" after 👎: a small v1-style field under the actions; the reply goes to the feedback endpoint's `comment`.
+- Edit question beside Retry on an error, in v1's button style.
+- `agentApi.feedback` keeps its optional `comment`.
+
+**Datasets menus (owner asked to check every dropdown/menu on the redesigned Datasets screens):**
+- `7b50e5c`: the list's row menu was clipped by the table card (only the Suggest dashboards sparkle showed in English, nothing in Arabic). It now opens on the page (`portal`, `align="end"`).
+- `8818373`: ActionMenu counts its 4px gap when deciding to open upward; the last row's menu was cut by the window edge.
+- This commit: the header's refresh options popup (connection-imported datasets) ran under the side nav when the header wrapped at narrower widths. It now flips to the button's start edge when it would leave the content area.
+- Checked in a browser, English and Arabic, at 1440px and 900px: every popup trigger on the list, the detail header ⋯ on all seven tabs, the live dataset, the Share dialog (selects only), and the refresh popup (on a dataset presented as imported, since none is seeded). After the fixes no popup is clipped, covered or off-screen. Expanding controls (Use as, + Rule, model cards, Data toolbar panels) open in place; native selects can't be clipped.
+
+**Captures:** Ask AI in eight states × four themes, v1 (`120e0ef` files restored temporarily) beside the current page, with the same browser-only sample data. They match, apart from the kept items above.
 

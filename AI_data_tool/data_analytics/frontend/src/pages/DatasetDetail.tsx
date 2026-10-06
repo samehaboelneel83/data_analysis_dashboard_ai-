@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef, useContext } from 'react'
+import { useEffect, useLayoutEffect, useState, useCallback, useRef, useContext } from 'react'
 import KeyInfluencersResultView from '../components/analysis/KeyInfluencersResult'
 import { pickInfluencerOutcome } from './datasetDetail/influencerOutcome'
 import AggregatesPanel from '../components/dataset/AggregatesPanel'
@@ -189,6 +189,19 @@ export default function DatasetDetail() {
   const refreshing = queueing || (refreshJobId != null && (!refreshJob || isJobActive(refreshJob)))
   // F3: load-mode picker -- full reload vs. watermark-driven incremental append.
   const [showRefreshMenu, setShowRefreshMenu] = useState(false)
+  // The refresh options hang from the button's end edge; when the header has
+  // wrapped and the button sits at the start, that runs under the side nav.
+  // Measured on open and flipped to the start edge when it would.
+  const refreshMenuRef = useRef<HTMLDivElement>(null)
+  const [refreshMenuAtStart, setRefreshMenuAtStart] = useState(false)
+  useLayoutEffect(() => {
+    if (!showRefreshMenu) { setRefreshMenuAtStart(false); return }
+    const el = refreshMenuRef.current
+    const main = el?.closest('main')
+    if (!el || !main) return
+    const r = el.getBoundingClientRect(), m = main.getBoundingClientRect()
+    if (r.left < m.left || r.right > m.right) setRefreshMenuAtStart(true)
+  }, [showRefreshMenu])
   const [refreshMode,     setRefreshMode]     = useState<'full' | 'incremental'>('full')
   const [refreshCursorCol, setRefreshCursorCol] = useState('')
   // The scheduling control lives in the SAME menu as the manual refresh: both
@@ -808,7 +821,8 @@ export default function DatasetDetail() {
                 : refreshByOther ? tr('refreshJob.someoneElse') : null}
             </div>
             {showRefreshMenu && (
-              <div style={{ position: 'absolute', top: '100%', insetInlineEnd: 0, zIndex: 20, marginTop: 4,
+              <div ref={refreshMenuRef} style={{ position: 'absolute', top: '100%', zIndex: 20, marginTop: 4,
+                ...(refreshMenuAtStart ? { insetInlineStart: 0 } : { insetInlineEnd: 0 }),
                 background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8,
                 padding: 12, width: 240, boxShadow: '0 4px 16px rgba(0,0,0,0.15)' }}>
                 {ds.data_source_id ? (<>
