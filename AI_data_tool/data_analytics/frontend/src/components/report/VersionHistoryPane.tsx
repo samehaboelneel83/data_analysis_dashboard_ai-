@@ -134,7 +134,7 @@ export default function VersionHistoryPane({ reportId, currentRevision, onRestor
                 )}
                 {v.via === 'copilot' && (
                   <div data-testid="version-copilot" className="sm ai">
-                    <Bot size={12} aria-hidden /> {v.note || t('shx.vh.copilot')}{v.created_by ? ` ${t('shx.vh.askedBy', { who: v.created_by })}` : ''}
+                    <Bot size={12} aria-hidden /> <span>{v.note ? <bdi>{v.note}</bdi> : t('shx.vh.copilot')}{v.created_by ? ` ${t('shx.vh.askedBy', { who: v.created_by })}` : ''}</span>
                   </div>
                 )}
                 <div className="sm">{t('shx.vh.counts', { p: localDigits(String(v.pages)), w: localDigits(String(v.widgets)) })}</div>

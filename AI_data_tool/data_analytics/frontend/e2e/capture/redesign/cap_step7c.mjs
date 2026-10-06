@@ -11,7 +11,7 @@ const { chromium } = createRequire(path.join(FE, 'package.json'))('playwright')
  * dashboard opened in the builder, × light / dark / Arabic / Arabic dark at
  * 1440 × 900. Browser-only data: grants and guest links (none are seeded),
  * versions, and the export responses. Usage: node cap_step7c.mjs <outdir>
- * [state] [reportId]; ONE=1 for light only.
+ * [state] [reportId]; ONE=1 for light only; PAUSE=ms between screens.
  */
 
 const BASE = 'http://localhost:3001'
@@ -46,10 +46,10 @@ const screens = [
   { name: 'export-done', fake: 'done', act: async p => { await exportOpen(p); await p.locator('.shx-f .btn-primary').click(); await p.waitForTimeout(600) } },
   { name: 'export-error', fake: 'error', act: async p => { await exportOpen(p); await p.locator('.shx-f .btn-primary').click(); await p.waitForTimeout(600) } },
   { name: 'export-blocked', fake: 'blocked', act: exportOpen },
-  { name: 'versions', edit: true, act: async p => {
-    await p.locator('.dl-panebar').getByRole('button', { name: /More|المزيد/ }).first().click().catch(() => {})
+  { name: 'versions', act: async p => {
+    await p.locator('.dl-vw-more').click()
     await p.getByRole('menuitem', { name: /Version history|سجل الإصدارات/ }).click()
-    await p.waitForTimeout(800); await p.locator('.shx-v').nth(1).click() } },
+    await p.waitForTimeout(1200); await p.locator('.shx-v').nth(1).click() } },
 ].filter(s => !only || s.name === only)
 
 const browser = await chromium.launch()
@@ -101,5 +101,7 @@ for (const sc of screens) for (const [suffix, lang, theme] of themes) {
   await page.screenshot({ path: path.join(OUT, `${sc.name}-${suffix}.png`) })
   console.log(`${sc.name}-${suffix}`, errors.length ? 'CONSOLE: ' + errors.join(' | ') : 'clean')
   await ctx.close()
+  // The dev server rate-limits widget queries: space the screens out.
+  await new Promise(r => setTimeout(r, Number(process.env.PAUSE ?? 4000)))
 }
 await browser.close()

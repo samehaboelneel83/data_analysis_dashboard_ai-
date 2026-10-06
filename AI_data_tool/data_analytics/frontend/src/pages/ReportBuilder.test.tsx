@@ -4,6 +4,7 @@ import { render, screen, fireEvent, within, waitFor, act } from '@testing-librar
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import ReportBuilder from './ReportBuilder'
 import { analysisApi, authzApi, reportsApi, datasetsApi, widgetDataApi, dataPreviewApi, dataSourcesApi, columnMetaApi, hierarchyApi } from '../services/api'
+import { PromptProvider } from '../components/ui/PromptDialog'
 import { ConfirmProvider } from '../components/ui/ConfirmDialog'
 import { axeViolations } from '../test/axe'
 
@@ -48,6 +49,11 @@ vi.mock('../services/api', () => ({
   pageVisibilityApi: { roles: vi.fn().mockResolvedValue([]), get: vi.fn().mockResolvedValue({ role_ids: [] }), set: vi.fn() },
   schedulesApi: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), delete: vi.fn(), runNow: vi.fn() },
   deliveriesApi: { list: vi.fn().mockResolvedValue([]) },
+  // View mode (7d) reads the top bar's model light, as Ask AI does.
+  lastLlmEndpoints: () => null,
+  getLlmChoice: () => null,
+  LLM_ENDPOINTS_EVENT: 'datalytics:llm-endpoints',
+  LLM_CHOICE_EVENT: 'datalytics:llm-choice',
   // The Share dialog (7c) reads grants, guest links and embed configs.
   reportGrantsApi: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), remove: vi.fn() },
   shareLinksApi: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), revoke: vi.fn() },
@@ -97,11 +103,11 @@ function renderBuilder() {
     // ConfirmProvider mirrors App.tsx: ReportBuilder's page delete asks through
     // useConfirm, which throws outside a provider by design rather than silently
     // never confirming.
-    <ConfirmProvider>
+    <ConfirmProvider><PromptProvider>
       <MemoryRouter initialEntries={['/reports/1']}>
         <Routes><Route path="/reports/:id" element={<ReportBuilder />} /></Routes>
       </MemoryRouter>
-    </ConfirmProvider>
+    </PromptProvider></ConfirmProvider>
   )
 }
 
@@ -1246,7 +1252,23 @@ describe('ReportBuilder Present', () => {
 
     expect(document.documentElement.dataset.presenting).toBe('1')
     expect(screen.queryByText('Analytics')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Stop/i })).toBeInTheDocument()
+    // 7d: the header goes too; the present controls exit, and so does Esc.
+    expect(screen.queryByTestId('builder-header')).not.toBeInTheDocument()
+    const controls = screen.getByTestId('present-controls')
+    fireEvent.click(within(controls).getByRole('button', { name: /Exit/ }))
+    expect(document.documentElement.dataset.presenting).toBeFalsy()
+  })
+
+  it('Esc exits; other keys no longer do (arrows move between pages)', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    fireEvent.click(screen.getByRole('button', { name: /Present/i }))
+    fireEvent.keyDown(document, { key: 'ArrowRight' })
+    expect(document.documentElement.dataset.presenting).toBe('1')
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => expect(document.documentElement.dataset.presenting).toBeFalsy())
   })
 })
 
@@ -1483,6 +1505,19 @@ describe('ReportBuilder — a view-only viewer gets the dashboard, not the studi
     expect(screen.queryByRole('button', { name: /Edit mode/i })).not.toBeInTheDocument()
     // The Modern header's "View only" chip, and the "View only · why?" button.
     expect(screen.getByRole('button', { name: /View only · why\?/i })).toBeInTheDocument()
+  })
+
+  it('reads with Ask AI and Insights, but no Suggest, no Present, and nothing that adds to the page (7d)', async () => {
+    await renderViewOnly()
+    expect(screen.queryByRole('button', { name: /Present/i })).not.toBeInTheDocument()
+    fireEvent.click(await screen.findByTestId('view-ai-open'))
+    const panel = await screen.findByTestId('view-assist')
+    expect(within(panel).getByRole('tab', { name: 'Ask' })).toBeInTheDocument()
+    expect(within(panel).getByRole('tab', { name: 'Insights' })).toBeInTheDocument()
+    expect(within(panel).queryByRole('tab', { name: 'Suggest' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'More' }))
+    expect(await screen.findByRole('menuitem', { name: 'Print' })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: 'Version history' })).not.toBeInTheDocument()
   })
 
   it('drops the authoring chrome: panels, add-widget, page controls, copilot', async () => {
@@ -2548,5 +2583,71 @@ describe('ReportBuilder Convert to', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Undo' }))
     await waitFor(() => expect(reportsApi.updateWidget).toHaveBeenLastCalledWith(1, 100, 5,
       { widget_type: 'bar', config: { dimension: 'region' } }), { timeout: 5000 })
+  })
+})
+
+describe('ReportBuilder reading (redesign 7d)', () => {
+  const toReading = async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    renderBuilder()
+    await screen.findByTestId('builder-header')
+    if (screen.getByTestId('mode-toggle').getAttribute('aria-label') === 'View mode') fireEvent.click(screen.getByTestId('mode-toggle'))
+    await screen.findByRole('toolbar', { name: 'Actions for Sales by Region' })
+  }
+
+  it('a widget can be focused full screen, and the focus closes again', async () => {
+    await toReading()
+    fireEvent.click(screen.getByRole('button', { name: 'Focus on Sales by Region' }))
+    const focus = await screen.findByTestId('focus-view')
+    expect(within(focus).getByRole('heading', { level: 2, name: 'Sales by Region' })).toBeInTheDocument()
+    expect(within(focus).getByRole('button', { name: 'Explain "Sales by Region"' })).toBeInTheDocument()
+    fireEvent.click(within(focus).getByRole('button', { name: /Exit focus/ }))
+    expect(screen.queryByTestId('focus-view')).not.toBeInTheDocument()
+  })
+
+  it('"Ask AI about" a widget opens the panel with the question in the box, not sent', async () => {
+    await toReading()
+    fireEvent.click(screen.getByRole('button', { name: 'Ask AI about Sales by Region' }))
+    const panel = await screen.findByTestId('view-assist')
+    expect(within(panel).getByRole('textbox', { name: /question/i })).toHaveValue('Explain "Sales by Region"')
+  })
+
+  it('the Ask AI button and Ctrl+/ open and close the panel', async () => {
+    await toReading()
+    fireEvent.click(screen.getByTestId('view-ai-open'))
+    expect(await screen.findByTestId('view-assist')).toBeInTheDocument()
+    fireEvent.click(within(screen.getByTestId('view-assist')).getByRole('button', { name: 'Close' }))
+    expect(screen.queryByTestId('view-assist')).not.toBeInTheDocument()
+    fireEvent.keyDown(document, { key: '/', ctrlKey: true })
+    expect(await screen.findByTestId('view-assist')).toBeInTheDocument()
+  })
+
+  it('an editor gets Suggest; the More menu keeps print, history and settings', async () => {
+    await toReading()
+    fireEvent.click(screen.getByTestId('view-ai-open'))
+    expect(within(await screen.findByTestId('view-assist')).getByRole('tab', { name: 'Suggest' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'More' }))
+    for (const name of ['Print', 'Version history', 'Report settings']) expect(await screen.findByRole('menuitem', { name })).toBeInTheDocument()
+  })
+
+  it('Present pages with the arrows and the controls, and auto-play can be paused', async () => {
+    const r = reportWithWidget()
+    r.pages.push({ ...r.pages[0], id: 101, name: 'Second', position: 1, widgets: [] } as any)
+    vi.mocked(reportsApi.get).mockResolvedValue(r as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    fireEvent.click(screen.getByRole('button', { name: /Present/i }))
+    const controls = screen.getByTestId('present-controls')
+    expect(controls).toHaveTextContent('1 / 2')
+    fireEvent.keyDown(document, { key: 'ArrowRight' })
+    await waitFor(() => expect(controls).toHaveTextContent('2 / 2'))
+    fireEvent.click(within(controls).getByRole('button', { name: 'Previous page' }))
+    await waitFor(() => expect(controls).toHaveTextContent('1 / 2'))
+    const auto = within(controls).getByRole('button', { name: /Auto-play/ })
+    expect(auto).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(auto)
+    expect(auto).toHaveAttribute('aria-pressed', 'false')
   })
 })

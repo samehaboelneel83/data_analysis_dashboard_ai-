@@ -22,7 +22,9 @@ interface Finding {
 export default function InsightsPane({ datasetId, columnTypes, onAdd, reportId, onComposed }: {
   datasetId: number | null
   columnTypes: Record<string, string>          // column -> dtype
-  onAdd: (s: Suggestion) => void
+  /** Absent for a viewer (view mode, redesign 7d): findings are read, not
+   *  added to a page the server would not let them change. */
+  onAdd?: (s: Suggestion) => void
   /** Enables "Build a report" — composing writes a page, so it needs the report. */
   reportId?: number
   /** Called after a page is written, so the builder can reload and show it. */
@@ -140,11 +142,13 @@ export default function InsightsPane({ datasetId, columnTypes, onAdd, reportId, 
                     </div>
                   )}
                   <div style={{ display: 'flex', gap: 6 }}>
+                    {onAdd && (
                     <button className="btn" style={{ fontSize: 11 }}
                       onClick={() => onAdd({ widget_type: 'text', title: '', reason: '',
                         config: { content: `${f.title}. ${f.detail}` } })}>
                       + Add as text
                     </button>
+                    )}
                     {datasetId != null && (
                       <button className="btn" style={{ fontSize: 11 }}
                         aria-label={`Pin finding: ${f.title}`}
@@ -157,7 +161,7 @@ export default function InsightsPane({ datasetId, columnTypes, onAdd, reportId, 
                         <IconLabel icon={Pin} size={11}>Pin</IconLabel>
                       </button>
                     )}
-                    {chart && (
+                    {chart && onAdd && (
                       <button className="btn btn-primary" style={{ fontSize: 11 }} onClick={() => onAdd(chart)}>
                         + Chart it
                       </button>

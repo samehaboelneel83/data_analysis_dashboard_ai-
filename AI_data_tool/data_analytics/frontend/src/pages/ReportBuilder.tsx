@@ -74,7 +74,7 @@ import CollapsibleSide from '../components/report/CollapsibleSide'
 import ReviewPane from '../components/report/ReviewPane'
 import PopupOverlay from '../components/report/PopupOverlay'
 import TooltipPageOverlay from '../components/report/TooltipPageOverlay'
-import { ArrowLeft, Plus, Eye, Undo2, Redo2, KeyRound, ShieldCheck, Pause, Play, FileDown, Share2, Printer, FileText, Package, Pencil, RefreshCw, ChevronUp, ChevronDown } from 'lucide-react'
+import { ArrowLeft, Plus, Eye, Undo2, Redo2, KeyRound, ShieldCheck, Pause, Play, FileDown, Share2, Maximize2, EllipsisVertical, SlidersHorizontal, Printer, FileText, Package, Pencil, RefreshCw, ChevronUp, ChevronDown } from 'lucide-react'
 import { updatedAgo } from '../lib/viewStyle'
 import { columnKind, usePageFilters } from '../lib/pageFilters'
 import PageFilterBar, { type PageFilterColumn } from '../components/report/PageFilterBar'
@@ -89,6 +89,14 @@ import toast from 'react-hot-toast'
 import ReleaseControl from '../components/report/ReleaseControl'
 import SubscribeButton from '../components/report/SubscribeButton'
 import ToolbarMenu from '../components/report/ToolbarMenu'
+import ActionMenu from '../components/ActionMenu'
+import AiMascot from '../components/ai/AiMascot'
+import ViewAssist, { type AssistTab } from './reportBuilder/ViewAssist'
+import FocusView from './reportBuilder/FocusView'
+import PresentControls from './reportBuilder/PresentControls'
+import { useAiOffline } from './ask/useAiOffline'
+import { datasetSuggestions } from './ask/suggestions'
+import './reportBuilder/viewMode.css'
 import { useConfirm } from '../components/ui/ConfirmDialog'
 import { useMeasuredWidth } from '../components/report/useMeasuredWidth'
 import { useModalDialog } from '../components/ui/useModalDialog'
@@ -324,6 +332,14 @@ export default function ReportBuilder() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   // Kiosk playback: pages auto-advance on an interval; any key or click exits.
   const [kiosk, setKiosk] = useState(false)
+  // Reading (redesign 7d): the reader's AI panel, a question handed to it
+  // (remounts the chat with the question in its box, never sent), and the
+  // widget shown full screen.
+  const [aiOpen, setAiOpen] = useState(false)
+  const [aiTab, setAiTab] = useState<AssistTab>('ask')
+  const [askSeed, setAskSeed] = useState<{ q: string; n: number } | null>(null)
+  const [focusW, setFocusW] = useState<Widget | null>(null)
+  const aiOffline = useAiOffline().offline
   // Refresh in the Modern header remounts the canvas, so every widget asks again.
   const [refreshNonce, setRefreshNonce] = useState(0)
 
@@ -1737,20 +1753,25 @@ export default function ReportBuilder() {
     }
   }, [kiosk])
 
+  // Paging, auto-play and the keys now live in PresentControls (7d): v1
+  // advanced every 8 s and exited on ANY key, which left the arrows useless.
+
+  /** "Ask AI about this widget": the panel, with a question in its box. */
+  const askAbout = (w: Widget) => {
+    setFocusW(null); setAiOpen(true); setAiTab('ask')
+    setAskSeed(s => ({ q: tr('vw.fq.explain', { title: w.title || w.widget_type }), n: (s?.n ?? 0) + 1 }))
+  }
+
+  // Ctrl+/ opens the reader's AI panel. Edit mode has the page copilot on the
+  // same keys, mounted only there, so the two never compete.
   useEffect(() => {
-    if (!kiosk || !report) return
-    const id = setInterval(() => {
-      setActivePage(prev => {
-        const pages = report.pages.filter(p => p.page_type === 'normal')
-        if (pages.length < 2) return prev
-        const i = pages.findIndex(p => p.id === prev?.id)
-        return pages[(i + 1) % pages.length]
-      })
-    }, 8000)
-    const exit = () => setKiosk(false)
-    document.addEventListener('keydown', exit)
-    return () => { clearInterval(id); document.removeEventListener('keydown', exit) }
-  }, [kiosk, report])
+    if (editMode) return
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === '/') { e.preventDefault(); setAiOpen(o => !o) }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [editMode])
 
   /** SAS's Duplicate Object: another one of these, beside it.
    *
@@ -3040,7 +3061,7 @@ export default function ReportBuilder() {
             there was no way for a person to reach the button that puts a report
             into edit mode. Wrapping costs a second row; not wrapping costs the
             control. */}
-        {topOpen && (
+        {topOpen && !kiosk && (
         <div data-testid="builder-header"
           style={{ display:'flex', alignItems:'flex-start', flexWrap:'wrap', gap:10, padding:'10px 20px', borderBottom:'1px solid var(--border)', flexShrink:0, background:'var(--surface)' }}>
           {/* Two parts: everything that varies by mode wraps INSIDE this one,
@@ -3221,7 +3242,7 @@ export default function ReportBuilder() {
             {canEdit && (
             <button className="btn btn-ghost btn-sm" title="Kiosk playback: pages advance every 8s; any key exits"
               aria-pressed={kiosk}
-              onClick={() => { setEditMode(false); setKiosk(k => !k) }}>
+              onClick={() => { setEditMode(false); setAiOpen(false); setFocusW(null); setKiosk(k => !k) }}>
               {kiosk ? <IconLabel icon={Pause}>{tr('builder.stop')}</IconLabel> : <IconLabel icon={Play}>{tr('builder.present')}</IconLabel>}
             </button>
             )}
@@ -3246,6 +3267,22 @@ export default function ReportBuilder() {
                   if (id === reportId) navigate(next.length ? `/reports/${next[next.length - 1].id}` : '/reports')
                 }}
                 onCloseAll={() => { setOpenReports(closeAll()); navigate('/reports') }} />
+            )}
+            {/* The rest, behind ⋮ (7d), in both modes and just before the mode
+                button, so that button never moves. Version history and report
+                settings are edits: from reading they switch to edit mode. */}
+            {(
+              <ActionMenu label={tr('vw.more')} align="end" portal triggerClassName="btn btn-ghost btn-sm dl-vw-more"
+                trigger={<EllipsisVertical size={15} aria-hidden />}
+                items={[
+                  { key: 'print', label: tr('shx.ex.print'), icon: <Printer size={14} />, onSelect: () => navigate(`/reports/${reportId}/print`) },
+                  ...(canEdit ? [
+                    { key: 'history', label: tr('shx.vh.title'), icon: <History size={14} />, onSelect: () => { setEditMode(true); setRightPanelMode('history') } },
+                    { key: 'settings', label: tr('builder.reportSettings'), icon: <SlidersHorizontal size={14} />, onSelect: () => { setEditMode(true); setRightPanelMode('parameters') } },
+                  ] : []),
+                  ...(Object.keys(access).length ? [{ key: 'why', label: tr('shx.why'), icon: <KeyRound size={14} />, onSelect: () => setAccessOpen2(true) }] : []),
+                  ...(isAdmin ? [{ key: 'role', label: tr('shx.byRole'), icon: <ShieldCheck size={14} />, onSelect: () => setAccessOpen(true) }] : []),
+                ]} />
             )}
             {canEdit ? (
               // ONE button that flips in place: "Edit" while reading, "View"
@@ -3476,8 +3513,8 @@ export default function ReportBuilder() {
           </div>
         )}
 
-        {/* Page tabs */}
-        {!modern && (
+        {/* Page tabs (not in Present: its own controls page through) */}
+        {!modern && !kiosk && (
         <div style={{ display:'flex', alignItems:'center', gap:3, padding:'0 16px', borderBottom:'1px solid var(--border)', flexShrink:0, background:'var(--surface)' }}>
           {!topOpen && (
             <span className="dl-topfold-lead">
@@ -3627,7 +3664,7 @@ export default function ReportBuilder() {
             <FilterBar variant="chips" />
           </div>
         )}
-        <div style={{ display:'flex', flex:1, gap:10, padding:'10px 16px', overflow:'hidden', minHeight:0 }}>
+        <div className={kiosk ? 'dl-pr-stage' : undefined} style={{ display:'flex', flex:1, gap:10, padding:'10px 16px', overflow:'hidden', minHeight:0, position:'relative' }}>
 
           {/* Canvas */}
           <div key={refreshNonce} style={{ flex:1, overflowY:'auto', overflowX:'auto' }}>
@@ -3649,7 +3686,7 @@ export default function ReportBuilder() {
             )}
             {/* 5.9: with page filters in use, the old "Filters: No selections"
                 line beside them read as "no filters apply" -- the opposite. */}
-            {!modern && !(pageFilters?.length > 0) && <FilterBar />}
+            {!modern && !kiosk && !(pageFilters?.length > 0) && <FilterBar />}
             {/* The same filters, reachable after scrolling: the strip above is
                 at the top of the canvas and a tall dashboard scrolls it away. */}
             <FloatingFilterWindow />
@@ -3832,6 +3869,22 @@ export default function ReportBuilder() {
                       opacity: isHidden || (editMode && (widget.config as any).container_id) ? 0.5 : 1,
                       ...(dropTargetId === widget.id ? { outline: '2px dashed var(--accent)', outlineOffset: -2, borderRadius: 'var(--radius)' } : {}) }}
                       title={dropTargetId === widget.id ? `Drop to add the field to "${widget.title || widget.widget_type}"` : undefined}>
+                      {/* Reading (7d): ask about this widget, or see it full
+                          screen. Beside the widget's own controls, never on them:
+                          WidgetRenderer and its menu are unchanged. */}
+                      {modern && (
+                        <div className="dl-vw-wt" role="toolbar" aria-label={tr('vw.wt.aria', { title: widget.title || widget.widget_type })}>
+                          <button type="button" onClick={() => askAbout(widget)} disabled={aiOffline}
+                            aria-label={tr('vw.wt.ask', { title: widget.title || widget.widget_type })}
+                            title={aiOffline ? tr('off.composer') : tr('vw.wt.askShort')}>
+                            <span className="dl-vw-av" aria-hidden><AiMascot size={15} /></span>
+                          </button>
+                          <button type="button" onClick={() => setFocusW(widget)}
+                            aria-label={tr('vw.wt.focus', { title: widget.title || widget.widget_type })} title={tr('vw.wt.focusShort')}>
+                            <Maximize2 size={15} aria-hidden />
+                          </button>
+                        </div>
+                      )}
                       <WidgetRenderer
                         widget={localisedWidgets.get(widget.id) ?? widget}
                         datasetId={report.dataset_id}
@@ -3870,6 +3923,41 @@ export default function ReportBuilder() {
             </div>
             )}
           </div>
+
+          {/* Reading (7d): the AI panel beside the dashboard, or the button
+              that opens it. Present keeps the panel and has its own button. */}
+          {!editMode && aiOpen && (
+            <ViewAssist tab={aiTab} onTab={setAiTab} onClose={() => setAiOpen(false)}
+              context={`${report.name} · ${activePage ? pageLabel(activePage.name) : ''}`}
+              ask={chatDatasetIds.length > 0 ? (
+                <ChatPane key={`ask-view-${reportId}-${askSeed?.n ?? 0}`} datasetIds={chatDatasetIds}
+                  conversationId={reportChatId} onConversationCreated={c => rememberReportChat(c.id)}
+                  datasetColumns={columns.map(c => c.name)} initialInput={askSeed?.q}
+                  suggestions={datasetSuggestions(columns, tr)}
+                  onAddToPage={canEdit ? (draft, title) => addSuggestedWidget({
+                    widget_type: draft.widget_type, title, reason: 'from Ask', config: draft.config }) : undefined} />
+              ) : dataset?.data_source_id != null ? (
+                <ChatPane key={`ask-view-src-${askSeed?.n ?? 0}`} dataSourceId={dataset.data_source_id} conversationId={null} initialInput={askSeed?.q} />
+              ) : (
+                <p style={{ padding: 14, fontSize: 13, color: 'var(--muted)', margin: 0 }}>{tr('vw.ai.noData')}</p>
+              )}
+              insights={<InsightsPane datasetId={report.dataset_id ?? null}
+                columnTypes={Object.fromEntries(columns.map(c => [c.name,
+                  columnMeta[c.name]?.role === 'category' ? 'categorical'
+                    : columnMeta[c.name]?.role === 'measure' ? 'numeric' : c.dtype]))}
+                onAdd={canEdit ? s => { void addSuggestedWidget(s) } : undefined}
+                reportId={canEdit ? reportId : undefined}
+                onComposed={canEdit ? () => { void loadReport() } : undefined} />}
+              suggest={canEdit ? (
+                <SuggestionsPane columns={columns} analysis={analysis} onAdd={addSuggestedWidget} reportId={reportId}
+                  datasetId={report.dataset_id} pageWidgets={activePage?.widgets ?? []} columnMeta={columnMeta} />
+              ) : undefined} />
+          )}
+          {modern && !aiOpen && (
+            <button type="button" className="dl-vw-fab" onClick={() => setAiOpen(true)} aria-keyshortcuts="Control+/" data-testid="view-ai-open">
+              <span className="dl-vw-av lg" aria-hidden><AiMascot size={24} alive={!aiOffline} /></span>{tr('nav.askAi')}
+            </button>
+          )}
 
           {/* Right: config panel */}
           {editMode && (
@@ -4209,6 +4297,24 @@ export default function ReportBuilder() {
             </CollapsibleSide>
           )}
         </div>
+        {/* Inside the cross-filter provider: the focused widget is a
+            WidgetRenderer like any other on the page. */}
+        {focusW && !editMode && (
+        <FocusView widget={localisedWidgets.get(focusW.id) ?? focusW} onClose={() => setFocusW(null)}
+          askDisabled={aiOffline}
+          onAsk={q => { setFocusW(null); setAiOpen(true); setAiTab('ask'); setAskSeed(s => ({ q, n: (s?.n ?? 0) + 1 })) }}
+          render={w => (
+            <WidgetRenderer widget={w} datasetId={report.dataset_id} reportId={reportId}
+              parameters={effectiveParams} onSetParameter={stableOnSetParameter}
+              calculatedColumns={calcCols} columnFormats={columnFormats} geography={geography}
+              datasets={datasets} relationships={relationships} editMode={false}
+              promptFilter={activePromptFilter} onFetchComplete={handleFetchComplete}
+              pages={report.pages} reportDisplayRules={report.display_rules ?? EMPTY_RULES}
+              reportFilters={report.common_filters ?? []} pageFilters={pageQueryFilters}
+              onDrillthrough={handleDrillthrough} hierarchy={hierarchy} bookmarks={bookmarks}
+              onNavigateToPage={handleButtonNavigate} onApplyBookmark={handleButtonApplyBookmark} />
+          )} />
+      )}
         </CrossFilterProvider>
         </>
         )}
@@ -4260,13 +4366,13 @@ export default function ReportBuilder() {
           </div>
         )}
 
-        <StatusBar
+        {!kiosk && <StatusBar
           pageIndex={report.pages.findIndex(p => p.id === activePage?.id)}
           pageCount={report.pages.length}
           saveState={saving ? 'saving' : 'saved'}
           zoom={zoom}
           onZoomChange={setZoom}
-        />
+        />}
       </div>
       {/* The page copilot: edit THIS page in plain language. Edit mode only —
           it writes through the same endpoints as the GUI, so offering it to a
@@ -4279,6 +4385,15 @@ export default function ReportBuilder() {
           reportName={report.name} pageName={activePage.title || activePage.name}
           widgetCount={activePage.widgets?.length ?? 0} datasetId={report.dataset_id}
           onApplied={onCopilotApplied} />
+      )}
+      {kiosk && (
+        <PresentControls title={report.name}
+          pages={report.pages.filter(p => (p.page_type ?? 'normal') === 'normal').map(p => ({ id: p.id, name: pageLabel(p.title || p.name) }))}
+          activeId={activePage?.id ?? null}
+          onGo={id => { const p = report.pages.find(x => x.id === id); if (p) setActivePage(p) }}
+          onExit={() => { setKiosk(false); setAiOpen(false) }}
+          onAsk={() => { setAiOpen(true); setAiTab('ask') }}
+          aiOpen={aiOpen} onCloseAi={() => setAiOpen(false)} />
       )}
       {shareOpen && (
         <ShareDashboardDialog report={report} canEdit={canEdit} isAdmin={isAdmin} pageId={activePage?.id ?? null}

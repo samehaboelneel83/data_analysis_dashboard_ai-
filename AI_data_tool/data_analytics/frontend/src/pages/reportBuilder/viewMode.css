@@ -1,0 +1,90 @@
+/* View and Present (redesign 7d), after the approved prototype's view.css
+   and assist.css, with the product's tokens. */
+
+/* ── Widget hover toolbar (reading only) ──────────────────────── */
+.dl-vw-wt { position: absolute; top: -8px; inset-inline-end: 16px; z-index: 5; display: flex; gap: 2px; padding: 3px; border-radius: 10px;
+  background: var(--surface); border: 1px solid var(--border); box-shadow: var(--dl-shadow-overlay); opacity: 0; pointer-events: none;
+  transition: opacity var(--dl-dur, .15s); }
+[data-widget-id]:hover > .dl-vw-wt, [data-widget-id]:focus-within > .dl-vw-wt { opacity: 1; pointer-events: auto; }
+@media (hover: none) { .dl-vw-wt { opacity: 1; pointer-events: auto; } }
+.dl-vw-wt button { width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 7px; background: none; color: var(--muted); cursor: pointer; padding: 0; }
+.dl-vw-wt button:hover { background: var(--surface2); color: var(--text); }
+.dl-vw-av { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; flex: none;
+  background: radial-gradient(130% 130% at 28% 18%, color-mix(in srgb, var(--accent) 55%, #fff), var(--accent) 48%, color-mix(in srgb, var(--accent) 72%, #000)); }
+.dl-vw-av .dl-mascot { width: 70%; height: 70%; }
+.dl-vw-av.lg { width: 36px; height: 36px; }
+
+/* ── Ask AI button on the canvas ──────────────────────────────── */
+.dl-vw-fab { position: absolute; bottom: 22px; inset-inline-end: 26px; z-index: 20; display: inline-flex; align-items: center; gap: 10px; height: 48px;
+  padding-inline: 6px 16px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit;
+  font-size: 14px; font-weight: 600; cursor: pointer; box-shadow: 0 14px 30px -12px rgb(0 0 0 / .35); }
+.dl-vw-fab:hover { border-color: var(--accent); }
+
+/* ── AI panel ─────────────────────────────────────────────────── */
+.dl-vw-ai { width: 400px; flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius, 12px); overflow: hidden; }
+.dl-vw-ai__h { display: flex; align-items: center; gap: 10px; padding: 12px 12px 10px 14px; border-bottom: 1px solid var(--border); }
+.dl-vw-ai__h .tt { flex: 1; min-width: 0; }
+.dl-vw-ai__h h2 { font-size: 15px; font-weight: 700; margin: 0; }
+.dl-vw-ai__ctx { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dl-vw-ai__x { width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 8px; background: none; color: var(--muted); cursor: pointer; }
+.dl-vw-ai__x:hover { background: var(--surface2); color: var(--text); }
+.dl-vw-ai__tabs { display: flex; gap: 2px; margin: 10px 12px 0; padding: 3px; border-radius: 10px; background: var(--surface2); }
+.dl-vw-ai__tabs button { flex: 1; height: 30px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 0; border-radius: 7px; background: none;
+  font: inherit; font-size: 13px; font-weight: 600; color: var(--muted); cursor: pointer; }
+.dl-vw-ai__tabs button[aria-selected="true"] { background: var(--surface); color: var(--text); box-shadow: var(--dl-shadow-card); }
+.dl-vw-ai__b { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+.dl-vw-ai__b > * { flex: 1; min-height: 0; }
+
+/* ── Focus ────────────────────────────────────────────────────── */
+.dl-vw-fx { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 900; background: var(--bg); display: flex; flex-direction: column; }
+.dl-vw-fx__h { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.dl-vw-fx__h h2 { flex: 1; min-width: 0; font-size: 17px; font-weight: 700; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[dir="rtl"] .dl-vw-fx__h .flip { transform: scaleX(-1); }
+.dl-vw-fx__b { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; padding: 16px 20px; }
+.dl-vw-fx__w { min-height: 0; height: 100%; }
+.dl-vw-fx__s { display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+.dl-vw-fx__card { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); padding: 14px; }
+.dl-vw-fx__card h3 { font-size: 13px; font-weight: 700; margin: 0 0 10px; }
+.dl-vw-fx__card p { font-size: 13px; color: var(--muted); margin: 0; }
+.dl-vw-q { width: 100%; display: flex; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+  font: inherit; font-size: 13px; color: var(--text); text-align: start; cursor: pointer; margin-top: 6px; }
+.dl-vw-q:hover { border-color: var(--accent); background: var(--accent-soft); }
+.dl-vw-q:disabled { opacity: .55; cursor: not-allowed; }
+
+/* ── Present ──────────────────────────────────────────────────── */
+/* Room for the title above and the controls below: the header is gone. */
+.dl-pr-stage { padding: 56px 24px 92px !important; }
+.dl-pr-ttl { position: fixed; top: 18px; inset-inline-start: 24px; z-index: 950; display: flex; align-items: center; gap: 10px; font-size: 15px; color: var(--muted);
+  transition: opacity .3s; }
+.dl-pr-ttl b { color: var(--text); font-weight: 700; }
+.dl-pr-ttl .sep { width: 4px; height: 4px; border-radius: 50%; background: var(--mc-border-strong); }
+.dl-pr-kb { position: fixed; top: 18px; inset-inline-end: 24px; z-index: 950; display: flex; align-items: center; gap: 14px; font-size: 12.5px; color: var(--muted); transition: opacity .3s; }
+.dl-pr-kb kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; background: var(--surface); }
+.dl-pr-ctl { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); z-index: 950; display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  border-radius: 16px; background: var(--surface); border: 1px solid var(--border); box-shadow: 0 18px 40px -12px rgb(0 0 0 / .4); transition: opacity .3s; }
+.dl-pr-ctl .ib { width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: 9px; background: none; color: var(--text); cursor: pointer; }
+.dl-pr-ctl .ib:hover:not(:disabled) { background: var(--surface2); }
+.dl-pr-ctl .ib:disabled { color: var(--mc-faint); cursor: default; }
+[dir="rtl"] .dl-pr-ctl .flip { transform: scaleX(-1); }
+.dl-pr-ctl .pn { font-size: 15px; font-weight: 700; min-width: 54px; text-align: center; font-variant-numeric: tabular-nums; }
+.dl-pr-dots { display: flex; gap: 6px; padding: 0 6px; }
+.dl-pr-dots button { width: 8px; height: 8px; padding: 0; border: 0; border-radius: 999px; background: var(--mc-border-strong); cursor: pointer; transition: width .2s; }
+.dl-pr-dots button[aria-current="true"] { width: 22px; background: var(--accent); }
+.dl-pr-ctl .vr { width: 1px; height: 24px; background: var(--border); margin: 0 4px; }
+.dl-pr-btn { display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border: 0; border-radius: 9px; background: none; font: inherit;
+  font-size: 14px; font-weight: 600; color: var(--text); cursor: pointer; }
+.dl-pr-btn:hover { background: var(--surface2); }
+.dl-pr-btn[aria-pressed="true"] { color: var(--mc-accent-ink); }
+.dl-pr-btn.exit { background: var(--surface2); }
+.dl-pr-btn kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--border); border-radius: 5px; padding: 0 5px; color: var(--muted); }
+.dl-pr-prog { position: fixed; left: 0; right: 0; bottom: 0; height: 3px; z-index: 950; background: transparent; }
+.dl-pr-prog i { display: block; height: 100%; background: var(--accent); width: 0; animation: dl-pr-prog linear forwards; }
+@keyframes dl-pr-prog { to { width: 100%; } }
+.dl-pr-idle .dl-pr-ttl, .dl-pr-idle .dl-pr-kb, .dl-pr-idle .dl-pr-ctl { opacity: 0; }
+.dl-pr-idle .dl-pr-ctl:focus-within { opacity: 1; }
+html[data-presenting="1"] .dl-statusbar, html[data-presenting="1"] [data-testid="status-bar"] { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .dl-pr-prog i { animation: none; }
+  .dl-vw-wt, .dl-pr-ttl, .dl-pr-kb, .dl-pr-ctl { transition: none; }
+}
