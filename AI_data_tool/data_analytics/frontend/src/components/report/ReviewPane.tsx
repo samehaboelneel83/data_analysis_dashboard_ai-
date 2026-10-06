@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { reviewApi, type PerfEvaluation } from '../../services/api'
 import { missingRequiredRoles } from './WidgetPlaceholder'
+
+/** A page over this many widgets is heavy: every one queries on load. The
+ *  builder's heavy-page banner (redesign 7e4) uses the same count. */
+export const HEAVY_PAGE = 14
 import type { Report, Widget } from '../../types/report'
 
 export interface PerfStat { durationMs: number; rowCount: number; ruleErrors?: { message: string }[] }
@@ -98,7 +102,7 @@ export function reviewReport(report: Report, perfStats: Record<number, PerfStat>
       }
     }
 
-    if (widgets.length > 14) {
+    if (widgets.length > HEAVY_PAGE) {
       findings.push({ severity: 'info', pageId: page.id,
         message: `Page "${page.name}" has ${widgets.length} widgets — every one queries on load` })
     }

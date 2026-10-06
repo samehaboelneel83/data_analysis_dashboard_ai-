@@ -2731,3 +2731,51 @@ describe('right rail and Properties (redesign 7e3)', () => {
     expect(within(screen.getByRole('navigation', { name: 'Panels' })).getByRole('button', { name: 'AI' })).toHaveAttribute('aria-pressed', 'true')
   })
 })
+
+describe('canvas overlays (redesign 7e4)', () => {
+  it('a multi-selection gets the group box and is laid out from Properties; one widget gets guides', async () => {
+    const report = reportWithWidget()
+    ;(report.pages[0].widgets as any[]).push({ id: 6, page_id: 100, widget_type: 'bar', title: 'Second Widget', config: { dimension: 'region' }, layout: { x: 6, y: 0, w: 6, h: 5 }, created_at: '2026-01-01' })
+    vi.mocked(reportsApi.get).mockResolvedValue(report as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    vi.mocked(reportsApi.updateWidget).mockResolvedValue({} as any)
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    fireEvent.click(await screen.findByText('Sales by Region'))
+    expect(await screen.findByTestId('selection-guides')).toHaveTextContent('col 1–6 · row 1')
+    fireEvent.click(await screen.findByText('Sales by Region'), { shiftKey: true })
+    fireEvent.click(await screen.findByText('Second Widget'), { shiftKey: true })
+    expect(screen.getByTestId('group-box')).toHaveTextContent('2 selected')
+    expect(screen.queryByTestId('selection-guides')).toBeNull()
+    const multi = screen.getByRole('region', { name: '2 widgets selected' })
+    for (const mode of ['Align Center', 'Align Bottom', 'Distribute Vertically']) expect(within(multi).getByRole('button', { name: mode })).toBeInTheDocument()
+    // Both already share a top edge; the left edges differ, so that one moves.
+    fireEvent.click(screen.getByRole('button', { name: 'Line up left edges' }))
+    await waitFor(() => expect(reportsApi.updateWidget).toHaveBeenCalledWith(1, 100, 6, { layout: expect.objectContaining({ x: 0 }) }))
+  })
+
+  it('the quick toolbar duplicates a widget', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    vi.mocked(reportsApi.addWidget).mockClear().mockResolvedValue({ id: 77, page_id: 100, widget_type: 'bar', title: 'Sales by Region', config: {}, layout: { x: 0, y: 5, w: 6, h: 5 }, created_at: '2026-01-01' } as any)
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    fireEvent.click(await screen.findByRole('button', { name: 'Duplicate Sales by Region' }))
+    await waitFor(() => expect(reportsApi.addWidget).toHaveBeenCalledWith(1, 100, expect.objectContaining({ widget_type: 'bar' })))
+  })
+
+  it('a page past the Review threshold says it is heavy and opens Performance', async () => {
+    const r = baseReport()
+    r.pages[0].widgets = Array.from({ length: 15 }, (_, i) => ({ id: 500 + i, page_id: 100, widget_type: 'text', title: `T${i}`, config: { text: 'x' },
+      layout: { x: 0, y: i * 2, w: 3, h: 2 }, created_at: '2026-01-01' })) as any
+    vi.mocked(reportsApi.get).mockResolvedValue(r as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    expect(await screen.findByRole('note')).toHaveTextContent('This page has 15 widgets that all query on load')
+    fireEvent.click(within(screen.getByRole('note')).getByRole('button', { name: 'Performance' }))
+    expect(screen.getByRole('heading', { name: 'Performance' })).toBeInTheDocument()
+  })
+})

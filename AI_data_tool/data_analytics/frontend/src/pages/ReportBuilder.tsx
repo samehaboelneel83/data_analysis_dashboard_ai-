@@ -103,6 +103,7 @@ import SaveState from './reportBuilder/SaveState'
 import ZoomControl from './reportBuilder/ZoomControl'
 import TemplatesPane from './reportBuilder/TemplatesPane'
 import { AI_MODES, AiTabs, PanelHead, RightRail } from './reportBuilder/RightRail'
+import { EditToolbar, EmptyResultNote, GroupBox, HeavyPageBanner, SelectionGuides } from './reportBuilder/CanvasOverlays'
 import { useConfirm } from '../components/ui/ConfirmDialog'
 import { useMeasuredWidth } from '../components/report/useMeasuredWidth'
 import { useModalDialog } from '../components/ui/useModalDialog'
@@ -2579,6 +2580,23 @@ export default function ReportBuilder() {
                       </button>
                     )}
                   </div>
+                  {editMode && multiSelectedIds.size >= 2 && (
+                    // 7e4: a multi-selection is laid out here (v1: a bar above
+                    // the canvas), every v1 mode kept.
+                    <section className="dl-bd-multi" aria-label={tr('bd.multi.n', { n: multiSelectedIds.size })}>
+                      <b className="hd">{tr('bd.multi.n', { n: multiSelectedIds.size })}</b>
+                      <div className="dl-bd-gh">{tr('bd.multi.layout')}</div>
+                      <div className="row">
+                        {([
+                          ['Align Left', () => applyAlign('left')], ['Align Center', () => applyAlign('center')], ['Align Right', () => applyAlign('right')],
+                          ['Align Top', () => applyAlign('top')], ['Align Middle', () => applyAlign('middle')], ['Align Bottom', () => applyAlign('bottom')],
+                          ['Distribute Horizontally', () => applyDistribute('horizontal')], ['Distribute Vertically', () => applyDistribute('vertical')],
+                        ] as const).map(([label, fn]) => (
+                          <button key={label} type="button" className="btn btn-ghost btn-sm dl-bd-line" onClick={fn}>{label}</button>
+                        ))}
+                      </div>
+                    </section>
+                  )}
                   {selectedW && (
                     <div className="dl-bd-sect" role="tablist" aria-label={tr('bd.sect.aria')}>
                       {(['format', 'data', 'interactions'] as const).map(k => (
@@ -3654,18 +3672,8 @@ export default function ReportBuilder() {
         </div>
         )}
 
-        {editMode && multiSelectedIds.size >= 2 && (
-          <div style={{ display: 'flex', gap: 4, alignItems: 'center', padding: '6px 16px', borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
-            <span style={{ fontSize: 11, color: 'var(--muted)', marginInlineEnd: 4 }}>Align/Distribute:</span>
-            {([
-              ['Align Left', () => applyAlign('left')], ['Align Center', () => applyAlign('center')], ['Align Right', () => applyAlign('right')],
-              ['Align Top', () => applyAlign('top')], ['Align Middle', () => applyAlign('middle')], ['Align Bottom', () => applyAlign('bottom')],
-              ['Distribute Horizontally', () => applyDistribute('horizontal')], ['Distribute Vertically', () => applyDistribute('vertical')],
-            ] as const).map(([label, fn]) => (
-              <button key={label} onClick={fn} style={{ fontSize: 11, padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface2)', color: 'var(--text)', cursor: 'pointer' }}>{label}</button>
-            ))}
-          </div>
-        )}
+        {/* The Align / Distribute bar that sat here is in Properties since 7e4
+            ("N widgets selected"), with quick actions on the group box. */}
 
         {/* Canvas + right panel */}
         <CrossFilterProvider
@@ -3704,6 +3712,8 @@ export default function ReportBuilder() {
             {/* Report (h1) > page (h2) > widget titles (level 3), the outline
                 ReportPrint draws too; without it the widgets skip a level. */}
             {activePage && <h2 className="dl-sr-only">{activePage.title || activePage.name}</h2>}
+            {/* 7e4: the prototype's heavy-page hint. */}
+            {editMode && <HeavyPageBanner n={pageWidgets.length} onPerformance={() => { setRightPanelMode('performance'); setRightOpenSignal(n => n + 1) }} />}
             {editMode && recoverable.length > 0 && (
               <div role="status" data-testid="recovery-banner"
                 style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', margin:'0 0 8px', padding:'6px 10px',
@@ -3918,6 +3928,17 @@ export default function ReportBuilder() {
                           </button>
                         </div>
                       )}
+                      {/* Building (7e4): the prototype's quick actions over the
+                          widget. Beside WidgetRenderer, which keeps its own header. */}
+                      {editMode && (
+                        <EditToolbar title={widget.title || widget.widget_type}
+                          onDuplicate={perWidgetHandlers.get(widget.id)?.onDuplicate}
+                          onAssign={() => {
+                            setSelectedW(widget); setRightPanelMode('default'); setPropSection('data'); setRightOpenSignal(n => n + 1)
+                            setTimeout(() => window.dispatchEvent(new CustomEvent(ASSIGN_DATA_EVENT, { detail: { widgetId: widget.id } })), 0)
+                          }}
+                          onFilters={() => { setSelectedW(widget); setRightPanelMode('default'); setPropSection('data'); setRightOpenSignal(n => n + 1) }} />
+                      )}
                       <WidgetRenderer
                         widget={localisedWidgets.get(widget.id) ?? widget}
                         datasetId={report.dataset_id}
@@ -3949,9 +3970,26 @@ export default function ReportBuilder() {
                         onApplyBookmark={handleButtonApplyBookmark}
                         eagerFetch={kiosk}
                       />
+                      {/* An empty result under the reader's filters says so, with
+                          the way out (7e4). */}
+                      <EmptyResultNote rowCount={perfStats[widget.id]?.rowCount} pageFiltered={pageFilters.length > 0}
+                        onClearPage={() => setPageFilters([])} />
                     </div>
                   )
                 })}
+                {/* 7e4: guides for the selected widget, the box around a
+                    multi-selection. They read the layout; they never move it. */}
+                {editMode && selectedW && multiSelectedIds.size < 2 && !dragging && !resizing && pageWidgets.some(w => w.id === selectedW.id) && (() => {
+                  const eff = (w: Widget) => localLayouts[w.id] ?? packedPreview[w.id] ?? w.layout
+                  const sw = pageWidgets.find(w => w.id === selectedW.id)!
+                  return <SelectionGuides layout={eff(sw)} containerW={containerW}
+                    others={pageWidgets.filter(w => w.id !== sw.id).map(eff)} />
+                })()}
+                {editMode && multiSelectedIds.size >= 2 && (
+                  <GroupBox containerW={containerW}
+                    layouts={pageWidgets.filter(w => multiSelectedIds.has(w.id)).map(w => localLayouts[w.id] ?? packedPreview[w.id] ?? w.layout)}
+                    onAlignLeft={() => applyAlign('left')} onAlignTop={() => applyAlign('top')} onDistribute={() => applyDistribute('horizontal')} />
+                )}
               </div>
             </div>
             )}

@@ -214,6 +214,38 @@
   border-inline: 1px solid var(--border); margin-block: -10px; }
 #object-picker { border-radius: 8px; height: 30px; }
 
+/* ── Canvas overlays (7e4) ────────────────────────────────────── */
+.dl-bd-guides { position: absolute; inset: 0; pointer-events: none; z-index: 9; }
+.dl-bd-guides i { position: absolute; border: 0 dashed var(--dl-series-4, var(--accent)); }
+.dl-bd-guides i.v { top: 0; bottom: 0; width: 0; border-left-width: 1.5px; }
+.dl-bd-guides i.h { left: 0; right: 0; height: 0; border-top-width: 1.5px; }
+.dl-bd-coord { position: absolute; white-space: nowrap; font: 600 11px var(--mono); padding: 2px 6px; border-radius: 5px; color: #fff;
+  background: var(--dl-series-4, var(--accent)); }
+.dl-bd-group { position: absolute; z-index: 8; border: 1.5px dashed var(--accent); border-radius: 12px; pointer-events: none; }
+.dl-bd-group__bar { position: absolute; top: -40px; left: 0; display: flex; align-items: center; gap: 2px; padding: 3px 4px 3px 10px; border-radius: 10px;
+  background: var(--surface); border: 1px solid var(--border); box-shadow: var(--dl-shadow-overlay); pointer-events: auto; white-space: nowrap; }
+.dl-bd-group__bar b { font-size: 12.5px; margin-inline-end: 6px; }
+.dl-bd-group__bar button { width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 7px; background: none; color: var(--muted); cursor: pointer; }
+.dl-bd-group__bar button:hover { background: var(--surface2); color: var(--text); }
+.dl-bd-wt { position: absolute; top: -22px; left: 50%; transform: translateX(-50%); z-index: 10; display: flex; gap: 1px; padding: 2px; border-radius: 9px;
+  background: var(--surface); border: 1px solid var(--border); box-shadow: var(--dl-shadow-overlay); opacity: 0; pointer-events: none; transition: opacity var(--dl-dur); }
+[data-widget-id]:hover > .dl-bd-wt, [data-widget-id]:focus-within > .dl-bd-wt { opacity: 1; pointer-events: auto; }
+@media (hover: none) { .dl-bd-wt { opacity: 1; pointer-events: auto; } }
+.dl-bd-wt button { width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; padding: 0; }
+.dl-bd-wt button:hover { background: var(--surface2); color: var(--text); }
+.dl-bd-empty { position: absolute; left: 12px; right: 12px; bottom: 12px; z-index: 4; display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+  border-radius: 9px; background: color-mix(in srgb, var(--surface) 92%, transparent); border: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+.dl-bd-empty span { flex: 1; min-width: 0; }
+.dl-bd-empty button { border: 1px solid var(--mc-border-strong); border-radius: 7px; background: var(--surface); color: var(--text); font: inherit; font-size: 12px;
+  padding: 3px 8px; cursor: pointer; white-space: nowrap; }
+.dl-bd-hint { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; padding: 9px 12px; border-radius: 10px; background: var(--mc-warning-soft); font-size: 13px; }
+.dl-bd-hint > svg { color: var(--warning); flex: none; }
+.dl-bd-hint span { flex: 1; }
+.dl-bd-multi { margin: 14px 14px 0; padding: 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface2); }
+.dl-bd-multi .hd { display: block; font-size: 13px; margin-bottom: 4px; }
+.dl-bd-multi .row { display: flex; flex-wrap: wrap; gap: 6px; }
+.dl-bd-multi .row .btn { background: var(--surface); font-size: 12px; }
+
 /* ── Footer ───────────────────────────────────────────────────── */
 .dl-statusbar__keys { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; color: var(--muted); font: inherit; font-size: 11.5px;
   cursor: pointer; padding: 2px 4px; border-radius: 6px; }
