@@ -238,3 +238,49 @@ describe('pre-aggregated disclosure', () => {
     expect(screen.getByRole('note')).toHaveTextContent(/counts groups/)
   })
 })
+
+describe('Format / Data / Interactions in the builder (redesign 7e3)', () => {
+  const sectioned = (section: 'format' | 'data' | 'interactions', wt: Widget['widget_type'] = 'bar') => render(
+    <CrossFilterProvider>
+      <WidgetConfigPanel widget={widget({ widget_type: wt })} columns={columns} onUpdate={vi.fn()} pages={[]} section={section} />
+    </CrossFilterProvider>,
+  )
+  const ids = () => Array.from(document.querySelectorAll('[data-group-id]')).map(e => e.getAttribute('data-group-id'))
+
+  it('Format shows Options and Display rules only, with those chips', () => {
+    sectioned('format')
+    const chips = Array.from(screen.getByRole('tablist', { name: /settings/i }).querySelectorAll('[role="tab"]')).map(t => t.textContent)
+    expect(chips).toEqual(['All', 'Options', 'Display rules'])
+    expect(groupHeading(/Appearance/)).toBeInTheDocument()
+    expect(groupHeading(/Ranking/)).not.toBeInTheDocument()
+  })
+
+  it('Data shows the data tabs only', () => {
+    sectioned('data')
+    expect(groupHeading(/Ranking/)).toBeInTheDocument()
+    expect(groupHeading(/Appearance/)).not.toBeInTheDocument()
+    expect(ids()).not.toContain('object')
+  })
+
+  it('the three sections together reach every group, so nothing is lost', () => {
+    for (const wt of ['bar', 'button'] as const) {
+      const { unmount } = render(
+        <CrossFilterProvider><WidgetConfigPanel widget={widget({ widget_type: wt })} columns={columns} onUpdate={vi.fn()} pages={[]} /></CrossFilterProvider>)
+      const all = ids().sort()
+      unmount()
+      const seen = new Set<string | null>()
+      for (const s of ['format', 'data', 'interactions'] as const) {
+        const r = sectioned(s, wt)
+        ids().forEach(i => seen.add(i))
+        r.unmount()
+      }
+      expect([...seen].sort(), wt).toEqual(all)
+    }
+  })
+
+  it('search still searches every section', () => {
+    sectioned('data')
+    fireEvent.change(screen.getByLabelText('Filter settings'), { target: { value: 'Border colour' } })
+    expect(groupHeading(/Appearance/)).toBeInTheDocument()
+  })
+})

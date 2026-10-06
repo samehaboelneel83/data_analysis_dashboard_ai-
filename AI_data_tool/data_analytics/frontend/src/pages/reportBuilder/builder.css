@@ -178,6 +178,42 @@
 .dl-gallery__pv p { font-size: 12px; color: var(--muted); margin: 2px 0 0; text-wrap: pretty; }
 .dl-bd-lb .dl-gallery__tile { border-radius: 10px; min-block-size: 64px; }
 
+/* ── Right rail and panels (7e3) ──────────────────────────────── */
+.dl-bd-rail { width: 44px; flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 0;
+  margin-block: -10px; margin-inline: 2px -16px; background: var(--surface); border-inline-start: 1px solid var(--border); overflow-y: auto; scrollbar-width: none; }
+.dl-bd-rail .gl { width: 22px; height: 1px; background: var(--border); margin: 6px 0; flex: none; }
+.dl-bd-ri { position: relative; width: 34px; height: 34px; flex: none; display: grid; place-items: center; border: 0; border-radius: 9px; background: none;
+  color: var(--muted); cursor: pointer; padding: 0; }
+.dl-bd-ri:hover { background: var(--surface2); color: var(--text); }
+.dl-bd-ri[aria-pressed="true"] { background: var(--accent-soft); color: var(--mc-accent-ink); }
+.dl-bd-ri .av, .dl-bd-ph .av { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center;
+  background: radial-gradient(130% 130% at 28% 18%, color-mix(in srgb, var(--accent) 55%, #fff), var(--accent) 48%, color-mix(in srgb, var(--accent) 72%, #000)); }
+.dl-bd-ri .av .dl-mascot, .dl-bd-ph .av .dl-mascot { width: 70%; height: 70%; }
+/* The right panel: the prototype's flat column, not a floating card. */
+[data-side="builder-right"] { border-radius: 0 !important; border-block: 0 !important; border-inline-end: 0 !important; margin-block: -10px; }
+[data-side="builder-right"] > button[aria-expanded="true"] { position: absolute; top: 12px; inset-inline-end: 10px; z-index: 3; width: 30px !important; height: 30px;
+  padding: 0 !important; border: 0 !important; border-radius: 8px; justify-content: center !important; }
+[data-side="builder-right"] > button[aria-expanded="true"]:hover { background: var(--surface2) !important; color: var(--text) !important; }
+.dl-bd-ph { display: flex; align-items: center; gap: 10px; min-height: 54px; padding: 0 48px 0 14px; border-bottom: 1px solid var(--border); color: var(--muted); }
+[dir="rtl"] .dl-bd-ph { padding: 0 14px 0 48px; }
+.dl-bd-ph h2 { flex: 1; min-width: 0; margin: 0; font-size: 15px; font-weight: 700; color: var(--text); }
+.dl-bd-ph .dl-bd-ib[aria-pressed="true"] { color: var(--mc-accent-ink); background: var(--accent-soft); }
+.dl-bd-pinned .dl-bd-ph { padding-inline-end: 14px; }
+.dl-bd-obj { display: flex; align-items: center; gap: 8px; margin: 14px 14px 4px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface2); }
+.dl-bd-obj .nm { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dl-bd-obj .ty { font-size: 11.5px; color: var(--muted); font-family: var(--mono); }
+.dl-bd-obj .lk { border: 0; background: none; padding: 0; font: inherit; font-size: 11.5px; color: var(--mc-accent-ink); cursor: pointer; white-space: nowrap; }
+.dl-bd-obj .lk:hover { text-decoration: underline; }
+.dl-bd-obj .x { width: 24px; height: 24px; }
+.dl-bd-sect, .dl-bd-aitabs { display: flex; gap: 4px; margin: 10px 14px 0; border-bottom: 1px solid var(--border); }
+.dl-bd-sect button, .dl-bd-aitabs button { height: 34px; padding: 0 10px; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; background: none;
+  font: 500 13px var(--sans); color: var(--muted); cursor: pointer; }
+.dl-bd-sect button[aria-selected="true"], .dl-bd-aitabs button[aria-selected="true"] { color: var(--text); font-weight: 600; border-bottom-color: var(--accent); }
+.dl-bd-aitabs { margin-bottom: 8px; }
+.dl-bd-pinned { width: 300px; flex: none; display: flex; flex-direction: column; overflow-y: auto; background: var(--surface);
+  border-inline: 1px solid var(--border); margin-block: -10px; }
+#object-picker { border-radius: 8px; height: 30px; }
+
 /* ── Footer ───────────────────────────────────────────────────── */
 .dl-statusbar__keys { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; color: var(--muted); font: inherit; font-size: 11.5px;
   cursor: pointer; padding: 2px 4px; border-radius: 6px; }

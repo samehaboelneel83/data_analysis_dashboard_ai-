@@ -112,11 +112,11 @@ function renderBuilder() {
   )
 }
 
-// Overflow panels (Selection, Tab order, Performance, Sync slicers, Bookmarks,
-// Mobile layout, Report rules) live behind the toolbar's More menu.
+// The panels (Selection, Tab order, Performance, Sync slicers, Bookmarks,
+// Mobile layout, Report rules, ...) open from the right rail since 7e3 (v1:
+// the toolbar's More menu).
 function openOverflowPanel(name: RegExp) {
-  fireEvent.click(screen.getByRole('button', { name: 'More panels' }))
-  fireEvent.click(screen.getByRole('menuitem', { name }))
+  fireEvent.click(within(screen.getByRole('navigation', { name: 'Panels' })).getByRole('button', { name }))
 }
 
 describe('ReportBuilder view switcher', () => {
@@ -441,6 +441,9 @@ describe('ReportBuilder Fields pane', () => {
     fireEvent.click(await screen.findByText('Sales by Region', {}, { timeout: 3000 }))
     await screen.findByText('Widget: Sales by Region')
 
+    // 7e3: the interaction is set under Properties' Interactions section,
+    // the title under Format -- the carry-through now crosses sections too.
+    fireEvent.click(screen.getByRole('tab', { name: 'Interactions' }))
     const isolated = screen.queryByRole('button', { name: 'Isolated —' })
       ?? (fireEvent.click(screen.getByRole('button', { name: /Interactions/ })),
           await screen.findByRole('button', { name: 'Isolated —' }))
@@ -448,6 +451,7 @@ describe('ReportBuilder Fields pane', () => {
     await waitFor(() => expect(reportsApi.updateWidget).toHaveBeenLastCalledWith(1, 100, 5,
       { config: expect.objectContaining({ interaction: expect.objectContaining({ broadcasts: false, receives: false }) }) }))
 
+    fireEvent.click(screen.getByRole('tab', { name: 'Format' }))
     fireEvent.change(screen.getByPlaceholderText('Widget title'), { target: { value: 'Sales, isolated' } })
     await waitFor(() => expect(reportsApi.updateWidget).toHaveBeenLastCalledWith(1, 100, 5,
       expect.objectContaining({ title: 'Sales, isolated',
@@ -1283,7 +1287,7 @@ describe('ReportBuilder report-level display rules', () => {
     renderBuilder()
     await screen.findByTestId('view-strip')
 
-    await screen.findByRole('button', { name: 'More panels' }); openOverflowPanel(/report rules/i)
+    await screen.findByRole('navigation', { name: 'Panels' }); openOverflowPanel(/report rules/i)
     fireEvent.click(screen.getByRole('button', { name: /add rule/i }))
 
     await waitFor(() => expect(reportsApi.update).toHaveBeenCalledWith(
@@ -1341,7 +1345,7 @@ describe('ReportBuilder report-level display rules', () => {
     const { unmount } = renderBuilder()
     await screen.findByTestId('view-strip')
 
-    await screen.findByRole('button', { name: 'More panels' }); openOverflowPanel(/report rules/i)
+    await screen.findByRole('navigation', { name: 'Panels' }); openOverflowPanel(/report rules/i)
     fireEvent.click(screen.getByRole('button', { name: /add rule/i }))
 
     // Unmount immediately -- well inside the 600ms debounce window -- rather than
@@ -2694,5 +2698,36 @@ describe('page tab menu (redesign 7e1)', () => {
     await waitFor(() => expect(reportsApi.updatePage).toHaveBeenCalledWith(1, 101, { position: 0 }))
     expect(reportsApi.updatePage).toHaveBeenCalledWith(1, 100, { position: 1 })
     await waitFor(() => expect(screen.getByRole('button', { name: 'Undo' })).toHaveAttribute('title', 'Undo: Move page "Detail" (Ctrl+Z)'))
+  })
+})
+
+describe('right rail and Properties (redesign 7e3)', () => {
+  it('pinned, Properties stays open beside the next panel; unpinned, the panel replaces it', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    fireEvent.click(await screen.findByText('Sales by Region'))
+    expect(await screen.findByText('Widget: Sales by Region')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Pin Properties open' }))
+    openOverflowPanel(/^Selection$/)
+    expect(screen.getByRole('heading', { name: 'Selection' })).toBeInTheDocument()
+    expect(screen.getByText('Widget: Sales by Region')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Unpin Properties' }))
+    expect(screen.queryByText('Widget: Sales by Region')).not.toBeInTheDocument()
+  })
+
+  it('one AI button opens Ask, Insights and Suggest as tabs', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue(baseReport() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    openOverflowPanel(/^AI$/)
+    const tabs = screen.getByRole('tablist', { name: 'AI' })
+    expect(within(tabs).getByRole('tab', { name: 'Ask' })).toHaveAttribute('aria-selected', 'true')
+    fireEvent.click(within(tabs).getByRole('tab', { name: 'Insights' }))
+    expect(within(tabs).getByRole('tab', { name: 'Insights' })).toHaveAttribute('aria-selected', 'true')
+    expect(within(screen.getByRole('navigation', { name: 'Panels' })).getByRole('button', { name: 'AI' })).toHaveAttribute('aria-pressed', 'true')
   })
 })

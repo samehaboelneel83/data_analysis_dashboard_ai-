@@ -74,7 +74,7 @@ import CollapsibleSide from '../components/report/CollapsibleSide'
 import ReviewPane from '../components/report/ReviewPane'
 import PopupOverlay from '../components/report/PopupOverlay'
 import TooltipPageOverlay from '../components/report/TooltipPageOverlay'
-import { ArrowLeft, Plus, Eye, Undo2, Redo2, KeyRound, ShieldCheck, Pause, Play, FileDown, Share2, Maximize2, EllipsisVertical, SlidersHorizontal, Printer, FileText, Package, Pencil, RefreshCw, ChevronUp, ChevronDown, Database, Search } from 'lucide-react'
+import { ArrowLeft, Plus, Eye, Undo2, Redo2, KeyRound, ShieldCheck, Pause, Play, FileDown, Share2, Maximize2, EllipsisVertical, SlidersHorizontal, Printer, FileText, Package, Pencil, RefreshCw, ChevronUp, ChevronDown, Database, Search, X, Settings2 } from 'lucide-react'
 import { updatedAgo } from '../lib/viewStyle'
 import { columnKind, usePageFilters } from '../lib/pageFilters'
 import PageFilterBar, { type PageFilterColumn } from '../components/report/PageFilterBar'
@@ -102,6 +102,7 @@ import PageTabs from './reportBuilder/PageTabs'
 import SaveState from './reportBuilder/SaveState'
 import ZoomControl from './reportBuilder/ZoomControl'
 import TemplatesPane from './reportBuilder/TemplatesPane'
+import { AI_MODES, AiTabs, PanelHead, RightRail } from './reportBuilder/RightRail'
 import { useConfirm } from '../components/ui/ConfirmDialog'
 import { useMeasuredWidth } from '../components/report/useMeasuredWidth'
 import { useModalDialog } from '../components/ui/useModalDialog'
@@ -381,7 +382,10 @@ export default function ReportBuilder() {
   const [relationships, setRelationships] = useState<{ from_dataset_id: number; from_column: string; to_dataset_id: number; to_column: string }[]>([])
   useEffect(() => { relationshipsApi.list().then(setRelationships).catch(() => setRelationships([])) }, [])
   const [outlierColumn, setOutlierColumn] = useState<string | null>(null)
-  const [toolbarMoreOpen, setToolbarMoreOpen] = useState(false)
+  // 7e3: Properties can be pinned open beside another rail panel, and shows
+  // a widget's settings by section (Format / Data / Interactions).
+  const [pinProps, setPinProps] = useState(false)
+  const [propSection, setPropSection] = useState<'format' | 'data' | 'interactions'>('format')
   const [shareOpen, setShareOpen] = useState(false)
   const [accessOpen, setAccessOpen] = useState(false)
   const isAdmin = !!useOptionalAuth()?.user?.role?.is_org_admin
@@ -2552,6 +2556,85 @@ export default function ReportBuilder() {
         )}
       </>} />
   )
+  // The Properties panel's contents (7e3): in the right panel, or pinned
+  // beside another rail panel.
+  const propertiesBody = (
+    <>
+                  <PanelHead mode="default" pinned={pinProps} onPin={() => setPinProps(p => !p)}
+                    extra={<button type="button" className="dl-bd-ib" aria-label={tr('builder.reportSettings')} title={tr('builder.reportSettings')}
+                      onClick={() => setRightPanelMode('parameters')}><Settings2 size={15} aria-hidden /></button>} />
+                  {/* The object card (7e3): what these settings belong to. */}
+                  <div className="dl-bd-obj">
+                    <span data-autodir-text className="nm"
+                      title={selectedW ? (selectedW.title || selectedW.widget_type) : (activePage?.name ?? '')}>
+                      {selectedW
+                        ? tr('builder.panelWidget', { name: selectedW.title || WIDGET_CATALOG.find(w => w.type === selectedW.widget_type)?.label || selectedW.widget_type })
+                        : tr('builder.panelPage', { name: activePage?.name ?? '' })}
+                    </span>
+                    {selectedW && <small className="ty" dir="ltr">{selectedW.widget_type}</small>}
+                    {selectedW && (
+                      <button aria-label="Deselect widget" title="Deselect widget" className="dl-bd-ib x"
+                        onClick={() => setSelectedW(null)}>
+                        <X size={14} aria-hidden />
+                      </button>
+                    )}
+                  </div>
+                  {selectedW && (
+                    <div className="dl-bd-sect" role="tablist" aria-label={tr('bd.sect.aria')}>
+                      {(['format', 'data', 'interactions'] as const).map(k => (
+                        <button key={k} type="button" role="tab" aria-selected={propSection === k} onClick={() => setPropSection(k)}>
+                          {tr(`bd.sect.${k}` as MessageKey)}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {/* Pick the object to edit, rather than finding it on the
+                      canvas. Every settings pane in SAS carries this, and it is
+                      what makes an object's settings reachable at all: a widget
+                      inside a container, a small one, or one sitting under
+                      another in a precision layout can be genuinely hard to
+                      click. The page is in the same list, because page settings
+                      are settings too. */}
+                  {activePage && (pageWidgets.length > 0) && (
+                    <div style={{ padding: '12px 14px 8px' }}>
+                      <label htmlFor="object-picker" style={{ display: 'block', fontSize: 11,
+                        fontWeight: 700, color: 'var(--muted)', marginBottom: 4 }}>
+                        {tr('builder.objectToEdit')}
+                      </label>
+                      <select id="object-picker" style={{ width: '100%', fontSize: 12 }}
+                        value={selectedW ? String(selectedW.id) : 'page'}
+                        onChange={e => {
+                          const v = e.target.value
+                          setSelectedW(v === 'page' ? null
+                            : pageWidgets.find(w => String(w.id) === v) ?? null)
+                        }}>
+                        <option value="page">{tr('builder.pageOption', { name: activePage.name })}</option>
+                        {pageWidgets.map(w => (
+                          <option key={w.id} value={String(w.id)}>
+                            {w.title || w.widget_type} ({w.widget_type})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {selectedW
+                    ? <WidgetConfigPanel key={`${selectedW.id}:${panelEpoch}`} section={propSection} onSection={setPropSection} geography={geography} widget={selectedW} columns={columns} datasets={datasets} primaryDatasetId={report.dataset_id} pages={report.pages} hierarchy={hierarchy} onHierarchyRefresh={refreshHierarchy} bookmarks={bookmarks} onUpdate={updateWidgetConfig} ruleErrors={perfStats[selectedW.id]?.ruleErrors}
+                      distinctCounts={Object.fromEntries(Object.entries(hints).flatMap(([k, h]) => typeof (h as { distinct?: unknown })?.distinct === 'number' ? [[k, (h as { distinct: number }).distinct]] : []))} />
+                    : activePage && <PagePropertiesPanel reportId={reportId} page={activePage} columns={columns} onUpdate={updatePageProps}
+                        pages={report.pages} bookmarks={bookmarks} onSelectWidget={setSelectedW}
+                        // The palette picker moved here from a row of unlabeled
+                        // dots in the header, where each theme was one colour
+                        // and no name.
+                        palettes={[
+                          ...Object.keys(THEMES).map(key => ({ key, name: PALETTE_NAME[key] ?? key[0].toUpperCase() + key.slice(1), colors: THEMES[key] })),
+                          ...Object.entries(orgThemes).map(([key, t]) => ({ key, name: t.name, colors: t.colors })),
+                        ]}
+                        currentPalette={report.theme ?? 'default'}
+                        onPalette={setThemeUndoable} />
+                  }
+    </>
+  )
   const layoutMenu = (
     <div className="dl-bd-menuw">
       <button className="btn btn-ghost btn-sm" aria-label="Page layout" aria-expanded={layoutMenuOpen}
@@ -3435,72 +3518,8 @@ export default function ReportBuilder() {
             <ZoomControl zoom={zoom} onZoom={setZoom} />
             {pageFilterBar}
           </>)}
-          {activeView === 'report' && editMode && (() => {
-            // Toolbar architecture: the most-used panels stay as buttons; the
-            // rest live behind ⋯ More. Thirteen co-equal toggles overflowed the
-            // strip and made every panel equally hard to find. The primaries
-            // are further split into three families with a hairline between
-            // them -- build, AI, collaborate -- so eight buttons read as three
-            // small groups rather than one long run of words.
-            const pl = (m: RightPanelMode) => tr(`builder.pane.${m}` as MessageKey)
-            const GROUPS: [RightPanelMode, string, LucideIcon][][] = [
-              [['outline', pl('outline'), PanelLeft], ['parameters', pl('parameters'), AtSign]],
-              // Ask and Insights sit side by side as primaries: same AI
-              // family, same discoverability. Insights was in the overflow,
-              // which left the engine's builder surface effectively hidden
-              // while its lesser sibling had a top-level button.
-              [['suggestions', pl('suggestions'), Lightbulb], ['ask', pl('ask'), Bot], ['insights', pl('insights'), Sparkles]],
-              [['review', pl('review'), CheckCheck], ['comments', pl('comments'), MessageSquare], ['schedule', pl('schedule'), Clock]],
-            ]
-            const OVERFLOW: [RightPanelMode, string, LucideIcon][] = [
-              ['mobile', pl('mobile'), Smartphone], ['selection', pl('selection'), MousePointerClick],
-              ['sync', pl('sync'), Link2], ['bookmarks', pl('bookmarks'), BookmarkIcon],
-              ['taborder', pl('taborder'), ArrowRightLeft], ['performance', pl('performance'), PerfGauge],
-              ['reportrules', pl('reportrules'), Palette], ['translations', pl('translations'), Languages],
-              ['history', pl('history'), History],
-            ]
-            const overflowActive = OVERFLOW.find(([m]) => m === rightPanelMode)
-            const toggleMode = (m: RightPanelMode) => setRightPanelMode(cur => cur === m ? 'default' : m)
-            const paneClass = (active: boolean) => `dl-panebtn${active ? ' dl-panebtn--on' : ''}`
-            return (
-              <div className="dl-panebar__tools">
-                {GROUPS.map((group, gi) => (
-                  <div key={gi} className="dl-panebar__group">
-                    {group.map(([m, label, Icon]) => (
-                      <button key={m} onClick={() => toggleMode(m)} aria-pressed={rightPanelMode === m}
-                        className={paneClass(rightPanelMode === m)} title={label}>
-                        {/* The word collapses to the icon when the strip is narrow
-                            (a container query in index.css), except on the open
-                            panel; it stays in the accessible name either way. */}
-                        <IconLabel icon={Icon}><span className="dl-panebtn__text">{label}</span></IconLabel>
-                      </button>
-                    ))}
-                  </div>
-                ))}
-                <div style={{ position: 'relative' }}>
-                  <button onClick={() => setToolbarMoreOpen(o => !o)}
-                    aria-label={tr('builder.morePanels')} aria-expanded={toolbarMoreOpen}
-                    className={paneClass(!!overflowActive || toolbarMoreOpen)}>
-                    {overflowActive
-                      ? <IconLabel icon={overflowActive[2]}>{overflowActive[1]}</IconLabel>
-                      : <IconLabel icon={MoreHorizontal}>{tr('builder.more')}</IconLabel>}
-                  </button>
-                  {toolbarMoreOpen && (
-                    <div role="menu" aria-label={tr('builder.morePanels')} className="dl-menu"
-                      style={{ position: 'absolute', insetInlineEnd: 0, top: '110%', zIndex: 700, minWidth: 180 }}>
-                      {OVERFLOW.map(([m, label, Icon]) => (
-                        <button key={m} role="menuitem"
-                          onClick={() => { toggleMode(m); setToolbarMoreOpen(false) }}
-                          className={`dl-menu__item${rightPanelMode === m ? ' dl-menu__item--on' : ''}`}>
-                          <IconLabel icon={Icon}>{label}</IconLabel>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )
-          })()}
+          {/* The panel toggles that sat here (eight words and "More panels")
+              are the right rail since 7e3. */}
         </div>
         )}
         </div>
@@ -3973,6 +3992,10 @@ export default function ReportBuilder() {
             </button>
           )}
 
+          {/* Pinned Properties beside the open rail panel (7e3). */}
+          {editMode && pinProps && rightPanelMode !== 'default' && (
+            <aside className="dl-bd-pinned" aria-label={tr('bd.rail.properties')}>{propertiesBody}</aside>
+          )}
           {/* Right: config panel */}
           {editMode && (
             <CollapsibleSide
@@ -3985,6 +4008,10 @@ export default function ReportBuilder() {
               style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)' }}
               scrollResetKey={rightPanelMode !== 'default' ? rightPanelMode : selectedW ? `widget-${selectedW.id}` : activePage ? `page-${activePage.id}` : 'none'}
             >
+              {rightPanelMode !== 'default' && (
+                <PanelHead mode={rightPanelMode} />
+              )}
+              {AI_MODES.includes(rightPanelMode) && <AiTabs mode={rightPanelMode} onPick={setRightPanelMode} />}
               {rightPanelMode === 'mobile' && (
                 activePage && <MobileLayoutEditor page={activePage} widgets={pageWidgets} onUpdate={updatePageProps} />
               )}
@@ -4237,78 +4264,20 @@ export default function ReportBuilder() {
                   </div>
                 )
               )}
-              {rightPanelMode === 'default' && (
-                <>
-                  <div style={{ padding:'9px 13px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between', gap:8 }}>
-                    <span data-autodir-text
-                      title={selectedW ? (selectedW.title || selectedW.widget_type) : (activePage?.name ?? '')}
-                      style={{ fontSize:12, fontWeight:600, color:'var(--text)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                      {selectedW
-                        ? tr('builder.panelWidget', { name: selectedW.title || WIDGET_CATALOG.find(w => w.type === selectedW.widget_type)?.label || selectedW.widget_type })
-                        : tr('builder.panelPage', { name: activePage?.name ?? '' })}
-                    </span>
-                    <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
-                      <button style={{ background:'none', border:'none', color:'var(--accent)', cursor:'pointer', fontSize:11, padding:0 }}
-                        onClick={() => setRightPanelMode('parameters')}>
-                        {tr('builder.reportSettings')}
-                      </button>
-                      {selectedW && (
-                        <button aria-label="Deselect widget" title="Deselect widget"
-                          style={{ background:'none', border:'none', color:'var(--muted)', cursor:'pointer', fontSize:14 }}
-                          onClick={() => setSelectedW(null)}>
-                          x
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  {/* Pick the object to edit, rather than finding it on the
-                      canvas. Every settings pane in SAS carries this, and it is
-                      what makes an object's settings reachable at all: a widget
-                      inside a container, a small one, or one sitting under
-                      another in a precision layout can be genuinely hard to
-                      click. The page is in the same list, because page settings
-                      are settings too. */}
-                  {activePage && (pageWidgets.length > 0) && (
-                    <div style={{ padding: '0 14px 8px' }}>
-                      <label htmlFor="object-picker" style={{ display: 'block', fontSize: 11,
-                        fontWeight: 700, color: 'var(--muted)', marginBottom: 4 }}>
-                        {tr('builder.objectToEdit')}
-                      </label>
-                      <select id="object-picker" style={{ width: '100%', fontSize: 12 }}
-                        value={selectedW ? String(selectedW.id) : 'page'}
-                        onChange={e => {
-                          const v = e.target.value
-                          setSelectedW(v === 'page' ? null
-                            : pageWidgets.find(w => String(w.id) === v) ?? null)
-                        }}>
-                        <option value="page">{tr('builder.pageOption', { name: activePage.name })}</option>
-                        {pageWidgets.map(w => (
-                          <option key={w.id} value={String(w.id)}>
-                            {w.title || w.widget_type} ({w.widget_type})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-
-                  {selectedW
-                    ? <WidgetConfigPanel key={`${selectedW.id}:${panelEpoch}`} geography={geography} widget={selectedW} columns={columns} datasets={datasets} primaryDatasetId={report.dataset_id} pages={report.pages} hierarchy={hierarchy} onHierarchyRefresh={refreshHierarchy} bookmarks={bookmarks} onUpdate={updateWidgetConfig} ruleErrors={perfStats[selectedW.id]?.ruleErrors}
-                      distinctCounts={Object.fromEntries(Object.entries(hints).flatMap(([k, h]) => typeof (h as { distinct?: unknown })?.distinct === 'number' ? [[k, (h as { distinct: number }).distinct]] : []))} />
-                    : activePage && <PagePropertiesPanel reportId={reportId} page={activePage} columns={columns} onUpdate={updatePageProps}
-                        pages={report.pages} bookmarks={bookmarks} onSelectWidget={setSelectedW}
-                        // The palette picker moved here from a row of unlabeled
-                        // dots in the header, where each theme was one colour
-                        // and no name.
-                        palettes={[
-                          ...Object.keys(THEMES).map(key => ({ key, name: PALETTE_NAME[key] ?? key[0].toUpperCase() + key.slice(1), colors: THEMES[key] })),
-                          ...Object.entries(orgThemes).map(([key, t]) => ({ key, name: t.name, colors: t.colors })),
-                        ]}
-                        currentPalette={report.theme ?? 'default'}
-                        onPalette={setThemeUndoable} />
-                  }
-                </>
-              )}
+              {rightPanelMode === 'default' && propertiesBody}
             </CollapsibleSide>
+          )}
+          {/* The right rail (7e3): every panel, one icon each. */}
+          {editMode && (
+            <RightRail mode={rightPanelMode} pinned={pinProps}
+              onPick={m => {
+                // Pressing the open panel again returns to Properties, as v1's
+                // toggles did; AI counts as open on any of its three tabs.
+                const open = m === 'ask' ? AI_MODES.includes(rightPanelMode) : rightPanelMode === m
+                if (m === 'default' && pinProps && rightPanelMode !== 'default') setPinProps(false)
+                setRightPanelMode(open && m !== 'default' ? 'default' : m)
+                setRightOpenSignal(n => n + 1)
+              }} />
           )}
         </div>
         {/* Inside the cross-filter provider: the focused widget is a
