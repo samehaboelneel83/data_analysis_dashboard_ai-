@@ -381,8 +381,8 @@ export default function PredictionModelsPanel({ datasetId, columns, mode, datase
                   <h3 dir="auto">{m.name}</h3>
                   <span className="dl-models__pill">v{m.version ?? 1}</span>
                   {m.status === 'champion'
-                    ? <span className="dl-models__pill dl-models__pill--champ">Champion</span>
-                    : <span className="dl-models__pill">candidate</span>}
+                    ? <span className="dl-models__pill dl-models__pill--champ">{t('mdl3.champion')}</span>
+                    : <span className="dl-models__pill">{t('mdl3.candidate')}</span>}
                 </div>
                 <p className="dl-models__predicts">{t('mdl3.predicts', { target: m.target, from: m.features.join(', ') })}</p>
                 <div className="dl-models__fit">
@@ -410,26 +410,26 @@ export default function PredictionModelsPanel({ datasetId, columns, mode, datase
                 )}
                 <div className="dl-models__actions">
                   <button onClick={() => void score(m)} disabled={scoringId === m.id} className="btn btn-primary btn-sm">
-                    {scoringId === m.id ? 'Scoring…' : 'Score this dataset'}
+                    {scoringId === m.id ? t('mdl3.scoring') : t('mdl3.score')}
                   </button>
                   {mode !== 'directquery' && (
                     <button onClick={() => void queueScore(m)} disabled={!!scoreJobs[m.id] && isJobActive(scoreJobs[m.id])}
                       className="btn btn-sm" title="Predict every row you can see and keep the result as a new dataset">
-                      Save predictions as a dataset
+                      {t('mdl3.savePredictions')}
                     </button>
                   )}
                   {m.status !== 'champion' && (
                     <button onClick={() => void promote(m)} className="btn btn-sm"
                       title="Dashboards that follow the champion score with this version from now on">
-                      Make champion
+                      {t('mdl3.makeChampion')}
                     </button>
                   )}
                   <button onClick={() => setCardFor(cardFor === m.id ? null : m.id)} aria-expanded={cardFor === m.id} className="btn btn-sm">
-                    Model card
+                    {t('mdl3.card')}
                   </button>
                   <button onClick={() => void remove(m)} aria-label={`Delete ${m.name}`} title={`Delete ${m.name}`}
                     className="dl-ov__linkish dl-models__delete">
-                    Delete
+                    {t('mdl3.delete')}
                   </button>
                 </div>
                 {cardFor === m.id && <ModelCardView m={m} dataset={dataset} datasetId={datasetId} />}

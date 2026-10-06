@@ -119,7 +119,7 @@ export default function DatasetShareDialog({ datasetId, onClose, datasetName, cr
         </header>
 
         {loading ? (
-          <p className="dl-share__muted">Loading…</p>
+          <p className="dl-share__muted">{t('common.loading')}</p>
         ) : (
           <>
             <div className="dl-share__add">
@@ -142,13 +142,13 @@ export default function DatasetShareDialog({ datasetId, onClose, datasetName, cr
               </select>
               <button className="btn btn-primary btn-sm" onClick={handleShare} disabled={picked === '' || saving}
                 title={picked === '' ? 'Choose who to share with first' : undefined}>
-                {saving ? 'Sharing…' : 'Share'}
+                {saving ? t('share3.sharing') : t('share3.share')}
               </button>
             </div>
 
             <h3 className="dl-share__label">{t('share3.direct')}</h3>
             {shares.length === 0 ? (
-              <p className="dl-share__muted dl-share__none">Not shared with anyone yet.</p>
+              <p className="dl-share__muted dl-share__none">{t('share3.none')}</p>
             ) : (
               <ul className="dl-share__list">
                 {shares.map(s => (
