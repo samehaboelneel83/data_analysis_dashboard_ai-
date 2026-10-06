@@ -51,20 +51,97 @@ Nothing is pushed.
 - ~~6-gap Gap pass for Builder~~ (replaced)
 - ~~6a Builder layout restyle~~ (replaced)
 - ~~6b Builder copilot tab, AI offline, and all states~~ (replaced)
-- [ ] Next: Home and Dashboards from `design-handoff-2/` (sub-steps and gates to be planned when the designs arrive)
+> **New designs (2026-10-06):** `/media/saeed/New Volume1/projects/design-handoff-2/`
+> (read its README). The `prototype/` folder is the source of truth; the PNGs have
+> stitching glitches. Serve it (`python3 -m http.server 8765` from `prototype/`) and
+> compare against it. Lucide icons from unpkg are prototype-only; the app keeps its
+> own icons. **Desktop only**: skip the tablet and mobile frames. Only Dashboards
+> Part 2 (Builder) is approved. Home and Parts 1, 3 and 4 are under the owner's
+> review; **don't start a sub-step before its design is approved.**
+>
+> **Owner's decisions after the 7-gap report (2026-10-06):**
+> - **Sidebar and top bar:** keep v1 for everything: group headers, all rail items
+>   (Glossary, Dataflows, Automations and Migration stay; the prototype only lacks
+>   them because it was made from screenshots), Platform fold and count, collapse
+>   icon, direction toggle, the LLM picker, search button, breadcrumbs, the bell's
+>   unread count. Two exceptions:
+>   - The Builder starts with the icon-only rail; the user can still expand it.
+>   - Present hides the dashboard header too, as long as Esc and the on-hover
+>     controls still exit.
+> - **Builder:** keep and re-home every v1 Builder feature the prototype doesn't
+>   show. Nothing is dropped (widget templates, report filters with date presets,
+>   layout recipes and Free layout, calculated columns, Auto hierarchy, Ask /
+>   Insights / Suggestions panes, the config panel's tabs and settings search,
+>   Display rules, Ranks, the Object-to-edit picker, page types, Shift+arrow resize,
+>   Ctrl+K, all align/distribute modes, kiosk auto-advance, conflict merge, Refresh,
+>   OpenReportsMenu, header fold, sensitivity badge, access dialogs).
+> - **Skipped** (they would change widget config semantics, renderer behaviour, the
+>   move path or WidgetRenderer): per-widget number format, Show title, automatic
+>   switch to horizontal bars, arrow keys moving all selected widgets, drill
+>   triggered from outside a widget.
+> - **Allowed:** Ask AI `?q=` prefill, schematic thumbnails drawn from each page's
+>   widget layout, suggested questions built from dataset columns.
+> - View-only users keep v1's gating (no Edit, Present or Add for them). Guest links
+>   keep v1's model (several links, each URL shown once, 1–90 days) with the new
+>   styling.
+> - Every item that needs new backend work stays out (Phase 1 rule) and is listed in
+>   "Backend follow-ups" below.
+> - Order: lower-risk screens first, the Builder last.
+
+- [x] 7-gap Gap pass for Home and Dashboards Parts 1–4
+- [ ] 7a Home *(after the owner approves the Home design)*: hero with the ask box (Ask AI gains `?q=`), chips from dataset columns, stat tiles, quick actions, Continue (dashboards only), Dashboards and Datasets sections, admin-only Activity and Refresh & jobs, first run, loading, an error per section (whole page only when reports or datasets fail), AI offline
+- [ ] 7b Dashboards list *(after Part 1 approval)*: Views/Folders column over the workspace tree, filters, grid/list, cards with schematic thumbnails, ⋯ menu, New dashboard dialog, bulk actions, every state including error and folders-failed; v1's subfolders, folder rename/delete, move confirm and publish toggle kept
+  - >> GATE C: stop, report Home and the Dashboards list
+- [ ] 7c Share, Export, Version history *(after Part 4 approval)*: restyle over the existing grants, guest links, embed configs, schedules, PDF/Excel export and versions; v1-only features kept
+- [ ] 7d View and Present *(after Part 3 approval)*: view header, focus mode, view-mode AI panel (Ask, Insights, Suggest charts), Present controls (header hidden, Esc and hover controls exit), AI offline, v1 viewer gating
+  - >> GATE D: stop, report View, Present and Part 4
+- [ ] 7e1 Builder: header and toolbars (save state, Edit/View, page tab menu, Layout menu with v1's recipes), icon-only rail on entry
+- [ ] 7e2 Builder: left panel (Insert gallery with preview, Fields, Templates; v1's widget templates, report filters and calculated columns re-homed)
+- [ ] 7e3 Builder: right panel rail and Properties (Format / Data / Interactions over the existing config panel, keeping every v1 tab and settings search; pinned second panel)
+- [ ] 7e4 Builder: canvas overlays and widget states (alignment guides, group box, hover toolbar, skeleton, empty result with Clear filters, error details, heavy-page banner)
+- [ ] 7e5 Builder: shortcuts dialog, copilot offline, and the states the prototype doesn't draw (empty page, read-only, load error, save conflict)
+  - >> GATE E: stop, report the Builder
 - [ ] Then: Upload, Connections, Lineage, the AI button
 - [ ] FINAL Full regression: all tests, build, capture every screen, compare against all designs, final summary, fix the flaky `Lineage.test.tsx` (and watch `geoRenderers.test.tsx`), and a clean-up list (test datasets 7 and 8, chat threads, the uncommitted init.sql edit)
-  - >> GATE E: stop, final report
+  - >> GATE F: stop, final report
 
 ## Backend follow-ups (found during the frontend steps)
 
-Not part of steps 1–6; candidates for the handoff's section 7 phases.
+Not part of the frontend steps (1–7); candidates for the handoff's section 7 phases.
 
 | Found in | Item | Why it needs the backend |
 |---|---|---|
 | 3c Data | Download CSV of a dataset (with the Data tab's filters, sort and search) | No dataset export endpoint exists; only Ask AI runs can be exported. |
 | 3c Share | Change a grant's View/Edit level in place | `/datasets/{id}/shares` can create and delete grants, not update one. |
 | 3c Share | "N row-security rules apply to this dataset" in the share dialog | No endpoint reports the rules that apply to a dataset (related to N9). |
+| 7-gap Home, list | Favorites (star a dashboard, Favorites filter and view) | No model or endpoint; `PinnedTile` pins widgets, not dashboards. |
+| 7-gap Home, list | Owner name and avatar on dashboards; a display name for the greeting | `ReportOut` has only the `created_by` id; `User` has no name field; non-admins can't look users up. |
+| 7-gap Home, list | Duplicate a dashboard | No copy endpoint (rebuilding from page templates loses filters, parameters, rules and theme). |
+| 7-gap Home, list | Exact "Shared with me" / "Shared" status in the reports list | No flag on `ReportOut`; per-row grants calls are author/admin only. |
+| 7-gap Home | Connection health ("All healthy") | `DataSourceOut` has no status; `sync_status` isn't exposed; only a live test per connection. |
+| 7-gap Home | Recently opened datasets in "Continue where you left off" | `RecentView` tracks reports only. |
+| 7-gap Home | Activity events: comments, refresh failures, "shared with a team"; an activity feed for non-admins | Comments aren't audited; refresh failures live in admin refresh-runs; grants are per email; audit-log is admin-only. |
+| 7-gap Home | Progress % for a running refresh | `RefreshRun` has no progress field. |
+| 7-gap list | View counts and "Most viewed" sort | `RecentView` keeps one row per user and report; no global count. |
+| 7-gap list | "Suggested by AI" proposals with Keep / Dismiss | Nothing stores pending proposals or proposes from recent questions. |
+| 7-gap list | Undo after delete; bulk share; request edit access | No restore, bulk grant or access-request endpoints. |
+| 7-gap Builder | KPI delta ("vs previous period / vs target") and sparkline | The KPI query returns one value. |
+| 7-gap Builder | Lock a widget | No field; would also touch the drag handlers. |
+| 7-gap Builder | Comment linked to a widget; unread comments | Comments carry only `page_id`. |
+| 7-gap Builder | "Split page" from the heavy-page banner; duplicate a page | No endpoints (page duplicate only via the template endpoints). |
+| 7-gap View | A viewer's "Bookmark this view" | Bookmark endpoints bump the revision and need edit rights; no personal bookmarks. |
+| 7-gap View | Widget-aware AI ("Reading 12 widgets", "Based on" chips, "N widgets read") and page-specific generated questions | The agent takes only `dataset_ids` or `data_source_id`; no report/page/widget scope. |
+| 7-gap View | Insights "Generated N ago" and saved dismissals | The scan is persisted but there is no GET endpoint; no dismiss storage. |
+| 7-gap View | Author-defined default filter chips per page | v1 page filters are per viewer (localStorage); no saved config. |
+| 7-gap Share | "Can comment" level; transfer ownership | No comment level in the capability ranks; no transfer endpoint. |
+| 7-gap Share | Invite with user suggestions, groups, pending invites for outside emails, notify by email with a message | Invite is email-only by design and 404s for non-members; grants are per user; `create_grant` sends no email. |
+| 7-gap Share | Guest link that never expires; link that carries the current filters | Guest links require 1–90 days; filters aren't stored on the link. |
+| 7-gap Share | Embed display options (tabs, filters, Ask AI, theme, size) | `EmbeddedReport` reads only the token. |
+| 7-gap Schedule | Pause / edit a schedule; multi-day picker; PNG format; pages selector; AI summary; groups as recipients | No `enabled` column, no PATCH route; one weekday; xlsx/pdf only. |
+| 7-gap Export | "Fit to content" paper; filter summary, page numbers, AI appendix; uses current filters; live preview | PDF accepts paper, orientation, contents and pages only, built server-side without UI filters. |
+| 7-gap Export | PowerPoint; page PNG; CSV zip; pick widgets for one workbook; raw/filtered options; size estimate | Not supported by the export endpoints. |
+| 7-gap Export | Background export with step progress, 24 h download link, error naming the failing widget with "Export without it" | Downloads are synchronous blobs; errors don't name a widget. |
+| 7-gap History | Named versions; preview a version; compare with current; per-version change summary; copy or PDF of a version | No label column; the versions list is metadata only (no snapshot content). |
 
 ## Log
 
@@ -222,3 +299,25 @@ suite and build; the screen comparison ran once over all of 3c before ticking.
 
 **Captures:** Ask AI in eight states × four themes, v1 (`120e0ef` files restored temporarily) beside the current page, with the same browser-only sample data. They match, apart from the kept items above.
 
+
+### 7-gap Gap pass for Home and Dashboards Parts 1–4 — no code change
+
+Compared the served prototype (`design-handoff-2/prototype/`, desktop frames) with the
+current app and backend, screen by screen: Home, Dashboards list (Part 1), Builder
+(Part 2), View & Present (Part 3), Share / Export / Version history (Part 4). Each
+element was classed as in v1, backend data exists (frontend only), or needs new
+backend work; the last group is in "Backend follow-ups". Also listed the sidebar and
+top bar differences (S1–S7, T1–T6) and the states the prototype doesn't draw (error
+for Home and the list, AI offline for the Home ask box and the View AI panel, Builder
+load error / conflict / empty / read-only, shared and embedded viewers, Part 4
+errors). The owner's decisions are in the note above the 7a–7e list.
+
+**Findings worth keeping in mind:**
+- v1's rail already has foldable group headers; the prototype just shows the chevron
+  on open groups too. Kept as v1.
+- Offline detection reads the LLM picker's poll, so the picker must stay for the
+  AI-offline states to work.
+- The prototype shows Edit and Present beside "View only"; v1 hides them for viewers
+  (kept).
+- Present in v1 exits on any key; the new controls use arrow keys, so Esc becomes the
+  exit (7d).
