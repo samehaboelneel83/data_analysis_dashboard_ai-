@@ -42,6 +42,12 @@ function FolderSelect({ id, folders, value, onChange }: {
   )
 }
 
+/** The built-in templates' names, in the reader's language by their key (QA
+ *  T1); a template this build does not know keeps the name the server sent. */
+const TEMPLATE_NAMES: Record<string, MessageKey> = {
+  'kpi-strip': 'dsh.tpl.kpi', quad: 'dsh.tpl.quad', 'geo-overview': 'dsh.tpl.geo', 'detail-page': 'dsh.tpl.detail',
+}
+
 export function NewDashboardDialog({ datasets, folders, initialMode, initialFolder, placeholderName, busy, onClose, onCreate }: {
   datasets: DatasetSummary[]
   folders: FlatFolder[]
@@ -53,6 +59,7 @@ export function NewDashboardDialog({ datasets, folders, initialMode, initialFold
   onCreate: (c: NewChoice) => void
 }) {
   const t = useT()
+  const tplName = (tp: { key: string; name: string }) => (TEMPLATE_NAMES[tp.key] ? t(TEMPLATE_NAMES[tp.key]) : tp.name)
   const ref = useModalDialog<HTMLDivElement>(onClose)
   const [mode, setMode] = useState<NewMode>(initialMode)
   const [name, setName] = useState('')
@@ -97,7 +104,7 @@ export function NewDashboardDialog({ datasets, folders, initialMode, initialFold
                 {templates.map(tp => (
                   <button key={tp.key} type="button" role="radio" aria-checked={template === tp.key} className="dsh-tpl" onClick={() => setTemplate(tp.key)}>
                     <TemplateArt k={tp.key} />
-                    <b>{tp.name}</b>
+                    <b>{tplName(tp)}</b>
                     <span>{t('dsh.new.widgets', { n: localDigits(String(tp.widgets)) })}</span>
                   </button>
                 ))}

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderWithProviders as render, screen, fireEvent, waitFor } from '../../test/renderWithProviders'
 import AlertsPanel from './AlertsPanel'
+import { DirectionProvider } from '../../contexts/DirectionContext'
 import { alertsApi } from '../../services/api'
 import type { DatasetColumn } from '../../services/api'
 
@@ -223,5 +224,21 @@ describe('HR evaluation 3.1', () => {
     expect(await screen.findByText('Headcount')).toBeInTheDocument()
     expect(screen.queryByText(/Last check failed/)).not.toBeInTheDocument()
     expect(screen.getByText(/last value 240,124/)).toBeInTheDocument()
+  })
+})
+
+describe('an alert row in Arabic (QA T1)', () => {
+  it('says its schedule, its check and Delete in Arabic', async () => {
+    localStorage.setItem('datalytics.language', 'ar')
+    try {
+      vi.mocked(alertsApi.list).mockResolvedValue([
+        { ...EXISTING[0], interval_minutes: 0, last_checked_at: null }] as never)
+      render(<DirectionProvider><AlertsPanel datasetId={1} columns={COLUMNS} /></DirectionProvider>)
+      await screen.findByText('Revenue fell')
+      expect(screen.getByText(/غير مجدول/)).toBeInTheDocument()
+      expect(screen.getByText('لم يُفحص بعد.')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'حذف Revenue fell' })).toHaveTextContent('حذف')
+      expect(screen.queryByText(/not scheduled|Not yet checked/)).toBeNull()
+    } finally { localStorage.removeItem('datalytics.language') }
   })
 })

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderWithProviders as render, screen, fireEvent, waitFor } from '../test/renderWithProviders'
 import DatasetShareDialog from './DatasetShareDialog'
+import { DirectionProvider } from '../contexts/DirectionContext'
 import { adminUsersApi, datasetSharesApi, lineageApi } from '../services/api'
 
 vi.mock('../services/api', () => ({
@@ -103,5 +104,19 @@ describe('the redesigned share dialog (3c)', () => {
     render(<DatasetShareDialog datasetId={5} onClose={() => {}} />)
     expect(await screen.findByText('Its creator')).toBeInTheDocument()
     expect(screen.queryByText('You created this dataset')).toBeNull()
+  })
+})
+
+describe('the share dialog in Arabic (QA T1)', () => {
+  it('the avatars speak Arabic, not "YOU"', async () => {
+    localStorage.setItem('datalytics.language', 'ar')
+    try {
+      vi.mocked(lineageApi.graph).mockResolvedValue({ sources: [], datasets: [], reports: [] })
+      const { container } = render(<DirectionProvider><DatasetShareDialog datasetId={5} datasetName="Demo — Sales" createdByMe onClose={() => {}} /></DirectionProvider>)
+      await waitFor(() => expect(container.ownerDocument.querySelectorAll('.dl-share__avatar').length).toBeGreaterThan(1))
+      const avatars = [...container.ownerDocument.querySelectorAll('.dl-share__avatar')].map(a => a.textContent)
+      expect(avatars).toContain('أنت')
+      expect(avatars.join(' ')).not.toMatch(/YOU|CR|AD/)
+    } finally { localStorage.removeItem('datalytics.language') }
   })
 })

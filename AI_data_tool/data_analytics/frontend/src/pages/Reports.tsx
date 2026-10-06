@@ -141,7 +141,7 @@ export default function Reports() {
     }
     setCreating(true)
     try {
-      const name = c.name || nextUntitledName(reports.map(x => x.name))
+      const name = c.name || nextUntitledName(reports.map(x => x.name), t('dsh.untitled'))
       const r = await reportsApi.create({ name, ...(c.datasetId != null ? { dataset_id: c.datasetId } : {}) })
       if (c.mode === 'tpl' && c.template) {
         // A template adds its page; the empty default page goes, so the new
@@ -670,7 +670,7 @@ export default function Reports() {
 
       {newDlg && (
         <NewDashboardDialog datasets={datasets ?? []} folders={folders} initialMode={newDlg.mode} initialFolder={newDlg.folder}
-          placeholderName={nextUntitledName(reports.map(x => x.name))} busy={creating}
+          placeholderName={nextUntitledName(reports.map(x => x.name), t('dsh.untitled'))} busy={creating}
           onClose={() => setNewDlg(null)} onCreate={c => void create(c)} />
       )}
       {suggest && <SuggestDashboardsDialog datasetId={suggest.id} datasetName={suggest.name} initialGoal={suggest.goal} onClose={() => setSuggest(null)} />}

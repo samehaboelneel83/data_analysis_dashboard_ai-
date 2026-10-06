@@ -1501,15 +1501,15 @@ export default function DatasetDetail() {
             <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 12 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                 <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
-                  Filters
+                  {tr('data3.f.title')}
                 </span>
                 <button className="btn btn-ghost btn-sm" onClick={addFilter} style={{ fontSize: 11, padding: '2px 7px' }}>
-                  + Add
+                  {tr('data3.f.add')}
                 </button>
               </div>
 
               {filterRows.length === 0 && (
-                <p style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center', padding: '6px 0' }}>No filters</p>
+                <p style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center', padding: '6px 0' }}>{tr('data3.f.none')}</p>
               )}
 
               {filterRows.map(f => (
@@ -1529,7 +1529,7 @@ export default function DatasetDetail() {
                     </select>
                     <input value={f.value} onChange={e => updateFilter(f.id, 'value', e.target.value)}
                       onKeyDown={e => e.key === 'Enter' && applyFilters()}
-                      placeholder="value…"
+                      placeholder={tr('data3.f.value')}
                       style={{ flex: 1, fontSize: 11, padding: '3px 6px', minWidth: 0 }} />
                   </div>
                 </div>
@@ -1538,7 +1538,7 @@ export default function DatasetDetail() {
               {filterRows.length > 0 && (
                 <button className="btn btn-primary btn-sm" onClick={applyFilters}
                   style={{ width: '100%', fontSize: 11, marginTop: 4 }}>
-                  Apply Filters
+                  {tr('data3.f.apply')}
                 </button>
               )}
             </div>
@@ -1551,16 +1551,16 @@ export default function DatasetDetail() {
             <div style={{ background: 'var(--surface)', border: `1px solid ${savedFilter ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 8, padding: 12 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
-                  Global Filter
+                  {tr('data3.g.title')}
                 </span>
                 {savedFilter && (
                   <span style={{ fontSize: 11, color: 'var(--accent)', padding: '1px 6px', background: 'color-mix(in srgb, var(--accent) 15%, transparent)', borderRadius: 4 }}>
-                    active
+                    {tr('data3.g.active')}
                   </span>
                 )}
               </div>
               <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8, lineHeight: 1.5 }}>
-                Applied to all reports that use this dataset.
+                {tr('data3.g.hint')}
               </p>
               <ExpressionBuilder
                 layout="flat"
@@ -1578,7 +1578,7 @@ export default function DatasetDetail() {
                   background: filterPreview.ok ? 'rgba(34,197,94,.1)' : 'rgba(239,68,68,.1)',
                   color: filterPreview.ok ? 'var(--success, #22c55e)' : 'var(--danger)' }}>
                   {filterPreview.ok
-                    ? `✓ ${filterPreview.passing!.toLocaleString()} / ${filterPreview.total.toLocaleString()} rows pass`
+                    ? `✓ ${tr('data3.g.pass', { n: localDigits(filterPreview.passing!.toLocaleString('en-US')), total: localDigits(filterPreview.total.toLocaleString('en-US')) })}`
                     : `✗ ${filterPreview.error}`}
                 </div>
               )}
@@ -1586,14 +1586,14 @@ export default function DatasetDetail() {
                 <button className="btn btn-ghost btn-sm"
                   style={{ fontSize: 11, flex: 1 }}
                   onClick={testGlobalFilter}
-                  disabled={!filterExpr.trim()} title={!filterExpr.trim() ? 'Write a filter expression first' : undefined}>
-                  Test
+                  disabled={!filterExpr.trim()} title={!filterExpr.trim() ? tr('data3.g.writeFirst') : undefined}>
+                  {tr('data3.g.test')}
                 </button>
                 <button className="btn btn-primary btn-sm"
                   style={{ fontSize: 11, flex: 1 }}
                   onClick={() => saveGlobalFilter()}
                   disabled={filterSaving}>
-                  {filterSaving ? 'Saving…' : 'Save'}
+                  {filterSaving ? tr('data3.g.saving') : tr('data3.g.save')}
                 </button>
                 {savedFilter && (
                   <button className="btn btn-ghost btn-sm"
@@ -1675,7 +1675,7 @@ export default function DatasetDetail() {
                       prepApi.get(dsId).then(setPrepSteps).catch(() => setPrepSteps([]))
                     }
                   }}>
-                  {editCells ? '✓ Editing cells' : '✎ Edit cells'}
+                  {editCells ? `✓ ${tr('data3.editing')}` : `✎ ${tr('data3.edit')}`}
                 </button>
                 {editCells && (
                   <>
@@ -1803,12 +1803,12 @@ export default function DatasetDetail() {
                     <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}
                       disabled={page === 0}
                       onClick={() => { const p = page - 1; setPage(p); loadPreview(p, filterRows, calcCols, sortBy, sortDir, search) }}>
-                      {arrows.back} Prev
+                      {arrows.back} {tr('data3.prev')}
                     </button>
                     <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}
                       disabled={(page + 1) * PAGE_SIZE >= preview.total}
                       onClick={() => { const p = page + 1; setPage(p); loadPreview(p, filterRows, calcCols, sortBy, sortDir, search) }}>
-                      Next {arrows.forward}
+                      {tr('data3.next')} {arrows.forward}
                     </button>
                   </div>
                 </div>

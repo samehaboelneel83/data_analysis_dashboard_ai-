@@ -95,7 +95,7 @@ Nothing is pushed.
 - [x] 7c Share, Export, Version history *(Part 4 approved 2026-10-06)*: restyle over the existing grants, guest links, embed configs, schedules, PDF/Excel export and versions; v1-only features kept
 - [x] 7d View and Present *(Part 3 approved 2026-10-06)*: view header, focus mode, view-mode AI panel (Ask, Insights, Suggest charts), Present controls (header hidden, Esc and hover controls exit), AI offline, v1 viewer gating
   - >> GATE D: stop, report View, Present and Part 4
-- [ ] 7-QA Fixes from the QA report `/media/saeed/New Volume1/projects/redesign-captures/qa-1/QA_REPORT.md` (owner, 2026-10-06), before 7e: Broken B1 (top priority), B2, B3, B5 (try to reproduce), B7, B8; Visual V1–V10 (V9: numbers must stay distinguishable); T1 on the redesigned screens only; all of T2 (the Arabic sidebar labels in `ar.ts` may be fixed, text only). A failing test before each fix where possible; before/after captures. B4 and B6 go to "Backend follow-ups".
+- [x] 7-QA Fixes from the QA report `/media/saeed/New Volume1/projects/redesign-captures/qa-1/QA_REPORT.md` (owner, 2026-10-06), before 7e: Broken B1 (top priority), B2, B3, B5 (try to reproduce), B7, B8; Visual V1–V10 (V9: numbers must stay distinguishable); T1 on the redesigned screens only; all of T2 (the Arabic sidebar labels in `ar.ts` may be fixed, text only). A failing test before each fix where possible; before/after captures. B4 and B6 go to "Backend follow-ups".
   - >> stop and report before 7e
 - [ ] 7e1 Builder: header and toolbars (save state, Edit/View, page tab menu, Layout menu with v1's recipes), icon-only rail on entry
 - [ ] 7e2 Builder: left panel (Insert gallery with preview, Fields, Templates; v1's widget templates, report filters and calculated columns re-homed)
@@ -522,7 +522,7 @@ errors). The owner's decisions are in the note above the 7a–7e list.
   - Viewers get Ask and Insights, with nothing that adds to the page. InsightsPane's `onAdd` became optional for that.
 - Present:
   - The header, the editor's page bar, the Filters line and the status bar are hidden (S7). Title and page name sit at the top, keyboard hints top-right.
-  - Bottom controls: previous / next, counter, dots, Auto-play (on, as v1's kiosk, now 15 s with a progress line, pausable), Ask AI, Exit (Esc).
+  - Bottom controls: previous / next, counter, dots, Auto-play (15 s with a progress line; starts OFF since GATE D, `4cec1e5`, the reader turns it on), Ask AI, Exit (Esc).
   - Arrows, Space and Page Up / Down page through (mirrored in Arabic). Esc closes the AI panel, then exits.
   - The controls fade after 2.5 s idle.
   - v1 exited on any key, which made the arrows useless; that is replaced.
@@ -539,7 +539,7 @@ errors). The owner's decisions are in the note above the 7a–7e list.
   - "Data behind this chart" in Focus.
   - Drill down and Copy image in the hover menu. The widget's own ⋮ menu keeps v1's export, View as and analyses, and Focus says so.
 - Subscribe stays its own header button (v1 component); the prototype lists it under More.
-- The Present stage is not scaled to fit; it keeps the page's width.
+- The Present stage is not scaled, and does not need to be (checked at GATE D): the canvas is a fluid 12-column grid, so it already fills the screen width, with a 24 px margin, at 1280 and 1920.
 - Present title, controls and hints follow the prototype. The Ask AI panel in Present is the same panel as in reading.
 
 **Seen while capturing, not changed (existing code):**
@@ -554,3 +554,49 @@ errors). The owner's decisions are in the note above the 7a–7e list.
 - Captures for 7c and 7d in light, dark, Arabic and Arabic dark were compared with the prototype. Fixed during the comparison: the Present stage padding, editor chrome showing in Present, and a doubled name in the AI panel's context line.
 - Fixed before commit: the Focus view had been mounted outside the cross-filter provider, which would have crashed it.
 - Captures used browser-only data for grants, guest links, versions, export responses, an unreachable model and a view-only reader. They are copied to `/media/saeed/New Volume1/projects/redesign-captures/7c/` and `…/7d/`.
+
+### 7-QA Fixes from the QA report — `a18e0ab` and the commit that adds this entry
+
+**Broken:**
+- B1 Datasets list: the page is a size container. Below 1100 px of page, the preview stacks under the table, and the table keeps a minimum width and scrolls sideways before the Name column collapses.
+- B2 Ask AI: a dataset opened by link (`?dataset=`) shows in the picker even when it looks like test data.
+- B3 Clarification chips also come from plain column words in the reply ("margin" → `margin_pct`), not only quoted names. Limit: a reply that names no column still has no chips (AN1, backend).
+- B5 Data tab: a sequence number per preview load, so an older answer never overwrites a newer one. Not reproduced live; this is the race that matches the report.
+- B7 Home row total counts every dataset (the live one was left out). Overview "Used by" lists "+N more" past 8. The folder tree reloads after a single or bulk delete. The stale folder count itself was not reproduced.
+- B8 Not reproduced: fresh loads, rail navigation, and a backend slowed to 4 s per call; typing was never lost and the first chip click always worked. No change.
+
+**Visual:**
+- V1 Dashboards list: the small columns have fixed widths, so the name takes what is left. Below 960 px of table, the Folder column collapses (it is not removed, so the colSpan-7 group rows still fit) and the folder shows under the name. Below 720 px the table scrolls sideways. The spans that clip carry `dir="auto"`, so text loses its end, not its start, in Arabic. At 1440, 0 of 11 names are clipped.
+- V2 Bulk bar: "1 dashboard selected", "Also select the one that looks like test data". Labels never wrap; the bar wraps instead.
+- V3 Search: the browser's own clear button is hidden; "1 result"; a shorter placeholder. Typed text gets `dir="auto"` in the shared ListFilter, and the no-match title puts the query in a `<bdi>`.
+- V4 Breadcrumb (CSS only, `index.css`; TopBar.tsx untouched): below 1360 px the muted section word goes first, so the page name keeps the room.
+- V5 Not reproduced (the shell never overflowed at 1024–1920). Defensive: `.dl-shell { overflow: clip }`, so nothing inside can scroll the shell.
+- V6 Key influencers: a condition and its "small group" mark each stay on one line.
+- V7 Dates isolate by their own script (FSI) with no-break spaces, so "1 يناير 2024 – 28 ديسمبر 2025" reads in order.
+- V8 Answer direction by words, not letters (`proseDir`), so an Arabic sentence full of English names stays RTL.
+- V9 Prose and chat chart labels keep 2 dp below 100, as the grid does (18.96 and 19 no longer both read "19"). Numbers between traced claims get the plain highlight. This changes redesign 1b's "1 dp from 10 up" (61.535 now reads 61.54).
+- V10:
+  - `color-scheme` per theme (the white scrollbar corner in dark mode).
+  - Home quick-action subtitles wrap to two lines.
+  - Language menu rows follow the menu's direction, with the label in a `<bdi>`.
+  - The answer bar is called as a function instead of a component declared inside ChatPane. It was remounted on every render, so the first 👎 lost its click and AddToDashboard lost its state.
+  - LLM server name and context boxes widened.
+
+**Translation:**
+- T1 on redesigned screens:
+  - Data tab: Edit cells, Prev/Next, and the Filters and Global Filter panels.
+  - Rules & alerts: the alert row, including the cadence.
+  - New dashboard dialog: the untitled name, and template names by key, with the server's name as fallback.
+  - Dataset Share dialog: the avatars.
+- T2:
+  - Column counts use plural forms ("8 أعمدة", "12 عمودًا"), and plural selection now reads Arabic-Indic digits.
+  - Ask AI → "اسأل الذكاء الاصطناعي", Lineage → "تتبّع المصدر", Automations → "الأتمتة" (ar.ts text only).
+  - Your own activity lines read in the first person ("حذفتَ …").
+  - The Columns header is "الاستخدام" (the dangling "كـ" read as cut off).
+
+**Checks:**
+- A failing test before each fix, except B8 (not reproduced) and V5 (defensive). CSS-only fixes are pinned by rule tests (`layout.test.ts` ×3, `crumbLayout.test.ts`).
+- Full suite: 285 files / 3768 tests pass. Type-check and build pass.
+- Before/after captures (light, dark, Arabic; 1100–1440) are in `/media/saeed/New Volume1/projects/redesign-captures/qa-1-fixes/{before,after}/`.
+- B4 and B6 are in "Backend follow-ups". T1 on the other pages is step 8-i18n.
+

@@ -107,7 +107,10 @@ export function pluralize(template: string, language: string,
   return template.replace(PLURAL, (whole, k: string, body: string) => {
     const raw = vars[k]
     if (raw === undefined) return whole
-    const n = typeof raw === 'number' ? raw : Number(String(raw).replace(/[,\s\u066C]/g, ''))
+    // Arabic-Indic digits ("٨", "٢٫٥") are read too: callers pass localDigits()
+    // output, and NaN here left the raw template on screen (QA T2).
+    const latin = String(raw).replace(/[\u0660-\u0669]/g, d => String(d.charCodeAt(0) - 0x0660)).replace(/\u066B/g, '.')
+    const n = typeof raw === 'number' ? raw : Number(latin.replace(/[,\s\u066C]/g, ''))
     if (!Number.isFinite(n)) return whole
     const forms: Record<string, string> = {}
     for (const m of body.matchAll(/([a-z]+)\s*\{([^{}]*)\}/g)) forms[m[1]] = m[2]

@@ -168,13 +168,13 @@ export default function DatasetShareDialog({ datasetId, onClose, datasetName, cr
             <h3 className="dl-share__label">{t('share3.also')}</h3>
             <ul className="dl-share__list">
               <li>
-                <span className="dl-share__avatar" aria-hidden>{createdByMe ? 'YOU' : 'CR'}</span>
+                <span className="dl-share__avatar" aria-hidden>{createdByMe ? t('share3.av.you') : t('share3.av.creator')}</span>
                 <span className="dl-share__who"><strong>{createdByMe ? t('share3.you') : t('share3.creator')}</strong>
                   <span>{createdByMe ? t('share3.youMade') : t('share3.creatorBody')}</span></span>
                 <span className="dl-share__lvl dl-share__muted">{t('share3.creatorTag')}</span>
               </li>
               <li>
-                <span className="dl-share__avatar dl-share__avatar--role" aria-hidden>AD</span>
+                <span className="dl-share__avatar dl-share__avatar--role" aria-hidden>{t('share3.av.admins')}</span>
                 <span className="dl-share__who"><strong>{t('share3.admins')}</strong><span>{t('share3.adminsBody')}</span></span>
                 <span className="dl-share__lvl dl-share__muted">{t('share3.edit')}</span>
               </li>

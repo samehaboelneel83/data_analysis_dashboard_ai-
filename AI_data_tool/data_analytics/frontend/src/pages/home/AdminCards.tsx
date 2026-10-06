@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Activity, RefreshCw, RotateCcw } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { formatTimeAgo, useT } from '../../i18n'
+import { formatTimeAgo, useT, type MessageKey } from '../../i18n'
 import { localDigits } from '../../lib/arabicFormats'
 import { datasetsApi, type RefreshRunRow } from '../../services/api'
 import type { FeedItem, JobsDigest } from './feeds'
@@ -35,10 +35,14 @@ export function ActivityCard({ items, loading, error, onRetry }: {
       <li key={a.id}>
         <span className="hm-pp" style={{ background: avatarColor(a.who) }} aria-hidden>{[...a.who][0]}</span>
         <div className="tx">
-          {fill(t(a.key, { who: '{who}', name: '{name}' }), {
-            who: <b>{a.mine ? t('hm.you') : <bdi>{a.who}</bdi>}</b>,
-            name: <b><bdi>{a.name}</bdi></b>,
-          })}
+          {/* My own line is its own sentence (QA T2): Arabic "حذفتَ …", not
+              the passive "تم حذف … بواسطة أنت". */}
+          <span data-mine={a.mine || undefined}>{a.mine
+            ? fill(t(a.key.replace('hm.act.', 'hm.actMine.') as MessageKey, { name: '{name}' }), { name: <b><bdi>{a.name}</bdi></b> })
+            : fill(t(a.key, { who: '{who}', name: '{name}' }), {
+              who: <b><bdi>{a.who}</bdi></b>,
+              name: <b><bdi>{a.name}</bdi></b>,
+            })}</span>
           <span className="tm">{formatTimeAgo(a.at, t)}</span>
         </div>
       </li>

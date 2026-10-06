@@ -283,6 +283,16 @@ describe('admin-only sections', () => {
     expect(screen.getByTestId('hm-tile-refresh')).toHaveTextContent(`${num(1)} of ${num(2)} jobs failed`)
   })
 
+  it('my own action reads as my own sentence (QA T2)', async () => {
+    vi.mocked(monitoringApi.activity).mockResolvedValue([
+      { id: 3, user_email: 'admin@example.com', action: 'report.publish', entity: 'report', entity_id: 1, detail: null, created_at: new Date().toISOString() },
+    ] as never)
+    renderHome(admin)
+    const act = await screen.findByTestId('home-activity')
+    await waitFor(() => expect(act).toHaveTextContent('You published Sales'))
+    expect(act.querySelector('[data-mine="true"]')).not.toBeNull()
+  })
+
   it('a failed activity call fails only its own card', async () => {
     vi.mocked(monitoringApi.activity).mockRejectedValue(new Error('down'))
     renderHome(admin)

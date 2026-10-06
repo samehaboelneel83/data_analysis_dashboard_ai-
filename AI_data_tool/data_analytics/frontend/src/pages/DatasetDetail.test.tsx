@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderWithProviders as render, screen, waitFor, fireEvent, act } from '../test/renderWithProviders'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { DirectionProvider } from '../contexts/DirectionContext'
 import DatasetDetail from './DatasetDetail'
 import { datasetsApi, analysisApi, dataPreviewApi, jobsApi } from '../services/api'
 import { AuthContext } from '../contexts/AuthContext'
@@ -984,6 +985,22 @@ describe('editing a cell in the data grid', () => {
     renderDetailAt('/datasets/29?tab=data')
     return screen.findByText('Nrth')
   }
+
+  it('speaks Arabic: Edit cells and the pager (QA T1)', async () => {
+    localStorage.setItem('datalytics.language', 'ar')
+    try {
+      editable()
+      render(
+        <DirectionProvider><MemoryRouter initialEntries={['/datasets/29?tab=data']}>
+          <Routes><Route path="/datasets/:id" element={<DatasetDetail />} /></Routes>
+        </MemoryRouter></DirectionProvider>)
+      await screen.findByText('Nrth')
+      expect(screen.getByRole('button', { name: /تعديل الخلايا/ })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /السابق/ })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /التالي/ })).toBeInTheDocument()
+      expect(screen.queryByText(/\bPrev\b|\bNext\b|Edit cells/)).toBeNull()
+    } finally { localStorage.removeItem('datalytics.language') }
+  })
 
   it('does not turn cells into inputs until editing is switched on', async () => {
     // The Data tab is a reading surface first; a grid where every cell is a
