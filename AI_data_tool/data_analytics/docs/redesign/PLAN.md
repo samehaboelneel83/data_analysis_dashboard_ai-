@@ -90,7 +90,7 @@ Nothing is pushed.
 
 - [x] 7-gap Gap pass for Home and Dashboards Parts 1–4
 - [x] 7a Home *(Home design approved 2026-10-06)*: hero with the ask box (Ask AI gains `?q=`), chips from dataset columns, stat tiles, quick actions, Continue (dashboards only), Dashboards and Datasets sections, admin-only Activity and Refresh & jobs, first run, loading, an error per section (whole page only when reports or datasets fail), AI offline
-- [ ] 7b Dashboards list *(after Part 1 approval)*: Views/Folders column over the workspace tree, filters, grid/list, cards with schematic thumbnails, ⋯ menu, New dashboard dialog, bulk actions, every state including error and folders-failed; v1's subfolders, folder rename/delete, move confirm and publish toggle kept
+- [x] 7b Dashboards list *(Part 1 approved 2026-10-06)*: Views/Folders column over the workspace tree, filters, grid/list, cards with schematic thumbnails, ⋯ menu, New dashboard dialog, bulk actions, every state including error and folders-failed; v1's subfolders, folder rename/delete, move confirm and publish toggle kept
   - >> GATE C: stop, report Home and the Dashboards list
 - [ ] 7c Share, Export, Version history *(after Part 4 approval)*: restyle over the existing grants, guest links, embed configs, schedules, PDF/Excel export and versions; v1-only features kept
 - [ ] 7d View and Present *(after Part 3 approval)*: view header, focus mode, view-mode AI panel (Ask, Insights, Suggest charts), Present controls (header hidden, Esc and hover controls exit), AI offline, v1 viewer gating
@@ -117,7 +117,7 @@ Not part of the frontend steps (1–7); candidates for the handoff's section 7 p
 | 7-gap Home, list | Favorites (star a dashboard, Favorites filter and view) | No model or endpoint; `PinnedTile` pins widgets, not dashboards. |
 | 7-gap Home, list | Owner name and avatar on dashboards; a display name for the greeting | `ReportOut` has only the `created_by` id; `User` has no name field; non-admins can't look users up. |
 | 7-gap Home, list | Duplicate a dashboard | No copy endpoint (rebuilding from page templates loses filters, parameters, rules and theme). |
-| 7-gap Home, list | Exact "Shared with me" / "Shared" status in the reports list | No flag on `ReportOut`; per-row grants calls are author/admin only. |
+| 7-gap Home, list | A "Shared" status (this dashboard has been shared with someone) and an exact "Shared with me" on Home | No flag on `ReportOut`; per-row grants calls are author/admin only. (The Dashboards page's "Shared with me" view is built from the workspace tree's `shared_with_me`, see 7b.) |
 | 7-gap Home | Connection health ("All healthy") | `DataSourceOut` has no status; `sync_status` isn't exposed; only a live test per connection. |
 | 7-gap Home | Recently opened datasets in "Continue where you left off" | `RecentView` tracks reports only. |
 | 7-gap Home | Activity events: comments, refresh failures, "shared with a team"; an activity feed for non-admins | Comments aren't audited; refresh failures live in admin refresh-runs; grants are per email; audit-log is admin-only. |
@@ -376,3 +376,49 @@ errors). The owner's decisions are in the note above the 7a–7e list.
 - Captures other than `full` used browser-only data: the dev database has no refresh runs and few audit rows.
 
 **Note for 7b:** the reused `ShareDialog` (`pages/reports/listParts.tsx`) still has hardcoded English. It is unchanged here; 7b restyles that list.
+
+### 7b Dashboards list — `c55d50a`
+
+**Changed:**
+- `pages/Reports.tsx` rebuilt from the approved prototype (`dashlist.html`), edge to edge like the builder (`dl-bleed`), with `pages/reports/` `FolderNav.tsx`, `DashCard.tsx` (card and row), `dialogs.tsx` (New dashboard, Move to folder), `model.ts` and `dashboards.css` (classes prefixed `dsh-` so nothing collides with the app's own `.dl-tree` / `.dl-seg` / `.dl-empty`).
+- Side column:
+  - Views: All dashboards, Recent (`/reports/recent`, 50, in the order opened), Shared with me (the workspace tree's `shared_with_me`: a folder grant or a grant naming the viewer, never merely "not mine").
+  - Folders: every folder of the tree, nested, with the dashboards beneath each. Each is a drop target. A menu on the ones the viewer may manage offers New subfolder, Rename, Delete.
+  - Inline New folder.
+  - The drag hint.
+  - "Folders couldn't load · Retry" when the tree fails.
+- Toolbar:
+  - Search over names, descriptions and dataset names (the shared `useListFilter`, restyled; shown from 8 dashboards, as on the Datasets list). `/` focuses it.
+  - All / Drafts / Published with counts, a Dataset filter, Sort (Recently modified / Name A–Z), grid / list (remembered).
+- Grouping: the All view, with nothing narrowing it, shows a section per folder (subfolders inside, collapsible, remembered), then "Not in a folder". A view, a search or a facet shows a flat grid with a count. A folder view shows its own dashboards, then its subfolders.
+- Card: schematic thumbnail, tick box (editors), "View only" chip, hover Open / Share (author or admin) / ⋯. Name, description or page count, Draft / Published / AI suggestion badge, modified time, dataset chip (v1's rule: hidden when the name already says it).
+  - ⋯: Open, Share…, Copy link, Move to folder…, Rename, Publish / Unpublish, Export as PDF, Delete, each behind the same rule as v1.
+- List view: a table with folder, dataset, status and modified, with group rows.
+- Bulk bar (once anything is ticked; a click on a card then ticks it): Move to…, Export (one PDF each), Delete (the shared confirmation naming them), "Select N that look like test data", clear.
+- New dashboard dialog:
+  - Blank: name, dataset, folder. With no dataset it opens the builder asking for data and is marked fresh, as v1.
+  - Template: the four built-in page templates, drawn from their real layouts. The template page is added and the empty default page removed.
+  - With AI: a goal and a dataset, handed to the existing Suggest dashboards dialog (new optional `initialGoal`).
+  - `?new=1` (palette, Home) opens it.
+- Move to folder dialog, with v1's warning about who can then open it. A drop is confirmed with the same words. The server's refusal is shown as given.
+- States: loading skeleton, first run (three ways to start), no match (what was searched, Clear search, Build it with AI, recent dashboards), filters with no result, empty Recent / Shared, empty folder ("New dashboard here"), whole-list error (v1's LoadError, header kept), folders failed. A failed datasets call hides only the chips and the filter.
+- The share dialog's hardcoded English is translated (`dsh.sd.*`).
+- New capture script `e2e/capture/redesign/cap_step7b.mjs` (15 states × 4 themes).
+
+**Deviations from the prototype:**
+- Left out (backend, see "Backend follow-ups"): favourites (star, Favorites view), owner avatars and the Owner column, view counts and Most viewed, Duplicate, a "Shared" status, "Suggested by AI" proposals with Keep / Dismiss (dashboards made by Suggest dashboards wear an "AI suggestion" badge instead, without a section of their own), Open in edit mode, Request edit access, bulk Share, undo after delete or move.
+- "Shared with me" is built after all: the tree marks granted dashboards. The 7-gap follow-up row was narrowed to the "Shared" status.
+- Moves are confirmed (v1), not done at once with an undo toast. Deletes are confirmed (v1); there is no restore endpoint for an undo.
+- The New dashboard dialog's templates are the four built-in page templates, not the prototype's invented "Sales / KPI scorecard / Operations". With AI proposes several drafts through Suggest dashboards rather than creating one.
+- The search box appears from 8 dashboards (v1's and the Datasets list's rule).
+- The tablet "Folder:" dropdown is not built (desktop only).
+
+**From v1:**
+- Kept: subfolders, folder rename and delete with "contents move up", move confirmation, Publish / Unpublish, delete confirmation, the dataset chip rule, Suggest dashboards' goal text, the fresh-report marker, `?new=1`, the opening loader, "Select test dashboards".
+- Replaced: the "My dashboards / Granted to me" grouping (the Shared with me view), the Sections / Folders toggle and the breadcrumb drill-down (the side column), and the separate Select mode (tick boxes on hover).
+- Tests: `Reports.test.tsx` rewritten around the new page (47 tests; the old file had 75, many pinning the replaced layout). The permission, confirmation, refusal, folder, move, search and creation behaviours are all still pinned. `loadFailures.test.tsx` expects the new first-run title.
+
+**Checks:** Dashboards tests 47, load failures and list wiring, full suite 278 files / 3677 tests, build, containers rebuilt.
+- The template flow was checked against the real API (create, add template, delete the default page, then the probe was deleted).
+- Captures in light, dark, Arabic and Arabic dark for grid, card menu, list, folder, bulk, no match, New dashboard (blank and template), new folder, move, first run, empty folder, loading, error and member were compared with the prototype at 1440 × 900. Fixed during the comparison: list column widths, an English name clipped at its start in the Arabic list, a second focus ring on the search box, and zero counts shown while loading or after an error.
+- Captures for empty folder, first run, loading, error and member used browser-only data. They are copied to `/media/saeed/New Volume1/projects/redesign-captures/7b/`, with 7a's in `…/7a/`.
