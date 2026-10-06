@@ -769,3 +769,12 @@ describe('ChatPane accessibility', () => {
     expect(await axeViolations(container)).toEqual([])
   })
 })
+
+describe('a question handed in (Home → /ask?q=)', () => {
+  it('starts in the box and is not sent', async () => {
+    const ask = vi.spyOn(agentApi, 'ask')
+    render(<ChatPane datasetIds={[3]} conversationId={null} initialInput="Total sales by region" />)
+    expect(await screen.findByRole('textbox', { name: /question/i })).toHaveValue('Total sales by region')
+    expect(ask).not.toHaveBeenCalled()
+  })
+})

@@ -46,6 +46,9 @@
 }
 .dl-ask__title { margin: 0; font-size: clamp(28px, 3.4vw, 42px); line-height: 1.1; font-weight: 700; letter-spacing: -0.02em; }
 .dl-ask__sub { margin: 12px 0 0; max-width: 520px; color: var(--muted); font-size: 15px; line-height: 1.6; }
+/* Home's question, waiting for a dataset to be chosen. */
+.dl-ask__pending { margin: 14px 0 0; max-width: 520px; font-size: 14px; color: var(--text); padding: 10px 12px; border-radius: var(--dl-radius-control, 8px); background: var(--accent-soft); }
+.dl-ask__pending q { font-weight: 600; unicode-bidi: isolate; }
 .dl-ask__points { list-style: none; margin: 22px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .dl-ask__points li { display: flex; align-items: center; gap: 10px; font-size: 13.5px; color: var(--text); }
 .dl-ask__points svg {

@@ -10,18 +10,25 @@ import { renderWithProviders } from '../test/renderWithProviders'
  * mocked to a probe that reports what it was given.
  */
 
-vi.mock('../components/chat/ChatPane', () => ({
-  default: (props: { dataSourceId?: number; datasetIds?: number[]; conversationId?: number | null
-                     onConversationCreated?: (c: { id: number; title: string }) => void }) => (
-    <div data-testid="chat-pane">
+vi.mock('../components/chat/ChatPane', async () => {
+  const { useState } = await vi.importActual<typeof import('react')>('react')
+  return {
+  default: function Probe(props: { dataSourceId?: number; datasetIds?: number[]; conversationId?: number | null
+                     onConversationCreated?: (c: { id: number; title: string }) => void; initialInput?: string }) {
+    // What the real pane does: the box takes the question once, on mount.
+    const [initial] = useState(props.initialInput ?? '')
+    return (
+    <div data-testid="chat-pane" data-initial={initial}>
       {props.dataSourceId != null ? `source:${props.dataSourceId}` : `datasets:${props.datasetIds?.join(',')}`}
       {` conversation:${props.conversationId === undefined ? 'unset' : String(props.conversationId)}`}
       <button onClick={() => props.onConversationCreated?.({ id: 99, title: 'Made by pane' })}>
         probe-create
       </button>
     </div>
-  ),
-}))
+    )
+  },
+  }
+})
 
 vi.mock('../services/api', () => ({
   datasetsApi: { list: vi.fn() },
@@ -248,5 +255,26 @@ describe('AskAI — the conversation list', () => {
                   { timeout: 5000 })
     expect(screen.queryByText('Live orders')).not.toBeInTheDocument()
     expect(screen.getByText('Warehouse')).toBeInTheDocument()
+  })
+})
+
+
+/**
+ * Home's question box hands its question over as `/ask?q=`. It is put in the
+ * question box -- never sent for the person -- and leaves the URL so a reload
+ * does not bring it back.
+ */
+describe('a question handed over from Home', () => {
+  it('waits in the hero until data is chosen', async () => {
+    renderAt('/ask?q=Which%20region%20grew')
+    expect(await screen.findByTestId('ask-pending-q')).toHaveTextContent('Which region grew')
+    expect(screen.queryByTestId('chat-pane')).not.toBeInTheDocument()
+  })
+
+  it('goes into the question box of the scoped chat, unsent', async () => {
+    renderAt('/ask?dataset=32&q=Total%20sales%20by%20region')
+    const pane = await screen.findByTestId('chat-pane')
+    expect(pane).toHaveAttribute('data-initial', 'Total sales by region')
+    expect(pane).toHaveTextContent('datasets:32')
   })
 })

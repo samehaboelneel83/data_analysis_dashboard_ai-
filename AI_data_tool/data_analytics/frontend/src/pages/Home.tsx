@@ -1,172 +1,105 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { datasetsApi, reportsApi, type DatasetSummary, type RecentReport } from '../services/api'
-import type { Report } from '../types/report'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Database, LayoutDashboard, Plug, RefreshCw } from 'lucide-react'
 import {
-  ChevronDown, ChevronRight, Database, LayoutDashboard, type LucideIcon,
-} from 'lucide-react'
+  agentApi, dataSourcesApi, datasetsApi, lineageApi, monitoringApi, reportsApi,
+  type ActivityRow, type DataSource, type DatasetSummary, type LineageGraph, type RecentReport, type RefreshRunRow,
+} from '../services/api'
+import type { Report } from '../types/report'
+import { useOptionalAuth } from '../contexts/AuthContext'
 import LoadError from '../components/ui/LoadError'
 import Loader from '../components/ui/Loader'
 import { formatTimeAgo, useT } from '../i18n'
+import { localDigits } from '../lib/arabicFormats'
+import { useAiOffline } from './ask/useAiOffline'
+import { datasetSuggestions } from './ask/suggestions'
+import { typeName } from './datasetsList/classify'
+import { Continue, Hero, Onboarding, Quick, Stats, type HeroChips, type Tile } from './home/parts'
+import DashboardsSection from './home/DashboardsSection'
+import DatasetsSection, { askable, recentDatasets } from './home/DatasetsSection'
+import { ActivityCard, JobsCard } from './home/AdminCards'
+import { feedItems, handle, jobsDigest } from './home/feeds'
+import { firstPageWidgets } from './home/Thumb'
+import './home/home.css'
 
 /**
- * The landing page: what you were working on, and the way back into it.
+ * The landing page (redesign 7a): a greeting with the question box, the
+ * workspace at a glance, the way back into recent work, and -- for org admins --
+ * what changed and what is refreshing.
  *
- * Card SECTIONS rather than one dense table -- the previous Home was the
- * dataset list, which answered "what data exists" but not "what was I doing".
- * Datasets kept its table and moved to /datasets (still reachable from its own
- * rail entry); nothing was removed.
+ * Every number and list here comes from an endpoint that already exists.
+ * What the design shows but the backend cannot answer is left out, not
+ * stubbed: favourites, owner names, Duplicate, connection health, recently
+ * opened datasets (PLAN.md, Backend follow-ups).
  *
- * Every section here is built from data the app actually serves. Recents is
- * real per-user view history (`/reports/recent`, added with the 0015
- * `recent_views` table) rather than the report list sorted by `updated_at` --
- * that older ordering answered "what changed", so a dashboard somebody else
- * edited jumped to the top of YOUR recents. Datasets order by `created_at`.
- *
- * Still deliberately absent: favourites and a saved-query section. Neither
- * exists in this backend, and a section that renders permanently empty makes
- * the page look richer while being worth less.
+ * Failure is per section. Only the two calls everything else hangs off
+ * (dashboards, datasets) blank the page, and they still never render as an
+ * empty workspace: an outage shown as "nothing yet" invites someone to
+ * rebuild work that exists.
  */
 
-const RECENT_LIMIT = 5
+interface Slot<T> { data: T | null; error: boolean; loading: boolean }
 
-/** A collapsible section with a heading and a row of cards. */
-function Section({ title, action, children, testId }: {
-  title: string
-  action?: React.ReactNode
-  children: React.ReactNode
-  testId?: string
-}) {
-  const KEY = `home.section.${title}`
-  const [open, setOpen] = useState(() => {
-    try { return localStorage.getItem(KEY) !== '0' } catch { return true }
-  })
-  const toggle = () => {
-    setOpen(o => {
-      try { localStorage.setItem(KEY, o ? '0' : '1') } catch { /* cosmetic */ }
-      return !o
-    })
-  }
-
-  return (
-    <section aria-label={title} data-testid={testId} style={{ marginBottom: 26 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-        <button onClick={toggle} aria-expanded={open}
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none',
-            border: 'none', cursor: 'pointer', padding: 0, color: 'var(--text)',
-            fontFamily: 'var(--sans)', fontSize: 14, fontWeight: 700 }}>
-          <span aria-hidden style={{ display: 'inline-flex', color: 'var(--muted)' }}>
-            {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-          </span>
-          {title}
-        </button>
-        {action && <div style={{ marginInlineStart: 'auto' }}>{action}</div>}
-      </div>
-      {open && children}
-    </section>
-  )
+/** One independent request with its own loading and error state. */
+function useSlot<T>(fn: () => Promise<T>, enabled = true): Slot<T> & { reload: () => void } {
+  const [s, setS] = useState<Slot<T>>({ data: null, error: false, loading: enabled })
+  const fnRef = useRef(fn)
+  fnRef.current = fn
+  const reload = useCallback(() => {
+    if (!enabled) return
+    setS(p => ({ ...p, error: false, loading: true }))
+    Promise.resolve().then(() => fnRef.current())
+      .then(data => setS({ data, error: false, loading: false }))
+      .catch(() => setS({ data: null, error: true, loading: false }))
+  }, [enabled])
+  useEffect(reload, [reload])
+  return { ...s, reload }
 }
 
-const cardGrid: React.CSSProperties = {
-  display: 'grid', gap: 12,
-  gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))',
-}
-
-/** One entity card: icon, name, a quiet subtitle, optional status chip. */
-function EntityCard({ to, icon: Icon, name, subtitle, chip, testId, onOpen }: {
-  to: string
-  icon: LucideIcon
-  name: string
-  subtitle: string | null
-  chip?: React.ReactNode
-  testId?: string
-  onOpen?: () => void
-}) {
-  // Only a plain left-click navigates THIS tab. Ctrl/Cmd/Shift/middle-click
-  // open elsewhere, and swapping Home for a loader there would strand it.
-  const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
-    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey
-      || e.shiftKey || e.altKey) return
-    onOpen?.()
-  }
-  return (
-    <Link to={to} data-testid={testId} className="card" onClick={handleClick}
-      style={{ display: 'block', padding: 14, textDecoration: 'none', color: 'var(--text)' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9 }}>
-        <span aria-hidden style={{ display: 'inline-flex', flexShrink: 0, color: 'var(--accent)',
-          background: 'var(--accent-soft)', borderRadius: 8, padding: 6 }}>
-          <Icon size={15} strokeWidth={1.9} />
-        </span>
-        {/* The full name on the element: the card cannot grow, so truncation is
-            right, but two dashboards differing after the twentieth character
-            are otherwise indistinguishable. */}
-        <span title={name} style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 650,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {name}
-        </span>
-        {chip}
-      </div>
-      {subtitle && (
-        <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 8 }}>{subtitle}</div>
-      )}
-    </Link>
-  )
-}
-
-function Empty({ text, cta }: { text: string; cta?: React.ReactNode }) {
-  return (
-    <div className="card" style={{ padding: '26px 20px', textAlign: 'center', color: 'var(--muted)' }}>
-      <p style={{ fontSize: 13, margin: 0 }}>{text}</p>
-      {cta && <div style={{ marginTop: 12 }}>{cta}</div>}
-    </div>
-  )
-}
+const RECENT = 4
 
 export default function Home() {
   const t = useT()
+  const user = useOptionalAuth()?.user ?? null
+  const isAdmin = !!user?.role?.is_org_admin
+  const { offline } = useAiOffline()
+  const askRef = useRef<HTMLInputElement>(null)
+  const navigate = useNavigate()
+
   const [reports, setReports] = useState<Report[]>([])
   const [datasets, setDatasets] = useState<DatasetSummary[]>([])
-  const [recent, setRecent] = useState<RecentReport[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<unknown>(null)
-  // Set when a card is clicked. React Router 7 wraps navigation in a
-  // transition, so the router's Suspense fallback never shows while the next
-  // (lazy) page loads -- Home just sits there looking unresponsive. Home
-  // unmounts once the new page renders, which clears this naturally.
+  // Router 7 navigates inside a transition, so the route's Suspense loader
+  // never shows while the next page loads; Home shows it itself.
   const [opening, setOpening] = useState(false)
   const open = () => setOpening(true)
 
   const load = () => {
     setLoadError(null)
     setLoading(true)
-    Promise.all([reportsApi.list(), datasetsApi.list(), reportsApi.recent()])
-      .then(([r, d, rec]) => { setReports(r); setDatasets(d); setRecent(rec) })
+    Promise.all([reportsApi.list(), datasetsApi.list()])
+      .then(([r, d]) => { setReports(r); setDatasets(d) })
       .catch(e => setLoadError(e ?? new Error('failed')))
       .finally(() => setLoading(false))
   }
   useEffect(load, [])
 
-  // Recents comes from the server as real per-user view history (0015).
-  // It was previously the report list sorted by `updated_at`, which answered
-  // "what changed" -- so a dashboard somebody else edited jumped to the top of
-  // YOUR recents, and one you read daily without editing never appeared.
-  const recentDatasets = useMemo(
-    () => [...datasets]
-      .sort((a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime())
-      .slice(0, RECENT_LIMIT),
-    [datasets],
-  )
-  const mine = useMemo(() => reports.filter(r => r.is_mine).slice(0, RECENT_LIMIT), [reports])
+  const recent = useSlot<RecentReport[]>(() => reportsApi.recent(RECENT))
+  const graph = useSlot<LineageGraph>(() => lineageApi.graph())
+  const sources = useSlot<DataSource[]>(() => dataSourcesApi.list())
+  const convs = useSlot(() => agentApi.listConversations())
+  const runs = useSlot<RefreshRunRow[]>(() => monitoringApi.refreshRuns({ limit: 200 }), isAdmin)
+  const activity = useSlot<ActivityRow[]>(() => monitoringApi.activity(200), isAdmin)
 
-  const draftChip = (r: { created_by?: number | null; published?: boolean }) =>
-    r.created_by != null && !r.published ? (
-    <span title={t('home.draftTitle')} aria-label={t('home.draftTitle')} tabIndex={0}
-      style={{ cursor: 'help', fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', flexShrink: 0,
-        border: '1px solid var(--border)', borderRadius: 99, padding: '1px 7px',
-        textTransform: 'uppercase', letterSpacing: '.04em' }}>
-      {t('common.draft')}
-    </span>
-  ) : undefined
+  const digest = useMemo(() => runs.data ? jobsDigest(runs.data) : null, [runs.data])
+  const feed = useMemo(() => activity.data ? feedItems(activity.data, user?.email, reports, datasets) : [],
+    [activity.data, user?.email, reports, datasets])
+
+  const chips = useMemo<HeroChips | null>(() => {
+    const d = recentDatasets(datasets).filter(askable).find(x => Array.isArray(x.columns) && x.columns.length)
+    return d ? { datasetId: d.id, datasetName: d.name, questions: datasetSuggestions(d.columns, t).slice(0, 4) } : null
+  }, [datasets, t])
 
   if (opening) return <Loader label={t('common.loading')} />
 
@@ -179,87 +112,81 @@ export default function Home() {
     )
   }
 
+  const n = (v: number) => localDigits(v.toLocaleString('en-US'))
+  const firstRun = !loading && !datasets.length && !reports.length
+  const setUp = loading || (datasets.length > 0 && reports.length > 0)
+  const noData = !loading && !datasets.length && !(sources.data?.length)
+  const askLocked = noData || offline
+  const focusAsk = () => askRef.current?.focus()
+  const name = (() => { const h = handle(user?.email); return h === '?' ? '' : h[0].toUpperCase() + h.slice(1) })()
+
+  // ── tiles ──
+  const published = reports.filter(r => r.published).length
+  const rows = datasets.reduce((s, d) => s + (d.mode === 'directquery' ? 0 : d.row_count ?? 0), 0)
+  const types = [...new Set((sources.data ?? []).map(s => typeName(s.type)).filter(Boolean))]
+  const lastRefresh = datasets.map(d => d.last_refreshed_at).filter(Boolean).sort().pop() ?? null
+  const failing = graph.data?.datasets.filter(d => d.health === 'failing').length ?? 0
+  const refreshSub = (): Pick<Tile, 'sub' | 'tone' | 'onRetry'> => {
+    if (isAdmin) {
+      if (runs.error) return { sub: t('hm.tile.failed'), onRetry: runs.reload }
+      if (!digest || runs.loading) return { sub: '…' }
+      if (!digest.total) return { sub: t(runs.data?.length ? 'hm.tile.noJobs24' : 'hm.tile.noJobs') }
+      return digest.failed
+        ? { sub: t('hm.tile.jobsFailed', { n: n(digest.failed), of: n(digest.total) }), tone: 'warn' }
+        : { sub: t('hm.tile.jobsOk', { of: n(digest.total) }), tone: 'ok' }
+    }
+    if (graph.error) return { sub: t('hm.tile.failed'), onRetry: graph.reload }
+    if (!graph.data) return { sub: '…' }
+    return failing ? { sub: t('hm.tile.failing', { n: n(failing) }), tone: 'err' } : { sub: t('hm.tile.noneFailing'), tone: 'ok' }
+  }
+  const tiles: Tile[] = [
+    { key: 'dashboards', icon: LayoutDashboard, label: t('nav.dashboards'), value: n(reports.length), to: '/reports',
+      sub: reports.length ? t('hm.tile.published', { n: n(published) }) : t('hm.tile.none') },
+    { key: 'datasets', icon: Database, label: t('nav.datasets'), value: n(datasets.length), to: '/datasets',
+      sub: datasets.length ? t('hm.tile.rows', { n: n(rows) }) : t('hm.tile.none') },
+    sources.error
+      ? { key: 'connections', icon: Plug, label: t('nav.connections'), value: '—', to: '/connections', sub: t('hm.tile.failed'), onRetry: sources.reload }
+      : { key: 'connections', icon: Plug, label: t('nav.connections'), value: sources.data ? n(sources.data.length) : '…', to: '/connections',
+          sub: sources.data?.length ? types.join(' · ') : t('hm.tile.none') },
+    { key: 'refresh', icon: RefreshCw, label: t('hm.tile.lastRefresh'), textual: true, to: isAdmin ? '/monitoring/jobs' : '/datasets',
+      value: lastRefresh ? formatTimeAgo(lastRefresh, t) ?? '—' : '—',
+      ...(lastRefresh || isAdmin ? refreshSub() : { sub: t('hm.tile.noRefreshes') }) },
+  ]
+
+  const byId = new Map(reports.map(r => [r.id, r]))
+  const continueItems = (recent.data ?? []).map(r => ({
+    id: r.id, name: r.name, when: formatTimeAgo(r.viewed_at, t), widgets: byId.has(r.id) ? firstPageWidgets(byId.get(r.id)) : null,
+  }))
+
+  const main = <>
+    <DashboardsSection reports={reports} isAdmin={isAdmin} loading={loading} onOpen={open}
+      onRename={(id, nm) => setReports(rs => rs.map(r => r.id === id ? { ...r, name: nm } : r))}
+      onDelete={id => setReports(rs => rs.filter(r => r.id !== id))} />
+    <DatasetsSection datasets={datasets} graph={graph.data} graphFailed={graph.error} onRetryGraph={graph.reload}
+      loading={loading} meId={user?.id ?? null} onOpen={open} />
+  </>
+
   return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 22, flexWrap: 'wrap' }}>
-        <div>
-          <h1 className="dl-page-title" style={{ marginBottom: 3 }}>{t('nav.home')}</h1>
-          <p style={{ color: 'var(--muted)', fontSize: 13, margin: 0 }}>
-            {t('home.subtitle')}
-          </p>
-        </div>
+    <div className="dl-hm" aria-busy={loading || undefined}>
+      <div className="hm-toprow">
+        <Hero ref={askRef} name={name} firstRun={firstRun} noData={noData} offline={offline} loading={loading} chips={chips} />
+        <Stats tiles={tiles} loading={loading} />
       </div>
-
-      {loading && <p style={{ color: 'var(--muted)' }}>{t('common.loading')}</p>}
-
-      {!loading && (
-        <>
-          <Section title={t('home.recents')} testId="home-recents">
-            {recent.length === 0 ? (
-              <Empty text={t('home.recentsEmpty')} />
-            ) : (
-              <div style={cardGrid}>
-                {recent.map(r => (
-                  <EntityCard key={r.id} onOpen={open} to={`/reports/${r.id}`} icon={LayoutDashboard}
-                    testId={`home-recent-${r.id}`}
-                    name={r.name} chip={draftChip(r)}
-                    subtitle={formatTimeAgo(r.viewed_at, t)
-                      && t('home.opened', { when: formatTimeAgo(r.viewed_at, t)! })} />
-                ))}
-              </div>
-            )}
-          </Section>
-
-          <Section title={t('nav.dashboards')} testId="home-dashboards"
-            action={<Link to="/reports" style={{ fontSize: 12, color: 'var(--accent)',
-              textDecoration: 'none' }}>{t('common.viewAll')}</Link>}>
-            {reports.length === 0 ? (
-              <Empty text={t('home.dashboardsEmpty')} />
-            ) : (
-              <div style={cardGrid}>
-                {(mine.length > 0 ? mine : reports.slice(0, RECENT_LIMIT)).map(r => (
-                  <EntityCard key={r.id} onOpen={open} to={`/reports/${r.id}`} icon={LayoutDashboard}
-                    name={r.name} chip={draftChip(r)}
-                    subtitle={r.my_capability === 'view'
-                      ? t('home.viewOnly')
-                      : formatTimeAgo(r.updated_at, t)
-                        && t('home.modified', { when: formatTimeAgo(r.updated_at, t)! })} />
-                ))}
-              </div>
-            )}
-          </Section>
-
-          <Section title={t('nav.datasets')} testId="home-datasets"
-            action={<Link to="/datasets" style={{ fontSize: 12, color: 'var(--accent)',
-              textDecoration: 'none' }}>{t('common.viewAll')}</Link>}>
-            {datasets.length === 0 ? (
-              <Empty text={t('home.datasetsEmpty')} />
-            ) : (
-              <div style={cardGrid}>
-                {recentDatasets.map(d => (
-                  <EntityCard key={d.id} onOpen={open} to={`/datasets/${d.id}`} icon={Database}
-                    testId={`home-dataset-${d.id}`}
-                    name={d.name}
-                    chip={d.mode === 'directquery' ? (
-                      <span title={t('home.liveTitle')} style={{ fontSize: 10.5, fontWeight: 700,
-                        color: 'var(--accent)', flexShrink: 0, background: 'var(--accent-soft)',
-                        borderRadius: 99, padding: '1px 7px', textTransform: 'uppercase' }}>{t('common.live')}</span>
-                    ) : undefined}
-                    subtitle={d.mode === 'directquery'
-                      // A live dataset is queried at its source, so nobody has
-                      // counted its rows -- `row_count` is absent, not zero, and
-                      // "0 rows" states something false about the data.
-                      ? t('home.colsOnly', { cols: (d.col_count ?? 0).toLocaleString() })
-                      : t('home.rowsCols', {
-                        rows: (d.row_count ?? 0).toLocaleString(),
-                        cols: (d.col_count ?? 0).toLocaleString(),
-                      })} />
-                ))}
-              </div>
-            )}
-          </Section>
-        </>
-      )}
+      {setUp
+        ? <Quick onAsk={askLocked ? undefined : focusAsk} askTo={askLocked ? '/ask' : undefined} />
+        : <Onboarding done={[datasets.length > 0, reports.length > 0, (convs.data?.length ?? 0) > 0]}
+            onAsk={askLocked ? () => navigate('/ask') : focusAsk} />}
+      <Continue items={continueItems.slice(0, RECENT)} loading={loading || recent.loading} error={recent.error}
+        onRetry={recent.reload} onOpen={open} />
+      {isAdmin ? (
+        <div className="hm-bot">
+          <div className="hm-colm">{main}</div>
+          <div className="hm-cola">
+            <ActivityCard items={feed} loading={loading || activity.loading} error={activity.error} onRetry={activity.reload} />
+            <JobsCard digest={digest} loading={runs.loading} error={runs.error} onRetry={runs.reload} />
+          </div>
+        </div>
+      ) : <div className="hm-colm">{main}</div>}
     </div>
   )
 }

@@ -62,6 +62,9 @@ export interface ChatPaneProps {
   /** Mounted inside a dashboard: "Add to this page" puts the answer straight
    *  onto the page being edited, instead of asking which dashboard. */
   onAddToPage?: (draft: WidgetDraft, title: string) => unknown
+  /** A question to start the box with (Home's question box and its starters
+   *  hand one over through `/ask?q=`). Put in the box, never sent for you. */
+  initialInput?: string
 }
 
 type MessageKind = 'answer' | 'clarify' | 'error' | 'limit'
@@ -135,7 +138,7 @@ function isProposals(p: unknown): p is DashboardProposalsPresentation {
 }
 
 export default function ChatPane({ dataSourceId, datasetIds, conversationId, onConversationCreated,
-  suggestions, datasetColumns, onAddToPage }: ChatPaneProps) {
+  suggestions, datasetColumns, onAddToPage, initialInput }: ChatPaneProps) {
   const t = useT()
   const { direction } = useDirection()
   // Model and server text: markup rendered, laid out by its majority script.
@@ -156,7 +159,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [input, setInput] = useState('')
+  const [input, setInput] = useState(initialInput ?? '')
   const [busy, setBusy] = useState(false)
   /** The question currently in flight, so the pending bubble can name the
    *  work. "Designing dashboards · 2m 14s" reads very differently from a
