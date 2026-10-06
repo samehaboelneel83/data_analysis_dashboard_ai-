@@ -32,3 +32,21 @@ export function canvasH(widgets: Widget[]) {
   if (!widgets.length) return 560
   return Math.max(560, Math.max(...widgets.map(w => w.layout.y + w.layout.h)) * (ROW_H + GAP) + 80)
 }
+
+/**
+ * QA3 A2: the widget under a point on the canvas, by its drawn box, topmost
+ * first. A drop used to read `e.target.closest('[data-widget-id]')`, which
+ * misses whenever something not inside the widget is drawn over it. Boxes are
+ * screen coordinates, so zoom and right-to-left need no special case.
+ */
+export function widgetIdAtPoint(canvas: Element, x: number, y: number): number | null {
+  const tiles = [...canvas.querySelectorAll<HTMLElement>('[data-widget-id]')].reverse()
+  for (const el of tiles) {
+    const r = el.getBoundingClientRect()
+    if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+      const id = Number(el.getAttribute('data-widget-id'))
+      if (id) return id
+    }
+  }
+  return null
+}

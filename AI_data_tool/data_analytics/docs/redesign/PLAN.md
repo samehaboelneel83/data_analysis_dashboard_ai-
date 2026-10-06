@@ -105,9 +105,14 @@ Nothing is pushed.
   - >> GATE E: stop, report the Builder
 - [x] 7-QA2 Fixes from the second QA report `/media/saeed/New Volume1/projects/redesign-captures/qa-2/QA_REPORT_2.md` (owner, after GATE E): Broken N1 (raw JSX on the Insights button), N2 (Version history and opening a dashboard must not force Edit mode; check v1), N3 (39 revisions at 13:01 with repeated numbers: display bug or autosave), N4 (Arabic hover toolbar covers the widget ⋮ menu), N5 (one-line `key` fix in CustomGraphRenderer.tsx only); B8 with the QA steps exactly; V1 and V4 at 1280 px and 125% zoom; V10 leftovers (dark Data table white square, Platform settings context column); Visual 6–10; Translation 10, 11, 12, 14, 15 and the Key influencers footnotes. A failing test before each fix where possible; before/after captures. B3, B4/13/16 and B6 go to "Backend follow-ups"; the remaining T1 items stay in 8-i18n.
   - >> stop and report
-- [ ] 8-i18n The QA report's T1 strings on pages the redesign has not reached (Glossary, Organizations, Platform settings, Admin settings Basemap, Org units, Row/column security, API keys, Custom connectors, SSO, Maps, Models "random forest", Activity codes, Connections "Combine databases")
+- [ ] 7-QA3 Fixes from the third QA report `/media/saeed/New Volume1/projects/redesign-captures/qa-3/QA_REPORT_3.md` (owner): Batch A builder behaviour (A1–A10); Batch B builder visuals (B1–B6); Batch C builder Arabic (ar.ts) with a check against hard-coded English in Builder components; Batch D round-2 leftovers (D1 breadcrumb at 125%, D2 dark tooltip label, D3 list ⋯ column, D4 one locale-driven date formatter, D5 Insights number isolation).
+  - [x] Batch A
+  - >> GATE A: stop, captures EN + AR before/after
+  - [ ] Batches B–D
+  - >> GATE B–D: stop, captures EN/AR × light/dark
+- [ ] 8-i18n The QA report's T1 strings on pages the redesign has not reached (Glossary, Organizations, Platform settings, Admin settings Basemap, Org units, Row/column security, API keys, Custom connectors, SSO, Maps, Models "random forest", Activity codes, Connections "Combine databases"). QA3 adds: Glossary "Business terms"; Admin Settings Basemap; Platform settings, including the endpoint list scrambled in RTL; SSO "Issuer URL", "Client ID" and the redirect line.
 - [ ] Then: Upload, Connections, Lineage, the AI button
-- [ ] FINAL Full regression: all tests, build, capture every screen, compare against all designs, final summary, fix the flaky `Lineage.test.tsx` (and watch `geoRenderers.test.tsx`), and a clean-up list (test datasets 7 and 8, chat threads, the uncommitted init.sql edit)
+- [ ] FINAL Full regression: all tests, build, capture every screen, compare against all designs, final summary, fix the flaky `Lineage.test.tsx` (and watch `geoRenderers.test.tsx`), and a clean-up list (test datasets 7 and 8, chat threads, the uncommitted init.sql edit). QA3 adds: dashboard "QA3-Builder" #16 (made 00:01; share link made and revoked 00:02–00:03; not made by the QA3 run, so the owner decides), and the cached insights QA3 may have saved on "Demo — Sales" and in the Builder AI panel.
   - >> GATE F: stop, final report
 
 ## Backend follow-ups (found during the frontend steps)
@@ -153,8 +158,9 @@ Not part of the frontend steps (1–7); candidates for the handoff's section 7 p
 | 7-QA2 B3 | Clarifications name columns the dataset doesn't have ("sales by department"), so no column chips can be offered | The model must name real columns (AN1: ground the clarification on the dataset's columns). |
 | 7-QA2 B4 / 13 / 16 | Answers (and clarifications) come back in a language other than the UI's: an Arabic follow-up answered in English, the AI panel in English in the Arabic UI, an Arabic clarification in the English UI | The answer language must follow the UI language (AP3), sent with each question. |
 | 7-QA2 B6 | "average by" took about 3.5 minutes; an Arabic follow-up spun for over 2.5 minutes with no cancel | A server-side timeout and a Stop / cancel endpoint (AN2). |
+| 7-QA3 N3 (top priority) | Re-checked in QA3: still open at the root. QA2 only grouped the burst in the history ("39 changes"). Opening a page with no layout mode in Edit still runs the automatic packing, which sends one `updateWidget` per widget in parallel (`persistWidgetLayouts`), so the server snapshots a version per widget. `VERSIONS_KEPT = 50` (`routers/reports.py`), so one such open can push most of the older history out. | One version per user action: a batch layout endpoint (or coalescing saves seconds apart), an atomic revision increment, and retention that counts actions rather than rows. |
 | 7-QA2 N3 | One automatic layout pass (Executive packing when a page is first edited) left 39 versions in half a second, with repeated revision numbers; the burst can also push older versions past the retention window | Every widget save snapshots a version and the revision is read-then-bumped without a lock. Needs one version per user action (a batch layout endpoint, or coalescing saves seconds apart) and an atomic revision increment. The history now shows such a burst as one entry. |
-| 7-QA2 T12 | Insights narrative, finding titles and details are English in the Arabic UI | The insights endpoint takes no language; the engine writes English. Needs the UI language on the request (AP3). The pane's own words are translated. |
+| 7-QA2 T12 (seen again in QA3) | Insights narrative, finding titles and details are English in the Arabic UI | The insights endpoint takes no language; the engine writes English. Needs the UI language on the request (AP3). The pane's own words are translated. |
 | 7-QA B6 | Ask AI is slow (about 70 s for a simple answer, about 4 min before a clarification), with no timeout or cancel | Needs a server-side timeout and a cancel endpoint (AN2: stream progress + cancel). |
 
 ## Log
@@ -713,3 +719,54 @@ errors). The owner's decisions are in the note above the 7a–7e list.
 - Before (the QA's screenshots) and after captures are in `/media/saeed/New Volume1/projects/redesign-captures/qa-2-fixes/{before,after}/`.
 - B3, B4/13/16, B6, N3 and T12 are in "Backend follow-ups". The remaining T1 items stay in 8-i18n.
 
+
+### 7-QA3 Fixes from the third QA report — Batch A (builder behaviour), the commit that adds this entry
+
+The QA3 report and screenshots were not on this machine. `qa-3/QA_REPORT_3.md` is rebuilt from the step brief; the QA's screenshots still need to be added to that folder.
+
+**Fixed:**
+- **A1** One selection rule (`reportBuilder/selection.ts`).
+  - When the multi-set is in use, it holds every selected widget, including the one first selected by a plain click. That one used to be outlined but not counted.
+  - The last widget added is the primary, so Properties follows the latest click.
+  - Shift+click on a selected widget removes it, and one left becomes a single selection. Escape and the ✕ clear both.
+- **A2 / A3** A field drop finds its widget by the pointer against the drawn tile boxes (`widgetIdAtPoint`), not by `e.target.closest(...)`. An overlay drawn over a tile but outside it lost the drop.
+  - Not reproduced headless: Playwright drops worked in EN and AR before the change.
+  - Fixed by the likely cause; pinned by a unit test (overlay on top, RTL) and a builder test (a drop event on the canvas itself fills the KPI's measure).
+- **A4** The quick toolbar's Filters sends the Assign data event with `tab: 'Filters'` and `open: false`. The panel opens Data › Filters, with no dialog.
+- **A5**
+  - Properties seeds its fields per widget. It now remounts (`panelEpoch`) after a change made outside it: a drop or a fix on the widget, Convert to, or a field click.
+  - The page panel follows `page.name`. It skips the name it sent itself, so a save landing mid-typing never rolls the field back, and the sync saves nothing.
+- **A6** In Edit, a click on a mark selects the widget only: `handleClick` returns before any cross-filter.
+  - Decomposition drill (navigation inside the widget) and slicer/text-filter controls are unchanged.
+  - View and Present still filter by clicking.
+- **A7** Two causes.
+  - (1) Drag, resize and the arrow nudge measured from the stored layout. On a page still auto-packed, that is not where the widget is drawn. The packed preview was also dropped as soon as a drag began, so every widget jumped.
+  - (2) `dropPacked` compacted the whole page, floating the dropped widget up and sliding others into its hole.
+  - Now the drop cell is where it lands. Only widgets it collides with are pushed down (cascading), and the ≥35% swap is kept. Resize, duplicate and delete still compact as before.
+- **A8** `lib/readingOrder.ts`: top→bottom, then start→end (right→left in Arabic; the canvas itself is not mirrored).
+  - Computed from the drawn layout, so it follows moves.
+  - A Tab order set by the author (`tabIndex`) wins, and widgets without one follow in reading order.
+  - Used by Tab order, Selection, the Mobile layout's unplaced widgets and the phone stack. In View the canvas DOM is in that order, so the keyboard follows the eye.
+- **A9** Every entry to Edit folds the app rail to icons. 7e1 folded only the first time.
+- **A10** A duplicate is placed under the original as drawn, selected alone, and scrolled into view. Escape also blurs a focused tile.
+
+**Tests:**
+- New: selection (5), dashboardLayout drops (2), widgetIdAtPoint (3), readingOrder (5), page-name sync (2), the Filters tab (1), Edit-click no filter (1), builder count + Escape (1), drop on a KPI by pointer (1).
+- Re-pinned:
+  - 7e4 multi-select now clicks A, then Shift+clicks B (it relied on Shift+clicking A twice).
+  - S6 now expects the rail to fold again on View → Edit.
+  - Drillthrough: the click-to-drill test runs in View.
+- A failing test before each fix, except A2 (not reproduced; likely cause).
+
+**Captures:**
+- `e2e/capture/redesign/cap_qa3_a.mjs` uses one scratch dashboard per scene, made and deleted through the API. Results are read back from the API.
+- Before is HEAD served from a worktree on :3002; after is :3001.
+- Folders: `/media/saeed/New Volume1/projects/redesign-captures/qa-3-fixes/{before,after}/A*`, in light, dark, Arabic and Arabic dark.
+- Reproduced headless on the old build: A4 (opened All), A6 ("1 filter" chips on every widget), A8 (order scrambled), A9 (rail expanded).
+- Not reproduced headless: A2, A3, A7. Drops and moves worked there on a free-layout page.
+- After: every item checks out in all four modes. A7 was also run on a packed page in EN and AR: KPI 1 lands on row 8, nothing else moves.
+
+**Recorded, not fixed (see Plan and Backend follow-ups):**
+- N3 re-checked: still open at the root, top backend item.
+- 8-i18n and FINAL additions.
+- N7: re-test in QA4.

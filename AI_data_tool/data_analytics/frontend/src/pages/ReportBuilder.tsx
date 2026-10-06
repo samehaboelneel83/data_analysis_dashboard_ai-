@@ -102,6 +102,8 @@ import PageTabs from './reportBuilder/PageTabs'
 import SaveState from './reportBuilder/SaveState'
 import ZoomControl, { ZOOM_MAX, ZOOM_MIN } from './reportBuilder/ZoomControl'
 import ShortcutsDialog from './reportBuilder/ShortcutsDialog'
+import { clickSelection, selectionCount } from './reportBuilder/selection'
+import { readingOrder, tabOrder } from '../lib/readingOrder'
 import BuilderSkeleton from './reportBuilder/BuilderSkeleton'
 import TemplatesPane from './reportBuilder/TemplatesPane'
 import { AI_MODES, AiTabs, PanelHead, RightRail } from './reportBuilder/RightRail'
@@ -128,7 +130,7 @@ import {
 
 import {
   COLS, ROW_H, GAP, LEFT_SIDEBAR_W, RIGHT_PANEL_W, SUGGEST_PANEL_W, MIN_CANVAS_W,
-  CLASSIFICATION_LABELS, CLASSIFICATION_COLORS, gridStyle, canvasH,
+  CLASSIFICATION_LABELS, CLASSIFICATION_COLORS, gridStyle, canvasH, widgetIdAtPoint,
 } from './reportBuilder/grid'
 import { SyncSlicersPaneConnected, BookmarksPaneConnected } from './reportBuilder/BookmarksConnected'
 import { SchedulePanel } from './reportBuilder/SchedulePanel'
@@ -202,7 +204,7 @@ function conflictFrom(detail: ConflictDetail, mine: WidgetEdit, pageId: number, 
 }
 
 export default function ReportBuilder() {
-  const { language } = useDirection()
+  const { language, rtl } = useDirection()
   const tr = useT()
   // "Page 3" is the name the app gives a new page; shown in the reader's
   // language (the stored name stays as it is). HR evaluation, item 3.6.
@@ -310,15 +312,12 @@ export default function ReportBuilder() {
   // copilot) all answer to capability through this single line instead of
   // each having to remember to ask.
   const editMode = editModeWanted && canEdit
-  // S6 (redesign 7e1): the builder opens with the icon rail. The first time
-  // edit mode opens in this visit the shell folds the rail (the saved choice
-  // is untouched, and the rail's own toggle still expands it); reading keeps
-  // the full rail, and switching back to editing does not fold it again.
-  const railFolded = useRef(false)
+  // S6 (redesign 7e1): the builder works with the icon rail. Every entry to
+  // edit mode folds it (QA3 A9: View → Edit used to bring back the full rail
+  // and squeeze the canvas); the saved choice is untouched, the rail's own
+  // toggle still expands it, and reading keeps the full rail.
   useEffect(() => {
-    const ask = (on: boolean) => window.dispatchEvent(new CustomEvent('datalytics:builder-compact', { detail: on }))
-    if (editMode && !railFolded.current) { railFolded.current = true; ask(true) }
-    else if (!editMode) ask(false)
+    window.dispatchEvent(new CustomEvent('datalytics:builder-compact', { detail: editMode }))
   }, [editMode])
   useEffect(() => () => { window.dispatchEvent(new CustomEvent('datalytics:builder-compact', { detail: false })) }, [])
   // Measured from the canvas element itself; 900 is only the value before one
@@ -485,6 +484,8 @@ export default function ReportBuilder() {
   // selected widget CHANGES, so without this it kept showing the editor's
   // refused values over the saved ones and its next autosave wrote them back.
   const [panelEpoch, setPanelEpoch] = useState(0)
+  const selectedIdRef = useRef<number | null>(null)
+  selectedIdRef.current = selectedW?.id ?? null
   useEffect(() => { loadedRevisionRef.current = loadedRevision }, [loadedRevision])
 
   // Load report
@@ -1589,6 +1590,10 @@ export default function ReportBuilder() {
       await write(after)
       pushUndo({ label: d.label, undo: () => write(before), redo: () => write(after) })
       await loadReport()
+      // QA3 A5: Properties seeds its fields per widget, so a change made from
+      // outside it (a field dropped on the widget, a fix offered on it) is
+      // shown by remounting it, as after a conflict.
+      if (selectedIdRef.current === d.widgetId) setPanelEpoch(n => n + 1)
     }
     window.addEventListener(PATCH_WIDGET_EVENT, onPatch)
     return () => window.removeEventListener(PATCH_WIDGET_EVENT, onPatch)
@@ -1615,6 +1620,7 @@ export default function ReportBuilder() {
       pushUndo({ label: d.label, undo: () => write(before), redo: () => write(after) })
       toast.success(d.label)
       await loadReport()
+      if (selectedIdRef.current === d.widgetId) setPanelEpoch(n => n + 1)
     }
     window.addEventListener(CONVERT_WIDGET_EVENT, onConvert)
     return () => window.removeEventListener(CONVERT_WIDGET_EVENT, onConvert)
@@ -1748,7 +1754,14 @@ export default function ReportBuilder() {
       // things at once.)
       if (mod && (e.key === '=' || e.key === '+')) { e.preventDefault(); setZoom(z => Math.min(ZOOM_MAX, z + 10)); return }
       if (mod && e.key === '-') { e.preventDefault(); setZoom(z => Math.max(ZOOM_MIN, z - 10)); return }
-      if (e.key === 'Escape') { setSelectedW(null); setShortcutsOpen(false); return }
+      if (e.key === 'Escape') {
+        // QA3 A10: every outline goes: the selection, a multi-selection, and
+        // the focus ring a clicked tile keeps.
+        setSelectedW(null); setMultiSelectedIds(new Set()); setShortcutsOpen(false)
+        const f = document.activeElement as HTMLElement | null
+        if (f?.closest?.('[data-canvas]')) f.blur()
+        return
+      }
       if (!selectedW || !activePage) return
       if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); void widgetActionsRef.current.duplicateWidget(selectedW); return }
       const arrows: Record<string, [number, number]> = {
@@ -1757,15 +1770,17 @@ export default function ReportBuilder() {
       if (e.key in arrows) {
         e.preventDefault()
         const [dx, dy] = arrows[e.key]
-        const items = toLayoutItems(activePage.widgets)
+        // From where the widgets are drawn (QA3 A7), as a drag is.
+        const items = toLayoutItems(activePage.widgets.map(w => ({ ...w, layout: packedPreviewRef.current[w.id] ?? w.layout })))
+        const cur = items.find(i => i.id === selectedW.id)?.layout ?? selectedW.layout
         const packed = isPackedMode(activePage.layout_mode)
         const next = e.shiftKey
           ? (packed
-            ? resizePacked(items, selectedW.id, selectedW.layout.w + dx, selectedW.layout.h + dy)
-            : resizeFree(items, selectedW.id, selectedW.layout.w + dx, selectedW.layout.h + dy))
+            ? resizePacked(items, selectedW.id, cur.w + dx, cur.h + dy)
+            : resizeFree(items, selectedW.id, cur.w + dx, cur.h + dy))
           : (packed
-            ? dropPacked(items, selectedW.id, { x: selectedW.layout.x + dx, y: selectedW.layout.y + dy })
-            : dropFree(items, selectedW.id, { x: selectedW.layout.x + dx, y: selectedW.layout.y + dy }))
+            ? dropPacked(items, selectedW.id, { x: cur.x + dx, y: cur.y + dy })
+            : dropFree(items, selectedW.id, { x: cur.x + dx, y: cur.y + dy }))
         void persistWidgetLayouts(activePage, next, undefined,
           `${e.shiftKey ? 'Resize' : 'Move'} "${selectedW.title || selectedW.widget_type}"`)
         if (next[selectedW.id]) setSelectedW({ ...selectedW, layout: next[selectedW.id] })
@@ -1842,7 +1857,9 @@ export default function ReportBuilder() {
             ? { show_subtotals: true, totals_position: 'after' } : {}),
           ...(w.config as Record<string, unknown>),
         },
-        layout: { ...w.layout, y: w.layout.y + w.layout.h },
+        // Below the original as it is drawn (an auto-packed page is not where
+        // its stored layout says).
+        layout: (() => { const at = shownLayout(w); return { ...at, y: at.y + at.h } })(),
       })
       {
         const pageId = activePage.id
@@ -1861,7 +1878,12 @@ export default function ReportBuilder() {
         )
       }
       await loadReport()
+      // QA3 A10: the copy is selected alone and brought into view; placed
+      // below its original it often landed off-screen.
+      setMultiSelectedIds(new Set())
       setSelectedW(copy)
+      setTimeout(() => document.querySelector(`[data-widget-id="${copy.id}"]`)
+        ?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }), 60)
       toast.success('Duplicated')
     } catch {
       toast.error('Could not duplicate this widget')
@@ -1903,19 +1925,23 @@ export default function ReportBuilder() {
   // identity between unrelated renders. Handlers route through refs holding
   // the LATEST implementation, so the callback identities never change while
   // the behavior always tracks current state.
-  const widgetActionsRef = useRef({ deleteWidget, duplicateWidget, selectWidget: (w: Widget, e: React.MouseEvent) => {
-    if (e.shiftKey) {
-      setMultiSelectedIds(prev => { const next = new Set(prev); next.has(w.id) ? next.delete(w.id) : next.add(w.id); return next })
-    } else {
-      setSelectedW(w)
-      setMultiSelectedIds(new Set())
-    }
-  } })
+  // QA3 A1: one rule (selection.ts) for plain and Shift clicks, so the count,
+  // the outlines and Properties agree. Refreshed every render below: it reads
+  // the current selection and page.
+  const selectWidget = (w: Widget, e: React.MouseEvent) => {
+    const next = clickSelection({ primary: selectedW?.id ?? null, multi: multiSelectedIds }, w.id, e.shiftKey)
+    setMultiSelectedIds(new Set(next.multi))
+    setSelectedW(next.primary == null ? null
+      : next.primary === w.id ? w
+      : (activePage?.widgets.find(x => x.id === next.primary) ?? null))
+  }
+  const widgetActionsRef = useRef({ deleteWidget, duplicateWidget, selectWidget })
   // Both refreshed every render, not just seeded in the initial ref value: the
   // one in the initial value is a closure over the FIRST render, where
   // `activePage` is still null and the action returns immediately.
   widgetActionsRef.current.deleteWidget = deleteWidget
   widgetActionsRef.current.duplicateWidget = duplicateWidget
+  widgetActionsRef.current.selectWidget = selectWidget
   const stableOnSetParameter = useCallback((name: string, value: string) =>
     setParamValues(prev => ({ ...prev, [name]: value })), [])
 
@@ -2220,7 +2246,8 @@ export default function ReportBuilder() {
       toast(`"${w.title || w.widget_type}" has no empty field left for ${columnName}`)
       return
     }
-    updateWidgetConfig(plan.config, w.title)
+    // QA3 A5: the open Properties shows the role just filled.
+    void updateWidgetConfig(plan.config, w.title).then(() => setPanelEpoch(n => n + 1))
   }, [liveSelected, updateWidgetConfig, planFieldOnWidget])
 
   // A measure always goes to the measure role — it is already an aggregate, so it has
@@ -2350,6 +2377,11 @@ export default function ReportBuilder() {
   }
 
   // ── Drag ─────────────────────────────────────────────────────────────────
+  // What the canvas draws for a widget: a drag in progress, else the page's
+  // automatic packing (set below, where it is computed), else the stored layout.
+  const packedPreviewRef = useRef<Record<number, Widget['layout']>>({})
+  const shownLayout = useCallback((w: Widget) =>
+    localLayoutsRef.current[w.id] ?? packedPreviewRef.current[w.id] ?? w.layout, [])
   const handleDragStart = useCallback((widget: Widget) => (e: React.MouseEvent) => {
     e.preventDefault()
     const canvasEl = canvasRef.current
@@ -2361,16 +2393,17 @@ export default function ReportBuilder() {
     const rect = canvasEl.getBoundingClientRect()
     const scale = zoom / 100
     const cellW = (containerW - GAP * (COLS - 1)) / COLS
-    const widgetLeft = widget.layout.x * (cellW + GAP)
-    const widgetTop  = widget.layout.y * (ROW_H + GAP)
-    const items = toLayoutItems(activePage.widgets.map(w => ({
-      ...w,
-      layout: localLayoutsRef.current[w.id] ?? w.layout,
-    })))
+    // QA3 A7: from where the widgets are DRAWN. On a page still auto-packed,
+    // the stored layout is not what is on screen: measuring the grab from it
+    // dropped the widget rows away from the pointer, and the others jumped.
+    const shown = shownLayout(widget)
+    const widgetLeft = shown.x * (cellW + GAP)
+    const widgetTop  = shown.y * (ROW_H + GAP)
+    const items = toLayoutItems(activePage.widgets.map(w => ({ ...w, layout: shownLayout(w) })))
     setDragging({
       widgetId: widget.id,
       startX: e.clientX, startY: e.clientY,
-      layout: widget.layout,
+      layout: shown,
       offsetX: (e.clientX - rect.left) / scale - widgetLeft,
       offsetY: (e.clientY - rect.top)  / scale - widgetTop,
       packed: isPackedMode(activePage.layout_mode),
@@ -2382,12 +2415,9 @@ export default function ReportBuilder() {
     e.preventDefault()
     if (!activePage) return
     setResizing({
-      widgetId: widget.id, startX: e.clientX, startY: e.clientY, layout: widget.layout,
+      widgetId: widget.id, startX: e.clientX, startY: e.clientY, layout: shownLayout(widget),
       packed: isPackedMode(activePage.layout_mode),
-      items: toLayoutItems(activePage.widgets.map(w => ({
-        ...w,
-        layout: localLayoutsRef.current[w.id] ?? w.layout,
-      }))),
+      items: toLayoutItems(activePage.widgets.map(w => ({ ...w, layout: shownLayout(w) }))),
     })
   }, [activePage])
 
@@ -2477,11 +2507,14 @@ export default function ReportBuilder() {
   // Localised widget objects, memoized per (widgets, layouts, translations):
   // a fresh object per render would defeat React.memo on WidgetRenderer.
   // Declared ABOVE the !report early return -- hooks must run every render.
+  // Kept while dragging (QA3 A7): blanking it made every widget jump back to
+  // its stored place the moment a drag began. The drag's own layouts win anyway.
   const packedPreview = useMemo(() => {
-    if (!activePage?.widgets.length || dragging || resizing) return {} as Record<number, Widget['layout']>
+    if (!activePage?.widgets.length) return {} as Record<number, Widget['layout']>
     if (!needsAutoPack(activePage.layout_mode)) return {}
     return applyLayoutRecipe(toLayoutItems(activePage.widgets), DEFAULT_RECIPE)
-  }, [activePage, dragging, resizing])
+  }, [activePage])
+  packedPreviewRef.current = packedPreview
   const localisedWidgets = useMemo(() => {
     const m = new Map<number, Widget>()
     for (const w of (activePage?.widgets ?? [])) {
@@ -2490,6 +2523,10 @@ export default function ReportBuilder() {
     return m
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePage?.widgets, localLayouts, packedPreview, localise])
+  // The page's widgets where the canvas draws them (a drag, the automatic
+  // packing, else stored): what reading and Tab order are taken from (QA3 A8).
+  const shownWidgets = useMemo(() => (activePage?.widgets ?? []).map(w =>
+    ({ ...w, layout: localLayouts[w.id] ?? packedPreview[w.id] ?? w.layout })), [activePage?.widgets, localLayouts, packedPreview])
   const activePromptFilter = useMemo(() =>
     activePage && activePage.prompt_column && promptValues[activePage.id]
       ? { column: activePage.prompt_column, value: promptValues[activePage.id] }
@@ -2602,7 +2639,7 @@ export default function ReportBuilder() {
                     {selectedW && <small className="ty" dir="ltr">{selectedW.widget_type}</small>}
                     {selectedW && (
                       <button aria-label="Deselect widget" title="Deselect widget" className="dl-bd-ib x"
-                        onClick={() => setSelectedW(null)}>
+                        onClick={() => { setSelectedW(null); setMultiSelectedIds(new Set()) }}>
                         <X size={14} aria-hidden />
                       </button>
                     )}
@@ -3785,8 +3822,7 @@ export default function ReportBuilder() {
               <div data-testid="mobile-stack" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {(() => {
                   if (!datasetsReady) return null
-                  const byPosition = [...pageWidgets].sort((a, b) =>
-                    ((a.layout as any)?.y ?? 0) - ((b.layout as any)?.y ?? 0) || ((a.layout as any)?.x ?? 0) - ((b.layout as any)?.x ?? 0))
+                  const byPosition = readingOrder(shownWidgets, rtl)
                   const knownIds = byPosition.map(w => w.id)
                   const savedOrder = (activePage.mobile_layout?.order ?? []).filter(id => knownIds.includes(id))
                   const missing = knownIds.filter(id => !savedOrder.includes(id))
@@ -3832,7 +3868,7 @@ export default function ReportBuilder() {
                 onDragOver={e => { if (e.dataTransfer.types.includes('application/x-fields') || e.dataTransfer.types.includes('application/x-field') || e.dataTransfer.types.includes('application/x-hierarchy')) {
                   e.preventDefault(); e.dataTransfer.dropEffect = 'copy'
                   const single = e.dataTransfer.types.includes('application/x-field') && !e.dataTransfer.types.includes('application/x-fields')
-                  const wid = single ? Number((e.target as HTMLElement).closest?.('[data-widget-id]')?.getAttribute('data-widget-id')) || null : null
+                  const wid = single ? widgetIdAtPoint(e.currentTarget, e.clientX, e.clientY) : null
                   if (wid !== dropTargetId) setDropTargetId(wid)
                 } }}
                 onDragLeave={e => { if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node | null)) setDropTargetId(null) }}
@@ -3854,7 +3890,10 @@ export default function ReportBuilder() {
                     // Dropped ON a widget: fill its next empty compatible role
                     // (SAS's drop-onto-object). Anywhere else, or a widget with
                     // no room left, makes a new chart -- and says which.
-                    const wid = Number((e.target as HTMLElement).closest?.('[data-widget-id]')?.getAttribute('data-widget-id'))
+                    // QA3 A2: by the pointer, not by the element under it. An
+                    // overlay drawn over the widget (outlines, the size tag,
+                    // the hover toolbar) is not inside it, and lost the drop.
+                    const wid = widgetIdAtPoint(e.currentTarget, e.clientX, e.clientY)
                     const target = wid ? pageWidgets.find(w => w.id === wid) : undefined
                     const col = columns.find(c => c.name === field)
                     const plan = target && col ? planFieldOnWidget(target, field, isNumericField(col)) : null
@@ -3920,7 +3959,10 @@ export default function ReportBuilder() {
                     </>)}
                   </div>
                 )}
-                {datasetsReady && pageWidgets
+                {/* QA3 A8: for a reader the DOM is in Tab order (reading order
+                    unless the author set one), so Tab moves as the eye does.
+                    Positions are absolute, so nothing moves on screen. */}
+                {datasetsReady && (editMode ? pageWidgets : tabOrder(shownWidgets, rtl).map(w => pageWidgets.find(x => x.id === w.id)!))
                   .filter(w => editMode || !(w.config as any).hidden)
                   /* A widget assigned to a container renders INSIDE it, so it is
                      skipped at canvas level -- rendering both places would fetch and
@@ -3968,7 +4010,10 @@ export default function ReportBuilder() {
                             setSelectedW(widget); setRightPanelMode('default'); setPropSection('data'); setRightOpenSignal(n => n + 1)
                             setTimeout(() => window.dispatchEvent(new CustomEvent(ASSIGN_DATA_EVENT, { detail: { widgetId: widget.id } })), 0)
                           }}
-                          onFilters={() => { setSelectedW(widget); setRightPanelMode('default'); setPropSection('data'); setRightOpenSignal(n => n + 1) }} />
+                          onFilters={() => {
+                            setSelectedW(widget); setRightPanelMode('default'); setPropSection('data'); setRightOpenSignal(n => n + 1)
+                            setTimeout(() => window.dispatchEvent(new CustomEvent(ASSIGN_DATA_EVENT, { detail: { widgetId: widget.id, tab: 'Filters', open: false } })), 0)
+                          }} />
                       )}
                       <WidgetRenderer
                         widget={localisedWidgets.get(widget.id) ?? widget}
@@ -4096,10 +4141,10 @@ export default function ReportBuilder() {
               )}
               {AI_MODES.includes(rightPanelMode) && <AiTabs mode={rightPanelMode} onPick={setRightPanelMode} />}
               {rightPanelMode === 'mobile' && (
-                activePage && <MobileLayoutEditor page={activePage} widgets={pageWidgets} onUpdate={updatePageProps} />
+                activePage && <MobileLayoutEditor page={activePage} widgets={shownWidgets} onUpdate={updatePageProps} />
               )}
               {rightPanelMode === 'selection' && (
-                <SelectionPane widgets={pageWidgets} onUpdate={(id, config) =>
+                <SelectionPane widgets={shownWidgets} onUpdate={(id, config) =>
                   reportsApi.updateWidget(reportId, activePage!.id, id, { config }).then(loadReport)} />
               )}
               {rightPanelMode === 'sync' && <SyncSlicersPaneConnected pages={report.pages} />}
@@ -4108,7 +4153,7 @@ export default function ReportBuilder() {
                   onRestored={loadReport} />
               )}
               {rightPanelMode === 'taborder' && (
-                <TabOrderPane widgets={pageWidgets} onUpdate={(id, config) =>
+                <TabOrderPane widgets={shownWidgets} onUpdate={(id, config) =>
                   reportsApi.updateWidget(reportId, activePage!.id, id, { config }).then(loadReport)} />
               )}
               {rightPanelMode === 'performance' && (
@@ -4407,7 +4452,7 @@ export default function ReportBuilder() {
             pageIndex={report.pages.findIndex(p => p.id === activePage?.id)}
             pageCount={report.pages.length}
             widgets={pageWidgets.length}
-            selected={multiSelectedIds.size || (selectedW ? 1 : 0)}
+            selected={selectionCount({ primary: selectedW?.id ?? null, multi: multiSelectedIds })}
             onShortcuts={() => setShortcutsOpen(true)}
           />
         ) : (

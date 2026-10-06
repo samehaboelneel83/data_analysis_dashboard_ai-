@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, act } from '@testing-library/react'
+import { ASSIGN_DATA_EVENT } from './WidgetPlaceholder'
 import WidgetConfigPanel from './WidgetConfigPanel'
 import { CrossFilterProvider } from './CrossFilterContext'
 import type { Widget } from '../../types/report'
@@ -282,5 +283,14 @@ describe('Format / Data / Interactions in the builder (redesign 7e3)', () => {
     sectioned('data')
     fireEvent.change(screen.getByLabelText('Filter settings'), { target: { value: 'Border colour' } })
     expect(groupHeading(/Appearance/)).toBeInTheDocument()
+  })
+})
+
+describe('the quick toolbar Filters button (QA3 A4)', () => {
+  it('opens the Filters tab, not Data roles, and no Assign data dialog', () => {
+    panel()
+    act(() => { window.dispatchEvent(new CustomEvent(ASSIGN_DATA_EVENT, { detail: { widgetId: 1, tab: 'Filters', open: false } })) })
+    expect(screen.getByRole('tab', { name: 'Filters' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 })

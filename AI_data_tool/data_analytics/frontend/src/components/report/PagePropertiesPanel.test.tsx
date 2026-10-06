@@ -189,3 +189,28 @@ describe('the last visible page', () => {
     expect((screen.getByDisplayValue('hidden') as HTMLInputElement).disabled).toBe(false)
   })
 })
+
+describe('a rename made elsewhere (QA3 A5)', () => {
+  it('shows in Tab name at once, without saving it again', () => {
+    vi.useFakeTimers()
+    const onUpdate = vi.fn()
+    const { rerender } = render(<PagePropertiesPanel page={page()} columns={[]} onUpdate={onUpdate} />)
+    rerender(<PagePropertiesPanel page={page({ name: 'Renamed on the tab' })} columns={[]} onUpdate={onUpdate} />)
+    expect(screen.getByLabelText(/tab name/i)).toHaveValue('Renamed on the tab')
+    act(() => { vi.advanceTimersByTime(600) })
+    expect(onUpdate).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it('the save of what is being typed does not roll the field back', () => {
+    vi.useFakeTimers()
+    const onUpdate = vi.fn()
+    const { rerender } = render(<PagePropertiesPanel page={page()} columns={[]} onUpdate={onUpdate} />)
+    fireEvent.change(screen.getByLabelText(/tab name/i), { target: { value: 'Over' } })
+    act(() => { vi.advanceTimersByTime(600) })
+    fireEvent.change(screen.getByLabelText(/tab name/i), { target: { value: 'Overview' } })
+    rerender(<PagePropertiesPanel page={page({ name: 'Over' })} columns={[]} onUpdate={onUpdate} />)
+    expect(screen.getByLabelText(/tab name/i)).toHaveValue('Overview')
+    vi.useRealTimers()
+  })
+})

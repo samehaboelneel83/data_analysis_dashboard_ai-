@@ -658,6 +658,10 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
       setDecompSplit(p.split_by ?? null)
       return
     }
+    // QA3 A6: while building, a click on a mark selects the widget and
+    // nothing else. It used to also pick the bar under the pointer and
+    // cross-filter the page. Readers (View, Present) still filter by clicking.
+    if (editMode) return
     // A map area: the extent of the sites a reader circled, as latitude and
     // longitude ranges. One filter per axis, each a `{ between }` value the
     // receiving widgets turn into >= and <= (see mergedPair). Two emits, so
@@ -722,7 +726,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
         setDrillPath(p => [...p, { column: currentNode.column_name!, granularity: currentNode.format, value: name, label: String(name) }])
       }
     }
-  }, [canBroadcast, widget.id, widget.config, localSelected, emitFilter, emitMultiFilter, hierarchyNodeId, hierarchy, currentNodeId, currentNode, binning, baseRows, zoom])
+  }, [canBroadcast, widget.id, widget.config, localSelected, emitFilter, emitMultiFilter, hierarchyNodeId, hierarchy, currentNodeId, currentNode, binning, baseRows, zoom, editMode])
 
   const commitZoom = useCallback((a: number, b: number) => {
     zoomCtl.current?.abort()

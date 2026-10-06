@@ -138,9 +138,10 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
   const [addRole, setAddRole] = useState<string | null>(null)
   useEffect(() => {
     const onAssign = (e: Event) => {
-      const detail = (e as CustomEvent<{ widgetId: number; open?: boolean }>).detail
+      const detail = (e as CustomEvent<{ widgetId: number; open?: boolean; tab?: 'Filters' }>).detail
       if (detail?.widgetId !== widget.id) return
-      setSettingsTab('Data roles')
+      // QA3 A4: the quick toolbar's Filters asks for the Filters tab.
+      setSettingsTab(detail.tab ?? 'Data roles')
       onSectionRef.current?.('data')
       if (detail.open !== false) { setAssignRole(null); setAssignOpen(true) }
     }

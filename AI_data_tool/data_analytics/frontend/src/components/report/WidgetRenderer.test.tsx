@@ -2296,6 +2296,20 @@ describe('clicking a map filters the page', () => {
     expect(screen.getByTestId('filters').textContent).toContain('country')
   }, 30000)
 
+  it('QA3 A6: in Edit a click on a mark does not filter the page', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({
+      type: 'series', rows: [{ name: 'France', value: 3 }], sampled: false } as never)
+    const { container } = render(
+      <CrossFilterProvider>
+        <WidgetRenderer widget={mapWidget()} datasetId={10} editMode />
+        <FilterReader />
+      </CrossFilterProvider>
+    )
+    fireEvent.click(await findRegion(container, 'France'))
+    await new Promise(r => setTimeout(r, 50))
+    expect(screen.getByTestId('filters').textContent).not.toContain('France')
+  }, 30000)
+
   it('two spellings of one region filter by both', async () => {
     // The merged-region case: filtering by "US" alone would drop every "USA"
     // row from the rest of the page, which is a wrong answer, not a partial one.

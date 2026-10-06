@@ -310,6 +310,22 @@ describe('ReportBuilder multi-select and Align/Distribute toolbar', () => {
 
     expect(reportsApi.updateWidget).toHaveBeenCalledWith(1, 100, 6, { layout: expect.objectContaining({ x: 0 }) })
   })
+
+  it('QA3 A1: a plain click then a Shift+click counts both widgets', async () => {
+    const report = reportWithWidget()
+    ;(report.pages[0].widgets as any[]).push({ id: 6, page_id: 100, widget_type: 'bar', title: 'Second Widget', config: { dimension: 'region' }, layout: { x: 6, y: 0, w: 6, h: 5 }, created_at: '2026-01-01' })
+    vi.mocked(reportsApi.get).mockResolvedValue(report as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    fireEvent.click(await screen.findByText('Sales by Region'))
+    fireEvent.click(await screen.findByText('Second Widget'), { shiftKey: true })
+    expect(await screen.findByText('2 selected')).toBeInTheDocument()
+    expect(screen.getAllByText('2 widgets selected').length).toBeGreaterThan(0)
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByText('2 selected')).toBeNull())
+  })
 })
 
 describe('ReportBuilder Performance panel', () => {
@@ -824,8 +840,8 @@ describe('ReportBuilder drillthrough navigation', () => {
     vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
     vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'North', value: 5 }], sampled: false })
 
-    renderBuilder()
-    await screen.findByTestId('view-strip')
+    // Read, not edit (QA3 A6): while building, a click selects the widget only.
+    renderBuilder('/reports/1')
 
     const row = await screen.findByText('North')
     fireEvent.click(row)
@@ -1769,6 +1785,32 @@ describe('dropping several fields on the canvas', () => {
       widget_type: 'dual_axis_bar' }))
   })
 
+  it('QA3 A2/A3: a measure dropped on a KPI that needs one fills it, found by the pointer', async () => {
+    vi.mocked(reportsApi.addWidget).mockClear()
+    vi.mocked(reportsApi.updateWidget).mockClear().mockResolvedValue({} as any)
+    const r = baseReport()
+    r.pages[0].widgets = [{ id: 7, page_id: 100, widget_type: 'kpi', title: 'Empty KPI', config: {},
+      layout: { x: 0, y: 0, w: 3, h: 2 }, created_at: '2026-01-01' }] as any
+    vi.mocked(reportsApi.get).mockResolvedValue(r as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns } as any)
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    const tile = await waitFor(() => { const t = document.querySelector('[data-widget-id="7"]') as HTMLElement; if (!t) throw new Error('no tile'); return t })
+    fireEvent.click(within(tile).getByText('Empty KPI'))
+    tile.getBoundingClientRect = () => ({ left: 10, top: 10, right: 300, bottom: 160, width: 290, height: 150, x: 10, y: 10, toJSON: () => ({}) })
+    const dt = transfer()
+    fireEvent.dragStart(await fieldButton('revenue'), { dataTransfer: dt })
+    // Dropped over the tile, but the event lands on the canvas itself (an
+    // overlay was on top): the target is found by the pointer.
+    const canvas = document.querySelector('[data-canvas]')!
+    const ev = new Event('drop', { bubbles: true, cancelable: true }) as any
+    Object.assign(ev, { dataTransfer: dt, clientX: 100, clientY: 80 })
+    act(() => { canvas.dispatchEvent(ev) })
+    await waitFor(() => expect(reportsApi.updateWidget).toHaveBeenCalledWith(1, 100, 7,
+      { config: expect.objectContaining({ measure: 'revenue' }) }))
+    expect(reportsApi.addWidget).not.toHaveBeenCalled()
+  })
+
   it('a single field still drops the way it always did', async () => {
     // The one-field path is what everyone already uses; the multi-field work
     // must not change it.
@@ -2676,10 +2718,9 @@ describe('the builder opens with the icon rail (redesign 7e1, S6)', () => {
       expect(seen.at(-1)).toBe(true)
       fireEvent.click(screen.getByTestId('mode-toggle'))
       expect(seen.at(-1)).toBe(false)
-      // Back to editing: the rail is not folded again on every switch.
-      const n = seen.length
+      // QA3 A9: back to editing folds it again, whatever the path.
       fireEvent.click(screen.getByTestId('mode-toggle'))
-      expect(seen.slice(n)).not.toContain(true)
+      expect(seen.at(-1)).toBe(true)
       unmount()
       expect(seen.at(-1)).toBe(false)
     } finally { window.removeEventListener('datalytics:builder-compact', on) }
@@ -2746,7 +2787,7 @@ describe('canvas overlays (redesign 7e4)', () => {
     await screen.findByTestId('view-strip')
     fireEvent.click(await screen.findByText('Sales by Region'))
     expect(await screen.findByTestId('selection-guides')).toHaveTextContent('col 1–6 · row 1')
-    fireEvent.click(await screen.findByText('Sales by Region'), { shiftKey: true })
+    // QA3 A1: the plain click already selected it; Shift+click adds the second.
     fireEvent.click(await screen.findByText('Second Widget'), { shiftKey: true })
     expect(screen.getByTestId('group-box')).toHaveTextContent('2 selected')
     expect(screen.queryByTestId('selection-guides')).toBeNull()
