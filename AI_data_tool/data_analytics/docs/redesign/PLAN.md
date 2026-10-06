@@ -24,7 +24,7 @@ Nothing is pushed.
 - [x] 3b Dataset detail shell + Overview + tab map
 - [x] 3c Remaining tabs + Share dialog
   - >> GATE A: stop, report the whole Datasets screen
-- [ ] 4a Ask AI Phase 1: layout, thread, column panel, answer card
+- [x] 4a Ask AI Phase 1: layout, thread, column panel, answer card
 - [ ] 4b Ask AI Phase 1: all states (first run, no dataset, thinking, clarification, offline, error)
   - >> GATE B: stop, report Ask AI
 - [ ] 5-gap Gap pass for Home and Viewer (no code). List what has no backend data.
@@ -138,3 +138,23 @@ suite and build; the screen comparison ran once over all of 3c before ticking.
 - Share: the picker is a select, not a type-ahead; each grant's level is shown as text (there is no endpoint to change it in place); no "2 rules apply" count (N9).
 - Captures of Rules & alerts and Aggregates used browser-only sample data: the dev database has no saved checks or aggregates.
 - Two flaky 3a tests fixed (per-call timestamps, ambiguous table query). `Lineage.test.tsx` is still flaky; scheduled for FINAL.
+
+### 4a Ask AI layout, column panel, answer card — `fc9a935`
+
+**Changed:**
+- Scoped page is History | thread | Columns, edge to edge (cancels the shell padding the way the report builder does). A scope bar names the dataset with its kind and size ("Uploaded file · 2,000 rows · 13 columns") around v1's compact picker.
+- History: "Conversations" with New chat beside it, a title search, Today / Earlier. Still lists only the current scope's threads (as v1). Delete now uses the app's confirm dialog instead of `window.confirm`.
+- Columns panel (new): Groups / Numbers / Dates / Other with value counts or ranges from the saved profile; id columns go to Other as "identifier"; a click puts the column name into the question. Folds to a rail (remembered); a drawer with a Columns button under 1100px.
+- Answer card (page only; the report builder's copilot keeps v1's rendering): header with dataset and run time, key numbers (highest, lowest, gap, rows back), the sentence with traced numbers dotted-underlined, the chart alone, Rows beside "How it was worked out" (plan, queries and repairs, rows back, numbers traced), Show SQL, Copy, Add to dashboard, one Export menu, a "⋯" menu keeping Retry / Copy SQL / Save as dataset, 👍/👎, then "Ask next" with two unused starter questions. Older answers are compact (sentence, chart, actions).
+- After 👎 the card asks "What was wrong?"; the reply goes to the existing feedback endpoint's `comment` field (the client call gained an optional `comment`; the endpoint already accepted it).
+- The thread scrolls to the start of the latest turn, not its last line (the card is taller than a screen).
+- `ResultView` gained an optional `rows="none"` (chart without its rows toggle) and `chartFormatFor`; defaults unchanged.
+
+**Deviations from the boards:**
+- Key number "Rows read 3,612 → 4 groups" is "Rows back 4": the run stores rows returned, not rows read (backend). Same for the source line, which keeps v1's wording, and the "Ran it" step.
+- Chart: bars keep the shared renderer's palette; the board's accent-for-the-top-bar / grey-for-the-rest needs a change to the shared chart renderers, which this step leaves alone.
+- Rows table keeps the shared grid (raw column names, "4 rows" footer) rather than the board's friendly-name-over-raw-name header.
+- Composer keeps v1's hint line under the box; no dataset chip inside the composer (the scope bar above already shows and switches it).
+- History items show the time, not the dataset name (the list is per dataset, as before).
+- Captures used browser-only sample conversation data (a stored answer for "average margin_pct by region" on Demo — Sales); no live model call.
+
