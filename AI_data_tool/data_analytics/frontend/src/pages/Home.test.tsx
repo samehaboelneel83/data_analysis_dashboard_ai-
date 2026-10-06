@@ -26,6 +26,9 @@ vi.mock('../services/api', () => ({
   dataSourcesApi: { list: vi.fn() },
   agentApi: { listConversations: vi.fn() },
   monitoringApi: { refreshRuns: vi.fn(), activity: vi.fn() },
+  authzApi: { decisions: vi.fn(async () => []) },
+  shareLinksApi: { list: vi.fn(async () => []), create: vi.fn(), revoke: vi.fn() },
+  embedConfigsApi: { list: vi.fn(async () => []), create: vi.fn(), setEnabled: vi.fn(), delete: vi.fn() },
 }))
 vi.mock('./ask/useAiOffline', () => ({ useAiOffline: vi.fn(() => ({ offline: false, checkedAt: null })) }))
 

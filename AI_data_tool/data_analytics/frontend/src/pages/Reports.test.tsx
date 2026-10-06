@@ -24,6 +24,9 @@ vi.mock('../services/api', () => ({
   datasetsApi: { list: vi.fn() },
   workspaceApi: { tree: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
   pageTemplatesApi: { builtins: vi.fn(), addFrom: vi.fn() },
+  authzApi: { decisions: vi.fn(async () => []) },
+  shareLinksApi: { list: vi.fn(async () => []), create: vi.fn(), revoke: vi.fn() },
+  embedConfigsApi: { list: vi.fn(async () => []), create: vi.fn(), setEnabled: vi.fn(), delete: vi.fn() },
 }))
 vi.mock('react-hot-toast', () => ({ default: { success: vi.fn(), error: vi.fn() } }))
 vi.mock('../components/dataset/SuggestDashboardsDialog', () => ({
@@ -169,7 +172,7 @@ describe('publish and share', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Share Revenue' })
     expect(await within(dialog).findByText('a@x.io')).toBeInTheDocument()
     fireEvent.change(within(dialog).getByLabelText('Email to share with'), { target: { value: 'b@x.io' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Share' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Invite' }))
     await waitFor(() => expect(reportGrantsApi.create).toHaveBeenCalledWith(1, { email: 'b@x.io', level: 'edit' }))
   })
 })

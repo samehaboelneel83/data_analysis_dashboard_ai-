@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { renderWithProviders as render, screen, fireEvent, waitFor, within } from '../../test/renderWithProviders'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import VersionHistoryPane from './VersionHistoryPane'
 import { reportsApi } from '../../services/api'
@@ -9,6 +9,9 @@ const ROWS = [
   { id: 9, revision: 3, created_at: '2026-09-05T10:00:00', created_by: 'a@b.com', pages: 1, widgets: 4 },
   { id: 8, revision: 2, created_at: '2026-09-05T09:00:00', created_by: 'a@b.com', pages: 1, widgets: 3 },
 ]
+
+/** Selecting a version is what offers Restore (redesign 7c). */
+const pick = async (name: string) => fireEvent.click(await screen.findByText(name))
 
 beforeEach(() => {
   vi.restoreAllMocks()
@@ -22,9 +25,9 @@ describe('VersionHistoryPane', () => {
     expect(await screen.findByText('Revision 3')).toBeInTheDocument()
     expect(screen.getByText('Revision 2')).toBeInTheDocument()
     // The current revision carries the badge; the older one does not.
-    const current = screen.getByText('Revision 3').closest('li')!
+    const current = screen.getByText('Revision 3').closest('[role="button"]')!
     expect(current).toHaveTextContent(/current/i)
-    expect(screen.getByText('Revision 2').closest('li')!).not.toHaveTextContent(/current/i)
+    expect(screen.getByText('Revision 2').closest('[role="button"]')!).not.toHaveTextContent(/current/i)
     expect(screen.getByText(/4 widgets/)).toBeInTheDocument()
   })
 
@@ -32,11 +35,11 @@ describe('VersionHistoryPane', () => {
     vi.spyOn(reportsApi, 'versions').mockResolvedValue(ROWS)
     const restore = vi.spyOn(reportsApi, 'restoreVersion').mockResolvedValue({
       restored_version_id: 8, restored_revision: 2, note: 'Pins removed.' })
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     const onRestored = vi.fn()
     render(<VersionHistoryPane reportId={5} currentRevision={3} onRestored={onRestored} />)
-    await screen.findByText('Revision 2')
+    await pick('Revision 2')
     fireEvent.click(screen.getByRole('button', { name: 'Restore revision 2' }))
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Restore' }))
     await waitFor(() => expect(restore).toHaveBeenCalledWith(5, 8))
     expect(onRestored).toHaveBeenCalled()
   })
@@ -48,21 +51,24 @@ describe('VersionHistoryPane', () => {
     const restore = vi.spyOn(reportsApi, 'restoreVersion').mockResolvedValue({
       restored_version_id: 8, restored_revision: 2, note: '',
       missing: [{ page: 'Overview', widget: 'Margin by region', kind: 'field', name: 'Margin' }] })
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
     render(<VersionHistoryPane reportId={5} currentRevision={3} onRestored={vi.fn()} />)
-    await screen.findByText('Revision 2')
+    await pick('Revision 2')
     fireEvent.click(screen.getByRole('button', { name: 'Restore revision 2' }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent('"Margin by region" uses the field "Margin"')
+    expect(dialog).toHaveTextContent(/saved as a new version first/)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Restore' }))
     await waitFor(() => expect(restore).toHaveBeenCalledWith(5, 8))
-    expect(confirm.mock.calls[0][0]).toContain('"Margin by region" uses the field "Margin"')
   })
 
   it('a declined confirm restores nothing', async () => {
     vi.spyOn(reportsApi, 'versions').mockResolvedValue(ROWS)
     const restore = vi.spyOn(reportsApi, 'restoreVersion')
-    vi.spyOn(window, 'confirm').mockReturnValue(false)
     render(<VersionHistoryPane reportId={5} currentRevision={3} onRestored={vi.fn()} />)
-    await screen.findByText('Revision 2')
+    await pick('Revision 2')
     fireEvent.click(screen.getByRole('button', { name: 'Restore revision 2' }))
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: /cancel/i }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
     expect(restore).not.toHaveBeenCalled()
   })
 
@@ -90,5 +96,20 @@ describe('VersionHistoryPane copilot attribution (Phase 7.1)', () => {
     const tag = await screen.findByTestId('version-copilot')
     expect(tag.textContent).toContain('Before the copilot removed "Sales" (asked by a@b.com)')
     expect(screen.getAllByTestId('version-copilot')).toHaveLength(1)
+  })
+})
+
+describe('VersionHistoryPane layout (7c)', () => {
+  it('groups versions by day and offers no Restore on the current one', async () => {
+    const today = new Date().toISOString()
+    vi.spyOn(reportsApi, 'versions').mockResolvedValue([
+      { id: 9, revision: 3, created_at: today, created_by: 'a@b.com', pages: 1, widgets: 4 },
+      { id: 8, revision: 2, created_at: '2025-01-05T09:00:00', created_by: 'a@b.com', pages: 1, widgets: 3 },
+    ])
+    render(<VersionHistoryPane reportId={5} currentRevision={3} onRestored={vi.fn()} />)
+    expect(await screen.findByText('Today')).toBeInTheDocument()
+    expect(screen.getByText('Earlier')).toBeInTheDocument()
+    await pick('Revision 3')
+    expect(screen.queryByRole('button', { name: 'Restore revision 3' })).not.toBeInTheDocument()
   })
 })

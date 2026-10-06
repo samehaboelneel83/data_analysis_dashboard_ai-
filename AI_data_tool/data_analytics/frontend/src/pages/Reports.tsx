@@ -21,7 +21,8 @@ import { AuthContext } from '../contexts/AuthContext'
 import { formatTimeAgo, useT } from '../i18n'
 import { localDigits } from '../lib/arabicFormats'
 import SuggestDashboardsDialog from '../components/dataset/SuggestDashboardsDialog'
-import { ShareDialog, loadCollapsed, saveCollapsed, sectionsFor, reportNodes, type FolderSection } from './reports/listParts'
+import ShareDashboardDialog from '../components/report/share/ShareDashboardDialog'
+import { loadCollapsed, saveCollapsed, sectionsFor, reportNodes, type FolderSection } from './reports/listParts'
 import { flatFolders, folderOf, reportsUnder, sharedWithMe, statusOf, type FlatFolder } from './reports/model'
 import FolderNav, { type View } from './reports/FolderNav'
 import { DashCard, DashRow } from './reports/DashCard'
@@ -675,7 +676,10 @@ export default function Reports() {
           onClose={() => setMoving(null)}
           onMove={(id, name) => { const rs = moving; setMoving(null); bulk.clear(); void moveMany(rs, id, name) }} />
       )}
-      {sharing && <ShareDialog report={sharing} onClose={() => setSharing(null)} />}
+      {sharing && (
+        <ShareDashboardDialog report={sharing} canEdit={canEdit(sharing)} isAdmin={isAdmin} onClose={() => setSharing(null)}
+          onPublishedChange={published => setReports(prev => prev.map(x => x.id === sharing.id ? { ...x, published } : x))} />
+      )}
     </div>
   )
 }

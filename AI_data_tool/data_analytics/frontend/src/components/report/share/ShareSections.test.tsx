@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderWithProviders as render, screen, fireEvent, waitFor, within } from '../../test/renderWithProviders'
-import ShareLinksDialog from './ShareLinksDialog'
-import { shareLinksApi, embedConfigsApi } from '../../services/api'
+import { renderWithProviders as render, screen, fireEvent, waitFor, within } from '../../../test/renderWithProviders'
+import { EmbedSection, GuestLinks } from './ShareSections'
+import { shareLinksApi, embedConfigsApi } from '../../../services/api'
 
-vi.mock('../../services/api', () => ({
+vi.mock('../../../services/api', () => ({
   shareLinksApi: { create: vi.fn(), list: vi.fn(), revoke: vi.fn() },
   embedConfigsApi: { create: vi.fn(), list: vi.fn(), setEnabled: vi.fn(), delete: vi.fn() },
 }))
@@ -28,47 +28,49 @@ beforeEach(() => {
   vi.mocked(embedConfigsApi.delete).mockResolvedValue(undefined as never)
 })
 
-describe('ShareLinksDialog', () => {
+/** v1's Guest links dialog, now two sections of the Share dialog (7c): the
+ *  same calls and the same one-time URL / secret and revoke confirmation. */
+describe('GuestLinks and EmbedSection', () => {
   it('states the permission consequence before anything is minted', async () => {
-    render(<ShareLinksDialog reportId={7} onClose={() => {}} />)
+    render(<><GuestLinks reportId={7} /><EmbedSection reportId={7} /></>)
     expect(await screen.findByText(/with your data permissions/i)).toBeInTheDocument()
   })
 
   it('shows per-link access count and last-access', async () => {
-    render(<ShareLinksDialog reportId={7} onClose={() => {}} />)
+    render(<><GuestLinks reportId={7} /><EmbedSection reportId={7} /></>)
     expect(await screen.findByText(/3 views/)).toBeInTheDocument()
   })
 
   it('mints a link and shows the one-time URL', async () => {
-    render(<ShareLinksDialog reportId={7} onClose={() => {}} />)
-    fireEvent.change(await screen.findByLabelText(/Expires after/), { target: { value: '14' } })
+    render(<><GuestLinks reportId={7} /><EmbedSection reportId={7} /></>)
+    fireEvent.click(await screen.findByRole('button', { name: '30 days' }))
     fireEvent.click(screen.getByRole('button', { name: 'Create guest link' }))
-    await waitFor(() => expect(shareLinksApi.create).toHaveBeenCalledWith(7, 14, false))
+    await waitFor(() => expect(shareLinksApi.create).toHaveBeenCalledWith(7, 30, false))
     expect(screen.getByLabelText('Guest link URL')).toHaveValue(`${window.location.origin}/shared/tok123`)
     expect(screen.getByText(/shown only once/)).toBeInTheDocument()
   })
 
   it('sends pinned:true when "Pin current layout" is checked', async () => {
-    render(<ShareLinksDialog reportId={7} onClose={() => {}} />)
+    render(<><GuestLinks reportId={7} /><EmbedSection reportId={7} /></>)
     fireEvent.click(await screen.findByLabelText(/Pin current layout/))
     fireEvent.click(screen.getByRole('button', { name: 'Create guest link' }))
     await waitFor(() => expect(shareLinksApi.create).toHaveBeenCalledWith(7, 7, true))
   })
 
   it('revokes an active link', async () => {
-    render(<ShareLinksDialog reportId={7} onClose={() => {}} />)
+    render(<><GuestLinks reportId={7} /><EmbedSection reportId={7} /></>)
     fireEvent.click(await screen.findByLabelText('Revoke link 1'))
     // Destructive actions are guarded, so the dialog has to be accepted.
     // The row's trigger carries the same label, so scope to the dialog.
     fireEvent.click(within(await screen.findByRole('alertdialog'))
-      .getByRole('button', { name: /revoke link/i }))
+      .getByRole('button', { name: /^revoke$/i }))
     await waitFor(() => expect(shareLinksApi.revoke).toHaveBeenCalledWith(7, 1))
   })
 
   it('cancelling the confirm leaves the link working', async () => {
     // The blast radius sits outside the system: the URL is already in other
     // people's hands, and revoking cannot be undone.
-    render(<ShareLinksDialog reportId={7} onClose={() => {}} />)
+    render(<><GuestLinks reportId={7} /><EmbedSection reportId={7} /></>)
     fireEvent.click(await screen.findByLabelText('Revoke link 1'))
     expect(await screen.findByRole('alertdialog')).toHaveTextContent(/cannot be restored/i)
     fireEvent.click(screen.getByRole('button', { name: /cancel/i }))
@@ -79,26 +81,34 @@ describe('ShareLinksDialog', () => {
   })
 
   it('lists existing embed configs', async () => {
-    render(<ShareLinksDialog reportId={7} onClose={() => {}} />)
+    render(<><GuestLinks reportId={7} /><EmbedSection reportId={7} /></>)
     expect(await screen.findByText(/portal/)).toBeInTheDocument()
   })
 
   it('creates an embed config and shows the one-time secret plus sample code', async () => {
-    render(<ShareLinksDialog reportId={7} onClose={() => {}} />)
+    render(<><GuestLinks reportId={7} /><EmbedSection reportId={7} /></>)
     fireEvent.change(await screen.findByLabelText(/Config name/), { target: { value: 'new-cfg' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create embed config' }))
     await waitFor(() => expect(embedConfigsApi.create).toHaveBeenCalledWith(7, 'new-cfg', []))
     expect(screen.getByLabelText('Embed secret')).toHaveValue('embed-secret-xyz')
     expect(screen.getByText(/shown only once/)).toBeInTheDocument()
-    expect(screen.getByText(/Python/)).toBeInTheDocument()
-    expect(screen.getByText(/Node/)).toBeInTheDocument()
+    expect(screen.getByText(/token, Python/)).toBeInTheDocument()
+    expect(screen.getByText(/token, Node/)).toBeInTheDocument()
   })
 
   it('disables and deletes an embed config', async () => {
-    render(<ShareLinksDialog reportId={7} onClose={() => {}} />)
+    render(<><GuestLinks reportId={7} /><EmbedSection reportId={7} /></>)
     fireEvent.click(await screen.findByLabelText('Disable embed config 5'))
     await waitFor(() => expect(embedConfigsApi.setEnabled).toHaveBeenCalledWith(7, 5, false))
     fireEvent.click(screen.getByLabelText('Delete embed config 5'))
     await waitFor(() => expect(embedConfigsApi.delete).toHaveBeenCalledWith(7, 5))
+  })
+})
+
+describe('guest links refused by policy', () => {
+  it("say why instead of offering the button", async () => {
+    render(<GuestLinks reportId={7} blockedReason="The report is Restricted; share it with named people instead." />)
+    expect(await screen.findByText(/share it with named people instead/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Create guest link' })).not.toBeInTheDocument()
   })
 })

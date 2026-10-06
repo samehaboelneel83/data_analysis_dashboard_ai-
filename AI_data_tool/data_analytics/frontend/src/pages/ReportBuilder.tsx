@@ -1,4 +1,4 @@
-import PdfOptionsDialog from '../components/report/PdfOptionsDialog'
+import ExportDialog from '../components/report/share/ExportDialog'
 import HierarchyChains from '../components/report/HierarchyChains'
 import RelativeDateEditor from '../components/report/RelativeDateEditor'
 import AccessExplainer from '../components/report/AccessExplainer'
@@ -32,7 +32,7 @@ import OutlierDetailsDialog from '../components/report/OutlierDetailsDialog'
 import CommentsPane from '../components/report/CommentsPane'
 import TranslationsPane from '../components/report/TranslationsPane'
 import InsightsPane from '../components/report/InsightsPane'
-import ShareLinksDialog from '../components/report/ShareLinksDialog'
+import ShareDashboardDialog from '../components/report/share/ShareDashboardDialog'
 import AccessDialog from '../components/report/AccessDialog'
 import { useOptionalAuth } from '../contexts/AuthContext'
 import ExplainDialog from '../components/report/ExplainDialog'
@@ -74,7 +74,7 @@ import CollapsibleSide from '../components/report/CollapsibleSide'
 import ReviewPane from '../components/report/ReviewPane'
 import PopupOverlay from '../components/report/PopupOverlay'
 import TooltipPageOverlay from '../components/report/TooltipPageOverlay'
-import { ArrowLeft, Plus, Eye, Undo2, Redo2, KeyRound, ShieldCheck, Pause, Play, FileDown, Printer, FileText, Package, Pencil, RefreshCw, ChevronUp, ChevronDown } from 'lucide-react'
+import { ArrowLeft, Plus, Eye, Undo2, Redo2, KeyRound, ShieldCheck, Pause, Play, FileDown, Share2, Printer, FileText, Package, Pencil, RefreshCw, ChevronUp, ChevronDown } from 'lucide-react'
 import { updatedAgo } from '../lib/viewStyle'
 import { columnKind, usePageFilters } from '../lib/pageFilters'
 import PageFilterBar, { type PageFilterColumn } from '../components/report/PageFilterBar'
@@ -3209,27 +3209,15 @@ export default function ReportBuilder() {
                 header wrapped onto a second line on a laptop. Each item keeps its
                 own gate -- a viewer sees no Share menu at all (every item in it is
                 edit/admin-only), and keeps Export and Subscribe. */}
-            <ToolbarMenu label={<IconLabel icon={Globe}>{tr('builder.share')}</IconLabel>} title="Links, guest access and permissions"
-              items={[
-                ...(canEdit ? [{ key: 'link', label: <IconLabel icon={Copy}>Copy link to this page</IconLabel>,
-                  onSelect: () => {
-                    // The link encodes the active page, so a colleague lands where the
-                    // sender was looking rather than on page 1.
-                    const url = new URL(window.location.href)
-                    if (activePage) url.searchParams.set('page', String(activePage.id))
-                    navigator.clipboard.writeText(url.toString())
-                      .then(() => toast.success('Link copied'))
-                      .catch(() => toast.error('Could not copy the link'))
-                  } }] : []),
-                ...(canEdit ? [{ key: 'guest', label: <IconLabel icon={Globe}>Guest links…</IconLabel>,
-                  title: access.share_link && !access.share_link.allowed ? access.share_link.reason : 'Read-only access without a login',
-                  disabled: access.share_link ? !access.share_link.allowed : false,
-                  onSelect: () => setShareOpen(true) }] : []),
-                ...(Object.keys(access).length ? [{ key: 'why', label: <IconLabel icon={KeyRound}>Your access, and why…</IconLabel>,
-                  title: 'What you can do here, and the rule behind each', onSelect: () => setAccessOpen2(true) }] : []),
-                ...(isAdmin ? [{ key: 'access', label: <IconLabel icon={ShieldCheck}>Access by role…</IconLabel>,
-                  title: 'Set per-role capability levels for this report', onSelect: () => setAccessOpen(true) }] : []),
-              ]} />
+            {/* One Share dialog (redesign 7c): people, general access, the
+                page link, guest links, embedding and schedules, each behind
+                its own v1 gate inside. A viewer gets "View only · why?". */}
+            {(canEdit || isAdmin) && (
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShareOpen(true)}
+                title={tr('shx.shareTitle')}>
+                <IconLabel icon={Share2}>{tr('builder.share')}</IconLabel>
+              </button>
+            )}
             {canEdit && (
             <button className="btn btn-ghost btn-sm" title="Kiosk playback: pages advance every 8s; any key exits"
               aria-pressed={kiosk}
@@ -3237,41 +3225,12 @@ export default function ReportBuilder() {
               {kiosk ? <IconLabel icon={Pause}>{tr('builder.stop')}</IconLabel> : <IconLabel icon={Play}>{tr('builder.present')}</IconLabel>}
             </button>
             )}
-            <ToolbarMenu label={<IconLabel icon={FileDown}>{tr('builder.export')}</IconLabel>} title="Print or download this dashboard"
-              items={[
-                { key: 'print', label: <IconLabel icon={Printer}>Print…</IconLabel>, title: 'Print or save as PDF from the browser',
-                  onSelect: () => navigate(`/reports/${reportId}/print`) },
-                { key: 'pdf', label: <IconLabel icon={FileText}>Download PDF…</IconLabel>,
-                  title: access.download && !access.download.allowed ? access.download.reason
-                    : "Server-rendered PDF: cover, contents, every page's visuals — choose paper, orientation and pages",
-                  disabled: access.download ? !access.download.allowed : false,
-                  onSelect: () => setPdfDialog(true) },
-                { key: 'xlsx', label: <IconLabel icon={FileText}>Excel (one sheet per chart)</IconLabel>,
-                  disabled: access.download ? !access.download.allowed : false,
-                  title: access.download && !access.download.allowed ? access.download.reason
-                    : "Every chart's data as you see it, one sheet each",
-                  onSelect: () => { reportsApi.downloadXlsx(reportId, report.name)
-                    .then(r => toast.success(r.withheld
-                      ? tr('export.xlsxDoneWithheld', { n: String(r.sheets), w: String(r.withheld) })
-                      : tr('export.xlsxDone', { n: String(r.sheets) })))
-                    // The reason travels in a Blob (responseType 'blob'), so
-                    // it is read back out rather than replaced with a guess.
-                    .catch(async (e: { response?: { data?: Blob } }) => {
-                      let msg = tr('export.xlsxFailed')
-                      try {
-                        const body = JSON.parse(await (e.response?.data as Blob).text()) as { detail?: string }
-                        if (body.detail) msg = body.detail
-                      } catch { /* keep the generic sentence */ }
-                      toast.error(msg)
-                    }) } },
-                { key: 'package', label: <IconLabel icon={Package}>Offline package</IconLabel>,
-                  disabled: access.download ? !access.download.allowed : false,
-                  title: access.download && !access.download.allowed ? access.download.reason
-                    : 'One HTML file that opens without the platform: every visible page, frozen as you see it now',
-                  onSelect: () => { reportsApi.downloadPackage(reportId, report.name)
-                    .then(() => toast.success(tr('export.packageDone')))
-                    .catch(() => toast.error(tr('export.packageFailed'))) } },
-              ]} />
+            {/* The Export dialog (7c): PDF, Excel, offline package, print. The
+                export policy greys the downloads inside, with its reason. */}
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPdfDialog(true)}
+              title={tr('shx.exportTitle')}>
+              <IconLabel icon={FileDown}>{tr('builder.export')}</IconLabel>
+            </button>
             {/* Beside PDF on purpose: a subscription is the recurring version of
                 that same export, and it needs only view -- so it must sit OUTSIDE
                 the editMode-gated toolbar, which a viewer never sees. */}
@@ -4255,14 +4214,7 @@ export default function ReportBuilder() {
         )}
 
         {pdfDialog && (
-          <PdfOptionsDialog pages={report.pages.filter(p => (p.page_type ?? 'normal') === 'normal').map(p => ({ id: p.id, name: p.name }))}
-            onClose={() => setPdfDialog(false)}
-            onDownload={o => {
-              setPdfDialog(false)
-              reportsApi.downloadPdf(reportId, report.name, o)
-                .then(() => toast.success('PDF downloaded'))
-                .catch(() => toast.error('Could not generate the PDF'))
-            }} />
+          <ExportDialog report={report} activePageId={activePage?.id ?? null} onClose={() => setPdfDialog(false)} />
         )}
 
         {geoCheck && report.dataset_id != null && (
@@ -4329,7 +4281,11 @@ export default function ReportBuilder() {
           onApplied={onCopilotApplied} />
       )}
       {shareOpen && (
-        <ShareLinksDialog reportId={report.id} onClose={() => setShareOpen(false)} />
+        <ShareDashboardDialog report={report} canEdit={canEdit} isAdmin={isAdmin} pageId={activePage?.id ?? null}
+          onClose={() => setShareOpen(false)}
+          onPublishedChange={published => setReport(r => r ? { ...r, published } : r)}
+          onAccessWhy={Object.keys(access).length ? () => { setShareOpen(false); setAccessOpen2(true) } : undefined}
+          onAccessByRole={() => { setShareOpen(false); setAccessOpen(true) }} />
       )}
       {accessOpen2 && (
         <AccessExplainer decisions={Object.values(access)}

@@ -10,7 +10,7 @@ import { usePrompt } from '../../components/ui/PromptDialog'
 import { formatTimeAgo, useT } from '../../i18n'
 import { reportsApi } from '../../services/api'
 import type { Report } from '../../types/report'
-import { ShareDialog } from '../reports/listParts'
+import ShareDashboardDialog from '../../components/report/share/ShareDashboardDialog'
 import { Empty, SecHead, Sk } from './parts'
 import Thumb, { firstPageWidgets } from './Thumb'
 
@@ -207,7 +207,7 @@ export default function DashboardsSection({ reports, isAdmin, loading, onRename,
   return (
     <section className="hm-sec" aria-labelledby="hm-dash">
       {head}{body}
-      {sharing && <ShareDialog report={sharing} onClose={() => setSharing(null)} />}
+      {sharing && <ShareDashboardDialog report={sharing} canEdit={canEdit(sharing)} isAdmin={isAdmin} onClose={() => setSharing(null)} />}
     </section>
   )
 }

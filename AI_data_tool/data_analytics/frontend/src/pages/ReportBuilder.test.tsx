@@ -48,6 +48,10 @@ vi.mock('../services/api', () => ({
   pageVisibilityApi: { roles: vi.fn().mockResolvedValue([]), get: vi.fn().mockResolvedValue({ role_ids: [] }), set: vi.fn() },
   schedulesApi: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), delete: vi.fn(), runNow: vi.fn() },
   deliveriesApi: { list: vi.fn().mockResolvedValue([]) },
+  // The Share dialog (7c) reads grants, guest links and embed configs.
+  reportGrantsApi: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), remove: vi.fn() },
+  shareLinksApi: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), revoke: vi.fn() },
+  embedConfigsApi: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), setEnabled: vi.fn(), delete: vi.fn() },
   COMMON_TIMEZONES: ['UTC', 'Asia/Riyadh'],
   widgetTemplatesApi: { list: vi.fn().mockResolvedValue([]), create: vi.fn(), delete: vi.fn() },
   columnsApi: { duplicate: vi.fn() },
@@ -2363,11 +2367,13 @@ describe('ReportBuilder explains permissions and sensitivity (Phase 7.3)', () =>
     renderBuilder()
     await screen.findByTestId('view-strip')
     expect((await screen.findByTestId('sensitivity-badge')).textContent).toContain('Restricted')
-    fireEvent.click(screen.getByRole('button', { name: /Share/ }))
-    const guest = await screen.findByRole('menuitem', { name: /Guest links/ })
-    expect(guest.getAttribute('aria-disabled')).toBe('true')
-    expect(guest.getAttribute('title')).toContain('share it with named people instead')
-    fireEvent.click(screen.getByRole('menuitem', { name: /Your access, and why/ }))
+    // 7c: Share opens one dialog; the refused guest link is greyed there
+    // with the server's reason, and "Your access, and why" is in its footer.
+    fireEvent.click(screen.getByRole('button', { name: /^Share$/ }))
+    const dialog = await screen.findByRole('dialog', { name: /Share/ })
+    expect(await within(dialog).findByText(/share it with named people instead/)).toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: 'Create guest link' })).not.toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: /Your access, and why/ }))
     const list = await screen.findByTestId('access-decisions')
     expect(list.textContent).toContain('Share it by guest link')
     expect(screen.getByTestId('access-sensitivity').textContent).toContain('No guest links or embeds')
