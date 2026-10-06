@@ -25,7 +25,7 @@ Nothing is pushed.
 - [x] 3c Remaining tabs + Share dialog
   - >> GATE A: stop, report the whole Datasets screen
 - [x] 4a Ask AI Phase 1: layout, thread, column panel, answer card
-- [ ] 4b Ask AI Phase 1: all states (first run, no dataset, thinking, clarification, offline, error)
+- [x] 4b Ask AI Phase 1: all states (first run, no dataset, thinking, clarification, offline, error)
   - >> GATE B: stop, report Ask AI
 - [ ] 5-gap Gap pass for Home and Viewer (no code). List what has no backend data.
   - >> GATE C: stop, the owner decides what to hide
@@ -152,9 +152,31 @@ suite and build; the screen comparison ran once over all of 3c before ticking.
 
 **Deviations from the boards:**
 - Key number "Rows read 3,612 → 4 groups" is "Rows back 4": the run stores rows returned, not rows read (backend). Same for the source line, which keeps v1's wording, and the "Ran it" step.
-- Chart: bars keep the shared renderer's palette; the board's accent-for-the-top-bar / grey-for-the-rest needs a change to the shared chart renderers, which this step leaves alone.
+- Chart: (fixed in 4b) the top bar is now in the accent and the rest grey, through the bar renderer's existing per-row fills; the renderer itself is unchanged.
 - Rows table keeps the shared grid (raw column names, "4 rows" footer) rather than the board's friendly-name-over-raw-name header.
 - Composer keeps v1's hint line under the box; no dataset chip inside the composer (the scope bar above already shows and switches it).
 - History items show the time, not the dataset name (the list is per dataset, as before).
 - Captures used browser-only sample conversation data (a stored answer for "average margin_pct by region" on Demo — Sales); no live model call.
+
+### 4b Ask AI states — `69f5454`
+
+**Changed:**
+- No dataset chosen: the same three columns. History lists every thread with what it asks about; picking one opens it in its scope. The chooser has a search, "Recently asked about" (from the conversations' targets, with counts), all datasets and connections. The composer is locked with "Choose data above to start asking". v1's certified/test-looking filter stays under the lists. v1's hero and illustration are gone.
+- First run: eyebrow (name · rows), "Ask <dataset> anything", intro, four starters, three how-it-works tiles. History says "Your conversations about this dataset will appear here." The composer placeholder names the dataset.
+- Thinking: three-dot pulse, "Working on your answer · 6 s", skeleton, "Usually 5–20 s…". v1's timer-driven checklist is removed (for both mounts, per the handoff); the long-wait notes stay, now translated. A new question folds the previous answer to compact.
+- Clarification: rendered question; option cards for columns the reply puts in bold, code or quotes that match the dataset's columns ("Use region · A column in Demo — Sales · 4 values"), then the server's own choices; "Or type your answer…". Picking sends the reply through the normal ask. Once answered, the card folds to "Needs one detail · You chose …" and the reply isn't repeated as a bubble.
+- AI offline: `llmApi.endpoints` now also broadcasts each answer (a window event plus the latest value; path, params and type unchanged). The page reads the top bar's poll with `choiceLight(...) === 'down'`, so there's no second poller. Banner above the composer: "new questions are paused", what still works, "Checked N s ago", plus links "Explore <dataset> without AI" (Data tab) and "Build a chart yourself" (/reports?new=1). Composer locked. The builder mount never locks.
+- Error: title, v1's hint, a visible "Try instead" with starters, Try again (primary) and Edit question (puts the question back in the box), Technical details open and `dir="ltr"`.
+- Profile is read once by the page and shared by the columns panel and the clarification options.
+- Localized: the pending texts, "Could not reach the agent", "Could not load this conversation", the result caption and "No rows.", "Tables considered", the Save-as-dataset prompts and toasts, copy/download toasts, the aria-labels (Copy SQL, Download CSV/Excel/PDF, Good/Bad answer, Save as dataset, Ways to continue), "Saving…".
+
+**Deviations from the boards:**
+- Connections show their type ("SQLite · asks across tables") rather than "4 tables": the connections list has no table count.
+- Error text keeps v1's hint ("Try rephrasing with a column name…") instead of a sentence naming the number of tries: the failed run doesn't say how many repairs it made.
+- The clarification option sends "Use <column>"; the resolved line says "You chose Use region" (the board's "Group by faculty" wording isn't derivable from the reply).
+- Columns are inserted into the composer as plain text, not as a styled token (the composer is a plain textarea).
+- Compact older answers keep v1's "Show rows (n)" toggle under the chart.
+- Captures used browser-only sample data (conversations, the stored answer, a never-answering ask for Thinking, a "down" `/llm/endpoints` for Offline).
+
+**Clean-up for FINAL:** `pages/ask/AskIllustration.tsx` and the `.dl-ask--hero` / `.dl-ask__hero*` CSS are now unused.
 
