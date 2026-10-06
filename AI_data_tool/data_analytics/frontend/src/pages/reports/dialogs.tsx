@@ -44,7 +44,7 @@ function FolderSelect({ id, folders, value, onChange }: {
 
 /** The built-in templates' names, in the reader's language by their key (QA
  *  T1); a template this build does not know keeps the name the server sent. */
-const TEMPLATE_NAMES: Record<string, MessageKey> = {
+export const TEMPLATE_NAMES: Record<string, MessageKey> = {
   'kpi-strip': 'dsh.tpl.kpi', quad: 'dsh.tpl.quad', 'geo-overview': 'dsh.tpl.geo', 'detail-page': 'dsh.tpl.detail',
 }
 
@@ -166,7 +166,7 @@ const TEMPLATE_LAYOUT: Record<string, [string, number, number, number, number][]
   'detail-page': [['slicer', 0, 0, 3, 6], ['bar', 3, 0, 9, 6], ['table', 0, 6, 12, 6]],
 }
 
-function TemplateArt({ k }: { k: string }) {
+export function TemplateArt({ k }: { k: string }) {
   const ws = (TEMPLATE_LAYOUT[k] ?? []).map(([widget_type, x, y, w, h], i) =>
     ({ id: i, widget_type, layout: { x, y, w, h } }) as unknown as Widget)
   return <Thumb widgets={ws} />

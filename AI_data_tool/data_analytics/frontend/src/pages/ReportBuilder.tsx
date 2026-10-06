@@ -74,7 +74,7 @@ import CollapsibleSide from '../components/report/CollapsibleSide'
 import ReviewPane from '../components/report/ReviewPane'
 import PopupOverlay from '../components/report/PopupOverlay'
 import TooltipPageOverlay from '../components/report/TooltipPageOverlay'
-import { ArrowLeft, Plus, Eye, Undo2, Redo2, KeyRound, ShieldCheck, Pause, Play, FileDown, Share2, Maximize2, EllipsisVertical, SlidersHorizontal, Printer, FileText, Package, Pencil, RefreshCw, ChevronUp, ChevronDown, Database } from 'lucide-react'
+import { ArrowLeft, Plus, Eye, Undo2, Redo2, KeyRound, ShieldCheck, Pause, Play, FileDown, Share2, Maximize2, EllipsisVertical, SlidersHorizontal, Printer, FileText, Package, Pencil, RefreshCw, ChevronUp, ChevronDown, Database, Search } from 'lucide-react'
 import { updatedAgo } from '../lib/viewStyle'
 import { columnKind, usePageFilters } from '../lib/pageFilters'
 import PageFilterBar, { type PageFilterColumn } from '../components/report/PageFilterBar'
@@ -101,6 +101,7 @@ import './reportBuilder/builder.css'
 import PageTabs from './reportBuilder/PageTabs'
 import SaveState from './reportBuilder/SaveState'
 import ZoomControl from './reportBuilder/ZoomControl'
+import TemplatesPane from './reportBuilder/TemplatesPane'
 import { useConfirm } from '../components/ui/ConfirmDialog'
 import { useMeasuredWidth } from '../components/report/useMeasuredWidth'
 import { useModalDialog } from '../components/ui/useModalDialog'
@@ -2608,9 +2609,11 @@ export default function ReportBuilder() {
         {editMode && activeView === 'report' ? (
           // A segmented control, like Report / Data / Model: one of three is
           // always on, and the track says so.
-          <div style={{ padding:'4px 10px 8px', flexShrink:0 }}>
+          // 7e2: Insert / Fields / Templates, as the prototype (v1: Charts /
+          // Fields / More; the stored keys are unchanged).
+          <div className="dl-bd-lh">
             <div role="tablist" aria-label={tr('builder.panel')} className="dl-seg" style={{ display:'flex' }}>
-              {([['charts', tr('builder.tab.charts')], ['fields', tr('builder.tab.fields')], ['more', tr('builder.tab.more')]] as const).map(([k, l]) => (
+              {([['charts', tr('bd.tab.insert')], ['fields', tr('builder.tab.fields')], ['more', tr('bd.tab.templates')]] as const).map(([k, l]) => (
                 <button key={k} type="button" role="tab" aria-selected={leftTab === k} onClick={() => setLeftTab(k)}
                   className={`dl-seg__btn${leftTab === k ? ' dl-seg__btn--on' : ''}`}
                   style={{ flex: 1, justifyContent: 'center' }}>
@@ -2627,7 +2630,7 @@ export default function ReportBuilder() {
 
         {/* Panel content — this panel always shows the fields/hierarchy content
             that used to live behind the "Data View" tab. */}
-        <div style={{ flex:1, overflowY:'auto', overflowX:'auto', padding:10 }}>
+        <div className="dl-bd-lb" style={{ flex:1, overflowY:'auto', overflowX:'auto', padding:10 }}>
           <>
               {/* Widget catalog — add-widget buttons, edit mode only */}
               {editMode && activeView === 'report' && leftTab === 'charts' && (
@@ -2640,8 +2643,9 @@ export default function ReportBuilder() {
                   name, then drop it onto any report. The object-level analogue of a
                   DataView; apply is a plain insert carrying the saved config. */}
               {editMode && activeView === 'report' && leftTab === 'more' && (
-                <div style={{ marginBottom:12, paddingBottom:12, borderBottom:'1px solid var(--border)' }}>
-                  <div style={{ fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:6 }}>Templates</div>
+                <TemplatesPane reportId={reportId} activePageId={activePage?.id ?? null} onAdded={() => { loadReport() }}
+                  widgetTemplates={
+                <div className="dl-bd-wtpl">
                   <div style={{ display:'flex', gap:4, marginBottom:6 }}>
                     <input value={tplName} onChange={e => setTplName(e.target.value)}
                       placeholder={selectedW ? 'Template name' : 'Select a widget first'}
@@ -2671,15 +2675,17 @@ export default function ReportBuilder() {
                       </span>
                     ))}
                   </div>
-                </div>
+                </div>} />
               )}
 
               {/* Report filters — one filter definition applied to every widget on the
                   report. Defined once here, it propagates everywhere; a widget whose
                   dataset lacks the column is simply unaffected. */}
-              {editMode && activeView === 'report' && leftTab === 'more' && (
-                <div style={{ marginBottom:12, paddingBottom:12, borderBottom:'1px solid var(--border)' }}>
-                  <div style={{ fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:6 }}>Report filters</div>
+              {/* 7e2: report filters live under Fields (v1: More), after the
+                  field list -- they are about the data. */}
+              {editMode && activeView === 'report' && leftTab === 'fields' && (
+                <div className="dl-bd-sec dl-bd-rf">
+                  <div className="dl-bd-gh">Report filters</div>
                   {dateColumnOf() && (
                     <div role="group" aria-label={`Quick date filters on ${dateColumnOf()}`} data-testid="date-presets"
                       style={{ display:'flex', flexWrap:'wrap', gap:4, marginBottom:6 }}>
@@ -2731,25 +2737,21 @@ export default function ReportBuilder() {
               {/* Fields — always-visible field picker; clicking a field assigns it to the
                   selected widget's next open role matching the field's numeric-ness. */}
               {editMode && activeView === 'report' && leftTab === 'fields' && (
-                <div style={{ marginBottom:12, paddingBottom:12, borderBottom:'1px solid var(--border)' }}>
+                <div className="dl-bd-sec dl-bd-fields">
                   {!selectedW && (
                     <div style={{ fontSize: 11, color:'var(--muted)', marginBottom:6 }}>{tr('fields.hint')}</div>
                   )}
-                  <input aria-label="Filter fields" value={fieldFilter}
-                    onChange={e => setFieldFilter(e.target.value)}
-                    placeholder="Filter…"
-                    style={{ width:'100%', fontSize:11, padding:'4px 7px', marginBottom:6,
-                      background:'var(--surface2)', border:'1px solid var(--border)',
-                      borderRadius:6, color:'var(--text)', boxSizing:'border-box' }} />
+                  <label className="dl-bd-search">
+                    <Search size={14} aria-hidden />
+                    <input aria-label="Filter fields" value={fieldFilter} dir="auto"
+                      onChange={e => setFieldFilter(e.target.value)} placeholder={tr('bd.fields.search')} />
+                  </label>
                   {(['Dimensions', 'Dates', 'Geography', 'Hierarchies', 'Measures', 'Aggregated'] as const).map(group => {
                     const needle = fieldFilter.trim().toLowerCase()
                     const folded = collapsedGroups.has(group)
                     const heading = (
-                      <button type="button" aria-expanded={!folded} onClick={() => toggleGroup(group)}
-                        style={{ display: 'flex', alignItems: 'center', gap: 4, width: '100%', background: 'none', border: 'none',
-                          padding: 0, margin: '2px 0 4px', cursor: 'pointer', fontSize: 10.5, fontWeight: 700,
-                          color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', textAlign: 'start' }}>
-                        <span aria-hidden style={{ display: 'inline-block', transform: folded ? 'rotate(-90deg)' : 'none', fontSize: 9 }}>▾</span>
+                      <button type="button" aria-expanded={!folded} onClick={() => toggleGroup(group)} className="dl-bd-gh dl-bd-gh--b">
+                        <span aria-hidden className="ch" style={{ transform: folded ? 'rotate(-90deg)' : 'none' }}>▾</span>
                         {tr(`fields.${group}` as MessageKey)}
                       </button>
                     )
@@ -2811,11 +2813,12 @@ export default function ReportBuilder() {
                         {!folded && <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                           {cols.map(c => (
                             <div key={c.name}>
-                            <span data-field-row={c.name} style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+                            <span data-field-row={c.name} className="dl-bd-f" data-on={gatheredFields.includes(c.name) || undefined}
+                              data-gathering={gatheredFields.length > 0 || undefined}>
                             {/* Tick several and stage them as one chart (the bar above). */}
                             <input type="checkbox" aria-label={`Select ${columnMeta[c.name]?.label || c.name}`}
                               checked={gatheredFields.includes(c.name)} onChange={() => toggleGathered(c.name)}
-                              style={{ margin: 0, flex: 'none' }} />
+                              className="dl-bd-f__ck" />
                             <button onClick={e => {
                                 // Ctrl/cmd-click gathers instead of assigning:
                                 // charting several fields together is a
@@ -2847,27 +2850,21 @@ export default function ReportBuilder() {
                               }}
                               title={[selectedW ? `Add ${c.name} to ${selectedW.title}` : `Add ${c.name} to the page as a chart (or drag it where you want it)`,
                                       hintTitle(hints[c.name])].filter(Boolean).join(' — ')}
-                              style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '4px 7px',
-                                background: gatheredFields.includes(c.name)
-                                  ? 'color-mix(in srgb, var(--accent) 22%, var(--surface2))' : 'var(--surface2)',
-                                border: `1px solid ${gatheredFields.includes(c.name) ? 'var(--accent)' : 'var(--border)'}`,
-                                borderRadius: 6,
-                                cursor: 'pointer',
-                                fontSize: 11, color: 'var(--text)', fontFamily: 'var(--sans)', whiteSpace: 'nowrap' }}>
-                              <span style={{ fontSize: 11 }}>{c.dtype === 'calculated' ? 'ƒx' : isNumericField(c) ? '#' : 'Aa'}</span>
-                              {columnMeta[c.name]?.label || c.name}
+                              className="dl-bd-f__b">
+                              <span className="dl-bd-f__ty" data-k={c.dtype === 'calculated' ? 'calc' : isNumericField(c) ? 'measure' : group === 'Dates' ? 'date' : group === 'Geography' ? 'geo' : 'dim'}>
+                                {c.dtype === 'calculated' ? 'ƒx' : isNumericField(c) ? '#' : 'Aa'}</span>
+                              <span className="nm"><bdi>{columnMeta[c.name]?.label || c.name}</bdi></span>
                               {/* "Country - 47": how many distinct values this
                                   category holds, which is what decides whether
                                   it is a bar chart or a mistake. */}
                               {hints[c.name]?.distinct != null && (
-                                <span style={{ color: 'var(--muted)' }}>
-                                  {' - '}{countLabel(hints[c.name].distinct as number)}
-                                </span>
+                                <small className="n"><span className="dl-sr-only">{' - '}</span>{countLabel(hints[c.name].distinct as number)}</small>
                               )}
                               {hints[c.name]?.related && (
                                 <span title={hintTitle(hints[c.name])} style={{ color: 'var(--accent)', fontSize: 11 }}>≈</span>
                               )}
                             </button>
+                            <span className="dl-bd-f__acts">
                             {/* Classification, the way SAS's data pane offers it:
                                 a category can also be geography, and then every
                                 map built from it inherits its boundary set. Not
@@ -3009,6 +3006,7 @@ export default function ReportBuilder() {
                                 color: 'var(--muted)', fontSize: 12, padding: '0 2px', flex: 'none',
                                 transform: fieldProps === c.name ? 'rotate(180deg)' : 'none' }}>⌄</button>
                             </span>
+                            </span>
                             {fieldProps === c.name && fieldProperties(c)}
                             </div>
                           ))}
@@ -3054,9 +3052,10 @@ export default function ReportBuilder() {
               )}
 
               {(!editMode || activeView !== 'report' || leftTab === 'fields') && (<>
-              {/* Datasets section */}
-              <div style={{ marginBottom:12, paddingBottom:12, borderBottom:'1px solid var(--border)' }}>
-                <div style={{ fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:6 }}>{tr('builder.datasets')}</div>
+              {/* Datasets section: first in the Fields tab (7e2, as the
+                  prototype's dataset card), by flex order. */}
+              <div className="dl-bd-sec dl-bd-dss">
+                <div className="dl-bd-gh">{tr('builder.datasets')}</div>
 
                 {report.dataset_id && datasets[report.dataset_id] && (
                   <div style={{ display:'flex', alignItems:'center', gap:5, padding:'4px 7px', background:'var(--surface2)', borderRadius:5, marginBottom:3, fontSize:11 }}>
@@ -3103,8 +3102,8 @@ export default function ReportBuilder() {
                 </div>
               </div>
 
-              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
-                <span style={{ fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em' }}>{tr('builder.hierarchy')}</span>
+              <div className="dl-bd-hier" style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+                <span className="dl-bd-gh" style={{ margin: 0 }}>{tr('builder.hierarchy')}</span>
                 {dataset && (
                   <button className="btn btn-ghost btn-sm" onClick={autoGenHierarchy} style={{ fontSize: 11, padding:'2px 6px' }}>
                     Auto

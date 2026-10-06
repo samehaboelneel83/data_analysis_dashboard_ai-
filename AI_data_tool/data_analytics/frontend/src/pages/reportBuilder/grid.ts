@@ -4,7 +4,7 @@ import type { Widget } from '../../types/report'
 export const COLS = 12
 export const ROW_H = 58    // px per grid row unit
 export const GAP = 8
-export const LEFT_SIDEBAR_W = 220
+export const LEFT_SIDEBAR_W = 264
 export const RIGHT_PANEL_W = 245
 /** The right panel while it shows Suggestions: each card draws a live chart,
  *  and at 245px a chart with axes is unreadable (measured: a 197x118 preview

@@ -89,9 +89,10 @@ function reportWithWidget() {
   return r
 }
 
-/** The builder's left panel is tabbed (Fields / Charts / More); the widget
- *  catalog lives under Charts, templates and report filters under More. */
-async function openLeftTab(name: 'Fields' | 'Charts' | 'More') {
+/** The builder's left panel is tabbed (Insert / Fields / Templates, since 7e2;
+ *  v1: Charts / Fields / More): the widget catalog under Insert, report
+ *  filters under Fields, widget templates under Templates. */
+async function openLeftTab(name: 'Fields' | 'Insert' | 'Templates') {
   fireEvent.click(await screen.findByRole('tab', { name }))
 }
 // The chosen tab is remembered per viewer; a test that opened Charts must not
@@ -1197,7 +1198,7 @@ describe('ReportBuilder widget catalog in the left sidebar', () => {
       layout: { x: 0, y: 0, w: 6, h: 5 }, created_at: '2026-01-01',
     } as any)
     renderBuilder()
-    await openLeftTab('Charts')
+    await openLeftTab('Insert')
     await screen.findByTestId('view-strip')
 
     fireEvent.click(screen.getByRole('button', { name: /Bar Chart/i }))
@@ -1232,7 +1233,7 @@ describe('ReportBuilder widget catalog in the left sidebar', () => {
       return widget as any
     })
     renderBuilder()
-    await openLeftTab('Charts')
+    await openLeftTab('Insert')
     await screen.findByTestId('view-strip')
 
     fireEvent.click(screen.getByRole('button', { name: /Bar Chart/i }))
@@ -1367,7 +1368,7 @@ describe('ReportBuilder object templates', () => {
       config: { dimension: 'region', measure: 'sales' }, layout: { x: 0, y: 0, w: 6, h: 5 }, created_at: '2026-01-01',
     } as any)
     renderBuilder()
-    await openLeftTab('More')
+    await openLeftTab('Templates')
 
     const tpl = await screen.findByRole('button', { name: 'My Bar' })
     fireEvent.click(tpl)
@@ -1404,7 +1405,7 @@ describe('ReportBuilder report-level common filters', () => {
     vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales', columns: [{ name: 'region', dtype: 'text' }] } as any)
     vi.mocked(reportsApi.addCommonFilter).mockResolvedValue({ id: 9, column: 'region', op: 'eq', value: 'North' })
     renderBuilder()
-    await openLeftTab('More')
+    await openLeftTab('Fields')
     await screen.findByTestId('view-strip')
 
     fireEvent.change(await screen.findByLabelText('Report filter column'), { target: { value: 'region' } })
@@ -1421,7 +1422,7 @@ describe('ReportBuilder report-level common filters', () => {
     vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales', columns: [{ name: 'region', dtype: 'text' }] } as any)
     vi.mocked(reportsApi.addCommonFilter).mockResolvedValue({ id: 10, column: 'region', op: 'in', value: ['A', 'B'] })
     renderBuilder()
-    await openLeftTab('More')
+    await openLeftTab('Fields')
     await screen.findByTestId('view-strip')
 
     fireEvent.change(await screen.findByLabelText('Report filter column'), { target: { value: 'region' } })
@@ -1439,7 +1440,7 @@ describe('ReportBuilder report-level common filters', () => {
     const spec = { mode: 'to_date', unit: 'year', anchor: 'data_max' }
     vi.mocked(reportsApi.addCommonFilter).mockResolvedValue({ id: 11, column: 'order_date', op: 'relative', value: spec })
     renderBuilder()
-    await openLeftTab('More')
+    await openLeftTab('Fields')
     await screen.findByTestId('view-strip')
 
     fireEvent.change(await screen.findByLabelText('Report filter column'), { target: { value: 'order_date' } })
@@ -2219,7 +2220,7 @@ describe('the object selector', () => {
 describe('the insert palette', () => {
   it('filters to what was typed', async () => {
     renderBuilder()
-    await openLeftTab('Charts')
+    await openLeftTab('Insert')
     const box = await screen.findByLabelText(/find a chart/i)
 
     fireEvent.change(box, { target: { value: 'waterfall' } })
@@ -2232,7 +2233,7 @@ describe('the insert palette', () => {
     // Somebody looking for a map does not necessarily know it is called
     // "Choropleth"; the category is part of what they are searching.
     renderBuilder()
-    await openLeftTab('Charts')
+    await openLeftTab('Insert')
     const box = await screen.findByLabelText(/find a chart/i)
 
     fireEvent.change(box, { target: { value: 'maps' } })
@@ -2241,7 +2242,7 @@ describe('the insert palette', () => {
 
   it('says so when nothing matches, rather than showing an empty panel', async () => {
     renderBuilder()
-    await openLeftTab('Charts')
+    await openLeftTab('Insert')
     fireEvent.change(await screen.findByLabelText(/find a chart/i),
       { target: { value: 'zzzz' } })
     expect(screen.getByText(/no chart matches/i)).toBeInTheDocument()
@@ -2249,7 +2250,7 @@ describe('the insert palette', () => {
 
   it('shows everything again when the box is cleared', async () => {
     renderBuilder()
-    await openLeftTab('Charts')
+    await openLeftTab('Insert')
     const box = await screen.findByLabelText(/find a chart/i)
     fireEvent.change(box, { target: { value: 'waterfall' } })
     fireEvent.change(box, { target: { value: '' } })
@@ -2519,7 +2520,7 @@ describe('ReportBuilder: every edit is one undo step', () => {
     vi.mocked(reportsApi.deleteCommonFilter).mockResolvedValue(undefined as any)
     renderBuilder()
     await screen.findByTestId('view-strip')
-    await openLeftTab('More')
+    await openLeftTab('Fields')
     fireEvent.click(await screen.findByRole('button', { name: 'Last 30 days' }))
     await waitFor(() => expect(reportsApi.addCommonFilter).toHaveBeenCalledWith(1, {
       column: 'order_date', op: 'relative', value: { mode: 'last', unit: 'day', n: 30, anchor: 'data_max' } }))
