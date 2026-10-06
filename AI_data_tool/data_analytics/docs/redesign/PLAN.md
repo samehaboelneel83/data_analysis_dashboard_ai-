@@ -1,6 +1,7 @@
 # Datalytics redesign — implementation plan
 
-Source of truth: `DATALYTICS_REDESIGN_HANDOFF.md` and `boards/` in this folder.
+Source of truth: `DATALYTICS_REDESIGN_HANDOFF.md` and `boards/` in this folder (for the
+finished steps; Ask AI follows v1, see below). New sessions: read `HANDOVER.md` first.
 Work happens on branch `said`; the pre-redesign commit is tagged `before-redesign`.
 Nothing is pushed.
 
@@ -27,7 +28,7 @@ Nothing is pushed.
 - [x] 4a Ask AI Phase 1: layout, thread, column panel, answer card (visual redesign reverted at the owner's request, see 4-revert)
 - [x] 4b Ask AI Phase 1: all states (first run, no dataset, thinking, clarification, offline, error) (visual redesign reverted, see 4-revert)
 - [x] 4-revert Ask AI back to the v1 layout with fixes; Datasets menu clipping fixes
-  - >> GATE B: stop, report Ask AI
+  - >> GATE B: stop, report Ask AI — **approved 2026-10-06**
 
 > **Ask AI decision (2026-10-06, owner):** the Ask AI page uses the v1 layout and look
 > (as at `120e0ef`) with fixes. The step 4 boards in `boards/step4-ask-ai-phase1/` are
@@ -35,15 +36,24 @@ Nothing is pushed.
 > stages, the themed delete dialog, offline detection (locks the question box with one
 > line), clarification column chips, "What was wrong?" after 👎, and Edit question on
 > an error.
-- [ ] 5-gap Gap pass for Home and Viewer (no code). List what has no backend data.
-  - >> GATE C: stop, the owner decides what to hide
-- [ ] 5a Home
-- [ ] 5b Viewer
-- [ ] 6-gap Gap pass for Builder (no code)
-  - >> GATE D: stop, report Home + Viewer; the owner decides on the Builder gaps
-- [ ] 6a Builder layout restyle (top bar, Fields panel, canvas, Inspector)
-- [ ] 6b Builder copilot tab, AI offline, and all states
-- [ ] FINAL Full regression: all tests, build, capture every screen, compare against all boards, final summary, fix the flaky `Lineage.test.tsx`, and a clean-up list (test datasets 7 and 8, chat threads, the uncommitted init.sql edit)
+> **Decision at GATE B (2026-10-06, owner):** GATE B is approved. Datasets and Ask AI
+> are done and stay as implemented. Steps 5 and 6 below (Home, Viewer, Builder) are
+> **replaced** by designs from another Claude Design project ("Home Redesign" and
+> "Dashboards Parts 1–4"), to be exported to
+> `/media/saeed/New Volume1/projects/design-handoff-2/`. Upload, Connections, Lineage
+> and the AI button come after that. The theme and design system stay as they are.
+> New sub-steps for the new designs will be added here once they arrive; don't start
+> them before the owner says so. See `HANDOVER.md`.
+
+- ~~5-gap Gap pass for Home and Viewer~~ (replaced, see above)
+- ~~5a Home~~ (replaced)
+- ~~5b Viewer~~ (replaced)
+- ~~6-gap Gap pass for Builder~~ (replaced)
+- ~~6a Builder layout restyle~~ (replaced)
+- ~~6b Builder copilot tab, AI offline, and all states~~ (replaced)
+- [ ] Next: Home and Dashboards from `design-handoff-2/` (sub-steps and gates to be planned when the designs arrive)
+- [ ] Then: Upload, Connections, Lineage, the AI button
+- [ ] FINAL Full regression: all tests, build, capture every screen, compare against all designs, final summary, fix the flaky `Lineage.test.tsx` (and watch `geoRenderers.test.tsx`), and a clean-up list (test datasets 7 and 8, chat threads, the uncommitted init.sql edit)
   - >> GATE E: stop, final report
 
 ## Backend follow-ups (found during the frontend steps)
