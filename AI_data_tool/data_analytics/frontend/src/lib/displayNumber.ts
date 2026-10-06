@@ -17,16 +17,18 @@ function sig3(v: number): string {
   return /e/i.test(s) ? String(Number(s)) : trimZeros(s)
 }
 
-/** The prose rounding of a non-negative value: 1 dp from 10 up, 2 dp from 1
- *  to 10, 3 significant digits below 1. */
+/** The prose rounding of a non-negative value: 1 dp from 100 up, 2 dp from 1
+ *  to 100, 3 significant digits below 1. QA V9: 1 dp from 10 up made 18.958
+ *  and 19.0 the same "19" in the sentence and over the bars, while the grid
+ *  (2 dp) told them apart. */
 function readable(v: number): string {
-  return v >= 10 ? trimZeros(v.toFixed(1)) : v >= 1 ? trimZeros(v.toFixed(2)) : sig3(v)
+  return v >= 100 ? trimZeros(v.toFixed(1)) : v >= 1 ? trimZeros(v.toFixed(2)) : sig3(v)
 }
 
 /**
  * A chart value with the prose rule applied, for the value labels the chat's
  * charts print: only values with more than 2 decimals change, so the label
- * over a bar reads like the sentence above it (83.9, not 83.89).
+ * over a bar reads like the sentence above it (83.89, not 83.888333).
  */
 export function readingValue(v: number): number {
   if (!Number.isFinite(v) || Number.isInteger(v)) return v
@@ -38,7 +40,7 @@ export function readingValue(v: number): number {
 /**
  * A number token from a sentence or a chart value label ("61.53500000000001",
  * "-3.14159%"). Only tokens with MORE than 2 decimal places change: 1 dp from
- * 10 up, 2 dp from 1 to 10, 3 significant digits below 1. Sign, `%` and
+ * 100 up, 2 dp from 1 to 100, 3 significant digits below 1. Sign, `%` and
  * thousands separators are kept; integers and anything already at 2 dp or
  * fewer -- years, ids, "1,234.5" -- are left as written.
  */

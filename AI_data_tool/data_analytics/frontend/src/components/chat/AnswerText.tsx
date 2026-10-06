@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { useDirection } from '../../contexts/DirectionContext'
 import { useT, type MessageKey, type TranslateFn } from '../../i18n'
 import { localDigits } from '../../lib/arabicFormats'
-import { majorityDir } from '../../lib/autoDir'
+import { proseDir } from '../../lib/autoDir'
 import { formatProseNumber } from '../../lib/displayNumber'
 import { markupSpans, renderMarkup, type MarkupSpan } from '../../lib/inlineMarkup'
 import type { AnswerEvidence, EvidenceClaim } from '../../services/api'
@@ -85,7 +85,8 @@ export default function AnswerText({ text, evidence, onShow }: {
 }) {
   const t = useT()
   const { direction } = useDirection()
-  const dir = majorityDir(text, direction)
+  // By words, not letters: English data names must not outvote an Arabic sentence (QA V8).
+  const dir = proseDir(text, direction)
   const claims = spans(text, evidence)
   const markup = markupSpans(text, { httpsOnly: true })
   if (!claims) {
@@ -115,17 +116,18 @@ export default function AnswerText({ text, evidence, onShow }: {
     }
     return <mark key={`c${i}`} className="dl-num" dir="ltr">{shown}</mark>
   }
-  // Text between claims stays unhighlighted, as before; only its rounding is new.
+  // Numbers between claims get the plain highlight (QA V9): with only the
+  // traced ones marked, an Arabic answer highlighted its first number alone.
   const leaf = (a: number, b: number): ReactNode[] => {
     const out: ReactNode[] = []
     let at = a
     claims.forEach((c, i) => {
       if (c.start < a || c.end > b) return
-      if (c.start > at) out.push(...numbers(text.slice(at, c.start), `t${at}`, false))
+      if (c.start > at) out.push(...numbers(text.slice(at, c.start), `t${at}`, true))
       out.push(claim(c, i))
       at = c.end
     })
-    if (at < b) out.push(...numbers(text.slice(at, b), `t${at}`, false))
+    if (at < b) out.push(...numbers(text.slice(at, b), `t${at}`, true))
     return out
   }
   const out = renderMarkup(text, fitting(markup, claims), 0, text.length, leaf)

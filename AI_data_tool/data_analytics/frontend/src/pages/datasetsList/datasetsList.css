@@ -166,6 +166,15 @@
 .dl-dsl__option:hover { border-color: var(--mc-accent-line, var(--accent)); }
 .dl-dsl__option span { font-size: 12.5px; color: var(--muted); line-height: 1.5; }
 
+/* QA B1: stack by the PAGE's width, not the window's -- the rail and the
+   shell padding take 300+ px, so a 1280 px window left the table less room
+   beside the preview than its fixed columns need, and Name collapsed to 0. */
+.dl-dsl { container-type: inline-size; container-name: dsl; }
+@container dsl (max-width: 1100px) {
+  .dl-dsl__body { grid-template-columns: minmax(0, 1fr); }
+  .dl-dsl__preview { position: static; }
+}
+
 @media (max-width: 1100px) {
   .dl-dsl__body { grid-template-columns: minmax(0, 1fr); }
   .dl-dsl__preview { position: static; }
@@ -177,7 +186,9 @@
    other column a width that fits its content, so nothing runs past the card
    beside the preview. Phones keep index.css's scrolling table. */
 @media (min-width: 700px) {
-  .dl-dsl__table { table-layout: fixed; }
+  /* The fixed columns take 658 px; Name keeps at least ~160 px, and the card
+     scrolls sideways before it would squeeze Name away (QA B1). */
+  .dl-dsl__table { table-layout: fixed; min-inline-size: 820px; }
   /* .dl-dsl prefix: outranks index.css's `.dl-table td` padding. */
   .dl-dsl .dl-dsl__table td, .dl-dsl .dl-dsl__table th { padding-inline: 8px; overflow: hidden; text-overflow: ellipsis; }
   .dl-dsl__c-check { inline-size: 36px; }

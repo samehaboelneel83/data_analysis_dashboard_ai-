@@ -259,6 +259,9 @@ export default function Reports() {
     try {
       await reportsApi.delete(r.id)
       setReports(prev => prev.filter(x => x.id !== r.id))
+      // Placement is the server's: read the tree again so folder counts and
+      // empty folders are its answer, not a guess (QA B7).
+      void loadTree()
       toast.success(t('dsh.toast.deleted'))
     } catch (e) { toast.error(detail(e, t('dsh.toast.deleteFailed'))) }
   }
@@ -299,7 +302,7 @@ export default function Reports() {
   // ── selection ──
   const bulk = useBulkSelection<ReportSummary>({
     remove: id => reportsApi.delete(id),
-    onRemoved: ids => setReports(r => r.filter(x => !ids.includes(x.id))),
+    onRemoved: ids => { setReports(r => r.filter(x => !ids.includes(x.id))); void loadTree() },
     noun: t('noun.dashboards'),
   })
   const selected = reports.filter(r => bulk.selected.has(r.id))
@@ -362,7 +365,7 @@ export default function Reports() {
   /** The heading above an ungrouped grid: how many, and the level-2 heading
    *  the cards' names sit under. */
   const countLine = (n: number, results = false) =>
-    <h2 className="dsh-count">{t(results ? 'dsh.results' : 'dsh.nDashboards', { n: localDigits(String(n)) })}</h2>
+    <h2 className="dsh-count">{t(results ? (n === 1 ? 'dsh.oneResult' : 'dsh.results') : (n === 1 ? 'dsh.oneDashboard' : 'dsh.nDashboards'), { n: localDigits(String(n)) })}</h2>
   const grid = (rs: ReportSummary[]) => <div className="dsh-grid">{rs.map(r => <DashCard key={r.id} {...props(r)} />)}</div>
 
   const sectionHead = (key: string, icon: React.ReactNode, name: string, count: number, drop?: { id: number | null; name: string | null },
@@ -407,7 +410,7 @@ export default function Reports() {
   const sorted = (rs: ReportSummary[]) => arrange(rs, 'all')
 
   const listTable = (groups: { key: string; label: React.ReactNode; rows: ReportSummary[] }[]) => (
-    <table className="dsh-tbl" data-testid="dash-table">
+    <div className="dsh-tblw"><table className="dsh-tbl" data-testid="dash-table">
       <thead><tr>
         <th className="c-ck"><span className="dl-sr-only">{t('dsh.select')}</span></th>
         <th className="c-nm">{t('dsh.col.name')}</th><th className="c-fd">{t('dsh.folder')}</th><th className="c-ds">{t('dsh.dataset')}</th>
@@ -418,7 +421,7 @@ export default function Reports() {
         g.label ? <tr key={`g-${g.key}`} className="dsh-grp"><td colSpan={7}><span>{g.label} · {localDigits(String(g.rows.length))}</span></td></tr> : null,
         ...g.rows.map(r => <DashRow key={r.id} {...props(r)} />),
       ])}</tbody>
-    </table>
+    </table></div>
   )
 
   const content = () => {
@@ -463,7 +466,8 @@ export default function Reports() {
         return (
           <div className="dsh-empty" role="status">
             <span className="ic" aria-hidden><SearchX size={26} /></span>
-            <h2>{t('dsh.nomatch.title', { q: repFilter.query.trim() })}</h2>
+            {/* The query in a <bdi>: "QA-" in the Arabic title read "-QA". */}
+            <h2>{t('dsh.nomatch.title', { q: '\u0000' }).split('\u0000').flatMap((part, i) => i ? [<bdi key={i}>{repFilter.query.trim()}</bdi>, part] : [part])}</h2>
             <p>{t('dsh.nomatch.text')}</p>
             <div className="dsh-acts">
               <button type="button" className="btn btn-ghost dsh-btn-line" onClick={clearFilters}><X size={14} aria-hidden />{t('dsh.clearSearch')}</button>
@@ -647,14 +651,14 @@ export default function Reports() {
 
           {selectMode && (
             <div className="dsh-bulk" role="toolbar" aria-label={t('bulk.aria')}>
-              <span>{t('bulk.selected', { n: bulk.selected.size, noun: t('noun.dashboards') })}</span>
+              <span>{bulk.selected.size === 1 ? t('dsh.bulk.one') : t('dsh.bulk.many', { n: localDigits(String(bulk.selected.size)) })}</span>
               <span className="vr" />
               {tree && <button type="button" className="btn" onClick={() => setMoving(selected)}><FolderInput size={15} aria-hidden />{t('dsh.bulk.move')}</button>}
               <button type="button" className="btn" onClick={() => void bulkExport()}><Download size={15} aria-hidden />{t('dsh.bulk.export')}</button>
               <button type="button" className="btn dng" disabled={bulk.busy} onClick={() => void bulk.deleteSelected(reports)}><Trash2 size={15} aria-hidden />{t('bulk.delete')}</button>
               {testLike.some(r => !bulk.selected.has(r.id)) && (
                 <button type="button" className="btn" onClick={() => bulk.setMany(testLike.map(r => r.id), true)}>
-                  {t('bulk.selectTest', { n: testLike.length })}
+                  {testLike.length === 1 ? t('dsh.bulk.selectTestOne') : t('bulk.selectTest', { n: localDigits(String(testLike.length)) })}
                 </button>
               )}
               <span className="vr" />

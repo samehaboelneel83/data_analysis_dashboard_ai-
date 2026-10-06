@@ -6,8 +6,8 @@ beforeEach(() => { localStorage.clear(); resetDigitsCache() })
 
 describe('formatProseNumber (redesign 1b)', () => {
   it('rounds a long float in a sentence', () => {
-    expect(formatProseNumber('61.53500000000001')).toBe('61.5')
-    expect(formatProseNumber('83.88833333333332')).toBe('83.9')
+    expect(formatProseNumber('61.53500000000001')).toBe('61.54')
+    expect(formatProseNumber('83.88833333333332')).toBe('83.89')
     expect(formatProseNumber('3.14159')).toBe('3.14')
     expect(formatProseNumber('0.123456')).toBe('0.123')
   })
@@ -19,14 +19,31 @@ describe('formatProseNumber (redesign 1b)', () => {
   })
 
   it('keeps the sign, % and thousands separators', () => {
-    expect(formatProseNumber('-12.3456%')).toBe('-12.3%')
+    expect(formatProseNumber('-12.3456%')).toBe('-12.35%')
     expect(formatProseNumber('+0.04567')).toBe('+0.0457')
     expect(formatProseNumber('12,431.98765')).toBe('12,432')
   })
 
   it('writes the digits the reader asked for', () => {
     setDigits('arab')
-    expect(formatProseNumber('61.53500000000001')).toBe('٦١٫٥')
+    expect(formatProseNumber('61.53500000000001')).toBe('٦١٫٥٤')
+  })
+})
+
+describe('numbers stay distinguishable (QA V9)', () => {
+  // Average margin by region was 19.00 / 18.04 / 18.96 / 20.04 in the rows,
+  // but 19 / 18 / 19 / 20 in the sentence and over the bars: 1 dp then
+  // trimmed made 18.958 and 19.0 the same "19".
+  it('the sentence and the chart keep 2 dp below 100, as the grid does', () => {
+    expect(formatProseNumber('18.958333333')).toBe('18.96')
+    expect(formatProseNumber('18.041666667')).toBe('18.04')
+    expect(formatProseNumber('19.000000001')).toBe('19')
+    expect(readingValue(18.958333333)).toBe(18.96)
+    expect(readingValue(18.041666667)).toBe(18.04)
+  })
+
+  it('from 100 up, 1 dp is enough to tell values apart', () => {
+    expect(formatProseNumber('123.456789')).toBe('123.5')
   })
 })
 
@@ -45,8 +62,8 @@ describe('formatCell (redesign 1b)', () => {
 
 describe('readingValue (chart value labels)', () => {
   it('rounds long decimals like the sentence, and leaves short ones alone', () => {
-    expect(readingValue(83.88833333333332)).toBe(83.9)
-    expect(readingValue(-61.53500000000001)).toBe(-61.5)
+    expect(readingValue(83.88833333333332)).toBe(83.89)
+    expect(readingValue(-61.53500000000001)).toBe(-61.54)
     expect(readingValue(18.04)).toBe(18.04)
     expect(readingValue(2024)).toBe(2024)
   })

@@ -122,7 +122,9 @@ export default function Home() {
 
   // ── tiles ──
   const published = reports.filter(r => r.published).length
-  const rows = datasets.reduce((s, d) => s + (d.mode === 'directquery' ? 0 : d.row_count ?? 0), 0)
+  // The same total as the Datasets list: every row count the server reports,
+  // a live dataset's included; one with no count adds nothing (QA B7).
+  const rows = datasets.reduce((s, d) => s + (d.row_count ?? 0), 0)
   const types = [...new Set((sources.data ?? []).map(s => typeName(s.type)).filter(Boolean))]
   const lastRefresh = datasets.map(d => d.last_refreshed_at).filter(Boolean).sort().pop() ?? null
   const failing = graph.data?.datasets.filter(d => d.health === 'failing').length ?? 0

@@ -44,7 +44,10 @@ export function useColumnProfile(ds: Dataset, name: string, analysis: Analysis):
   if (dt) {
     const months = (dt.monthly_counts ?? []).slice(-21)
     const max = Math.max(1, ...months.map(m => m.count))
-    const d = (s?: string) => iso(s ? new Date(s).toLocaleDateString(language === 'ar' ? 'ar-u-nu-latn' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—')
+    // A date isolates by its own first strong letter (FSI), not forced left to
+    // right: under LRI "1 يناير 2024" read backwards (QA V7). No-break spaces
+    // keep each date on one line.
+    const d = (s?: string) => `\u2068${s ? new Date(s).toLocaleDateString(language === 'ar' ? 'ar-u-nu-latn' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).replace(/ /g, '\u00a0') : '—'}\u2069`
     return {
       dist: <span className="dl-ov__months">{months.map(m => <i key={m.period} title={`${m.period}: ${m.count}`} style={{ blockSize: `${Math.max(12, (m.count / max) * 100)}%` }} />)}</span>,
       sum: `${localDigits(d(dt.min))} – ${localDigits(d(dt.max))}`,

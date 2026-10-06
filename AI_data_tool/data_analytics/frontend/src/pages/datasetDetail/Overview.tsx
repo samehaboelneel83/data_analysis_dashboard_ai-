@@ -126,6 +126,11 @@ export default function Overview(p: OverviewProps) {
                       <span className="dl-ov__muted dl-ov__end">{t(`ov3.kind.${u.kind}` as MessageKey)}</span>
                     </li>
                   ))}
+                  {/* The count above covers all of them; past eight, say how
+                      many more and where they are (QA B7). */}
+                  {usedBy.length > 8 && (
+                    <li><Link to="/lineage" className="dl-ov__muted">{t('ov3.usedBy.more', { n: localDigits(String(usedBy.length - 8)) })}</Link></li>
+                  )}
                 </ul>
               )}
           </section>

@@ -60,6 +60,9 @@ export function useListFilter<T>(
       onChange={e => setQuery(e.target.value)}
       aria-label={label}
       placeholder={label}
+      // Typed text sets its own direction ("QA-" in the Arabic UI showed as
+      // "-QA"); the empty box keeps the page's, so the placeholder does too.
+      dir={query ? 'auto' : undefined}
       style={{
         padding: '6px 10px', fontSize: 12, borderRadius: 6,
         border: '1px solid var(--border)', background: 'var(--surface)',

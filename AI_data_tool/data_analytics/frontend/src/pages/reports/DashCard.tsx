@@ -111,6 +111,8 @@ export function DashCard(p: DashProps) {
 export function DashRow(p: DashProps) {
   const t = useT()
   const { r } = p
+  const folder = p.folderName ?? t('dsh.notInFolder')
+  const folderIcon = p.folderName ? <Folder size={14} aria-hidden /> : <FolderOpen size={14} aria-hidden />
   return (
     <tr data-testid={`dash-row-${r.id}`} data-selected={p.selected || undefined}
       draggable={p.draggable && !p.selectMode}
@@ -129,17 +131,17 @@ export function DashRow(p: DashProps) {
             <Link to={`/reports/${r.id}`} title={r.name} dir="auto"
               onClick={e => { if (p.selectMode) e.preventDefault(); else if (plain(e)) p.onOpen() }}>{r.name}</Link>
             <Blurb r={r} className="d" />
+            {/* Shown only on a narrow table, where the folder column gives way. */}
+            <span className="fdi">{folderIcon}<span dir="auto">{folder}</span></span>
           </span>
         </div>
       </td>
-      <td>
-        <span className="fd" title={p.folderName ?? t('dsh.notInFolder')}>
-          {p.folderName ? <Folder size={14} aria-hidden /> : <FolderOpen size={14} aria-hidden />}
-          <span><bdi>{p.folderName ?? t('dsh.notInFolder')}</bdi></span>
-        </span>
+      <td className="c-fd">
+        {/* dir="auto" on the span that clips: text loses its end, whatever the page direction. */}
+        <span className="fd" title={folder}>{folderIcon}<span dir="auto">{folder}</span></span>
       </td>
-      <td>{p.datasetName
-        ? <span className="dsh-ch" style={{ flex: 'none' }} title={p.datasetName}><Database size={12} aria-hidden /><span><bdi>{p.datasetName}</bdi></span></span>
+      <td className="c-ds">{p.datasetName
+        ? <span className="dsh-ch" style={{ flex: 'none' }} title={p.datasetName}><Database size={12} aria-hidden /><span dir="auto">{p.datasetName}</span></span>
         : null}</td>
       <td>
         <Badge r={r} />

@@ -55,13 +55,21 @@ export default function AskAI() {
   // 4.7: certified first, test-looking leftovers out of sight -- in the
   // picker a newcomer sees first.
   const clean = useCleanDatasets(usableDatasets)
-  const items: PickerItem[] = useMemo(() => [
-    ...clean.visible.map(d => ({
-      key: `d:${d.id}`, kind: 'dataset' as const, name: isCertified(d) ? `✓ ${d.name}` : d.name,
-      rows: d.row_count ?? null, cols: d.col_count ?? null, updated: d.updated_at ?? null,
-    })),
-    ...sourceItems,
-  ], [clean.visible, sourceItems])
+  // The dataset the URL is about is always listed, even one hidden as
+  // test-looking: a link (Home's Ask AI, a starter) can open it, and the
+  // picker must then name it rather than say "Choose a dataset" (QA B2).
+  const linkedId = params.get('dataset') ? Number(params.get('dataset')) : null
+  const items: PickerItem[] = useMemo(() => {
+    const linked = linkedId != null && !clean.visible.some(d => d.id === linkedId)
+      ? usableDatasets.filter(d => d.id === linkedId) : []
+    return [
+      ...[...linked, ...clean.visible].map(d => ({
+        key: `d:${d.id}`, kind: 'dataset' as const, name: isCertified(d) ? `✓ ${d.name}` : d.name,
+        rows: d.row_count ?? null, cols: d.col_count ?? null, updated: d.updated_at ?? null,
+      })),
+      ...sourceItems,
+    ]
+  }, [clean.visible, sourceItems, usableDatasets, linkedId])
   const [columnsById, setColumnsById] = useState<Record<number, DatasetColumn[]>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)

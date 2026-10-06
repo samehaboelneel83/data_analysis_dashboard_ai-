@@ -460,13 +460,52 @@ describe('views, search and facets', () => {
     expect(screen.queryByTestId('dash-card-1')).not.toBeInTheDocument()
   })
 
+  it('one ticked dashboard and one search result read in the singular (QA V2, V3)', async () => {
+    vi.mocked(reportsApi.list).mockResolvedValue(Array.from({ length: 9 }, (_, i) => report({ id: i + 1, name: `Board ${i}` })) as never)
+    renderReports()
+    const box = await screen.findByRole('searchbox', { name: /Search dashboards/ })
+    fireEvent.change(box, { target: { value: 'Board 3' } })
+    expect(screen.getByText('1 result')).toBeInTheDocument()
+    fireEvent.click(within(card(4)).getByRole('checkbox'))
+    expect(screen.getByRole('toolbar')).toHaveTextContent('1 dashboard selected')
+  })
+
+  it('the searched text in the no-match title keeps its own direction (QA V3)', async () => {
+    vi.mocked(reportsApi.list).mockResolvedValue(Array.from({ length: 9 }, (_, i) => report({ id: i + 1, name: `Board ${i}` })) as never)
+    renderReports()
+    fireEvent.change(await screen.findByRole('searchbox', { name: /Search dashboards/ }), { target: { value: 'QA-' } })
+    const title = screen.getByText((_, el) => el?.tagName === 'H2' && el.textContent === 'No dashboards match "QA-"')
+    expect(title.querySelector('bdi')).toHaveTextContent(/^QA-$/)
+  })
+
+  it('one test-looking dashboard is offered in the singular (QA V2)', async () => {
+    vi.mocked(reportsApi.list).mockResolvedValue([report({ id: 1, name: 'Revenue' }), report({ id: 2, name: 'test 2' })] as never)
+    renderReports()
+    await screen.findByTestId('dash-card-2')
+    fireEvent.click(within(card(1)).getByRole('checkbox'))
+    expect(within(screen.getByRole('toolbar')).getByRole('button', { name: 'Also select the one that looks like test data' })).toBeInTheDocument()
+  })
+
+  it('the list cells that clip take the direction of their own text (QA V1)', async () => {
+    vi.mocked(reportsApi.list).mockResolvedValue([report({ id: 2, name: 'Costs', dataset_id: 4 })] as never)
+    renderReports()
+    await screen.findByTestId('dash-card-2')
+    fireEvent.click(screen.getByRole('button', { name: 'List view' }))
+    const row = screen.getByTestId('dash-row-2')
+    // The span that clips, not a <bdi> inside it: an English name in an
+    // Arabic row then loses its end, not its start.
+    expect(within(row).getByText('Ledger').closest('[dir="auto"]')).not.toBeNull()
+    expect(within(row).getAllByText('Not in a folder')[0].closest('[dir="auto"]')).not.toBeNull()
+  })
+
   it('a search with no match says what was searched and offers a way out', async () => {
     vi.mocked(reportsApi.list).mockResolvedValue(Array.from({ length: 9 }, (_, i) => report({ id: i + 1, name: `Board ${i}` })) as never)
     renderReports()
     const box = await screen.findByRole('searchbox', { name: /Search dashboards/ })
     fireEvent.change(box, { target: { value: 'zzz' } })
-    expect(screen.getByText('No dashboards match "zzz"')).toBeInTheDocument()
-    fireEvent.click(within(screen.getByText('No dashboards match "zzz"').parentElement as HTMLElement).getByRole('button', { name: 'Clear search' }))
+    // The whole heading's text: the query sits in a <bdi> (QA V3), which splits the text nodes.
+    const title = screen.getByText((_, el) => el?.tagName === 'H2' && el.textContent === 'No dashboards match "zzz"')
+    fireEvent.click(within(title.parentElement as HTMLElement).getByRole('button', { name: 'Clear search' }))
     expect(screen.getByTestId('dash-card-1')).toBeInTheDocument()
   })
 
@@ -839,5 +878,33 @@ describe('kept from v1: folders', () => {
     expect(dialog).toHaveTextContent('Move "Board 1" to Not in a folder?')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }))
     await waitFor(() => expect(workspaceApi.update).toHaveBeenCalledWith(91, { parent_id: null }))
+  })
+})
+
+/**
+ * QA B7 (7-QA): a folder's count was reported to stay at 1 after its only
+ * dashboard was deleted, until a reload. Folder placement is the server's, so
+ * after a delete -- one or several -- the tree is read again.
+ */
+describe('a delete re-reads the folder tree (QA B7)', () => {
+  it('after a single delete', async () => {
+    renderReports()
+    await screen.findByTestId('dash-card-1')
+    const before = vi.mocked(workspaceApi.tree).mock.calls.length
+    fireEvent.click(within(card(1)).getByRole('button', { name: 'More actions for Revenue' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }))
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete' }))
+    await waitFor(() => expect(vi.mocked(workspaceApi.tree).mock.calls.length).toBeGreaterThan(before))
+  })
+
+  it('after a bulk delete', async () => {
+    vi.mocked(reportsApi.list).mockResolvedValue([report({ id: 1, name: 'A' }), report({ id: 2, name: 'B' })] as never)
+    renderReports()
+    await screen.findByTestId('dash-card-2')
+    const before = vi.mocked(workspaceApi.tree).mock.calls.length
+    fireEvent.click(within(card(1)).getByRole('checkbox', { name: /A/ }))
+    fireEvent.click(within(screen.getByRole('toolbar')).getByRole('button', { name: /Delete/ }))
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: /Delete/ }))
+    await waitFor(() => expect(vi.mocked(workspaceApi.tree).mock.calls.length).toBeGreaterThan(before))
   })
 })

@@ -170,7 +170,7 @@ export default function LlmEndpointsPanel() {
                   </td>
                   <td style={cell}>
                     <input className="dl-field__input" value={r.name} aria-label={t('llm.ep.name')}
-                      onChange={e => edit(i, { name: e.target.value })} style={{ minWidth: 110 }} />
+                      onChange={e => edit(i, { name: e.target.value })} style={{ minWidth: 140 }} />
                   </td>
                   <td style={cell}>
                     <input className="dl-field__input" value={r.base_url} aria-label={`${t('llm.ep.url')}: ${r.name}`}
@@ -203,7 +203,7 @@ export default function LlmEndpointsPanel() {
                     <input className="dl-field__input" type="number" min={0} step={1024} value={r.context}
                       aria-label={`${t('llm.ep.context')}: ${r.name}`}
                       placeholder={r.detectedContext ? t('llm.ep.contextAuto', { n: r.detectedContext }) : ''}
-                      onChange={e => edit(i, { context: e.target.value })} style={{ width: 110 }} />
+                      onChange={e => edit(i, { context: e.target.value })} style={{ width: 140 }} />
                   </td>
                   <td style={{ ...cell, textAlign: 'center' }}>
                     <input type="checkbox" checked={r.enabled} aria-label={`${t('llm.ep.enabled')}: ${r.name}`}

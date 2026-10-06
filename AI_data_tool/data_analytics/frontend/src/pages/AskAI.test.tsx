@@ -278,3 +278,21 @@ describe('a question handed over from Home', () => {
     expect(pane).toHaveTextContent('datasets:32')
   })
 })
+
+/**
+ * QA B2 (7-QA): a dataset the picker hides as test-looking ("ID only (test)")
+ * could still be opened by link -- from Home's Ask AI action or its starters
+ * -- and the chat answered about it, but the picker said "Choose a dataset".
+ * The picker must name the dataset the page is about, hidden or not.
+ */
+describe('a test-looking dataset opened by link (QA B2)', () => {
+  it('is named in the picker', async () => {
+    vi.mocked(datasetsApi.list).mockResolvedValue([
+      { id: 32, name: 'Orders', mode: 'import', filename: 'orders.csv' } as any,
+      { id: 8, name: 'ID only (test)', mode: 'import', filename: 'id_only_test.csv' } as any,
+    ])
+    renderAt('/ask?dataset=8')
+    await screen.findByTestId('chat-pane')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'What to ask about' })).toHaveTextContent('ID only (test)'))
+  })
+})

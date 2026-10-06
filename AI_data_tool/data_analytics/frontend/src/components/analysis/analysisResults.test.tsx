@@ -85,6 +85,16 @@ describe('key influencers renderer (redesign KI-7)', () => {
     expect(screen.getByText(/· 25%/)).toBeInTheDocument()
   })
 
+  it('a condition and its small-group mark never break across lines (QA V6)', () => {
+    // "month is 2024-02 [small group]" wrapped over 4–5 lines and broke the
+    // date at its hyphen; in Arabic "= 2024-02" split.
+    render(<ResultFor kind="key_influencers" result={ki} params={{}} />)
+    const cond = screen.getByText('Water bottles', { exact: false })
+    expect(cond).toHaveStyle({ whiteSpace: 'nowrap' })
+    expect(screen.getByText('small group')).toHaveStyle({ whiteSpace: 'nowrap' })
+    expect(screen.getAllByTestId('influencer-lift')[0]).toHaveStyle({ whiteSpace: 'nowrap' })
+  })
+
   it('invents no p-values and keeps the not-causation caveat', () => {
     render(<ResultFor kind="key_influencers" result={ki} params={{}} />)
     expect(screen.queryByText(/p[- ]?value/i)).toBeNull()

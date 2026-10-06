@@ -543,7 +543,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
                             the test's -- a reader has to be able to tell which. */}
                         <AnswerSource msg={msg} />
                         {msg.runId != null && (
-                          <AnswerActions msg={msg} question={turn.question?.text} />
+                          answerActions(msg, turn.question?.text)
                         )}
                         {why && why.run === msg.runId && (
                           <form className="dl-why" onSubmit={e => {
@@ -578,7 +578,11 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
     </div>
   )
 
-  function AnswerActions({ msg, question }: { msg: ChatMessage; question?: string }) {
+  // Called as a function, not mounted as <AnswerActions/> (QA V10): a
+  // component declared in here is a new type on every render, so React
+  // remounted the bar -- a click whose mousedown came before a re-render never
+  // landed (the first 👎 did nothing) and AddToDashboard lost its state.
+  function answerActions(msg: ChatMessage, question?: string) {
     const runId = msg.runId!
     const sqlable = !(msg.intent === 'chat' || isProposals(msg.presentation)
       || isAnalysisResult(msg.presentation))

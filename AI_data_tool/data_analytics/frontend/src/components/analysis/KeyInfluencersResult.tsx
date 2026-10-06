@@ -82,10 +82,12 @@ export default function KeyInfluencersResult({ result, leftOut = [] }: {
                 {/* The rule can hold an interval, "(64.5, 70.1]": an LTR
                     isolate keeps its brackets in maths order under RTL,
                     where they otherwise swapped ends with the text. */}
-                <td>
-                  <span dir="ltr" style={{ unicodeBidi: 'isolate' }}><strong>{r.factor}</strong> {tr('ki.is')} {r.group}</span>
+                {/* QA V6: the condition and its mark each stay on one line
+                    ("2024-02" broke at its hyphen); the mark may drop under. */}
+                <td style={{ minWidth: '12em' }}>
+                  <span dir="ltr" style={{ unicodeBidi: 'isolate', whiteSpace: 'nowrap' }}><strong>{r.factor}</strong> {tr('ki.is')} {r.group}</span>
                   {small && (
-                    <span className="dl-ki__small" style={{ marginInlineStart: 8, fontSize: 10.5, fontWeight: 600,
+                    <span className="dl-ki__small" style={{ marginInlineStart: 8, fontSize: 10.5, fontWeight: 600, whiteSpace: 'nowrap', display: 'inline-block',
                       padding: '1px 7px', borderRadius: 99, color: 'var(--mc-warning)',
                       background: 'var(--mc-warning-soft)', border: '1px solid var(--mc-warning-line)' }}>
                       {tr('ki.smallGroup')}

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderWithProviders as render, screen, waitFor, fireEvent } from '../test/renderWithProviders'
+import { renderWithProviders as render, screen, waitFor, fireEvent, act } from '../test/renderWithProviders'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import DatasetDetail from './DatasetDetail'
 import { datasetsApi, analysisApi, dataPreviewApi, jobsApi } from '../services/api'
@@ -1405,5 +1405,38 @@ describe('the automatic analyses wait for the Analysis tab (redesign 3c)', () =>
     fireEvent.click(screen.getByRole('tab', { name: /^Analysis/ }))
     await waitFor(() => expect(analysisApi.segment).toHaveBeenCalledTimes(1))
     expect(analysisApi.keyInfluencers).toHaveBeenCalledWith(29, 'revenue')
+  })
+})
+
+/**
+ * QA B5 (7-QA): with a sort active, a filter's chip appeared but the table
+ * kept the unfiltered rows until Apply was pressed again. The Data tab sent a
+ * new request for each change and showed whichever answer came back LAST; on
+ * the single-process server an older, slower request (the sort) could land
+ * after the newer one (the filter) and overwrite it. Only the latest request
+ * may fill the table.
+ */
+describe('Data tab: an older answer never overwrites a newer one (QA B5)', () => {
+  it('shows the result of the latest request even when an earlier one resolves after it', async () => {
+    vi.mocked(datasetsApi.get).mockResolvedValue(importDataset())
+    vi.mocked(analysisApi.get).mockRejectedValue(new Error('none'))
+    const first = { columns: ['region'], rows: [['Start']], total: 1 }
+    let resolveA!: (v: unknown) => void
+    let resolveB!: (v: unknown) => void
+    vi.mocked(dataPreviewApi.query)
+      .mockResolvedValueOnce(first as never)
+      .mockImplementationOnce(() => new Promise(r => { resolveA = r }) as never)
+      .mockImplementationOnce(() => new Promise(r => { resolveB = r }) as never)
+    renderDetail(29, 'data')
+    await screen.findByText('Start')
+    const box = screen.getByRole('searchbox')
+    fireEvent.change(box, { target: { value: 'a' } })           // request A (older)
+    await waitFor(() => expect(dataPreviewApi.query).toHaveBeenCalledTimes(2), { timeout: 2000 })
+    fireEvent.change(box, { target: { value: 'eu' } })          // request B (newer)
+    await waitFor(() => expect(dataPreviewApi.query).toHaveBeenCalledTimes(3), { timeout: 2000 })
+    await act(async () => { resolveB({ columns: ['region'], rows: [['Europe']], total: 1 }) })
+    await act(async () => { resolveA({ columns: ['region'], rows: [['Asia Pacific']], total: 1 }) })
+    expect(await screen.findByText('Europe')).toBeInTheDocument()
+    expect(screen.queryByText('Asia Pacific')).not.toBeInTheDocument()
   })
 })

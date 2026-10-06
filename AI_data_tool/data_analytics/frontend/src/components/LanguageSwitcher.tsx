@@ -60,7 +60,6 @@ export default function LanguageSwitcher() {
           {LANGUAGES.map(l => (
             <button key={l} type="button" role="menuitemradio" aria-checked={l === language}
               onClick={() => { setLanguage(l); setOpen(false) }}
-              lang={l} dir={LANGUAGE_DIRECTION[l]}
               style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%',
                 background: l === language ? 'var(--accent-soft)' : 'none', border: 'none',
                 cursor: 'pointer', textAlign: 'start', padding: '8px 10px', borderRadius: 7,
@@ -69,7 +68,9 @@ export default function LanguageSwitcher() {
               <span aria-hidden style={{ width: 14, display: 'inline-flex', flexShrink: 0 }}>
                 {l === language && <Check size={13} />}
               </span>
-              <span style={{ flex: 1 }}>{LANGUAGE_LABEL[l]}</span>
+              {/* Script and direction on the label only, so every row follows
+                  the menu's direction (QA V10: the Arabic row was mirrored). */}
+              <span style={{ flex: 1 }}><bdi lang={l} dir={LANGUAGE_DIRECTION[l]}>{LANGUAGE_LABEL[l]}</bdi></span>
               <span style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase' }}>
                 {LANGUAGE_DIRECTION[l]}
               </span>

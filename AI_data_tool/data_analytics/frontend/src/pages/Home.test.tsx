@@ -235,6 +235,23 @@ describe('the tiles', () => {
   })
 })
 
+/**
+ * QA B7 (7-QA): Home said 4,440 rows where the Datasets list said 16,440 --
+ * Home left the live dataset out although the server reports its row count.
+ * Both pages must add up the same rows; a live dataset with NO count adds none.
+ */
+describe('the rows tile agrees with the Datasets list (QA B7)', () => {
+  it('counts a live dataset\'s rows when the server reports them, and skips them when it does not', async () => {
+    vi.mocked(datasetsApi.list).mockResolvedValue([
+      dataset({ id: 1, row_count: 300 }),
+      dataset({ id: 2, name: 'Live', mode: 'directquery', row_count: 12000, filename: null, data_source_id: 2 }),
+      dataset({ id: 3, name: 'Live2', mode: 'directquery', row_count: null, filename: null, data_source_id: 2 }),
+    ] as never)
+    renderHome()
+    expect(await screen.findByTestId('hm-tile-datasets')).toHaveTextContent(`${num(12300)} rows`)
+  })
+})
+
 describe('admin-only sections', () => {
   it('are not requested, or shown, for a member', async () => {
     renderHome(member)

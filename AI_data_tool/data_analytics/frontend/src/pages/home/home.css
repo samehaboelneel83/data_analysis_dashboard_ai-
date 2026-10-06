@@ -83,7 +83,8 @@
 .hm-qa.q-i .ic { background: none; }
 .hm-qa .tx { min-width: 0; }
 .hm-qa b { display: block; font-size: 14px; font-weight: 600; }
-.hm-qa small { display: block; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Wraps to two lines rather than clipping ("Start from a bl…", QA V10). */
+.hm-qa small { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; font-size: 12px; color: var(--muted); text-wrap: pretty; }
 .hm-qa .ar { margin-inline-start: auto; color: var(--mc-faint); flex: none; transition: transform var(--dl-dur), color var(--dl-dur); }
 .hm-qa:hover .ar { color: var(--mc-accent-ink); transform: translateX(3px); }
 [dir="rtl"] .hm-qa .ar { transform: scaleX(-1); }

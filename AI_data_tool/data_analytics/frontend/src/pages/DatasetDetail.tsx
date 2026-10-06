@@ -294,6 +294,10 @@ export default function DatasetDetail() {
   }, [dsId])
   useEffect(loadDataset, [loadDataset])
 
+  // Each preview request is numbered; only the latest may fill the table. On
+  // the single-process server an older, slower request (a sort) could land
+  // after a newer one (a filter) and put the unfiltered rows back (QA B5).
+  const previewSeq = useRef(0)
   const loadPreview = useCallback(async (
     pg    = page,
     frows = filterRows,
@@ -303,6 +307,8 @@ export default function DatasetDetail() {
     srch  = search,
   ) => {
     if (!ds) return
+    const seq = ++previewSeq.current
+    const latest = () => seq === previewSeq.current
     setPvLoading(true)
     setPvError(null)
     try {
@@ -312,7 +318,7 @@ export default function DatasetDetail() {
         // rather than silently sent and dropped server-side (see the note
         // rendered above the table for this same reason).
         const result = await dataPreviewApi.query(dsId, [], [], PAGE_SIZE, 0)
-        setPreview(result)
+        if (latest()) setPreview(result)
         return
       }
       const activeFilters: DataPreviewFilter[] = frows
@@ -322,12 +328,12 @@ export default function DatasetDetail() {
         dsId, activeFilters, cc, PAGE_SIZE, pg * PAGE_SIZE,
         sb ?? undefined, sd, srch || undefined,
       )
-      setPreview(result)
+      if (latest()) setPreview(result)
     } catch (err: any) {
       const msg = err?.response?.data?.detail ?? 'Failed to load data'
-      setPvError(msg)
+      if (latest()) setPvError(msg)
     } finally {
-      setPvLoading(false)
+      if (latest()) setPvLoading(false)
     }
   }, [ds, dsId, page, filterRows, calcCols, sortBy, sortDir, search])
 

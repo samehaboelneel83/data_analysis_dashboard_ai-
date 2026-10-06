@@ -175,4 +175,30 @@ describe('Overview number formats (3b)', () => {
       analysis: { numeric: { columns: { year: { min: 2024, p5: 2024, p25: 2024, median: 2024, p75: 2025, p95: 2025, max: 2025 } } } } })
     expect(screen.getByText('\u20662024\u2069 – \u20662025\u2069 · median \u20662024\u2069')).toBeInTheDocument()
   })
+
+  it('isolates each date by its own script, not forced left to right (QA V7)', () => {
+    // Forced LTR (LRI), an Arabic date "1 يناير 2024" read backwards:
+    // "1 2024 ديسمبر 28 – يناير 2025". First-strong (FSI) follows the date.
+    show({ ds: { ...DS, columns: [{ id: 3, name: 'date', dtype: 'datetime', missing_pct: 0, stats: {} }] } as Dataset })
+    const sum = screen.getByText(/2025.* – .*2026/)
+    expect(sum.textContent).toMatch(/^\u2068[^\u2066\u2069]*2025\u2069 – \u2068[^\u2066\u2069]*2026\u2069$/)
+  })
+})
+
+/**
+ * QA B7 (7-QA): "Used by" said 9 and listed 8 -- the list stopped at eight
+ * with nothing saying one was left out. The count and the list must agree.
+ */
+describe('Used by: the count and the list agree (QA B7)', () => {
+  it('says how many more there are past the first eight, and where to see them', async () => {
+    vi.mocked(lineageApi.graph).mockResolvedValue({
+      sources: [], datasets: [],
+      reports: Array.from({ length: 9 }, (_, i) => ({ id: 10 + i, name: `Board ${i + 1}`, dataset_ids: [1] })),
+    })
+    show()
+    const used = screen.getByTestId('overview-used-by')
+    await within(used).findByRole('link', { name: 'Board 8' })
+    expect(within(used).queryByRole('link', { name: 'Board 9' })).not.toBeInTheDocument()
+    expect(within(used).getByRole('link', { name: '+1 more' })).toHaveAttribute('href', '/lineage')
+  })
 })

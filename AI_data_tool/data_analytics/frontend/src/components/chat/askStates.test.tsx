@@ -46,7 +46,8 @@ describe('clarification', () => {
     await ask('average final score by department')
     const group = await screen.findByRole('group', { name: 'Ways to continue' })
     const chips = Array.from(group.querySelectorAll('button')).map(b => b.textContent)
-    expect(chips).toEqual(['Use faculty', 'Show all faculties'])
+    // Set-apart terms first, then plain mentions (QA B3: "final score").
+    expect(chips).toEqual(['Use faculty', 'Use final_score', 'Show all faculties'])
     fireEvent.click(screen.getByRole('button', { name: 'Use faculty' }))
     await waitFor(() => expect(agentApi.ask).toHaveBeenLastCalledWith(7, 'Use faculty'))
   })
@@ -65,6 +66,24 @@ describe('what was wrong', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send feedback' }))
     await waitFor(() => expect(feedback).toHaveBeenCalledWith(7, { runId: 21, rating: 'down', comment: 'wrong column' }))
     expect(screen.queryByLabelText('What was wrong?')).not.toBeInTheDocument()
+  })
+})
+
+describe('the answer bar keeps its elements across renders (QA V10)', () => {
+  it('a re-render does not replace the buttons, so a click in progress still lands', async () => {
+    // The bar was a component declared inside ChatPane: a new type on every
+    // render, so React remounted it -- a press whose mousedown fell before a
+    // re-render lost its click (the first 👎 "did nothing"), and state inside
+    // the bar was dropped.
+    vi.spyOn(agentApi, 'ask').mockResolvedValue({ run_id: 21, status: 'ok', intent: 'aggregate', error: null,
+      answer: 'Total is 5.', results: [] } as any)
+    vi.spyOn(agentApi, 'feedback').mockResolvedValue({ id: 1, run_id: 21, rating: 'up', comment: null })
+    page()
+    await ask('total')
+    const bad = await screen.findByRole('button', { name: 'Bad answer' })
+    fireEvent.click(screen.getByRole('button', { name: 'Good answer' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Good answer' })).toHaveAttribute('aria-pressed', 'true'))
+    expect(screen.getByRole('button', { name: 'Bad answer' })).toBe(bad)
   })
 })
 

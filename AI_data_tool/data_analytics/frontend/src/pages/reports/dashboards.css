@@ -52,6 +52,7 @@
   background: var(--bg); border: 1px solid var(--border); color: var(--muted); box-sizing: border-box; }
 .dsh-srch:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .dsh-srch input[type="search"] { flex: 1; min-width: 0 !important; height: 100%; border: 0 !important; background: none !important; outline: none; font-size: 14px !important; padding: 0 !important; color: var(--text) !important; }
+.dsh-srch input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; display: none; }
 .dsh-srch input[type="search"]:focus, .dsh-srch input[type="search"]:focus-visible { box-shadow: none !important; outline: none !important; }
 .dsh-srch kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; background: var(--surface); color: var(--muted); }
 .dsh-seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: 9px; background: var(--surface2); }
@@ -143,11 +144,12 @@
 .dsh-tbl .c-ck { width: 40px; padding-inline-end: 0; }
 .dsh-tbl .c-ck .dsh-ck { position: static; opacity: 0; width: 18px; height: 18px; }
 .dsh-tbl tr:hover .dsh-ck, .dsh-tbl tr:focus-within .dsh-ck, .dsh-selmode .dsh-tbl .dsh-ck, .dsh-tbl .dsh-ck:checked { opacity: 1; }
-.dsh-tbl .c-nm { width: 34%; }
-.dsh-tbl .c-fd { width: 15%; }
-.dsh-tbl .c-ds { width: 22%; }
-.dsh-tbl .c-st { width: 12%; }
-.dsh-tbl .c-mod { width: 13%; }
+/* The small columns are fixed and the name takes what is left (QA V1: in
+   percentages they all shrank together and the name went first). */
+.dsh-tbl .c-fd { width: 140px; }
+.dsh-tbl .c-ds { width: 160px; }
+.dsh-tbl .c-st { width: 96px; }
+.dsh-tbl .c-mod { width: 120px; }
 .dsh-tbl td { overflow: hidden; text-overflow: ellipsis; }
 .dsh-tbl .dsh-ch { max-width: 100%; }
 .dsh-nmc { display: flex; align-items: center; gap: 12px; min-width: 0; }
@@ -160,7 +162,25 @@
 .dsh-nmc a:hover { color: var(--mc-accent-ink); text-decoration: underline; }
 .dsh-nmc .d { display: block; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dsh-tbl .fd { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); max-width: 170px; }
-.dsh-tbl .fd span { overflow: hidden; text-overflow: ellipsis; }
+.dsh-tbl .fd span { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.dsh-nmc .fdi { display: none; }
+.dsh-tblw { container-type: inline-size; container-name: dshtbl; overflow-x: auto; border-radius: 14px; }
+/* Below this the table scrolls sideways rather than squeeze the name away. */
+.dsh-tblw > .dsh-tbl { min-inline-size: 720px; }
+/* A narrow table: the folder column gives way (the folder shows under the
+   name instead, and the "All" view groups by folder anyway). */
+@container dshtbl (max-width: 960px) {
+  /* Collapsed to nothing rather than removed, so the group rows (colSpan 7)
+     still span exactly the table. */
+  .dsh-tbl .c-fd { width: 0; padding: 0; border-inline: 0; overflow: hidden; font-size: 0; }
+  .dsh-tbl .c-fd > * { display: none; }
+  .dsh-tbl .c-ds { width: 150px; }
+  .dsh-tbl .c-mod { width: 112px; }
+  .dsh-nmc .fdi { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); min-width: 0; }
+  .dsh-nmc .fdi span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .dsh-nmc .fdi svg { flex: none; }
+  .dsh-mth { display: none; }
+}
 .dsh-tbl .c-act { width: 112px; text-align: end; }
 .dsh-ra { display: inline-flex; align-items: center; gap: 2px; justify-content: flex-end; }
 .dsh-ra .dsh-ibx { box-shadow: none; background: none; }
@@ -173,7 +193,8 @@
 /* ── Bulk bar ─────────────────────────────────────────────────── */
 .dsh-bulk { position: sticky; bottom: 18px; z-index: 20; margin: 18px auto 0; width: max-content; max-width: 100%; display: flex; align-items: center; gap: 6px;
   padding-block: 6px; padding-inline: 16px 6px; border-radius: 14px; background: var(--text); color: var(--bg); box-shadow: 0 18px 40px -12px rgb(0 0 0 / .45);
-  font-size: 14px; font-weight: 600; }
+  font-size: 14px; font-weight: 600; flex-wrap: wrap; justify-content: center; row-gap: 4px; }
+.dsh-bulk > * { white-space: nowrap; flex: none; }
 .dsh-bulk .btn { height: 32px; color: var(--bg); background: transparent; border: 0; }
 .dsh-bulk .btn:hover:not(:disabled) { background: color-mix(in srgb, var(--bg) 14%, transparent); }
 .dsh-bulk .btn.dng { color: #ff9a9a; }

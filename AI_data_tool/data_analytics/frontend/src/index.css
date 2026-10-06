@@ -77,6 +77,11 @@ svg.lucide { stroke-width: var(--dl-icon-stroke); }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* Native scrollbars, their corner and form controls follow the theme (QA
+   V10: a white square where a dark table's two scrollbars meet). */
+:root { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+
 html, body, #root {
   height: 100%;
   background: var(--bg);
@@ -1073,7 +1078,11 @@ svg.recharts-surface { direction: ltr; }
 
 /* ---- Shell ---- */
 
-.dl-shell { display: flex; block-size: 100%; }
+/* clip, not hidden (QA V5): nothing inside the shell can make the document
+   taller, and a clipped box cannot be scrolled from script either, so a focus
+   jump or scrollIntoView never nudges the whole shell (top bar and logo up
+   ~15px). Fixed-position popups are not clipped by it. */
+.dl-shell { display: flex; block-size: 100%; overflow: clip; }
 .dl-shell__main { flex: 1; display: flex; flex-direction: column; min-inline-size: 0; }
 .dl-shell__content { flex: 1; overflow: auto; background: var(--bg); }
 
@@ -1969,6 +1978,14 @@ html[data-presenting="1"] .dl-bleed { margin: 0; block-size: 100%; }
   overflow: hidden;
   text-overflow: ellipsis;
   min-inline-size: 0;
+}
+
+/* A narrower window (QA V4): the controls on the right are fixed, so the
+   trail is what gives. The muted section word in front goes first, so the
+   page's own name keeps the room ("Dashboards > Q" before). */
+@media (max-width: 1360px) {
+  .dl-crumbs > .dl-crumbs__section:first-child:not(.dl-crumbs__link),
+  .dl-crumbs > .dl-crumbs__section:first-child:not(.dl-crumbs__link) + .dl-crumbs__sep { display: none; }
 }
 
 /* ============================================================
