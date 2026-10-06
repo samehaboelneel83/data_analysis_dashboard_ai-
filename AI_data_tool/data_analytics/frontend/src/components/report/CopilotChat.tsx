@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent } from 'react'
+import { useAiOffline } from '../../pages/ask/useAiOffline'
 import { ArrowUp, ArrowUpRight, BookOpen, Check, Lightbulb, Minus, MoreHorizontal, PencilLine,
   RotateCcw, Sparkles, TrendingUp, X } from 'lucide-react'
 import { insightsApi, reportsApi } from '../../services/api'
@@ -100,6 +101,9 @@ export default function CopilotChat({
 }: CopilotChatProps) {
   const t = useT()
   const [open, setOpen] = useState(false)
+  // 7e5: the top bar's model light, as Ask AI reads it (4b). While it is
+  // down, new requests are paused and the panel says why in one line.
+  const { offline } = useAiOffline()
   const [turns, setTurns] = useState<Turn[]>([])
   // The number of a reply whose source the reader asked to see (E11).
   const [evidenceFocus, setEvidenceFocus] = useState<{ turn: number; at: EvidenceFocus } | null>(null)
@@ -385,7 +389,7 @@ export default function CopilotChat({
                       <p className="dl-askai__insight-text" dir="auto">
                         {insight.title}{insight.detail ? ` — ${insight.detail}` : ''}
                       </p>
-                      <button type="button" className="dl-askai__insight-more" disabled={busy}
+                      <button type="button" className="dl-askai__insight-more" disabled={busy || offline}
                         onClick={() => void send(t('copilot.tellMore', { title: insight.title }))}>
                         {t('copilot.tellMoreBtn')}
                       </button>
@@ -396,7 +400,7 @@ export default function CopilotChat({
                 <ul className="dl-askai__sug">
                   {suggestions.map(s => (
                     <li key={s.text}>
-                      <button type="button" disabled={busy}
+                      <button type="button" disabled={busy || offline}
                         onClick={() => {
                           if (s.fill) { setInput(s.text + ' '); inputRef.current?.focus() }
                           else void send(s.text)
@@ -463,15 +467,16 @@ export default function CopilotChat({
           </div>
 
           <div className="dl-askai__composer">
+            {offline && <p role="status" className="dl-chat__note dl-chat__note--error dl-chat__offline" data-testid="copilot-offline">{t('off.title')}</p>}
             <div className="dl-askai__box">
-              <textarea ref={inputRef} rows={1} value={input} disabled={busy}
-                placeholder={t('copilot.placeholder')}
+              <textarea ref={inputRef} rows={1} value={input} disabled={busy || offline}
+                placeholder={offline ? t('off.composer') : t('copilot.placeholder')}
                 aria-label={t('copilot.inputLabel')}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={e => {
                   if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send() }
                 }} />
-              <button type="button" className="dl-askai__send" onClick={() => void send()} disabled={busy}
+              <button type="button" className="dl-askai__send" onClick={() => void send()} disabled={busy || offline}
                 aria-label={t('copilot.send')} title={t('copilot.send')}>
                 <ArrowUp size={16} aria-hidden />
               </button>

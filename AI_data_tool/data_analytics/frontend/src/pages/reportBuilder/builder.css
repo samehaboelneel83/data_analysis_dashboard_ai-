@@ -246,6 +246,35 @@
 .dl-bd-multi .row { display: flex; flex-wrap: wrap; gap: 6px; }
 .dl-bd-multi .row .btn { background: var(--surface); font-size: 12px; }
 
+/* ── Shortcuts, loading, empty page, conflict (7e5) ───────────── */
+.dl-bd-scrim { position: fixed; inset: 0; z-index: 1000; background: rgb(15 23 42 / .45); display: grid; place-items: center; padding: 16px; }
+.dl-bd-keys { width: min(640px, 100%); padding: 18px 22px 22px; border-radius: 16px; background: var(--surface); border: 1px solid var(--border);
+  box-shadow: var(--dl-shadow-overlay); display: grid; grid-template-columns: 1fr 1fr; column-gap: 28px; }
+.dl-bd-keys .hd { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.dl-bd-keys .hd h2 { flex: 1; margin: 0; font-size: 18px; font-weight: 700; }
+.dl-bd-keys section { min-width: 0; }
+.dl-bd-keys dl { margin: 0; }
+.dl-bd-keys dl > div { display: flex; align-items: center; gap: 10px; min-height: 34px; border-bottom: 1px solid var(--border); }
+.dl-bd-keys dt { flex: 1; font-size: 13.5px; color: var(--text); }
+.dl-bd-keys dd { margin: 0; display: inline-flex; gap: 4px; }
+.dl-bd-keys kbd { font: 600 11px var(--mono); padding: 2px 6px; border-radius: 5px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); }
+.dl-bd-skel { display: flex; flex-direction: column; height: 100%; min-height: 560px; background: var(--bg); }
+.dl-bd-skel .r1, .dl-bd-skel .r2 { display: flex; align-items: center; gap: 12px; padding: 0 16px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.dl-bd-skel .r1 { height: 52px; } .dl-bd-skel .r2 { height: 44px; }
+.dl-bd-skel .sp { flex: 1; }
+.dl-bd-skel .r1 .sk, .dl-bd-skel .r2 .sk { height: 22px; border-radius: 8px; }
+.dl-bd-skel .body { flex: 1; display: flex; min-height: 0; }
+.dl-bd-skel .side { width: 264px; padding: 16px; display: flex; flex-direction: column; gap: 12px; background: var(--surface); border-inline-end: 1px solid var(--border); }
+.dl-bd-skel .side .sk { height: 14px; border-radius: 6px; }
+.dl-bd-skel .grid { flex: 1; padding: 16px; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); grid-auto-rows: 120px; gap: 12px; align-content: start; }
+.dl-bd-skel .grid .sk { border-radius: 14px; }
+.dl-bd-skel .sk { display: block; background: linear-gradient(90deg, var(--surface2), color-mix(in srgb, var(--surface2) 55%, var(--surface)), var(--surface2));
+  background-size: 200% 100%; animation: dl-bd-sk 1.4s ease-in-out infinite; }
+@keyframes dl-bd-sk { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+.dl-bd-emptypage .ic { width: 56px; height: 56px; border-radius: 16px; display: grid; place-items: center; background: var(--accent-soft); color: var(--mc-accent-ink); }
+.dl-bd-conflict { border-radius: 10px; margin: 8px 16px 0; border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border)) !important; }
+@media (prefers-reduced-motion: reduce) { .dl-bd-skel .sk { animation: none; } }
+
 /* ── Footer ───────────────────────────────────────────────────── */
 .dl-statusbar__keys { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; color: var(--muted); font: inherit; font-size: 11.5px;
   cursor: pointer; padding: 2px 4px; border-radius: 6px; }

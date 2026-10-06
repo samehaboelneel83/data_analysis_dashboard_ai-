@@ -2779,3 +2779,50 @@ describe('canvas overlays (redesign 7e4)', () => {
     expect(screen.getByRole('heading', { name: 'Performance' })).toBeInTheDocument()
   })
 })
+
+describe('builder shortcuts (redesign 7e5)', () => {
+  it('Ctrl+D duplicates the selection, Ctrl + / − zoom, Ctrl+/ opens AI, ? opens the sheet', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    vi.mocked(reportsApi.addWidget).mockClear().mockResolvedValue({ id: 78, page_id: 100, widget_type: 'bar', title: 'Sales by Region', config: {}, layout: { x: 0, y: 5, w: 6, h: 5 }, created_at: '2026-01-01' } as any)
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    fireEvent.click(await screen.findByText('Sales by Region'))
+    fireEvent.keyDown(document.body, { key: 'd', ctrlKey: true })
+    await waitFor(() => expect(reportsApi.addWidget).toHaveBeenCalledWith(1, 100, expect.objectContaining({ widget_type: 'bar' })))
+    fireEvent.keyDown(document.body, { key: '=', ctrlKey: true })
+    expect(screen.getByText('110%')).toBeInTheDocument()
+    fireEvent.keyDown(document.body, { key: '-', ctrlKey: true })
+    expect(screen.getByText('100%')).toBeInTheDocument()
+    fireEvent.keyDown(document.body, { key: '/', ctrlKey: true })
+    expect(within(screen.getByRole('navigation', { name: 'Panels' })).getByRole('button', { name: 'AI' })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.keyDown(document.body, { key: '?' })
+    expect(screen.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeInTheDocument()
+  })
+})
+
+describe('builder states the prototype does not draw (redesign 7e5)', () => {
+  it('while the dashboard loads, a skeleton of the builder says it is loading', async () => {
+    vi.mocked(reportsApi.get).mockReturnValue(new Promise(() => {}) as any)
+    renderBuilder()
+    const s = await screen.findByRole('status', { name: 'Loading the dashboard' })
+    expect(s).toHaveAttribute('aria-busy', 'true')
+  })
+
+  it('a dashboard that fails to load offers Retry and the way back', async () => {
+    vi.mocked(reportsApi.get).mockRejectedValue(Object.assign(new Error('boom'), { response: { status: 500 } }))
+    renderBuilder()
+    expect(await screen.findByRole('button', { name: /Retry|Try again/ })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Dashboards/ })).toHaveAttribute('href', '/reports')
+  })
+
+  it('an empty page offers the Templates tab', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue(baseReport() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    renderBuilder()
+    const empty = await screen.findByTestId('empty-page')
+    fireEvent.click(within(empty).getByRole('button', { name: /template/i }))
+    expect(screen.getByRole('tab', { name: 'Templates' })).toHaveAttribute('aria-selected', 'true')
+  })
+})

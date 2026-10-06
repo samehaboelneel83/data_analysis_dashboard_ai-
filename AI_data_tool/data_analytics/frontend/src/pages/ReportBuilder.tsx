@@ -100,13 +100,14 @@ import './reportBuilder/viewMode.css'
 import './reportBuilder/builder.css'
 import PageTabs from './reportBuilder/PageTabs'
 import SaveState from './reportBuilder/SaveState'
-import ZoomControl from './reportBuilder/ZoomControl'
+import ZoomControl, { ZOOM_MAX, ZOOM_MIN } from './reportBuilder/ZoomControl'
+import ShortcutsDialog from './reportBuilder/ShortcutsDialog'
+import BuilderSkeleton from './reportBuilder/BuilderSkeleton'
 import TemplatesPane from './reportBuilder/TemplatesPane'
 import { AI_MODES, AiTabs, PanelHead, RightRail } from './reportBuilder/RightRail'
 import { EditToolbar, EmptyResultNote, GroupBox, HeavyPageBanner, SelectionGuides } from './reportBuilder/CanvasOverlays'
 import { useConfirm } from '../components/ui/ConfirmDialog'
 import { useMeasuredWidth } from '../components/report/useMeasuredWidth'
-import { useModalDialog } from '../components/ui/useModalDialog'
 import {
   applyRecipe as applyLayoutRecipe,
   compact,
@@ -1732,8 +1733,17 @@ export default function ReportBuilder() {
       const mod = e.ctrlKey || e.metaKey
       if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); void (e.shiftKey ? runRedoRef.current() : runUndoRef.current()); return }
       if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); void runRedoRef.current(); return }
+      // 7e5, from the prototype's sheet: zoom, the AI panel, duplicate.
+      if (mod && (e.key === '=' || e.key === '+')) { e.preventDefault(); setZoom(z => Math.min(ZOOM_MAX, z + 10)); return }
+      if (mod && e.key === '-') { e.preventDefault(); setZoom(z => Math.max(ZOOM_MIN, z - 10)); return }
+      if (mod && e.key === '/') {
+        e.preventDefault()
+        setRightPanelMode(m => AI_MODES.includes(m) ? 'default' : 'ask'); setRightOpenSignal(n => n + 1)
+        return
+      }
       if (e.key === 'Escape') { setSelectedW(null); setShortcutsOpen(false); return }
       if (!selectedW || !activePage) return
+      if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); void widgetActionsRef.current.duplicateWidget(selectedW); return }
       const arrows: Record<string, [number, number]> = {
         ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
       }
@@ -2227,7 +2237,6 @@ export default function ReportBuilder() {
   }
 
   const confirm = useConfirm()
-  const shortcutsRef = useModalDialog<HTMLDivElement>(() => setShortcutsOpen(false))
   const deletePage = async (page: ReportPage) => {
     if (!await confirm({ title: `Delete page "${page.name}"?`, body: 'Its widgets are deleted with it.' })) return
     setSaving(true)
@@ -2478,12 +2487,16 @@ export default function ReportBuilder() {
   if (loadError) {
     return (
       <div style={{ padding: 32 }}>
+        {/* 7e5: the way back beside v1's retry. */}
+        <Link to="/reports" className="dl-vw-back" style={{ marginBottom: 12, display: 'inline-flex' }}>
+          <ArrowLeft size={14} className="flip-rtl" aria-hidden /> {tr('nav.dashboards')}
+        </Link>
         <LoadError what="this report" error={loadError}
           onRetry={() => { loadReport().catch(e => setLoadError(e ?? new Error('failed'))) }} />
       </div>
     )
   }
-  if (!report) return <p style={{ color: 'var(--muted)', padding: 32 }}>{tr('common.loading')}</p>
+  if (!report) return <BuilderSkeleton />
   // Every column the page's data offers to the filter bar: the report's
   // dataset first, then any added ones. A name already offered is not repeated
   // -- a filter is by column NAME, and reaches each chart that has it.
@@ -3564,7 +3577,7 @@ export default function ReportBuilder() {
         {/* Concurrent-edit warning. Non-blocking on purpose: the other session's
             change is already saved, so the useful action is to pull it in. */}
         {editConflict && canEdit && (
-          <div data-testid="edit-conflict" role="alert" style={{ display:'flex', alignItems:'center', gap:10, padding:'7px 14px',
+          <div data-testid="edit-conflict" role="alert" className="dl-bd-conflict" style={{ display:'flex', alignItems:'center', gap:10, padding:'7px 14px',
             background:'rgba(220,80,60,.12)', borderBottom:'1px solid rgba(220,80,60,.4)',
             fontSize:12, color:'var(--text)', flexShrink:0, flexWrap:'wrap' }}>
             <span style={{ flex:1, minWidth:200 }}>{editConflict.message}</span>
@@ -3856,8 +3869,8 @@ export default function ReportBuilder() {
                   // the page, or start from a page template"). The drag-a-field
                   // gesture is the builder's best one -- a field dropped here
                   // becomes the right chart -- and nothing used to mention it.
-                  <div data-testid="empty-page" style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', flexDirection:'column', gap:10, color:'var(--muted)', pointerEvents:'none', textAlign:'center', padding:16 }}>
-                    <span style={{ fontSize:36, opacity:.2 }}>⊞</span>
+                  <div data-testid="empty-page" className="dl-bd-emptypage" style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', flexDirection:'column', gap:10, color:'var(--muted)', pointerEvents:'none', textAlign:'center', padding:16 }}>
+                    <span className="ic" aria-hidden><LayoutTemplate size={26} /></span>
                     {!editMode && <span style={{ fontSize:13 }}>{tr('builder.noWidgets')}</span>}
                     {editMode && (<>
                       <span style={{ fontSize:15, fontWeight:600, color:'var(--text)' }}>{tr('builder.designPage')}</span>
@@ -3881,8 +3894,10 @@ export default function ReportBuilder() {
                             {tr('builder.addData')}
                           </button>
                         )}
-                        <button type="button" className="btn btn-ghost btn-sm"
-                          onClick={() => { window.scrollTo({ top: 0 }); setPageMenuOpen(true) }}>
+                        {/* 7e5: opens the Templates tab, where the layouts are
+                            cards (v1 opened the page tabs' menu, still there). */}
+                        <button type="button" className="btn btn-ghost btn-sm dl-bd-line"
+                          onClick={() => { setLeftTab('more'); setLeftOpenSignal(n => n + 1) }}>
                           {tr('builder.addFromTemplate')}
                         </button>
                       </span>
@@ -4353,39 +4368,7 @@ export default function ReportBuilder() {
           </Suspense>
         )}
 
-        {shortcutsOpen && (
-          <div
-            onClick={() => setShortcutsOpen(false)}
-            style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.45)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            {/* The role belongs on the panel; the backdrop is the scrim, not
-                the dialog. And a keyboard-shortcuts reference that cannot be
-                closed from the keyboard is its own contradiction. */}
-            <div ref={shortcutsRef} role="dialog" aria-modal="true" aria-label="Keyboard shortcuts"
-              onClick={e => e.stopPropagation()}
-              style={{ background: 'var(--surface)', border: '1px solid var(--border)',
-                borderRadius: 'var(--radius)', padding: 20, minWidth: 320, fontSize: 13 }}>
-              <div style={{ fontWeight: 700, marginBottom: 10 }}>Keyboard shortcuts</div>
-              <table style={{ borderCollapse: 'collapse' }}>
-                <tbody>
-                  {[['Ctrl+K', 'Jump to any report, dataset or page'],
-                    ['Arrow keys', 'Move the selected widget'],
-                    ['Shift + arrows', 'Resize the selected widget'],
-                    ['Delete', 'Remove the selected widget'],
-                    ['Ctrl+Z', 'Undo the last change (the toolbar names it)'],
-                    ['Ctrl+Y / Ctrl+Shift+Z', 'Redo'],
-                    ['Escape', 'Deselect / close'],
-                    ['?', 'Toggle this reference']].map(([k, d]) => (
-                    <tr key={k}>
-                      <td style={{ padding: '3px 14px 3px 0' }}><kbd style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 6px', fontSize: 11 }}>{k}</kbd></td>
-                      <td style={{ padding: '3px 0', color: 'var(--muted)' }}>{d}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
+        {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
 
         {!kiosk && (editMode ? (
           // Building (7e1): zoom is in the second row and the save state in the
