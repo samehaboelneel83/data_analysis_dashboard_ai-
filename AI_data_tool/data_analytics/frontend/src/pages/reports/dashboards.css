@@ -73,13 +73,15 @@
 .dsh-sec .dsh-sec { margin: 18px 0 0; padding-inline-start: 18px; border-inline-start: 2px solid var(--border); }
 .dsh-sh { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; border-radius: 9px; }
 .dsh-sh[data-drop="true"] { box-shadow: 0 0 0 2px var(--accent); background: var(--accent-soft); }
-.dsh-sh .fold { white-space: nowrap; flex: none; display: inline-flex; align-items: center; gap: 8px; border: 0; background: none; padding-block: 4px; padding-inline: 2px 6px;
-  border-radius: 7px; font-size: 15px; font-weight: 600; color: var(--text); cursor: pointer; font-family: var(--sans); max-width: 100%; }
+/* A folder name wraps rather than truncating (v1's rule): two folders that
+   differ after the twentieth character must still be told apart. */
+.dsh-sh .fold { flex: 0 1 auto; display: inline-flex; align-items: center; gap: 8px; border: 0; background: none; padding-block: 4px; padding-inline: 2px 6px;
+  border-radius: 7px; font-size: 15px; font-weight: 600; color: var(--text); cursor: pointer; font-family: var(--sans); max-width: 100%; text-align: start; }
 .dsh-sh .fold:hover { background: var(--surface2); }
 .dsh-sh .fold .chev { color: var(--muted); transition: transform var(--dl-dur); }
 .dsh-sh .fold[aria-expanded="false"] .chev { transform: rotate(-90deg); }
 [dir="rtl"] .dsh-sh .fold[aria-expanded="false"] .chev { transform: rotate(90deg); }
-.dsh-sh .fold .name { overflow: hidden; text-overflow: ellipsis; }
+.dsh-sh .fold .name { min-width: 0; overflow-wrap: anywhere; }
 .dsh-sh .ficon { color: var(--muted); flex: none; }
 .dsh-sh .cnt { font-size: 12px; color: var(--muted); background: var(--surface2); border-radius: 6px; padding: 1px 7px; font-variant-numeric: tabular-nums; }
 .dsh-sh .note { font-size: 13px; color: var(--muted); }
@@ -209,7 +211,7 @@
 .dsh-start .go { margin-top: auto; display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--mc-accent-ink); font-size: 14px; }
 [dir="rtl"] .dsh-start .go svg { transform: scaleX(-1); }
 .dsh-count { font-size: 14px; font-weight: 400; color: var(--muted); margin: 0 0 12px; }
-.dsh-shh { margin: 0; font: inherit; min-width: 0; display: flex; }
+.dsh-shh { margin: 0; font: inherit; min-width: 0; display: flex; flex: 0 1 auto; }
 .dsh .sk { display: block; border-radius: 6px; background: var(--dl-skeleton, var(--mc-canvas-2)); }
 
 /* ── Dialogs ──────────────────────────────────────────────────── */
@@ -252,3 +254,10 @@
 .dsh-folders button[aria-checked="true"] { background: var(--accent-soft); color: var(--mc-accent-ink); font-weight: 600; }
 .dsh-folders button svg { color: var(--muted); flex: none; }
 .dsh-note { font-size: 13px; color: var(--muted); margin: 12px 0 0; }
+
+/* A touch screen cannot hover, so nothing waits for a hover there: the card
+   and row controls and the folder menus are simply shown (v1's rule). */
+@media (hover: none) {
+  .dsh-ov { opacity: 1; transform: none; pointer-events: auto; }
+  .dsh-ck, .dsh-ra .q, .dsh-tirow .dsh-timenu, .dsh-sh .dsh-shmenu { opacity: 1; }
+}

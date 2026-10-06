@@ -416,9 +416,43 @@ errors). The owner's decisions are in the note above the 7a–7e list.
 **From v1:**
 - Kept: subfolders, folder rename and delete with "contents move up", move confirmation, Publish / Unpublish, delete confirmation, the dataset chip rule, Suggest dashboards' goal text, the fresh-report marker, `?new=1`, the opening loader, "Select test dashboards".
 - Replaced: the "My dashboards / Granted to me" grouping (the Shared with me view), the Sections / Folders toggle and the breadcrumb drill-down (the side column), and the separate Select mode (tick boxes on hover).
-- Tests: `Reports.test.tsx` rewritten around the new page (47 tests; the old file had 75, many pinning the replaced layout). The permission, confirmation, refusal, folder, move, search and creation behaviours are all still pinned. `loadFailures.test.tsx` expects the new first-run title.
+- Tests: `Reports.test.tsx` rewritten around the new page. `loadFailures.test.tsx` expects the new first-run title. (The GATE C report said the old file had 75 tests; it had 71. See the audit below.)
 
 **Checks:** Dashboards tests 47, load failures and list wiring, full suite 278 files / 3677 tests, build, containers rebuilt.
 - The template flow was checked against the real API (create, add template, delete the default page, then the probe was deleted).
 - Captures in light, dark, Arabic and Arabic dark for grid, card menu, list, folder, bulk, no match, New dashboard (blank and template), new folder, move, first run, empty folder, loading, error and member were compared with the prototype at 1440 × 900. Fixed during the comparison: list column widths, an English name clipped at its start in the Arabic list, a second focus ring on the search box, and zero counts shown while loading or after an error.
 - Captures for empty folder, first run, loading, error and member used browser-only data. They are copied to `/media/saeed/New Volume1/projects/redesign-captures/7b/`, with 7a's in `…/7a/`.
+
+**GATE C audit of the old tests (2026-10-06, owner's request):** each of the old file's 71 tests was mapped to a new test or dropped because it pinned the replaced layout only.
+- Dropped (layout replaced):
+  - The My workspaces / Granted grouping (6 tests: split by authorship, plain grid ×2, each dashboard under its own heading, empty folder under the viewer's own group only, folder inside its authorship group).
+  - Collapsing a whole group.
+  - "One full-width column, no workspace tree" (the design adds the side column).
+  - "Loose dashboards before the first folder heading" (now a last "Not in a folder" section).
+  - The folder drill-down view (3 tests: breadcrumb, the remembered Sections / Folders choice, a new folder inside the viewed folder; subfolders are made from the folder's menu).
+  - "New dashboard opens the builder at once" (now the dialog; covered by the Blank test).
+  - "The heading gets its whole row" (the new header holds the count and menu beside it; wrapping is still pinned).
+- Re-pinned in `Reports.test.tsx` ("kept from v1"), 19 tests where the behaviour stays but had lost its test:
+  - Select mode doesn't open the dashboard.
+  - Exactly one Delete.
+  - A granted-but-editable dashboard keeps its design controls.
+  - Someone else's dashboard has no Publish.
+  - Removing a grant.
+  - A control click doesn't open the dashboard.
+  - Controls are reachable and named.
+  - The stretched title link (the whole card opens it).
+  - Controls show on hover and focus and are never hidden on touch.
+  - Two-line clamp with the full name on the link.
+  - Folder headings wrap.
+  - A hand-written description is left alone and the API value is never rewritten.
+  - No dataset says nothing.
+  - Heading counts (subtree, and zero).
+  - Expanding again.
+  - No folder headings while searching.
+  - The tree is re-read after a new folder.
+  - An unchanged rename sends nothing.
+  - A drop on "Not in a folder" moves to the top level.
+- Two behaviours had been lost along with their tests, and are restored in `dashboards.css`:
+  - On a touch screen (no hover) the card and row controls and the folder menus are now always shown.
+  - Folder headings wrap instead of truncating.
+- Totals: `Reports.test.tsx` 66 tests; full suite 278 files / 3696 tests; build passes.

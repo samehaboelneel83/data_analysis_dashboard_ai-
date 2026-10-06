@@ -620,3 +620,221 @@ describe('Reports accessibility', () => {
     expect(await axeViolations(container)).toEqual([])
   })
 })
+
+/**
+ * Behaviours the v1 page pinned that the redesign keeps, re-pinned against the
+ * new layout (GATE C audit of the old Reports.test.tsx).
+ */
+const stylesheet = async () => {
+  const fs = await import('node:fs')
+  const path = await import('node:path')
+  const url = await import('node:url')
+  const here = path.dirname(url.fileURLToPath(import.meta.url))
+  return fs.readFileSync(path.resolve(here, 'reports/dashboards.css'), 'utf8')
+}
+/** The body of the first rule whose selector list starts with `selector`. */
+const rule = (css: string, selector: string) => {
+  const i = css.indexOf(selector + ' {')
+  expect(i, `no rule for ${selector}`).toBeGreaterThan(-1)
+  return css.slice(i, css.indexOf('}', i) + 1)
+}
+const menuOf = async (id: number, name: string) => {
+  fireEvent.click(within(card(id)).getByRole('button', { name: `More actions for ${name}` }))
+  return screen.findByRole('menu')
+}
+
+describe('kept from v1: controls', () => {
+  it('in select mode a click on a card ticks it and does not open it', async () => {
+    vi.mocked(reportsApi.list).mockResolvedValue([report({ id: 1, name: 'A' }), report({ id: 2, name: 'B' })] as never)
+    renderReports()
+    await screen.findByTestId('dash-card-2')
+    fireEvent.click(within(card(1)).getByRole('checkbox', { name: /A/ }))
+    fireEvent.click(within(card(2)).getByRole('link', { name: 'B' }))
+    expect(screen.getByTestId('where')).toHaveTextContent(/^\/reports$/)
+    expect(within(card(2)).getByRole('checkbox')).toBeChecked()
+  })
+
+  it('offers exactly one Delete per dashboard', async () => {
+    renderReports()
+    await screen.findByTestId('dash-card-1')
+    expect(within(card(1)).queryByRole('button', { name: /Delete/ })).not.toBeInTheDocument()
+    const menu = await menuOf(1, 'Revenue')
+    expect(within(menu).getAllByRole('menuitem', { name: 'Delete' })).toHaveLength(1)
+  })
+
+  it('a granted-but-editable dashboard keeps its design controls, not the author\'s', async () => {
+    vi.mocked(reportsApi.list).mockResolvedValue([report({ is_mine: false, created_by: 4, my_capability: 'edit' })] as never)
+    renderReports()
+    await screen.findByTestId('dash-card-1')
+    expect(within(card(1)).getByRole('checkbox')).toBeInTheDocument()
+    expect(within(card(1)).queryByRole('button', { name: 'Share Revenue' })).not.toBeInTheDocument()
+    const menu = await menuOf(1, 'Revenue')
+    for (const name of ['Rename', 'Move to folder…', 'Delete']) expect(within(menu).getByRole('menuitem', { name })).toBeInTheDocument()
+    for (const name of ['Publish', 'Share…']) expect(within(menu).queryByRole('menuitem', { name })).not.toBeInTheDocument()
+  })
+
+  it("someone else's dashboard offers no Publish either", async () => {
+    vi.mocked(reportsApi.list).mockResolvedValue([report({ is_mine: false, created_by: 4 })] as never)
+    renderReports()
+    await screen.findByTestId('dash-card-1')
+    const menu = await menuOf(1, 'Revenue')
+    expect(within(menu).queryByRole('menuitem', { name: /Publish/ })).not.toBeInTheDocument()
+  })
+
+  it('removing a grant calls the API and drops the row', async () => {
+    vi.mocked(reportGrantsApi.list).mockResolvedValue([{ id: 5, user_id: 2, email: 'a@x.io', level: 'view' }] as never)
+    vi.mocked(reportGrantsApi.remove).mockResolvedValue(undefined as never)
+    renderReports()
+    await screen.findByTestId('dash-card-1')
+    fireEvent.click(within(card(1)).getByRole('button', { name: 'Share Revenue' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Share Revenue' })
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Remove access for a@x.io' }))
+    await waitFor(() => expect(reportGrantsApi.remove).toHaveBeenCalledWith(1, 5))
+    await waitFor(() => expect(within(dialog).queryByText('a@x.io')).not.toBeInTheDocument())
+  })
+
+  it('clicking a control inside the card does not open the dashboard', async () => {
+    vi.mocked(reportGrantsApi.list).mockResolvedValue([] as never)
+    renderReports()
+    await screen.findByTestId('dash-card-1')
+    fireEvent.click(within(card(1)).getByRole('button', { name: 'Share Revenue' }))
+    expect(screen.getByTestId('where')).toHaveTextContent(/^\/reports$/)
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('keeps every control reachable and named, not merely un-drawn', async () => {
+    renderReports()
+    await screen.findByTestId('dash-card-1')
+    for (const name of ['Share Revenue', 'More actions for Revenue']) {
+      const btn = within(card(1)).getByRole('button', { name })
+      expect(btn).not.toHaveAttribute('aria-hidden')
+      expect(btn).not.toBeDisabled()
+      expect(btn).toHaveAttribute('title')
+    }
+  })
+})
+
+describe('kept from v1: stylesheet rules jsdom cannot see', () => {
+  it('the whole card opens the dashboard: the title link is stretched over it', async () => {
+    const css = await stylesheet()
+    expect(rule(css, '.dsh-nm a::after')).toMatch(/inset:\s*0/)
+    // Controls sit above the stretched link, so they stay clickable.
+    expect(rule(css, '.dsh-ov')).toMatch(/z-index:\s*3/)
+  })
+
+  it('controls reveal on hover AND keyboard focus, and are never hidden on touch', async () => {
+    const css = await stylesheet()
+    expect(rule(css, '.dsh-ov')).toMatch(/opacity:\s*0/)
+    expect(css).toMatch(/\.dsh-card:focus-within \.dsh-ov/)
+    expect(css).toMatch(/@media \(hover: none\) \{\s*\.dsh-ov \{[^}]*opacity: 1/)
+  })
+
+  it('a long dashboard name is clamped to two lines, and the full name stays on the link', async () => {
+    expect(rule(await stylesheet(), '.dsh-nm')).toMatch(/-webkit-line-clamp:\s*2/)
+    const long = 'What stands out in Route planning extract output for the northern depots'
+    vi.mocked(reportsApi.list).mockResolvedValue([report({ name: long })] as never)
+    renderReports()
+    expect(await screen.findByRole('link', { name: long })).toHaveAttribute('title', long)
+    // The badges live in the footer, never beside the title.
+    expect(within(screen.getByRole('heading', { name: long })).queryByText('Draft')).not.toBeInTheDocument()
+  })
+
+  it('a folder heading wraps rather than truncating', async () => {
+    const name = rule(await stylesheet(), '.dsh-sh .fold .name')
+    expect(name).not.toMatch(/text-overflow:\s*ellipsis/)
+    expect(name).toMatch(/overflow-wrap:\s*anywhere/)
+    expect(rule(await stylesheet(), '.dsh-sh .fold')).not.toMatch(/white-space:\s*nowrap/)
+  })
+})
+
+describe('kept from v1: what a card says', () => {
+  it('leaves a hand-written description alone, and never rewrites the one it was sent', async () => {
+    const rows = [report({ id: 10, name: 'Ops', description: 'Weekly ops review, EMEA only' }),
+      report({ id: 11, name: 'R', description: 'Suggested from the data' })]
+    vi.mocked(reportsApi.list).mockResolvedValue(rows as never)
+    renderReports()
+    await screen.findByTestId('dash-card-11')
+    expect(card(10)).toHaveTextContent('Weekly ops review, EMEA only')
+    expect(card(10)).not.toHaveTextContent('AI suggestion')
+    expect(rows[1].description).toBe('Suggested from the data')
+  })
+
+  it('says nothing about a dataset when a dashboard has none', async () => {
+    renderReports()
+    await screen.findByTestId('dash-card-1')
+    expect(card(1)).not.toHaveTextContent(/No dataset/i)
+    expect(card(1).querySelector('.dsh-ch')).toBeNull()
+  })
+})
+
+describe('kept from v1: folders', () => {
+  beforeEach(() => {
+    vi.mocked(reportsApi.list).mockResolvedValue(Array.from({ length: 9 }, (_, i) => report({ id: i + 1, name: `Board ${i + 1}` })) as never)
+    vi.mocked(workspaceApi.tree).mockResolvedValue({
+      roots: [node({ id: 1, name: 'Finance', children: [leaf(1), leaf(2), node({ id: 2, parent_id: 1, name: 'Board', children: [leaf(3, 2)] })] }),
+        node({ id: 3, name: 'Empty', children: [] })],
+      unfiled: [],
+    } as never)
+  })
+
+  it('each heading says how many dashboards it holds, subtree included; an empty one says zero', async () => {
+    renderReports()
+    const finance = await screen.findByRole('region', { name: 'Finance' })
+    expect(within(finance).getAllByLabelText('3 dashboards')[0]).toHaveTextContent('3')
+    expect(within(screen.getByRole('region', { name: 'Empty' })).getByLabelText('0 dashboards')).toHaveTextContent('0')
+  })
+
+  it('a collapsed heading expands again', async () => {
+    renderReports()
+    const finance = await screen.findByRole('region', { name: 'Finance' })
+    const toggle = within(finance).getAllByRole('button', { name: /Finance/ })[0]
+    fireEvent.click(toggle)
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(within(finance).getByTestId('dash-card-1')).toBeInTheDocument()
+  })
+
+  it('while searching there are no folder headings, so an emptied folder cannot promise cards', async () => {
+    renderReports()
+    await screen.findByRole('region', { name: 'Finance' })
+    fireEvent.change(screen.getByRole('searchbox', { name: /Search dashboards/ }), { target: { value: 'Board 1' } })
+    expect(screen.queryByRole('region', { name: 'Finance' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Empty' })).not.toBeInTheDocument()
+    expect(screen.getByTestId('dash-card-1')).toBeInTheDocument()
+  })
+
+  it('a new folder shows up: the tree is read again after it is made', async () => {
+    renderReports()
+    await screen.findByRole('region', { name: 'Finance' })
+    const before = vi.mocked(workspaceApi.tree).mock.calls.length
+    fireEvent.click(screen.getAllByRole('button', { name: 'New folder' })[0])
+    fireEvent.change(within(nav()).getByRole('textbox', { name: 'Folder name' }), { target: { value: 'Ops' } })
+    fireEvent.click(within(nav()).getByRole('button', { name: 'Create folder' }))
+    await waitFor(() => expect(vi.mocked(workspaceApi.tree).mock.calls.length).toBeGreaterThan(before))
+  })
+
+  it('a rename to the same name sends nothing', async () => {
+    renderReports()
+    await screen.findByTestId('dash-card-1')
+    fireEvent.click(within(card(1)).getByRole('button', { name: 'More actions for Board 1' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Rename' }))
+    await answerPrompt('Board 1')
+    expect(reportsApi.update).not.toHaveBeenCalled()
+  })
+
+  it('a drop on "Not in a folder" moves the dashboard out to the top level', async () => {
+    vi.mocked(workspaceApi.tree).mockResolvedValue({
+      roots: [node({ id: 1, name: 'Finance', children: [leaf(1)] })], unfiled: [leaf(2, null, { id: 0 })],
+    } as never)
+    renderReports()
+    const loose = await screen.findByRole('region', { name: 'Not in a folder' })
+    fireEvent.dragStart(card(1))
+    const head = loose.querySelector('.dsh-sh') as HTMLElement
+    fireEvent.dragOver(head)
+    fireEvent.drop(head)
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent('Move "Board 1" to Not in a folder?')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }))
+    await waitFor(() => expect(workspaceApi.update).toHaveBeenCalledWith(91, { parent_id: null }))
+  })
+})
