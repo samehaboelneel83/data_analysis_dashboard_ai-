@@ -11,13 +11,15 @@ import { localDigits } from '../../lib/arabicFormats'
  */
 export const MAX_QUESTION = 2000
 
-export default function Composer({ value, onChange, onSend, busy = false, locked, lockedHint }: {
+export default function Composer({ value, onChange, onSend, busy = false, locked, lockedHint, placeholder }: {
   value: string
   onChange: (v: string) => void
   onSend: () => void
   busy?: boolean
   locked?: boolean
   lockedHint?: string
+  /** Names the scope ("Ask a question about Enrolments 2025…"). */
+  placeholder?: string
 }) {
   const t = useT()
   const ref = useRef<HTMLTextAreaElement>(null)
@@ -46,7 +48,7 @@ export default function Composer({ value, onChange, onSend, busy = false, locked
         <textarea ref={ref} rows={1} value={value} maxLength={MAX_QUESTION}
           disabled={disabled}
           onChange={e => onChange(e.target.value)} onKeyDown={onKey}
-          placeholder={locked ? (lockedHint ?? t('ask.lockedHint')) : t('ask.placeholder')}
+          placeholder={locked ? (lockedHint ?? t('ask.lockedHint')) : (placeholder ?? t('ask.placeholder'))}
           aria-label={t('ask.questionLabel')}
           aria-describedby={locked ? undefined : 'dl-composer-hint'}
           className="dl-composer__input" />

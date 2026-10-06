@@ -57,7 +57,7 @@ const renderAt = (path: string) => renderWithProviders(
 describe('AskAI', () => {
   it('mounts nothing until a scope is picked -- a question needs a target', async () => {
     renderAt('/ask')
-    expect(await screen.findByText('Choose your data')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'What do you want to ask about?' })).toBeInTheDocument()
     expect(screen.queryByTestId('chat-pane')).not.toBeInTheDocument()
   })
 
@@ -71,37 +71,48 @@ describe('AskAI', () => {
     expect(await screen.findByTestId('chat-pane')).toHaveTextContent('source:3')
   })
 
-  it('picking a scope in the picker mounts the pane for it', async () => {
+  it('picking a dataset in the chooser mounts the pane for it', async () => {
     renderAt('/ask')
-    const trigger = await screen.findByRole('button', { name: 'What to ask about' })
-    await waitFor(() => expect(trigger).not.toBeDisabled())
-    fireEvent.click(trigger)
-    fireEvent.click(await screen.findByRole('option', { name: /Orders/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /^Orders/ }))
     expect(await screen.findByTestId('chat-pane')).toHaveTextContent('datasets:32')
   })
 
-  it('the picker searches, and says what each choice is', async () => {
+  it('the chooser searches, and lists connections apart', async () => {
     renderAt('/ask')
-    const trigger = await screen.findByRole('button', { name: 'What to ask about' })
-    await waitFor(() => expect(trigger).not.toBeDisabled())
-    fireEvent.click(trigger)
-    const search = await screen.findByRole('combobox', { name: /search/i })
-    expect(screen.getAllByRole('option').map(o => o.textContent)).toEqual(
-      expect.arrayContaining([expect.stringMatching(/Warehouse/)]))
-    fireEvent.change(search, { target: { value: 'ware' } })
-    expect(screen.getAllByRole('option')).toHaveLength(1)
-    fireEvent.keyDown(search, { key: 'Enter' })
+    await screen.findByRole('heading', { name: 'Connections' })
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search datasets and connections' }), { target: { value: 'ware' } })
+    expect(screen.queryByRole('button', { name: /^Orders/ })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /^Warehouse/ }))
     expect(await screen.findByTestId('chat-pane')).toHaveTextContent('source:3')
   })
 
-  it('before a scope is picked, shows only the data step -- no locked question box', async () => {
-    // The locked composer was a second control nobody could use; the question
-    // box now appears only once data is chosen.
+  it('before a scope is picked, the question box is locked and says why', async () => {
     renderAt('/ask')
-    expect(await screen.findByRole('heading', { name: 'Ask your data anything' })).toBeInTheDocument()
-    expect(screen.getByText('Choose your data')).toBeInTheDocument()
-    expect(screen.queryByText(/Step \d/)).not.toBeInTheDocument()
-    expect(screen.queryByRole('textbox', { name: 'Your question' })).not.toBeInTheDocument()
+    const box = await screen.findByRole('textbox', { name: 'Your question' })
+    expect(box).toBeDisabled()
+    expect(box).toHaveAttribute('placeholder', 'Choose data above to start asking')
+  })
+
+  it('puts the data recently asked about first, with its conversation count', async () => {
+    vi.mocked(agentApi.listConversations).mockResolvedValue([
+      { id: 9, title: 'Orders by city', data_source_id: null, dataset_ids: [32], created_at: '2026-09-03T08:00:00' },
+      { id: 8, title: 'Orders by month', data_source_id: null, dataset_ids: [32], created_at: '2026-09-02T08:00:00' },
+    ] as any)
+    renderAt('/ask')
+    expect(await screen.findByRole('heading', { name: 'Recently asked about' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Orders.*2 conversations/ })).toBeInTheDocument()
+  })
+
+  it('lists every thread with what it asks about, and opens one in its scope', async () => {
+    vi.mocked(agentApi.listConversations).mockResolvedValue([
+      { id: 9, title: 'Orders by city', data_source_id: null, dataset_ids: [32], created_at: '2026-09-03T08:00:00' },
+      { id: 8, title: 'Orders by month', data_source_id: null, dataset_ids: [32], created_at: '2026-09-02T08:00:00' },
+    ] as any)
+    renderAt('/ask')
+    const list = await screen.findByRole('list', { name: /conversations/i })
+    await waitFor(() => expect(list).toHaveTextContent('Orders by month'))
+    fireEvent.click(within(list).getByRole('button', { name: /^Orders by month/ }))
+    expect(await screen.findByTestId('chat-pane')).toHaveTextContent('conversation:8')
   })
 
   it('a failed dataset list is an error, never "no data yet"', async () => {
@@ -248,19 +259,16 @@ describe('AskAI — the conversation list', () => {
   // for the agent's dataset mode to read and the backend refuses it with a
   // 400. Offering it here is offering a dead option: the connection it reads
   // from is already in this same list, under Connections.
-  it('leaves DirectQuery datasets out of the picker', async () => {
+  it('leaves DirectQuery datasets out of the chooser', async () => {
     vi.mocked(datasetsApi.list).mockResolvedValue([
       { id: 32, name: 'Orders', mode: 'import', filename: 'orders.csv' } as any,
       { id: 167, name: 'Live orders', mode: 'directquery', filename: null } as any,
     ])
     renderAt('/ask')
-    const trigger = await screen.findByRole('button', { name: 'What to ask about' })
-    await waitFor(() => expect(trigger).not.toBeDisabled())
-    fireEvent.click(trigger)
-    await waitFor(() => expect(screen.getByText('Orders')).toBeInTheDocument(),
-                  { timeout: 5000 })
-    expect(screen.queryByText('Live orders')).not.toBeInTheDocument()
-    expect(screen.getByText('Warehouse')).toBeInTheDocument()
+    const chooser = await screen.findByRole('region', { name: 'What do you want to ask about?' })
+    expect(await within(chooser).findByRole('button', { name: /^Orders/ })).toBeInTheDocument()
+    expect(within(chooser).queryByText('Live orders')).not.toBeInTheDocument()
+    expect(within(chooser).getByRole('button', { name: /^Warehouse/ })).toBeInTheDocument()
   })
 })
 

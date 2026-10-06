@@ -145,7 +145,7 @@ export default function AnswerCard(p: AnswerCardProps) {
 
       {p.results && p.results.length > 0 && (
         <ResultView results={p.results} presentation={p.presentation} focus={p.focus}
-          rows={p.full && charted ? 'none' : 'toggle'} />
+          rows={p.full && charted ? 'none' : 'toggle'} highlightTop />
       )}
 
       {p.full && (charted || steps.length > 0) && (

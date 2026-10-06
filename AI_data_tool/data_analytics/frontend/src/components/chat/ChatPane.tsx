@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import toast from 'react-hot-toast'
 import { usePrompt } from '../ui/PromptDialog'
-import { AlertTriangle, Code2, Copy, Database, Download, RotateCcw, Sparkles, ThumbsDown, ThumbsUp, User } from 'lucide-react'
+import { AlertCircle, AlertTriangle, BarChart3, Code2, Copy, Database, Download, Pencil, RotateCcw, Sparkles, ThumbsDown, ThumbsUp, User } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { agentApi, dataSourcesApi } from '../../services/api'
 import type { AgentAnswer, AgentMessage, AgentPresentation, AgentResult, AnswerEvidence } from '../../services/api'
 import Pending from './Pending'
@@ -18,6 +19,9 @@ import { aiLimitMessage } from '../../lib/aiLimit'
 import Composer from './Composer'
 import AnswerText from './AnswerText'
 import AnswerCard from './AnswerCard'
+import { ClarifyCard, FirstRun, columnsMentioned, type ClarifyOption } from './pageStates'
+import { useAiOffline } from '../../pages/ask/useAiOffline'
+import { localDigits } from '../../lib/arabicFormats'
 import AddToDashboard from './AddToDashboard'
 import SaveAsRule, { looksLikeDefinition } from './SaveAsRule'
 import { answerToWidget, type WidgetDraft } from './answerWidget'
@@ -69,6 +73,11 @@ export interface ChatPaneProps {
   /** Text to put into the question box (a column clicked in the side panel);
    *  `seq` makes the same column clickable twice. */
   insertRequest?: { text: string; seq: number } | null
+  /** Rows in the scope, for the first-run line ("ENROLMENTS 2025 · 3,612 ROWS"). */
+  scopeRows?: number | null
+  /** Distinct values per column (from the saved profile), for the
+   *  clarification's column options ("A column in X · 4 values"). */
+  columnValues?: Record<string, number>
 }
 
 type MessageKind = 'answer' | 'clarify' | 'error' | 'limit'
@@ -142,8 +151,19 @@ function isProposals(p: unknown): p is DashboardProposalsPresentation {
 }
 
 export default function ChatPane({ dataSourceId, datasetIds, conversationId, onConversationCreated,
-  suggestions, datasetColumns, onAddToPage, variant, datasetName, insertRequest }: ChatPaneProps) {
+  suggestions, datasetColumns, onAddToPage, variant, datasetName, insertRequest, scopeRows, columnValues }: ChatPaneProps) {
   const t = useT()
+  const page = variant === 'page'
+  // The top bar's model light, read from its own poll (4b). The builder mount
+  // never locks: its copilot has its own offline handling.
+  const ai = useAiOffline()
+  const offline = page && ai.offline
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    if (!offline) return
+    const id = window.setInterval(() => setTick(n => n + 1), 5000)
+    return () => window.clearInterval(id)
+  }, [offline])
   const { direction } = useDirection()
   // Model and server text: markup rendered, laid out by its majority script.
   const modelText = (text: string) => renderTextWithLinks(text, { httpsOnly: true })
@@ -215,7 +235,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
     setLoading(true)
     agentApi.messages(conversationId)
       .then(stored => { if (seq === loadSeq.current) setMessages(stored.map(fromStored)) })
-      .catch(() => { if (seq === loadSeq.current) setLoadError('Could not load this conversation.') })
+      .catch(() => { if (seq === loadSeq.current) setLoadError(t('chat.loadFailed')) })
       .finally(() => { if (seq === loadSeq.current) setLoading(false) })
   }, [owned, conversationId])
 
@@ -279,7 +299,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
       const limit = aiLimitMessage(e, t)
       setMessages(m => [...m, limit
         ? { id: nextId++, role: 'assistant', kind: 'limit', text: limit }
-        : { id: nextId++, role: 'assistant', kind: 'error', text: 'Could not reach the agent. Try again.' }])
+        : { id: nextId++, role: 'assistant', kind: 'error', text: t('chat.unreachable') }])
     } finally {
       setBusy(false)
       setPending(null)
@@ -333,7 +353,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
     try {
       await agentApi.downloadRunFile(runId, format)
     } catch {
-      toast.error('Could not download the file')
+      toast.error(t('chat.downloadFailed'))
     }
   }
 
@@ -354,17 +374,17 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
   const saveAsDataset = async (msg: ChatMessage) => {
     if (dataSourceId == null) return
     const sql = await sqlFor(msg)
-    if (!sql.length) { toast.error('There is no query behind this answer'); return }
+    if (!sql.length) { toast.error(t('chat.noQuery')); return }
     // The LAST step: a multi-step run's earlier queries are intermediate
     // working, and the final one is the answer the person is looking at.
     const statement = sql[sql.length - 1]
     const name = await prompt({
-      title: 'Name this dataset', label: 'Dataset name',
-      defaultValue: 'Ask AI result', confirmLabel: 'Save dataset',
+      title: t('chat.save.title'), label: t('chat.save.label'),
+      defaultValue: t('chat.save.default'), confirmLabel: t('chat.save.confirm'),
     })
     if (name === null) return
     const trimmed = name.trim()
-    if (!trimmed) { toast.error('A dataset needs a name'); return }
+    if (!trimmed) { toast.error(t('chat.save.needName')); return }
 
     setSaving(msg.runId ?? -1)
     try {
@@ -378,10 +398,8 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
             columns: cols, query: statement,
           })
           if (matches.length) {
-            const go = window.confirm(
-              `You may already have this: ${matches[0].name} covers `
-              + `${Math.round(matches[0].coverage * 100)}% of these columns.\n\n`
-              + 'Create a new dataset anyway?')
+            const go = window.confirm(t('chat.save.similar', {
+              name: matches[0].name, pct: Math.round(matches[0].coverage * 100) }))
             if (!go) return
           }
         }
@@ -389,20 +407,20 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
 
       const ds = await dataSourcesApi.import(
         dataSourceId, trimmed, undefined, statement, 'import')
-      toast.success(`Saved as "${ds.name}"`)
+      toast.success(t('chat.save.done', { name: ds.name }))
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail ?? 'Could not save this as a dataset')
+      toast.error(e?.response?.data?.detail ?? t('chat.save.failed'))
     } finally { setSaving(null) }
   }
 
   const copySql = async (msg: ChatMessage) => {
     const sql = await sqlFor(msg)
-    if (!sql.length) { toast.error('No SQL to copy'); return }
+    if (!sql.length) { toast.error(t('chat.noSql')); return }
     try {
       await navigator.clipboard.writeText(sql.join('\n\n'))
-      toast.success('SQL copied')
+      toast.success(t('chat.sqlCopied'))
     } catch {
-      toast.error('Could not copy')
+      toast.error(t('chat.copyFailed'))
     }
   }
 
@@ -411,7 +429,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
       await navigator.clipboard.writeText(msg.text)
       toast.success(t('ask.answerCopied'))
     } catch {
-      toast.error('Could not copy')
+      toast.error(t('chat.copyFailed'))
     }
   }
 
@@ -429,16 +447,55 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
   const rephrase = (suggestions ?? []).slice(0, 3)
   // The page's card: which answer is the latest (shown in full), and two
   // starter questions not asked yet for "Ask next".
-  const lastAnswerId = [...turns].reverse().find(tn => tn.answer?.kind === 'answer')?.answer?.id
+  // Full only while it is the newest turn: a new question folds it (4b).
+  const lastTurn = turns[turns.length - 1]
+  const lastAnswerId = lastTurn?.answer?.kind === 'answer' ? lastTurn.answer.id : undefined
   const asked = new Set(messages.filter(m => m.role === 'user').map(m => m.text.trim().toLowerCase()))
   const askNext = (suggestions ?? []).filter(s => !asked.has(s.trim().toLowerCase())).slice(0, 2)
+
+  // A clarification's ways to answer: the columns it names, then the server's
+  // own choices. When the next question IS one of them, the card folds to
+  // "You chose …" and that question is not repeated as a bubble (4b).
+  const clarifyOptions = (msg: ChatMessage): ClarifyOption[] => {
+    const cols = columnsMentioned(msg.text, datasetColumns ?? [])
+    const out: ClarifyOption[] = cols.map(c => ({
+      send: t('clar3.use', { col: c }),
+      label: <>{t('clar3.useWord')} <code className="dl-clar3__col" dir="ltr">{c}</code></>,
+      sub: [datasetName ? t('clar3.colIn', { name: datasetName }) : t('clar3.col'),
+        columnValues?.[c] != null ? t('askcol.values', { n: localDigits(String(columnValues[c])) }) : null]
+        .filter(Boolean).join(' · '),
+    }))
+    if (isChoices(msg.presentation)) {
+      for (const o of msg.presentation.options) {
+        if (typeof o === 'string' && o.trim() && !out.some(x => x.send === o)) out.push({ send: o, label: o })
+      }
+    }
+    return out
+  }
+  const chosenFor = new Map<number, ReactNode>()
+  const hideQuestion = new Set<number>()
+  if (page) {
+    turns.forEach((turn, i) => {
+      const next = turns[i + 1]
+      if (turn.answer?.kind !== 'clarify' || !next?.question) return
+      const pick = clarifyOptions(turn.answer).find(o => o.send === next.question!.text)
+      if (!pick) return
+      chosenFor.set(turn.key, <strong dir="auto">{pick.label}</strong>)
+      hideQuestion.add(next.key)
+    })
+  }
+  const lastTurnKey = turns[turns.length - 1]?.key
 
   return (
     <div className="dl-chat">
       <div className="dl-chat__scroll">
         {loading && <p className="dl-chat__note">{t('common.loading')}</p>}
         {loadError && <p role="alert" className="dl-chat__note dl-chat__note--error">{loadError}</p>}
-        {!loading && !loadError && messages.length === 0 && (
+        {!loading && !loadError && messages.length === 0 && page && (
+          <FirstRun name={datasetName} rows={scopeRows} starters={suggestions ?? []}
+            onAsk={q => void send(q)} busy={busy || offline} />
+        )}
+        {!loading && !loadError && messages.length === 0 && !page && (
           suggestions && suggestions.length > 0 ? (
             <div className="dl-chat__start">
               <p className="dl-chat__start-title">{t('ask.tryOne')}</p>
@@ -462,7 +519,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
           return (
             <article key={turn.key} className={`dl-turn${msg?.kind === 'error' ? ' dl-turn--error' : ''}`}
               aria-label={turn.question?.text}>
-              {turn.question && (
+              {turn.question && !hideQuestion.has(turn.key) && (
                 <header className="dl-turn__q">
                   <span className="dl-turn__avatar" aria-hidden><User size={14} /></span>
                   <p className="dl-turn__q-text" dir="auto">{turn.question.text}</p>
@@ -488,22 +545,35 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
                     ) : msg.kind === 'error' ? (
                       <div className="dl-answer-error">
                         <p className="dl-answer-error__title">
-                          <AlertTriangle size={16} aria-hidden /> {t('ask.err.title')}
+                          {page ? <AlertCircle size={16} aria-hidden /> : <AlertTriangle size={16} aria-hidden />} {t('ask.err.title')}
                         </p>
                         <p className="dl-answer-error__hint">{t('ask.err.hint')}</p>
                         {rephrase.length > 0 && (
                           <div className="dl-chips dl-chips--small" role="group" aria-label={t('ask.err.tryInstead')}>
+                            {page && <span className="dl-chips__label" aria-hidden>{t('ask.err.tryInstead')}</span>}
                             {rephrase.map(s => (
                               <button key={s} type="button" className="dl-chip" disabled={busy}
                                 onClick={() => void send(s)}>{s}</button>
                             ))}
                           </div>
                         )}
-                        <details className="dl-answer-error__details">
+                        {turn.question && page && (
+                          <div className="dl-actions">
+                            <button type="button" className="btn btn-primary btn-sm" disabled={busy || offline}
+                              onClick={() => void send(turn.question!.text)}>
+                              <RotateCcw size={14} aria-hidden /> {t('err3.tryAgain')}
+                            </button>
+                            <button type="button" className="btn btn-sm" disabled={offline}
+                              onClick={() => setInput(turn.question!.text)}>
+                              <Pencil size={14} aria-hidden /> {t('err3.edit')}
+                            </button>
+                          </div>
+                        )}
+                        <details className="dl-answer-error__details" open={page || undefined}>
                           <summary>{t('ask.err.details')}</summary>
                           <div dir="ltr" className="dl-answer-error__raw">{modelText(msg.text)}</div>
                         </details>
-                        {turn.question && (
+                        {turn.question && !page && (
                           <div className="dl-actions">
                             <button type="button" className="dl-act" disabled={busy}
                               onClick={() => void send(turn.question!.text)}>
@@ -512,6 +582,11 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
                           </div>
                         )}
                       </div>
+                    ) : msg.kind === 'clarify' && page ? (
+                      <ClarifyCard
+                        body={<p className="dl-clar3__q" dir={majorityDir(msg.text, direction)}>{modelText(msg.text)}</p>}
+                        options={clarifyOptions(msg)} onChoose={reply => void send(reply)} busy={busy || offline}
+                        chosen={chosenFor.get(turn.key)} open={turn.key === lastTurnKey} />
                     ) : msg.kind === 'clarify' ? (
                       <div className="dl-answer-clarify">
                         <span className="dl-answer-clarify__tag">{t('ask.needsDetail')}</span>
@@ -562,7 +637,29 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
         <div ref={endRef} />
       </div>
       <div className="dl-chat__composer">
-        <Composer value={input} onChange={setInput} onSend={() => void send()} busy={busy} />
+          {offline && (
+            <div className="dl-offline" role="status" data-testid="ai-offline">
+              <AlertTriangle size={17} aria-hidden className="dl-offline__icon" />
+              <div>
+                <p className="dl-offline__title">{t('off.title')}</p>
+                <p className="dl-offline__text">
+                  {t('off.text')}
+                  {ai.checkedAt != null && ` ${t('off.checked', { n: localDigits(String(Math.max(0, Math.round((Date.now() - ai.checkedAt) / 1000)))) })}`}
+                </p>
+                <div className="dl-offline__links">
+                  {datasetIds?.length === 1 && (
+                    <Link className="btn btn-sm" to={`/datasets/${datasetIds[0]}?tab=data`}>
+                      <Database size={14} aria-hidden /> {datasetName ? t('off.explore', { name: datasetName }) : t('off.explorePlain')}
+                    </Link>
+                  )}
+                  <Link className="btn btn-sm" to="/reports?new=1"><BarChart3 size={14} aria-hidden /> {t('off.build')}</Link>
+                </div>
+              </div>
+            </div>
+          )}
+        <Composer value={input} onChange={setInput} onSend={() => void send()} busy={busy}
+          locked={offline} lockedHint={offline ? t('off.composer') : undefined}
+          placeholder={page && datasetName ? t('ask3.placeholder', { name: datasetName }) : undefined} />
       </div>
     </div>
   )
@@ -656,7 +753,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
                 onClick={() => void toggleSql(msg)}>
                 <Code2 size={14} aria-hidden /> {openRun.has(runId) ? t('ask.hideSql') : t('ask.showSql')}
               </button>
-              <button type="button" className="dl-act" onClick={() => void copySql(msg)} aria-label="Copy SQL">
+              <button type="button" className="dl-act" onClick={() => void copySql(msg)} aria-label={t('ask.copySql')}>
                 <Copy size={14} aria-hidden /> <span className="dl-act__text">{t('ask.copySql')}</span>
               </button>
               {/* Connection scope only: a dataset-mode answer runs
@@ -665,26 +762,26 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
                   present-and-failing. */}
               {dataSourceId != null && (
                 <button type="button" className="dl-act" onClick={() => void saveAsDataset(msg)}
-                  aria-label="Save as dataset" disabled={saving !== null}>
+                  aria-label={t('ask.saveDataset')} disabled={saving !== null}>
                   <Database size={14} aria-hidden />
-                  {saving === runId ? 'Saving…' : t('ask.saveDataset')}
+                  {saving === runId ? t('ans3.saving') : t('ask.saveDataset')}
                 </button>
               )}
             </>
           )}
           {msg.results && msg.results.some(r => r.total > 0) && (
             <>
-              <button type="button" aria-label="Download CSV" className="dl-act"
+              <button type="button" aria-label={t('chat.dl.csv')} className="dl-act"
                 onClick={() => downloadCsv(msg.results!, `ask-ai-result-${runId}.csv`)}>
                 <Download size={14} aria-hidden /> CSV
               </button>
               {/* Excel and PDF are built server-side from the
                   same stored snapshot the grid draws. */}
-              <button type="button" aria-label="Download Excel" className="dl-act"
+              <button type="button" aria-label={t('chat.dl.xlsx')} className="dl-act"
                 onClick={() => void downloadFile(runId, 'xlsx')}>
                 <Download size={14} aria-hidden /> Excel
               </button>
-              <button type="button" aria-label="Download PDF" className="dl-act"
+              <button type="button" aria-label={t('chat.dl.pdf')} className="dl-act"
                 onClick={() => void downloadFile(runId, 'pdf')}>
                 <Download size={14} aria-hidden /> PDF
               </button>
@@ -692,13 +789,13 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
           )}
           <span className="dl-actions__grow" />
           <button type="button" className="dl-act dl-act--icon"
-            aria-label="Good answer" title={t('ask.good')}
+            aria-label={t('ask.good')} title={t('ask.good')}
             aria-pressed={feedbackByRun[runId] === 'up'}
             onClick={() => void rate(runId, 'up')}>
             <ThumbsUp size={14} aria-hidden />
           </button>
           <button type="button" className="dl-act dl-act--icon"
-            aria-label="Bad answer" title={t('ask.bad')}
+            aria-label={t('ask.bad')} title={t('ask.bad')}
             aria-pressed={feedbackByRun[runId] === 'down'}
             onClick={() => void rate(runId, 'down')}>
             <ThumbsDown size={14} aria-hidden />
@@ -715,7 +812,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
             )}
             {msg.contextObjects && msg.contextObjects.length > 0 && (
               <div className="dl-sql__tables">
-                Tables considered: {msg.contextObjects.join(', ')}
+                {t('ans3.tables', { list: msg.contextObjects.join(', ') })}
               </div>
             )}
           </div>

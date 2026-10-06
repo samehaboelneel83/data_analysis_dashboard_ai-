@@ -64,6 +64,13 @@ describe('the pending indicator', () => {
     expect(screen.getByRole('status').textContent).not.toMatch(/designing/i)
   })
 
+  it('claims no stage it cannot see: no timed checklist, just the time and the usual range (4b)', () => {
+    render(<Pending question="what were total sales?" />)
+    act(() => { vi.advanceTimersByTime(12_000) })
+    expect(screen.queryByText(/writing the query|running it/i)).toBeNull()
+    expect(screen.getByText(/Usually 5–20 s/)).toBeInTheDocument()
+  })
+
   it('is announced to a screen reader without shouting', () => {
     /* `polite`, not `assertive`: a progress counter that interrupts whatever the
        reader is saying every second is worse than no counter. */

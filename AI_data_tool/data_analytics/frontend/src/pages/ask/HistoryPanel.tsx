@@ -25,7 +25,7 @@ function when(iso?: string | null): string {
 
 export default function HistoryPanel({
   conversations, selected, onSelect, onNew, editing, onEdit, onSave, onCancelEdit, onDelete,
-  collapsed, onToggleCollapsed, mobileOpen, onCloseMobile,
+  collapsed, onToggleCollapsed, mobileOpen, onCloseMobile, describe, emptyText,
 }: {
   conversations: AgentConversation[]
   selected: number | null | undefined
@@ -40,6 +40,11 @@ export default function HistoryPanel({
   onToggleCollapsed: () => void
   mobileOpen: boolean
   onCloseMobile: () => void
+  /** The line under a title: what the thread asks about, when the list
+   *  spans datasets (no scope chosen). The time otherwise. */
+  describe?: (c: AgentConversation) => string | undefined
+  /** Said when there are no threads yet. */
+  emptyText?: string
 }) {
   const t = useT()
   const panelRef = useRef<HTMLElement>(null)
@@ -88,7 +93,7 @@ export default function HistoryPanel({
         )}
         <ul aria-label={t('ask.conversations')} className="dl-hist__list">
           {conversations.length === 0 && (
-            <li className="dl-hist__empty">{t('ask.noConversations')}</li>
+            <li className="dl-hist__empty">{emptyText ?? t('ask.noConversations')}</li>
           )}
           {conversations.length > 0 && shown.length === 0 && (
             <li className="dl-hist__empty">{t('askh.noMatch')}</li>
@@ -112,7 +117,9 @@ export default function HistoryPanel({
                     <MessageSquare size={14} aria-hidden className="dl-hist__pick-icon" />
                     <span className="dl-hist__pick-text">
                       <span className="dl-hist__pick-title" dir="auto">{c.title}</span>
-                      {when(c.created_at) && <span className="dl-hist__pick-when">{localDigits(when(c.created_at))}</span>}
+                      {describe
+                        ? describe(c) && <span className="dl-hist__pick-when" dir="auto">{describe(c)}</span>
+                        : when(c.created_at) && <span className="dl-hist__pick-when">{localDigits(when(c.created_at))}</span>}
                     </span>
                   </button>
                 )}

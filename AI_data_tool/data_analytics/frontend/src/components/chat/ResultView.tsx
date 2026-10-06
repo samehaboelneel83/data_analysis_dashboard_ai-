@@ -155,18 +155,24 @@ export function downloadCsv(results: AgentResult[], filename: string) {
 }
 
 function Caption({ result }: { result: AgentResult }) {
+  const t = useT()
   const shown = result.rows.length
   const partial = result.truncated || shown < result.total
   return (
     <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-      {partial ? `${result.total} rows, showing ${shown}` : `${result.total} rows`}
+      {localDigits(partial ? t('res.rowsShowing', { n: result.total, shown }) : t('res.rows', { n: result.total }))}
       {/* A grid that no query produced says so. These rows are real -- they
           are this workspace's own catalog -- but "rows with no SQL behind
           them" is precisely what a made-up answer looks like, and the reader
           should never have to tell the two apart by instinct. */}
-      {result.source === 'catalog' && ' · from the data catalog, not a query'}
+      {result.source === 'catalog' && ` · ${t('res.catalog')}`}
     </span>
   )
+}
+
+function NoRows() {
+  const t = useT()
+  return <span style={{ fontSize: 12, color: 'var(--muted)' }}>{t('res.none')}</span>
 }
 
 export function ResultGrid({ result, focus }: {
@@ -183,7 +189,7 @@ export function ResultGrid({ result, focus }: {
     hit?.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
   }, [focus])
   if (result.total === 0 || result.columns.length === 0) {
-    return <span style={{ fontSize: 12, color: 'var(--muted)' }}>No rows.</span>
+    return <NoRows />
   }
   return (
     <div>
@@ -225,11 +231,14 @@ export function ResultGrid({ result, focus }: {
   )
 }
 
-function ResultChart({ result, format, x, y }: {
+function ResultChart({ result, format, x, y, highlightTop }: {
   result: AgentResult
   format: 'bar' | 'line' | 'pie'
   x?: string | null
   y?: string | null
+  /** The Ask AI answer card's bars: the top one in the accent, the rest grey
+   *  (redesign 4a), through the renderer's existing per-row fills. */
+  highlightTop?: boolean
 }) {
   const { rtl } = useDirection()
   // On a phone, value labels over each bar collide; the axis and the rows
@@ -247,6 +256,12 @@ function ResultChart({ result, format, x, y }: {
         rows: grouped.rows.map(r => r.map(v => (typeof v === 'number' ? readingValue(v) : v))) }
     : { rows }
   const Renderer = format === 'bar' ? BarChartRenderer : format === 'line' ? LineChartRenderer : PieChartRenderer
+  const top = highlightTop && format === 'bar' && !grouped && rows.length > 1
+    ? rows.reduce((best, r, i) => (Number(r.value) > Number(rows[best].value) ? i : best), 0) : -1
+  const ruleStyles = top < 0 ? undefined : {
+    rows: rows.map((_, i) => ({ fill: i === top ? 'var(--accent)' : 'var(--dl-chart-rest, color-mix(in oklab, var(--text) 20%, var(--surface)))' })),
+    cells: {}, widget: {},
+  }
   return (
     <div data-testid="result-chart" data-format={format} data-grouped={grouped ? grouped.series : undefined}
       style={{ height: 240, width: '100%', minWidth: 280 }}>
@@ -254,7 +269,7 @@ function ResultChart({ result, format, x, y }: {
           axes outright with the two columns it is actually drawing. The rows
           are `{name, value}` by then -- without this the axes would read
           "name" and "value", which say nothing about this data. */}
-      <Renderer rows={rows} data={data} rtl={rtl} broadcasts={false}
+      <Renderer rows={rows} data={data} rtl={rtl} broadcasts={false} ruleStyles={ruleStyles}
         cfg={{ x_axis_label: axes.x, y_axis_label: axes.y,
           // 5.13: long category names ("Assistant Engineer", department
           // names) clip with "…" like the Suggestions preview, instead of
@@ -345,7 +360,7 @@ export function chartFormatFor(result: AgentResult, presentation?: AgentPresenta
   return auto === 'bar' || auto === 'line' ? auto : null
 }
 
-export default function ResultView({ results, presentation, focus, rows = 'toggle' }: {
+export default function ResultView({ results, presentation, focus, rows = 'toggle', highlightTop }: {
   results: AgentResult[]
   presentation?: AgentPresentation | null
   /** A number of the answer to point at (E11). */
@@ -353,6 +368,7 @@ export default function ResultView({ results, presentation, focus, rows = 'toggl
   /** 'none': the chart alone -- the Ask AI answer card shows the rows beside
    *  it (redesign 4a). Default keeps the "Show rows" toggle under the chart. */
   rows?: 'toggle' | 'none'
+  highlightTop?: boolean
 }) {
   const t = useT()
   const [rowsOpen, setRowsOpen] = useState(false)
@@ -374,7 +390,7 @@ export default function ResultView({ results, presentation, focus, rows = 'toggl
               <>
                 <div className="dl-result__chart">
                   <ResultChart result={r} format={drawn!}
-                    x={presentation?.x} y={presentation?.y} />
+                    x={presentation?.x} y={presentation?.y} highlightTop={highlightTop} />
                 </div>
                 {rows === 'toggle' && (
                   <button type="button" className="dl-result__rows-toggle" aria-expanded={rowsOpen}

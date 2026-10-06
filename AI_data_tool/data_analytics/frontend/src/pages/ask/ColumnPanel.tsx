@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import { ArrowLeftToLine, ArrowRightToLine, Plus } from 'lucide-react'
 import { useT, type MessageKey } from '../../i18n'
 import { localDigits } from '../../lib/arabicFormats'
 import { nonAdditiveKind } from '../../lib/semanticGuard'
-import { analysisApi, type DatasetColumn } from '../../services/api'
+import type { DatasetColumn } from '../../services/api'
 import { typeTag, type Analysis } from '../datasetDetail/columnProfile'
 import { fmtDate } from './dates'
 
@@ -13,6 +13,7 @@ import { fmtDate } from './dates'
  * puts the column into the question. The counts and ranges come from the
  * dataset's saved profile when there is one; without it the panel still lists
  * the columns. Folds to a thin rail; the choice is remembered like History's.
+ * The profile is read once by the page (the clarification uses it too).
  */
 
 type Group = 'groups' | 'numbers' | 'dates' | 'other'
@@ -26,8 +27,9 @@ function groupOf(c: DatasetColumn): Group {
   return 'groups'
 }
 
-export default function ColumnPanel({ datasetId, columns, onInsert, collapsed, onToggle, mobileOpen, onCloseMobile }: {
-  datasetId: number
+export default function ColumnPanel({ profile, columns, onInsert, collapsed, onToggle, mobileOpen, onCloseMobile }: {
+  /** The dataset's saved profile (read once by the page). */
+  profile: Analysis
   columns: DatasetColumn[]
   onInsert: (name: string) => void
   collapsed: boolean
@@ -36,15 +38,6 @@ export default function ColumnPanel({ datasetId, columns, onInsert, collapsed, o
   onCloseMobile?: () => void
 }) {
   const t = useT()
-  const [profile, setProfile] = useState<Analysis>(null)
-  useEffect(() => {
-    let on = true
-    setProfile(null)
-    Promise.resolve().then(() => analysisApi?.get?.(datasetId))
-      .then(a => { if (on && a) setProfile(a) }).catch(() => {})
-    return () => { on = false }
-  }, [datasetId])
-
   const groups = useMemo(() => {
     const g: Record<Group, DatasetColumn[]> = { groups: [], numbers: [], dates: [], other: [] }
     for (const c of columns) g[groupOf(c)].push(c)
