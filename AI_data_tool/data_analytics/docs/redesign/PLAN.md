@@ -97,11 +97,11 @@ Nothing is pushed.
   - >> GATE D: stop, report View, Present and Part 4
 - [x] 7-QA Fixes from the QA report `/media/saeed/New Volume1/projects/redesign-captures/qa-1/QA_REPORT.md` (owner, 2026-10-06), before 7e: Broken B1 (top priority), B2, B3, B5 (try to reproduce), B7, B8; Visual V1–V10 (V9: numbers must stay distinguishable); T1 on the redesigned screens only; all of T2 (the Arabic sidebar labels in `ar.ts` may be fixed, text only). A failing test before each fix where possible; before/after captures. B4 and B6 go to "Backend follow-ups".
   - >> stop and report before 7e
-- [ ] 7e1 Builder: header and toolbars (save state, Edit/View, page tab menu, Layout menu with v1's recipes), icon-only rail on entry
-- [ ] 7e2 Builder: left panel (Insert gallery with preview, Fields, Templates; v1's widget templates, report filters and calculated columns re-homed)
-- [ ] 7e3 Builder: right panel rail and Properties (Format / Data / Interactions over the existing config panel, keeping every v1 tab and settings search; pinned second panel)
-- [ ] 7e4 Builder: canvas overlays and widget states (alignment guides, group box, hover toolbar, skeleton, empty result with Clear filters, error details, heavy-page banner)
-- [ ] 7e5 Builder: shortcuts dialog, copilot offline, and the states the prototype doesn't draw (empty page, read-only, load error, save conflict)
+- [x] 7e1 Builder: header and toolbars (save state, Edit/View, page tab menu, Layout menu with v1's recipes), icon-only rail on entry
+- [x] 7e2 Builder: left panel (Insert gallery with preview, Fields, Templates; v1's widget templates, report filters and calculated columns re-homed)
+- [x] 7e3 Builder: right panel rail and Properties (Format / Data / Interactions over the existing config panel, keeping every v1 tab and settings search; pinned second panel)
+- [x] 7e4 Builder: canvas overlays and widget states (alignment guides, group box, hover toolbar, skeleton, empty result with Clear filters, error details, heavy-page banner)
+- [x] 7e5 Builder: shortcuts dialog, copilot offline, and the states the prototype doesn't draw (empty page, read-only, load error, save conflict)
   - >> GATE E: stop, report the Builder
 - [ ] 8-i18n The QA report's T1 strings on pages the redesign has not reached (Glossary, Organizations, Platform settings, Admin settings Basemap, Org units, Row/column security, API keys, Custom connectors, SSO, Maps, Models "random forest", Activity codes, Connections "Combine databases")
 - [ ] Then: Upload, Connections, Lineage, the AI button
@@ -131,6 +131,7 @@ Not part of the frontend steps (1–7); candidates for the handoff's section 7 p
 | 7-gap Builder | KPI delta ("vs previous period / vs target") and sparkline | The KPI query returns one value. |
 | 7-gap Builder | Lock a widget | No field; would also touch the drag handlers. |
 | 7-gap Builder | Comment linked to a widget; unread comments | Comments carry only `page_id`. |
+| 7e Builder | Count badges on the rail (unread comments, open review findings) | Unread needs per-user read state; review findings are computed in the pane, not served. |
 | 7-gap Builder | "Split page" from the heavy-page banner; duplicate a page | No endpoints (page duplicate only via the template endpoints). |
 | 7-gap View | A viewer's "Bookmark this view" | Bookmark endpoints bump the revision and need edit rights; no personal bookmarks. |
 | 7-gap View | Widget-aware AI ("Reading 12 widgets", "Based on" chips, "N widgets read") and page-specific generated questions | The agent takes only `dataset_ids` or `data_source_id`; no report/page/widget scope. |
@@ -599,4 +600,64 @@ errors). The owner's decisions are in the note above the 7a–7e list.
 - Full suite: 285 files / 3768 tests pass. Type-check and build pass.
 - Before/after captures (light, dark, Arabic; 1100–1440) are in `/media/saeed/New Volume1/projects/redesign-captures/qa-1-fixes/{before,after}/`.
 - B4 and B6 are in "Backend follow-ups". T1 on the other pages is step 8-i18n.
+
+### 7e Builder — `ca51517` (7e1), `4d43bc4` (7e2), `7f647d7` (7e3), `750dc4c` (7e4), `0f0e4e2` (7e5)
+
+**Changed (edit mode; reading keeps 7d):**
+- 7e1 Header and toolbars:
+  - Header: back arrow, the name (rename in place), dataset chips, Draft (unpublished; published dashboards keep ReleaseControl), "Saved · 2s ago", undo / redo, sensitivity, then Refresh, Share (primary), Present, Export, Subscribe (icon), Open reports, ⋮ and the Edit / View switch.
+  - Second row: Report / Data / Model; page tabs with a ⌄ menu (Rename, Move left / right through the page update, undoable, mirrored in Arabic, Page settings, Delete); + and v1's template menu; Layout with v1's recipes and Free layout; zoom − / + and Fit.
+  - Footer: page, widgets on it, the selection, Shortcuts.
+  - S6: the builder opens with the icon rail; the saved choice is untouched and the rail's toggle still expands it.
+- 7e2 Left panel: Insert / Fields / Templates (v1: Charts / Fields / More).
+  - Insert: v1's gallery with a hover and focus preview (a schematic, and what each chart is best for).
+  - Fields: dataset card first, search, quiet rows (badge, name, count) whose v1 tools show on hover or focus; report filters and date presets moved here from More.
+  - Templates: page layouts as cards, your page templates, save this page, import a page, then v1's widget templates. The panel defaults to 264 px.
+- 7e3 Right rail and Properties:
+  - The rail holds every v1 panel in the prototype's groups. It replaces v1's eight-word toolbar and More panels; pressing the open panel returns to Properties.
+  - AI is one button with Ask / Insights / Suggest tabs.
+  - Properties has a head, the object card, Report settings, and a pin that keeps it beside the next panel.
+  - Format / Data / Interactions sit over v1's settings tabs; every tab and the settings search are kept, and search reaches every section. The panel is 300 px.
+- 7e4 Canvas overlays, all beside WidgetRenderer and off the move path:
+  - guides and "col 1–6 · row 8 · aligned ×5" for the selected widget
+  - a group box around a multi-selection; v1's eight align / distribute modes moved into Properties
+  - a quick toolbar (Duplicate, Assign data, Filters)
+  - "No rows match these filters · Clear filters"
+  - a heavy-page banner past the Review panel's count, now one shared constant
+- 7e5 States:
+  - the shortcuts sheet, which lists only bound keys; Ctrl+D and Ctrl + / − were added (Ctrl+/ stays the page copilot's, as in v1: a second binding opened two things at once)
+  - the page copilot locks with one line while the model server is down
+  - a builder-shaped skeleton while loading
+  - a load failure keeps Retry, gains the way back, and is in the reader's language (LoadError takes an optional title)
+  - the empty page opens Templates
+  - the conflict banner restyled; read-only stays v1's gating
+
+**Deviations from the prototype:**
+- The Edit / View switch stays last in the header (v1 and 7d rule, pinned by a test); the prototype puts it before Present. v1's Refresh, Subscribe, Open reports, sensitivity and ReleaseControl stay in the header. On a narrow header, Present and Export become icons and keep their words as accessible names.
+- Not built (new endpoints or semantics):
+  - Duplicate page and Split page (both listed)
+  - rail count badges (listed)
+  - KPI delta / sparkline (listed)
+  - per-widget Number format, Show title and the automatic horizontal bars (owner: skipped)
+  - a drag handle on the quick toolbar (move path)
+- The Layout menu holds v1's recipes and Free layout, not the prototype's Show grid / Snap to grid. v1 has no grid overlay, and snapping is always on.
+- The collapsed left panel is v1's chevron strip, not a 44 px icon column. Field badges keep v1's glyphs (#, Aa, ƒx), whose names are pinned.
+- Loading, error and needs-data widget states stay WidgetRenderer's own (v1).
+- The canvas is not mirrored in Arabic (v1); the guides follow it.
+
+**Tests:**
+- Re-pinned, with nothing dropped:
+  - zoom (×2)
+  - add page
+  - delete page (now in the page menu)
+  - the pop-up marker (now in words)
+  - the left-tab names (11 calls)
+  - the panel helper and report rules (×2), now from the rail
+  - the interaction carry-through test (set under Interactions, title under Format)
+- New:
+  - toolbar (10), rail (5), Templates (4), gallery (4), canvas overlays (5), shortcuts (2), Layout S6 (1)
+  - settings sections (4), StatusBar (1), copilot offline (1)
+  - builder integration (11)
+- Full suite: 291 files / 3816 tests pass. Type-check and build pass.
+- New `e2e/capture/redesign/cap_step7e.mjs`. Captures (light, dark, Arabic, Arabic dark) were compared with the prototype and copied to `/media/saeed/New Volume1/projects/redesign-captures/7e/`.
 

@@ -837,6 +837,8 @@ export const ar: Record<MessageKey, string> = {
   'home.workspace': 'مساحة عملك',
   'home.draftTitle': 'مسودة: لم تُنشر بعد — أنت والمسؤولون فقط يمكنهم فتحها. انشرها من لوحة المعلومات لمشاركتها.',
   'home.liveTitle': 'يُستعلم عنها مباشرة من المصدر',
+  'bd.loadErr.title': 'تعذّر تحميل هذه اللوحة',
+  'bd.loadErr.retry': 'حاول مرة أخرى',
   'bd.loading': 'جارٍ تحميل اللوحة',
   'bd.keys.title': 'اختصارات لوحة المفاتيح',
   'bd.keys.close': 'إغلاق',

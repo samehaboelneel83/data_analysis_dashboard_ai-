@@ -835,6 +835,8 @@ export const en = {
   'home.workspace': 'your workspace',
   'home.draftTitle': 'Draft: not published yet — only you and admins can open it. Publish it from the dashboard to share it.',
   'home.liveTitle': 'Queried live at the source',
+  'bd.loadErr.title': 'Could not load this dashboard',
+  'bd.loadErr.retry': 'Try again',
   'bd.loading': 'Loading the dashboard',
   'bd.keys.title': 'Keyboard shortcuts',
   'bd.keys.close': 'Close',

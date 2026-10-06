@@ -2781,7 +2781,7 @@ describe('canvas overlays (redesign 7e4)', () => {
 })
 
 describe('builder shortcuts (redesign 7e5)', () => {
-  it('Ctrl+D duplicates the selection, Ctrl + / − zoom, Ctrl+/ opens AI, ? opens the sheet', async () => {
+  it('Ctrl+D duplicates the selection, Ctrl + / − zoom, Ctrl+/ opens the copilot only, ? opens the sheet', async () => {
     vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
     vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
     vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
@@ -2795,8 +2795,10 @@ describe('builder shortcuts (redesign 7e5)', () => {
     expect(screen.getByText('110%')).toBeInTheDocument()
     fireEvent.keyDown(document.body, { key: '-', ctrlKey: true })
     expect(screen.getByText('100%')).toBeInTheDocument()
+    // Ctrl+/ is the page copilot's toggle (v1); the rail is left alone.
     fireEvent.keyDown(document.body, { key: '/', ctrlKey: true })
-    expect(within(screen.getByRole('navigation', { name: 'Panels' })).getByRole('button', { name: 'AI' })).toHaveAttribute('aria-pressed', 'true')
+    expect(await screen.findByRole('dialog', { name: 'Ask AI' })).toBeInTheDocument()
+    expect(within(screen.getByRole('navigation', { name: 'Panels' })).getByRole('button', { name: 'AI' })).toHaveAttribute('aria-pressed', 'false')
     fireEvent.keyDown(document.body, { key: '?' })
     expect(screen.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeInTheDocument()
   })

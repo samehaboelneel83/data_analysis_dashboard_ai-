@@ -1733,14 +1733,11 @@ export default function ReportBuilder() {
       const mod = e.ctrlKey || e.metaKey
       if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); void (e.shiftKey ? runRedoRef.current() : runUndoRef.current()); return }
       if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); void runRedoRef.current(); return }
-      // 7e5, from the prototype's sheet: zoom, the AI panel, duplicate.
+      // 7e5, from the prototype's sheet: zoom and duplicate. (Ctrl+/ is the
+      // page copilot's own toggle, as in v1; binding it here too opened two
+      // things at once.)
       if (mod && (e.key === '=' || e.key === '+')) { e.preventDefault(); setZoom(z => Math.min(ZOOM_MAX, z + 10)); return }
       if (mod && e.key === '-') { e.preventDefault(); setZoom(z => Math.max(ZOOM_MIN, z - 10)); return }
-      if (mod && e.key === '/') {
-        e.preventDefault()
-        setRightPanelMode(m => AI_MODES.includes(m) ? 'default' : 'ask'); setRightOpenSignal(n => n + 1)
-        return
-      }
       if (e.key === 'Escape') { setSelectedW(null); setShortcutsOpen(false); return }
       if (!selectedW || !activePage) return
       if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); void widgetActionsRef.current.duplicateWidget(selectedW); return }
@@ -2491,7 +2488,7 @@ export default function ReportBuilder() {
         <Link to="/reports" className="dl-vw-back" style={{ marginBottom: 12, display: 'inline-flex' }}>
           <ArrowLeft size={14} className="flip-rtl" aria-hidden /> {tr('nav.dashboards')}
         </Link>
-        <LoadError what="this report" error={loadError}
+        <LoadError what="this report" title={tr('bd.loadErr.title')} retryLabel={tr('bd.loadErr.retry')} error={loadError}
           onRetry={() => { loadReport().catch(e => setLoadError(e ?? new Error('failed'))) }} />
       </div>
     )

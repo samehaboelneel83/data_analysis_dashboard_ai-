@@ -3,8 +3,8 @@ import { useModalDialog } from '../../components/ui/useModalDialog'
 import { useT, type MessageKey } from '../../i18n'
 
 /** The builder's shortcuts, as the prototype's sheet: Canvas and Report. Only
- *  keys the builder binds are listed (v1's set, plus Ctrl+D, Ctrl + / − and
- *  Ctrl+/ from the prototype, bound in 7e5). */
+ *  keys the builder binds are listed (v1's set -- Ctrl+/ is the page
+ *  copilot's -- plus Ctrl+D and Ctrl + / − from the prototype, bound in 7e5). */
 const GROUPS: [MessageKey, [MessageKey, string[]][]][] = [
   ['bd.keys.canvas', [
     ['bd.keys.select', ['Shift', 'Click']],
