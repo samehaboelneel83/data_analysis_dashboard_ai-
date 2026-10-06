@@ -89,7 +89,7 @@ Nothing is pushed.
 > - Order: lower-risk screens first, the Builder last.
 
 - [x] 7-gap Gap pass for Home and Dashboards Parts 1–4
-- [ ] 7a Home *(after the owner approves the Home design)*: hero with the ask box (Ask AI gains `?q=`), chips from dataset columns, stat tiles, quick actions, Continue (dashboards only), Dashboards and Datasets sections, admin-only Activity and Refresh & jobs, first run, loading, an error per section (whole page only when reports or datasets fail), AI offline
+- [x] 7a Home *(Home design approved 2026-10-06)*: hero with the ask box (Ask AI gains `?q=`), chips from dataset columns, stat tiles, quick actions, Continue (dashboards only), Dashboards and Datasets sections, admin-only Activity and Refresh & jobs, first run, loading, an error per section (whole page only when reports or datasets fail), AI offline
 - [ ] 7b Dashboards list *(after Part 1 approval)*: Views/Folders column over the workspace tree, filters, grid/list, cards with schematic thumbnails, ⋯ menu, New dashboard dialog, bulk actions, every state including error and folders-failed; v1's subfolders, folder rename/delete, move confirm and publish toggle kept
   - >> GATE C: stop, report Home and the Dashboards list
 - [ ] 7c Share, Export, Version history *(after Part 4 approval)*: restyle over the existing grants, guest links, embed configs, schedules, PDF/Excel export and versions; v1-only features kept
@@ -321,3 +321,58 @@ errors). The owner's decisions are in the note above the 7a–7e list.
   (kept).
 - Present in v1 exits on any key; the new controls use arrow keys, so Esc becomes the
   exit (7d).
+
+### 7a Home — `3ed767f`
+
+**Changed:**
+- `pages/Home.tsx` rebuilt from the approved prototype (`home.html`), split into `pages/home/` (`parts.tsx`, `DashboardsSection.tsx`, `DatasetsSection.tsx`, `AdminCards.tsx`, `Thumb.tsx`, `feeds.ts`, `home.css`).
+- Hero:
+  - date, "Good morning/afternoon/evening, <name>" (the email's local part, as the top bar shows it), the question box with the mascot.
+  - Submitting goes to `/ask?q=…`. Ask AI reads `q` once and drops it from the URL. While no data is chosen it shows "Choose the data to ask this about: “…”". The first chat that opens gets it in its box, unsent (new optional `initialInput` on ChatPane).
+- Starters: built from the newest dataset Ask AI can answer from, with `datasetSuggestions` from its columns. Each opens `/ask?dataset=<id>&q=…`.
+- Tiles:
+  - Dashboards (count, "N published").
+  - Datasets (count, rows of stored datasets).
+  - Connections (count, their types).
+  - Last refresh (newest `last_refreshed_at`). Its second line is "N of M jobs failed" over the last 24 h of refresh runs for org admins, and the lineage graph's failing count for everyone else.
+  - A tile whose call fails says so, with Retry.
+- Quick actions: New dashboard (`/reports?new=1`), Upload, New connection, Ask AI (focuses the box; goes to `/ask` while the box is locked).
+- Continue where you left off: `/reports/recent` (4), with schematic thumbnails drawn from each dashboard's first page (one box per widget at its grid place, a glyph per kind).
+- Dashboards section:
+  - Six shown, All / Mine, Recent / Name, grid / list (remembered).
+  - Draft / Published badges, "View only" for viewers.
+  - Hover: Open, Share (author or admin, the list page's ShareDialog), ⋯ Rename / Delete (editors), Copy link, Export as PDF (the server applies the export policy).
+- Datasets section:
+  - The five most recently changed, with source icon and words (`classify.ts`), rows × columns ("N columns · live" for DirectQuery), last refreshed, and freshness (Fresh / Stale / Refresh failed / Uploaded / Live).
+  - Actions: Preview (a drawer with the Datasets list's preview panel), Build dashboard, Ask AI (only for datasets Ask AI can answer from).
+- Org admins only:
+  - Recent activity: the audit-log actions that make a sentence (upload, create, publish, unpublish, share, release, restore, refresh, delete; 5 shown).
+  - Refresh & jobs: last 24 h counts; failures, then running, then the latest success; Retry on a failed dataset refresh.
+  - Neither endpoint is called for anyone else, and both cards are absent for them.
+- First run:
+  - The setup steps replace the quick actions while there are no datasets or no dashboards. Progress is counted from datasets, dashboards and Ask AI conversations.
+  - The question box is locked with "Connect data first to ask questions".
+- Loading skeletons for every section.
+- Failure is per section. Only the reports or datasets list failing blanks the page (v1's LoadError, never an empty workspace).
+- AI offline (the top bar's poll via `useAiOffline`): the box is locked ("The AI is offline right now" plus v1's one line "New questions are paused…"), the mascot greys out, and the starters hide. The rest of Home works.
+- All new copy is in `en.ts` / `ar.ts`. Names are bidi-isolated. The Arabic activity lines use the passive ("تم نشر … بواسطة …") so they don't guess anyone's gender.
+- New capture script `e2e/capture/redesign/cap_step7a.mjs` (8 states × 4 themes).
+
+**Deviations from the prototype:**
+- Left out (backend, listed in "Backend follow-ups"): favourites (the star and the Favorites filter), owner avatars, "Shared with me", Duplicate, connection health ("All healthy"), recently opened datasets in Continue, comment/refresh-failure/"shared with Finance" activity, running %.
+- The starters say which dataset they are about ("Try with <dataset>"): they are built from that dataset's columns and open Ask AI scoped to it. The prototype's chips name no data.
+- Connections tile shows the connection types instead of "All healthy".
+- The jobs list shows "Running · started N ago", not a progress bar.
+- Continue's empty text says "Dashboards you open…" (datasets are not tracked).
+- Activity names are email local parts ("sara"), not full names; there is no name field.
+- Whole-page error keeps v1's LoadError card; the prototype has no error state.
+
+**From v1 Home:**
+- Dropped (the design replaces them): the collapsible sections, the plain "Home" title (the greeting replaces it), and "my dashboards first, else all" (now the All / Mine filter).
+- Kept: "View only", the live dataset's "N columns · live", the opening loader.
+- Tests: "no create buttons in the header" and "sections collapse" were removed (the design reverses both). The others were adapted, and new ones cover the hand-off to Ask AI, starters, offline lock, tiles, admin-only calls, per-section errors and first run.
+
+**Checks:** Home tests 25, AskAI and ChatPane additions, full suite 278 files / 3701 tests, build, containers rebuilt. Captures in light, dark, Arabic, Arabic dark for full, sample, first run, loading, error, offline, member and section errors were compared with the prototype at 1440 wide. The menu, preview drawer, question hand-off and starter were checked in the browser with no page errors.
+- Captures other than `full` used browser-only data: the dev database has no refresh runs and few audit rows.
+
+**Note for 7b:** the reused `ShareDialog` (`pages/reports/listParts.tsx`) still has hardcoded English. It is unchanged here; 7b restyles that list.
