@@ -337,11 +337,22 @@ function Kpi({ result, focused }: { result: AgentResult; focused?: boolean }) {
   )
 }
 
-export default function ResultView({ results, presentation, focus }: {
+/** The chart a result draws (bar / line / pie), or null for a grid or KPI. */
+export function chartFormatFor(result: AgentResult, presentation?: AgentPresentation | null): 'bar' | 'line' | 'pie' | null {
+  const format = presentation?.format
+  if (format === 'bar' || format === 'line' || format === 'pie') return format
+  const auto = autoChart(result)
+  return auto === 'bar' || auto === 'line' ? auto : null
+}
+
+export default function ResultView({ results, presentation, focus, rows = 'toggle' }: {
   results: AgentResult[]
   presentation?: AgentPresentation | null
   /** A number of the answer to point at (E11). */
   focus?: EvidenceFocus | null
+  /** 'none': the chart alone -- the Ask AI answer card shows the rows beside
+   *  it (redesign 4a). Default keeps the "Show rows" toggle under the chart. */
+  rows?: 'toggle' | 'none'
 }) {
   const t = useT()
   const [rowsOpen, setRowsOpen] = useState(false)
@@ -365,11 +376,13 @@ export default function ResultView({ results, presentation, focus }: {
                   <ResultChart result={r} format={drawn!}
                     x={presentation?.x} y={presentation?.y} />
                 </div>
-                <button type="button" className="dl-result__rows-toggle" aria-expanded={rowsOpen}
-                  onClick={() => setRowsOpen(o => !o)}>
-                  {rowsOpen ? t('ask.hideRows') : t('ask.showRows', { n: localDigits(String(r.total)) })}
-                </button>
-                {rowsOpen && <ResultGrid result={r} focus={here} />}
+                {rows === 'toggle' && (
+                  <button type="button" className="dl-result__rows-toggle" aria-expanded={rowsOpen}
+                    onClick={() => setRowsOpen(o => !o)}>
+                    {rowsOpen ? t('ask.hideRows') : t('ask.showRows', { n: localDigits(String(r.total)) })}
+                  </button>
+                )}
+                {rows === 'toggle' && rowsOpen && <ResultGrid result={r} focus={here} />}
               </>
             ) : auto === 'kpi' ? null : (
               <ResultGrid result={r} focus={here} />

@@ -17,6 +17,7 @@ import { renderTextWithLinks } from '../../lib/inlineMarkup'
 import { aiLimitMessage } from '../../lib/aiLimit'
 import Composer from './Composer'
 import AnswerText from './AnswerText'
+import AnswerCard from './AnswerCard'
 import AddToDashboard from './AddToDashboard'
 import SaveAsRule, { looksLikeDefinition } from './SaveAsRule'
 import { answerToWidget, type WidgetDraft } from './answerWidget'
@@ -60,6 +61,14 @@ export interface ChatPaneProps {
   /** Mounted inside a dashboard: "Add to this page" puts the answer straight
    *  onto the page being edited, instead of asking which dashboard. */
   onAddToPage?: (draft: WidgetDraft, title: string) => unknown
+  /** 'page': the Ask AI page's answer card (redesign 4a) -- the latest answer
+   *  in full, older ones compact. The builder mount keeps v1's rendering. */
+  variant?: 'page'
+  /** Shown in the answer card's header. */
+  datasetName?: string
+  /** Text to put into the question box (a column clicked in the side panel);
+   *  `seq` makes the same column clickable twice. */
+  insertRequest?: { text: string; seq: number } | null
 }
 
 type MessageKind = 'answer' | 'clarify' | 'error' | 'limit'
@@ -133,7 +142,7 @@ function isProposals(p: unknown): p is DashboardProposalsPresentation {
 }
 
 export default function ChatPane({ dataSourceId, datasetIds, conversationId, onConversationCreated,
-  suggestions, datasetColumns, onAddToPage }: ChatPaneProps) {
+  suggestions, datasetColumns, onAddToPage, variant, datasetName, insertRequest }: ChatPaneProps) {
   const t = useT()
   const { direction } = useDirection()
   // Model and server text: markup rendered, laid out by its majority script.
@@ -210,13 +219,23 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
       .finally(() => { if (seq === loadSeq.current) setLoading(false) })
   }, [owned, conversationId])
 
+  useEffect(() => {
+    if (!insertRequest) return
+    setInput(v => (v && !/\s$/.test(v) ? `${v} ${insertRequest.text}` : `${v}${insertRequest.text}`))
+  }, [insertRequest])
+
   const target = dataSourceId != null ? { dataSourceId } : { datasetIds }
 
   // Keep the newest turn in view as questions and answers arrive.
   const endRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    endRef.current?.scrollIntoView?.({ block: 'end', behavior: 'smooth' })
-  }, [messages.length, pending])
+    // The page's answer card is taller than a screen: show the latest turn
+    // from its question down, not its last line (4a).
+    const last = variant === 'page'
+      ? endRef.current?.parentElement?.querySelector<HTMLElement>('article.dl-turn:last-of-type') : null
+    if (last) last.scrollIntoView?.({ block: 'start', behavior: 'smooth' })
+    else endRef.current?.scrollIntoView?.({ block: 'end', behavior: 'smooth' })
+  }, [messages.length, pending, variant])
 
   /** `choice` is an option the agent offered and the person clicked. It is
    *  sent exactly as typed would be -- same endpoint, same history, same
@@ -267,10 +286,11 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
     }
   }
 
-  const rate = async (runId: number, rating: 'up' | 'down') => {
+  const rate = async (runId: number, rating: 'up' | 'down', comment?: string) => {
     setFeedbackByRun(m => ({ ...m, [runId]: rating })) // optimistic
     try {
-      if (convId != null) await agentApi.feedback(convId, { runId, rating })
+      if (convId != null) await agentApi.feedback(convId, comment ? { runId, rating, comment } : { runId, rating })
+      if (comment) toast.success(t('ans3.thanks'))
     } catch {
       // The click already reflects intent; a failed write just means it
       // wasn't persisted -- not worth interrupting the chat over.
@@ -407,6 +427,11 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
   }
   const pendingTurn = pending !== null ? turns[turns.length - 1] : null
   const rephrase = (suggestions ?? []).slice(0, 3)
+  // The page's card: which answer is the latest (shown in full), and two
+  // starter questions not asked yet for "Ask next".
+  const lastAnswerId = [...turns].reverse().find(tn => tn.answer?.kind === 'answer')?.answer?.id
+  const asked = new Set(messages.filter(m => m.role === 'user').map(m => m.text.trim().toLowerCase()))
+  const askNext = (suggestions ?? []).filter(s => !asked.has(s.trim().toLowerCase())).slice(0, 2)
 
   return (
     <div className="dl-chat">
@@ -496,6 +521,9 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
                             onChoose={option => void send(option)} />
                         )}
                       </div>
+                    ) : variant === 'page' && msg.runId != null && !isProposals(msg.presentation)
+                        && !isAnalysisResult(msg.presentation) ? (
+                      pageAnswer(msg, turn.question?.text, msg.id === lastAnswerId)
                     ) : (
                       <>
                         <AnswerText text={msg.text} evidence={msg.evidence}
@@ -539,14 +567,60 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
     </div>
   )
 
+  /** The draft "Add to dashboard" places, when the answer maps onto the dataset. */
+  function draftFor(msg: ChatMessage) {
+    return datasetColumns && (datasetIds?.length === 1 || (onAddToPage && datasetIds?.length))
+      ? answerToWidget(msg.results?.[0], msg.sql ?? sqlByRun[msg.runId!], datasetColumns,
+          msg.presentation?.x, msg.presentation?.y)
+      : null
+  }
+
+  // Called, not mounted as <PageAnswer/>: an inner component is a new type on
+  // every render, which would remount the card (and refetch its run) per keystroke.
+  function pageAnswer(msg: ChatMessage, question: string | undefined, full: boolean) {
+    const runId = msg.runId!
+    const draft = draftFor(msg)
+    const answerTitle = question ?? msg.text.slice(0, 80)
+    const hasRows = !!msg.results?.some(r => r.total > 0)
+    return (
+      <AnswerCard key={msg.id} full={full} text={msg.text} runId={runId} results={msg.results}
+        presentation={msg.presentation} evidence={msg.evidence}
+        focus={evidenceFocus?.msg === msg.id ? evidenceFocus.at : null}
+        onShowClaim={msg.results?.length ? c => setEvidenceFocus(f => {
+          const at = focusFor(c, f?.at)
+          return at ? { msg: msg.id, at } : f
+        }) : undefined}
+        datasetName={datasetName}
+        sqlable={msg.intent !== 'chat'}
+        sqlOpen={openRun.has(runId)} sqlLoading={sqlLoading.has(runId)}
+        sql={(msg.sql && msg.sql.length ? msg.sql : sqlByRun[runId]) ?? []}
+        contextObjects={msg.contextObjects}
+        onToggleSql={() => void toggleSql(msg)}
+        onCopy={() => void copyAnswer(msg)} onCopySql={() => void copySql(msg)}
+        onRetry={question ? () => void send(question) : undefined}
+        onSaveDataset={dataSourceId != null && msg.intent !== 'chat' && saving === null ? () => void saveAsDataset(msg) : undefined}
+        savingDataset={saving === runId}
+        onCsv={hasRows ? () => downloadCsv(msg.results!, `ask-ai-result-${runId}.csv`) : undefined}
+        onFile={hasRows ? f => void downloadFile(runId, f) : undefined}
+        addToDashboard={draft && onAddToPage ? (
+          <button type="button" className="dl-act" data-testid="add-to-page"
+            onClick={() => void onAddToPage(draft, answerTitle)}>
+            <Sparkles size={14} aria-hidden /> <span className="dl-act__text">{t('ask.addToPage')}</span>
+          </button>
+        ) : draft && datasetIds ? (
+          <AddToDashboard datasetId={datasetIds[0]} draft={draft} title={answerTitle} />
+        ) : null}
+        rating={feedbackByRun[runId]} onRate={(r, c) => void rate(runId, r, c)}
+        source={answerSource(msg, t)}
+        askNext={askNext} onAsk={q => void send(q)} busy={busy} />
+    )
+  }
+
   function AnswerActions({ msg, question }: { msg: ChatMessage; question?: string }) {
     const runId = msg.runId!
     const sqlable = !(msg.intent === 'chat' || isProposals(msg.presentation)
       || isAnalysisResult(msg.presentation))
-    const draft = datasetColumns && (datasetIds?.length === 1 || (onAddToPage && datasetIds?.length))
-      ? answerToWidget(msg.results?.[0], msg.sql ?? sqlByRun[runId], datasetColumns,
-          msg.presentation?.x, msg.presentation?.y)
-      : null
+    const draft = draftFor(msg)
     const answerTitle = question ?? msg.text.slice(0, 80)
     return (
       <div className="dl-actions-wrap">

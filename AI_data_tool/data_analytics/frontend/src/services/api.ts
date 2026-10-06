@@ -3172,8 +3172,12 @@ export const agentApi = {
     api.post<AgentAnswer>(`/agent/conversations/${conversationId}/ask`,
       { question }).then(r => r.data),
   runDetail: (runId: number) =>
-    api.get<{ steps: { sql: string | null; status: string; result_rows?: AgentResult | null }[]
-              context_objects?: string[] | null }>(
+    api.get<{ steps: { sql: string | null; status: string; result_rows?: AgentResult | null
+                       rows_returned?: number | null; repair_attempts?: number | null }[]
+              context_objects?: string[] | null
+              /** Run time and the plan's sub-questions (read by the 4a answer card). */
+              ms?: number | null
+              plan?: { id: string; question?: string; depends_on?: string[] }[] | null }>(
       `/agent/runs/${runId}`).then(r => r.data),
   /** Download one answer's result as Excel or PDF, built server-side from
    *  the stored snapshot (CSV stays client-side -- the rows are already in
@@ -3188,10 +3192,12 @@ export const agentApi = {
     document.body.appendChild(a); a.click(); a.remove()
     URL.revokeObjectURL(url)
   },
-  feedback: (conversationId: number, body: { runId: number | null; rating: 'up' | 'down' }) =>
+  /** `comment` is the optional "What was wrong?" (the endpoint already takes it). */
+  feedback: (conversationId: number, body: { runId: number | null; rating: 'up' | 'down'; comment?: string }) =>
     api.post<{ id: number; run_id: number | null; rating: string; comment: string | null }>(
       `/agent/conversations/${conversationId}/feedback`,
-      { run_id: body.runId, rating: body.rating }).then(r => r.data),
+      body.comment ? { run_id: body.runId, rating: body.rating, comment: body.comment }
+        : { run_id: body.runId, rating: body.rating }).then(r => r.data),
 }
 
 /** Describe one of a dataset's columns. The response says WHERE the sentence

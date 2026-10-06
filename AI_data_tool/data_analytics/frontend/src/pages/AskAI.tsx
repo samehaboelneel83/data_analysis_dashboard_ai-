@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { BarChart3, Bot, Code2, History, MessageSquareText, Sparkles } from 'lucide-react'
+import { BarChart3, Bot, Code2, Columns3, History, MessageSquareText, Sparkles } from 'lucide-react'
 import EmptyState from '../components/ui/EmptyState'
 import ChatPane from '../components/chat/ChatPane'
 import { agentApi, datasetsApi, dataSourcesApi } from '../services/api'
@@ -9,6 +9,10 @@ import { useT } from '../i18n'
 import AskIllustration from './ask/AskIllustration'
 import DataPicker, { type PickerItem } from './ask/DataPicker'
 import HistoryPanel from './ask/HistoryPanel'
+import ColumnPanel, { readColumnsFold } from './ask/ColumnPanel'
+import { useConfirm } from '../components/ui/ConfirmDialog'
+import { localDigits } from '../lib/arabicFormats'
+import { sourceWords } from './datasetsList/classify'
 import { connectionSuggestions, datasetSuggestions } from './ask/suggestions'
 import './ask/ask.css'
 import DatasetListFilter, { useCleanDatasets } from '../components/dataset/DatasetListFilter'
@@ -20,7 +24,9 @@ import { isCertified } from '../lib/cleanDatasets'
  *  - No scope yet: a hero that says what this page does, Step 1 (a searchable
  *    picker of datasets and live connections) and Step 2 (the question box,
  *    shown but locked, so the order of things is obvious at a glance).
- *  - A scope: the threads held about it (History) beside the chat.
+ *  - A scope: the threads held about it (History) beside the chat, and the
+ *    dataset's columns on the other side (redesign 4a): History | thread |
+ *    Columns, edge to edge, the scope named in a bar over the thread.
  *
  * The scope is in the URL (`/ask?dataset=32`, `/ask?source=3`) so a question
  * about a specific dataset can be LINKED to -- DatasetDetail's "Ask about
@@ -66,6 +72,10 @@ export default function AskAI() {
   const [editing, setEditing] = useState<{ id: number; title: string } | null>(null)
   const [folded, setFolded] = useState(readFold)
   const [drawer, setDrawer] = useState(false)
+  const [colsFolded, setColsFolded] = useState(readColumnsFold)
+  const [colsDrawer, setColsDrawer] = useState(false)
+  const [insert, setInsert] = useState<{ text: string; seq: number } | null>(null)
+  const confirm = useConfirm()
 
   const datasetId = params.get('dataset') ? Number(params.get('dataset')) : null
   const sourceId = params.get('source') ? Number(params.get('source')) : null
@@ -114,6 +124,7 @@ export default function AskAI() {
     let alive = true
     setSelected(undefined)
     setEditing(null)
+    setInsert(null)
     agentApi.listConversations()
       .then(all => {
         if (!alive) return
@@ -163,7 +174,8 @@ export default function AskAI() {
   }
 
   const remove = async (c: AgentConversation) => {
-    if (!window.confirm(`Delete "${c.title}"? Its messages go with it.`)) return
+    if (!(await confirm({ title: t('ask3.deleteTitle'), body: t('ask3.deleteBody', { title: c.title }),
+      confirmLabel: t('ask3.delete') }))) return
     try {
       await agentApi.remove(c.id)
     } catch {
@@ -178,7 +190,21 @@ export default function AskAI() {
     return !f
   })
 
+  const toggleCols = () => setColsFolded(f => {
+    try { localStorage.setItem('datalytics.ask.columnsFolded', f ? '0' : '1') } catch { /* a convenience */ }
+    return !f
+  })
+
   const scoped = sourceId != null || datasetId != null
+  const dataset = datasetId != null ? usableDatasets.find(d => d.id === datasetId) : undefined
+  // "Uploaded file · 3,612 rows · 9 columns", beside the picker.
+  const scopeMeta = dataset ? [
+    sourceWords(dataset, null, t),
+    t('ask3.rowsCols', {
+      rows: localDigits((dataset.row_count ?? 0).toLocaleString('en-US')),
+      cols: localDigits(String(dataset.col_count ?? dataset.columns?.length ?? 0)),
+    }),
+  ].join(' · ') : ''
   const columns = datasetId != null ? columnsById[datasetId] : undefined
   const suggestions = useMemo(
     () => (sourceId != null ? connectionSuggestions(t) : datasetSuggestions(columns, t)),
@@ -226,7 +252,7 @@ export default function AskAI() {
   }
 
   return (
-    <div className="dl-ask dl-ask--work">
+    <div className={`dl-ask dl-ask--work${columns?.length ? ' dl-ask--cols' : ''}`}>
       <HistoryPanel
         conversations={conversations} selected={selected}
         onSelect={id => { setSelected(id); setDrawer(false) }}
@@ -242,19 +268,36 @@ export default function AskAI() {
             aria-label={t('ask.hist.title')} aria-expanded={drawer}>
             <History size={16} aria-hidden /> <span>{t('ask.hist.title')}</span>
           </button>
-          <DataPicker items={items} value={scopeKey} onChoose={choose} size="compact" loading={loading} />
+          <div className="dl-ask__scope">
+            <DataPicker items={items} value={scopeKey} onChoose={choose} size="compact" loading={loading} />
+            {scopeMeta && <span className="dl-ask__scope-meta">{scopeMeta}</span>}
+          </div>
+          {columns && columns.length > 0 && (
+            <button type="button" className="dl-ask__hist-btn dl-ask__cols-btn" onClick={() => setColsDrawer(true)}
+              aria-expanded={colsDrawer}>
+              <Columns3 size={16} aria-hidden /> <span>{t('ask3.columns')}</span>
+            </button>
+          )}
         </div>
         <div className="dl-ask__pane">
           {selected !== undefined && (
             sourceId != null
               ? <ChatPane key={scopeKey} dataSourceId={sourceId} conversationId={selected}
-                  onConversationCreated={created} suggestions={suggestions} />
+                  onConversationCreated={created} suggestions={suggestions} variant="page" />
               : <ChatPane key={scopeKey} datasetIds={[datasetId as number]} conversationId={selected}
                   onConversationCreated={created} suggestions={suggestions}
-                  datasetColumns={columns?.map(c => c.name)} />
+                  datasetColumns={columns?.map(c => c.name)} variant="page"
+                  datasetName={dataset?.name} insertRequest={insert} />
           )}
         </div>
       </section>
+
+      {datasetId != null && columns && columns.length > 0 && (
+        <ColumnPanel datasetId={datasetId} columns={columns}
+          onInsert={name => { setInsert(r => ({ text: name, seq: (r?.seq ?? 0) + 1 })); setColsDrawer(false) }}
+          collapsed={colsFolded && !colsDrawer} onToggle={toggleCols}
+          mobileOpen={colsDrawer} onCloseMobile={() => setColsDrawer(false)} />
+      )}
     </div>
   )
 }

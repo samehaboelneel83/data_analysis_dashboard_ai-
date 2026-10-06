@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import AskAI from './AskAI'
+import { renderWithProviders } from '../test/renderWithProviders'
 
 /**
  * The page's whole job is scope resolution: turn a URL or a picker choice
@@ -11,8 +12,10 @@ import AskAI from './AskAI'
 
 vi.mock('../components/chat/ChatPane', () => ({
   default: (props: { dataSourceId?: number; datasetIds?: number[]; conversationId?: number | null
-                     onConversationCreated?: (c: { id: number; title: string }) => void }) => (
+                     onConversationCreated?: (c: { id: number; title: string }) => void
+                     insertRequest?: { text: string } | null; variant?: string }) => (
     <div data-testid="chat-pane">
+      {props.insertRequest ? `insert:${props.insertRequest.text} ` : ''}
       {props.dataSourceId != null ? `source:${props.dataSourceId}` : `datasets:${props.datasetIds?.join(',')}`}
       {` conversation:${props.conversationId === undefined ? 'unset' : String(props.conversationId)}`}
       <button onClick={() => props.onConversationCreated?.({ id: 99, title: 'Made by pane' })}>
@@ -26,6 +29,7 @@ vi.mock('../services/api', () => ({
   datasetsApi: { list: vi.fn() },
   dataSourcesApi: { list: vi.fn() },
   agentApi: { listConversations: vi.fn(), rename: vi.fn(), remove: vi.fn() },
+  analysisApi: { get: vi.fn().mockResolvedValue(null) },
 }))
 
 import { datasetsApi, dataSourcesApi, agentApi } from '../services/api'
@@ -46,7 +50,7 @@ beforeEach(() => {
   vi.mocked(agentApi.remove).mockResolvedValue(undefined)
 })
 
-const renderAt = (path: string) => render(
+const renderAt = (path: string) => renderWithProviders(
   <MemoryRouter initialEntries={[path]}><AskAI /></MemoryRouter>,
 )
 
@@ -208,10 +212,12 @@ describe('AskAI — the conversation list', () => {
   })
 
   it('deletes a thread after confirming, and empties the pane if it was open', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     renderAt('/ask?dataset=32')
     await screen.findByRole('list', { name: /conversations/i })
     fireEvent.click(screen.getByRole('button', { name: /delete orders by city/i }))
+    // The app's own dialog (4a), not window.confirm.
+    const dialog = await screen.findByRole('alertdialog', { name: 'Delete this conversation?' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
     await waitFor(() => expect(agentApi.remove).toHaveBeenCalledWith(55))
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: /^Orders by city/ })).not.toBeInTheDocument())
@@ -219,11 +225,23 @@ describe('AskAI — the conversation list', () => {
   })
 
   it('a declined confirm deletes nothing', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(false)
     renderAt('/ask?dataset=32')
     await screen.findByRole('list', { name: /conversations/i })
     fireEvent.click(screen.getByRole('button', { name: /delete orders by city/i }))
+    const dialog = await screen.findByRole('alertdialog', { name: 'Delete this conversation?' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
     expect(agentApi.remove).not.toHaveBeenCalled()
+  })
+
+  it('searches the conversations by title', async () => {
+    renderAt('/ask?dataset=32')
+    const list = await screen.findByRole('list', { name: /conversations/i })
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search conversations' }), { target: { value: 'older' } })
+    expect(list).toHaveTextContent('Older orders chat')
+    expect(list).not.toHaveTextContent('Orders by city')
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search conversations' }), { target: { value: 'zzz' } })
+    expect(list).toHaveTextContent('No conversation matches.')
   })
 
   // A DirectQuery dataset keeps its rows in the connection, so it has no file
@@ -243,5 +261,45 @@ describe('AskAI — the conversation list', () => {
                   { timeout: 5000 })
     expect(screen.queryByText('Live orders')).not.toBeInTheDocument()
     expect(screen.getByText('Warehouse')).toBeInTheDocument()
+  })
+})
+
+describe('AskAI — the columns panel (4a)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    vi.mocked(datasetsApi.list).mockResolvedValue([
+      { id: 32, name: 'Orders', mode: 'import', filename: 'orders.csv', row_count: 3612, col_count: 4,
+        columns: [
+          { name: 'region', dtype: 'categorical' }, { name: 'revenue', dtype: 'numeric' },
+          { name: 'order_date', dtype: 'datetime' }, { name: 'order_id', dtype: 'numeric' },
+        ] } as any,
+    ])
+  })
+
+  it('groups the columns and puts a clicked one into the question', async () => {
+    renderAt('/ask?dataset=32')
+    const panel = await screen.findByTestId('column-panel')
+    expect(within(panel).getByText('Columns (4)')).toBeInTheDocument()
+    expect(within(panel).getByRole('heading', { name: 'Groups' })).toBeInTheDocument()
+    expect(within(panel).getByRole('heading', { name: 'Numbers' })).toBeInTheDocument()
+    expect(within(panel).getByRole('heading', { name: 'Dates' })).toBeInTheDocument()
+    // An id column is not a number to add up: it sits under Other.
+    expect(within(panel).getByRole('heading', { name: 'Other' })).toBeInTheDocument()
+    expect(within(panel).getByText('identifier')).toBeInTheDocument()
+    fireEvent.click(within(panel).getByRole('button', { name: 'Put revenue in the question' }))
+    expect(await screen.findByTestId('chat-pane')).toHaveTextContent('insert:revenue')
+  })
+
+  it('names the scope with its kind and size', async () => {
+    renderAt('/ask?dataset=32')
+    expect(await screen.findByText('Uploaded file · 3,612 rows · 4 columns')).toBeInTheDocument()
+  })
+
+  it('folds the panel and remembers it', async () => {
+    renderAt('/ask?dataset=32')
+    const panel = await screen.findByTestId('column-panel')
+    fireEvent.click(within(panel).getByRole('button', { name: 'Hide columns' }))
+    expect(screen.getByTestId('column-panel')).toHaveClass('dl-cols3--collapsed')
+    expect(localStorage.getItem('datalytics.ask.columnsFolded')).toBe('1')
   })
 })

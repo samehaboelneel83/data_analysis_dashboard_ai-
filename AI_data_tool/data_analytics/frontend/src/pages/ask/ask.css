@@ -431,3 +431,93 @@
 /* Mixed-language titles (an English question in the Arabic UI) take their
    own direction, but still line up with the reading side of the panel. */
 .dl-hist__pick-title[dir="auto"], .dl-pick__opt-name[dir="auto"] { text-align: match-parent; }
+
+/* ── Redesign 4a: History | thread | Columns, edge to edge ─────────────── */
+.dl-ask--work {
+  max-width: none; gap: 0;
+  margin: calc(var(--dl-shell-pad, 0px) * -1);
+  height: calc(100% + var(--dl-shell-pad, 0px) * 2);
+  background: var(--mc-canvas, var(--bg));
+}
+.dl-ask--work .dl-hist {
+  width: 248px; border: 0; border-inline-end: 1px solid var(--border); border-radius: 0; padding: 14px 12px;
+}
+.dl-ask--work .dl-hist__head { padding: 0 0 4px; }
+.dl-ask--work .dl-hist__title { font-size: 13px; font-weight: 700; letter-spacing: 0; text-transform: none; color: var(--text); }
+.dl-ask--work .dl-hist__head .dl-hist__new { white-space: nowrap; flex-shrink: 0; padding: 5px 10px; font-size: 12.5px; border-color: var(--border); background: var(--surface); color: var(--text); }
+.dl-ask--work .dl-hist__head .dl-hist__new:hover { background: var(--ask-soft); }
+.dl-hist__search {
+  display: flex; align-items: center; gap: 8px; padding: 0 10px; block-size: 32px; color: var(--muted);
+  border: 1px solid var(--border); border-radius: var(--dl-radius-control, 8px); background: var(--mc-canvas-2, var(--surface2));
+}
+.dl-hist__search input { flex: 1; min-inline-size: 0; border: 0; background: transparent; font: inherit; font-size: 12.5px; color: var(--text); outline: 0; }
+.dl-hist--collapsed .dl-hist__search { display: none; }
+.dl-ask--work .dl-hist__pick-icon { display: none; }
+.dl-ask--work .dl-hist__pick-title { font-size: 12.5px; }
+.dl-ask--work .dl-hist__fold { order: 3; }
+.dl-ask--work .dl-ask__main { gap: 0; }
+.dl-ask--work .dl-ask__bar { padding: 8px 20px; border-block-end: 1px solid var(--border); background: var(--surface); }
+.dl-ask__scope {
+  display: inline-flex; align-items: center; gap: 4px; min-inline-size: 0; max-inline-size: 100%; padding-block: 2px; padding-inline: 4px 12px;
+  border: 1px solid var(--border); border-radius: var(--dl-radius-control, 8px); background: var(--surface);
+}
+.dl-ask__scope .dl-pick--compact { flex: 0 1 auto; }
+.dl-ask__scope .dl-pick__trigger { border: 0; background: transparent; padding: 4px 6px; }
+.dl-ask__scope .dl-pick__trigger-name { font-size: 14.5px; }
+.dl-ask__scope-meta { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dl-ask--work .dl-ask__pane { border: 0; border-radius: 0; background: transparent; }
+.dl-ask--work .dl-chat__scroll { padding-inline: max(20px, calc((100% - 820px) / 2)); }
+.dl-ask--work .dl-chat__composer {
+  border: 0; background: transparent; padding-block: 8px 16px; padding-inline: max(20px, calc((100% - 820px) / 2));
+}
+.dl-ask--work .dl-turn__a > .dl-turn__avatar { display: none; }
+.dl-ask--work .dl-turn__q .dl-turn__avatar { display: none; }
+.dl-ask--work .dl-turn__q-text {
+  background: var(--accent-soft, var(--ask-soft)); border: 1px solid color-mix(in oklab, var(--accent) 35%, var(--border));
+}
+.dl-ask__cols-btn { margin-inline-start: auto; }
+
+/* Columns panel */
+.dl-cols3 {
+  width: 256px; flex-shrink: 0; min-height: 0; display: flex; flex-direction: column;
+  border-inline-start: 1px solid var(--border); background: var(--surface);
+}
+.dl-cols3__head { display: flex; align-items: center; gap: 6px; padding: 14px 12px 8px; }
+.dl-cols3__title { flex: 1; font-size: 13px; font-weight: 700; }
+.dl-cols3__body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 12px 16px; }
+.dl-cols3__hint {
+  margin: 0 0 10px; padding: 8px 10px; border-radius: var(--dl-radius-control, 8px);
+  background: var(--mc-canvas-2, var(--surface2)); color: var(--muted); font-size: 12.5px; line-height: 1.45;
+}
+.dl-cols3__group h3 { margin: 12px 0 4px; font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.dl-cols3__group ul { list-style: none; margin: 0; padding: 0; }
+.dl-cols3__col {
+  position: relative; inline-size: 100%; display: flex; align-items: center; gap: 8px; padding: 6px; border: 0; border-radius: 6px;
+  background: none; color: var(--text); font: inherit; font-size: 13px; text-align: start; cursor: pointer;
+}
+.dl-cols3__col:hover, .dl-cols3__col:focus-visible { background: var(--ask-soft); }
+.dl-cols3__col:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.dl-cols3__tag { inline-size: 32px; flex-shrink: 0; font-family: var(--mono, monospace); font-size: 9.5px; color: var(--muted); }
+.dl-cols3__name { flex: 1; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: start; }
+.dl-cols3__meta { flex-shrink: 0; font-size: 11.5px; color: var(--muted); }
+.dl-cols3__add { display: none; align-items: center; gap: 2px; font-size: 11.5px; color: var(--accent); font-weight: 600; }
+.dl-cols3__col:hover .dl-cols3__meta, .dl-cols3__col:focus-visible .dl-cols3__meta { display: none; }
+.dl-cols3__col:hover .dl-cols3__add, .dl-cols3__col:focus-visible .dl-cols3__add { display: inline-flex; }
+.dl-cols3--collapsed { width: 48px; align-items: center; }
+.dl-cols3--collapsed .dl-cols3__head { padding: 14px 0; }
+@media (max-width: 1100px) {
+  .dl-cols3:not(.dl-cols3--open) { display: none; }
+  .dl-ask__cols-btn { display: inline-flex; }
+  .dl-cols3--open {
+    position: fixed; z-index: 60; inset-block: 0; inset-inline-end: 0; width: min(300px, 86vw);
+    box-shadow: 0 0 40px rgb(0 0 0 / .3);
+  }
+  /* Rendered only while a drawer is open. */
+  .dl-hist__scrim { display: block; position: fixed; inset: 0; z-index: 59; background: rgb(0 0 0 / .45); }
+}
+@media (max-width: 820px) {
+  .dl-ask--work .dl-ask__bar { padding: 8px 12px; }
+  .dl-ask__scope-meta { display: none; }
+}
+/* The answer card is its own card: no second frame around it. */
+.dl-turn__body:has(> .dl-ans3) { border: 0; padding: 0; background: none; box-shadow: none; }
