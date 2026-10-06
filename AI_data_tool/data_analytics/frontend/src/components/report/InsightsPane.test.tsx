@@ -2,9 +2,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import toast from 'react-hot-toast'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import InsightsPane from './InsightsPane'
+import { DirectionProvider } from '../../contexts/DirectionContext'
 import { insightsApi, suggestApi } from '../../services/api'
 
 vi.mock('../../services/api', () => ({
+  findingKey: () => 'k', pinsApi: { create: vi.fn() },
   insightsApi: { run: vi.fn() },
   suggestApi: { autoCompose: vi.fn(), forReport: vi.fn() },
 }))
@@ -177,3 +179,27 @@ describe('evidence chips (Phase 7.2)', () => {
     expect(screen.getAllByTestId('insight-evidence')).toHaveLength(1)
   })
 })
+
+describe('InsightsPane: QA2 N1 and Translation 12', () => {
+  it('the Build button says its words, not raw markup (N1)', async () => {
+    render(<InsightsPane datasetId={5} columnTypes={types} reportId={1} />)
+    fireEvent.click(screen.getByRole('button', { name: /Generate/ }))
+    const btn = await screen.findByRole('button', { name: 'Build a report from these' })
+    expect(btn.textContent).not.toMatch(/IconLabel|</)
+  })
+
+  it('speaks Arabic, and the server\'s English sentences keep their own direction (T12)', async () => {
+    localStorage.setItem('datalytics.language', 'ar')
+    try {
+      render(<DirectionProvider><InsightsPane datasetId={5} columnTypes={types} reportId={1} onAdd={vi.fn()} /></DirectionProvider>)
+      fireEvent.click(screen.getByRole('button', { name: /توليد/ }))
+      expect(await screen.findByRole('button', { name: 'بناء تقرير من هذه' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /إعادة الفحص/ })).toBeInTheDocument()
+      expect(screen.getAllByRole('button', { name: '+ ارسمه' }).length).toBeGreaterThan(0)
+      expect(screen.getByText('A carries 60% of revenue')).toHaveAttribute('dir', 'auto')
+      expect(screen.getByText('Across 2,000 rows: things.')).toHaveAttribute('dir', 'auto')
+      expect(screen.queryByText(/Generate|Re-scan|Chart it|Add as text/)).toBeNull()
+    } finally { localStorage.removeItem('datalytics.language') }
+  })
+})
+

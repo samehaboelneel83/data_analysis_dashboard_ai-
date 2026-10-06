@@ -103,6 +103,8 @@ Nothing is pushed.
 - [x] 7e4 Builder: canvas overlays and widget states (alignment guides, group box, hover toolbar, skeleton, empty result with Clear filters, error details, heavy-page banner)
 - [x] 7e5 Builder: shortcuts dialog, copilot offline, and the states the prototype doesn't draw (empty page, read-only, load error, save conflict)
   - >> GATE E: stop, report the Builder
+- [x] 7-QA2 Fixes from the second QA report `/media/saeed/New Volume1/projects/redesign-captures/qa-2/QA_REPORT_2.md` (owner, after GATE E): Broken N1 (raw JSX on the Insights button), N2 (Version history and opening a dashboard must not force Edit mode; check v1), N3 (39 revisions at 13:01 with repeated numbers: display bug or autosave), N4 (Arabic hover toolbar covers the widget ⋮ menu), N5 (one-line `key` fix in CustomGraphRenderer.tsx only); B8 with the QA steps exactly; V1 and V4 at 1280 px and 125% zoom; V10 leftovers (dark Data table white square, Platform settings context column); Visual 6–10; Translation 10, 11, 12, 14, 15 and the Key influencers footnotes. A failing test before each fix where possible; before/after captures. B3, B4/13/16 and B6 go to "Backend follow-ups"; the remaining T1 items stay in 8-i18n.
+  - >> stop and report
 - [ ] 8-i18n The QA report's T1 strings on pages the redesign has not reached (Glossary, Organizations, Platform settings, Admin settings Basemap, Org units, Row/column security, API keys, Custom connectors, SSO, Maps, Models "random forest", Activity codes, Connections "Combine databases")
 - [ ] Then: Upload, Connections, Lineage, the AI button
 - [ ] FINAL Full regression: all tests, build, capture every screen, compare against all designs, final summary, fix the flaky `Lineage.test.tsx` (and watch `geoRenderers.test.tsx`), and a clean-up list (test datasets 7 and 8, chat threads, the uncommitted init.sql edit)
@@ -148,6 +150,11 @@ Not part of the frontend steps (1–7); candidates for the handoff's section 7 p
 | 7-gap History | Named versions; preview a version; compare with current; per-version change summary; copy or PDF of a version | No label column; the versions list is metadata only (no snapshot content). |
 | GATE D (v1 Suggestions) | Suggestions pane proposes "average year by category"; its preview is refused (422) | The same identifier/measure problem as KI-6: `year` is classed as a measure. Fix the role in the backend (KI-3/KI-6) so suggestions never average a year or an id. |
 | 7-QA B4 | An Arabic follow-up in a conversation that started in English is answered in English | The answer language follows the conversation, not the question (see AP3: localize by the question's language). |
+| 7-QA2 B3 | Clarifications name columns the dataset doesn't have ("sales by department"), so no column chips can be offered | The model must name real columns (AN1: ground the clarification on the dataset's columns). |
+| 7-QA2 B4 / 13 / 16 | Answers (and clarifications) come back in a language other than the UI's: an Arabic follow-up answered in English, the AI panel in English in the Arabic UI, an Arabic clarification in the English UI | The answer language must follow the UI language (AP3), sent with each question. |
+| 7-QA2 B6 | "average by" took about 3.5 minutes; an Arabic follow-up spun for over 2.5 minutes with no cancel | A server-side timeout and a Stop / cancel endpoint (AN2). |
+| 7-QA2 N3 | One automatic layout pass (Executive packing when a page is first edited) left 39 versions in half a second, with repeated revision numbers; the burst can also push older versions past the retention window | Every widget save snapshots a version and the revision is read-then-bumped without a lock. Needs one version per user action (a batch layout endpoint, or coalescing saves seconds apart) and an atomic revision increment. The history now shows such a burst as one entry. |
+| 7-QA2 T12 | Insights narrative, finding titles and details are English in the Arabic UI | The insights endpoint takes no language; the engine writes English. Needs the UI language on the request (AP3). The pane's own words are translated. |
 | 7-QA B6 | Ask AI is slow (about 70 s for a simple answer, about 4 min before a clarification), with no timeout or cancel | Needs a server-side timeout and a cancel endpoint (AN2: stream progress + cancel). |
 
 ## Log
@@ -660,4 +667,49 @@ errors). The owner's decisions are in the note above the 7a–7e list.
   - builder integration (11)
 - Full suite: 291 files / 3816 tests pass. Type-check and build pass.
 - New `e2e/capture/redesign/cap_step7e.mjs`. Captures (light, dark, Arabic, Arabic dark) were compared with the prototype and copied to `/media/saeed/New Volume1/projects/redesign-captures/7e/`.
+
+### 7-QA2 Fixes from the second QA report — the commit that adds this entry
+
+**Broken:**
+- N1 Insights: the Build button was a string holding JSX, shown as raw markup (v1 bug). It is a real button now.
+- N2 A dashboard opens for reading.
+  - v1 (since the 25 Sep UI refresh) opened every dashboard in Edit for anyone who could edit it.
+  - Now only a just-created blank dashboard opens in Edit: `?edit=1` from New dashboard and "Build a dashboard", or `?pick=data`. AI-built dashboards arrive complete and open in View.
+  - Version history from ⋮ opens a panel over the view; it no longer switches to Edit.
+- N3 The 39 entries are real, not a display bug.
+  - Opening a page with no layout mode in Edit runs v1's automatic Executive packing. It saves each moved widget as a separate parallel request, and the server snapshots a version per save. Parallel requests read the same revision, hence the repeats.
+  - A burst like this can also push older versions past the retention window.
+  - The history now shows such a burst as one entry ("39 changes"), expandable; its Restore goes to before the burst.
+  - The server fix is in the backend list (one version per action, batch layout save, atomic revision). Changing the client's parallel saves would touch v1's move/save path, so it was left.
+- N4 The reading toolbar (Ask AI, Focus) is centred on the widget's top edge. In Arabic it sat on the widget's own ⋮.
+- N5 CustomGraphRenderer passes `key` directly, not inside the spread props object. The change is 5 lines in that function, with no other renderer change.
+- B8 Not reproduced locally, even with slow secondary requests or focus tracking.
+  - Likely cause: the search box appeared only after the dashboard list loaded. While the server was busy (the QA run had multi-minute Ask AI requests in flight), a click where the box would be landed nowhere.
+  - The box is now there from the first paint. What is typed meanwhile applies when the rows arrive. The shared ListFilter gained an `always` option, and other pages are unchanged.
+  - Home: a pressed chip shows it is opening and the others wait. The Ask AI route loads on demand, so the click looked lost.
+
+**Visual:**
+- V1 Below 720 px of table, Status folds into the name cell too and the columns shrink. The minimum drops to 540 px, so a 606 px box (125% zoom) needs no sideways scroll, and the Arabic group header is no longer clipped.
+- V4 Below 1280 px, the top bar's Search shows only its icon and the model picker narrows (CSS only; TopBar.tsx untouched). At 1152 and 1229 the page names show in full.
+- V10:
+  - Dark Data table white square: the real cause was the unstyled `::-webkit-scrollbar-corner` (custom scrollbars paint it white); round 1's `color-scheme` change didn't reach it.
+  - Platform settings: on a narrow panel each model server is a grid of labelled fields, nothing scrolled out of sight.
+- Visual 6 Chart tooltip value and label in the text colour (CSS only).
+- Visual 7 The print view is paper: light while open, with the reader's theme back on leaving. The bridge tokens are also declared on `[data-product]` subtrees.
+- Visual 8 Present shows the title once when the page's title is the dashboard's name, and opens scrolled to the top.
+- Visual 9 Revoking the link just minted takes its one-time URL away. Revoked and expired links fold behind "Show N revoked or expired links"; there is no delete endpoint, and they are the record of who had access.
+- Visual 10 / T10 Version history times use a 24-hour clock in the reader's language (Arabic showed "01:01 PM").
+
+**Translation:**
+- 11: the widget ⋮ menu (labels only; "؟" lands at the end).
+- 12: Insights' own words. The server's narrative and findings stay English with `dir="auto"` (backend row added).
+- 14: the partial-period note, composed in Arabic from its fields, with the period label isolated.
+- 15: the print view buttons.
+- Key influencers: the caveat and the server's skip notes are translated by their fixed patterns; an unknown sentence is shown as sent.
+
+**Checks:**
+- A failing test before each fix, except B8 (fixed by its likely cause; pinned by tests) and the CSS-only fixes (pinned by rule tests).
+- Full suite: 294 files / 3844 tests. The only failure was the known flaky `Lineage.test.tsx` (FINAL), which passes alone. Type-check and build pass.
+- Before (the QA's screenshots) and after captures are in `/media/saeed/New Volume1/projects/redesign-captures/qa-2-fixes/{before,after}/`.
+- B3, B4/13/16, B6, N3 and T12 are in "Backend follow-ups". The remaining T1 items stay in 8-i18n.
 

@@ -145,7 +145,10 @@ export default function LlmEndpointsPanel() {
       )}
       <p className="dl-setting__hint">{t('llm.ep.strengthHint')}</p>
 
-      <div style={{ overflowX: 'auto' }}>
+      {/* QA2 V10: on a narrow panel each server is labelled fields (index.css,
+          .dl-llmep), not a table scrolled past its end -- in Arabic the On box
+          and the row's buttons started out of sight. */}
+      <div className="dl-llmep" style={{ overflowX: 'auto' }}>
         <table aria-labelledby="llm-ep-title" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
           <thead>
             <tr style={{ textAlign: 'start', color: 'var(--muted)', fontSize: 11 }}>
@@ -168,20 +171,20 @@ export default function LlmEndpointsPanel() {
                   <td style={cell} title={r.status?.error ?? (l === 'up' ? t('llm.up') : l === 'down' ? t('llm.down') : t('llm.unknown'))}>
                     <Led light={l} />
                   </td>
-                  <td style={cell}>
+                  <td style={cell} data-label={t('llm.ep.name')}>
                     <input className="dl-field__input" value={r.name} aria-label={t('llm.ep.name')}
                       onChange={e => edit(i, { name: e.target.value })} style={{ minWidth: 140 }} />
                   </td>
-                  <td style={cell}>
+                  <td style={cell} data-label={t('llm.ep.url')}>
                     <input className="dl-field__input" value={r.base_url} aria-label={`${t('llm.ep.url')}: ${r.name}`}
                       onChange={e => edit(i, { base_url: e.target.value })} style={{ minWidth: 200 }}
                       placeholder="http://host:8000/v1" dir="ltr" />
                   </td>
-                  <td style={cell}>
+                  <td style={cell} data-label={t('llm.ep.model')}>
                     <input className="dl-field__input" value={r.model} aria-label={`${t('llm.ep.model')}: ${r.name}`}
                       onChange={e => edit(i, { model: e.target.value })} style={{ minWidth: 110 }} dir="ltr" />
                   </td>
-                  <td style={cell}>
+                  <td style={cell} data-label={t('llm.ep.key')}>
                     <input className="dl-field__input" type="password" autoComplete="new-password" value={r.api_key}
                       aria-label={`${t('llm.ep.key')}: ${r.name}`} disabled={r.clear_key}
                       placeholder={r.has_api_key && !r.clear_key ? t('llm.ep.keyKeep') : t('llm.ep.keyNone')}
@@ -193,23 +196,23 @@ export default function LlmEndpointsPanel() {
                       </label>
                     )}
                   </td>
-                  <td style={cell}>
+                  <td style={cell} data-label={t('llm.ep.strength')}>
                     <input className="dl-field__input" type="number" min={1} max={10} value={r.strength}
                       aria-label={`${t('llm.ep.strength')}: ${r.name}`} placeholder={String(r.guessedStrength)}
                       title={t('llm.ep.strengthHint')}
                       onChange={e => edit(i, { strength: e.target.value })} style={{ width: 64 }} />
                   </td>
-                  <td style={cell}>
+                  <td style={cell} data-label={t('llm.ep.context')}>
                     <input className="dl-field__input" type="number" min={0} step={1024} value={r.context}
                       aria-label={`${t('llm.ep.context')}: ${r.name}`}
                       placeholder={r.detectedContext ? t('llm.ep.contextAuto', { n: r.detectedContext }) : ''}
                       onChange={e => edit(i, { context: e.target.value })} style={{ width: 140 }} />
                   </td>
-                  <td style={{ ...cell, textAlign: 'center' }}>
+                  <td style={{ ...cell, textAlign: 'center' }} data-label={t('llm.ep.enabled')}>
                     <input type="checkbox" checked={r.enabled} aria-label={`${t('llm.ep.enabled')}: ${r.name}`}
                       onChange={e => edit(i, { enabled: e.target.checked })} />
                   </td>
-                  <td style={{ ...cell, whiteSpace: 'nowrap' }}>
+                  <td style={{ ...cell, whiteSpace: 'nowrap' }} className="acts">
                     <button type="button" className="btn btn-sm" disabled={testing !== null} onClick={() => void test(r)}>
                       {testing === r.key ? t('settings.testing') : t('llm.ep.test')}
                     </button>{' '}

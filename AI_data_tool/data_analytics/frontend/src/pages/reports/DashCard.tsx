@@ -132,7 +132,7 @@ export function DashRow(p: DashProps) {
               onClick={e => { if (p.selectMode) e.preventDefault(); else if (plain(e)) p.onOpen() }}>{r.name}</Link>
             <Blurb r={r} className="d" />
             {/* Shown only on a narrow table, where the folder column gives way. */}
-            <span className="fdi">{folderIcon}<span dir="auto">{folder}</span></span>
+            <span className="fdi">{folderIcon}<span dir="auto">{folder}</span><span className="sti"><Badge r={r} /></span></span>
           </span>
         </div>
       </td>
@@ -143,7 +143,7 @@ export function DashRow(p: DashProps) {
       <td className="c-ds">{p.datasetName
         ? <span className="dsh-ch" style={{ flex: 'none' }} title={p.datasetName}><Database size={12} aria-hidden /><span dir="auto">{p.datasetName}</span></span>
         : null}</td>
-      <td>
+      <td className="c-st">
         <Badge r={r} />
         {!p.canEdit && <span className="dsh-bdg draft" style={{ marginInlineStart: 6 }} title={t('dsh.viewOnly')}>
           <Eye size={12} aria-label={t('dsh.viewOnly')} /></span>}

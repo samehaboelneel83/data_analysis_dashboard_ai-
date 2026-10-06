@@ -23,7 +23,7 @@ describe('Dashboards list layout (QA V1–V3)', () => {
 
   it('on a narrow table the folder column gives way and shows under the name', () => {
     expect(rule('.dsh-tblw')).toMatch(/container-type:\s*inline-size/)
-    const q = css.match(/@container dshtbl \(max-width: \d+px\)\s*\{([\s\S]*?)\n\}/)
+    const q = css.match(/@container dshtbl \(max-width: 960px\)\s*\{([\s\S]*?)\n\}/)
     expect(q, 'no container query for the narrow table').toBeTruthy()
     // Collapsed, not removed: a removed column leaves the colSpan-7 group
     // rows a phantom column that soaks up the name's room.
@@ -45,4 +45,14 @@ describe('Dashboards list layout (QA V1–V3)', () => {
   it("the browser's own clear button is hidden: the box has one", () => {
     expect(css).toMatch(/\.dsh-srch input\[type="search"\]::-webkit-search-cancel-button\s*\{[^}]*display:\s*none/)
   })
+
+  it('narrower still (QA2 V1, 125% zoom: a 606 px box), Status folds into the name cell and the table fits without scrolling', () => {
+    const q = css.match(/@container dshtbl \(max-width: 719px\)\s*\{([\s\S]*?)\n\}/)
+    expect(q, 'no second narrow step').toBeTruthy()
+    expect(q![1]).toMatch(/\.dsh-tbl \.c-st\s*\{[^}]*width:\s*0/)
+    expect(q![1]).toMatch(/\.dsh-nmc \.sti\s*\{[^}]*display:/)
+    const min = Number(rule('.dsh-tblw > .dsh-tbl').match(/min-inline-size:\s*(\d+)px/)?.[1])
+    expect(min).toBeLessThanOrEqual(560)
+  })
 })
+

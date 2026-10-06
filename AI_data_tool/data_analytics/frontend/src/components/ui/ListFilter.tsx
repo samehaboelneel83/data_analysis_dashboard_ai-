@@ -37,6 +37,9 @@ export function useListFilter<T>(
   items: T[],
   fields: (item: T) => (string | null | undefined)[],
   label: string,
+  /** `always`: show the box whatever the count -- even before the list has
+   *  arrived, so a click there lands (QA2 B8, the Dashboards list). */
+  opts?: { always?: boolean },
 ) {
   const [query, setQuery] = useState('')
 
@@ -51,7 +54,7 @@ export function useListFilter<T>(
 
   // Only worth showing once the list is long enough to be hard to scan. Below
   // that the box is chrome competing with the content it filters.
-  const worthShowing = items.length >= 8
+  const worthShowing = !!opts?.always || items.length >= 8
 
   const input = worthShowing ? (
     <input

@@ -1,6 +1,6 @@
 import { forwardRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import {
+import { Loader2,
   ArrowRight, ArrowUp, ArrowUpRight, Calendar, Check, Clock, Database, History, LayoutDashboard, Plug,
   Plus, RefreshCw, Sparkles, TriangleAlert, Upload, type LucideIcon,
 } from 'lucide-react'
@@ -79,6 +79,9 @@ export const Hero = forwardRef<HTMLInputElement, {
   const t = useT()
   const navigate = useNavigate()
   const [q, setQ] = useState('')
+  // The chip on its way to Ask AI (QA2 B8): that page loads on demand, and
+  // until it does the click must show it landed.
+  const [going, setGoing] = useState<string | null>(null)
   const hr = new Date().getHours()
   const greeting = firstRun ? t('hm.welcome')
     : t(hr < 12 ? 'hm.morning' : hr < 18 ? 'hm.afternoon' : 'hm.evening')
@@ -115,9 +118,10 @@ export const Hero = forwardRef<HTMLInputElement, {
         <div className="hm-chips" role="group" aria-label={t('hm.chipsAria', { name: chips.datasetName })}>
           <span className="hm-chips__about">{t('hm.chipsAbout')} <bdi>{chips.datasetName}</bdi></span>
           {chips.questions.map(c => (
-            <button key={c} type="button" className="hm-chip"
-              onClick={() => navigate(`/ask?dataset=${chips.datasetId}&q=${encodeURIComponent(c)}`)}>
-              <Sparkles size={14} aria-hidden />{c}
+            <button key={c} type="button" className="hm-chip" aria-busy={going === c || undefined}
+              disabled={going != null && going !== c}
+              onClick={() => { if (going) return; setGoing(c); navigate(`/ask?dataset=${chips.datasetId}&q=${encodeURIComponent(c)}`) }}>
+              {going === c ? <Loader2 size={14} className="dl-spin" aria-hidden /> : <Sparkles size={14} aria-hidden />}{c}
             </button>
           ))}
         </div>

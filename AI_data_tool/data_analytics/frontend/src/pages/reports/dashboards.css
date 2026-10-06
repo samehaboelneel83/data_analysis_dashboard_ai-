@@ -166,7 +166,19 @@
 .dsh-nmc .fdi { display: none; }
 .dsh-tblw { container-type: inline-size; container-name: dshtbl; overflow-x: auto; border-radius: 14px; }
 /* Below this the table scrolls sideways rather than squeeze the name away. */
-.dsh-tblw > .dsh-tbl { min-inline-size: 720px; }
+.dsh-tblw > .dsh-tbl { min-inline-size: 540px; }
+.dsh-nmc .sti { display: none; }
+/* Narrower still (QA2 V1: a 606 px box at 125% zoom): Status folds into the
+   name cell too, and the small columns shrink, so the table fits. */
+@container dshtbl (max-width: 719px) {
+  .dsh-tbl .c-st { width: 0; padding: 0; border-inline: 0; overflow: hidden; font-size: 0; }
+  .dsh-tbl .c-st > * { display: none; }
+  .dsh-tbl .c-ds { width: 124px; }
+  .dsh-tbl .c-mod { width: 96px; }
+  .dsh-tbl .c-act { width: 88px; }
+  .dsh-nmc .sti { display: inline-flex; margin-inline-start: 6px; }
+  .dsh-nmc .sti:empty { display: none; }
+}
 /* A narrow table: the folder column gives way (the folder shows under the
    name instead, and the "All" view groups by folder anyway). */
 @container dshtbl (max-width: 960px) {

@@ -7,7 +7,7 @@ import { closeAll, closeOpen, markOpen, readOpen, type OpenReport } from '../lib
 import OpenReportsMenu from '../components/report/OpenReportsMenu'
 import { useEffect, useState, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
 import LoadError from '../components/ui/LoadError'
-import { useParams, Link, useNavigate } from 'react-router-dom'
+import { useParams, Link, useNavigate, useLocation } from 'react-router-dom'
 import { useCrumbTitle } from '../lib/crumb'
 import NotFound from './NotFound'
 import { useDirection } from '../contexts/DirectionContext'
@@ -290,7 +290,15 @@ export default function ReportBuilder() {
   // A phone opens a dashboard to READ it: the studio's two side panels left
   // no room for the canvas at 390px. It starts in View there (Edit remains a
   // tap away for someone who needs it).
-  const [editModeWanted, setEditMode] = useState(() => !window.matchMedia(MOBILE_QUERY).matches)
+  // QA2 N2: a dashboard opens for reading. Only a just-created one (?edit=1,
+  // or ?pick=data, which asks for its data) opens in Edit. v1 opened every
+  // dashboard in Edit for anyone who could edit it.
+  const routeLocation = useLocation()
+  const [editModeWanted, setEditMode] = useState(() => {
+    if (window.matchMedia(MOBILE_QUERY).matches) return false
+    const q = new URLSearchParams(routeLocation.search)
+    return q.has('edit') || q.has('pick')
+  })
   // Capability mirror (server enforces; this hides what it would refuse):
   // 'view' can't edit, only 'data' can reach the Data/Model authoring tabs.
   const myCapability = report?.my_capability ?? 'view'
@@ -387,6 +395,8 @@ export default function ReportBuilder() {
   // 7e3: Properties can be pinned open beside another rail panel, and shows
   // a widget's settings by section (Format / Data / Interactions).
   const [pinProps, setPinProps] = useState(false)
+  // Version history opened from ⋮ while reading (QA2 N2): a panel over the view.
+  const [viewHistory, setViewHistory] = useState(false)
   const [propSection, setPropSection] = useState<'format' | 'data' | 'interactions'>('format')
   const [shareOpen, setShareOpen] = useState(false)
   const [accessOpen, setAccessOpen] = useState(false)
@@ -1767,6 +1777,13 @@ export default function ReportBuilder() {
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [editMode, selectedW, activePage, persistWidgetLayouts])
+
+  // Present starts at the top of the page (QA2 Visual 8: it once opened
+  // scrolled down, the top row of cards cut off).
+  useEffect(() => {
+    if (!kiosk) return
+    document.querySelectorAll<HTMLElement>('[data-canvas-scroll], .dl-shell__content').forEach(el => { el.scrollTop = 0 })
+  }, [kiosk, activePage?.id])
 
   // ── Kiosk playback ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -3474,7 +3491,9 @@ export default function ReportBuilder() {
                 items={[
                   { key: 'print', label: tr('shx.ex.print'), icon: <Printer size={14} />, onSelect: () => navigate(`/reports/${reportId}/print`) },
                   ...(canEdit ? [
-                    { key: 'history', label: tr('shx.vh.title'), icon: <History size={14} />, onSelect: () => { setEditMode(true); setRightPanelMode('history') } },
+                    // QA2 N2: over the view while reading; the rail panel while editing.
+                    { key: 'history', label: tr('shx.vh.title'), icon: <History size={14} />, onSelect: () => {
+                      if (editMode) { setRightPanelMode('history'); setRightOpenSignal(n => n + 1) } else { setAiOpen(false); setViewHistory(true) } } },
                     { key: 'settings', label: tr('builder.reportSettings'), icon: <SlidersHorizontal size={14} />, onSelect: () => { setEditMode(true); setRightPanelMode('parameters') } },
                   ] : []),
                   ...(Object.keys(access).length ? [{ key: 'why', label: tr('shx.why'), icon: <KeyRound size={14} />, onSelect: () => setAccessOpen2(true) }] : []),
@@ -3718,7 +3737,7 @@ export default function ReportBuilder() {
         <div className={kiosk ? 'dl-pr-stage' : undefined} style={{ display:'flex', flex:1, gap:10, padding:'10px 16px', overflow:'hidden', minHeight:0, position:'relative' }}>
 
           {/* Canvas */}
-          <div key={refreshNonce} style={{ flex:1, overflowY:'auto', overflowX:'auto' }}>
+          <div key={refreshNonce} data-canvas-scroll style={{ flex:1, overflowY:'auto', overflowX:'auto' }}>
             {/* Report (h1) > page (h2) > widget titles (level 3), the outline
                 ReportPrint draws too; without it the widgets skip a level. */}
             {activePage && <h2 className="dl-sr-only">{activePage.title || activePage.name}</h2>}
@@ -4007,6 +4026,20 @@ export default function ReportBuilder() {
             )}
           </div>
 
+          {!editMode && !kiosk && viewHistory && !aiOpen && (
+            <aside className="dl-vw-ai" data-testid="view-history" aria-label={tr('shx.vh.title')}>
+              <div className="dl-vw-ai__h">
+                <div className="tt"><h2>{tr('shx.vh.title')}</h2></div>
+                <button type="button" className="dl-vw-ai__x" onClick={() => setViewHistory(false)} aria-label={tr('bd.keys.close')} title={tr('bd.keys.close')}>
+                  <X size={16} aria-hidden />
+                </button>
+              </div>
+              <div className="dl-vw-ai__b">
+                <VersionHistoryPane reportId={reportId} currentRevision={loadedRevision}
+                  onRestored={() => { loadReport().catch(() => {}) }} />
+              </div>
+            </aside>
+          )}
           {/* Reading (7d): the AI panel beside the dashboard, or the button
               that opens it. Present keeps the panel and has its own button. */}
           {!editMode && aiOpen && (

@@ -112,3 +112,30 @@ describe('guest links refused by policy', () => {
     expect(screen.queryByRole('button', { name: 'Create guest link' })).not.toBeInTheDocument()
   })
 })
+
+describe('guest links after a revoke (QA2 Visual 9)', () => {
+  it('revoking the link just minted takes its one-time URL away', async () => {
+    render(<GuestLinks reportId={7} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Create guest link' }))
+    await screen.findByLabelText('Guest link URL')
+    vi.mocked(shareLinksApi.list).mockResolvedValue([
+      { id: 2, creator: 'me@x.com', created_at: '2026-08-23', expires_at: '2026-08-30', active: true, pinned: false, access_count: 0, last_access_at: null },
+    ] as never)
+    fireEvent.click(screen.getByRole('button', { name: 'Create guest link' }))
+    fireEvent.click(await screen.findByLabelText('Revoke link 2'))
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: /^revoke$/i }))
+    await waitFor(() => expect(screen.queryByLabelText('Guest link URL')).toBeNull())
+  })
+
+  it('revoked links fold away behind a toggle, kept as the record of who had access', async () => {
+    vi.mocked(shareLinksApi.list).mockResolvedValue([
+      { id: 1, creator: 'me@x.com', created_at: '2026-08-23', expires_at: '2026-08-30', active: true, pinned: false, access_count: 3, last_access_at: null },
+      { id: 3, creator: 'old@x.com', created_at: '2026-08-01', expires_at: '2026-08-02', active: false, pinned: false, access_count: 0, last_access_at: null },
+    ] as never)
+    render(<GuestLinks reportId={7} />)
+    await screen.findByText(/3 views/)
+    expect(screen.queryByText('old@x.com')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Show 1 revoked or expired link' }))
+    expect(screen.getByText('old@x.com')).toBeInTheDocument()
+  })
+})

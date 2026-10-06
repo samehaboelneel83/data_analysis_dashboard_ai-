@@ -31,3 +31,33 @@ describe('dark theme natives (QA V10)', () => {
     expect(css).toMatch(/:root\[data-theme="dark"\]\s*\{\s*color-scheme:\s*dark/)
   })
 })
+
+describe('top bar at 125% zoom (QA2 V4)', () => {
+  // At ~1150–1230 CSS px the page name was still cut ("Datasets > Demo …"):
+  // Search (180 px) and the model picker (up to 260 px) are fixed. Below 1280
+  // Search is its icon (its aria-label stays) and the picker's name truncates.
+  const q = () => css.match(/@media \(max-width: 1279px\)\s*\{([\s\S]*?)\n\}/g)?.find(b => b.includes('llm-picker')) ?? ''
+  it('Search gives up its words below 1280 px', () => {
+    expect(q()).toMatch(/\.dl-crumbs \+ div \+ button\s*\{[^}]*min-width:\s*0/)
+    expect(q()).toMatch(/\.dl-crumbs \+ div \+ button > span:not\(:first-child\)\s*\{[^}]*display:\s*none/)
+  })
+  it('the model picker narrows', () => {
+    expect(q()).toMatch(/\[data-testid="llm-picker"\] > button\s*\{[^}]*max-width:\s*1\d\dpx/)
+  })
+})
+
+describe('the scrollbar corner (QA2 V10)', () => {
+  it('is transparent: custom scrollbars leave it white otherwise, in every theme', () => {
+    // color-scheme (QA1) did not reach it: with ::-webkit-scrollbar set, the
+    // corner is painted white unless it is styled too.
+    expect(css).toMatch(/::-webkit-scrollbar-corner\s*\{[^}]*background:\s*transparent/)
+  })
+})
+
+describe('chart tooltips in dark mode (QA2 Visual 6)', () => {
+  it('the value is in the text colour; the series name keeps its colour as the cue', () => {
+    expect(css).toMatch(/\.recharts-tooltip-item-value[^{]*\{[^}]*color:\s*var\(--text\)/)
+    expect(css).toMatch(/\.recharts-tooltip-label[^{]*\{[^}]*color:\s*var\(--text\)/)
+  })
+})
+

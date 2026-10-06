@@ -36,6 +36,22 @@ export const rankInfluencers = (rows: KeyInfluencer[]) =>
  * (churn), and colouring "more" red told an HR lead a higher salary was a
  * problem.
  */
+/** The server's fixed English sentences (backend analysis/influencers.py), in
+ *  the reader's language (QA2: the footnotes were English in Arabic). A
+ *  sentence this build does not recognise is shown as sent. Column names keep
+ *  their spelling, isolated so they hold their order in Arabic. */
+const iso = (c: string) => `\u2066${c}\u2069`
+export function kiSentence(s: string, tr: ReturnType<typeof useT>): string {
+  if (s === 'These factors move with the outcome; that is not proof they cause it.') return tr('ki.caveat')
+  let m: RegExpExecArray | null
+  if ((m = /^'(.+)' skipped: no values$/.exec(s))) return tr('ki.w.noValues', { c: iso(m[1]) })
+  if ((m = /^'(.+)' skipped: only one value$/.exec(s))) return tr('ki.w.oneValue', { c: iso(m[1]) })
+  if ((m = /^'(.+)' skipped: it identifies rows rather than describing them$/.exec(s))) return tr('ki.w.identifier', { c: iso(m[1]) })
+  if ((m = /^'(.+)' skipped: ([\d,]+) distinct values, too many to group$/.exec(s))) return tr('ki.w.tooMany', { c: iso(m[1]), n: localDigits(m[2]) })
+  if ((m = /^analysed a ([\d,]+)-row sample of ([\d,]+) rows$/.exec(s))) return tr('ki.w.sample', { n: localDigits(m[1]), total: localDigits(m[2]) })
+  return s
+}
+
 export default function KeyInfluencersResult({ result, leftOut = [] }: {
   result: Result
   /** Columns the client skipped as identifiers, said under the table. */
@@ -136,13 +152,13 @@ export default function KeyInfluencersResult({ result, leftOut = [] }: {
         </div>
       )}
       {/* Server-written English for now (AP3): laid out by its own script. */}
-      <p dir={majorityDir(meta.caveat, direction)} style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>{meta.caveat}</p>
+      <p dir={majorityDir(kiSentence(meta.caveat, tr), direction)} style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>{kiSentence(meta.caveat, tr)}</p>
       <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
         {tr('ki.smallGroupNote', { pct: localDigits(String(SMALL_GROUP_SHARE * 100)) })}
       </p>
       {result.warnings.length > 0 && (
         <ul style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6, paddingInline: 18 }}>
-          {result.warnings.map((w, i) => <li key={i} dir={majorityDir(w, direction)}>{w}</li>)}
+          {result.warnings.map((w, i) => { const x = kiSentence(w, tr); return <li key={i} dir={majorityDir(x, direction)}>{x}</li> })}
         </ul>
       )}
     </div>

@@ -4,6 +4,7 @@ import toast from 'react-hot-toast'
 import { reportsApi, describeMissing, type MissingDependency } from '../../services/api'
 import { useConfirm } from '../ui/ConfirmDialog'
 import { useT } from '../../i18n'
+import { useDirection } from '../../contexts/DirectionContext'
 import { localDigits } from '../../lib/arabicFormats'
 import './share/share.css'
 
@@ -51,17 +52,38 @@ function dayOf(iso: string | null): 'today' | 'yesterday' | 'earlier' {
   const diff = Math.round((start(now) - start(d)) / 86400000)
   return diff <= 0 ? 'today' : diff === 1 ? 'yesterday' : 'earlier'
 }
-function when(iso: string | null, group: string): string {
+/** In the reader's language and on a 24-hour clock (QA2 V10: Arabic showed
+ *  "01:01 PM" in English letters). Latin digits, as the app's numbers. */
+function when(iso: string | null, group: string, lang: string): string {
   if (!iso) return ''
   const d = new Date(iso)
   if (isNaN(d.getTime())) return ''
+  const loc = lang === 'ar' ? 'ar-u-nu-latn' : 'en-GB'
   return group === 'earlier'
-    ? d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-    : d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+    ? d.toLocaleString(loc, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+    : d.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+}
+
+/** Saves this close together by one person are one action as far as a
+ *  reader is concerned (QA2 N3): an automatic layout pass writes every
+ *  widget separately, and the server snapshots each write. */
+const BURST_MS = 10_000
+function bursts(rows: VersionRow[]): VersionRow[][] {
+  const out: VersionRow[][] = []
+  for (const r of rows) {
+    const g = out[out.length - 1]
+    const prev = g?.[g.length - 1]
+    const close = prev && prev.created_by === r.created_by && (prev.via ?? null) === (r.via ?? null)
+      && prev.created_at && r.created_at
+      && Math.abs(new Date(prev.created_at).getTime() - new Date(r.created_at).getTime()) <= BURST_MS
+    if (close) g.push(r); else out.push([r])
+  }
+  return out
 }
 
 export default function VersionHistoryPane({ reportId, currentRevision, onRestored }: VersionHistoryPaneProps) {
   const t = useT()
+  const { language } = useDirection()
   const confirm = useConfirm()
   const [rows, setRows] = useState<VersionRow[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -112,9 +134,46 @@ export default function VersionHistoryPane({ reportId, currentRevision, onRestor
         {error && <p role="alert" className="shx-err">{error}</p>}
         {rows && rows.length === 0 && <p className="shx-note">{t('shx.vh.empty')}</p>}
         {!rows && !error && <p className="shx-note">{t('common.loading')}</p>}
-        {(rows ?? []).map(v => {
+        {bursts(rows ?? []).map(members => {
+          const v = members[0]
           const g = dayOf(v.created_at)
           const head = g !== group ? (group = g, <div key={`g-${g}`} className="shx-vg">{t(`shx.vh.${g}` as 'shx.vh.today')}</div>) : null
+          if (members.length > 1) {
+            // One entry for the burst; Restore goes to the state before it.
+            const oldest = members[members.length - 1]
+            const on = selected === v.id
+            const who = v.created_by?.split('@')[0] ?? null
+            return [head, (
+              <div key={v.id} role="button" tabIndex={0} aria-pressed={on} aria-expanded={on} className="shx-v"
+                onClick={e => { if (!(e.target as HTMLElement).closest('button')) setSelected(on ? null : v.id) }}
+                onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) { e.preventDefault(); setSelected(on ? null : v.id) } }}>
+                <span className="dt" aria-hidden />
+                <div className="tx">
+                  <div className="tm">
+                    {t('shx.vh.burst', { n: localDigits(String(members.length)) })}
+                    <span style={{ fontWeight: 400, color: 'var(--muted)' }}>· {when(v.created_at, g, language)}</span>
+                  </div>
+                  {who && (
+                    <div className="by"><span className="shx-av" style={{ background: color(who) }} aria-hidden>{[...who][0]}</span><bdi>{who}</bdi></div>
+                  )}
+                  <div className="sm">{t('shx.vh.burstWhy')}</div>
+                  {on && (<>
+                    <ul className="shx-vb">
+                      {members.map(m => (
+                        <li key={m.id}>{t('shx.vh.revision', { n: localDigits(String(m.revision)) })}<span> · {when(m.created_at, g, language)}</span></li>
+                      ))}
+                    </ul>
+                    <div className="shx-va">
+                      <button type="button" className="btn btn-primary btn-sm" disabled={restoring != null}
+                        aria-label={t('shx.vh.burstRestore')} onClick={() => void restore(oldest)}>
+                        <RotateCcw size={13} aria-hidden />{restoring === oldest.id ? t('shx.vh.restoring') : t('shx.vh.burstRestore')}
+                      </button>
+                    </div>
+                  </>)}
+                </div>
+              </div>
+            )]
+          }
           const isCurrent = currentRevision != null && v.revision === currentRevision
           const on = selected === v.id
           const who = v.created_by?.split('@')[0] ?? null
@@ -126,7 +185,7 @@ export default function VersionHistoryPane({ reportId, currentRevision, onRestor
               <div className="tx">
                 <div className="tm">
                   {t('shx.vh.revision', { n: localDigits(String(v.revision)) })}
-                  <span style={{ fontWeight: 400, color: 'var(--muted)' }}>· {when(v.created_at, g)}</span>
+                  <span style={{ fontWeight: 400, color: 'var(--muted)' }}>· {when(v.created_at, g, language)}</span>
                   {isCurrent && <span className="shx-cur">{t('shx.vh.current')}</span>}
                 </div>
                 {who && (

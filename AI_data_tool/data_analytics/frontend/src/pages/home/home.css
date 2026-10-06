@@ -288,3 +288,9 @@
 @media (prefers-reduced-motion: reduce) {
   .dl-hm *, .dl-hm *::before, .dl-hm *::after { animation: none !important; transition: none !important; }
 }
+
+/* A chip on its way to Ask AI (QA2 B8). */
+.hm-chip[aria-busy="true"] { border-color: var(--accent); }
+.hm-chip:disabled { opacity: .55; cursor: default; }
+.hm .dl-spin, .hm-chip .dl-spin { animation: hm-spin 1s linear infinite; }
+@keyframes hm-spin { to { transform: rotate(360deg); } }

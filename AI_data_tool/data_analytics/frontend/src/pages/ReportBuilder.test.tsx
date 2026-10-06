@@ -16,7 +16,7 @@ vi.mock('../services/api', () => ({
   // Phase 7.3: the header asks what this user may do (share, download...).
   authzApi: { decisions: vi.fn().mockResolvedValue([]) },
   reportsApi: {
-    get: vi.fn(), list: vi.fn().mockResolvedValue([]), update: vi.fn(), addPage: vi.fn(), updatePage: vi.fn(), deletePage: vi.fn(),
+    get: vi.fn(), list: vi.fn().mockResolvedValue([]), update: vi.fn(), addPage: vi.fn(), updatePage: vi.fn(), deletePage: vi.fn(), versions: vi.fn().mockResolvedValue([]),
     addWidget: vi.fn(), updateWidget: vi.fn(), deleteWidget: vi.fn(),
     listBookmarks: vi.fn().mockResolvedValue([]), addBookmark: vi.fn(), deleteBookmark: vi.fn(),
     getRevision: vi.fn().mockResolvedValue(0),
@@ -99,13 +99,15 @@ async function openLeftTab(name: 'Fields' | 'Insert' | 'Templates') {
 // leave the next one there.
 beforeEach(() => { try { localStorage.removeItem('datalytics:builder-left-tab'); sessionStorage.removeItem('datalytics:open-reports') } catch { /* */ } })
 
-function renderBuilder() {
+/** `?edit=1` is how a just-created dashboard arrives (QA2 N2): the builder
+ *  opens in Edit for it. An existing dashboard opens in View. */
+function renderBuilder(path = '/reports/1?edit=1') {
   return render(
     // ConfirmProvider mirrors App.tsx: ReportBuilder's page delete asks through
     // useConfirm, which throws outside a provider by design rather than silently
     // never confirming.
     <ConfirmProvider><PromptProvider>
-      <MemoryRouter initialEntries={['/reports/1']}>
+      <MemoryRouter initialEntries={[path]}>
         <Routes><Route path="/reports/:id" element={<ReportBuilder />} /></Routes>
       </MemoryRouter>
     </PromptProvider></ConfirmProvider>
@@ -2826,5 +2828,45 @@ describe('builder states the prototype does not draw (redesign 7e5)', () => {
     const empty = await screen.findByTestId('empty-page')
     fireEvent.click(within(empty).getByRole('button', { name: /template/i }))
     expect(screen.getByRole('tab', { name: 'Templates' })).toHaveAttribute('aria-selected', 'true')
+  })
+})
+
+describe('opening a dashboard (QA2 N2)', () => {
+  it('an editor opening an existing dashboard reads it first; Edit is one click', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    renderBuilder('/reports/1')
+    expect(await screen.findByTestId('mode-toggle')).toHaveAccessibleName('Edit mode')
+    expect(screen.queryByTestId('view-strip')).toBeNull()
+  })
+
+  it('Version history opens over the view, without switching to Edit', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    vi.mocked(reportsApi.versions).mockResolvedValue([] as any)
+    renderBuilder('/reports/1')
+    await screen.findByTestId('mode-toggle')
+    fireEvent.click(screen.getByRole('button', { name: 'More' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Version history' }))
+    expect(await screen.findByTestId('view-history')).toBeInTheDocument()
+    expect(screen.getByTestId('mode-toggle')).toHaveAccessibleName('Edit mode')
+  })
+})
+
+
+describe('Present starts at the top (QA2 Visual 8)', () => {
+  it('a canvas scrolled down is brought back to the top when Present opens', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    renderBuilder('/reports/1')
+    await screen.findByTestId('mode-toggle')
+    const scroller = document.querySelector('[data-canvas-scroll]') as HTMLElement
+    expect(scroller).not.toBeNull()
+    scroller.scrollTop = 400
+    fireEvent.click(screen.getByRole('button', { name: /Present/ }))
+    await waitFor(() => expect((document.querySelector('[data-canvas-scroll]') as HTMLElement).scrollTop).toBe(0))
   })
 })

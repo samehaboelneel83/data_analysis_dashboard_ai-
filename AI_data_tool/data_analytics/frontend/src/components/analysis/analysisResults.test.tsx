@@ -101,3 +101,27 @@ describe('key influencers renderer (redesign KI-7)', () => {
     expect(screen.getByText(/not proof they cause it/)).toBeInTheDocument()
   })
 })
+
+describe('key influencers footnotes in Arabic (QA2 T1, new)', () => {
+  it('the caveat and the server\'s skip notes are Arabic; column names keep their spelling', async () => {
+    const { DirectionProvider } = await import('../../contexts/DirectionContext')
+    localStorage.setItem('datalytics.language', 'ar')
+    try {
+      const ki = {
+        kind: 'key_influencers', columns: [],
+        rows: [{ factor: 'region', group: 'Africa', grouped_by: 'value', mean: 3755, baseline: 4316, lift: 0.87, rows: 400, share_of_rows: 0.2 }],
+        meta: { method: 'group lift', target: 'revenue', target_value: null, measure: 'mean', baseline: 4316, n_rows_used: 2000, n_rows_total: 2000,
+          sampled: false, groups_considered: 1, caveat: 'These factors move with the outcome; that is not proof they cause it.' },
+        warnings: ["'date' skipped: 633 distinct values, too many to group", "'cost' skipped: it identifies rows rather than describing them",
+          "'notes' skipped: only one value", "'x' skipped: no values", 'analysed a 50,000-row sample of 120,000 rows', 'something new from the server'],
+      }
+      render(<DirectionProvider><ResultFor kind="key_influencers" result={ki} params={{}} /></DirectionProvider>)
+      const box = screen.getByTestId('key-influencers')
+      expect(box.textContent).not.toMatch(/not proof|skipped|too many|identifies rows|only one value|no values|analysed a/)
+      expect(box.textContent).toContain('date')
+      expect(box.textContent).toContain('633')
+      // An unknown sentence is shown as sent, never dropped.
+      expect(box.textContent).toContain('something new from the server')
+    } finally { localStorage.removeItem('datalytics.language') }
+  })
+})

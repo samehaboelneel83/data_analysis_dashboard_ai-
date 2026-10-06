@@ -113,3 +113,41 @@ describe('VersionHistoryPane layout (7c)', () => {
     expect(screen.queryByRole('button', { name: 'Restore revision 3' })).not.toBeInTheDocument()
   })
 })
+
+describe('a burst of saves reads as one change (QA2 N3), times in the reader\'s clock (QA2 V10)', () => {
+  const at = (s: number) => new Date(Date.UTC(2026, 9, 6, 10, 1, 35) + s).toISOString()
+  const BURST = [
+    { id: 52, revision: 37, created_at: at(400), created_by: 'admin@x.io', pages: 2, widgets: 41 },
+    { id: 51, revision: 35, created_at: at(390), created_by: 'admin@x.io', pages: 2, widgets: 41 },
+    { id: 50, revision: 34, created_at: at(380), created_by: 'admin@x.io', pages: 2, widgets: 41 },
+    { id: 49, revision: 34, created_at: at(0), created_by: 'admin@x.io', pages: 2, widgets: 41 },
+    { id: 10, revision: 2, created_at: at(-3_600_000), created_by: 'sara@x.io', pages: 1, widgets: 4 },
+  ]
+
+  it('one entry for saves seconds apart by one person; it expands, and Restore goes to before the burst', async () => {
+    vi.spyOn(reportsApi, 'versions').mockResolvedValue(BURST as never)
+    vi.spyOn(reportsApi, 'versionDependencies').mockResolvedValue({ missing: [] } as never)
+    const restore = vi.spyOn(reportsApi, 'restoreVersion').mockResolvedValue({ restored_revision: 34, missing: [] } as never)
+    render(<VersionHistoryPane reportId={5} currentRevision={38} onRestored={vi.fn()} />)
+    const burst = await screen.findByText('4 changes')
+    expect(screen.getAllByRole('button', { pressed: false }).length).toBe(2)
+    fireEvent.click(burst)
+    expect(screen.getAllByText(/^Revision 3[457]$/).length).toBe(4)
+    fireEvent.click(screen.getByRole('button', { name: 'Restore the state before these changes' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Restore' }))
+    await waitFor(() => expect(restore).toHaveBeenCalledWith(5, 49))
+  })
+
+  it('an Arabic reader sees a 24-hour time, never "PM"', async () => {
+    localStorage.setItem('datalytics.language', 'ar')
+    try {
+      const { DirectionProvider } = await import('../../contexts/DirectionContext')
+      vi.spyOn(reportsApi, 'versions').mockResolvedValue([BURST[4]] as never)
+      render(<DirectionProvider><VersionHistoryPane reportId={5} currentRevision={null} onRestored={vi.fn()} /></DirectionProvider>)
+      await screen.findByText('sara')
+      // A 24-hour time, with no AM/PM after it in either script.
+      expect(document.body.textContent).toMatch(/\d\d:\d\d/)
+      expect(document.body.textContent).not.toMatch(/\d\d:\d\d\s*(AM|PM|ص|م)/)
+    } finally { localStorage.removeItem('datalytics.language') }
+  })
+})

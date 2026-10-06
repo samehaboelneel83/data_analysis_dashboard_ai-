@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import Reports, { nextUntitledName } from './Reports'
 import { reportsApi, reportGrantsApi, datasetsApi, workspaceApi, pageTemplatesApi } from '../services/api'
@@ -906,5 +906,20 @@ describe('a delete re-reads the folder tree (QA B7)', () => {
     fireEvent.click(within(screen.getByRole('toolbar')).getByRole('button', { name: /Delete/ }))
     fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: /Delete/ }))
     await waitFor(() => expect(vi.mocked(workspaceApi.tree).mock.calls.length).toBeGreaterThan(before))
+  })
+})
+
+describe('the search box while the list loads (QA2 B8)', () => {
+  it('is there at once, keeps what is typed, and applies it when the list arrives', async () => {
+    let resolve: (v: unknown) => void = () => {}
+    vi.mocked(reportsApi.list).mockReturnValue(new Promise(r => { resolve = r }) as never)
+    renderReports()
+    // A slow list used to mean no box at all: a click there hit nothing.
+    const box = await screen.findByRole('searchbox', { name: /Search dashboards/ })
+    fireEvent.change(box, { target: { value: 'Board 3' } })
+    await act(async () => { resolve(Array.from({ length: 9 }, (_, i) => report({ id: i + 1, name: `Board ${i}` }))) })
+    expect(await screen.findByTestId('dash-card-4')).toBeInTheDocument()
+    expect(screen.queryByTestId('dash-card-1')).toBeNull()
+    expect(screen.getByRole('searchbox', { name: /Search dashboards/ })).toHaveValue('Board 3')
   })
 })

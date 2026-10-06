@@ -2,7 +2,9 @@
    and assist.css, with the product's tokens. */
 
 /* ── Widget hover toolbar (reading only) ──────────────────────── */
-.dl-vw-wt { position: absolute; top: -8px; inset-inline-end: 16px; z-index: 5; display: flex; gap: 2px; padding: 3px; border-radius: 10px;
+/* Centred on the top edge (QA2 N4): the inline-end corner is where the widget
+   keeps its own ⋮ menu, which the toolbar covered in Arabic. */
+.dl-vw-wt { position: absolute; top: -18px; left: 50%; transform: translateX(-50%); z-index: 5; display: flex; gap: 2px; padding: 3px; border-radius: 10px;
   background: var(--surface); border: 1px solid var(--border); box-shadow: var(--dl-shadow-overlay); opacity: 0; pointer-events: none;
   transition: opacity var(--dl-dur, .15s); }
 [data-widget-id]:hover > .dl-vw-wt, [data-widget-id]:focus-within > .dl-vw-wt { opacity: 1; pointer-events: auto; }
@@ -88,3 +90,6 @@ html[data-presenting="1"] .dl-statusbar, html[data-presenting="1"] [data-testid=
   .dl-pr-prog i { animation: none; }
   .dl-vw-wt, .dl-pr-ttl, .dl-pr-kb, .dl-pr-ctl { transition: none; }
 }
+
+/* Version history over the view (QA2 N2): the panel head names it once. */
+.dl-vw-ai .shx-vp-h { display: none; }

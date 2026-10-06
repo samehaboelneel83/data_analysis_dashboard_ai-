@@ -148,3 +148,11 @@
 .shx-cur { font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: var(--accent-soft); color: var(--mc-accent-ink); text-transform: uppercase; letter-spacing: .04em; }
 .shx-va { display: flex; gap: 6px; margin-top: 6px; }
 .shx-va .btn { height: 30px; }
+
+/* A burst of saves listed inside its one entry (QA2 N3). */
+.shx-vb { list-style: none; margin: 6px 0 0; padding: 0; font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 2px; }
+.shx-vb span { color: var(--mc-faint); }
+
+/* Revoked and expired guest links, folded (QA2 Visual 9). */
+.shx-more { border: 0; background: none; padding: 4px 0; font: inherit; font-size: 12.5px; color: var(--mc-accent-ink); cursor: pointer; }
+.shx-more:hover { text-decoration: underline; }

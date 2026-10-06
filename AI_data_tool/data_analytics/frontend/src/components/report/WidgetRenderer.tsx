@@ -1,5 +1,6 @@
 import { lazy, memo, Suspense, useContext, useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import type { PartialPeriod, RelativeNote } from '../../lib/relativeDates'
+import { partialPeriodEnd } from '../../lib/relativeDates'
 import type { BrushRange } from './chartRenderers/axisOptions'
 import OverviewStrip from './chartRenderers/OverviewStrip'
 import { StaticChartsContext } from './chartRenderers/useChartViewport'
@@ -7,7 +8,8 @@ import { createPortal } from 'react-dom'
 import { Copy, Trash2, MoreVertical, Link as LinkIcon } from 'lucide-react'
 import { widgetDataApi } from '../../services/api'
 import { isCanceledRequest } from '../../lib/canceledRequest'
-import { useT } from '../../i18n'
+import { useT, type MessageKey } from '../../i18n'
+import { useDirection } from '../../contexts/DirectionContext'
 import ConvertToMenu from './ConvertToMenu'
 import { pickChartSvg, svgToPng } from '../../lib/widgetImage'
 import toast from 'react-hot-toast'
@@ -863,6 +865,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
   const [showContextMenu, setShowContextMenu] = useState(false)
   const [reconcileOpen, setReconcileOpen] = useState(false)
   const t = useT()
+  const { language } = useDirection()
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 })
   useEffect(() => {
     if (!showContextMenu) return
@@ -1338,27 +1341,28 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
           // that need no request -- the transparency pane and re-typing.
           const live = dataOverride === undefined
           const items = [
-            { key: 'why', label: 'Why am I seeing this?', onSelect: () => setKitDialog('why') },
-            ...(measure && live ? [{ key: 'explain', label: `Explain ${measure}`, onSelect: () => setKitDialog('explain') }] : []),
+            // QA2 T11: the menu's words in the reader's language (labels only).
+            { key: 'why', label: t('wr.menu.why'), onSelect: () => setKitDialog('why') },
+            ...(measure && live ? [{ key: 'explain', label: t('wr.menu.explain', { m: measure }), onSelect: () => setKitDialog('explain') }] : []),
             ...(live && DIFFERENCE_TYPES.includes(widget.widget_type) && typeof cfgAny.dimension === 'string'
                 && !cfgAny.dimension2 && rowsNow >= 2 && String(cfgAny.aggregation ?? 'sum') !== 'max'
                 && String(cfgAny.aggregation ?? 'sum') !== 'min' && !(measure && measureNames.has(measure))
-              ? [{ key: 'difference', label: 'Is this difference real?', onSelect: () => setKitDialog('difference') }] : []),
+              ? [{ key: 'difference', label: t('wr.menu.difference'), onSelect: () => setKitDialog('difference') }] : []),
             ...(live && widget.widget_type === 'forecast' && measure && numericCols.length
-              ? [{ key: 'whatif', label: 'What if…', onSelect: () => setKitDialog('scenario') }] : []),
-            ...options.map(o => ({ key: `as-${o.type}`, label: `View as ${o.label}${o.recommended ? ' (recommended)' : ''}`,
+              ? [{ key: 'whatif', label: t('wr.menu.whatif'), onSelect: () => setKitDialog('scenario') }] : []),
+            ...options.map(o => ({ key: `as-${o.type}`, label: t(o.recommended ? 'wr.menu.viewAsRec' : 'wr.menu.viewAs', { chart: (() => { const k = `gallery.tile.${o.type}` as MessageKey; const v = t(k); return v !== k ? v : o.label })() }),
                                    onSelect: () => setViewAs(o.type) })),
-            ...(viewAs ? [{ key: 'as-original', label: 'Show as designed', onSelect: () => setViewAs(null) }] : []),
+            ...(viewAs ? [{ key: 'as-original', label: t('wr.menu.original'), onSelect: () => setViewAs(null) }] : []),
             // The data behind this chart, from the visible menu -- it used to be
             // reachable only by right-clicking (HR evaluation, item 3.2).
             ...(live && widgetDatasetId != null && allowExport ? [
-              { key: 'export-csv', label: 'Export data as CSV', onSelect: () => handleExport('csv') },
-              { key: 'export-xlsx', label: 'Export data as Excel', onSelect: () => handleExport('xlsx') },
+              { key: 'export-csv', label: t('wr.menu.csv'), onSelect: () => handleExport('csv') },
+              { key: 'export-xlsx', label: t('wr.menu.xlsx'), onSelect: () => handleExport('xlsx') },
             ] : []),
           ]
           return (
             <span onMouseDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
-              <ActionMenu portal label={`Analyse ${title}`} items={items}
+              <ActionMenu portal label={t('wr.menu.aria', { title })} items={items}
                 trigger={<MoreVertical size={15} aria-hidden />} triggerClassName="dl-wicon" />
             </span>
           )
@@ -1540,7 +1544,14 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
       {!loading && !hiddenByRule && partial && (
         <div data-testid="partial-period-note" role="note"
           style={{ fontSize: 10, color: '#b7791f', padding: '0 10px 4px', lineHeight: 1.3 }}>
-          ◔ {partial.text}
+          {/* QA2 T14: in Arabic the sentence is composed from the fields (the
+              server writes English); the period label is isolated so
+              "2025-12" keeps its order. English keeps the server's words. */}
+          {language === 'ar' && partialPeriodEnd(partial) ? (() => {
+            const f = (d: Date) => d.toLocaleDateString('ar-u-nu-latn', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+            return <span dir="rtl">◔ <bdi dir="ltr">{partial.label}</bdi> {t('wr.partial', {
+              through: f(new Date(partial.through + 'T00:00:00Z')), unit: t(`wr.unit.${partial.granularity}` as MessageKey), end: f(partialPeriodEnd(partial)!) })}</span>
+          })() : <>◔ {partial.text}</>}
         </div>
       )}
 

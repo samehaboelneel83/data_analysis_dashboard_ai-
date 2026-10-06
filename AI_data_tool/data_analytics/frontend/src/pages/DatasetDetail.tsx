@@ -95,7 +95,7 @@ export default function DatasetDetail() {
     setBuilding(true)
     try {
       const report = await reportsApi.create({ name: ds.name, dataset_id: ds.id })
-      navigate(`/reports/${(report as { id: number }).id}`)
+      navigate(`/reports/${(report as { id: number }).id}?edit=1`)
     } catch (e) {
       toast.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
         ?? 'Could not create the dashboard')

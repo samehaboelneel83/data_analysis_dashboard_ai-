@@ -74,20 +74,20 @@ export default function CustomGraphRenderer(
   const draw = (layer: Layer, i: number) => {
     const colour = COLORS[i % COLORS.length]
     const shared = {
-      key: layer.key, dataKey: layer.key, name: layer.label,
+      dataKey: layer.key, name: layer.label,
       yAxisId: layer.axis === 'right' ? 'right' : 'left',
     } as const
     switch (layer.mark) {
       case 'line':
-        return <Line {...shared} type="monotone" stroke={colour} strokeWidth={2} dot={false} />
+        return <Line key={layer.key} {...shared} type="monotone" stroke={colour} strokeWidth={2} dot={false} />
       case 'area':
-        return <Area {...shared} type="monotone" stroke={colour} fill={colour} fillOpacity={0.3} />
+        return <Area key={layer.key} {...shared} type="monotone" stroke={colour} fill={colour} fillOpacity={0.3} />
       case 'scatter':
-        return <Scatter {...shared} fill={colour} />
+        return <Scatter key={layer.key} {...shared} fill={colour} />
       // Anything else is a bar, matching the shaper: marks come from stored
       // config, which outlives the list either side knows about.
       default:
-        return <Bar {...shared} fill={colour} />
+        return <Bar key={layer.key} {...shared} fill={colour} />
     }
   }
 

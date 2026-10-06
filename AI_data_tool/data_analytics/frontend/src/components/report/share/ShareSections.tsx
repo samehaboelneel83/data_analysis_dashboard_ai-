@@ -26,6 +26,11 @@ export function GuestLinks({ reportId, blockedReason }: { reportId: number; bloc
   const [days, setDays] = useState<string>('7')
   const [pinned, setPinned] = useState(false)
   const [minted, setMinted] = useState('')
+  // Which link the one-time URL belongs to, so revoking it takes the URL away
+  // (QA2 Visual 9: the dead address stayed on screen).
+  const [mintedId, setMintedId] = useState<number | null>(null)
+  // Revoked and expired links stay as the record of who had access, folded.
+  const [showOff, setShowOff] = useState(false)
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState('')
 
@@ -37,6 +42,7 @@ export function GuestLinks({ reportId, blockedReason }: { reportId: number; bloc
     try {
       const r = await shareLinksApi.create(reportId, Number(days) || 7, pinned)
       setMinted(`${window.location.origin}/shared/${r.token}`)
+      setMintedId(r.id ?? null)
       setCopied(false)
       void refresh()
     } catch (e) {
@@ -88,7 +94,7 @@ export function GuestLinks({ reportId, blockedReason }: { reportId: number; bloc
 
       {links.length > 0 && (
         <ul className="shx-list" aria-label={t('shx.gl.list')}>
-          {links.map(l => (
+          {links.filter(l => l.active || showOff).map(l => (
             <li key={l.id} data-off={!l.active || undefined}>
               <div className="tx">
                 <b dir="auto">{l.creator}</b>
@@ -113,12 +119,19 @@ export function GuestLinks({ reportId, blockedReason }: { reportId: number; bloc
                       confirmLabel: t('shx.gl.revoke'),
                     })) return
                     await shareLinksApi.revoke(reportId, l.id)
+                    if (l.id === mintedId) { setMinted(''); setMintedId(null) }
                     void refresh()
                   }}>{t('shx.gl.revoke')}</button>
               )}
             </li>
           ))}
         </ul>
+      )}
+      {links.some(l => !l.active) && (
+        <button type="button" className="shx-more" aria-expanded={showOff} onClick={() => setShowOff(v => !v)}>
+          {showOff ? t('shx.gl.hideOff')
+            : t(links.filter(l => !l.active).length === 1 ? 'shx.gl.showOffOne' : 'shx.gl.showOff', { n: localDigits(String(links.filter(l => !l.active).length)) })}
+        </button>
       )}
     </div>
   )

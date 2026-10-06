@@ -73,7 +73,10 @@ export default function Reports() {
   const [loadError, setLoadError] = useState<unknown>(null)
 
   const dsName = (r: ReportSummary) => datasets?.find(d => d.id === r.dataset_id)?.name
-  const repFilter = useListFilter(reports, r => [r.name, r.description, dsName(r)], t('dsh.search'))
+  // Always shown, from the first paint (QA2 B8): while a slow list loaded there
+  // was no box, so a click where it would be landed nowhere and the typing
+  // with it. What is typed meanwhile applies when the rows arrive.
+  const repFilter = useListFilter(reports, r => [r.name, r.description, dsName(r)], t('dsh.search'), { always: true })
 
   const [view, setView] = useState<View>('all')
   const [status, setStatus] = useState<'all' | 'draft' | 'pub'>('all')
@@ -157,7 +160,7 @@ export default function Reports() {
       if (c.mode === 'blank' && c.datasetId == null) {
         try { sessionStorage.setItem('datalytics:fresh-report', String(r.id)) } catch { /* private mode */ }
         openReport(`/reports/${r.id}?pick=data`)
-      } else openReport(`/reports/${r.id}`)
+      } else openReport(`/reports/${r.id}?edit=1`)
     } catch (e) {
       toast.error(detail(e, t('dsh.toast.createFailed')))
       setCreating(false)
@@ -610,7 +613,7 @@ export default function Reports() {
             </div>
           </div>
 
-          {!loading && !loadError && reports.length > 0 && (
+          {!loadError && (loading || reports.length > 0) && (
             <div className="dsh-tb" role="search">
               {repFilter.input && (
                 <label className="dsh-srch" ref={searchWrap}>

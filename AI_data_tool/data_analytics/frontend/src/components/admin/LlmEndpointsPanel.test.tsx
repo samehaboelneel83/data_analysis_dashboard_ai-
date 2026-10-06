@@ -60,4 +60,16 @@ describe('LlmEndpointsPanel', () => {
     expect(px(screen.getAllByLabelText('Name')[0])).toBeGreaterThanOrEqual(140)
     expect(px(screen.getByLabelText(/: Default$/, { selector: 'input[type="number"][step="1024"]' }))).toBeGreaterThanOrEqual(140)
   })
+
+  it('on a narrow panel each server becomes labelled fields, nothing scrolled out of sight (QA2 V10)', async () => {
+    const fs = await import('node:fs'); const path = await import('node:path')
+    const css = fs.readFileSync(path.join(__dirname, '..', '..', 'index.css'), 'utf8')
+    const { container } = render(<LlmEndpointsPanel />)
+    await screen.findByDisplayValue('http://10.0.0.5:8000/v1')
+    expect(container.querySelector('.dl-llmep')).not.toBeNull()
+    const labels = Array.from(container.querySelectorAll('tbody td[data-label]')).map(td => td.getAttribute('data-label'))
+    expect(labels).toEqual(expect.arrayContaining(['Name', 'Context (tokens)', 'On']))
+    expect(css).toMatch(/@container llmep \(max-width: \d+px\)\s*\{[\s\S]*?\.dl-llmep td\[data-label\]::before/)
+  })
 })
+

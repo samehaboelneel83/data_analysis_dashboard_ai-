@@ -76,7 +76,7 @@ export default function DatasetsSection({ datasets, graph, graphFailed, onRetryG
     try {
       const r = await reportsApi.create({ name: d.name, dataset_id: d.id })
       onOpen()
-      navigate(`/reports/${(r as { id: number }).id}`)
+      navigate(`/reports/${(r as { id: number }).id}?edit=1`)
     } catch (e) {
       toast.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? t('dsl.pv.buildFailed'))
       setBuilding(null)

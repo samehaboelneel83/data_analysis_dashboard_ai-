@@ -78,9 +78,11 @@ export default function PresentControls({ title, pages, activeId, onGo, onExit, 
   }, [idle, aiOpen])
 
   const page = pages[i]
+  // A page whose display title is the dashboard's name says it once (QA2 V8).
+  const pageName = page && page.name.trim().toLowerCase() !== title.trim().toLowerCase() ? page.name : null
   return (
     <>
-      <div className="dl-pr-ttl"><b><bdi>{title}</bdi></b>{page && <><span className="sep" aria-hidden /><bdi>{page.name}</bdi></>}</div>
+      <div className="dl-pr-ttl"><b><bdi>{title}</bdi></b>{pageName && <><span className="sep" aria-hidden /><bdi>{pageName}</bdi></>}</div>
       <div className="dl-pr-kb" aria-hidden>
         <Keyboard size={14} />
         <span><kbd>←</kbd> <kbd>→</kbd> {t('vw.pr.navigate')}</span>
