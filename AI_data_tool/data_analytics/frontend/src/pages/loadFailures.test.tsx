@@ -84,7 +84,7 @@ describe('Reports', () => {
     vi.mocked(datasetsApi.list).mockResolvedValue([] as never)
     wrap(<Reports />)
 
-    expect(await screen.findByText(/no dashboards yet/i)).toBeInTheDocument()
+    expect(await screen.findByText(/build your first dashboard/i)).toBeInTheDocument()
     expect(screen.queryByRole('alert')).toBeNull()
   })
 

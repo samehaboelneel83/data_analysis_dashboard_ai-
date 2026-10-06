@@ -6,12 +6,14 @@ import { ChevronDown, ChevronRight, Folder } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useModalDialog } from '../../components/ui/useModalDialog'
 import { Z_OVERLAY } from '../../lib/zIndex'
+import { useT } from '../../i18n'
 
 /** "Share to": the author names a person (by email -- sharing must not double
  *  as an org-directory listing) and a level. Grants are the ONLY way another
  *  user gets design rights on an authored dashboard; publishing gives the org
  *  view-only access and locks the layout. */
 export function ShareDialog({ report, onClose }: { report: ReportSummary; onClose: () => void }) {
+  const t = useT()
   const dialogRef = useModalDialog<HTMLDivElement>(onClose)
   const [grants, setGrants] = useState<ReportGrant[] | null>(null)
   const [email, setEmail] = useState('')
@@ -21,7 +23,7 @@ export function ShareDialog({ report, onClose }: { report: ReportSummary; onClos
   useEffect(() => {
     reportGrantsApi.list(report.id)
       .then(setGrants)
-      .catch(() => { toast.error('Could not load who this is shared with'); setGrants([]) })
+      .catch(() => { toast.error(t('dsh.sd.loadFailed')); setGrants([]) })
   }, [report.id])
 
   const add = async () => {
@@ -31,9 +33,9 @@ export function ShareDialog({ report, onClose }: { report: ReportSummary; onClos
       const g = await reportGrantsApi.create(report.id, { email: email.trim(), level })
       setGrants(prev => [...(prev ?? []).filter(x => x.user_id !== g.user_id), g])
       setEmail('')
-      toast.success(`Shared with ${g.email}`)
+      toast.success(t('dsh.sd.shared', { email: g.email }))
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail ?? 'Could not share')
+      toast.error(e?.response?.data?.detail ?? t('dsh.sd.failed'))
     } finally { setBusy(false) }
   }
 
@@ -42,57 +44,56 @@ export function ShareDialog({ report, onClose }: { report: ReportSummary; onClos
       await reportGrantsApi.remove(report.id, g.id)
       setGrants(prev => (prev ?? []).filter(x => x.id !== g.id))
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail ?? 'Could not remove the grant')
+      toast.error(e?.response?.data?.detail ?? t('dsh.sd.removeFailed'))
     }
   }
 
-  const LEVEL_LABEL = { view: 'Can view', edit: 'Can edit', data: 'Can edit + data' } as const
+  const LEVEL_LABEL = { view: t('dsh.sd.view'), edit: t('dsh.sd.edit'), data: t('dsh.sd.data') } as const
 
   // The z-index is the one value that stays inline: it comes from the
   // app-wide stacking register, so it is data this component is given
   // rather than a style it chooses.
   return (
     <div className="dl-modal" style={{ zIndex: Z_OVERLAY }}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={`Share ${report.name}`}
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={t('dsh.shareName', { name: report.name })}
         className="dl-modal__panel">
         <div className="dl-modal__head">
-          <h2 className="dl-modal__title">Share “{report.name}”</h2>
-          <button onClick={onClose} aria-label="Close"
+          <h2 className="dl-modal__title">{t('dsh.sd.title', { name: report.name })}</h2>
+          <button onClick={onClose} aria-label={t('hm.close')}
             className="dl-modal__x">×</button>
         </div>
         <p className="dl-modal__note">
-          Sharing gives one person access — including to a draft. Publishing (separate)
-          makes it view-only for the whole organisation.
+          {t('dsh.sd.note')}
         </p>
 
         <div className="dl-modal__row">
           <input value={email} onChange={e => setEmail(e.target.value)}
-            placeholder="colleague@company.com" aria-label="Email to share with"
+            placeholder="colleague@company.com" aria-label={t('dsh.sd.email')} dir="ltr"
             onKeyDown={e => { if (e.key === 'Enter') void add() }}
             className="dl-modal__input" />
           <select value={level} onChange={e => setLevel(e.target.value as typeof level)}
-            aria-label="Access level"
+            aria-label={t('dsh.sd.level')}
             className="dl-modal__control">
-            <option value="view">Can view</option>
-            <option value="edit">Can edit</option>
-            <option value="data">Can edit + data</option>
+            <option value="view">{LEVEL_LABEL.view}</option>
+            <option value="edit">{LEVEL_LABEL.edit}</option>
+            <option value="data">{LEVEL_LABEL.data}</option>
           </select>
-          <button className="btn btn-primary btn-sm" onClick={add} disabled={busy || !email.trim()} title={!email.trim() ? 'Enter an email address first' : undefined}>
-            Share
+          <button className="btn btn-primary btn-sm" onClick={add} disabled={busy || !email.trim()} title={!email.trim() ? t('dsh.sd.needEmail') : undefined}>
+            {t('dsh.share')}
           </button>
         </div>
 
-        {grants === null && <p className="dl-modal__note">Loading…</p>}
+        {grants === null && <p className="dl-modal__note">{t('common.loading')}</p>}
         {grants !== null && grants.length === 0 && (
-          <p className="dl-modal__note">Not shared with anyone yet.</p>
+          <p className="dl-modal__note">{t('dsh.sd.none')}</p>
         )}
         {grants !== null && grants.map(g => (
           <div key={g.id} className="dl-grant">
-            <span className="dl-grant__email">{g.email}</span>
+            <span className="dl-grant__email" dir="ltr">{g.email}</span>
             <span className="dl-grant__level">{LEVEL_LABEL[g.level]}</span>
             <button className="btn btn-ghost btn-sm dl-grant__remove" onClick={() => remove(g)}
-              aria-label={`Remove access for ${g.email}`}>
-              Remove
+              aria-label={t('dsh.sd.removeFor', { email: g.email })}>
+              {t('dsh.sd.remove')}
             </button>
           </div>
         ))}

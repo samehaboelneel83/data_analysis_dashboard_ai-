@@ -31,6 +31,9 @@ export interface SuggestDashboardsDialogProps {
   datasetId: number
   datasetName: string
   onClose: () => void
+  /** A goal typed elsewhere (the Dashboards page's New dashboard → With AI).
+   *  Starts the goal box in place of the last remembered goal. */
+  initialGoal?: string
 }
 
 /** How much room a widget needs, by kind.
@@ -136,7 +139,7 @@ function reasonFrom(e: unknown, fallback: string): string {
 }
 
 export default function SuggestDashboardsDialog(
-  { datasetId, datasetName, onClose }: SuggestDashboardsDialogProps,
+  { datasetId, datasetName, onClose, initialGoal }: SuggestDashboardsDialogProps,
 ) {
   const tr = useT()
   const navigate = useNavigate()
@@ -144,7 +147,7 @@ export default function SuggestDashboardsDialog(
   // overlay in this app uses. `overlayCoverage.test.ts` pins that: a modal a
   // keyboard user cannot leave is the failure it exists to prevent.
   const dialogRef = useModalDialog<HTMLDivElement>(onClose)
-  const [goal, setGoal] = useState(() => rememberedRun(datasetId)?.goal ?? '')
+  const [goal, setGoal] = useState(() => initialGoal || (rememberedRun(datasetId)?.goal ?? ''))
   const [busy, setBusy] = useState(false)
   const [building, setBuilding] = useState<number | null>(null)
   const [error, setError] = useState('')

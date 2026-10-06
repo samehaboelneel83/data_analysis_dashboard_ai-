@@ -1,704 +1,680 @@
-import { useCallback, useContext, useEffect, useState } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import {
+  ArrowDownUp, ArrowRight, ChevronDown, Database, Download, Folder, FolderInput, FolderOpen, FolderPlus, LayoutDashboard,
+  LayoutGrid, LayoutTemplate, Link2, List, Pencil, Plus, Search, SearchX, Share2, Sparkles, SquareDashedBottom, Trash2, X,
+  Globe, GlobeLock, Users, Clock,
+} from 'lucide-react'
+import toast from 'react-hot-toast'
 import LoadError from '../components/ui/LoadError'
 import Loader from '../components/ui/Loader'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import BulkBar from '../components/ui/BulkBar'
+import ActionMenu, { type ActionMenuItem } from '../components/ActionMenu'
 import { useBulkSelection } from '../lib/useBulkSelection'
 import { looksLikeTestData } from '../lib/testData'
-import { reportsApi, datasetsApi, workspaceApi } from '../services/api'
+import { pageTemplatesApi, reportsApi, datasetsApi, workspaceApi } from '../services/api'
 import type { ReportSummary, DatasetSummary } from '../services/api'
 import type { WorkspaceTree } from '../types/report'
-import { ChevronRight, FileBarChart, Folder, FolderPlus, LayoutList, Pencil, Plus, Trash2, Share2 } from 'lucide-react'
-import toast from 'react-hot-toast'
 import { useConfirm } from '../components/ui/ConfirmDialog'
 import { usePrompt } from '../components/ui/PromptDialog'
 import { useListFilter } from '../components/ui/ListFilter'
 import { AuthContext } from '../contexts/AuthContext'
-import { Eye, Globe, GlobeLock } from 'lucide-react'
-import IconLabel from '../components/ui/IconLabel'
-import ActionMenu from '../components/ActionMenu'
-import { useT } from '../i18n'
-import { useDirection } from '../contexts/DirectionContext'
-
-import {
-  ShareDialog, Fold, loadCollapsed, saveCollapsed, sectionsFor, reportNodes,
-  SUGGESTED_PLAIN, SUGGESTED_FOR,
-} from './reports/listParts'
-import type { FolderSection } from './reports/listParts'
+import { formatTimeAgo, useT } from '../i18n'
+import { localDigits } from '../lib/arabicFormats'
+import SuggestDashboardsDialog from '../components/dataset/SuggestDashboardsDialog'
+import { ShareDialog, loadCollapsed, saveCollapsed, sectionsFor, reportNodes, type FolderSection } from './reports/listParts'
+import { flatFolders, folderOf, reportsUnder, sharedWithMe, statusOf, type FlatFolder } from './reports/model'
+import FolderNav, { type View } from './reports/FolderNav'
+import { DashCard, DashRow } from './reports/DashCard'
+import { MoveDialog, NewDashboardDialog, type NewChoice, type NewMode } from './reports/dialogs'
+import Thumb from './home/Thumb'
 import { nextUntitledName } from '../lib/untitledName'
+import './home/home.css'
+import './reports/dashboards.css'
 export { nextUntitledName }
 
-const ARRANGE_KEY = 'datalytics:dashboards-arrange'
+/**
+ * The Dashboards page (redesign 7b): views and folders on the left, then the
+ * dashboards -- grouped by folder, or narrowed by a view, a search, a status
+ * or a dataset -- as cards or a table, with bulk actions.
+ *
+ * Placement, folder management and "Shared with me" come from the workspace
+ * tree; the tree failing fails only them. What the design shows but the
+ * backend cannot answer is left out, not stubbed: favourites, owner names,
+ * view counts, Duplicate, stored AI proposals, a "Shared" status
+ * (PLAN.md, Backend follow-ups). Kept from v1: subfolders, folder rename and
+ * delete, the move confirmation, Publish / Unpublish, delete confirmation,
+ * the dataset chip rule and Suggest dashboards' goal text.
+ */
+
+const SORT_KEY = 'datalytics:dashboards-sort'
+const LAYOUT_KEY = 'datalytics:dashboards-layout'
+const read = (k: string, ok: string[], d: string) => { try { const v = localStorage.getItem(k); return v && ok.includes(v) ? v : d } catch { return d } }
+const save = (k: string, v: string) => { try { localStorage.setItem(k, v) } catch { /* a convenience */ } }
+const detail = (e: unknown, fallback: string) => {
+  const d = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+  return typeof d === 'string' ? d : (d as { message?: string })?.message ?? fallback
+}
 
 export default function Reports() {
   const t = useT()
-  const { language } = useDirection()
-  const [reports, setReports]   = useState<ReportSummary[]>([])
-  const repFilter = useListFilter(reports,
-    r => [r.name, r.description], t('search.dashboards'))
-  const [datasets, setDatasets] = useState<DatasetSummary[]>([])
-  const [loading, setLoading]   = useState(true)
-  const [creating, setCreating] = useState(false)
+  const navigate = useNavigate()
+  const confirm = useConfirm()
+  const prompt = usePrompt()
+  const isAdmin = !!useContext(AuthContext)?.user?.role?.is_org_admin
 
-  // Three states, not two. Without the catch a server error cleared `loading`
-  // and fell through to "No reports yet" -- which invites the user to recreate
-  // work that already exists.
-  const [loadError, setLoadError] = useState<unknown>(null)
-  const [sharing, setSharing] = useState<ReportSummary | null>(null)
+  const [reports, setReports] = useState<ReportSummary[]>([])
+  const [datasets, setDatasets] = useState<DatasetSummary[] | null>(null)
   const [tree, setTree] = useState<WorkspaceTree | null>(null)
+  const [treeFailed, setTreeFailed] = useState(false)
+  const [recentIds, setRecentIds] = useState<number[] | null>(null)
+  const [loading, setLoading] = useState(true)
+  // Three states, not two: a failed load must never read as "no dashboards".
+  const [loadError, setLoadError] = useState<unknown>(null)
+
+  const dsName = (r: ReportSummary) => datasets?.find(d => d.id === r.dataset_id)?.name
+  const repFilter = useListFilter(reports, r => [r.name, r.description, dsName(r)], t('dsh.search'))
+
+  const [view, setView] = useState<View>('all')
+  const [status, setStatus] = useState<'all' | 'draft' | 'pub'>('all')
+  const [dsFilter, setDsFilter] = useState<number | null>(null)
+  const [sort, setSortState] = useState(() => read(SORT_KEY, ['recent', 'name'], 'recent') as 'recent' | 'name')
+  const [layout, setLayoutState] = useState(() => read(LAYOUT_KEY, ['grid', 'list'], 'grid') as 'grid' | 'list')
+  const setSort = (v: 'recent' | 'name') => { setSortState(v); save(SORT_KEY, v) }
+  const setLayout = (v: 'grid' | 'list') => { setLayoutState(v); save(LAYOUT_KEY, v) }
   const [collapsed, setCollapsed] = useState<Set<string>>(loadCollapsed)
-  const [folderBusy, setFolderBusy] = useState(false)
-  // The card being dragged, and the heading it is over. State rather than
-  // dataTransfer: the tree did it this way too, and jsdom's drag events carry
-  // no dataTransfer at all.
-  const [dragging, setDragging] = useState<ReportSummary | null>(null)
-  const [overTarget, setOverTarget] = useState<string | null>(null)
-  // Two ways to arrange the page (requested 2026-09-28): the folders as
-  // sections down the page, or a folder view you drill into, one level at a
-  // time, with a breadcrumb back. Remembered per browser.
-  const [arrange, setArrange] = useState<'sections' | 'folders'>(() => {
-    try { return localStorage.getItem(ARRANGE_KEY) === 'folders' ? 'folders' : 'sections' } catch { return 'sections' }
-  })
-  const chooseArrange = (a: 'sections' | 'folders') => {
-    setArrange(a)
-    try { localStorage.setItem(ARRANGE_KEY, a) } catch { /* private mode */ }
-  }
-  // The folder being viewed, as the path of folder ids from the top.
-  const [path, setPath] = useState<number[]>([])
   const toggleFold = (key: string) => setCollapsed(prev => {
     const next = new Set(prev)
-    if (next.has(key)) next.delete(key)
-    else next.add(key)
+    if (next.has(key)) next.delete(key); else next.add(key)
     saveCollapsed(next)
     return next
   })
-  // Context read directly (not the throwing useAuth()) so tests without an
-  // AuthProvider degrade to "not admin" rather than crashing.
-  const isAdmin = !!useContext(AuthContext)?.user?.role?.is_org_admin
-  // Folder placement is a courtesy on top of the list, so it fails on its own:
-  // an async wrapper, because reading `workspaceApi.tree` can throw
-  // SYNCHRONOUSLY under a partial module mock, which would escape a .catch()
-  // attached inside the Promise.all array and take the whole page down.
-  const loadFolders = async (): Promise<WorkspaceTree | null> => {
-    try {
-      return await workspaceApi.tree()
-    } catch {
-      return null
-    }
-  }
+
+  // Placement and recents are courtesies on top of the list, so each fails on
+  // its own. Async wrappers: under a partial module mock, reading the api
+  // object can throw synchronously, which a .catch() would not see.
+  const loadTree = async () => { try { const tr = await workspaceApi.tree(); setTree(tr); setTreeFailed(false) } catch { setTree(null); setTreeFailed(true) } }
+  const loadRecent = async () => { try { setRecentIds((await reportsApi.recent(50)).map(r => r.id)) } catch { setRecentIds(null) } }
+  const loadDatasets = async () => { try { setDatasets(await datasetsApi.list()) } catch { setDatasets(null) } }
 
   const load = useCallback(() => {
     setLoading(true); setLoadError(null)
-    Promise.all([reportsApi.list(), datasetsApi.list(), loadFolders()])
-      .then(([r, d, tree]) => {
-        setReports(r); setDatasets(d)
-        setTree(tree)
-      })
+    reportsApi.list()
+      .then(r => { setReports(r); void loadTree(); void loadRecent(); void loadDatasets() })
       .catch(e => setLoadError(e ?? new Error('failed')))
       .finally(() => setLoading(false))
   }, [])
   useEffect(load, [load])
 
-  // SAS's "New report" opens the editor at once, as "Report N", and you name
-  // it when you know what it is. The old form demanded a name first and
-  // offered the dataset as an unsorted <select> -- two decisions before the
-  // author had seen anything. The builder now asks for data itself, in the
-  // dataset picker (?pick=data), and the title is renamed in place.
-  const handleCreate = async () => {
-    if (creating) return
-    setCreating(true)
-    try {
-      const r = await reportsApi.create({ name: nextUntitledName(reports.map(x => x.name)) })
-      // Marked as fresh for this tab: if the author leaves without adding a
-      // single thing, the builder removes it again (see ReportBuilder) --
-      // abandoned "Untitled dashboard"s were most of the list's clutter.
-      try { sessionStorage.setItem('datalytics:fresh-report', String(r.id)) } catch { /* private mode */ }
-      openReport(`/reports/${r.id}?pick=data`)
-    } catch (e: any) {
-      toast.error(e?.response?.data?.detail ?? 'Could not create a dashboard')
-    } finally {
-      setCreating(false)
-    }
-  }
-
-  // Set when a dashboard is opened. React Router 7 navigates inside a
-  // transition, so the router's Suspense loader never shows while the report
-  // builder (the app's heaviest page) loads -- this list just sat there and
-  // the click looked ignored. The list unmounts once the dashboard renders,
-  // which clears this.
+  // ── opening ──
+  // Router 7 navigates inside a transition, so the route loader never shows
+  // while the builder loads; the list shows it itself.
   const [opening, setOpening] = useState(false)
-  const navigate = useNavigate()
   const openReport = (to: string) => { setOpening(true); navigate(to) }
-  /** For the title link: only a plain left-click opens here. Ctrl/Cmd/Shift/
-   *  middle-click open a new tab, and this list must stay where it is. */
-  const onTitleClick = (e: React.MouseEvent) => {
-    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
-    setOpening(true)
-  }
 
-  // Select mode: tick several dashboards and delete them together (clearing
-  // out test runs was one menu + one dialog per card). Only dashboards the
-  // viewer may edit -- the ones the server lets them delete -- can be ticked.
-  const [selecting, setSelecting] = useState(false)
-  const bulk = useBulkSelection<ReportSummary>({
-    remove: id => reportsApi.delete(id),
-    onRemoved: ids => setReports(r => r.filter(x => !ids.includes(x.id))),
-    noun: t('noun.dashboards'),
-  })
-  const deletable = (r: ReportSummary) => (r.my_capability ?? 'view') !== 'view'
-  const testLike = reports.filter(r => deletable(r) && looksLikeTestData(r.name))
-  const stopSelecting = () => { setSelecting(false); bulk.clear() }
-
-  // "Create a dashboard" from the command palette lands here as ?new=1.
-  // Waits for the list so the new name does not collide with an existing one.
+  // ── creating ──
+  const [newDlg, setNewDlg] = useState<{ mode: NewMode; folder: number | null } | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [suggest, setSuggest] = useState<{ id: number; name: string; goal: string } | null>(null)
+  const openNew = (mode: NewMode = 'blank', folder: number | null = view.startsWith('f:') ? Number(view.slice(2)) : null) =>
+    setNewDlg({ mode, folder })
+  // "Create a dashboard" from the command palette or Home lands here as ?new=1.
   const [params, setParams] = useSearchParams()
   const wantsNew = params.get('new') === '1'
   useEffect(() => {
     if (!wantsNew || loading) return
     setParams(p => { p.delete('new'); return p }, { replace: true })
-    void handleCreate()
+    openNew('blank', null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wantsNew, loading])
 
-  const confirm = useConfirm()
-  const prompt = usePrompt()
-  const handleDelete = async (id: number, name: string) => {
-    if (!await confirm({ title: `Delete dashboard "${name}"?`, body: 'This cannot be undone.' })) return
-    await reportsApi.delete(id)
-    setReports(r => r.filter(x => x.id !== id))
-    toast.success('Dashboard deleted')
+  const fileInto = async (reportId: number, folderId: number | null) => {
+    if (folderId == null) return
+    try { await workspaceApi.create({ node_type: 'report', report_id: reportId, parent_id: folderId }) }
+    catch (e) { toast.error(detail(e, t('dsh.toast.fileFailed'))) }
   }
-
-  const handleRename = async (r: ReportSummary) => {
-    const name = (await prompt({
-      title: 'Rename dashboard', defaultValue: r.name, confirmLabel: 'Rename',
-    }))?.trim()
-    if (!name || name === r.name) return
-    await reportsApi.update(r.id, { name })
-    setReports(prev => prev.map(x => x.id === r.id ? { ...x, name } : x))
-    toast.success('Dashboard renamed')
-  }
-
-  // ---- folders: the actions the tree had, with the tree's own words --------
-  // The page reloads the tree after each one rather than patching its copy:
-  // the server decides where a deleted folder's contents land and what the
-  // new node looks like, and a guess here would be a second source of truth.
-  const refreshTree = async () => setTree(await loadFolders())
-
-  const addFolder = async (parentId: number | null = null) => {
-    const name = (await prompt({
-      title: parentId === null ? 'New folder' : 'New subfolder',
-      label: 'Folder name', placeholder: 'e.g. Finance', confirmLabel: 'Create',
-    }))?.trim()
-    if (!name) return
-    setFolderBusy(true)
+  const create = async (c: NewChoice) => {
+    if (c.mode === 'ai') {
+      const ds = datasets?.find(d => d.id === c.datasetId)
+      if (ds) { setNewDlg(null); setSuggest({ id: ds.id, name: ds.name, goal: c.goal }) }
+      return
+    }
+    setCreating(true)
     try {
-      await workspaceApi.create({
-        node_type: 'folder', name,
-        ...(parentId === null ? {} : { parent_id: parentId }),
-      })
-      await refreshTree()
-      toast.success(`Created ${name}`)
-    } catch {
-      toast.error('Could not create the folder')
-    } finally {
-      setFolderBusy(false)
+      const name = c.name || nextUntitledName(reports.map(x => x.name))
+      const r = await reportsApi.create({ name, ...(c.datasetId != null ? { dataset_id: c.datasetId } : {}) })
+      if (c.mode === 'tpl' && c.template) {
+        // A template adds its page; the empty default page goes, so the new
+        // dashboard opens on the template rather than on a blank first page.
+        await pageTemplatesApi.addFrom(r.id, { builtin: c.template })
+        const first = r.pages?.[0]?.id
+        if (first != null) await reportsApi.deletePage(r.id, first).catch(() => {})
+      }
+      await fileInto(r.id, c.folderId)
+      // Blank with no data: marked fresh for this tab, so the builder removes
+      // it again if the author leaves without adding anything (v1), and the
+      // builder asks for data first.
+      if (c.mode === 'blank' && c.datasetId == null) {
+        try { sessionStorage.setItem('datalytics:fresh-report', String(r.id)) } catch { /* private mode */ }
+        openReport(`/reports/${r.id}?pick=data`)
+      } else openReport(`/reports/${r.id}`)
+    } catch (e) {
+      toast.error(detail(e, t('dsh.toast.createFailed')))
+      setCreating(false)
     }
   }
 
-  const renameFolder = async (f: FolderSection) => {
-    const name = (await prompt({
-      title: 'Rename folder', defaultValue: f.name, confirmLabel: 'Rename',
-    }))?.trim()
+  // ── folders ──
+  const [newFolder, setNewFolder] = useState(false)
+  const createFolder = async (name: string, parentId: number | null = null) => {
+    try {
+      await workspaceApi.create({ node_type: 'folder', name, ...(parentId === null ? {} : { parent_id: parentId }) })
+      setNewFolder(false)
+      await loadTree()
+      toast.success(t('dsh.toast.folderCreated', { name }))
+    } catch (e) { toast.error(detail(e, t('dsh.toast.folderFailed'))) }
+  }
+  const subfolder = async (f: FlatFolder) => {
+    const name = (await prompt({ title: t('folders.new'), label: t('dsh.folderName'), confirmLabel: t('dsh.createFolder') }))?.trim()
+    if (name) await createFolder(name, f.id)
+  }
+  const renameFolder = async (f: FlatFolder) => {
+    const name = (await prompt({ title: t('folders.rename'), defaultValue: f.name, confirmLabel: t('dsh.rename') }))?.trim()
     if (!name || name === f.name) return
-    await workspaceApi.update(f.id, { name })
-    await refreshTree()
+    try { await workspaceApi.update(f.id, { name }); await loadTree() } catch (e) { toast.error(detail(e, t('dsh.toast.folderFailed'))) }
+  }
+  const removeFolder = async (f: FlatFolder) => {
+    // Says what actually happens: a folder's contents move up a level.
+    if (!await confirm({ title: t('dsh.folderDeleteTitle', { name: f.name }), body: t('dsh.folderDeleteBody'), confirmLabel: t('folders.delete') })) return
+    try {
+      await workspaceApi.delete(f.id)
+      if (view === `f:${f.id}`) setView('all')
+      await loadTree()
+    } catch (e) { toast.error(detail(e, t('dsh.toast.folderFailed'))) }
   }
 
-  const removeFolder = async (f: FolderSection) => {
-    // Says what actually happens. Deleting a folder re-parents its contents
-    // rather than deleting them, and users who have been burned by other tools
-    // will not believe that unless it is written down.
-    if (!await confirm({
-      title: `Delete the folder "${f.name}"?`,
-      body: 'Anything inside it moves up a level — no dashboards are deleted.',
-      confirmLabel: 'Delete folder',
-    })) return
-    await workspaceApi.delete(f.id)
-    await refreshTree()
-  }
-
-  // ---- moving a dashboard: a drop, then a question, then the server -------
+  // ── moving ──
   const nodes = reportNodes(tree)
-
+  const [dragging, setDragging] = useState<ReportSummary | null>(null)
+  const [overTarget, setOverTarget] = useState<string | null>(null)
+  const [moving, setMoving] = useState<ReportSummary[] | null>(null)
   const endDrag = () => { setDragging(null); setOverTarget(null) }
 
-  const moveDashboard = async (r: ReportSummary, parentId: number | null, targetName: string | null) => {
+  /** One move, already confirmed. Throws the server's refusal. */
+  const moveOne = async (r: ReportSummary, parentId: number | null) => {
     const node = nodes.get(r.id)
-    // Dropped where it already is: nothing to ask, nothing to send.
-    if ((node?.parent_id ?? null) === parentId) { endDrag(); return }
-    // A drop is the easiest gesture to make by accident, and a move can widen
-    // who sees the dashboard -- a folder's grants reach everything in it. So
-    // it is confirmed, and the confirmation says that much.
-    const ok = await confirm({
-      title: `Move "${r.name}" to ${targetName === null ? 'the top level' : `"${targetName}"`}?`,
-      body: 'Nothing is copied or deleted. Anyone the destination folder is shared with will be able to open it there.',
-      confirmLabel: 'Move',
-      destructive: false,
-    })
-    if (!ok) { endDrag(); return }
-    try {
-      if (node && node.id > 0) {
-        await workspaceApi.update(node.id, { parent_id: parentId })
-      } else {
-        // No node row yet: the move IS the creation of one.
-        await workspaceApi.create({ node_type: 'report', report_id: r.id, parent_id: parentId })
-      }
-      await refreshTree()
-      toast.success(`Moved ${r.name} to ${targetName ?? 'the top level'}`)
-    } catch (e) {
-      // The server's answer is the answer -- a folder the viewer cannot
-      // manage, the cycle guard -- shown as it was given, never pre-empted.
-      const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
-      toast.error(typeof detail === 'string' ? detail : 'That move is not allowed')
-    } finally {
-      endDrag()
-    }
+    if ((node?.parent_id ?? null) === parentId) return false
+    if (node && node.id > 0) await workspaceApi.update(node.id, { parent_id: parentId })
+    else await workspaceApi.create({ node_type: 'report', report_id: r.id, parent_id: parentId })
+    return true
   }
-
-  const dropTargetProps = (key: string, parentId: number | null, targetName: string | null) => ({
-    onDragOver: (e: React.DragEvent<HTMLDivElement>) => { e.preventDefault(); setOverTarget(key) },
+  const moveMany = async (rs: ReportSummary[], parentId: number | null, targetName: string | null) => {
+    let moved = 0
+    try {
+      for (const r of rs) if (await moveOne(r, parentId)) moved++
+      if (moved) toast.success(rs.length === 1
+        ? t('dsh.toast.moved', { name: rs[0].name, to: targetName ?? t('dsh.notInFolder') })
+        : t('dsh.toast.movedMany', { n: localDigits(String(moved)), to: targetName ?? t('dsh.notInFolder') }))
+    } catch (e) {
+      // The server's answer is the answer: a folder this viewer cannot manage,
+      // the cycle guard. Shown as given, never pre-empted.
+      toast.error(detail(e, t('dsh.toast.moveRefused')))
+    } finally { await loadTree() }
+  }
+  const dropOn = async (r: ReportSummary, parentId: number | null, targetName: string | null) => {
+    if ((nodes.get(r.id)?.parent_id ?? null) === parentId) { endDrag(); return }
+    // A drop is the easiest gesture to make by accident, and a move can widen
+    // who sees the dashboard, so it is confirmed and the confirmation says so.
+    const ok = await confirm({
+      title: t('dsh.move.confirmTitle', { name: r.name, to: targetName ?? t('dsh.notInFolder') }),
+      body: t('dsh.move.note'), confirmLabel: t('dsh.move.go'), destructive: false,
+    })
+    endDrag()
+    if (ok) await moveMany([r], parentId, targetName)
+  }
+  const dropFor = (key: string, parentId: number | null, name: string | null) => ({
+    onDragOver: (e: React.DragEvent) => { if (!dragging) return; e.preventDefault(); setOverTarget(key) },
     onDragLeave: () => setOverTarget(prev => (prev === key ? null : prev)),
-    onDrop: (e: React.DragEvent<HTMLDivElement>) => {
-      e.preventDefault()
-      e.stopPropagation()
-      if (dragging) void moveDashboard(dragging, parentId, targetName)
-    },
+    onDrop: (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); if (dragging) void dropOn(dragging, parentId, name) },
   })
 
-  const handlePublish = async (r: ReportSummary) => {
+  // ── per-dashboard actions ──
+  const [sharing, setSharing] = useState<ReportSummary | null>(null)
+  const canEdit = (r: ReportSummary) => (r.my_capability ?? 'view') !== 'view'
+  // Publish and Share are the author's controls (admins too), on authored
+  // dashboards only: a legacy row would be a button the server 400s.
+  const canAdminister = (r: ReportSummary) => r.created_by != null && (!!r.is_mine || isAdmin)
+
+  const rename = async (r: ReportSummary) => {
+    const name = (await prompt({ title: t('dsh.renameTitle'), defaultValue: r.name, confirmLabel: t('dsh.rename') }))?.trim()
+    if (!name || name === r.name) return
+    try {
+      await reportsApi.update(r.id, { name })
+      setReports(prev => prev.map(x => x.id === r.id ? { ...x, name } : x))
+      toast.success(t('dsh.toast.renamed'))
+    } catch (e) { toast.error(detail(e, t('dsh.toast.renameFailed'))) }
+  }
+  const remove = async (r: ReportSummary) => {
+    if (!await confirm({ title: t('dsh.deleteTitle', { name: r.name }), body: t('dsh.deleteBody'), confirmLabel: t('dsh.delete') })) return
+    try {
+      await reportsApi.delete(r.id)
+      setReports(prev => prev.filter(x => x.id !== r.id))
+      toast.success(t('dsh.toast.deleted'))
+    } catch (e) { toast.error(detail(e, t('dsh.toast.deleteFailed'))) }
+  }
+  const publish = async (r: ReportSummary) => {
     const next = !r.published
     try {
       await reportsApi.setPublished(r.id, next)
       setReports(prev => prev.map(x => x.id === r.id ? { ...x, published: next } : x))
-      toast.success(next
-        ? 'Published — everyone in your organisation can now open it, view-only'
-        : 'Unpublished — back to a private draft')
-    } catch (e: any) {
-      // The publish gate (Phase 7.4) answers with {message, findings}.
-      const d = e?.response?.data?.detail
-      toast.error(typeof d === 'string' ? d : d?.message ?? 'Could not change publication')
+      toast.success(t(next ? 'dsh.toast.published' : 'dsh.toast.unpublished'))
+    } catch (e) {
+      // The publish gate answers with {message, findings}.
+      toast.error(detail(e, t('dsh.toast.publishFailed')))
     }
   }
+  const copyLink = async (r: ReportSummary) => {
+    try { await navigator.clipboard.writeText(`${window.location.origin}/reports/${r.id}`); toast.success(t('dsh.toast.copied')) }
+    catch { toast.error(t('dsh.toast.copyFailed')) }
+  }
+  const exportPdf = (r: ReportSummary) => reportsApi.downloadPdf(r.id, r.name)
+    .then(() => toast.success(t('dsh.toast.pdf', { name: r.name })))
+    .catch(e => toast.error(detail(e, t('dsh.toast.pdfFailed'))))
+
+  const menu = (r: ReportSummary): ActionMenuItem[] => {
+    const edit = canEdit(r)
+    return [
+      { key: 'open', label: t('dsh.open'), icon: <ArrowRight size={14} />, onSelect: () => openReport(`/reports/${r.id}`) },
+      ...(canAdminister(r) ? [{ key: 'share', label: t('dsh.shareDots'), icon: <Share2 size={14} />, onSelect: () => setSharing(r) }] : []),
+      { key: 'link', label: t('dsh.copyLink'), icon: <Link2 size={14} />, onSelect: () => void copyLink(r) },
+      ...(edit && tree ? [{ key: 'move', label: t('dsh.moveDots'), icon: <FolderInput size={14} />, onSelect: () => setMoving([r]) }] : []),
+      ...(edit ? [{ key: 'rename', label: t('dsh.rename'), icon: <Pencil size={14} />, onSelect: () => void rename(r) }] : []),
+      ...(canAdminister(r) ? [{ key: 'publish', label: t(r.published ? 'dsh.unpublish' : 'dsh.publish'),
+        icon: r.published ? <GlobeLock size={14} /> : <Globe size={14} />, onSelect: () => void publish(r) }] : []),
+      { key: 'pdf', label: t('dsh.exportPdf'), icon: <Download size={14} />, onSelect: () => void exportPdf(r) },
+      ...(edit ? [{ key: 'delete', label: t('dsh.delete'), icon: <Trash2 size={14} />, danger: true, onSelect: () => void remove(r) }] : []),
+    ]
+  }
+
+  // ── selection ──
+  const bulk = useBulkSelection<ReportSummary>({
+    remove: id => reportsApi.delete(id),
+    onRemoved: ids => setReports(r => r.filter(x => !ids.includes(x.id))),
+    noun: t('noun.dashboards'),
+  })
+  const selected = reports.filter(r => bulk.selected.has(r.id))
+  const testLike = reports.filter(r => canEdit(r) && looksLikeTestData(r.name))
+  const bulkExport = async () => {
+    for (const r of selected) {
+      try { await reportsApi.downloadPdf(r.id, r.name) } catch (e) { toast.error(detail(e, t('dsh.toast.pdfFailed'))); return }
+    }
+    toast.success(t('dsh.toast.pdfMany', { n: localDigits(String(selected.length)) }))
+  }
+
+  // ── what is shown ──
+  const known = useMemo(() => new Set(reports.map(r => r.id)), [reports])
+  const folders = useMemo(() => flatFolders(tree, known), [tree, known])
+  const shared = useMemo(() => sharedWithMe(tree), [tree])
+  const placedIn = useMemo(() => folderOf(tree), [tree])
+  const folderName = (id: number | null | undefined) => id == null ? null : folders.find(f => f.id === id)?.name ?? null
+  const recentSet = useMemo(() => recentIds ? new Set(recentIds) : null, [recentIds])
+  const counts = {
+    all: reports.length,
+    recent: recentIds ? recentIds.filter(id => known.has(id)).length : null,
+    shared: tree ? reports.filter(r => shared.has(r.id)).length : null,
+  }
+  const statusCount = (s: 'all' | 'draft' | 'pub') => reports.filter(r => s === 'all' || statusOf(r) === s).length
+  const usedDatasets = (datasets ?? []).filter(d => reports.some(r => r.dataset_id === d.id))
+
+  // Leaving a view that no longer exists (a deleted folder, a failed tree).
+  useEffect(() => {
+    if (view.startsWith('f:') && tree && !folders.some(f => `f:${f.id}` === view)) setView('all')
+  }, [view, tree, folders])
+
+  const narrowed = repFilter.query.trim() !== '' || status !== 'all' || dsFilter != null
+  const clearFilters = () => { repFilter.setQuery(''); setStatus('all'); setDsFilter(null) }
+
+  /** The filtered rows, narrowed by the view and the facets, then sorted.
+   *  Takes the search hook's rows whole (listFilterWiring.test pins that). */
+  const arrange = (rows: ReportSummary[], v: View) => {
+    let xs = rows
+    if (v === 'recent') xs = xs.filter(r => recentSet?.has(r.id))
+    else if (v === 'shared') xs = xs.filter(r => shared.has(r.id))
+    else if (v.startsWith('f:')) { const under = reportsUnder(tree, Number(v.slice(2))); xs = xs.filter(r => under.has(r.id)) }
+    if (status !== 'all') xs = xs.filter(r => statusOf(r) === status)
+    if (dsFilter != null) xs = xs.filter(r => r.dataset_id === dsFilter)
+    const byRecent = v === 'recent' && recentIds
+      ? (a: ReportSummary, b: ReportSummary) => recentIds.indexOf(a.id) - recentIds.indexOf(b.id)
+      : (a: ReportSummary, b: ReportSummary) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+    return [...xs].sort(sort === 'name' ? (a, b) => a.name.localeCompare(b.name) : byRecent)
+  }
+  const shown = arrange(repFilter.filtered, view)
+  const selectMode = bulk.selected.size > 0
+
+  // ── rendering ──
+  const props = (r: ReportSummary) => ({
+    r, datasetName: dsName(r), folderName: folderName(placedIn.get(r.id)),
+    canEdit: canEdit(r), canShare: canAdminister(r), selected: bulk.selected.has(r.id), selectMode,
+    draggable: canEdit(r) && !!tree, dragging: dragging?.id === r.id, menu: menu(r),
+    onToggle: () => bulk.toggle(r.id), onShare: () => setSharing(r), onOpen: () => setOpening(true),
+    onDragStart: () => setDragging(r), onDragEnd: endDrag,
+  })
+  /** The heading above an ungrouped grid: how many, and the level-2 heading
+   *  the cards' names sit under. */
+  const countLine = (n: number, results = false) =>
+    <h2 className="dsh-count">{t(results ? 'dsh.results' : 'dsh.nDashboards', { n: localDigits(String(n)) })}</h2>
+  const grid = (rs: ReportSummary[]) => <div className="dsh-grid">{rs.map(r => <DashCard key={r.id} {...props(r)} />)}</div>
+
+  const sectionHead = (key: string, icon: React.ReactNode, name: string, count: number, drop?: { id: number | null; name: string | null },
+    actions?: React.ReactNode, depth = 0) => {
+    const H = depth ? 'h3' : 'h2'
+    return (
+    <div className="dsh-sh" data-drop={overTarget === `sec:${key}` || undefined} {...(drop ? dropFor(`sec:${key}`, drop.id, drop.name) : {})}>
+      <H className="dsh-shh">
+        <button type="button" className="fold" aria-expanded={!collapsed.has(key)} onClick={() => toggleFold(key)}>
+          <ChevronDown size={16} className="chev" aria-hidden />{icon}<span className="name"><bdi>{name}</bdi></span>
+        </button>
+      </H>
+      <span className="cnt" aria-label={t('dsh.countAria', { n: count })}>{localDigits(String(count))}</span>
+      <span className="dsh-sp" />
+      {actions}
+    </div>
+    )
+  }
+  const folderActions = (f: FolderSection) => f.can_manage && (
+    <span className="dsh-shmenu">
+      <ActionMenu label={t('folders.actions', { name: f.name })} portal align="end" triggerClassName="dsh-ib" items={[
+        { key: 'sub', label: t('folders.new'), icon: <FolderPlus size={14} />, onSelect: () => void subfolder({ id: f.id, name: f.name } as FlatFolder) },
+        { key: 'rename', label: t('folders.rename'), icon: <Pencil size={14} />, onSelect: () => void renameFolder({ id: f.id, name: f.name } as FlatFolder) },
+        { key: 'delete', label: t('folders.delete'), icon: <Trash2 size={14} />, danger: true, onSelect: () => void removeFolder({ id: f.id, name: f.name } as FlatFolder) },
+      ]} />
+    </span>
+  )
+  /** A folder at any depth: its own dashboards, then its subfolders inside it. */
+  const folderSection = (f: FolderSection, depth = 0): React.ReactNode => {
+    const key = `folder:${f.id}`
+    return (
+      <section key={f.id} className="dsh-sec" aria-label={f.name}>
+        {sectionHead(key, <Folder size={16} className="ficon" aria-hidden />, f.name, f.count, { id: f.id, name: f.name }, folderActions(f), depth)}
+        {!collapsed.has(key) && <>
+          {f.direct.length > 0 && grid(sorted(f.direct))}
+          {f.children.map(c => folderSection(c, depth + 1))}
+          {f.count === 0 && f.children.length === 0 && <p className="dsh-empty-line">{t('folders.empty')}</p>}
+        </>}
+      </section>
+    )
+  }
+  const sorted = (rs: ReportSummary[]) => arrange(rs, 'all')
+
+  const listTable = (groups: { key: string; label: React.ReactNode; rows: ReportSummary[] }[]) => (
+    <table className="dsh-tbl" data-testid="dash-table">
+      <thead><tr>
+        <th className="c-ck"><span className="dl-sr-only">{t('dsh.select')}</span></th>
+        <th className="c-nm">{t('dsh.col.name')}</th><th className="c-fd">{t('dsh.folder')}</th><th className="c-ds">{t('dsh.dataset')}</th>
+        <th className="c-st">{t('dsh.col.status')}</th><th className="c-mod">{t('dsh.col.modified')}</th>
+        <th className="c-act"><span className="dl-sr-only">{t('dsh.col.actions')}</span></th>
+      </tr></thead>
+      <tbody>{groups.map(g => [
+        g.label ? <tr key={`g-${g.key}`} className="dsh-grp"><td colSpan={7}><span>{g.label} · {localDigits(String(g.rows.length))}</span></td></tr> : null,
+        ...g.rows.map(r => <DashRow key={r.id} {...props(r)} />),
+      ])}</tbody>
+    </table>
+  )
+
+  const content = () => {
+    if (loading) {
+      return (
+        <div className="dsh-grid" aria-busy="true" aria-label={t('dsh.loading')}>
+          {Array.from({ length: 8 }, (_, i) => (
+            <div key={i} className="dsh-card" aria-hidden="true">
+              <span className="sk" style={{ aspectRatio: '16/9', borderRadius: '13px 13px 0 0' }} />
+              <div className="dsh-bd">
+                <span className="sk" style={{ height: 14, width: '78%' }} /><span className="sk" style={{ height: 10, width: '56%', marginTop: 6 }} />
+                <div className="dsh-mt"><span className="sk" style={{ height: 20, width: 64, borderRadius: 999 }} /><span className="dsh-sp" /><span className="sk" style={{ height: 12, width: 70 }} /></div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )
+    }
+    if (loadError) return <LoadError what={t('dsh.what')} error={loadError} onRetry={load} />
+    if (!reports.length) {
+      return (
+        <>
+          <div className="dsh-hero" data-testid="dash-firstrun">
+            <div className="art"><Thumb widgets={null} /></div>
+            <div><h2>{t('dsh.first.title')}</h2><p>{t('dsh.first.text')}</p></div>
+          </div>
+          <div className="dsh-first">
+            {([['blank', SquareDashedBottom, 'dsh.first.blank', 'dsh.first.blankSub'], ['tpl', LayoutTemplate, 'dsh.first.tpl', 'dsh.first.tplSub'],
+              ['ai', Sparkles, 'dsh.first.ai', 'dsh.first.aiSub']] as const).map(([m, Icon, b, s]) => (
+              <button key={m} type="button" className="dsh-start" onClick={() => openNew(m)}>
+                <span className="ic" aria-hidden><Icon size={22} /></span><b>{t(b)}</b><span>{t(s)}</span>
+                <span className="go">{t('dsh.first.go')}<ArrowRight size={15} aria-hidden /></span>
+              </button>
+            ))}
+          </div>
+        </>
+      )
+    }
+    if (!shown.length) {
+      if (repFilter.noMatches || repFilter.query.trim()) {
+        const near = (recentIds ?? []).map(id => reports.find(r => r.id === id)).filter(Boolean).slice(0, 3) as ReportSummary[]
+        return (
+          <div className="dsh-empty" role="status">
+            <span className="ic" aria-hidden><SearchX size={26} /></span>
+            <h2>{t('dsh.nomatch.title', { q: repFilter.query.trim() })}</h2>
+            <p>{t('dsh.nomatch.text')}</p>
+            <div className="dsh-acts">
+              <button type="button" className="btn btn-ghost dsh-btn-line" onClick={clearFilters}><X size={14} aria-hidden />{t('dsh.clearSearch')}</button>
+              <button type="button" className="btn btn-primary" onClick={() => openNew('ai')}><Sparkles size={14} aria-hidden />{t('dsh.nomatch.ai')}</button>
+            </div>
+            {near.length > 0 && (
+              <div className="dsh-near">
+                <div className="l">{t('dsh.view.recent')}</div>
+                {near.map(r => (
+                  <Link key={r.id} to={`/reports/${r.id}`} onClick={() => setOpening(true)}>
+                    <LayoutDashboard size={16} aria-hidden /><bdi>{r.name}</bdi><span className="tm">{formatTimeAgo(r.updated_at, t)}</span>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      }
+      if (narrowed) {
+        return (
+          <div className="dsh-empty" role="status">
+            <span className="ic" aria-hidden><SearchX size={26} /></span>
+            <h2>{t('dsh.nofilter.title')}</h2><p>{t('dsh.nofilter.text')}</p>
+            <div className="dsh-acts"><button type="button" className="btn btn-ghost dsh-btn-line" onClick={clearFilters}><X size={14} aria-hidden />{t('dsh.clearFilters')}</button></div>
+          </div>
+        )
+      }
+      if (view === 'recent') return <div className="dsh-empty"><span className="ic" aria-hidden><Clock size={26} /></span><h2>{t('dsh.recent.empty')}</h2><p>{t('dsh.recent.emptyText')}</p></div>
+      if (view === 'shared') return <div className="dsh-empty"><span className="ic" aria-hidden><Users size={26} /></span><h2>{t('dsh.shared.empty')}</h2><p>{t('dsh.shared.emptyText')}</p></div>
+    }
+    if (view.startsWith('f:')) {
+      const id = Number(view.slice(2))
+      const here = findSection(id)
+      if (!here || (here.count === 0 && here.children.length === 0)) {
+        return (
+          <div className="dsh-empty" data-testid="dash-folder-empty">
+            <span className="ic" aria-hidden><FolderOpen size={26} /></span>
+            <h2>{t('dsh.folderEmpty')}</h2><p>{t('dsh.folderEmptyText')}</p>
+            <div className="dsh-acts"><button type="button" className="btn btn-primary" onClick={() => openNew('blank', id)}><Plus size={14} aria-hidden />{t('dsh.newHere')}</button></div>
+          </div>
+        )
+      }
+      if (!narrowed) {
+        if (layout === 'list') {
+          const groups = [{ key: 'here', label: null as React.ReactNode, rows: sorted(here.direct) },
+            ...flattenSections(here.children).map(s => ({ key: String(s.id), label: <><Folder size={14} aria-hidden /><bdi>{s.path}</bdi></>, rows: sorted(s.direct) }))]
+          return listTable(groups.filter(g => g.rows.length))
+        }
+        return <>{countLine(here.count)}{here.direct.length > 0 && grid(sorted(here.direct))}{here.children.map(c => folderSection(c))}</>
+      }
+    }
+    // Grouped by folder: the All view with nothing narrowing it.
+    if (view === 'all' && !narrowed && tree) {
+      const { sections, loose } = sectionsFor(shown, tree, { all: reports, keepEmpty: true })
+      if (layout === 'list') {
+        const groups = [
+          ...flattenSections(sections).map(s => ({ key: String(s.id), label: <><Folder size={14} aria-hidden /><bdi>{s.path}</bdi></>, rows: sorted(s.direct) })),
+          { key: 'root', label: sections.length ? <><FolderOpen size={14} aria-hidden />{t('dsh.notInFolder')}</> : null, rows: sorted(loose) },
+        ]
+        return listTable(groups.filter(g => g.rows.length))
+      }
+      return (
+        <>
+          {!sections.length && countLine(loose.length)}
+          {sections.map(c => folderSection(c))}
+          {loose.length > 0 && (sections.length ? (
+            <section className="dsh-sec" aria-label={t('dsh.notInFolder')}>
+              {sectionHead('root', <FolderOpen size={16} className="ficon" aria-hidden />, t('dsh.notInFolder'), loose.length, { id: null, name: null })}
+              {!collapsed.has('root') && grid(sorted(loose))}
+            </section>
+          ) : grid(sorted(loose)))}
+        </>
+      )
+    }
+    // Flat: a view, a search or a facet narrowing the page.
+    return (
+      <>
+        {countLine(shown.length, narrowed)}
+        {layout === 'list' ? listTable([{ key: 'flat', label: null, rows: shown }]) : grid(shown)}
+      </>
+    )
+  }
+  function findSection(id: number): FolderSection | null {
+    const { sections } = sectionsFor(arrange(reports, 'all'), tree, { all: reports, keepEmpty: true })
+    const walk = (ss: FolderSection[]): FolderSection | null => {
+      for (const s of ss) { if (s.id === id) return s; const got = walk(s.children); if (got) return got }
+      return null
+    }
+    return walk(sections)
+  }
+  function flattenSections(ss: FolderSection[], prefix = ''): (FolderSection & { path: string })[] {
+    return ss.flatMap(s => {
+      const path = prefix ? `${prefix} / ${s.name}` : s.name
+      return [{ ...s, path }, ...flattenSections(s.children, path)]
+    })
+  }
+
+  // "/" focuses the search box, as the prototype's hint says.
+  const searchWrap = useRef<HTMLLabelElement>(null)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement
+      if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable) return
+      const input = searchWrap.current?.querySelector('input')
+      if (input) { e.preventDefault(); input.focus() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   if (opening) return <Loader label={t('common.loading')} />
 
+  const sortLabel = t(sort === 'recent' ? 'dsh.sort.recent' : 'dsh.sort.name')
+  const dsLabel = dsFilter == null ? t('dsh.any') : usedDatasets.find(d => d.id === dsFilter)?.name ?? t('dsh.any')
+
   return (
-    <div className={`dl-dash-page${selecting ? ' dl-dash-page--selecting' : ''}`}>
-      <div className="dl-page-head">
-        <div>
-          <h1 className="dl-page-head__title">{t('nav.dashboards')}</h1>
-          <p className="dl-page-head__sub">{t('dashboards.subtitle')}</p>
-        </div>
-        <div className="dl-page-head__tools">
-          {repFilter.input}
-          {reports.length > 0 && (
-            <button type="button" className="btn btn-ghost" aria-pressed={selecting}
-              onClick={() => selecting ? stopSelecting() : setSelecting(true)}>
-              {selecting ? t('bulk.done2') : t('bulk.select')}
-            </button>
-          )}
-          {reports.length > 0 && (
-            <div className="dl-seg" role="group" aria-label={t('dashboards.view')} data-testid="dashboards-arrange">
-              <button type="button" className="btn btn-ghost btn-sm" aria-pressed={arrange === 'sections'}
-                onClick={() => chooseArrange('sections')}>
-                <LayoutList size={13} aria-hidden /> {t('dashboards.viewSections')}
-              </button>
-              <button type="button" className="btn btn-ghost btn-sm" aria-pressed={arrange === 'folders'}
-                onClick={() => chooseArrange('folders')}>
-                <Folder size={13} aria-hidden /> {t('dashboards.viewFolders')}
+    <div className="dl-bleed dsh">
+      <FolderNav view={view} onView={v => { setView(v); bulk.clear() }} counts={counts} folders={folders}
+        treeFailed={treeFailed} onRetryTree={() => void loadTree()}
+        creating={newFolder} onStartFolder={() => setNewFolder(true)} onCreateFolder={name => void createFolder(name)}
+        onCancelFolder={() => setNewFolder(false)} onSubfolder={f => void subfolder(f)} onRename={f => void renameFolder(f)}
+        onDelete={f => void removeFolder(f)} dropFor={dropFor} overTarget={overTarget}
+        dragHint={reports.some(canEdit)} ready={!loading && !loadError} />
+      <div className={`dsh-main${selectMode ? ' dsh-selmode' : ''}`}>
+        <div className="dsh-page">
+          <div className="dsh-hd">
+            <div className="tt">
+              <h1>{t('nav.dashboards')}</h1>
+              <p>{t('dsh.subtitle')}</p>
+            </div>
+            <div className="dsh-acts">
+              {!treeFailed && !loading && !loadError && (
+                <button type="button" className="btn btn-ghost dsh-btn-line" onClick={() => setNewFolder(true)}>
+                  <FolderPlus size={15} aria-hidden />{t('folders.newTop')}
+                </button>
+              )}
+              <button type="button" className="btn btn-primary" onClick={() => openNew()} disabled={creating}>
+                <Plus size={15} aria-hidden />{t('dashboards.new')}
               </button>
             </div>
+          </div>
+
+          {!loading && !loadError && reports.length > 0 && (
+            <div className="dsh-tb" role="search">
+              {repFilter.input && (
+                <label className="dsh-srch" ref={searchWrap}>
+                  <Search size={16} aria-hidden />
+                  {repFilter.input}
+                  {repFilter.query
+                    ? <button type="button" className="dsh-ib" onClick={() => repFilter.setQuery('')} aria-label={t('dsh.clearSearch')} title={t('dsh.clearSearch')}><X size={14} aria-hidden /></button>
+                    : <kbd aria-hidden>/</kbd>}
+                </label>
+              )}
+              <div className="dsh-seg" role="group" aria-label={t('dsh.col.status')}>
+                {(['all', 'draft', 'pub'] as const).map(s => (
+                  <button key={s} type="button" aria-pressed={status === s} onClick={() => setStatus(s)}>
+                    {t(s === 'all' ? 'dsh.st.all' : s === 'draft' ? 'dsh.st.drafts' : 'dsh.st.published')}
+                    <span className="n">{localDigits(String(statusCount(s)))}</span>
+                  </button>
+                ))}
+              </div>
+              {usedDatasets.length > 0 && (
+                <ActionMenu label={t('dsh.datasetIs', { name: dsLabel })} triggerClassName="dsh-dd"
+                  trigger={<><Database size={15} aria-hidden /><span className="v">{t('dsh.dataset')}:</span> <span className="val"><bdi>{dsLabel}</bdi></span><ChevronDown size={14} aria-hidden /></>}
+                  items={[{ key: 'any', label: t('dsh.any'), onSelect: () => setDsFilter(null) },
+                    ...usedDatasets.map(d => ({ key: String(d.id), label: d.name, onSelect: () => setDsFilter(d.id) }))]} />
+              )}
+              <span className="dsh-sp" />
+              <ActionMenu label={t('dsh.sortIs', { sort: sortLabel })} align="end" triggerClassName="dsh-dd"
+                trigger={<><ArrowDownUp size={15} aria-hidden /><span className="v">{t('dsh.sort')}:</span> {sortLabel}<ChevronDown size={14} aria-hidden /></>}
+                items={[{ key: 'recent', label: t('dsh.sort.recent'), onSelect: () => setSort('recent') },
+                  { key: 'name', label: t('dsh.sort.name'), onSelect: () => setSort('name') }]} />
+              <div className="dsh-seg ic" role="group" aria-label={t('dashboards.view')} data-testid="dashboards-layout">
+                <button type="button" aria-pressed={layout === 'grid'} onClick={() => setLayout('grid')} aria-label={t('dsh.grid')} title={t('dsh.grid')}><LayoutGrid size={15} aria-hidden /></button>
+                <button type="button" aria-pressed={layout === 'list'} onClick={() => setLayout('list')} aria-label={t('dsh.list')} title={t('dsh.list')}><List size={15} aria-hidden /></button>
+              </div>
+            </div>
           )}
-          {/* In the folder view a new folder goes where you are. */}
-          <button className="btn btn-ghost" disabled={folderBusy}
-            onClick={() => void addFolder(arrange === 'folders' && path.length ? path[path.length - 1] : null)}>
-            <FolderPlus size={14} /> {t('folders.newTop')}
-          </button>
-          <button className="btn btn-primary" onClick={() => void handleCreate()} disabled={creating}>
-            <Plus size={14} /> {t('dashboards.new')}
-          </button>
+
+          {content()}
+
+          {selectMode && (
+            <div className="dsh-bulk" role="toolbar" aria-label={t('bulk.aria')}>
+              <span>{t('bulk.selected', { n: bulk.selected.size, noun: t('noun.dashboards') })}</span>
+              <span className="vr" />
+              {tree && <button type="button" className="btn" onClick={() => setMoving(selected)}><FolderInput size={15} aria-hidden />{t('dsh.bulk.move')}</button>}
+              <button type="button" className="btn" onClick={() => void bulkExport()}><Download size={15} aria-hidden />{t('dsh.bulk.export')}</button>
+              <button type="button" className="btn dng" disabled={bulk.busy} onClick={() => void bulk.deleteSelected(reports)}><Trash2 size={15} aria-hidden />{t('bulk.delete')}</button>
+              {testLike.some(r => !bulk.selected.has(r.id)) && (
+                <button type="button" className="btn" onClick={() => bulk.setMany(testLike.map(r => r.id), true)}>
+                  {t('bulk.selectTest', { n: testLike.length })}
+                </button>
+              )}
+              <span className="vr" />
+              <button type="button" className="dsh-ib" onClick={bulk.clear} aria-label={t('bulk.clear')} title={t('bulk.clear')}><X size={15} aria-hidden /></button>
+            </div>
+          )}
         </div>
       </div>
 
-      {selecting && testLike.length > 0 && (
-        <button type="button" className="dl-select-hint" style={{ marginBlockEnd: 8 }}
-          onClick={() => bulk.setMany(testLike.map(r => r.id), true)}>
-          <Trash2 size={13} aria-hidden /> {t('bulk.selectTest', { n: testLike.length })}
-        </button>
+      {newDlg && (
+        <NewDashboardDialog datasets={datasets ?? []} folders={folders} initialMode={newDlg.mode} initialFolder={newDlg.folder}
+          placeholderName={nextUntitledName(reports.map(x => x.name))} busy={creating}
+          onClose={() => setNewDlg(null)} onCreate={c => void create(c)} />
       )}
-      {selecting && (
-        <BulkBar count={bulk.selected.size} busy={bulk.busy} noun={t('noun.dashboards')}
-          onClear={bulk.clear} onDelete={() => void bulk.deleteSelected(reports)} />
+      {suggest && <SuggestDashboardsDialog datasetId={suggest.id} datasetName={suggest.name} initialGoal={suggest.goal} onClose={() => setSuggest(null)} />}
+      {moving && (
+        <MoveDialog names={moving.map(r => r.name)} folders={folders}
+          current={moving.length === 1 ? (nodes.get(moving[0].id)?.parent_id ?? null) : undefined}
+          onClose={() => setMoving(null)}
+          onMove={(id, name) => { const rs = moving; setMoving(null); bulk.clear(); void moveMany(rs, id, name) }} />
       )}
-
-      {loading && <p className="dl-muted-line">{t('common.loading')}</p>}
-
-      {!loading && !!loadError && (
-        <LoadError what="reports" error={loadError} onRetry={load} />
-      )}
-
-      {!loading && !loadError && reports.length === 0 && (
-        <div className="card dl-empty">
-          <FileBarChart size={40} className="dl-empty__icon" />
-          <p className="dl-empty__title">{t('dashboards.empty')}</p>
-          <p className="dl-empty__body">{t('dashboards.emptyBody')}</p>
-          <button className="btn btn-primary" onClick={() => void handleCreate()} disabled={creating}>{t('dashboards.createFirst')}</button>
-        </div>
-      )}
-
-      {repFilter.noMatches && (
-        <p className="dl-nomatch">
-          {t('common.nothingMatches', { q: repFilter.query })}
-        </p>
-      )}
-      {reports.length > 0 && (() => {
-        const renderCard = (r: ReportSummary) => {
-          const ds = datasets.find(d => d.id === r.dataset_id)
-          // Mirrors the server exactly: delete_report requires >= edit, so a
-          // view-level viewer gets no Delete control, and "Open designer"
-          // becomes plain "Open" -- a designer link over a report whose every
-          // edit the server refuses is a dead control with extra steps.
-          const canEdit = (r.my_capability ?? 'view') !== 'view'
-          // Publish and Share are the AUTHOR's controls (admins too) and only
-          // exist on authored dashboards -- a legacy row (created_by null) is
-          // outside the regime, and offering Publish there would be a button
-          // the server 400s.
-          const owned = r.created_by != null
-          const canAdminister = owned && (r.is_mine || isAdmin)
-          // Suggest dashboards writes its provenance into the DESCRIPTION
-          // (SuggestDashboardsDialog), in one of two shapes. Read, never
-          // rewritten -- the API value is untouched and this is purely how the
-          // card draws it.
-          //
-          //   "Suggested from the data"  -> says nothing a chip cannot, and
-          //                                 said it identically on every such
-          //                                 card, costing a full line each.
-          //   "Suggested for: <goal>"    -> the goal IS worth reading; only
-          //                                 the prefix is redundant once a
-          //                                 chip says "Suggested".
-          const suggestedFor = r.description?.startsWith(SUGGESTED_FOR)
-            ? r.description.slice(SUGGESTED_FOR.length).trim()
-            : null
-          const isSuggested = r.description === SUGGESTED_PLAIN || suggestedFor !== null
-          const blurb = suggestedFor || (isSuggested ? '' : r.description)
-          // Almost every generated dashboard is NAMED after its dataset --
-          // "What stands out in Demo Sales", "Enrolments 2025 - escalated to
-          // registrar" -- and the footer then printed that name again two
-          // lines below. One fact, two labels, on most of the grid.
-          //
-          // Not dropped outright: on "What stands out in this data" the chip
-          // is the only thing distinguishing one card from the next.
-          const flat = (v: string) => v.toLowerCase().replace(/\s+/g, ' ').trim()
-          const showDataset = !!ds && !flat(r.name).includes(flat(ds.name))
-          return (
-            <div key={r.id} className="card dl-dash-card"
-              data-selected={selecting && bulk.selected.has(r.id) ? 'true' : undefined}
-              draggable={!selecting}
-              data-dragging={dragging?.id === r.id ? 'true' : undefined}
-              onDragStart={e => {
-                // Some browsers refuse to start a drag with no payload.
-                e.dataTransfer?.setData('text/plain', String(r.id))
-                setDragging(r)
-              }}
-              onDragEnd={endDrag}
-              // The whole card opens the dashboard, because the whole card is
-              // what people aim at. One guard instead of a stopPropagation on
-              // every control: a link or a button inside the card handles its
-              // own click, and a control added later is covered without anyone
-              // remembering to opt it out.
-              onClick={e => {
-                if (selecting) {
-                  // In select mode the whole card is the checkbox, title included.
-                  if ((e.target as HTMLElement).closest('input')) return
-                  e.preventDefault()
-                  if (canEdit) bulk.toggle(r.id)
-                  return
-                }
-                if ((e.target as HTMLElement).closest('a, button')) return
-                openReport(`/reports/${r.id}`)
-              }}
-              // Deliberately NOT tabIndex/role=link. The title below is a real
-              // anchor: it already carries the route for the keyboard, for a
-              // screen reader, and for middle-click and "open in new tab". A
-              // second focusable wrapper would put two tab stops and two
-              // announcements on one destination.
-              >
-              {selecting && (
-                <input type="checkbox" className="dl-dash-card__check" disabled={!canEdit}
-                  aria-label={t('bulk.selectRow', { name: r.name })}
-                  checked={bulk.selected.has(r.id)} onChange={() => bulk.toggle(r.id)} />
-              )}
-              <div className="dl-dash-card__head">
-                {/* The title owns the row. It used to share it with the chips
-                    at flex-shrink: 0, which left "What stands out in Route
-                    planning extract output" about eight characters wide and
-                    six lines tall. */}
-                <Link to={`/reports/${r.id}`} className="dl-dash-card__title"
-                  title={r.name} onClick={e => { if (selecting) e.preventDefault(); else onTitleClick(e) }}>
-                  {r.name}
-                </Link>
-                <div className="dl-dash-card__controls">
-                  {canAdminister && (
-                    <span className="dl-card-actions">
-                      <button className="btn btn-ghost btn-sm" onClick={() => setSharing(r)}
-                        aria-label={`Share ${r.name}`} title={`Share ${r.name} with a person`}>
-                        <Share2 size={12} />
-                      </button>
-                      <button className="btn btn-ghost btn-sm" onClick={() => handlePublish(r)}
-                        aria-label={r.published ? `Unpublish ${r.name}` : `Publish ${r.name}`}
-                        title={r.published
-                          ? 'Unpublish — back to a private draft'
-                          : 'Publish — everyone in your organisation can open it, view-only'}>
-                        {r.published ? <GlobeLock size={14} /> : <Globe size={14} />}
-                      </button>
-                    </span>
-                  )}
-                  {/* Icon-only, so it needs an explicit name: a screen reader otherwise
-                      announces "button" with nothing to distinguish one row's delete
-                      from another's. Names the report, so the row is identified too. */}
-                  {canEdit && (
-                    <span className="dl-card-actions">
-                      <button className="btn btn-ghost btn-sm"
-                        onClick={() => void handleRename(r)}
-                        aria-label={`Rename dashboard ${r.name}`} title={`Rename dashboard ${r.name}`}>
-                        <Pencil size={14} />
-                      </button>
-                      <button className="btn btn-ghost btn-sm dl-danger-item"
-                        onClick={() => handleDelete(r.id, r.name)}
-                        aria-label={`Delete dashboard ${r.name}`} title={`Delete dashboard ${r.name}`}>
-                        <Trash2 size={14} />
-                      </button>
-                    </span>
-                  )}
-                </div>
-              </div>
-              {blurb && <p className="dl-dash-card__blurb">{blurb}</p>}
-              {/* Every chip on one row, beside the dataset it describes. Three
-                  of them used to sit up beside the title, where each one cost
-                  the name a few more characters of width. */}
-              <div className="dl-dash-card__foot">
-                {/* "No dataset" used to render here. It is an absence, not a
-                    fact about the dashboard, and it cost a label on every card
-                    that had one. */}
-                {showDataset && <span className="badge badge-categorical">{ds!.name}</span>}
-                {isSuggested && (
-                  <span className="dl-chip dl-chip--suggested"
-                    title="Created by Suggest dashboards from this dataset">
-                    {t('dashboards.suggested')}
-                  </span>
-                )}
-                {owned && r.published && (
-                  <span className="dl-chip dl-chip--published"
-                    title="Published — everyone in your organisation can open it, view-only">
-                    {t('dashboards.published')}
-                  </span>
-                )}
-                {!canEdit && (
-                  <span className="dl-chip dl-chip--viewonly" title="View only">
-                    <IconLabel icon={Eye} size={11}>{t('dashboards.viewOnly')}</IconLabel>
-                  </span>
-                )}
-                <span className="dl-dash-card__date">
-                  {/* In the interface's language, not the browser's: an English
-                      page read "272026/9/" on an Arabic-locale machine. */}
-                  {new Date(r.created_at).toLocaleDateString(language, { dateStyle: 'medium' })}
-                </span>
-              </div>
-            </div>
-          )
-        }
-
-        const grid = (items: ReportSummary[]) => (
-          <div className="dl-dash-grid">{items.map(renderCard)}</div>
-        )
-
-        if (arrange === 'folders') {
-          // One level at a time: the folders here as tiles (a click opens one),
-          // then the dashboards filed directly here, as the usual cards.
-          const { sections, loose } = sectionsFor(repFilter.filtered, tree, {
-            all: reports, keepEmpty: !repFilter.query.trim(),
-          })
-          // Walk the path; a folder that has gone (deleted, or filtered out)
-          // stops the walk where it is, so the view never points at nothing.
-          const trail: FolderSection[] = []
-          let level = sections
-          for (const id of path) {
-            const next = level.find(s => s.id === id)
-            if (!next) break
-            trail.push(next)
-            level = next.children
-          }
-          const here = trail[trail.length - 1]
-          const folders = here ? here.children : sections
-          const cards = here ? here.direct : loose
-          const crumbs: { key: string; name: string; to: number[]; id: number | null }[] = [
-            { key: 'root', name: t('folders.root'), to: [], id: null },
-            ...trail.map((f, i) => ({ key: `folder:${f.id}`, name: f.name, to: trail.slice(0, i + 1).map(x => x.id), id: f.id })),
-          ]
-          return (
-            <div data-testid="folder-view">
-              <nav aria-label={t('dashboards.viewFolders')} className="dl-folder-crumbs"
-                style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4, margin: '4px 0 12px', fontSize: 13 }}>
-                {crumbs.map((c, i) => {
-                  const last = i === crumbs.length - 1
-                  return (
-                    <span key={c.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                      {i > 0 && <ChevronRight size={13} aria-hidden style={{ color: 'var(--muted)' }} />}
-                      {/* Each crumb is also a drop target: drag a card up a level. */}
-                      <span {...dropTargetProps(`crumb:${c.key}`, c.id, c.id === null ? null : c.name)}
-                        data-drop-active={overTarget === `crumb:${c.key}` ? 'true' : undefined}
-                        style={{ borderRadius: 6, outline: overTarget === `crumb:${c.key}` ? '2px dashed var(--accent)' : undefined }}>
-                        {last
-                          ? <strong aria-current="page">{c.name}</strong>
-                          : <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPath(c.to)}>{c.name}</button>}
-                      </span>
-                    </span>
-                  )
-                })}
-              </nav>
-              {folders.length > 0 && (
-                <div className="dl-dash-grid" style={{ marginBlockEnd: 16 }}>
-                  {folders.map(f => (
-                    <div key={f.id} className="card dl-folder-tile" role="button" tabIndex={0}
-                      aria-label={t('folders.open', { name: f.name })}
-                      data-folder={f.name}
-                      {...dropTargetProps(`tile:${f.id}`, f.id, f.name)}
-                      data-drop-active={overTarget === `tile:${f.id}` ? 'true' : undefined}
-                      onClick={e => {
-                        if ((e.target as HTMLElement).closest('button, a, [role="menu"]')) return
-                        setPath([...trail.map(x => x.id), f.id])
-                      }}
-                      onKeyDown={e => {
-                        if (e.target !== e.currentTarget) return
-                        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setPath([...trail.map(x => x.id), f.id]) }
-                      }}
-                      style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer',
-                        outline: overTarget === `tile:${f.id}` ? '2px dashed var(--accent)' : undefined }}>
-                      <Folder size={28} aria-hidden style={{ color: 'var(--accent)', flex: 'none' }} />
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.name}</div>
-                        <div className="dl-muted-line" style={{ fontSize: 12 }}>
-                          {t('folders.count', { n: f.count })}
-                          {f.children.length > 0 && ` · ${t('folders.subfolders', { n: f.children.length })}`}
-                        </div>
-                      </div>
-                      {f.can_manage && (
-                        <ActionMenu
-                          label={t('folders.actions', { name: f.name })}
-                          items={[
-                            { key: 'subfolder', label: t('folders.new'), icon: <FolderPlus size={14} />,
-                              onSelect: () => void addFolder(f.id) },
-                            { key: 'rename', label: t('folders.rename'), icon: <Pencil size={14} />,
-                              onSelect: () => void renameFolder(f) },
-                            { key: 'delete', label: t('folders.delete'), icon: <Trash2 size={14} />, danger: true,
-                              onSelect: () => void removeFolder(f) },
-                          ]}
-                        />
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-              {cards.length > 0 && grid(cards)}
-              {folders.length === 0 && cards.length === 0 && (
-                <p className="dl-fold__empty">{here ? t('folders.nothingHere') : t('folders.empty')}</p>
-              )}
-            </div>
-          )
-        }
-
-        // One shape at every depth: the folder's own cards, then its
-        // subfolders as smaller headings inside it. Nesting the <section>s
-        // is what indents them (index.css), so depth is never a prop.
-        const renderFolder = (f: FolderSection, depth: number) => (
-          <Fold key={f.id} name={f.name} tier="folder" count={f.count}
-            heading={`h${Math.min(3 + depth, 6)}` as 'h3' | 'h4' | 'h5' | 'h6'}
-            collapsed={collapsed.has(`folder:${f.id}`)}
-            onToggle={() => toggleFold(`folder:${f.id}`)}
-            dropProps={dropTargetProps(`folder:${f.id}`, f.id, f.name)}
-            dropActive={overTarget === `folder:${f.id}`}
-            // can_manage is the server's answer: no menu rather than a menu
-            // of items it would refuse.
-            actions={f.can_manage && (
-              <ActionMenu
-                label={t('folders.actions', { name: f.name })}
-                items={[
-                  { key: 'subfolder', label: t('folders.new'), icon: <FolderPlus size={14} />,
-                    onSelect: () => void addFolder(f.id) },
-                  { key: 'rename', label: t('folders.rename'), icon: <Pencil size={14} />,
-                    onSelect: () => void renameFolder(f) },
-                  { key: 'delete', label: t('folders.delete'), icon: <Trash2 size={14} />, danger: true,
-                    onSelect: () => void removeFolder(f) },
-                ]}
-              />
-            )}>
-            {f.direct.length > 0 && grid(f.direct)}
-            {f.children.map(c => renderFolder(c, depth + 1))}
-            {f.count === 0 && f.children.length === 0 && (
-              <p className="dl-fold__empty">{t('folders.empty')}</p>
-            )}
-          </Fold>
-        )
-
-        // Loose dashboards FIRST. A run of cards after a heading reads as
-        // belonging to it; a run before the first heading reads as belonging
-        // to nothing, which is the truth -- and it avoids inventing an
-        // "Unfiled" label for the absence.
-        // Empty folders are the viewer's own and show only where their own
-        // dashboards do -- never under "Granted to me" -- and never while a
-        // search is narrowing the page.
-        const arranged = (items: ReportSummary[], keepEmpty: boolean) => {
-          const { sections, loose } = sectionsFor(items, tree, {
-            all: reports, keepEmpty: keepEmpty && !repFilter.query.trim(),
-          })
-          return (
-            <>
-              {loose.length > 0 && grid(loose)}
-              {sections.map(s => renderFolder(s, 0))}
-            </>
-          )
-        }
-
-        // Same grouping contract as the workspace tree: authorship, not
-        // permission, and headings only when the viewer actually has both
-        // kinds -- a user who authored everything reads a plain grid. Both
-        // paths render subsets of repFilter.filtered, so the search box keeps
-        // filtering the grouped view too (listFilterWiring.test pins the flat
-        // path textually; the grouped one derives from the same array).
-        const mine = repFilter.filtered.filter(r => r.is_mine)
-        const granted = repFilter.filtered.filter(r => !r.is_mine)
-        if (mine.length === 0 || granted.length === 0) {
-          return arranged(repFilter.filtered, true)
-        }
-        return (
-          <>
-            <Fold name={t('dashboards.mine')} tier="group" heading="h2" count={mine.length}
-              collapsed={collapsed.has('group:mine')}
-              onToggle={() => toggleFold('group:mine')}
-              dropProps={dropTargetProps('root', null, null)}
-              dropActive={overTarget === 'root'}>
-              {arranged(mine, true)}
-            </Fold>
-            <Fold name={t('dashboards.granted')} tier="group" heading="h2" count={granted.length}
-              note={t('dashboards.grantedNote')}
-              collapsed={collapsed.has('group:granted')}
-              onToggle={() => toggleFold('group:granted')}>
-              {arranged(granted, false)}
-            </Fold>
-          </>
-        )
-      })()}
       {sharing && <ShareDialog report={sharing} onClose={() => setSharing(null)} />}
     </div>
   )
