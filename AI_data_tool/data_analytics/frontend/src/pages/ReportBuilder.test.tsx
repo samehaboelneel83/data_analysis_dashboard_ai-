@@ -983,7 +983,8 @@ describe('ReportBuilder popup overlay (view mode)', () => {
     renderBuilder()
     await screen.findByTestId('view-strip')
     // Default state is edit mode.
-    expect(screen.getByRole('button', { name: /Popup KPIs.*\[P\]/ })).toBeInTheDocument()
+    // 7e1: the marker is in words for a screen reader (it was "[P]").
+    expect(screen.getByRole('button', { name: 'Popup KPIs (pop-up page)' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Open KPIs' }))
 
@@ -1155,7 +1156,7 @@ describe('ReportBuilder zoom-aware drag math', () => {
       renderBuilder()
       await screen.findByTestId('view-strip')
 
-      const zoomIn = screen.getByRole('button', { name: '+' })
+      const zoomIn = screen.getByRole('button', { name: 'Zoom in' })
       for (let i = 0; i < 5; i++) fireEvent.click(zoomIn)
       expect(screen.getByText('150%')).toBeInTheDocument()
 
@@ -1174,7 +1175,7 @@ describe('ReportBuilder zoom-aware drag math', () => {
   })
 })
 
-describe('ReportBuilder status bar zoom', () => {
+describe('ReportBuilder zoom (in the second row since 7e1)', () => {
   it('zooms the canvas in and updates the displayed percentage', async () => {
     vi.mocked(reportsApi.get).mockResolvedValue(baseReport() as any)
     vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
@@ -1182,7 +1183,7 @@ describe('ReportBuilder status bar zoom', () => {
     await screen.findByTestId('view-strip')
 
     expect(screen.getByText('100%')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '+' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }))
     expect(screen.getByText('110%')).toBeInTheDocument()
   })
 })
@@ -2466,7 +2467,7 @@ describe('ReportBuilder: every edit is one undo step', () => {
     vi.mocked(reportsApi.deletePage).mockResolvedValue(undefined as any)
     renderBuilder()
     await screen.findByTestId('view-strip')
-    fireEvent.click(screen.getByRole('button', { name: /^\+?\s*Page$/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add page' }))
     await waitFor(() => expect(undoTitle()).toBe('Undo: Add page "Page 2" (Ctrl+Z)'))
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
     await waitFor(() => expect(reportsApi.deletePage).toHaveBeenCalledWith(1, 101))
@@ -2497,7 +2498,9 @@ describe('ReportBuilder: every edit is one undo step', () => {
     vi.mocked(reportsApi.addWidget).mockClear().mockResolvedValue({ id: 90 } as any)
     renderBuilder()
     await screen.findByTestId('view-strip')
-    fireEvent.click(screen.getByRole('button', { name: 'Delete page "Detail"' }))
+    // 7e1: Delete lives in the page's ⌄ menu (it was an "x" on every tab).
+    fireEvent.click(screen.getByRole('button', { name: 'Page options: Detail' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete page' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Delete' }))
     await waitFor(() => expect(reportsApi.deletePage).toHaveBeenCalledWith(1, 101))
     await waitFor(() => expect(undoTitle()).toBe('Undo: Delete page "Detail" (Ctrl+Z)'))
@@ -2650,5 +2653,45 @@ describe('ReportBuilder reading (redesign 7d)', () => {
     expect(auto).toHaveAttribute('aria-pressed', 'false')
     fireEvent.click(auto)
     expect(auto).toHaveAttribute('aria-pressed', 'true')
+  })
+})
+
+describe('the builder opens with the icon rail (redesign 7e1, S6)', () => {
+  it('asks the shell to fold the rail in edit mode, and lets it go when reading or leaving', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue(baseReport() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    const seen: boolean[] = []
+    const on = (e: Event) => seen.push(!!(e as CustomEvent<boolean>).detail)
+    window.addEventListener('datalytics:builder-compact', on)
+    try {
+      const { unmount } = renderBuilder()
+      await screen.findByTestId('view-strip')
+      expect(seen.at(-1)).toBe(true)
+      fireEvent.click(screen.getByTestId('mode-toggle'))
+      expect(seen.at(-1)).toBe(false)
+      // Back to editing: the rail is not folded again on every switch.
+      const n = seen.length
+      fireEvent.click(screen.getByTestId('mode-toggle'))
+      expect(seen.slice(n)).not.toContain(true)
+      unmount()
+      expect(seen.at(-1)).toBe(false)
+    } finally { window.removeEventListener('datalytics:builder-compact', on) }
+  })
+})
+
+describe('page tab menu (redesign 7e1)', () => {
+  it('Move left swaps the page with its neighbour, as one undo step', async () => {
+    const r = baseReport()
+    r.pages.push({ id: 101, report_id: 1, name: 'Detail', page_type: 'normal', position: 1, created_at: '2026-01-01', layout_mode: 'free', widgets: [] } as any)
+    vi.mocked(reportsApi.get).mockResolvedValue(r as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(reportsApi.updatePage).mockClear().mockResolvedValue({} as any)
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    fireEvent.click(screen.getByRole('button', { name: 'Page options: Detail' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move left' }))
+    await waitFor(() => expect(reportsApi.updatePage).toHaveBeenCalledWith(1, 101, { position: 0 }))
+    expect(reportsApi.updatePage).toHaveBeenCalledWith(1, 100, { position: 1 })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Undo' })).toHaveAttribute('title', 'Undo: Move page "Detail" (Ctrl+Z)'))
   })
 })

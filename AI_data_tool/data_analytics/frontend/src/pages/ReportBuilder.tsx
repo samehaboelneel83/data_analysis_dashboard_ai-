@@ -74,7 +74,7 @@ import CollapsibleSide from '../components/report/CollapsibleSide'
 import ReviewPane from '../components/report/ReviewPane'
 import PopupOverlay from '../components/report/PopupOverlay'
 import TooltipPageOverlay from '../components/report/TooltipPageOverlay'
-import { ArrowLeft, Plus, Eye, Undo2, Redo2, KeyRound, ShieldCheck, Pause, Play, FileDown, Share2, Maximize2, EllipsisVertical, SlidersHorizontal, Printer, FileText, Package, Pencil, RefreshCw, ChevronUp, ChevronDown } from 'lucide-react'
+import { ArrowLeft, Plus, Eye, Undo2, Redo2, KeyRound, ShieldCheck, Pause, Play, FileDown, Share2, Maximize2, EllipsisVertical, SlidersHorizontal, Printer, FileText, Package, Pencil, RefreshCw, ChevronUp, ChevronDown, Database } from 'lucide-react'
 import { updatedAgo } from '../lib/viewStyle'
 import { columnKind, usePageFilters } from '../lib/pageFilters'
 import PageFilterBar, { type PageFilterColumn } from '../components/report/PageFilterBar'
@@ -97,6 +97,10 @@ import PresentControls from './reportBuilder/PresentControls'
 import { useAiOffline } from './ask/useAiOffline'
 import { datasetSuggestions } from './ask/suggestions'
 import './reportBuilder/viewMode.css'
+import './reportBuilder/builder.css'
+import PageTabs from './reportBuilder/PageTabs'
+import SaveState from './reportBuilder/SaveState'
+import ZoomControl from './reportBuilder/ZoomControl'
 import { useConfirm } from '../components/ui/ConfirmDialog'
 import { useMeasuredWidth } from '../components/report/useMeasuredWidth'
 import { useModalDialog } from '../components/ui/useModalDialog'
@@ -294,6 +298,17 @@ export default function ReportBuilder() {
   // copilot) all answer to capability through this single line instead of
   // each having to remember to ask.
   const editMode = editModeWanted && canEdit
+  // S6 (redesign 7e1): the builder opens with the icon rail. The first time
+  // edit mode opens in this visit the shell folds the rail (the saved choice
+  // is untouched, and the rail's own toggle still expands it); reading keeps
+  // the full rail, and switching back to editing does not fold it again.
+  const railFolded = useRef(false)
+  useEffect(() => {
+    const ask = (on: boolean) => window.dispatchEvent(new CustomEvent('datalytics:builder-compact', { detail: on }))
+    if (editMode && !railFolded.current) { railFolded.current = true; ask(true) }
+    else if (!editMode) ask(false)
+  }, [editMode])
+  useEffect(() => () => { window.dispatchEvent(new CustomEvent('datalytics:builder-compact', { detail: false })) }, [])
   // Measured from the canvas element itself; 900 is only the value before one
   // exists. See useMeasuredWidth for why this cannot be an effect.
   const { width: containerW, attach: attachCanvas, ref: canvasRef } =
@@ -2251,6 +2266,31 @@ export default function ReportBuilder() {
     }
   }
 
+  /** Move left / right in the page tab menu (7e1): swap the page with its
+   *  neighbour among the tabs, through the same page update, undoable. */
+  const movePage = async (page: ReportPage, by: -1 | 1) => {
+    const list = tabPages
+    const i = list.findIndex(p => p.id === page.id)
+    const other = list[i + by]
+    if (i < 0 || !other) return
+    let a = page.position ?? i, b = other.position ?? i + by
+    if (a === b) { a = i; b = i + by }
+    const put = (x: number, y: number) => async () => {
+      await reportsApi.updatePage(reportId, pid(page.id), { position: x })
+      await reportsApi.updatePage(reportId, pid(other.id), { position: y })
+    }
+    setSaving(true)
+    try {
+      await put(b, a)()
+      pushUndo({ label: `Move page "${page.name}"`, undo: put(a, b), redo: put(b, a) })
+      await loadReport()
+    } catch (err) {
+      toast.error((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Could not move the page')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const updatePageProps = useCallback(async (data: Partial<ReportPage>) => {
     if (!activePage) return
     setSaving(true)
@@ -2488,6 +2528,53 @@ export default function ReportBuilder() {
   const viewPages = report.pages.filter(page => page.page_type !== 'hidden' && page.page_type !== 'popup'
     && page.page_type !== 'tooltip' && page.page_type !== 'drillthrough')
   const updated = updatedAgo(dataset?.last_refreshed_at, tr('ai.limit.locale'))
+  // The builder's page tabs: hidden and pop-up pages too (marked), never the
+  // tooltip and drill-through pages, which open from a widget.
+  const tabPages = report.pages.filter(page => (editMode || (page.page_type !== 'hidden' && page.page_type !== 'popup'))
+    && page.page_type !== 'tooltip' && page.page_type !== 'drillthrough')
+  const pageTabs = (
+    <PageTabs pages={tabPages} activeId={activePage?.id ?? null} label={pageLabel}
+      renamingId={editPid} renameValue={editPname} onRenameValue={setEditPname}
+      onSelect={pg => { const page = report.pages.find(x => x.id === pg.id); if (page) { setActivePage(page); setSelectedW(null) } }}
+      onStartRename={pg => { setEditPid(pg.id); setEditPname(pg.name) }}
+      onSaveName={pg => { const page = report.pages.find(x => x.id === pg.id); if (page) void savePageName(page) }}
+      onDelete={pg => { const page = report.pages.find(x => x.id === pg.id); if (page) void deletePage(page) }}
+      onMove={(pg, by) => { const page = report.pages.find(x => x.id === pg.id); if (page) void movePage(page, by) }}
+      onSettings={pg => { const page = report.pages.find(x => x.id === pg.id); if (page) { setActivePage(page); setSelectedW(null); setRightPanelMode('default') } }}
+      onAdd={() => void addPage()}
+      addExtra={<>
+        <button type="button" className="dl-bd-ib dl-bd-tpl" aria-label="Add page from a template" title={tr('bd.pg.fromTemplate')}
+          aria-expanded={pageMenuOpen} onClick={() => setPageMenuOpen(o => !o)}><ChevronDown size={13} aria-hidden /></button>
+        {pageMenuOpen && (
+          <PageTemplateMenu reportId={reportId} activePageId={activePage?.id ?? null}
+            onClose={() => setPageMenuOpen(false)} onAdded={() => { setPageMenuOpen(false); loadReport() }} />
+        )}
+      </>} />
+  )
+  const layoutMenu = (
+    <div className="dl-bd-menuw">
+      <button className="btn btn-ghost btn-sm" aria-label="Page layout" aria-expanded={layoutMenuOpen}
+        onClick={() => setLayoutMenuOpen(o => !o)}>
+        <IconLabel icon={LayoutTemplate}>{tr('builder.layout')}</IconLabel>
+      </button>
+      {layoutMenuOpen && (
+        <div role="menu" aria-label="Page layout" className="dl-bd-menu">
+          {RECIPES.map(r => {
+            const on = activePage?.layout_mode !== 'free' && (activePage?.layout_template === r.id || (!activePage?.layout_template && r.id === DEFAULT_RECIPE))
+            return (
+              <button key={r.id} role="menuitem" aria-current={on || undefined} onClick={() => { void applyPageRecipe(r.id) }}>
+                <b>{r.label}{r.id === DEFAULT_RECIPE ? ' (default)' : ''}</b><small>{r.hint}</small>
+              </button>
+            )
+          })}
+          <hr />
+          <button role="menuitem" aria-current={activePage?.layout_mode === 'free' || undefined} onClick={() => { void applyPageRecipe('free') }}>
+            <b>Free layout</b><small>Place tiles by hand; still no overlap or tiny charts</small>
+          </button>
+        </div>
+      )}
+    </div>
+  )
 
   return (
     // Negative margin cancels Layout's <main> padding so the editor stays edge-to-edge, and
@@ -3062,7 +3149,7 @@ export default function ReportBuilder() {
             into edit mode. Wrapping costs a second row; not wrapping costs the
             control. */}
         {topOpen && !kiosk && (
-        <div data-testid="builder-header"
+        <div data-testid="builder-header" className={modern ? undefined : 'dl-bd-top'}
           style={{ display:'flex', alignItems:'flex-start', flexWrap:'wrap', gap:10, padding:'10px 20px', borderBottom:'1px solid var(--border)', flexShrink:0, background:'var(--surface)' }}>
           {/* Two parts: everything that varies by mode wraps INSIDE this one,
               while the end part (Opened reports + the Edit/View button) stays
@@ -3080,15 +3167,13 @@ export default function ReportBuilder() {
           {modern ? (<>
             <Link to="/reports" className="dl-vw-back"><ArrowLeft size={14} className="flip-rtl" /> {tr('nav.dashboards')}</Link>
             <span className="dl-vw-vr" aria-hidden />
-          </>) : (<>
-          <Link to="/reports" style={{ color:'var(--muted)', display:'flex', alignItems:'center', gap:4, fontSize:12, textDecoration:'none' }}>
-            <ArrowLeft size={13} className="flip-rtl" /> {tr('nav.dashboards')}
+          </>) : (
+          <Link to="/reports" className="dl-bd-back" aria-label={tr('nav.dashboards')} title={tr('nav.dashboards')}>
+            <ArrowLeft size={16} className="flip-rtl" aria-hidden />
           </Link>
-          <span style={{ color:'var(--border)' }}>|</span>
-          </>)}
+          )}
           {editMode && renaming ? (
-            <input autoFocus aria-label="Dashboard name" defaultValue={report.name} maxLength={120}
-              style={{ fontWeight:700, fontSize:16, padding:'1px 6px', minWidth:220 }}
+            <input autoFocus aria-label="Dashboard name" defaultValue={report.name} maxLength={120} className="dl-bd-name-in" dir="auto"
               onBlur={e => void commitRename(e.currentTarget.value)}
               onKeyDown={e => {
                 if (e.key === 'Enter') e.currentTarget.blur()
@@ -3124,22 +3209,17 @@ export default function ReportBuilder() {
             <h1 style={{ fontWeight:700, fontSize:16, margin:0 }}>{report.name}</h1>
           )}
           {dataset && canEdit && !modern && (
-            <nav aria-label="Breadcrumb" style={{ display:'flex', alignItems:'center', gap:4 }}>
-              <span aria-hidden style={{ color:'var(--muted)', fontSize:12 }}>▸</span>
+            <nav aria-label="Breadcrumb" className="dl-bd-chips">
               {[dataset, ...(report.additional_dataset_ids ?? []).map(id => datasets[id]).filter((d): d is Dataset => !!d)]
-                .map((d, i) => (
-                  <span key={d.id} style={{ display:'flex', alignItems:'center', gap:4 }}>
-                    {i > 0 && <span aria-hidden style={{ color:'var(--muted)', fontSize:11 }}>,</span>}
-                    <Link to={`/datasets/${d.id}`} className="badge badge-categorical" style={{ textDecoration:'none' }}>{d.name}</Link>
-                  </span>
+                .map(d => (
+                  <Link key={d.id} to={`/datasets/${d.id}`} className="dl-bd-chip ds" title={d.name}>
+                    <Database size={13} aria-hidden /><span><bdi>{d.name}</bdi></span>
+                  </Link>
               ))}
               {dataset.data_source_id != null && (
-                <>
-                  <span aria-hidden style={{ color:'var(--muted)', fontSize:12 }}>▸</span>
-                  <Link to={`/connections/${dataset.data_source_id}/review`} style={{ fontSize:11, color:'var(--accent)' }}>
-                    {sourceName ?? 'Source'}
-                  </Link>
-                </>
+                <Link to={`/connections/${dataset.data_source_id}/review`} className="dl-bd-chip src">
+                  <span aria-hidden>▸</span> <bdi>{sourceName ?? 'Source'}</bdi>
+                </Link>
               )}
             </nav>
           )}
@@ -3160,29 +3240,34 @@ export default function ReportBuilder() {
               </span>
             )
           })()}
+          {/* Draft until published (7e1); a published dashboard shows its
+              release state instead (ReleaseControl, below). */}
+          {editMode && !report.published && report.created_by != null && (
+            <span className="dl-bd-chip" title={tr('home.draftTitle')}>{tr('dsh.badge.draft')}</span>
+          )}
+          {editMode && <SaveState saving={saving} />}
           {editMode && (
             <span style={{ display: 'inline-flex', gap: 2 }}>
+              <span className="dl-bd-vr" aria-hidden />
               {/* aria-disabled, not disabled: a disabled button shows no tooltip,
                   and "why can't I" must always have an answer. */}
-              <button className="btn btn-ghost btn-sm" aria-label="Undo"
+              <button className="dl-bd-ib" aria-label="Undo"
                 aria-disabled={!undoStack.undoLabel || undoStack.busy}
                 title={undoStack.undoLabel ? `Undo: ${undoStack.undoLabel} (Ctrl+Z)` : 'Nothing to undo yet'}
-                style={{ opacity: undoStack.undoLabel ? 1 : 0.4 }}
                 onClick={() => { if (undoStack.undoLabel) void runUndo() }}>
-                <Undo2 size={14} />
+                <Undo2 size={15} />
               </button>
-              <button className="btn btn-ghost btn-sm" aria-label="Redo"
+              <button className="dl-bd-ib" aria-label="Redo"
                 aria-disabled={!undoStack.redoLabel || undoStack.busy}
                 title={undoStack.redoLabel ? `Redo: ${undoStack.redoLabel} (Ctrl+Y)` : 'Nothing to redo'}
-                style={{ opacity: undoStack.redoLabel ? 1 : 0.4 }}
                 onClick={() => { if (undoStack.redoLabel) void runRedo() }}>
-                <Redo2 size={14} />
+                <Redo2 size={15} />
               </button>
             </span>
           )}
           {editMode && (
             <select aria-label="Sensitivity label" value={report.classification ?? ''}
-              title="Classify this report" style={{ fontSize: 11, padding: '2px 4px' }}
+              title="Classify this report" className="dl-bd-sel"
               onChange={async e => {
                 try {
                   const prev = report.classification ?? ''
@@ -3234,13 +3319,13 @@ export default function ReportBuilder() {
                 page link, guest links, embedding and schedules, each behind
                 its own v1 gate inside. A viewer gets "View only · why?". */}
             {(canEdit || isAdmin) && (
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShareOpen(true)}
+              <button type="button" className={editMode ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm'} onClick={() => setShareOpen(true)}
                 title={tr('shx.shareTitle')}>
                 <IconLabel icon={Share2}>{tr('builder.share')}</IconLabel>
               </button>
             )}
             {canEdit && (
-            <button className="btn btn-ghost btn-sm" title="Kiosk playback: pages advance every 8s; any key exits"
+            <button className="btn btn-ghost btn-sm dl-bd-icn" title="Kiosk playback: pages advance every 8s; any key exits"
               aria-pressed={kiosk}
               onClick={() => { setEditMode(false); setAiOpen(false); setFocusW(null); setKiosk(k => !k) }}>
               {kiosk ? <IconLabel icon={Pause}>{tr('builder.stop')}</IconLabel> : <IconLabel icon={Play}>{tr('builder.present')}</IconLabel>}
@@ -3248,14 +3333,16 @@ export default function ReportBuilder() {
             )}
             {/* The Export dialog (7c): PDF, Excel, offline package, print. The
                 export policy greys the downloads inside, with its reason. */}
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPdfDialog(true)}
+            <button type="button" className="btn btn-ghost btn-sm dl-bd-icn" onClick={() => setPdfDialog(true)}
               title={tr('shx.exportTitle')}>
               <IconLabel icon={FileDown}>{tr('builder.export')}</IconLabel>
             </button>
             {/* Beside PDF on purpose: a subscription is the recurring version of
                 that same export, and it needs only view -- so it must sit OUTSIDE
                 the editMode-gated toolbar, which a viewer never sees. */}
-            <SubscribeButton reportId={reportId} />
+            {/* Icon-only while building (7e1: the prototype's header has no
+                Subscribe); the word stays its accessible name. */}
+            <span className="dl-bd-sub"><SubscribeButton reportId={reportId} /></span>
             {/* The reports open in this tab, as SAS lists them: one button and a
                 menu, not a strip of tabs above the page. */}
             {!kiosk && (
@@ -3289,11 +3376,17 @@ export default function ReportBuilder() {
               // while editing. The old two-part switch appeared only in edit
               // mode, so the control changed shape and moved on every switch.
               editMode ? (
-                <button type="button" aria-label="View mode" data-testid="mode-toggle"
-                  className="btn btn-sm dl-modebtn" title={tr('builder.view')}
-                  onClick={() => setEditMode(false)}>
-                  <Eye size={13} aria-hidden /> {tr('builder.view')}
-                </button>
+                // Edit is where you are; View is the button (7e1, after the
+                // prototype's Edit / View switch). Still the one mode button,
+                // last, as v1 and 7d keep it.
+                <span className="dl-bd-mode" role="group" aria-label={tr('bd.mode')}>
+                  <span className="on" aria-current="true"><Pencil size={13} aria-hidden /> {tr('builder.edit')}</span>
+                  <button type="button" aria-label="View mode" data-testid="mode-toggle"
+                    className="dl-modebtn" title={tr('builder.view')}
+                    onClick={() => setEditMode(false)}>
+                    <Eye size={13} aria-hidden /> {tr('builder.view')}
+                  </button>
+                </span>
               ) : (
                 <button type="button" aria-label="Edit mode" data-testid="mode-toggle"
                   className="btn btn-primary btn-sm dl-modebtn" title={tr('builder.edit')}
@@ -3316,7 +3409,7 @@ export default function ReportBuilder() {
         {/* Report / Data / Model view strip — authors only. A viewer has one
             surface (the dashboard); these tabs are the studio. */}
         {topOpen && canEdit && !kiosk && !modern && (
-        <div className="dl-panebar">
+        <div className="dl-panebar dl-bd-bar">
           {/* Scoped to just these three: other tests use `within(view-strip)` to look
               for a button named /Report/i, and "Report rules" below would otherwise
               also match that regex if it shared this container.
@@ -3333,6 +3426,16 @@ export default function ReportBuilder() {
               </button>
             ))}
           </div>
+          {/* The prototype's second row (7e1): pages, then Layout and zoom. */}
+          {activeView === 'report' && editMode && (<>
+            <span className="dl-bd-vr" aria-hidden />
+            {pageTabs}
+            <span className="sp" />
+            {layoutMenu}
+            <span className="dl-bd-vr" aria-hidden />
+            <ZoomControl zoom={zoom} onZoom={setZoom} />
+            {pageFilterBar}
+          </>)}
           {activeView === 'report' && editMode && (() => {
             // Toolbar architecture: the most-used panels stay as buttons; the
             // rest live behind ⋯ More. Thirteen co-equal toggles overflowed the
@@ -3513,110 +3616,22 @@ export default function ReportBuilder() {
           </div>
         )}
 
-        {/* Page tabs (not in Present: its own controls page through) */}
-        {!modern && !kiosk && (
-        <div style={{ display:'flex', alignItems:'center', gap:3, padding:'0 16px', borderBottom:'1px solid var(--border)', flexShrink:0, background:'var(--surface)' }}>
-          {!topOpen && (
-            <span className="dl-topfold-lead">
-              <button type="button" className="dl-topfold" data-testid="top-expand"
-                aria-expanded={false} aria-label={tr('builder.top.expand')} title={tr('builder.top.expand')}
-                onClick={() => setTopOpen(true)}>
-                <ChevronDown size={14} aria-hidden />
-              </button>
-              <h1 className="dl-topfold-name" title={report.name}>{report.name}</h1>
-            </span>
-          )}
-          {report.pages
-            .filter(page => (editMode || (page.page_type !== 'hidden' && page.page_type !== 'popup')) && page.page_type !== 'tooltip' && page.page_type !== 'drillthrough')
-            .map(page => {
-              const typeIcon = page.page_type === 'hidden' ? ' [H]' : page.page_type === 'popup' ? ' [P]' : ''
-              const isActive = page.id === activePage?.id
-              return (
-                <div key={page.id} style={{ display:'flex', alignItems:'center', borderBottom: isActive ? '2px solid var(--accent)' : '2px solid transparent', marginBottom:-1,
-                  opacity: page.page_type === 'hidden' ? 0.55 : 1 }}>
-                  {editPid === page.id ? (
-                    <input value={editPname} onChange={e => setEditPname(e.target.value)}
-                      onBlur={() => savePageName(page)} onKeyDown={e => e.key==='Enter' && savePageName(page)}
-                      style={{ fontSize:12, padding:'5px 8px', width:90 }} autoFocus />
-                  ) : (
-                    <button
-                      style={{ padding:'7px 13px', border:'none', background:'none', cursor:'pointer', fontSize:12,
-                        color: isActive ? 'var(--accent)' : 'var(--muted)',
-                        fontWeight: isActive ? 600 : 400, fontFamily:'var(--sans)' }}
-                      onClick={() => { setActivePage(page); setSelectedW(null) }}
-                      onDoubleClick={() => {
-                        if (!editMode) return
-                        setEditPid(page.id); setEditPname(page.name)
-                      }}
-                    >{pageLabel(page.name)}{typeIcon}</button>
-                  )}
-                  {editMode && report.pages.length > 1 && (
-                    <button style={{ background:'none', border:'none', color:'var(--muted)', cursor:'pointer', padding:'0 4px', fontSize:13 }}
-                      aria-label={`Delete page "${page.name}"`} title={`Delete page "${page.name}" (undoable)`}
-                      onClick={() => deletePage(page)}>x</button>
-                  )}
-                </div>
-              )
-            })}
-          {editMode && (
-            <div style={{ position: 'relative', display: 'inline-flex', gap: 2 }}>
-              <button className="btn btn-ghost btn-sm" onClick={addPage} style={{ marginBottom:3, fontSize:11 }}>
-                <Plus size={11}/> {tr('builder.page')}
-              </button>
-              <button className="btn btn-ghost btn-sm" aria-label="Add page from a template"
-                aria-expanded={pageMenuOpen}
-                onClick={() => setPageMenuOpen(o => !o)} style={{ marginBottom:3, fontSize:11, padding:'4px 6px' }}>
-                ▾
-              </button>
-              {pageMenuOpen && (
-                <PageTemplateMenu
-                  reportId={reportId}
-                  activePageId={activePage?.id ?? null}
-                  onClose={() => setPageMenuOpen(false)}
-                  onAdded={() => { setPageMenuOpen(false); loadReport() }}
-                />
-              )}
-            </div>
-          )}
-          {editMode && (
-            <div style={{ position: 'relative', marginInlineStart: 8, marginBottom: 3 }}>
-              <button className="btn btn-ghost btn-sm" aria-label="Page layout"
-                aria-expanded={layoutMenuOpen}
-                onClick={() => setLayoutMenuOpen(o => !o)}
-                style={{ fontSize: 11 }}>
-                <IconLabel icon={LayoutTemplate}>{tr('builder.layout')}</IconLabel>
-              </button>
-              {layoutMenuOpen && (
-                <div role="menu" aria-label="Page layout"
-                  style={{ position: 'absolute', insetInlineStart: 0, top: '110%', zIndex: 700, minWidth: 220,
-                    background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8,
-                    boxShadow: '0 8px 24px rgba(0,0,0,.25)', padding: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  {RECIPES.map(r => {
-                    const on = activePage?.layout_mode !== 'free' && (activePage?.layout_template === r.id || (!activePage?.layout_template && r.id === DEFAULT_RECIPE))
-                    return (
-                      <button key={r.id} role="menuitem"
-                        onClick={() => { void applyPageRecipe(r.id) }}
-                        style={{ textAlign: 'start', width: '100%', padding: '6px 8px', border: 'none', borderRadius: 6,
-                          background: on ? 'var(--accent)' : 'transparent', color: on ? 'var(--mc-accent-fg)' : 'var(--text)',
-                          cursor: 'pointer', fontSize: 12 }}>
-                        <div style={{ fontWeight: 600 }}>{r.label}{r.id === DEFAULT_RECIPE ? ' (default)' : ''}</div>
-                        <div style={{ fontSize: 11, opacity: 0.8 }}>{r.hint}</div>
-                      </button>
-                    )
-                  })}
-                  <button role="menuitem"
-                    onClick={() => { void applyPageRecipe('free') }}
-                    style={{ textAlign: 'start', width: '100%', padding: '6px 8px', border: 'none', borderRadius: 6, marginTop: 4,
-                      background: activePage?.layout_mode === 'free' ? 'var(--accent)' : 'transparent',
-                      color: activePage?.layout_mode === 'free' ? 'var(--mc-accent-fg)' : 'var(--text)',
-                      cursor: 'pointer', fontSize: 12 }}>
-                    <div style={{ fontWeight: 600 }}>Free layout</div>
-                    <div style={{ fontSize: 11, opacity: 0.8 }}>Place tiles by hand; still no overlap or tiny charts</div>
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
+        {/* Page tabs while the top is folded (7e1): with it open they sit in
+            the second row. Present pages through with its own controls, and a
+            reader gets the 7d bar. */}
+        {!modern && !kiosk && !topOpen && (
+        <div className="dl-bd-bar">
+          <span className="dl-topfold-lead">
+            <button type="button" className="dl-topfold" data-testid="top-expand"
+              aria-expanded={false} aria-label={tr('builder.top.expand')} title={tr('builder.top.expand')}
+              onClick={() => setTopOpen(true)}>
+              <ChevronDown size={14} aria-hidden />
+            </button>
+            <h1 className="dl-topfold-name" title={report.name}>{report.name}</h1>
+          </span>
+          {editMode && pageTabs}
+          <span className="sp" />
+          {editMode && layoutMenu}
           {pageFilterBar}
         </div>
         )}
@@ -4366,13 +4381,25 @@ export default function ReportBuilder() {
           </div>
         )}
 
-        {!kiosk && <StatusBar
-          pageIndex={report.pages.findIndex(p => p.id === activePage?.id)}
-          pageCount={report.pages.length}
-          saveState={saving ? 'saving' : 'saved'}
-          zoom={zoom}
-          onZoomChange={setZoom}
-        />}
+        {!kiosk && (editMode ? (
+          // Building (7e1): zoom is in the second row and the save state in the
+          // header; the footer counts the page's widgets and the selection.
+          <StatusBar
+            pageIndex={report.pages.findIndex(p => p.id === activePage?.id)}
+            pageCount={report.pages.length}
+            widgets={pageWidgets.length}
+            selected={multiSelectedIds.size || (selectedW ? 1 : 0)}
+            onShortcuts={() => setShortcutsOpen(true)}
+          />
+        ) : (
+          <StatusBar
+            pageIndex={report.pages.findIndex(p => p.id === activePage?.id)}
+            pageCount={report.pages.length}
+            saveState={saving ? 'saving' : 'saved'}
+            zoom={zoom}
+            onZoomChange={setZoom}
+          />
+        ))}
       </div>
       {/* The page copilot: edit THIS page in plain language. Edit mode only —
           it writes through the same endpoints as the GUI, so offering it to a

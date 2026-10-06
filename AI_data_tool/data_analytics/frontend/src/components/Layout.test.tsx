@@ -225,3 +225,25 @@ describe('Layout — the theme switch lives in the header', () => {
     expect(main).toHaveTextContent('Page Content')
   })
 })
+
+describe('the builder opens with the icon rail (redesign 7e, S6)', () => {
+  it('folds to icons while the builder asks, without touching the saved choice, and the user can still expand it', async () => {
+    const { act } = await import('@testing-library/react')
+    mockUser = { ...mockUser, id: 42 }
+    localStorage.removeItem('rail-expanded:42')
+    renderLayout('/reports/1')
+    const rail = () => screen.getByTestId('app-rail')
+    expect(rail()).toHaveAttribute('data-expanded', 'true')
+    act(() => { window.dispatchEvent(new CustomEvent('datalytics:builder-compact', { detail: true })) })
+    expect(rail()).toHaveAttribute('data-expanded', 'false')
+    expect(localStorage.getItem('rail-expanded:42')).not.toBe('0')
+    // The user can still open it, and it stays open for this visit.
+    fireEvent.click(screen.getByRole('button', { name: 'Expand navigation' }))
+    expect(rail()).toHaveAttribute('data-expanded', 'true')
+    expect(localStorage.getItem('rail-expanded:42')).not.toBe('0')
+    // Leaving the builder restores the saved choice.
+    act(() => { window.dispatchEvent(new CustomEvent('datalytics:builder-compact', { detail: true })) })
+    act(() => { window.dispatchEvent(new CustomEvent('datalytics:builder-compact', { detail: false })) })
+    expect(rail()).toHaveAttribute('data-expanded', 'true')
+  })
+})

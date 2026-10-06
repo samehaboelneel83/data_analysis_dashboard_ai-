@@ -1,0 +1,105 @@
+/* The builder (redesign 7e), after the approved prototype's bld.css, with the
+   product's tokens. Edit mode only: reading keeps viewMode.css (7d). */
+
+/* ── Header ───────────────────────────────────────────────────── */
+/* Two full rows while building, as the prototype: v1's 5.14 let the title row
+   and the panel bar share one line when both fitted. */
+.dl-builder-top > .dl-bd-top, .dl-builder-top > .dl-bd-bar { flex: 1 1 100% !important; max-width: 100%; }
+.dl-builder-top > .dl-bd-top { border-bottom: 1px solid var(--border) !important; }
+.dl-builder-top > .dl-bd-bar { border-bottom: 0; }
+.dl-bd-top { min-height: 52px; padding: 6px 12px !important; gap: 8px !important; align-items: center !important; }
+.dl-bd-top .dl-hdr-main { gap: 8px !important; min-height: 38px !important; }
+.dl-bd-top .dl-hdr-end { gap: 6px !important; min-height: 38px !important; }
+.dl-bd-top .btn-sm { height: 32px; }
+.dl-bd-back { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); flex: none; }
+.dl-bd-back:hover { background: var(--surface2); color: var(--text); }
+.dl-bd-top .dl-report-name { font: 600 16px var(--sans) !important; padding: 4px 8px !important; border-radius: 8px !important; max-width: 240px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid transparent !important; }
+.dl-bd-top .dl-report-name:hover { border-color: var(--border) !important; }
+.dl-bd-name-in { font: 600 16px var(--sans); padding: 4px 8px; border-radius: 8px; border: 1px solid var(--accent); box-shadow: 0 0 0 3px var(--accent-soft);
+  background: var(--surface); color: var(--text); min-width: 220px; }
+.dl-bd-chips { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.dl-bd-chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  white-space: nowrap; background: var(--surface2); color: var(--muted); text-decoration: none; max-width: 220px; }
+.dl-bd-chip > span { overflow: hidden; text-overflow: ellipsis; }
+.dl-bd-chip.ds { background: color-mix(in srgb, var(--dl-series-2) 13%, transparent); color: color-mix(in srgb, var(--dl-series-2) 70%, var(--text)); }
+.dl-bd-chip.ds:hover { text-decoration: underline; }
+.dl-bd-chip.src { background: none; padding: 0 4px; font-weight: 500; color: var(--mc-accent-ink); }
+.dl-bd-save { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.dl-bd-save > svg { color: var(--success); flex: none; }
+.dl-bd-save[data-saving] > svg { color: var(--muted); }
+.dl-spin { animation: dl-spin 1s linear infinite; }
+@keyframes dl-spin { to { transform: rotate(360deg); } }
+.dl-bd-vr { width: 1px; height: 22px; background: var(--border); flex: none; margin: 0 2px; }
+.dl-bd-ib { width: 30px; height: 30px; display: inline-grid; place-items: center; border: 0; border-radius: 8px; background: none; color: var(--muted);
+  cursor: pointer; padding: 0; flex: none; }
+.dl-bd-ib:hover:not(:disabled):not([aria-disabled="true"]) { background: var(--surface2); color: var(--text); }
+.dl-bd-ib:disabled, .dl-bd-ib[aria-disabled="true"] { opacity: .4; cursor: default; }
+.dl-bd-sel { height: 28px; font-size: 12px !important; padding: 0 4px !important; border-radius: 8px !important; max-width: 128px; width: auto !important; }
+/* The mode switch: Edit is where you are, View is the button. */
+.dl-bd-mode { display: inline-flex; align-items: center; padding: 3px; gap: 2px; border-radius: 10px; background: var(--surface2); flex: none; }
+.dl-bd-mode > * { height: 28px; display: inline-flex; align-items: center; gap: 6px; padding: 0 11px; border-radius: 7px; font-size: 13px; font-weight: 600;
+  border: 0; background: none; color: var(--muted); font-family: var(--sans); }
+.dl-bd-mode > .on { background: var(--surface); color: var(--text); box-shadow: var(--dl-shadow-card); }
+.dl-bd-mode > button { cursor: pointer; }
+.dl-bd-mode > button:hover { color: var(--text); }
+
+/* Labels that give way while building: font-size 0 hides the word but keeps
+   it as the button's accessible name (display:none would drop it). */
+.dl-bd-top { container-type: inline-size; container-name: bdtop; }
+.dl-bd-top .dl-bd-sub { display: contents; }
+.dl-bd-top .dl-bd-sub > .btn > span { font-size: 0; gap: 0 !important; }
+.dl-bd-top .dl-bd-sub > .btn { width: 32px; padding: 0; justify-content: center; }
+@container bdtop (max-width: 1180px) {
+  .dl-bd-top .dl-bd-icn > span { font-size: 0; gap: 0 !important; }
+  .dl-bd-top .dl-bd-icn { width: 32px; padding: 0; justify-content: center; }
+  .dl-bd-top .dl-report-name { max-width: 200px; }
+}
+@container bdtop (max-width: 1020px) {
+  .dl-bd-chip.src { display: none; }
+  .dl-bd-top .dl-report-name { max-width: 170px; }
+}
+
+/* ── Second row: views, pages, layout, zoom ───────────────────── */
+.dl-bd-bar { min-height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: var(--surface); border-bottom: 1px solid var(--border);
+  flex-wrap: wrap; }
+.dl-bd-bar .sp { flex: 1; }
+.dl-bd-pages { display: flex; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.dl-bd-pg { position: relative; display: inline-flex; align-items: center; height: 30px; border-radius: 8px; flex: none; }
+.dl-bd-pg:hover { background: var(--surface2); }
+.dl-bd-pg[data-on] { background: var(--bg); box-shadow: inset 0 0 0 1px var(--border); }
+.dl-bd-pg[data-kind="hidden"], .dl-bd-pg[data-kind="popup"] { opacity: .7; }
+.dl-bd-pg__b { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding-inline: 12px 2px; border: 0; background: none; font: 500 13px var(--sans);
+  color: var(--muted); white-space: nowrap; cursor: pointer; }
+.dl-bd-pg[data-on] .dl-bd-pg__b { color: var(--text); font-weight: 600; }
+.dl-bd-pg__k { color: var(--mc-faint); }
+.dl-bd-pg__in { height: 26px; width: 110px; font-size: 13px; padding: 0 8px; margin-inline-start: 4px; border-radius: 6px; }
+.dl-bd-pg__m { width: 22px !important; height: 22px !important; margin-inline-end: 4px; display: grid !important; place-items: center; padding: 0 !important;
+  border: 0 !important; border-radius: 5px !important; background: none !important; color: var(--mc-faint) !important; opacity: 0; cursor: pointer; }
+.dl-bd-pg:hover .dl-bd-pg__m, .dl-bd-pg[data-on] .dl-bd-pg__m, .dl-bd-pg__m:focus-visible, .dl-bd-pg__m[aria-expanded="true"] { opacity: 1; }
+.dl-bd-pg__m:hover { background: var(--surface2) !important; color: var(--text) !important; }
+@media (hover: none) { .dl-bd-pg__m { opacity: 1; } }
+.dl-bd-add { position: relative; display: inline-flex; align-items: center; gap: 0; flex: none; }
+.dl-bd-add .dl-bd-tpl { width: 18px; }
+.dl-bd-zoom { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+.dl-bd-zoom > span { min-width: 42px; text-align: center; }
+.dl-bd-fit { gap: 6px; }
+.dl-bd-menuw { position: relative; }
+.dl-bd-menu { position: absolute; top: calc(100% + 4px); inset-inline-end: 0; z-index: 700; min-width: 250px; padding: 4px; border-radius: 12px;
+  background: var(--surface); border: 1px solid var(--border); box-shadow: var(--dl-shadow-overlay); display: flex; flex-direction: column; gap: 2px; }
+.dl-bd-menu [role="menuitem"] { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; padding: 7px 10px; border: 0; border-radius: 8px;
+  background: none; color: var(--text); text-align: start; cursor: pointer; font: inherit; font-size: 13px; }
+.dl-bd-menu [role="menuitem"]:hover { background: var(--surface2); }
+.dl-bd-menu [role="menuitem"] b { font-weight: 600; }
+.dl-bd-menu [role="menuitem"] small { font-size: 12px; color: var(--muted); }
+.dl-bd-menu [role="menuitem"][aria-current="true"] { background: var(--accent-soft); }
+.dl-bd-menu [role="menuitem"][aria-current="true"] b { color: var(--mc-accent-ink); }
+.dl-bd-menu hr { border: 0; border-top: 1px solid var(--border); margin: 4px 2px; width: calc(100% - 4px); }
+
+/* ── Footer ───────────────────────────────────────────────────── */
+.dl-statusbar__keys { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; color: var(--muted); font: inherit; font-size: 11.5px;
+  cursor: pointer; padding: 2px 4px; border-radius: 6px; }
+.dl-statusbar__keys:hover { color: var(--text); background: var(--surface2); }
+.dl-statusbar__keys kbd { font-family: var(--mono); font-size: 10.5px; border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; background: var(--surface); }
+
+@media (prefers-reduced-motion: reduce) { .dl-spin { animation: none; } }
