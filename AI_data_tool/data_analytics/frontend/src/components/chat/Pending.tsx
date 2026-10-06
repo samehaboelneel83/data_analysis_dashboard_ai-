@@ -17,7 +17,7 @@ import { localDigits } from '../../lib/arabicFormats'
  *  Redesign 4b: the timer-driven checklist ("Writing the query", "Running
  *  it"…) is gone. The server does not stream its progress, so those stages
  *  were guesses dressed as facts; the elapsed time and a typical range are
- *  what is actually known. */
+ *  what is actually known. The look is v1's otherwise. */
 
 //: Past this, the wait stops being ordinary and deserves an explanation rather
 //: than a spinner. Every non-dashboard question measured on this data answered
@@ -59,7 +59,7 @@ export default function Pending({ question }: { question: string }) {
       aria-live="polite"
       className="dl-pending">
       <div className="dl-pending__head">
-        <span className="dl-pending__pulse" aria-hidden><i /><i /><i /></span>
+        <span className="dl-pending__pulse" aria-hidden />
         <span className="dl-pending__title">{designing ? t('pend.designing') : t('ask.analyzing')}</span>
         <span className="dl-pending__time">{time}</span>
       </div>
@@ -67,11 +67,11 @@ export default function Pending({ question }: { question: string }) {
         <span style={{ width: '72%' }} /><span style={{ width: '54%' }} />
         <span className="dl-pending__skeleton-chart" />
       </div>
-      <div className="dl-pending__note">
-        {unusual
-          ? (designing ? t('pend.slowDashboards') : t('pend.slow'))
-          : t('pend.usual')}
-      </div>
+      {unusual && (
+        <div className="dl-pending__note">
+          {designing ? t('pend.slowDashboards') : t('pend.slow')}
+        </div>
+      )}
     </div>
   )
 }

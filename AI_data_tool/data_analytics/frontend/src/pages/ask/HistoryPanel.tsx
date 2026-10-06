@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react'
-import { MessageSquare, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Search, Trash2, X } from 'lucide-react'
+import { useRef } from 'react'
+import { MessageSquare, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Trash2, X } from 'lucide-react'
 import type { AgentConversation } from '../../services/api'
 import { useT } from '../../i18n'
 import { localDigits } from '../../lib/arabicFormats'
@@ -7,7 +7,7 @@ import { fmtDate, fmtTime } from './dates'
 
 /**
  * The threads held about the current scope, grouped Today / Earlier, with
- * "New chat" beside the title and a title search under it (redesign 4a). On a wide screen it can fold to a thin rail (the choice
+ * "New chat" on top. On a wide screen it can fold to a thin rail (the choice
  * is remembered); on a phone it is a drawer the page opens from a button.
  */
 
@@ -25,7 +25,7 @@ function when(iso?: string | null): string {
 
 export default function HistoryPanel({
   conversations, selected, onSelect, onNew, editing, onEdit, onSave, onCancelEdit, onDelete,
-  collapsed, onToggleCollapsed, mobileOpen, onCloseMobile, describe, emptyText,
+  collapsed, onToggleCollapsed, mobileOpen, onCloseMobile,
 }: {
   conversations: AgentConversation[]
   selected: number | null | undefined
@@ -40,21 +40,13 @@ export default function HistoryPanel({
   onToggleCollapsed: () => void
   mobileOpen: boolean
   onCloseMobile: () => void
-  /** The line under a title: what the thread asks about, when the list
-   *  spans datasets (no scope chosen). The time otherwise. */
-  describe?: (c: AgentConversation) => string | undefined
-  /** Said when there are no threads yet. */
-  emptyText?: string
 }) {
   const t = useT()
   const panelRef = useRef<HTMLElement>(null)
-  const [query, setQuery] = useState('')
-  const q = query.trim().toLowerCase()
-  const shown = q ? conversations.filter(c => c.title.toLowerCase().includes(q)) : conversations
   const today = new Date()
   const groups: { label: string; items: AgentConversation[] }[] = []
-  const todays = shown.filter(c => c.created_at && sameDay(new Date(c.created_at), today))
-  const earlier = shown.filter(c => !todays.includes(c))
+  const todays = conversations.filter(c => c.created_at && sameDay(new Date(c.created_at), today))
+  const earlier = conversations.filter(c => !todays.includes(c))
   if (todays.length) groups.push({ label: t('ask.hist.today'), items: todays })
   if (earlier.length) groups.push({ label: t('ask.hist.earlier'), items: earlier })
 
@@ -68,10 +60,7 @@ export default function HistoryPanel({
       <aside ref={panelRef} className={cls.join(' ')} aria-label={t('ask.hist.title')}
         onKeyDown={e => { if (e.key === 'Escape' && mobileOpen) onCloseMobile() }}>
         <div className="dl-hist__head">
-          <span className="dl-hist__title">{t('askh.title')}</span>
-          <button type="button" className="dl-hist__new" onClick={onNew} title={t('ask.newChat')}>
-            <Plus size={15} aria-hidden /> <span className="dl-hist__new-text">{t('ask.newChat')}</span>
-          </button>
+          <span className="dl-hist__title">{t('ask.hist.title')}</span>
           <button type="button" className="dl-hist__icon dl-hist__fold"
             aria-label={collapsed ? t('ask.hist.expand') : t('ask.hist.collapse')}
             title={collapsed ? t('ask.hist.expand') : t('ask.hist.collapse')}
@@ -84,19 +73,12 @@ export default function HistoryPanel({
             <X size={16} aria-hidden />
           </button>
         </div>
-        {conversations.length > 0 && (
-          <label className="dl-hist__search">
-            <Search size={14} aria-hidden />
-            <input type="search" value={query} onChange={e => setQuery(e.target.value)}
-              placeholder={t('askh.search')} aria-label={t('askh.search')} />
-          </label>
-        )}
+        <button type="button" className="dl-hist__new" onClick={onNew} title={t('ask.newChat')}>
+          <Plus size={15} aria-hidden /> <span className="dl-hist__new-text">{t('ask.newChat')}</span>
+        </button>
         <ul aria-label={t('ask.conversations')} className="dl-hist__list">
           {conversations.length === 0 && (
-            <li className="dl-hist__empty">{emptyText ?? t('ask.noConversations')}</li>
-          )}
-          {conversations.length > 0 && shown.length === 0 && (
-            <li className="dl-hist__empty">{t('askh.noMatch')}</li>
+            <li className="dl-hist__empty">{t('ask.noConversations')}</li>
           )}
           {groups.map(g => [
             <li key={`g-${g.label}`} role="presentation" className="dl-hist__group">{g.label}</li>,
@@ -117,9 +99,7 @@ export default function HistoryPanel({
                     <MessageSquare size={14} aria-hidden className="dl-hist__pick-icon" />
                     <span className="dl-hist__pick-text">
                       <span className="dl-hist__pick-title" dir="auto">{c.title}</span>
-                      {describe
-                        ? describe(c) && <span className="dl-hist__pick-when" dir="auto">{describe(c)}</span>
-                        : when(c.created_at) && <span className="dl-hist__pick-when">{localDigits(when(c.created_at))}</span>}
+                      {when(c.created_at) && <span className="dl-hist__pick-when">{localDigits(when(c.created_at))}</span>}
                     </span>
                   </button>
                 )}

@@ -231,14 +231,11 @@ export function ResultGrid({ result, focus }: {
   )
 }
 
-function ResultChart({ result, format, x, y, highlightTop }: {
+function ResultChart({ result, format, x, y }: {
   result: AgentResult
   format: 'bar' | 'line' | 'pie'
   x?: string | null
   y?: string | null
-  /** The Ask AI answer card's bars: the top one in the accent, the rest grey
-   *  (redesign 4a), through the renderer's existing per-row fills. */
-  highlightTop?: boolean
 }) {
   const { rtl } = useDirection()
   // On a phone, value labels over each bar collide; the axis and the rows
@@ -256,12 +253,6 @@ function ResultChart({ result, format, x, y, highlightTop }: {
         rows: grouped.rows.map(r => r.map(v => (typeof v === 'number' ? readingValue(v) : v))) }
     : { rows }
   const Renderer = format === 'bar' ? BarChartRenderer : format === 'line' ? LineChartRenderer : PieChartRenderer
-  const top = highlightTop && format === 'bar' && !grouped && rows.length > 1
-    ? rows.reduce((best, r, i) => (Number(r.value) > Number(rows[best].value) ? i : best), 0) : -1
-  const ruleStyles = top < 0 ? undefined : {
-    rows: rows.map((_, i) => ({ fill: i === top ? 'var(--accent)' : 'var(--dl-chart-rest, color-mix(in oklab, var(--text) 20%, var(--surface)))' })),
-    cells: {}, widget: {},
-  }
   return (
     <div data-testid="result-chart" data-format={format} data-grouped={grouped ? grouped.series : undefined}
       style={{ height: 240, width: '100%', minWidth: 280 }}>
@@ -269,7 +260,7 @@ function ResultChart({ result, format, x, y, highlightTop }: {
           axes outright with the two columns it is actually drawing. The rows
           are `{name, value}` by then -- without this the axes would read
           "name" and "value", which say nothing about this data. */}
-      <Renderer rows={rows} data={data} rtl={rtl} broadcasts={false} ruleStyles={ruleStyles}
+      <Renderer rows={rows} data={data} rtl={rtl} broadcasts={false}
         cfg={{ x_axis_label: axes.x, y_axis_label: axes.y,
           // 5.13: long category names ("Assistant Engineer", department
           // names) clip with "…" like the Suggestions preview, instead of
@@ -352,23 +343,11 @@ function Kpi({ result, focused }: { result: AgentResult; focused?: boolean }) {
   )
 }
 
-/** The chart a result draws (bar / line / pie), or null for a grid or KPI. */
-export function chartFormatFor(result: AgentResult, presentation?: AgentPresentation | null): 'bar' | 'line' | 'pie' | null {
-  const format = presentation?.format
-  if (format === 'bar' || format === 'line' || format === 'pie') return format
-  const auto = autoChart(result)
-  return auto === 'bar' || auto === 'line' ? auto : null
-}
-
-export default function ResultView({ results, presentation, focus, rows = 'toggle', highlightTop }: {
+export default function ResultView({ results, presentation, focus }: {
   results: AgentResult[]
   presentation?: AgentPresentation | null
   /** A number of the answer to point at (E11). */
   focus?: EvidenceFocus | null
-  /** 'none': the chart alone -- the Ask AI answer card shows the rows beside
-   *  it (redesign 4a). Default keeps the "Show rows" toggle under the chart. */
-  rows?: 'toggle' | 'none'
-  highlightTop?: boolean
 }) {
   const t = useT()
   const [rowsOpen, setRowsOpen] = useState(false)
@@ -390,15 +369,13 @@ export default function ResultView({ results, presentation, focus, rows = 'toggl
               <>
                 <div className="dl-result__chart">
                   <ResultChart result={r} format={drawn!}
-                    x={presentation?.x} y={presentation?.y} highlightTop={highlightTop} />
+                    x={presentation?.x} y={presentation?.y} />
                 </div>
-                {rows === 'toggle' && (
-                  <button type="button" className="dl-result__rows-toggle" aria-expanded={rowsOpen}
-                    onClick={() => setRowsOpen(o => !o)}>
-                    {rowsOpen ? t('ask.hideRows') : t('ask.showRows', { n: localDigits(String(r.total)) })}
-                  </button>
-                )}
-                {rows === 'toggle' && rowsOpen && <ResultGrid result={r} focus={here} />}
+                <button type="button" className="dl-result__rows-toggle" aria-expanded={rowsOpen}
+                  onClick={() => setRowsOpen(o => !o)}>
+                  {rowsOpen ? t('ask.hideRows') : t('ask.showRows', { n: localDigits(String(r.total)) })}
+                </button>
+                {rowsOpen && <ResultGrid result={r} focus={here} />}
               </>
             ) : auto === 'kpi' ? null : (
               <ResultGrid result={r} focus={here} />

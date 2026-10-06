@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import { usePrompt } from '../ui/PromptDialog'
-import { AlertCircle, AlertTriangle, BarChart3, Code2, Copy, Database, Download, Pencil, RotateCcw, Sparkles, ThumbsDown, ThumbsUp, User } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { AlertTriangle, Code2, Copy, Database, Download, Pencil, RotateCcw, Sparkles, ThumbsDown, ThumbsUp, User } from 'lucide-react'
 import { agentApi, dataSourcesApi } from '../../services/api'
 import type { AgentAnswer, AgentMessage, AgentPresentation, AgentResult, AnswerEvidence } from '../../services/api'
 import Pending from './Pending'
@@ -18,10 +17,8 @@ import { renderTextWithLinks } from '../../lib/inlineMarkup'
 import { aiLimitMessage } from '../../lib/aiLimit'
 import Composer from './Composer'
 import AnswerText from './AnswerText'
-import AnswerCard from './AnswerCard'
-import { ClarifyCard, FirstRun, columnsMentioned, type ClarifyOption } from './pageStates'
+import { columnsMentioned } from './clarifyColumns'
 import { useAiOffline } from '../../pages/ask/useAiOffline'
-import { localDigits } from '../../lib/arabicFormats'
 import AddToDashboard from './AddToDashboard'
 import SaveAsRule, { looksLikeDefinition } from './SaveAsRule'
 import { answerToWidget, type WidgetDraft } from './answerWidget'
@@ -65,19 +62,6 @@ export interface ChatPaneProps {
   /** Mounted inside a dashboard: "Add to this page" puts the answer straight
    *  onto the page being edited, instead of asking which dashboard. */
   onAddToPage?: (draft: WidgetDraft, title: string) => unknown
-  /** 'page': the Ask AI page's answer card (redesign 4a) -- the latest answer
-   *  in full, older ones compact. The builder mount keeps v1's rendering. */
-  variant?: 'page'
-  /** Shown in the answer card's header. */
-  datasetName?: string
-  /** Text to put into the question box (a column clicked in the side panel);
-   *  `seq` makes the same column clickable twice. */
-  insertRequest?: { text: string; seq: number } | null
-  /** Rows in the scope, for the first-run line ("ENROLMENTS 2025 · 3,612 ROWS"). */
-  scopeRows?: number | null
-  /** Distinct values per column (from the saved profile), for the
-   *  clarification's column options ("A column in X · 4 values"). */
-  columnValues?: Record<string, number>
 }
 
 type MessageKind = 'answer' | 'clarify' | 'error' | 'limit'
@@ -151,23 +135,19 @@ function isProposals(p: unknown): p is DashboardProposalsPresentation {
 }
 
 export default function ChatPane({ dataSourceId, datasetIds, conversationId, onConversationCreated,
-  suggestions, datasetColumns, onAddToPage, variant, datasetName, insertRequest, scopeRows, columnValues }: ChatPaneProps) {
+  suggestions, datasetColumns, onAddToPage }: ChatPaneProps) {
   const t = useT()
-  const page = variant === 'page'
-  // The top bar's model light, read from its own poll (4b). The builder mount
-  // never locks: its copilot has its own offline handling.
-  const ai = useAiOffline()
-  const offline = page && ai.offline
-  const [, setTick] = useState(0)
-  useEffect(() => {
-    if (!offline) return
-    const id = window.setInterval(() => setTick(n => n + 1), 5000)
-    return () => window.clearInterval(id)
-  }, [offline])
   const { direction } = useDirection()
   // Model and server text: markup rendered, laid out by its majority script.
   const modelText = (text: string) => renderTextWithLinks(text, { httpsOnly: true })
   const owned = conversationId !== undefined
+  // The top bar's model light, read from its own poll: while it is red the
+  // page's question box is locked. The builder mount (conversationId
+  // omitted) never locks; its copilot has its own handling.
+  const ai = useAiOffline()
+  const offline = owned && ai.offline
+  // "What was wrong?" after a thumbs down: the run it is about, and the text.
+  const [why, setWhy] = useState<{ run: number; text: string } | null>(null)
   const [convId, setConvId] = useState<number | null>(conversationId ?? null)
   // What the pane itself created or last loaded -- so a parent echoing the
   // id we just reported does not trigger a reload of the thread we hold.
@@ -239,23 +219,13 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
       .finally(() => { if (seq === loadSeq.current) setLoading(false) })
   }, [owned, conversationId])
 
-  useEffect(() => {
-    if (!insertRequest) return
-    setInput(v => (v && !/\s$/.test(v) ? `${v} ${insertRequest.text}` : `${v}${insertRequest.text}`))
-  }, [insertRequest])
-
   const target = dataSourceId != null ? { dataSourceId } : { datasetIds }
 
   // Keep the newest turn in view as questions and answers arrive.
   const endRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    // The page's answer card is taller than a screen: show the latest turn
-    // from its question down, not its last line (4a).
-    const last = variant === 'page'
-      ? endRef.current?.parentElement?.querySelector<HTMLElement>('article.dl-turn:last-of-type') : null
-    if (last) last.scrollIntoView?.({ block: 'start', behavior: 'smooth' })
-    else endRef.current?.scrollIntoView?.({ block: 'end', behavior: 'smooth' })
-  }, [messages.length, pending, variant])
+    endRef.current?.scrollIntoView?.({ block: 'end', behavior: 'smooth' })
+  }, [messages.length, pending])
 
   /** `choice` is an option the agent offered and the person clicked. It is
    *  sent exactly as typed would be -- same endpoint, same history, same
@@ -308,6 +278,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
 
   const rate = async (runId: number, rating: 'up' | 'down', comment?: string) => {
     setFeedbackByRun(m => ({ ...m, [runId]: rating })) // optimistic
+    if (!comment) setWhy(rating === 'down' ? { run: runId, text: '' } : null)
     try {
       if (convId != null) await agentApi.feedback(convId, comment ? { runId, rating, comment } : { runId, rating })
       if (comment) toast.success(t('ans3.thanks'))
@@ -445,57 +416,13 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
   }
   const pendingTurn = pending !== null ? turns[turns.length - 1] : null
   const rephrase = (suggestions ?? []).slice(0, 3)
-  // The page's card: which answer is the latest (shown in full), and two
-  // starter questions not asked yet for "Ask next".
-  // Full only while it is the newest turn: a new question folds it (4b).
-  const lastTurn = turns[turns.length - 1]
-  const lastAnswerId = lastTurn?.answer?.kind === 'answer' ? lastTurn.answer.id : undefined
-  const asked = new Set(messages.filter(m => m.role === 'user').map(m => m.text.trim().toLowerCase()))
-  const askNext = (suggestions ?? []).filter(s => !asked.has(s.trim().toLowerCase())).slice(0, 2)
-
-  // A clarification's ways to answer: the columns it names, then the server's
-  // own choices. When the next question IS one of them, the card folds to
-  // "You chose …" and that question is not repeated as a bubble (4b).
-  const clarifyOptions = (msg: ChatMessage): ClarifyOption[] => {
-    const cols = columnsMentioned(msg.text, datasetColumns ?? [])
-    const out: ClarifyOption[] = cols.map(c => ({
-      send: t('clar3.use', { col: c }),
-      label: <>{t('clar3.useWord')} <code className="dl-clar3__col" dir="ltr">{c}</code></>,
-      sub: [datasetName ? t('clar3.colIn', { name: datasetName }) : t('clar3.col'),
-        columnValues?.[c] != null ? t('askcol.values', { n: localDigits(String(columnValues[c])) }) : null]
-        .filter(Boolean).join(' · '),
-    }))
-    if (isChoices(msg.presentation)) {
-      for (const o of msg.presentation.options) {
-        if (typeof o === 'string' && o.trim() && !out.some(x => x.send === o)) out.push({ send: o, label: o })
-      }
-    }
-    return out
-  }
-  const chosenFor = new Map<number, ReactNode>()
-  const hideQuestion = new Set<number>()
-  if (page) {
-    turns.forEach((turn, i) => {
-      const next = turns[i + 1]
-      if (turn.answer?.kind !== 'clarify' || !next?.question) return
-      const pick = clarifyOptions(turn.answer).find(o => o.send === next.question!.text)
-      if (!pick) return
-      chosenFor.set(turn.key, <strong dir="auto">{pick.label}</strong>)
-      hideQuestion.add(next.key)
-    })
-  }
-  const lastTurnKey = turns[turns.length - 1]?.key
 
   return (
     <div className="dl-chat">
       <div className="dl-chat__scroll">
         {loading && <p className="dl-chat__note">{t('common.loading')}</p>}
         {loadError && <p role="alert" className="dl-chat__note dl-chat__note--error">{loadError}</p>}
-        {!loading && !loadError && messages.length === 0 && page && (
-          <FirstRun name={datasetName} rows={scopeRows} starters={suggestions ?? []}
-            onAsk={q => void send(q)} busy={busy || offline} />
-        )}
-        {!loading && !loadError && messages.length === 0 && !page && (
+        {!loading && !loadError && messages.length === 0 && (
           suggestions && suggestions.length > 0 ? (
             <div className="dl-chat__start">
               <p className="dl-chat__start-title">{t('ask.tryOne')}</p>
@@ -519,7 +446,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
           return (
             <article key={turn.key} className={`dl-turn${msg?.kind === 'error' ? ' dl-turn--error' : ''}`}
               aria-label={turn.question?.text}>
-              {turn.question && !hideQuestion.has(turn.key) && (
+              {turn.question && (
                 <header className="dl-turn__q">
                   <span className="dl-turn__avatar" aria-hidden><User size={14} /></span>
                   <p className="dl-turn__q-text" dir="auto">{turn.question.text}</p>
@@ -545,60 +472,49 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
                     ) : msg.kind === 'error' ? (
                       <div className="dl-answer-error">
                         <p className="dl-answer-error__title">
-                          {page ? <AlertCircle size={16} aria-hidden /> : <AlertTriangle size={16} aria-hidden />} {t('ask.err.title')}
+                          <AlertTriangle size={16} aria-hidden /> {t('ask.err.title')}
                         </p>
                         <p className="dl-answer-error__hint">{t('ask.err.hint')}</p>
                         {rephrase.length > 0 && (
                           <div className="dl-chips dl-chips--small" role="group" aria-label={t('ask.err.tryInstead')}>
-                            {page && <span className="dl-chips__label" aria-hidden>{t('ask.err.tryInstead')}</span>}
                             {rephrase.map(s => (
                               <button key={s} type="button" className="dl-chip" disabled={busy}
                                 onClick={() => void send(s)}>{s}</button>
                             ))}
                           </div>
                         )}
-                        {turn.question && page && (
+                        <details className="dl-answer-error__details">
+                          <summary>{t('ask.err.details')}</summary>
+                          <div dir="ltr" className="dl-answer-error__raw">{modelText(msg.text)}</div>
+                        </details>
+                        {turn.question && (
                           <div className="dl-actions">
-                            <button type="button" className="btn btn-primary btn-sm" disabled={busy || offline}
+                            <button type="button" className="dl-act" disabled={busy || offline}
                               onClick={() => void send(turn.question!.text)}>
-                              <RotateCcw size={14} aria-hidden /> {t('err3.tryAgain')}
+                              <RotateCcw size={14} aria-hidden /> {t('ask.retry')}
                             </button>
-                            <button type="button" className="btn btn-sm" disabled={offline}
-                              onClick={() => setInput(turn.question!.text)}>
+                            <button type="button" className="dl-act" onClick={() => setInput(turn.question!.text)}>
                               <Pencil size={14} aria-hidden /> {t('err3.edit')}
                             </button>
                           </div>
                         )}
-                        <details className="dl-answer-error__details" open={page || undefined}>
-                          <summary>{t('ask.err.details')}</summary>
-                          <div dir="ltr" className="dl-answer-error__raw">{modelText(msg.text)}</div>
-                        </details>
-                        {turn.question && !page && (
-                          <div className="dl-actions">
-                            <button type="button" className="dl-act" disabled={busy}
-                              onClick={() => void send(turn.question!.text)}>
-                              <RotateCcw size={14} aria-hidden /> {t('ask.retry')}
-                            </button>
-                          </div>
-                        )}
                       </div>
-                    ) : msg.kind === 'clarify' && page ? (
-                      <ClarifyCard
-                        body={<p className="dl-clar3__q" dir={majorityDir(msg.text, direction)}>{modelText(msg.text)}</p>}
-                        options={clarifyOptions(msg)} onChoose={reply => void send(reply)} busy={busy || offline}
-                        chosen={chosenFor.get(turn.key)} open={turn.key === lastTurnKey} />
                     ) : msg.kind === 'clarify' ? (
                       <div className="dl-answer-clarify">
                         <span className="dl-answer-clarify__tag">{t('ask.needsDetail')}</span>
                         <p dir={majorityDir(msg.text, direction)}>{modelText(msg.text)}</p>
-                        {isChoices(msg.presentation) && (
-                          <ChoiceOptions presentation={msg.presentation} disabled={busy}
-                            onChoose={option => void send(option)} />
-                        )}
+                        {(() => {
+                          // The columns the question back names, as "Use <column>"
+                          // chips, then the server's own choices.
+                          const cols = columnsMentioned(msg.text, datasetColumns ?? []).map(c => t('clar3.use', { col: c }))
+                          const server = isChoices(msg.presentation) ? msg.presentation.options : []
+                          const options = [...cols, ...server.filter(o => !cols.includes(o))]
+                          return options.length > 0 && (
+                            <ChoiceOptions presentation={{ kind: 'choices', options }} disabled={busy || offline}
+                              onChoose={option => void send(option)} />
+                          )
+                        })()}
                       </div>
-                    ) : variant === 'page' && msg.runId != null && !isProposals(msg.presentation)
-                        && !isAnalysisResult(msg.presentation) ? (
-                      pageAnswer(msg, turn.question?.text, msg.id === lastAnswerId)
                     ) : (
                       <>
                         <AnswerText text={msg.text} evidence={msg.evidence}
@@ -626,6 +542,21 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
                         {msg.runId != null && (
                           <AnswerActions msg={msg} question={turn.question?.text} />
                         )}
+                        {why && why.run === msg.runId && (
+                          <form className="dl-why" onSubmit={e => {
+                            e.preventDefault()
+                            if (!why.text.trim()) return
+                            void rate(why.run, 'down', why.text.trim())
+                            setWhy(null)
+                          }}>
+                            <label htmlFor={`dl-why-${why.run}`}>{t('ans3.whatWrong')}</label>
+                            <input id={`dl-why-${why.run}`} value={why.text} dir="auto" autoFocus
+                              placeholder={t('ans3.whatWrongHint')}
+                              onChange={e => setWhy({ run: why.run, text: e.target.value })} />
+                            <button type="submit" className="dl-act" disabled={!why.text.trim()}>{t('ans3.sendWhy')}</button>
+                            <button type="button" className="dl-act" onClick={() => setWhy(null)}>{t('common.cancel')}</button>
+                          </form>
+                        )}
                       </>
                     )}
                   </div>
@@ -637,87 +568,21 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
         <div ref={endRef} />
       </div>
       <div className="dl-chat__composer">
-          {offline && (
-            <div className="dl-offline" role="status" data-testid="ai-offline">
-              <AlertTriangle size={17} aria-hidden className="dl-offline__icon" />
-              <div>
-                <p className="dl-offline__title">{t('off.title')}</p>
-                <p className="dl-offline__text">
-                  {t('off.text')}
-                  {ai.checkedAt != null && ` ${t('off.checked', { n: localDigits(String(Math.max(0, Math.round((Date.now() - ai.checkedAt) / 1000)))) })}`}
-                </p>
-                <div className="dl-offline__links">
-                  {datasetIds?.length === 1 && (
-                    <Link className="btn btn-sm" to={`/datasets/${datasetIds[0]}?tab=data`}>
-                      <Database size={14} aria-hidden /> {datasetName ? t('off.explore', { name: datasetName }) : t('off.explorePlain')}
-                    </Link>
-                  )}
-                  <Link className="btn btn-sm" to="/reports?new=1"><BarChart3 size={14} aria-hidden /> {t('off.build')}</Link>
-                </div>
-              </div>
-            </div>
-          )}
+        {offline && <p role="status" className="dl-chat__note dl-chat__note--error dl-chat__offline" data-testid="ai-offline">{t('off.title')}</p>}
         <Composer value={input} onChange={setInput} onSend={() => void send()} busy={busy}
-          locked={offline} lockedHint={offline ? t('off.composer') : undefined}
-          placeholder={page && datasetName ? t('ask3.placeholder', { name: datasetName }) : undefined} />
+          locked={offline} lockedHint={offline ? t('off.composer') : undefined} />
       </div>
     </div>
   )
-
-  /** The draft "Add to dashboard" places, when the answer maps onto the dataset. */
-  function draftFor(msg: ChatMessage) {
-    return datasetColumns && (datasetIds?.length === 1 || (onAddToPage && datasetIds?.length))
-      ? answerToWidget(msg.results?.[0], msg.sql ?? sqlByRun[msg.runId!], datasetColumns,
-          msg.presentation?.x, msg.presentation?.y)
-      : null
-  }
-
-  // Called, not mounted as <PageAnswer/>: an inner component is a new type on
-  // every render, which would remount the card (and refetch its run) per keystroke.
-  function pageAnswer(msg: ChatMessage, question: string | undefined, full: boolean) {
-    const runId = msg.runId!
-    const draft = draftFor(msg)
-    const answerTitle = question ?? msg.text.slice(0, 80)
-    const hasRows = !!msg.results?.some(r => r.total > 0)
-    return (
-      <AnswerCard key={msg.id} full={full} text={msg.text} runId={runId} results={msg.results}
-        presentation={msg.presentation} evidence={msg.evidence}
-        focus={evidenceFocus?.msg === msg.id ? evidenceFocus.at : null}
-        onShowClaim={msg.results?.length ? c => setEvidenceFocus(f => {
-          const at = focusFor(c, f?.at)
-          return at ? { msg: msg.id, at } : f
-        }) : undefined}
-        datasetName={datasetName}
-        sqlable={msg.intent !== 'chat'}
-        sqlOpen={openRun.has(runId)} sqlLoading={sqlLoading.has(runId)}
-        sql={(msg.sql && msg.sql.length ? msg.sql : sqlByRun[runId]) ?? []}
-        contextObjects={msg.contextObjects}
-        onToggleSql={() => void toggleSql(msg)}
-        onCopy={() => void copyAnswer(msg)} onCopySql={() => void copySql(msg)}
-        onRetry={question ? () => void send(question) : undefined}
-        onSaveDataset={dataSourceId != null && msg.intent !== 'chat' && saving === null ? () => void saveAsDataset(msg) : undefined}
-        savingDataset={saving === runId}
-        onCsv={hasRows ? () => downloadCsv(msg.results!, `ask-ai-result-${runId}.csv`) : undefined}
-        onFile={hasRows ? f => void downloadFile(runId, f) : undefined}
-        addToDashboard={draft && onAddToPage ? (
-          <button type="button" className="dl-act" data-testid="add-to-page"
-            onClick={() => void onAddToPage(draft, answerTitle)}>
-            <Sparkles size={14} aria-hidden /> <span className="dl-act__text">{t('ask.addToPage')}</span>
-          </button>
-        ) : draft && datasetIds ? (
-          <AddToDashboard datasetId={datasetIds[0]} draft={draft} title={answerTitle} />
-        ) : null}
-        rating={feedbackByRun[runId]} onRate={(r, c) => void rate(runId, r, c)}
-        source={answerSource(msg, t)}
-        askNext={askNext} onAsk={q => void send(q)} busy={busy} />
-    )
-  }
 
   function AnswerActions({ msg, question }: { msg: ChatMessage; question?: string }) {
     const runId = msg.runId!
     const sqlable = !(msg.intent === 'chat' || isProposals(msg.presentation)
       || isAnalysisResult(msg.presentation))
-    const draft = draftFor(msg)
+    const draft = datasetColumns && (datasetIds?.length === 1 || (onAddToPage && datasetIds?.length))
+      ? answerToWidget(msg.results?.[0], msg.sql ?? sqlByRun[runId], datasetColumns,
+          msg.presentation?.x, msg.presentation?.y)
+      : null
     const answerTitle = question ?? msg.text.slice(0, 80)
     return (
       <div className="dl-actions-wrap">

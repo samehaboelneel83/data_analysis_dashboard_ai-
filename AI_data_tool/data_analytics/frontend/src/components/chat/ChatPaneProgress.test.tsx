@@ -64,11 +64,11 @@ describe('the pending indicator', () => {
     expect(screen.getByRole('status').textContent).not.toMatch(/designing/i)
   })
 
-  it('claims no stage it cannot see: no timed checklist, just the time and the usual range (4b)', () => {
+  it('claims no stage it cannot see: no timed checklist, just the time', () => {
     render(<Pending question="what were total sales?" />)
     act(() => { vi.advanceTimersByTime(12_000) })
-    expect(screen.queryByText(/writing the query|running it/i)).toBeNull()
-    expect(screen.getByText(/Usually 5–20 s/)).toBeInTheDocument()
+    expect(screen.queryByText(/understanding the question|writing the query|running it|building the chart/i)).toBeNull()
+    expect(screen.getByRole('status').textContent).toMatch(/12\s*s/)
   })
 
   it('is announced to a screen reader without shouting', () => {

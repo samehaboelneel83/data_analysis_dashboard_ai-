@@ -12,10 +12,8 @@ import { renderWithProviders } from '../test/renderWithProviders'
 
 vi.mock('../components/chat/ChatPane', () => ({
   default: (props: { dataSourceId?: number; datasetIds?: number[]; conversationId?: number | null
-                     onConversationCreated?: (c: { id: number; title: string }) => void
-                     insertRequest?: { text: string } | null; variant?: string }) => (
+                     onConversationCreated?: (c: { id: number; title: string }) => void }) => (
     <div data-testid="chat-pane">
-      {props.insertRequest ? `insert:${props.insertRequest.text} ` : ''}
       {props.dataSourceId != null ? `source:${props.dataSourceId}` : `datasets:${props.datasetIds?.join(',')}`}
       {` conversation:${props.conversationId === undefined ? 'unset' : String(props.conversationId)}`}
       <button onClick={() => props.onConversationCreated?.({ id: 99, title: 'Made by pane' })}>
@@ -29,7 +27,6 @@ vi.mock('../services/api', () => ({
   datasetsApi: { list: vi.fn() },
   dataSourcesApi: { list: vi.fn() },
   agentApi: { listConversations: vi.fn(), rename: vi.fn(), remove: vi.fn() },
-  analysisApi: { get: vi.fn().mockResolvedValue(null) },
 }))
 
 import { datasetsApi, dataSourcesApi, agentApi } from '../services/api'
@@ -57,7 +54,7 @@ const renderAt = (path: string) => renderWithProviders(
 describe('AskAI', () => {
   it('mounts nothing until a scope is picked -- a question needs a target', async () => {
     renderAt('/ask')
-    expect(await screen.findByRole('heading', { name: 'What do you want to ask about?' })).toBeInTheDocument()
+    expect(await screen.findByText('Choose your data')).toBeInTheDocument()
     expect(screen.queryByTestId('chat-pane')).not.toBeInTheDocument()
   })
 
@@ -71,48 +68,37 @@ describe('AskAI', () => {
     expect(await screen.findByTestId('chat-pane')).toHaveTextContent('source:3')
   })
 
-  it('picking a dataset in the chooser mounts the pane for it', async () => {
+  it('picking a scope in the picker mounts the pane for it', async () => {
     renderAt('/ask')
-    fireEvent.click(await screen.findByRole('button', { name: /^Orders/ }))
+    const trigger = await screen.findByRole('button', { name: 'What to ask about' })
+    await waitFor(() => expect(trigger).not.toBeDisabled())
+    fireEvent.click(trigger)
+    fireEvent.click(await screen.findByRole('option', { name: /Orders/ }))
     expect(await screen.findByTestId('chat-pane')).toHaveTextContent('datasets:32')
   })
 
-  it('the chooser searches, and lists connections apart', async () => {
+  it('the picker searches, and says what each choice is', async () => {
     renderAt('/ask')
-    await screen.findByRole('heading', { name: 'Connections' })
-    fireEvent.change(screen.getByRole('searchbox', { name: 'Search datasets and connections' }), { target: { value: 'ware' } })
-    expect(screen.queryByRole('button', { name: /^Orders/ })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /^Warehouse/ }))
+    const trigger = await screen.findByRole('button', { name: 'What to ask about' })
+    await waitFor(() => expect(trigger).not.toBeDisabled())
+    fireEvent.click(trigger)
+    const search = await screen.findByRole('combobox', { name: /search/i })
+    expect(screen.getAllByRole('option').map(o => o.textContent)).toEqual(
+      expect.arrayContaining([expect.stringMatching(/Warehouse/)]))
+    fireEvent.change(search, { target: { value: 'ware' } })
+    expect(screen.getAllByRole('option')).toHaveLength(1)
+    fireEvent.keyDown(search, { key: 'Enter' })
     expect(await screen.findByTestId('chat-pane')).toHaveTextContent('source:3')
   })
 
-  it('before a scope is picked, the question box is locked and says why', async () => {
+  it('before a scope is picked, shows only the data step -- no locked question box', async () => {
+    // The locked composer was a second control nobody could use; the question
+    // box now appears only once data is chosen.
     renderAt('/ask')
-    const box = await screen.findByRole('textbox', { name: 'Your question' })
-    expect(box).toBeDisabled()
-    expect(box).toHaveAttribute('placeholder', 'Choose data above to start asking')
-  })
-
-  it('puts the data recently asked about first, with its conversation count', async () => {
-    vi.mocked(agentApi.listConversations).mockResolvedValue([
-      { id: 9, title: 'Orders by city', data_source_id: null, dataset_ids: [32], created_at: '2026-09-03T08:00:00' },
-      { id: 8, title: 'Orders by month', data_source_id: null, dataset_ids: [32], created_at: '2026-09-02T08:00:00' },
-    ] as any)
-    renderAt('/ask')
-    expect(await screen.findByRole('heading', { name: 'Recently asked about' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /^Orders.*2 conversations/ })).toBeInTheDocument()
-  })
-
-  it('lists every thread with what it asks about, and opens one in its scope', async () => {
-    vi.mocked(agentApi.listConversations).mockResolvedValue([
-      { id: 9, title: 'Orders by city', data_source_id: null, dataset_ids: [32], created_at: '2026-09-03T08:00:00' },
-      { id: 8, title: 'Orders by month', data_source_id: null, dataset_ids: [32], created_at: '2026-09-02T08:00:00' },
-    ] as any)
-    renderAt('/ask')
-    const list = await screen.findByRole('list', { name: /conversations/i })
-    await waitFor(() => expect(list).toHaveTextContent('Orders by month'))
-    fireEvent.click(within(list).getByRole('button', { name: /^Orders by month/ }))
-    expect(await screen.findByTestId('chat-pane')).toHaveTextContent('conversation:8')
+    expect(await screen.findByRole('heading', { name: 'Ask your data anything' })).toBeInTheDocument()
+    expect(screen.getByText('Choose your data')).toBeInTheDocument()
+    expect(screen.queryByText(/Step \d/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: 'Your question' })).not.toBeInTheDocument()
   })
 
   it('a failed dataset list is an error, never "no data yet"', async () => {
@@ -226,7 +212,7 @@ describe('AskAI — the conversation list', () => {
     renderAt('/ask?dataset=32')
     await screen.findByRole('list', { name: /conversations/i })
     fireEvent.click(screen.getByRole('button', { name: /delete orders by city/i }))
-    // The app's own dialog (4a), not window.confirm.
+    // The app's own dialog, not window.confirm.
     const dialog = await screen.findByRole('alertdialog', { name: 'Delete this conversation?' })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
     await waitFor(() => expect(agentApi.remove).toHaveBeenCalledWith(55))
@@ -245,69 +231,22 @@ describe('AskAI — the conversation list', () => {
     expect(agentApi.remove).not.toHaveBeenCalled()
   })
 
-  it('searches the conversations by title', async () => {
-    renderAt('/ask?dataset=32')
-    const list = await screen.findByRole('list', { name: /conversations/i })
-    fireEvent.change(screen.getByRole('searchbox', { name: 'Search conversations' }), { target: { value: 'older' } })
-    expect(list).toHaveTextContent('Older orders chat')
-    expect(list).not.toHaveTextContent('Orders by city')
-    fireEvent.change(screen.getByRole('searchbox', { name: 'Search conversations' }), { target: { value: 'zzz' } })
-    expect(list).toHaveTextContent('No conversation matches.')
-  })
-
   // A DirectQuery dataset keeps its rows in the connection, so it has no file
   // for the agent's dataset mode to read and the backend refuses it with a
   // 400. Offering it here is offering a dead option: the connection it reads
   // from is already in this same list, under Connections.
-  it('leaves DirectQuery datasets out of the chooser', async () => {
+  it('leaves DirectQuery datasets out of the picker', async () => {
     vi.mocked(datasetsApi.list).mockResolvedValue([
       { id: 32, name: 'Orders', mode: 'import', filename: 'orders.csv' } as any,
       { id: 167, name: 'Live orders', mode: 'directquery', filename: null } as any,
     ])
     renderAt('/ask')
-    const chooser = await screen.findByRole('region', { name: 'What do you want to ask about?' })
-    expect(await within(chooser).findByRole('button', { name: /^Orders/ })).toBeInTheDocument()
-    expect(within(chooser).queryByText('Live orders')).not.toBeInTheDocument()
-    expect(within(chooser).getByRole('button', { name: /^Warehouse/ })).toBeInTheDocument()
-  })
-})
-
-describe('AskAI — the columns panel (4a)', () => {
-  beforeEach(() => {
-    localStorage.clear()
-    vi.mocked(datasetsApi.list).mockResolvedValue([
-      { id: 32, name: 'Orders', mode: 'import', filename: 'orders.csv', row_count: 3612, col_count: 4,
-        columns: [
-          { name: 'region', dtype: 'categorical' }, { name: 'revenue', dtype: 'numeric' },
-          { name: 'order_date', dtype: 'datetime' }, { name: 'order_id', dtype: 'numeric' },
-        ] } as any,
-    ])
-  })
-
-  it('groups the columns and puts a clicked one into the question', async () => {
-    renderAt('/ask?dataset=32')
-    const panel = await screen.findByTestId('column-panel')
-    expect(within(panel).getByText('Columns (4)')).toBeInTheDocument()
-    expect(within(panel).getByRole('heading', { name: 'Groups' })).toBeInTheDocument()
-    expect(within(panel).getByRole('heading', { name: 'Numbers' })).toBeInTheDocument()
-    expect(within(panel).getByRole('heading', { name: 'Dates' })).toBeInTheDocument()
-    // An id column is not a number to add up: it sits under Other.
-    expect(within(panel).getByRole('heading', { name: 'Other' })).toBeInTheDocument()
-    expect(within(panel).getByText('identifier')).toBeInTheDocument()
-    fireEvent.click(within(panel).getByRole('button', { name: 'Put revenue in the question' }))
-    expect(await screen.findByTestId('chat-pane')).toHaveTextContent('insert:revenue')
-  })
-
-  it('names the scope with its kind and size', async () => {
-    renderAt('/ask?dataset=32')
-    expect(await screen.findByText('Uploaded file · 3,612 rows · 4 columns')).toBeInTheDocument()
-  })
-
-  it('folds the panel and remembers it', async () => {
-    renderAt('/ask?dataset=32')
-    const panel = await screen.findByTestId('column-panel')
-    fireEvent.click(within(panel).getByRole('button', { name: 'Hide columns' }))
-    expect(screen.getByTestId('column-panel')).toHaveClass('dl-cols3--collapsed')
-    expect(localStorage.getItem('datalytics.ask.columnsFolded')).toBe('1')
+    const trigger = await screen.findByRole('button', { name: 'What to ask about' })
+    await waitFor(() => expect(trigger).not.toBeDisabled())
+    fireEvent.click(trigger)
+    await waitFor(() => expect(screen.getByText('Orders')).toBeInTheDocument(),
+                  { timeout: 5000 })
+    expect(screen.queryByText('Live orders')).not.toBeInTheDocument()
+    expect(screen.getByText('Warehouse')).toBeInTheDocument()
   })
 })

@@ -94,7 +94,9 @@ export default function ActionMenu({
     if (!trigger || !menu) return
     const tRect = trigger.getBoundingClientRect()
     const mRect = menu.getBoundingClientRect()
-    const overflowsBottom = tRect.bottom + mRect.height > window.innerHeight
+    // The menu sits 4px below the trigger: count that gap and a little air,
+    // or a menu on the last row "fits" and is then cut by the window edge.
+    const overflowsBottom = tRect.bottom + 4 + mRect.height + 4 > window.innerHeight
     const overflowsRight = tRect.left + mRect.width > window.innerWidth
     setPlacement({ top: overflowsBottom, left: overflowsRight })
     if (portal) {
