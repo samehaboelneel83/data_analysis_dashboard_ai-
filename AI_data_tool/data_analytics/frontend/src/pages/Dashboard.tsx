@@ -508,7 +508,11 @@ export default function Dashboard() {
                             {/* One way in. A red trash icon repeated down every row
                                 is an alarm the page rings at itself; delete already
                                 lived in this menu, and lives there alone now. */}
-                            <ActionMenu
+                            {/* On the body, hanging inward: inside the table card
+                                (which scrolls sideways) the open menu was clipped
+                                to a sliver at the card's edge -- only the sparkle
+                                of "Suggest dashboards" showed, then nothing. */}
+                            <ActionMenu portal align="end"
                               label={`More actions for dataset ${ds.name}`}
                               items={[
                                 { key: 'suggest', label: t('datasets.suggest'), icon: <Sparkles size={16} />, onSelect: () => setSuggestFor({ id: ds.id, name: ds.name }) },
