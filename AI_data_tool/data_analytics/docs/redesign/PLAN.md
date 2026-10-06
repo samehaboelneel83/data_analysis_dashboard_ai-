@@ -22,7 +22,7 @@ Nothing is pushed.
 - [x] 2 Key influencers stopgap
 - [x] 3a Datasets list
 - [x] 3b Dataset detail shell + Overview + tab map
-- [ ] 3c Remaining tabs + Share dialog
+- [x] 3c Remaining tabs + Share dialog
   - >> GATE A: stop, report the whole Datasets screen
 - [ ] 4a Ask AI Phase 1: layout, thread, column panel, answer card
 - [ ] 4b Ask AI Phase 1: all states (first run, no dataset, thinking, clarification, offline, error)
@@ -100,3 +100,31 @@ to Analysis (insights, influencers, associations, segment, anomalies), Columns
 **Environment note (2026-10-06):** the machine rebooted mid-step and the data
 drive came back as `/media/saeed/New Volume1`. Docker left an empty, root-owned
 `/media/saeed/New Volume/projects/...` skeleton behind; removing it needs sudo.
+
+### 3c Remaining tabs + Share dialog — `0f217fc`, `230ab1f`, `14ddd5b`, `b8df925`, `0e6da8d`, `af2460a`
+
+Committed in parts (Columns/Data/Analysis, Rules & alerts, Models/Aggregates,
+Share + translations, fixes) after the 2026-10-06 reboot, each after the full
+suite and build; the screen comparison ran once over all of 3c before ticking.
+
+**Changed:**
+- Columns: `ColumnMeaningPanel` is the tab's table (meaning, distribution, empty %, summary, Use as pill opening role / summary / worth explaining / may be suggested / hidden). Type filter, search, "n of m described", "Hidden columns (n)". v1's per-column statistics stay folded under "Detailed statistics". Profile helpers shared with the Overview (`columnProfile.tsx`); values bidi-isolated.
+- Data: v1's left panel became a toolbar (Filter with chips, sort, Row filter, ƒx Column, Group & bin, Measures, Steps), each opening its unchanged panel. Type tags in headers, row numbers, "(filtered from N)". BUG-037's narrow-screen rule retired with the side column it fixed.
+- Analysis: question list over the registry ("All 19 analyses"); built-in questions open key influencers, segments, patterns, insights, anomalies; the rest open `StatisticsPanel` limited by a new `only` prop. Deep links pick their question.
+- Rules & alerts: Quality rules card (state, result after Run now, Warn/Block pill, + Rule), the one-off quality report folded under it, Alerts restyled, new Freshness card.
+- Models: train card, model cards with fit bar and plain words, changed-since-training warning, facts grid from the model card, "Also tried".
+- Aggregates: table of aggregates (locked RLS columns, status, Edit / Rebuild), the "dashboards don't switch" note, New aggregate form.
+- Share dialog: Person / Role / Org unit switch, Shared directly, static "Can also open it" (dashboards counted from lineage), row-security note.
+- All new copy in `en.ts` and `ar.ts`.
+
+**Deviations from the boards:**
+- Automatic analyses (segments, patterns, key influencers) now start when the Analysis tab is first opened instead of on every visit to any tab: on the single-process dev server they held up the open tab's requests (Rules & alerts waited seconds for its edit permission). They still run without a click.
+- Analysis list adds "What stands out?" (insights) and "What looks unusual?" (anomalies): v1 features the board's list omits.
+- Columns: no highlighted row for a column whose check fails (that needs the checks "try" call on every visit; the Overview already shows it).
+- Data: no "Download CSV" (no dataset export endpoint: backend work) and no "n of m columns" picker (no such feature exists). Cell values keep v1's raw text, not currency formats. "Edit cells" stays above the table.
+- Rules: a rule row shows the check in words plus its kind; checks have no names. "New alert" keeps its v1 label (tests and other screens use it) rather than "+ Alert".
+- Models: no "Retrain" button (training again under the same name already makes the next version; the warning says so); facts show "—" where an older model card did not record them; the note does not claim "4 approaches / 20%".
+- Aggregates: no "Used by" column (would need lineage per aggregate).
+- Share: the picker is a select, not a type-ahead; each grant's level is shown as text (there is no endpoint to change it in place); no "2 rules apply" count (N9).
+- Captures of Rules & alerts and Aggregates used browser-only sample data: the dev database has no saved checks or aggregates.
+- Two flaky 3a tests fixed (per-call timestamps, ambiguous table query). `Lineage.test.tsx` is still flaky; scheduled for FINAL.
