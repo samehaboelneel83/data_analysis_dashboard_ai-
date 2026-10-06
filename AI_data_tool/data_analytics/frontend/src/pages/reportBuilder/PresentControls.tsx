@@ -9,8 +9,8 @@ import { localDigits } from '../../lib/arabicFormats'
  * Present (redesign 7d): the dashboard full screen, with the header gone
  * (the owner allowed it, as long as Esc and these controls still exit).
  *
- * Pages advance on their own as v1's kiosk did -- auto-play is on, and can be
- * paused here -- now every 15 s, with a progress line. Arrow keys, Space and
+ * Auto-play starts OFF (the owner's choice at GATE D); the button turns it
+ * on, and pages then advance every 15 s with a progress line. Arrow keys, Space and
  * Page Up / Down move between pages (mirrored in Arabic); Esc closes the AI
  * panel if it is open, then exits. v1 exited on ANY key, which made the arrow
  * keys unusable. After 2.5 s without the mouse or a key, the title and the
@@ -32,7 +32,7 @@ export default function PresentControls({ title, pages, activeId, onGo, onExit, 
 }) {
   const t = useT()
   const { rtl } = useDirection()
-  const [auto, setAuto] = useState(true)
+  const [auto, setAuto] = useState(false)
   const [idle, setIdle] = useState(false)
   const i = Math.max(0, pages.findIndex(p => p.id === activeId))
   const go = (n: number) => { if (n >= 0 && n < pages.length) onGo(pages[n].id) }

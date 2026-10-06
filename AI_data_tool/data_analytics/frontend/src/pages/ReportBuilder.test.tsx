@@ -2631,7 +2631,7 @@ describe('ReportBuilder reading (redesign 7d)', () => {
     for (const name of ['Print', 'Version history', 'Report settings']) expect(await screen.findByRole('menuitem', { name })).toBeInTheDocument()
   })
 
-  it('Present pages with the arrows and the controls, and auto-play can be paused', async () => {
+  it('Present pages with the arrows and the controls; auto-play starts off and can be turned on', async () => {
     const r = reportWithWidget()
     r.pages.push({ ...r.pages[0], id: 101, name: 'Second', position: 1, widgets: [] } as any)
     vi.mocked(reportsApi.get).mockResolvedValue(r as any)
@@ -2645,9 +2645,10 @@ describe('ReportBuilder reading (redesign 7d)', () => {
     await waitFor(() => expect(controls).toHaveTextContent('2 / 2'))
     fireEvent.click(within(controls).getByRole('button', { name: 'Previous page' }))
     await waitFor(() => expect(controls).toHaveTextContent('1 / 2'))
+    // Auto-play starts off (GATE D); the button turns it on.
     const auto = within(controls).getByRole('button', { name: /Auto-play/ })
-    expect(auto).toHaveAttribute('aria-pressed', 'true')
-    fireEvent.click(auto)
     expect(auto).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.click(auto)
+    expect(auto).toHaveAttribute('aria-pressed', 'true')
   })
 })

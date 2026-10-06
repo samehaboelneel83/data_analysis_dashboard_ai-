@@ -95,12 +95,15 @@ Nothing is pushed.
 - [x] 7c Share, Export, Version history *(Part 4 approved 2026-10-06)*: restyle over the existing grants, guest links, embed configs, schedules, PDF/Excel export and versions; v1-only features kept
 - [x] 7d View and Present *(Part 3 approved 2026-10-06)*: view header, focus mode, view-mode AI panel (Ask, Insights, Suggest charts), Present controls (header hidden, Esc and hover controls exit), AI offline, v1 viewer gating
   - >> GATE D: stop, report View, Present and Part 4
+- [ ] 7-QA Fixes from the QA report `/media/saeed/New Volume1/projects/redesign-captures/qa-1/QA_REPORT.md` (owner, 2026-10-06), before 7e: Broken B1 (top priority), B2, B3, B5 (try to reproduce), B7, B8; Visual V1–V10 (V9: numbers must stay distinguishable); T1 on the redesigned screens only; all of T2 (the Arabic sidebar labels in `ar.ts` may be fixed, text only). A failing test before each fix where possible; before/after captures. B4 and B6 go to "Backend follow-ups".
+  - >> stop and report before 7e
 - [ ] 7e1 Builder: header and toolbars (save state, Edit/View, page tab menu, Layout menu with v1's recipes), icon-only rail on entry
 - [ ] 7e2 Builder: left panel (Insert gallery with preview, Fields, Templates; v1's widget templates, report filters and calculated columns re-homed)
 - [ ] 7e3 Builder: right panel rail and Properties (Format / Data / Interactions over the existing config panel, keeping every v1 tab and settings search; pinned second panel)
 - [ ] 7e4 Builder: canvas overlays and widget states (alignment guides, group box, hover toolbar, skeleton, empty result with Clear filters, error details, heavy-page banner)
 - [ ] 7e5 Builder: shortcuts dialog, copilot offline, and the states the prototype doesn't draw (empty page, read-only, load error, save conflict)
   - >> GATE E: stop, report the Builder
+- [ ] 8-i18n The QA report's T1 strings on pages the redesign has not reached (Glossary, Organizations, Platform settings, Admin settings Basemap, Org units, Row/column security, API keys, Custom connectors, SSO, Maps, Models "random forest", Activity codes, Connections "Combine databases")
 - [ ] Then: Upload, Connections, Lineage, the AI button
 - [ ] FINAL Full regression: all tests, build, capture every screen, compare against all designs, final summary, fix the flaky `Lineage.test.tsx` (and watch `geoRenderers.test.tsx`), and a clean-up list (test datasets 7 and 8, chat threads, the uncommitted init.sql edit)
   - >> GATE F: stop, final report
@@ -142,6 +145,9 @@ Not part of the frontend steps (1–7); candidates for the handoff's section 7 p
 | 7-gap Export | PowerPoint; page PNG; CSV zip; pick widgets for one workbook; raw/filtered options; size estimate | Not supported by the export endpoints. |
 | 7-gap Export | Background export with step progress, 24 h download link, error naming the failing widget with "Export without it" | Downloads are synchronous blobs; errors don't name a widget. |
 | 7-gap History | Named versions; preview a version; compare with current; per-version change summary; copy or PDF of a version | No label column; the versions list is metadata only (no snapshot content). |
+| GATE D (v1 Suggestions) | Suggestions pane proposes "average year by category"; its preview is refused (422) | The same identifier/measure problem as KI-6: `year` is classed as a measure. Fix the role in the backend (KI-3/KI-6) so suggestions never average a year or an id. |
+| 7-QA B4 | An Arabic follow-up in a conversation that started in English is answered in English | The answer language follows the conversation, not the question (see AP3: localize by the question's language). |
+| 7-QA B6 | Ask AI is slow (about 70 s for a simple answer, about 4 min before a clarification), with no timeout or cancel | Needs a server-side timeout and a cancel endpoint (AN2: stream progress + cancel). |
 
 ## Log
 
