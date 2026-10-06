@@ -38,6 +38,16 @@ Nothing is pushed.
 - [ ] FINAL Full regression: all tests, build, capture every screen, compare against all boards, final summary, fix the flaky `Lineage.test.tsx`, and a clean-up list (test datasets 7 and 8, chat threads, the uncommitted init.sql edit)
   - >> GATE E: stop, final report
 
+## Backend follow-ups (found during the frontend steps)
+
+Not part of steps 1–6; candidates for the handoff's section 7 phases.
+
+| Found in | Item | Why it needs the backend |
+|---|---|---|
+| 3c Data | Download CSV of a dataset (with the Data tab's filters, sort and search) | No dataset export endpoint exists; only Ask AI runs can be exported. |
+| 3c Share | Change a grant's View/Edit level in place | `/datasets/{id}/shares` can create and delete grants, not update one. |
+| 3c Share | "N row-security rules apply to this dataset" in the share dialog | No endpoint reports the rules that apply to a dataset (related to N9). |
+
 ## Log
 
 ### 1 Ask AI quick fixes — `405b2b2`, `6ec9358`
