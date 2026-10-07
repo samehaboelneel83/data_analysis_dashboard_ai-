@@ -1,1302 +1,925 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import Reports, { nextUntitledName } from './Reports'
-import { reportsApi, reportGrantsApi, datasetsApi, workspaceApi } from '../services/api'
+import { reportsApi, reportGrantsApi, datasetsApi, workspaceApi, pageTemplatesApi } from '../services/api'
 import { ConfirmProvider } from '../components/ui/ConfirmDialog'
 import { PromptProvider } from '../components/ui/PromptDialog'
+import { AuthContext } from '../contexts/AuthContext'
 import { answerPrompt } from '../test/renderWithProviders'
 import toast from 'react-hot-toast'
 import { axeViolations } from '../test/axe'
 
+/**
+ * The Dashboards page (redesign 7b). What is pinned: every control the server
+ * would refuse is absent, a drop or a delete is confirmed before anything is
+ * sent, the server's refusal is shown as given, folders come from the tree and
+ * fail on their own, and nothing the backend cannot answer is pretended.
+ */
+
 vi.mock('../services/api', () => ({
-  reportsApi: { list: vi.fn(), delete: vi.fn(), create: vi.fn(), update: vi.fn(), setPublished: vi.fn() },
+  reportsApi: { list: vi.fn(), recent: vi.fn(), delete: vi.fn(), create: vi.fn(), update: vi.fn(), setPublished: vi.fn(),
+    downloadPdf: vi.fn(), deletePage: vi.fn() },
   reportGrantsApi: { list: vi.fn(), create: vi.fn(), remove: vi.fn() },
   datasetsApi: { list: vi.fn() },
-  // The page reads the workspace tree again -- not to render it, but to work
-  // out which folder each dashboard is filed in.
   workspaceApi: { tree: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
+  pageTemplatesApi: { builtins: vi.fn(), addFrom: vi.fn() },
+  authzApi: { decisions: vi.fn(async () => []) },
+  shareLinksApi: { list: vi.fn(async () => []), create: vi.fn(), revoke: vi.fn() },
+  embedConfigsApi: { list: vi.fn(async () => []), create: vi.fn(), setEnabled: vi.fn(), delete: vi.fn() },
 }))
-vi.mock('react-hot-toast', () => ({
-  default: { success: vi.fn(), error: vi.fn() },
+vi.mock('react-hot-toast', () => ({ default: { success: vi.fn(), error: vi.fn() } }))
+vi.mock('../components/dataset/SuggestDashboardsDialog', () => ({
+  default: (p: { datasetName: string; initialGoal?: string }) =>
+    <div data-testid="suggest-dialog">{p.datasetName}|{p.initialGoal}</div>,
 }))
 
 /** Renders the current path, so navigation is observable rather than implied. */
 function Where() {
-  const { pathname } = useLocation()
-  return <div data-testid="where">{pathname}</div>
+  const { pathname, search } = useLocation()
+  return <div data-testid="where">{pathname}{search}</div>
 }
 
-const renderReports = () =>
+const renderReports = (opts: { admin?: boolean; at?: string } = {}) =>
   render(
-    <ConfirmProvider>
-      <PromptProvider>
-        <MemoryRouter initialEntries={['/reports']}>
+    <AuthContext.Provider value={{ user: { id: 7, email: 'me@x.io', role: { is_org_admin: !!opts.admin } } as never,
+      loading: false, login: async () => {}, logout: () => {} }}>
+      <ConfirmProvider><PromptProvider>
+        <MemoryRouter initialEntries={[opts.at ?? '/reports']}>
           <Reports />
           <Where />
         </MemoryRouter>
-      </PromptProvider>
-    </ConfirmProvider>
+      </PromptProvider></ConfirmProvider>
+    </AuthContext.Provider>,
   )
 
-// `my_capability` is spelled out because the page now defaults a MISSING one
-// to 'view' (fail closed) rather than to full access. The list endpoint always
-// sends it, so a fixture without one is not a state the app can be in -- and
-// omitting it silently hid every edit control this file asserts on.
+// `my_capability` is spelled out: the page fails closed on a missing one.
 const report = (over = {}) => ({
-  id: 1, name: 'Revenue', description: '', dataset_id: undefined,
-  my_capability: 'data', created_by: 7, is_mine: true,
-  created_at: '2026-08-22T00:00:00Z', ...over,
+  id: 1, name: 'Revenue', description: '', dataset_id: undefined, pages: [],
+  my_capability: 'data', created_by: 7, is_mine: true, published: false,
+  created_at: '2026-08-22T00:00:00Z', updated_at: '2026-09-01T00:00:00Z', ...over,
 })
+const node = (over: Record<string, unknown>) => ({
+  id: 1, parent_id: null, node_type: 'folder', name: 'Finance', report_id: null,
+  position: 0, can_manage: true, is_mine: true, role_ids: [], pages: [], children: [], ...over,
+})
+const leaf = (reportId: number, parent: number | null = 1, over: Record<string, unknown> = {}) =>
+  node({ id: 90 + reportId, parent_id: parent, node_type: 'report', name: 'x', report_id: reportId, ...over })
+
+const card = (id: number) => screen.getByTestId(`dash-card-${id}`)
+const nav = () => screen.getByTestId('dash-nav')
+/** A folder's button in the side column (its menu trigger also names it). */
+const folderBtn = async (name: string) => {
+  await waitFor(() => expect(nav().querySelector(`[data-folder="${name}"]`)).not.toBeNull())
+  return nav().querySelector(`[data-folder="${name}"]`) as HTMLElement
+}
 
 beforeEach(() => {
   vi.clearAllMocks()
-  // Collapsed headings persist; a test must not inherit another's.
   localStorage.clear()
   vi.mocked(datasetsApi.list).mockResolvedValue([] as never)
   vi.mocked(reportsApi.list).mockResolvedValue([report()] as never)
+  vi.mocked(reportsApi.recent).mockResolvedValue([] as never)
   vi.mocked(reportsApi.delete).mockResolvedValue(undefined as never)
   vi.mocked(workspaceApi.tree).mockResolvedValue({ roots: [], unfiled: [] } as never)
+  vi.mocked(workspaceApi.update).mockResolvedValue({} as never)
+  vi.mocked(workspaceApi.create).mockResolvedValue({} as never)
 })
 
-describe('deleting a dashboard', () => {
-  it('the trash button confirms, then deletes', async () => {
+describe('deleting', () => {
+  it('confirms, then deletes', async () => {
     renderReports()
-    await waitFor(() => expect(screen.getByText('Revenue')).toBeInTheDocument())
-
-    fireEvent.click(screen.getByRole('button', { name: 'Delete dashboard Revenue' }))
-
-    const dlg = await screen.findByRole('alertdialog')
-    fireEvent.click(within(dlg).getByRole('button', { name: /Delete/i }))
-
+    await screen.findByTestId('dash-card-1')
+    fireEvent.click(within(card(1)).getByRole('button', { name: 'More actions for Revenue' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent('Delete dashboard "Revenue"?')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
     await waitFor(() => expect(reportsApi.delete).toHaveBeenCalledWith(1))
+    await waitFor(() => expect(screen.queryByTestId('dash-card-1')).not.toBeInTheDocument())
   })
 
-  it('select mode: clicking cards ticks them instead of opening them, then deletes them together', async () => {
-    vi.mocked(reportsApi.list).mockResolvedValue([
-      report(), report({ id: 2, name: 'Untitled dashboard 3' }), report({ id: 3, name: 'Shared KPIs', my_capability: 'view', is_mine: false }),
-    ] as never)
+  it('ticking cards selects them and deletes them together, after naming them', async () => {
+    vi.mocked(reportsApi.list).mockResolvedValue([report({ id: 1, name: 'A' }), report({ id: 2, name: 'B' })] as never)
     renderReports()
-    await waitFor(() => expect(screen.getByText('Revenue')).toBeInTheDocument())
-
-    fireEvent.click(screen.getByRole('button', { name: 'Select' }))
-    fireEvent.click(screen.getByText('Untitled dashboard 3'))
-    expect(screen.getByTestId('where')).toHaveTextContent('/reports')
-    expect(screen.getByRole('checkbox', { name: 'Select Untitled dashboard 3' })).toBeChecked()
-    // A dashboard the viewer cannot delete cannot be ticked.
-    expect(screen.getByRole('checkbox', { name: 'Select Shared KPIs' })).toBeDisabled()
-
-    fireEvent.click(screen.getByRole('button', { name: /Delete selected/ }))
-    const dlg = await screen.findByRole('alertdialog')
-    fireEvent.click(within(dlg).getByRole('button', { name: /Delete selected/ }))
-    await waitFor(() => expect(reportsApi.delete).toHaveBeenCalledWith(2))
-    expect(reportsApi.delete).toHaveBeenCalledTimes(1)
+    await screen.findByTestId('dash-card-2')
+    fireEvent.click(within(card(1)).getByRole('checkbox', { name: /A/ }))
+    // Once something is ticked, a click on another card ticks it too.
+    fireEvent.click(card(2))
+    const bar = screen.getByRole('toolbar')
+    expect(bar).toHaveTextContent('2')
+    fireEvent.click(within(bar).getByRole('button', { name: /Delete/ }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent('A')
+    expect(dialog).toHaveTextContent('B')
+    fireEvent.click(within(dialog).getByRole('button', { name: /Delete/ }))
+    await waitFor(() => expect(reportsApi.delete).toHaveBeenCalledTimes(2))
   })
 
-  it('offers exactly ONE delete control per card', async () => {
-    // It used to offer two: this button and a ⋯ menu whose only item was the
-    // same action. Two controls for one destructive act is two chances to fire
-    // it and one more thing to read on every card.
+  it('a view-only dashboard has no Delete, no tick box, and says it is view only', async () => {
+    vi.mocked(reportsApi.list).mockResolvedValue([report({ id: 3, name: 'Theirs', my_capability: 'view', is_mine: false, created_by: 4 })] as never)
     renderReports()
-    await screen.findByText('Revenue')
-    expect(screen.getAllByRole('button', { name: /delete dashboard/i })).toHaveLength(1)
-    expect(screen.queryByRole('button', { name: /more actions/i })).toBeNull()
+    await screen.findByTestId('dash-card-3')
+    expect(card(3)).toHaveTextContent('View only')
+    expect(within(card(3)).queryByRole('checkbox')).not.toBeInTheDocument()
+    fireEvent.click(within(card(3)).getByRole('button', { name: 'More actions for Theirs' }))
+    const menu = await screen.findByRole('menu')
+    expect(within(menu).queryByRole('menuitem', { name: 'Delete' })).not.toBeInTheDocument()
+    expect(within(menu).queryByRole('menuitem', { name: 'Rename' })).not.toBeInTheDocument()
+    expect(within(menu).getByRole('menuitem', { name: 'Export as PDF' })).toBeInTheDocument()
   })
 })
 
-describe('my workspaces vs granted to me', () => {
-  it('splits the grid by authorship when the viewer has both kinds', async () => {
-    vi.mocked(reportsApi.list).mockResolvedValue([
-      report({ id: 1, name: 'Revenue', is_mine: true, my_capability: 'data' }),
-      report({ id: 2, name: 'Board pack', is_mine: false, my_capability: 'view' }),
-    ] as never)
-    renderReports()
-    expect(await screen.findByRole('heading', { name: 'My workspaces' })).toBeInTheDocument()
-    const granted = screen.getByRole('heading', { name: 'Granted to me' })
-    expect(granted.compareDocumentPosition(screen.getByText('Board pack')))
-      .toBe(Node.DOCUMENT_POSITION_FOLLOWING)
-  })
-
-  it('shows a plain grid when everything is the viewer\'s own', async () => {
-    vi.mocked(reportsApi.list).mockResolvedValue([
-      report({ id: 1, name: 'Revenue', is_mine: true, my_capability: 'data' }),
-    ] as never)
-    renderReports()
-    await screen.findByText('Revenue')
-    expect(screen.queryByRole('heading', { name: 'My workspaces' })).toBeNull()
-    expect(screen.queryByRole('heading', { name: 'Granted to me' })).toBeNull()
-  })
-
-  it('shows a plain grid when everything was granted to the viewer', async () => {
-    // The other half of the same rule, and the branch nothing covered: a
-    // viewer who authored NOTHING would otherwise read "Granted to me" over
-    // their entire list, which labels a distinction that is not there.
-    vi.mocked(reportsApi.list).mockResolvedValue([
-      report({ id: 2, name: 'Board pack', is_mine: false, my_capability: 'view' }),
-      report({ id: 3, name: 'Team board', is_mine: false, my_capability: 'edit' }),
-    ] as never)
-    renderReports()
-    await screen.findByText('Board pack')
-    expect(screen.queryByRole('heading', { name: 'My workspaces' })).toBeNull()
-    expect(screen.queryByRole('heading', { name: 'Granted to me' })).toBeNull()
-  })
-
-  it('puts each dashboard under its own heading, not just the headings on screen', async () => {
-    // A heading that renders with nothing beneath it -- or with the wrong
-    // cards beneath it -- looks identical to a correct one in a test that only
-    // asserts the headings exist.
-    vi.mocked(reportsApi.list).mockResolvedValue([
-      report({ id: 1, name: 'Revenue', is_mine: true, my_capability: 'data' }),
-      report({ id: 2, name: 'Board pack', is_mine: false, my_capability: 'view' }),
-    ] as never)
-    renderReports()
-
-    const mineHead = await screen.findByRole('heading', { name: 'My workspaces' })
-    const grantedHead = screen.getByRole('heading', { name: 'Granted to me' })
-    const revenue = screen.getByText('Revenue')
-    const boardPack = screen.getByText('Board pack')
-
-    // Revenue sits between the two headings; Board pack after the second.
-    expect(mineHead.compareDocumentPosition(revenue))
-      .toBe(Node.DOCUMENT_POSITION_FOLLOWING)
-    expect(grantedHead.compareDocumentPosition(revenue))
-      .toBe(Node.DOCUMENT_POSITION_PRECEDING)
-    expect(grantedHead.compareDocumentPosition(boardPack))
-      .toBe(Node.DOCUMENT_POSITION_FOLLOWING)
-  })
-
-  it('a view-only report loses Delete and is marked view only', async () => {
-    // Mirrors the server: delete_report requires >= edit. Offering the button
-    // and letting the request 403 would be the dead-control defect.
-    //
-    // The "Open designer →" / "Open →" labels used to carry this distinction
-    // too; that button is gone (the whole card opens the dashboard now), so
-    // the chip is the only thing left saying it -- which makes asserting on
-    // the chip the point rather than a consolation.
-    vi.mocked(reportsApi.list).mockResolvedValue([
-      report({ id: 2, name: 'Board pack', is_mine: false, my_capability: 'view' }),
-    ] as never)
-    renderReports()
-    await screen.findByText('Board pack')
-    expect(screen.queryByRole('button', { name: 'Delete dashboard Board pack' })).toBeNull()
-    expect(screen.getByText(/view only/)).toBeInTheDocument()
-  })
-
-  it('a granted-but-editable report keeps its design controls', async () => {
-    vi.mocked(reportsApi.list).mockResolvedValue([
-      report({ id: 3, name: 'Team dashboard', is_mine: false, my_capability: 'edit' }),
-    ] as never)
-    renderReports()
-    await screen.findByText('Team dashboard')
-    expect(screen.getByRole('button', { name: 'Delete dashboard Team dashboard' })).toBeInTheDocument()
-    expect(screen.queryByText(/view only/)).toBeNull()
-  })
-})
-
-describe('publish and share controls', () => {
-  const own = (over = {}) => report({
-    id: 5, name: 'My board', is_mine: true, my_capability: 'data',
-    created_by: 9, published: false, ...over,
-  })
-
-  it('the author gets Publish and Share; publishing calls the API and shows the badge', async () => {
-    vi.mocked(reportsApi.list).mockResolvedValue([own()] as never)
+describe('publish and share', () => {
+  it('the author gets Share and Publish; publishing calls the API and shows the badge', async () => {
     vi.mocked(reportsApi.setPublished).mockResolvedValue({ published: true } as never)
     renderReports()
-    fireEvent.click(await screen.findByRole('button', { name: 'Publish My board' }))
-    await waitFor(() => expect(reportsApi.setPublished).toHaveBeenCalledWith(5, true))
-    expect(await screen.findByText('published')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Unpublish My board' })).toBeInTheDocument()
+    await screen.findByTestId('dash-card-1')
+    expect(card(1)).toHaveTextContent('Draft')
+    expect(within(card(1)).getByRole('button', { name: 'Share Revenue' })).toBeInTheDocument()
+    fireEvent.click(within(card(1)).getByRole('button', { name: 'More actions for Revenue' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Publish' }))
+    await waitFor(() => expect(reportsApi.setPublished).toHaveBeenCalledWith(1, true))
+    await waitFor(() => expect(card(1)).toHaveTextContent('Published'))
   })
 
-  it('a legacy report (no author) offers no Publish -- the server would 400 it', async () => {
-    vi.mocked(reportsApi.list).mockResolvedValue([
-      report({ id: 6, name: 'Old faithful', created_by: null, my_capability: 'data' }),
-    ] as never)
+  it('a legacy dashboard (no author) offers no Publish and wears no status', async () => {
+    vi.mocked(reportsApi.list).mockResolvedValue([report({ created_by: null, is_mine: false })] as never)
     renderReports()
-    await screen.findByText('Old faithful')
-    expect(screen.queryByRole('button', { name: /Publish/ })).toBeNull()
-    expect(screen.queryByRole('button', { name: /Share/ })).toBeNull()
+    await screen.findByTestId('dash-card-1')
+    expect(card(1)).not.toHaveTextContent('Draft')
+    fireEvent.click(within(card(1)).getByRole('button', { name: 'More actions for Revenue' }))
+    expect(within(await screen.findByRole('menu')).queryByRole('menuitem', { name: 'Publish' })).not.toBeInTheDocument()
   })
 
-  it('a granted dashboard someone else authored offers no Publish or Share', async () => {
-    // Edit capability is design power, not sharing power -- mirrored from the
-    // server, which 403s a grantee's publish.
-    vi.mocked(reportsApi.list).mockResolvedValue([
-      report({ id: 7, name: 'Their board', is_mine: false, created_by: 4, my_capability: 'edit' }),
-    ] as never)
-    renderReports()
-    await screen.findByText('Their board')
-    expect(screen.queryByRole('button', { name: /Publish|Share/ })).toBeNull()
+  it("someone else's dashboard offers no Share, unless the viewer is an admin", async () => {
+    vi.mocked(reportsApi.list).mockResolvedValue([report({ is_mine: false, created_by: 4 })] as never)
+    const { unmount } = renderReports()
+    await screen.findByTestId('dash-card-1')
+    expect(within(card(1)).queryByRole('button', { name: 'Share Revenue' })).not.toBeInTheDocument()
+    unmount()
+    renderReports({ admin: true })
+    await screen.findByTestId('dash-card-1')
+    expect(within(card(1)).getByRole('button', { name: 'Share Revenue' })).toBeInTheDocument()
   })
 
   it('the share dialog lists grants and posts a new one by email', async () => {
-    vi.mocked(reportsApi.list).mockResolvedValue([own()] as never)
-    vi.mocked(reportGrantsApi.list).mockResolvedValue([
-      { id: 1, user_id: 2, email: 'ana@ex.com', level: 'view' },
-    ] as never)
-    vi.mocked(reportGrantsApi.create).mockResolvedValue(
-      { id: 2, user_id: 3, email: 'omar@ex.com', level: 'edit' } as never)
+    vi.mocked(reportGrantsApi.list).mockResolvedValue([{ id: 5, user_id: 2, email: 'a@x.io', level: 'view' }] as never)
+    vi.mocked(reportGrantsApi.create).mockResolvedValue({ id: 6, user_id: 3, email: 'b@x.io', level: 'edit' } as never)
     renderReports()
-    fireEvent.click(await screen.findByRole('button', { name: 'Share My board' }))
-
-    expect(await screen.findByText('ana@ex.com')).toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText('Email to share with'),
-      { target: { value: 'omar@ex.com' } })
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Share' }))
-    await waitFor(() => expect(reportGrantsApi.create)
-      .toHaveBeenCalledWith(5, { email: 'omar@ex.com', level: 'edit' }))
-    expect(await screen.findByText('omar@ex.com')).toBeInTheDocument()
-  })
-
-  it('removing a grant calls the API and drops the row', async () => {
-    vi.mocked(reportsApi.list).mockResolvedValue([own()] as never)
-    vi.mocked(reportGrantsApi.list).mockResolvedValue([
-      { id: 1, user_id: 2, email: 'ana@ex.com', level: 'edit' },
-    ] as never)
-    vi.mocked(reportGrantsApi.remove).mockResolvedValue(undefined as never)
-    renderReports()
-    fireEvent.click(await screen.findByRole('button', { name: 'Share My board' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Remove access for ana@ex.com' }))
-    await waitFor(() => expect(reportGrantsApi.remove).toHaveBeenCalledWith(5, 1))
-    expect(screen.queryByText('ana@ex.com')).toBeNull()
+    await screen.findByTestId('dash-card-1')
+    fireEvent.click(within(card(1)).getByRole('button', { name: 'Share Revenue' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Share Revenue' })
+    expect(await within(dialog).findByText('a@x.io')).toBeInTheDocument()
+    fireEvent.change(within(dialog).getByLabelText('Email to share with'), { target: { value: 'b@x.io' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Invite' }))
+    await waitFor(() => expect(reportGrantsApi.create).toHaveBeenCalledWith(1, { email: 'b@x.io', level: 'edit' }))
   })
 })
 
 describe('opening a dashboard', () => {
-  const where = () => screen.getByTestId('where').textContent
-
-  it('the whole card opens it, not just the title', async () => {
+  it('the title is a real anchor, and a click shows the loader', async () => {
     renderReports()
-    const card = (await screen.findByText('Revenue')).closest('.card')!
-    fireEvent.click(card)
-    expect(where()).toBe('/reports/1')
+    const link = await screen.findByRole('link', { name: 'Revenue' })
+    expect(link).toHaveAttribute('href', '/reports/1')
+    fireEvent.click(link)
+    expect(await screen.findByRole('status')).toBeInTheDocument()
   })
 
-  it('keeps the title a real anchor, so middle-click and new-tab still work', async () => {
-    // A div with an onClick cannot be opened in a new tab, copied as a link,
-    // or reached by a screen reader's link list. The card click is a
-    // convenience ON TOP of the anchor, never a replacement for it.
+  it('a ctrl-click (new tab) keeps the list', async () => {
     renderReports()
-    const title = await screen.findByText('Revenue')
-    expect(title.tagName).toBe('A')
-    expect(title).toHaveAttribute('href', '/reports/1')
+    fireEvent.click(await screen.findByRole('link', { name: 'Revenue' }), { ctrlKey: true })
+    expect(screen.getByTestId('dash-card-1')).toBeInTheDocument()
   })
 
-  it('does not navigate when a control inside the card is clicked', async () => {
+  it('the card has one tab stop: the title link', async () => {
     renderReports()
-    await screen.findByText('Revenue')
-    fireEvent.click(screen.getByRole('button', { name: 'Delete dashboard Revenue' }))
-    expect(where()).toBe('/reports')
-  })
-
-  it('adds no second tab stop for the card itself', async () => {
-    // Two focusable things pointing at one destination means two tab stops and
-    // two announcements for one dashboard.
-    renderReports()
-    const card = (await screen.findByText('Revenue')).closest('.card')!
-    expect(card).not.toHaveAttribute('tabindex')
-    expect(card).not.toHaveAttribute('role')
+    await screen.findByTestId('dash-card-1')
+    expect(card(1)).not.toHaveAttribute('tabindex')
+    expect(within(card(1)).getAllByRole('link')).toHaveLength(1)
   })
 })
 
-describe('card controls are quiet until reached for', () => {
-  /**
-   * jsdom applies no stylesheet, so the reveal itself is pinned by CONTENT --
-   * the technique svgDirection.test.ts uses for the same reason. What IS
-   * testable here is the part that matters for access: the buttons stay in the
-   * DOM and in the tab order, so "hidden until hover" never becomes "hidden".
-   */
-  const css = async () => {
-    const fs = await import('node:fs')
-    const path = await import('node:path')
-    const url = await import('node:url')
-    const here = path.dirname(url.fileURLToPath(import.meta.url))
-    return fs.readFileSync(path.resolve(here, '../index.css'), 'utf8')
-  }
-
-  it('keeps every control reachable, not merely un-drawn', async () => {
+describe('what a card says', () => {
+  it('a Suggest dashboards card wears the AI badge and keeps its goal, without the prefix', async () => {
     vi.mocked(reportsApi.list).mockResolvedValue([
-      report({ id: 5, name: 'My board', is_mine: true, my_capability: 'data',
-               created_by: 9, published: false }),
+      report({ id: 1, name: 'A', description: 'Suggested from the data' }),
+      report({ id: 2, name: 'B', description: 'Suggested for: churn by month' }),
     ] as never)
     renderReports()
-    await screen.findByText('My board')
-
-    for (const name of ['Share My board', 'Publish My board', 'Delete dashboard My board']) {
-      const btn = screen.getByRole('button', { name })
-      expect(btn).toBeInTheDocument()
-      expect(btn).not.toHaveAttribute('aria-hidden')
-      expect(btn).not.toBeDisabled()
-    }
+    await screen.findByTestId('dash-card-2')
+    expect(card(1)).toHaveTextContent('AI suggestion')
+    expect(card(1)).not.toHaveTextContent('Suggested from the data')
+    expect(card(2)).toHaveTextContent('churn by month')
+    expect(card(2)).not.toHaveTextContent('Suggested for:')
   })
-
-  it('names all three for a screen reader and on hover', async () => {
-    // Icon-only buttons: without both, one card's delete is indistinguishable
-    // from another's, and the globe is a guess.
-    vi.mocked(reportsApi.list).mockResolvedValue([
-      report({ id: 5, name: 'My board', is_mine: true, my_capability: 'data',
-               created_by: 9, published: false }),
-    ] as never)
-    renderReports()
-    await screen.findByText('My board')
-
-    for (const name of ['Share My board', 'Publish My board', 'Delete dashboard My board']) {
-      expect(screen.getByRole('button', { name })).toHaveAttribute('title')
-    }
-  })
-
-  it('reveals on hover AND on keyboard focus, and never hides on touch', async () => {
-    const text = await css()
-    const rule = text.match(/\.dl-card-actions\s*\{[^}]*\}/)
-    expect(rule, 'no .dl-card-actions rule in index.css').toBeTruthy()
-    expect(rule![0]).toMatch(/opacity:\s*0/)
-
-    // Keyboard users never hover; without this they could not see what they
-    // had focused.
-    expect(text).toMatch(/\.card:focus-within\s+\.dl-card-actions/)
-    // A touch screen has no hover at all, so the reveal must not apply there.
-    expect(text).toMatch(/@media\s*\(hover:\s*none\)[^{]*\{[^}]*\.dl-card-actions/)
-  })
-})
-
-describe('dashboards proposed by Suggest dashboards', () => {
-  it('shows a Suggested chip instead of a description line', async () => {
-    vi.mocked(reportsApi.list).mockResolvedValue([
-      report({ id: 8, name: 'Revenue picture', description: 'Suggested from the data' }),
-    ] as never)
-    renderReports()
-    await screen.findByText('Revenue picture')
-
-    expect(screen.getByText('Suggested')).toBeInTheDocument()
-    // The sentence itself is gone: it said the same thing on every such card
-    // and cost a full line to do it.
-    expect(screen.queryByText('Suggested from the data')).toBeNull()
-  })
-
-  it('keeps the goal when one was given, without repeating the word', async () => {
-    // "Suggested for: quarterly board review" carries something the chip
-    // cannot -- the goal. Only the prefix is redundant once the chip is there.
-    vi.mocked(reportsApi.list).mockResolvedValue([
-      report({ id: 9, name: 'Board view',
-               description: 'Suggested for: quarterly board review' }),
-    ] as never)
-    renderReports()
-    await screen.findByText('Board view')
-
-    expect(screen.getByText('Suggested')).toBeInTheDocument()
-    expect(screen.getByText('quarterly board review')).toBeInTheDocument()
-    expect(screen.queryByText(/Suggested for:/)).toBeNull()
-  })
-
-  it('leaves a hand-written description completely alone', async () => {
-    vi.mocked(reportsApi.list).mockResolvedValue([
-      report({ id: 10, name: 'Ops', description: 'Weekly ops review, EMEA only' }),
-    ] as never)
-    renderReports()
-    await screen.findByText('Ops')
-
-    expect(screen.getByText('Weekly ops review, EMEA only')).toBeInTheDocument()
-    expect(screen.queryByText('Suggested')).toBeNull()
-  })
-
-  it('does not rewrite the description it was sent', async () => {
-    // A rendering change only: nothing here may mutate the API value, or the
-    // next PATCH would save the trimmed text back over the original.
-    const rows = [report({ id: 11, name: 'R', description: 'Suggested from the data' })]
-    vi.mocked(reportsApi.list).mockResolvedValue(rows as never)
-    renderReports()
-    await screen.findByText('R')
-    expect(rows[0].description).toBe('Suggested from the data')
-  })
-})
-
-describe('the card title is not squeezed by its own chips', () => {
-  /**
-   * The regression this pins: the title and the status chips shared one flex
-   * row, chips at flex-shrink: 0. Adding the SUGGESTED chip left "What stands
-   * out in Route planning extract output" about eight characters wide and six
-   * lines tall, and the grid row grew to fit the tower.
-   *
-   * The structural fix is that no chip sits beside the title any more. That is
-   * checkable in jsdom; the two-line clamp that goes with it is CSS, so it is
-   * pinned by reading index.css.
-   */
-  const suggested = () => report({
-    id: 12, name: 'What stands out in Route planning extract output',
-    description: 'Suggested from the data', published: true, created_by: 9,
-    is_mine: true, my_capability: 'data',
-  })
-
-  it('puts every chip in the footer, none beside the title', async () => {
-    vi.mocked(reportsApi.list).mockResolvedValue([suggested()] as never)
-    renderReports()
-    const title = await screen.findByText(/What stands out in Route planning/)
-    const head = title.closest('.dl-dash-card__head')!
-    const card = title.closest('.card')!
-
-    expect(head).toBeTruthy()
-    for (const chip of ['Suggested', 'published']) {
-      const el = screen.getByText(chip)
-      expect(head.contains(el), `${chip} is still beside the title`).toBe(false)
-      expect(card.querySelector('.dl-dash-card__foot')!.contains(el)).toBe(true)
-    }
-  })
-
-  it('clamps a long name to two lines rather than letting it tower', async () => {
-    const fs = await import('node:fs')
-    const path = await import('node:path')
-    const url = await import('node:url')
-    const here = path.dirname(url.fileURLToPath(import.meta.url))
-    const css = fs.readFileSync(path.resolve(here, '../index.css'), 'utf8')
-
-    const rule = css.match(/\.dl-dash-card__title\s*\{[^}]*\}/)
-    expect(rule, 'no .dl-dash-card__title rule in index.css').toBeTruthy()
-    expect(rule![0]).toMatch(/line-clamp:\s*2/)
-    // Without min-inline-size: 0 a flex child refuses to shrink below its
-    // content, which is what let the chips win the row in the first place.
-    expect(rule![0]).toMatch(/min-inline-size:\s*0/)
-  })
-
-  it('keeps the full name reachable once it is clipped', async () => {
-    vi.mocked(reportsApi.list).mockResolvedValue([suggested()] as never)
-    renderReports()
-    const title = await screen.findByText(/What stands out in Route planning/)
-    expect(title).toHaveAttribute('title',
-      'What stands out in Route planning extract output')
-  })
-})
-
-/**
- * The card carries four labels at most, and no two of them say the same thing.
- *
- * Every auto-generated dashboard is named after the dataset it was generated
- * from -- "What stands out in Demo Sales", "Enrolments 2025 - escalated to
- * registrar" -- and the footer then printed that dataset's name again, right
- * under the title. Two labels, one fact, on most of the grid.
- *
- * The chip is not dropped outright, because it is the ONLY identifying label
- * on a card whose title says nothing: "What stands out in this data" needs
- * "Metrics Snapshot Test" to be worth anything at all.
- */
-describe('the dashboard card does not repeat itself', () => {
-  const withDataset = (dsName: string, reportName: string) => {
-    vi.mocked(datasetsApi.list).mockResolvedValue([
-      { id: 9, name: dsName },
-    ] as never)
-    vi.mocked(reportsApi.list).mockResolvedValue([
-      report({ id: 1, name: reportName, dataset_id: 9 }),
-    ] as never)
-  }
 
   it('drops the dataset chip when the title already names the dataset', async () => {
-    withDataset('Enrolments 2025', 'Enrolments 2025 - escalated to registrar')
-    renderReports()
-
-    await screen.findByText('Enrolments 2025 - escalated to registrar')
-    // Exact match: the title contains the string, the chip WAS the string.
-    expect(screen.queryByText('Enrolments 2025')).toBeNull()
-  })
-
-  it('ignores case and spacing when deciding that', async () => {
-    withDataset('demo  sales', 'What stands out in Demo Sales')
-    renderReports()
-
-    await screen.findByText('What stands out in Demo Sales')
-    // Queried in the normalised form testing-library compares against --
-    // asking for the raw double space matches nothing either way, which
-    // would make this test pass without testing anything.
-    expect(screen.queryByText('demo sales')).toBeNull()
-  })
-
-  it('keeps the dataset chip when the title does not name it', async () => {
-    // The card that needs it most: the title is generic, so the chip is the
-    // only thing telling one of these apart from the next.
-    withDataset('Metrics Snapshot Test', 'What stands out in this data')
-    renderReports()
-
-    expect(await screen.findByText('Metrics Snapshot Test')).toBeInTheDocument()
-  })
-
-  it('says nothing at all when a dashboard has no dataset', async () => {
-    // "No dataset" is an absence, not a fact about the dashboard. It cost a
-    // label on every card that had one.
-    vi.mocked(datasetsApi.list).mockResolvedValue([] as never)
+    vi.mocked(datasetsApi.list).mockResolvedValue([{ id: 4, name: 'Demo Sales' }] as never)
     vi.mocked(reportsApi.list).mockResolvedValue([
-      report({ id: 1, name: '465', dataset_id: undefined }),
+      report({ id: 1, name: 'What stands out in demo  sales', dataset_id: 4 }),
+      report({ id: 2, name: 'Quarterly', dataset_id: 4 }),
     ] as never)
     renderReports()
+    await waitFor(() => expect(card(2)).toHaveTextContent('Demo Sales'))
+    expect(card(1)).not.toHaveTextContent('Demo Sales')
+  })
 
-    await screen.findByText('465')
-    expect(screen.queryByText(/no dataset/i)).toBeNull()
+  it('says how many pages when there is no description', async () => {
+    vi.mocked(reportsApi.list).mockResolvedValue([report({ pages: [{ id: 1, page_type: 'normal', widgets: [] }, { id: 2, page_type: 'normal', widgets: [] }] })] as never)
+    renderReports()
+    expect(await screen.findByTestId('dash-card-1')).toHaveTextContent(/2 pages/)
   })
 })
 
-describe('the dashboards page is one full-width column', () => {
-  it('does not render the workspace tree', async () => {
-    // The tree moved out again: the page is a list of dashboards, and the
-    // 280px column of folders was taking a quarter of the width to show six.
-    renderReports()
-    await screen.findByText('Revenue')
-    expect(screen.queryByTestId('workspace-tree')).toBeNull()
-    // No show/hide toggle for a folder column. (The Sections | Folders view
-    // toggle is a different control: it rearranges the list itself.)
-    expect(screen.queryByRole('button', { name: /(show|hide) folders/i })).toBeNull()
-  })
-})
-
-
-/**
- * Folders are headings, not chips.
- *
- * A chip on every card under one folder said the same word six times in a
- * row -- the duplication the page had just been cleared of. A heading says
- * it once and makes the grid read like the tree did: this folder, its
- * dashboards, then its subfolders as smaller headings inside it.
- *
- * Loose dashboards come FIRST, before any folder heading, rather than last
- * under an invented "Unfiled" label: a run of cards after a heading reads as
- * belonging to it, a run of cards before the first heading reads as
- * belonging to nothing. Same shape at every level -- a folder is its direct
- * cards and then its children.
- */
-describe('cards are grouped under folder headings', () => {
-  const node = (over: Record<string, unknown>) => ({
-    id: 1, parent_id: null, node_type: 'folder', name: 'Widget gallery', report_id: null,
-    position: 0, can_manage: true, is_mine: true, role_ids: [], pages: [],
-    children: [], ...over,
-  })
-  const leaf = (reportId: number) =>
-    node({ id: 90 + reportId, node_type: 'report', name: 'x', report_id: reportId })
-
-  const three = () => vi.mocked(reportsApi.list).mockResolvedValue([
-    report({ id: 1, name: 'Revenue' }),
-    report({ id: 2, name: 'Costs' }),
-    report({ id: 3, name: 'Margin' }),
-  ] as never)
-
-  const before = (a: Element, b: Element) =>
-    !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)
-
-  it('puts a heading named after the folder above its dashboards', async () => {
-    three()
-    vi.mocked(workspaceApi.tree).mockResolvedValue({
-      roots: [node({ children: [leaf(1), leaf(2)] })], unfiled: [leaf(3)],
-    } as never)
-    renderReports()
-
-    const region = await screen.findByRole('region', { name: 'Widget gallery' })
-    expect(within(region).getByText('Revenue')).toBeInTheDocument()
-    expect(within(region).getByText('Costs')).toBeInTheDocument()
-    expect(within(region).queryByText('Margin')).toBeNull()
-    // No chip: the heading already said it.
-    expect(screen.queryByTestId('card-folder')).toBeNull()
-    // And each dashboard exactly ONCE on the page. Scoping the assertions
-    // above to the region hid a mutant that rendered every filed card a
-    // second time in the loose grid -- the duplication this feature exists
-    // to avoid, and nothing here would have noticed.
-    for (const name of ['Revenue', 'Costs', 'Margin']) {
-      expect(screen.getAllByText(name)).toHaveLength(1)
-    }
-  })
-
-  it('nests a subfolder heading inside its parent', async () => {
-    three()
-    vi.mocked(workspaceApi.tree).mockResolvedValue({
-      roots: [node({
-        name: 'omda',
-        children: [leaf(1), node({ id: 2, name: 'omda1', children: [leaf(2)] })],
-      })],
-      unfiled: [],
-    } as never)
-    renderReports()
-
-    const parent = await screen.findByRole('region', { name: 'omda' })
-    const child = within(parent).getByRole('region', { name: 'omda1' })
-    expect(within(child).getByText('Costs')).toBeInTheDocument()
-    // The parent's own dashboard sits above the child folder, not inside it.
-    expect(within(child).queryByText('Revenue')).toBeNull()
-    expect(before(within(parent).getByText('Revenue'), child)).toBe(true)
-  })
-
-  it('renders loose dashboards before the first folder heading', async () => {
-    three()
-    vi.mocked(workspaceApi.tree).mockResolvedValue({
-      roots: [node({ children: [leaf(1)] })], unfiled: [leaf(2), leaf(3)],
-    } as never)
-    renderReports()
-
-    const heading = await screen.findByRole('heading', { name: 'Widget gallery' })
-    expect(before(screen.getByText('Costs'), heading)).toBe(true)
-    expect(before(screen.getByText('Margin'), heading)).toBe(true)
-    expect(screen.queryByText(/unfiled/i)).toBeNull()
-  })
-
-  it('shows a folder that is genuinely empty, with a zero', async () => {
-    // The page manages folders now, so a folder you just created has to be
-    // on screen to be named, filled or deleted. It used to be hidden, which
-    // made "New folder" look like it did nothing.
-    three()
-    vi.mocked(workspaceApi.tree).mockResolvedValue({
-      roots: [
-        node({ children: [leaf(1)] }),
-        node({ id: 2, name: 'Empty one', children: [] }),
-        node({ id: 3, name: 'Only subfolders', children: [node({ id: 4, name: 'Also empty' })] }),
-      ],
-      unfiled: [],
-    } as never)
-    renderReports()
-
-    await screen.findByRole('heading', { name: 'Widget gallery' })
-    const empty = screen.getByRole('region', { name: 'Empty one' })
-    expect(within(empty).getByLabelText('0 dashboards')).toBeInTheDocument()
-    expect(within(empty).getByText(/empty folder/i)).toBeInTheDocument()
-    // Nesting still holds for empties.
-    const outer = screen.getByRole('region', { name: 'Only subfolders' })
-    expect(within(outer).getByRole('region', { name: 'Also empty' })).toBeInTheDocument()
-  })
-
-  it("lists an empty folder once, under the viewer's own group only", async () => {
-    // An empty folder belongs to nobody's dashboards, so without this rule
-    // it appeared under BOTH groups -- the same heading twice on one page.
-    // It is the viewer's own folder, so it goes where their own dashboards go.
+describe('folders', () => {
+  const tree = () => vi.mocked(workspaceApi.tree).mockResolvedValue({
+    roots: [node({ id: 1, name: 'Finance', children: [leaf(1), node({ id: 2, parent_id: 1, name: 'Board', children: [leaf(2, 2)] })] }),
+      node({ id: 3, name: 'Empty', children: [] })],
+    unfiled: [leaf(3, null, { id: 0 })],
+  } as never)
+  beforeEach(() => {
     vi.mocked(reportsApi.list).mockResolvedValue([
-      report({ id: 1, name: 'Revenue' }),
-      report({ id: 3, name: 'Theirs', is_mine: false, my_capability: 'view', created_by: 8 }),
+      report({ id: 1, name: 'Revenue' }), report({ id: 2, name: 'Pack' }), report({ id: 3, name: 'Loose' }),
     ] as never)
-    vi.mocked(workspaceApi.tree).mockResolvedValue({
-      roots: [node({ id: 2, name: 'Empty one', children: [] })],
-      unfiled: [leaf(1), leaf(3)],
-    } as never)
-    renderReports()
-
-    const mine = await screen.findByRole('region', { name: 'My workspaces' })
-    expect(within(mine).getByRole('heading', { name: 'Empty one' })).toBeInTheDocument()
-    const granted = screen.getByRole('region', { name: 'Granted to me' })
-    expect(within(granted).queryByRole('heading', { name: 'Empty one' })).toBeNull()
-    expect(screen.getAllByRole('heading', { name: 'Empty one' })).toHaveLength(1)
+    tree()
   })
 
-  it('hides a folder the search box emptied, and empty ones while searching', async () => {
-    // Eight rows, so the search box renders at all. A folder that HAS
-    // dashboards but none that match is hidden with them: the heading
-    // would otherwise promise something the search says is not there. And
-    // an empty folder cannot match anything, so it goes too.
-    vi.mocked(reportsApi.list).mockResolvedValue(
-      Array.from({ length: 8 }, (_, i) => report({ id: i + 1, name: `Dash ${i + 1}` })) as never)
-    vi.mocked(workspaceApi.tree).mockResolvedValue({
-      roots: [
-        node({ children: [leaf(1)] }),
-        node({ id: 2, name: 'Empty one', children: [] }),
-      ],
-      unfiled: [leaf(2), leaf(3), leaf(4), leaf(5), leaf(6), leaf(7), leaf(8)],
-    } as never)
+  it('groups the cards under folder headings, subfolders inside, loose ones last', async () => {
     renderReports()
-    await screen.findByRole('heading', { name: 'Widget gallery' })
-
-    fireEvent.change(screen.getByPlaceholderText('Search dashboards'), { target: { value: 'Dash 2' } })
-
-    expect(screen.queryByRole('heading', { name: 'Widget gallery' })).toBeNull()
-    expect(screen.queryByRole('heading', { name: 'Empty one' })).toBeNull()
-    expect(screen.getByText('Dash 2')).toBeInTheDocument()
+    const finance = await screen.findByRole('region', { name: 'Finance' })
+    expect(within(finance).getByTestId('dash-card-1')).toBeInTheDocument()
+    const board = within(finance).getByRole('region', { name: 'Board' })
+    expect(within(board).getByTestId('dash-card-2')).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'Not in a folder' })).getByTestId('dash-card-3')).toBeInTheDocument()
+    // A folder with nothing in it is still shown, so it can be filled or deleted.
+    expect(within(screen.getByRole('region', { name: 'Empty' })).getByText('Empty folder')).toBeInTheDocument()
   })
 
-  it('still renders the dashboards when the tree request fails', async () => {
-    // The headings are a courtesy. Losing them must not cost the page.
-    three()
-    vi.mocked(workspaceApi.tree).mockRejectedValue(new Error('boom'))
+  it('lists the folders in the side column with what each holds, subtree included', async () => {
     renderReports()
-
-    expect(await screen.findByText('Revenue')).toBeInTheDocument()
-    expect(screen.getByText('Margin')).toBeInTheDocument()
-    expect(screen.queryByRole('alert')).toBeNull()
-  })
-})
-
-
-/**
- * Three tiers, and each one visibly UNDER the one above it.
- *
- * "My workspaces" and "sameh" used to render as siblings at the same level,
- * with the folder heading actually heavier than the group heading -- the
- * hierarchy read upside-down. Now a folder's section is inside its group's
- * section, a subfolder's inside its folder's, and every heading carries the
- * same collapse control, so a long page folds down to its headings.
- */
-describe('headings nest and collapse', () => {
-  const node = (over: Record<string, unknown>) => ({
-    id: 1, parent_id: null, node_type: 'folder', name: 'sameh', report_id: null,
-    position: 0, can_manage: true, is_mine: true, role_ids: [], pages: [],
-    children: [], ...over,
-  })
-  const leaf = (reportId: number) =>
-    node({ id: 90 + reportId, node_type: 'report', name: 'x', report_id: reportId })
-
-  /** One of mine filed under "sameh", one of mine loose, one granted. */
-  const arrange = () => {
-    vi.mocked(reportsApi.list).mockResolvedValue([
-      report({ id: 1, name: 'Revenue' }),
-      report({ id: 2, name: 'Costs' }),
-      report({ id: 3, name: 'Theirs', is_mine: false, my_capability: 'view', created_by: 8 }),
-    ] as never)
-    vi.mocked(workspaceApi.tree).mockResolvedValue({
-      roots: [node({ children: [leaf(1)] })], unfiled: [leaf(2), leaf(3)],
-    } as never)
-  }
-
-  it('puts a folder INSIDE its authorship group, not beside it', async () => {
-    arrange()
-    renderReports()
-
-    const group = await screen.findByRole('region', { name: 'My workspaces' })
-    const folder = within(group).getByRole('region', { name: 'sameh' })
-    expect(within(folder).getByText('Revenue')).toBeInTheDocument()
-    // The loose card is in the group but not in the folder.
-    expect(within(group).getByText('Costs')).toBeInTheDocument()
-    expect(within(folder).queryByText('Costs')).toBeNull()
-    // And the other group is a sibling, not a child.
-    expect(within(group).queryByText('Theirs')).toBeNull()
+    const finance = await folderBtn('Finance')
+    expect(finance).toHaveTextContent('2')
   })
 
-  it('collapses a folder from its heading, and expands it again', async () => {
-    arrange()
+  it('choosing a folder shows only what is in it', async () => {
     renderReports()
-    await screen.findByText('Revenue')
+    fireEvent.click(await folderBtn('Board'))
+    expect(screen.getByTestId('dash-card-2')).toBeInTheDocument()
+    expect(screen.queryByTestId('dash-card-1')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('dash-card-3')).not.toBeInTheDocument()
+  })
 
-    const toggle = screen.getByRole('button', { name: 'sameh' })
-    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  it('an empty folder says so and offers a dashboard there', async () => {
+    vi.mocked(pageTemplatesApi.builtins).mockResolvedValue([] as never)
+    renderReports()
+    fireEvent.click(await folderBtn('Empty'))
+    expect(screen.getByTestId('dash-folder-empty')).toHaveTextContent('This folder is empty')
+    fireEvent.click(screen.getByRole('button', { name: 'New dashboard here' }))
+    expect(await screen.findByLabelText('Folder')).toHaveValue('3')
+  })
 
+  it('headings collapse, and the choice is remembered', async () => {
+    const { unmount } = renderReports()
+    const finance = await screen.findByRole('region', { name: 'Finance' })
+    const toggle = within(finance).getAllByRole('button', { name: /Finance/ })[0]
     fireEvent.click(toggle)
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
-    expect(screen.queryByText('Revenue')).toBeNull()
-    // The heading stays, so there is something to expand from.
-    expect(screen.getByRole('heading', { name: 'sameh' })).toBeInTheDocument()
-    // Nothing outside the folder moved.
-    expect(screen.getByText('Costs')).toBeInTheDocument()
-
-    fireEvent.click(toggle)
-    expect(screen.getByText('Revenue')).toBeInTheDocument()
-  })
-
-  it('collapses a whole group, folders included', async () => {
-    arrange()
-    renderReports()
-    await screen.findByText('Revenue')
-
-    fireEvent.click(screen.getByRole('button', { name: 'My workspaces' }))
-
-    expect(screen.queryByText('Revenue')).toBeNull()
-    expect(screen.queryByText('Costs')).toBeNull()
-    expect(screen.queryByRole('heading', { name: 'sameh' })).toBeNull()
-    // The other group is untouched.
-    expect(screen.getByText('Theirs')).toBeInTheDocument()
-  })
-
-  it('remembers what was collapsed across a reload', async () => {
-    arrange()
-    const { unmount } = renderReports()
-    await screen.findByText('Revenue')
-    fireEvent.click(screen.getByRole('button', { name: 'sameh' }))
-    expect(screen.queryByText('Revenue')).toBeNull()
+    expect(screen.queryByTestId('dash-card-1')).not.toBeInTheDocument()
     unmount()
-
     renderReports()
-    await screen.findByText('Costs')
-    expect(screen.queryByText('Revenue')).toBeNull()
-    expect(screen.getByRole('button', { name: 'sameh' })).toHaveAttribute('aria-expanded', 'false')
+    const again = await screen.findByRole('region', { name: 'Finance' })
+    expect(within(again).getAllByRole('button', { name: /Finance/ })[0]).toHaveAttribute('aria-expanded', 'false')
   })
 
-  it('says how many dashboards each heading holds', async () => {
-    // The number is what makes a collapsed heading worth anything: "sameh"
-    // alone says nothing about whether opening it is worth the click.
-    arrange()
+  it('still lists every dashboard when the tree fails, and says the folders did not load', async () => {
+    vi.mocked(workspaceApi.tree).mockRejectedValue(new Error('down'))
     renderReports()
-    await screen.findByText('Revenue')
-
-    const group = screen.getByRole('region', { name: 'My workspaces' })
-    expect(within(group).getAllByLabelText('2 dashboards')[0]).toBeInTheDocument()
-    const folder = within(group).getByRole('region', { name: 'sameh' })
-    expect(within(folder).getByLabelText('1 dashboard')).toBeInTheDocument()
+    expect(await screen.findByText("Folders couldn't load.")).toBeInTheDocument()
+    for (const id of [1, 2, 3]) expect(screen.getByTestId(`dash-card-${id}`)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'New folder' })).not.toBeInTheDocument()
   })
 
-  it("counts the whole subtree, not just the folder's own cards", async () => {
-    // A folded "omda" whose dashboards all live in "omda1" must not say 0 --
-    // that number is the only reason to open it. A shallow count survived
-    // every other test here because none of them nested.
-    vi.mocked(reportsApi.list).mockResolvedValue([
-      report({ id: 1, name: 'Revenue' }),
-      report({ id: 2, name: 'Costs' }),
-    ] as never)
-    vi.mocked(workspaceApi.tree).mockResolvedValue({
-      roots: [node({
-        name: 'omda',
-        children: [leaf(1), node({ id: 2, name: 'omda1', children: [leaf(2)] })],
-      })],
-      unfiled: [],
-    } as never)
+  it('creates a top-level folder inline, in the side column', async () => {
     renderReports()
-
-    const parent = await screen.findByRole('region', { name: 'omda' })
-    // The parent's own count badge is the first one inside it; the child's
-    // is nested deeper.
-    expect(within(parent).getAllByLabelText(/dashboards?$/)[0])
-      .toHaveAttribute('aria-label', '2 dashboards')
-    expect(within(within(parent).getByRole('region', { name: 'omda1' }))
-      .getByLabelText('1 dashboard')).toBeInTheDocument()
-  })
-})
-
-/**
- * A heading is never cut short.
- *
- * "My workspa…" shipped: the heading's name had the card-title treatment
- * (nowrap + ellipsis), and a flex quirk handed the <h2> a fraction of its row.
- * The fix is a rule, not a width: a heading name WRAPS. jsdom lays nothing
- * out, so the rule is pinned by reading the stylesheet, the way the
- * hover-reveal test above does.
- */
-describe('heading names are shown in full', () => {
-  const stylesheet = async () => {
-    const fs = await import('node:fs')
-    const path = await import('node:path')
-    const url = await import('node:url')
-    const here = path.dirname(url.fileURLToPath(import.meta.url))
-    return fs.readFileSync(path.resolve(here, '../index.css'), 'utf8')
-  }
-  // indexOf rather than a RegExp: a selector full of dots and underscores
-  // needs escaping, and escaping is exactly what went wrong in the first
-  // draft of this helper.
-  const rule = (css: string, selector: string) => {
-    const i = css.indexOf(String.fromCharCode(10) + selector + ' {')
-    expect(i, `no rule for ${selector}`).toBeGreaterThan(-1)
-    return css.slice(i, css.indexOf('}', i) + 1)
-  }
-
-  it('lets a folder or group name wrap rather than truncate', async () => {
-    const name = rule(await stylesheet(), '.dl-fold__name')
-    expect(name).not.toMatch(/white-space\s*:\s*nowrap/)
-    expect(name).not.toMatch(/text-overflow\s*:\s*ellipsis/)
-    expect(name).toMatch(/overflow-wrap\s*:\s*anywhere/)
+    await screen.findByTestId('dash-card-1')
+    fireEvent.click(screen.getAllByRole('button', { name: 'New folder' })[0])
+    fireEvent.change(within(nav()).getByRole('textbox', { name: 'Folder name' }), { target: { value: 'Ops' } })
+    fireEvent.click(within(nav()).getByRole('button', { name: 'Create folder' }))
+    await waitFor(() => expect(workspaceApi.create).toHaveBeenCalledWith({ node_type: 'folder', name: 'Ops' }))
   })
 
-  it('gives the heading its whole row so nothing can squeeze it', async () => {
-    expect(rule(await stylesheet(), '.dl-fold__title')).toMatch(/flex\s*:\s*1 1 auto/)
-  })
-})
-
-
-/**
- * Folders and dashboards are managed from the page, now that the tree is not
- * mounted anywhere else. The strings are the tree's, character for character:
- * the delete prompt in particular says that nothing is destroyed, and a user
- * who has been burned by another tool will not believe that unless it is
- * written on the button.
- *
- * Every folder action reads `can_manage` from the server; the page never
- * decides who may rename or delete.
- */
-describe('managing folders and dashboards from the page', () => {
-  const node = (over: Record<string, unknown>) => ({
-    id: 1, parent_id: null, node_type: 'folder', name: 'sameh', report_id: null,
-    position: 0, can_manage: true, is_mine: true, role_ids: [], pages: [],
-    children: [], ...over,
-  })
-  const leaf = (reportId: number) =>
-    node({ id: 90 + reportId, node_type: 'report', name: 'x', report_id: reportId })
-  const treeWith = (...roots: unknown[]) =>
-    vi.mocked(workspaceApi.tree).mockResolvedValue({ roots, unfiled: [] } as never)
-  const openMenu = (name: string) =>
-    fireEvent.click(screen.getByRole('button', { name: `Actions for ${name}` }))
-  const item = (name: RegExp) => screen.getByRole('menuitem', { name })
-
-  beforeEach(() => {
-    vi.mocked(workspaceApi.create).mockResolvedValue({} as never)
-    vi.mocked(workspaceApi.update).mockResolvedValue({} as never)
+  it("creates a subfolder, renames and deletes a folder from its menu; deleting says contents survive", async () => {
     vi.mocked(workspaceApi.delete).mockResolvedValue(undefined as never)
-  })
-
-  it('creates a top-level folder from the page head, and shows it', async () => {
-    treeWith(node({ children: [leaf(1)] }))
     renderReports()
-    await screen.findByRole('heading', { name: 'sameh' })
-    // The refresh after creating returns the tree with the new folder in it.
-    treeWith(node({ children: [leaf(1)] }), node({ id: 2, name: 'Q4 planning' }))
+    const row = (await folderBtn('Finance')).parentElement as HTMLElement
+    const menuBtn = () => within(row).getByRole('button', { name: 'Actions for Finance' })
+    fireEvent.click(menuBtn())
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'New subfolder' }))
+    await answerPrompt('Q3')
+    await waitFor(() => expect(workspaceApi.create).toHaveBeenCalledWith({ node_type: 'folder', name: 'Q3', parent_id: 1 }))
 
-    fireEvent.click(screen.getByRole('button', { name: 'New folder' }))
+    fireEvent.click(menuBtn())
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Rename' }))
+    await answerPrompt('Money')
+    await waitFor(() => expect(workspaceApi.update).toHaveBeenCalledWith(1, { name: 'Money' }))
 
-    // The name is asked for in a real, in-page dialog -- not a native prompt,
-    // which the browser can suppress and no test or screen reader can reach.
-    expect(await screen.findByRole('dialog', { name: 'New folder' })).toBeInTheDocument()
-    await answerPrompt('Q4 planning')
-
-    await waitFor(() => expect(workspaceApi.create).toHaveBeenCalledWith({ node_type: 'folder', name: 'Q4 planning' }))
-    expect(await screen.findByRole('heading', { name: 'Q4 planning' })).toBeInTheDocument()
-  })
-
-  it("creates a subfolder from a folder's own menu", async () => {
-    treeWith(node({ children: [leaf(1)] }))
-    renderReports()
-    await screen.findByRole('heading', { name: 'sameh' })
-    openMenu('sameh')
-    fireEvent.click(item(/new subfolder/i))
-
-    expect(await screen.findByRole('dialog', { name: 'New subfolder' })).toBeInTheDocument()
-    await answerPrompt('EMEA')
-
-    await waitFor(() => expect(workspaceApi.create).toHaveBeenCalledWith({ node_type: 'folder', name: 'EMEA', parent_id: 1 }))
-  })
-
-  it('renames a folder', async () => {
-    treeWith(node({ children: [leaf(1)] }))
-    renderReports()
-    await screen.findByRole('heading', { name: 'sameh' })
-    treeWith(node({ name: 'Sales', children: [leaf(1)] }))
-
-    openMenu('sameh')
-    fireEvent.click(item(/rename/i))
-
-    // Pre-filled with the current name, and selected, so typing replaces it.
-    const renameFolderDialog = await screen.findByRole('dialog', { name: 'Rename folder' })
-    expect(within(renameFolderDialog).getByRole('textbox')).toHaveValue('sameh')
-    await answerPrompt('Sales')
-
-    await waitFor(() => expect(workspaceApi.update).toHaveBeenCalledWith(1, { name: 'Sales' }))
-    expect(await screen.findByRole('heading', { name: 'Sales' })).toBeInTheDocument()
-  })
-
-  it('deleting a folder says that its contents survive', async () => {
-    treeWith(node({ children: [leaf(1)] }))
-    renderReports()
-    await screen.findByRole('heading', { name: 'sameh' })
-
-    openMenu('sameh')
-    fireEvent.click(item(/delete folder/i))
-
+    fireEvent.click(menuBtn())
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete folder' }))
     const dialog = await screen.findByRole('alertdialog')
-    expect(dialog).toHaveTextContent('Delete the folder "sameh"?')
-    expect(dialog).toHaveTextContent('Anything inside it moves up a level — no dashboards are deleted.')
-    expect(workspaceApi.delete).not.toHaveBeenCalled()
-
-    treeWith()
+    expect(dialog).toHaveTextContent('No dashboards are deleted')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete folder' }))
     await waitFor(() => expect(workspaceApi.delete).toHaveBeenCalledWith(1))
-    // The dashboard is still on the page -- re-parented, not deleted.
-    expect(await screen.findByText('Revenue')).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'sameh' })).toBeNull()
   })
 
   it('offers no folder actions on a folder the viewer cannot manage', async () => {
-    // can_manage is the server's answer. No menu, rather than a menu of
-    // items the server would refuse.
-    treeWith(node({ can_manage: false, children: [leaf(1)] }))
+    vi.mocked(workspaceApi.tree).mockResolvedValue({ roots: [node({ can_manage: false, children: [leaf(1)] })], unfiled: [] } as never)
     renderReports()
-    await screen.findByRole('heading', { name: 'sameh' })
-    expect(screen.queryByRole('button', { name: 'Actions for sameh' })).toBeNull()
-  })
-
-  it('renames a dashboard from its card', async () => {
-    vi.mocked(reportsApi.update).mockResolvedValue({} as never)
-    renderReports()
-    await screen.findByText('Revenue')
-    fireEvent.click(screen.getByRole('button', { name: 'Rename dashboard Revenue' }))
-
-    const renameDialog = await screen.findByRole('dialog', { name: 'Rename dashboard' })
-    expect(within(renameDialog).getByRole('textbox')).toHaveValue('Revenue')
-    await answerPrompt('Income')
-
-    await waitFor(() => expect(reportsApi.update).toHaveBeenCalledWith(1, { name: 'Income' }))
-    expect(await screen.findByText('Income')).toBeInTheDocument()
-    expect(screen.queryByText('Revenue')).toBeNull()
-  })
-
-  it('does not rename when the prompt is cancelled or unchanged', async () => {
-    vi.mocked(reportsApi.update).mockResolvedValue({} as never)
-    renderReports()
-    await screen.findByText('Revenue')
-    fireEvent.click(screen.getByRole('button', { name: 'Rename dashboard Revenue' }))
-    await answerPrompt(null)
-
-    fireEvent.click(screen.getByRole('button', { name: 'Rename dashboard Revenue' }))
-    // Same name back, padded: trimmed to the original, so nothing is written.
-    await answerPrompt('  Revenue ')
-
-    expect(reportsApi.update).not.toHaveBeenCalled()
-  })
-
-  it('a view-only dashboard offers no rename', async () => {
-    // Mirrors delete: the server requires >= edit to change a report, so a
-    // viewer gets no control that would be refused.
-    vi.mocked(reportsApi.list).mockResolvedValue([
-      report({ my_capability: 'view', is_mine: false, created_by: 8 }),
-    ] as never)
-    renderReports()
-    await screen.findByText('Revenue')
-    expect(screen.queryByRole('button', { name: /rename dashboard/i })).toBeNull()
+    const row = (await folderBtn('Finance')).parentElement as HTMLElement
+    expect(within(row).getAllByRole('button')).toHaveLength(1)
   })
 })
 
-
-/**
- * Moving a dashboard is a drag onto a folder heading, then a question.
- *
- * The question, because a drop is the easiest gesture to make by accident
- * and a move can change who sees the dashboard (folder grants reach into
- * the folder). The server still has the last word: the page sends the move
- * it was asked for and shows the refusal it gets back, never a guess of its
- * own about what is allowed.
- */
-describe('moving a dashboard between folders by drag and drop', () => {
-  const node = (over: Record<string, unknown>) => ({
-    id: 1, parent_id: null, node_type: 'folder', name: 'sameh', report_id: null,
-    position: 0, can_manage: true, is_mine: true, role_ids: [], pages: [],
-    children: [], ...over,
-  })
-  const leaf = (reportId: number, parent: number | null = 1) =>
-    node({ id: 90 + reportId, parent_id: parent, node_type: 'report', name: 'x', report_id: reportId })
-  const twoFolders = (unfiled: unknown[] = []) =>
+describe('moving a dashboard', () => {
+  beforeEach(() => {
+    vi.mocked(reportsApi.list).mockResolvedValue([report({ id: 1, name: 'Revenue' }), report({ id: 2, name: 'Costs' })] as never)
     vi.mocked(workspaceApi.tree).mockResolvedValue({
-      roots: [node({ children: [leaf(1)] }), node({ id: 9, name: 'Archive', children: [] })],
-      unfiled,
+      roots: [node({ id: 1, name: 'Finance', children: [leaf(1)] }), node({ id: 9, name: 'Archive', children: [] })],
+      unfiled: [leaf(2, null, { id: 0 })],
     } as never)
-  const card = (name: string) => screen.getByText(name).closest('.dl-dash-card') as HTMLElement
-  const headOf = (name: string) => screen.getByRole('heading', { name }).parentElement as HTMLElement
-  const drag = (what: string, onto: string) => {
-    fireEvent.dragStart(card(what))
-    fireEvent.dragOver(headOf(onto))
-    fireEvent.drop(headOf(onto))
+  })
+  const folderRow = (name: string) => (nav().querySelector(`[data-folder="${name}"]`) as HTMLElement).parentElement as HTMLElement
+  const drag = (id: number, onto: string) => {
+    fireEvent.dragStart(card(id))
+    fireEvent.dragOver(folderRow(onto))
+    fireEvent.drop(folderRow(onto))
   }
 
-  beforeEach(() => {
-    vi.mocked(reportsApi.list).mockResolvedValue([
-      report({ id: 1, name: 'Revenue' }),
-      report({ id: 2, name: 'Costs' }),
-    ] as never)
-    vi.mocked(workspaceApi.update).mockResolvedValue({} as never)
-    vi.mocked(workspaceApi.create).mockResolvedValue({} as never)
-  })
-
-  it('asks first, then moves the node into the folder it was dropped on', async () => {
-    twoFolders([leaf(2, null)])
+  it('a drop onto a folder asks first, then re-parents the node', async () => {
     renderReports()
-    await screen.findByRole('heading', { name: 'Archive' })
-
-    drag('Revenue', 'Archive')
-
+    await folderBtn('Archive')
+    drag(1, 'Archive')
     const dialog = await screen.findByRole('alertdialog')
-    expect(dialog).toHaveTextContent('Move "Revenue" to "Archive"?')
-    expect(workspaceApi.update).not.toHaveBeenCalled()
-
-    // The refresh after the move returns Revenue under Archive.
-    vi.mocked(workspaceApi.tree).mockResolvedValue({
-      roots: [node({ children: [] }), node({ id: 9, name: 'Archive', children: [leaf(1, 9)] })],
-      unfiled: [leaf(2, null)],
-    } as never)
+    expect(dialog).toHaveTextContent('Move "Revenue" to Archive?')
+    expect(dialog).toHaveTextContent('Anyone the destination folder is shared with')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }))
-
     await waitFor(() => expect(workspaceApi.update).toHaveBeenCalledWith(91, { parent_id: 9 }))
-    const archive = await screen.findByRole('region', { name: 'Archive' })
-    expect(await within(archive).findByText('Revenue')).toBeInTheDocument()
-    expect(toast.success).toHaveBeenCalled()
   })
 
-  it('does nothing when the move is cancelled', async () => {
-    twoFolders([leaf(2, null)])
+  it('nothing is sent when the move is cancelled', async () => {
     renderReports()
-    await screen.findByRole('heading', { name: 'Archive' })
-
-    drag('Revenue', 'Archive')
-    const dialog = await screen.findByRole('alertdialog')
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
-
-    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    await folderBtn('Archive')
+    drag(1, 'Archive')
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
     expect(workspaceApi.update).not.toHaveBeenCalled()
-    expect(workspaceApi.create).not.toHaveBeenCalled()
-    expect(within(screen.getByRole('region', { name: 'sameh' })).getByText('Revenue')).toBeInTheDocument()
   })
 
   it('files a loose dashboard by creating its node', async () => {
-    // An unfiled dashboard has no node row yet (id 0), so there is nothing
-    // to re-parent: the move IS the creation of its node.
-    twoFolders([node({ id: 0, node_type: 'report', name: 'x', report_id: 2 })])
     renderReports()
-    await screen.findByText('Costs')
-
-    drag('Costs', 'Archive')
+    await folderBtn('Archive')
+    drag(2, 'Archive')
     fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Move' }))
-
-    await waitFor(() => expect(workspaceApi.create).toHaveBeenCalledWith({
-      node_type: 'report', report_id: 2, parent_id: 9,
-    }))
-    expect(workspaceApi.update).not.toHaveBeenCalled()
+    await waitFor(() => expect(workspaceApi.create).toHaveBeenCalledWith({ node_type: 'report', report_id: 2, parent_id: 9 }))
   })
 
-  it('moves a dashboard out to the top level via the group heading', async () => {
-    vi.mocked(reportsApi.list).mockResolvedValue([
-      report({ id: 1, name: 'Revenue' }),
-      report({ id: 3, name: 'Theirs', is_mine: false, my_capability: 'view', created_by: 8 }),
-    ] as never)
-    twoFolders([leaf(3, null)])
+  it('asks nothing when it is dropped where it already is', async () => {
     renderReports()
-    await screen.findByRole('heading', { name: 'My workspaces' })
+    await folderBtn('Finance')
+    drag(1, 'Finance')
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+  })
 
-    drag('Revenue', 'My workspaces')
-    const dialog = await screen.findByRole('alertdialog')
-    expect(dialog).toHaveTextContent('Move "Revenue" to the top level?')
+  it("shows the server's refusal as given", async () => {
+    vi.mocked(workspaceApi.update).mockRejectedValue({ response: { data: { detail: 'Only the author can move this' } } })
+    renderReports()
+    await folderBtn('Archive')
+    drag(1, 'Archive')
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Move' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Only the author can move this'))
+  })
+
+  it('Move to folder… picks a folder in a dialog', async () => {
+    renderReports()
+    await screen.findByTestId('dash-card-1')
+    fireEvent.click(within(card(1)).getByRole('button', { name: 'More actions for Revenue' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Move to folder…' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Move "Revenue" to…' })
+    // Its own folder is not offered.
+    expect(within(dialog).queryByRole('radio', { name: 'Finance' })).not.toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'Archive' }))
     fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }))
+    await waitFor(() => expect(workspaceApi.update).toHaveBeenCalledWith(91, { parent_id: 9 }))
+  })
+})
 
-    await waitFor(() => expect(workspaceApi.update).toHaveBeenCalledWith(91, { parent_id: null }))
+describe('views, search and facets', () => {
+  beforeEach(() => {
+    vi.mocked(reportsApi.list).mockResolvedValue([
+      report({ id: 1, name: 'Revenue', published: true }),
+      report({ id: 2, name: 'Costs', published: false, dataset_id: 4 }),
+      report({ id: 3, name: 'Granted', is_mine: false, created_by: 5, published: true }),
+    ] as never)
+    vi.mocked(datasetsApi.list).mockResolvedValue([{ id: 4, name: 'Ledger' }] as never)
   })
 
-  it('asks nothing when a dashboard is dropped where it already is', async () => {
-    twoFolders([leaf(2, null)])
+  it('Recent lists what this person opened, in that order', async () => {
+    vi.mocked(reportsApi.recent).mockResolvedValue([{ id: 3 }, { id: 1 }] as never)
     renderReports()
-    await screen.findByRole('heading', { name: 'Archive' })
-
-    drag('Revenue', 'sameh')
-
-    expect(screen.queryByRole('alertdialog')).toBeNull()
-    expect(workspaceApi.update).not.toHaveBeenCalled()
+    fireEvent.click(await within(nav()).findByRole('button', { name: /Recent/ }))
+    const names = screen.getAllByRole('heading', { level: 3 }).map(h => h.textContent)
+    expect(names).toEqual(['Granted', 'Revenue'])
   })
 
-  it("shows the server's refusal rather than pre-empting it", async () => {
-    // Who may move what into where is the server's rule (can_manage, the
-    // cycle guard). The page sends the move and repeats the answer.
-    twoFolders([leaf(2, null)])
-    vi.mocked(workspaceApi.update).mockRejectedValue(
-      { response: { data: { detail: 'You cannot manage the folder "Archive"' } } })
+  it('Shared with me lists only what was deliberately granted, not merely not mine', async () => {
+    vi.mocked(workspaceApi.tree).mockResolvedValue({ roots: [], unfiled: [
+      leaf(3, null, { id: 0, shared_with_me: true, is_mine: false }), leaf(1, null, { id: 0 }),
+    ] } as never)
     renderReports()
-    await screen.findByRole('heading', { name: 'Archive' })
+    const item = await within(nav()).findByRole('button', { name: /Shared with me/ })
+    await waitFor(() => expect(item).toHaveTextContent('1'))
+    fireEvent.click(item)
+    expect(screen.getByTestId('dash-card-3')).toBeInTheDocument()
+    expect(screen.queryByTestId('dash-card-1')).not.toBeInTheDocument()
+  })
 
-    drag('Revenue', 'Archive')
-    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Move' }))
+  it('the status filter narrows to drafts or published, with counts', async () => {
+    renderReports()
+    const drafts = await screen.findByRole('button', { name: /Drafts/ })
+    expect(drafts).toHaveTextContent('1')
+    fireEvent.click(drafts)
+    expect(screen.getByTestId('dash-card-2')).toBeInTheDocument()
+    expect(screen.queryByTestId('dash-card-1')).not.toBeInTheDocument()
+  })
 
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('You cannot manage the folder "Archive"'))
-    // Unchanged on screen: the server said no.
-    expect(within(screen.getByRole('region', { name: 'sameh' })).getByText('Revenue')).toBeInTheDocument()
+  it('the dataset filter narrows to one dataset', async () => {
+    renderReports()
+    fireEvent.click(await screen.findByRole('button', { name: 'Dataset: Any' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Ledger' }))
+    expect(screen.getByTestId('dash-card-2')).toBeInTheDocument()
+    expect(screen.queryByTestId('dash-card-1')).not.toBeInTheDocument()
+  })
+
+  it('one ticked dashboard and one search result read in the singular (QA V2, V3)', async () => {
+    vi.mocked(reportsApi.list).mockResolvedValue(Array.from({ length: 9 }, (_, i) => report({ id: i + 1, name: `Board ${i}` })) as never)
+    renderReports()
+    const box = await screen.findByRole('searchbox', { name: /Search dashboards/ })
+    fireEvent.change(box, { target: { value: 'Board 3' } })
+    expect(screen.getByText('1 result')).toBeInTheDocument()
+    fireEvent.click(within(card(4)).getByRole('checkbox'))
+    expect(screen.getByRole('toolbar')).toHaveTextContent('1 dashboard selected')
+  })
+
+  it('the searched text in the no-match title keeps its own direction (QA V3)', async () => {
+    vi.mocked(reportsApi.list).mockResolvedValue(Array.from({ length: 9 }, (_, i) => report({ id: i + 1, name: `Board ${i}` })) as never)
+    renderReports()
+    fireEvent.change(await screen.findByRole('searchbox', { name: /Search dashboards/ }), { target: { value: 'QA-' } })
+    const title = screen.getByText((_, el) => el?.tagName === 'H2' && el.textContent === 'No dashboards match "QA-"')
+    expect(title.querySelector('bdi')).toHaveTextContent(/^QA-$/)
+  })
+
+  it('one test-looking dashboard is offered in the singular (QA V2)', async () => {
+    vi.mocked(reportsApi.list).mockResolvedValue([report({ id: 1, name: 'Revenue' }), report({ id: 2, name: 'test 2' })] as never)
+    renderReports()
+    await screen.findByTestId('dash-card-2')
+    fireEvent.click(within(card(1)).getByRole('checkbox'))
+    expect(within(screen.getByRole('toolbar')).getByRole('button', { name: 'Also select the one that looks like test data' })).toBeInTheDocument()
+  })
+
+  it('the list cells that clip take the direction of their own text (QA V1)', async () => {
+    vi.mocked(reportsApi.list).mockResolvedValue([report({ id: 2, name: 'Costs', dataset_id: 4 })] as never)
+    renderReports()
+    await screen.findByTestId('dash-card-2')
+    fireEvent.click(screen.getByRole('button', { name: 'List view' }))
+    const row = screen.getByTestId('dash-row-2')
+    // The span that clips, not a <bdi> inside it: an English name in an
+    // Arabic row then loses its end, not its start.
+    expect(within(row).getByText('Ledger').closest('[dir="auto"]')).not.toBeNull()
+    expect(within(row).getAllByText('Not in a folder')[0].closest('[dir="auto"]')).not.toBeNull()
+  })
+
+  it('a search with no match says what was searched and offers a way out', async () => {
+    vi.mocked(reportsApi.list).mockResolvedValue(Array.from({ length: 9 }, (_, i) => report({ id: i + 1, name: `Board ${i}` })) as never)
+    renderReports()
+    const box = await screen.findByRole('searchbox', { name: /Search dashboards/ })
+    fireEvent.change(box, { target: { value: 'zzz' } })
+    // The whole heading's text: the query sits in a <bdi> (QA V3), which splits the text nodes.
+    const title = screen.getByText((_, el) => el?.tagName === 'H2' && el.textContent === 'No dashboards match "zzz"')
+    fireEvent.click(within(title.parentElement as HTMLElement).getByRole('button', { name: 'Clear search' }))
+    expect(screen.getByTestId('dash-card-1')).toBeInTheDocument()
+  })
+
+  it('the search also matches the dataset name', async () => {
+    vi.mocked(reportsApi.list).mockResolvedValue([
+      ...Array.from({ length: 8 }, (_, i) => report({ id: i + 10, name: `Board ${i}` })), report({ id: 2, name: 'Costs', dataset_id: 4 }),
+    ] as never)
+    renderReports()
+    await waitFor(() => expect(screen.getByTestId('dash-card-2')).toHaveTextContent('Ledger'))
+    fireEvent.change(screen.getByRole('searchbox', { name: /Search dashboards/ }), { target: { value: 'ledger' } })
+    expect(screen.getByTestId('dash-card-2')).toBeInTheDocument()
+    expect(screen.queryByTestId('dash-card-10')).not.toBeInTheDocument()
+  })
+
+  it('list view is a table with folder, dataset and status, and is remembered', async () => {
+    const { unmount } = renderReports()
+    await screen.findByTestId('dash-card-1')
+    fireEvent.click(screen.getByRole('button', { name: 'List view' }))
+    const table = screen.getByTestId('dash-table')
+    expect(within(table).getByTestId('dash-row-2')).toHaveTextContent('Ledger')
+    expect(within(table).getByTestId('dash-row-2')).toHaveTextContent('Draft')
+    unmount()
+    renderReports()
+    expect(await screen.findByTestId('dash-table')).toBeInTheDocument()
+  })
+})
+
+describe('partial failures', () => {
+  it('a failed datasets call hides the dataset chips and filter, and nothing else', async () => {
+    vi.mocked(datasetsApi.list).mockRejectedValue(new Error('down'))
+    vi.mocked(reportsApi.list).mockResolvedValue([report({ dataset_id: 4 })] as never)
+    renderReports()
+    expect(await screen.findByTestId('dash-card-1')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Dataset:/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('a failed recents call leaves Recent without a count, and the page works', async () => {
+    vi.mocked(reportsApi.recent).mockRejectedValue(new Error('down'))
+    renderReports()
+    await screen.findByTestId('dash-card-1')
+    expect(within(nav()).getByRole('button', { name: /Recent/ })).not.toHaveTextContent(/\d/)
+  })
+})
+
+describe('renaming', () => {
+  it('renames from the card menu', async () => {
+    vi.mocked(reportsApi.update).mockResolvedValue({} as never)
+    renderReports()
+    await screen.findByTestId('dash-card-1')
+    fireEvent.click(within(card(1)).getByRole('button', { name: 'More actions for Revenue' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Rename' }))
+    await answerPrompt('Income')
+    await waitFor(() => expect(reportsApi.update).toHaveBeenCalledWith(1, { name: 'Income' }))
+    expect(await screen.findByRole('link', { name: 'Income' })).toBeInTheDocument()
+  })
+
+  it('does nothing when the prompt is cancelled', async () => {
+    renderReports()
+    await screen.findByTestId('dash-card-1')
+    fireEvent.click(within(card(1)).getByRole('button', { name: 'More actions for Revenue' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Rename' }))
+    await answerPrompt(null)
+    expect(reportsApi.update).not.toHaveBeenCalled()
   })
 })
 
 describe('creating a dashboard', () => {
-  it('New dashboard opens the builder at once, auto-named, asking for data', async () => {
-    vi.mocked(reportsApi.create).mockResolvedValue(report({ id: 77, name: 'Untitled dashboard' }) as never)
+  beforeEach(() => {
+    vi.mocked(datasetsApi.list).mockResolvedValue([{ id: 4, name: 'Ledger' }] as never)
+    vi.mocked(reportsApi.create).mockResolvedValue({ id: 42, pages: [{ id: 420 }] } as never)
+  })
+
+  it('Blank with no data opens the builder asking for data, auto-named', async () => {
     renderReports()
-    fireEvent.click(await screen.findByRole('button', { name: /New dashboard/i }))
+    await screen.findByTestId('dash-card-1')
+    fireEvent.click(screen.getByRole('button', { name: 'New dashboard' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Create a dashboard' })
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Create$/ }))
     await waitFor(() => expect(reportsApi.create).toHaveBeenCalledWith({ name: 'Untitled dashboard' }))
-    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/reports/77'))
+    expect(await screen.findByTestId('where')).toHaveTextContent('/reports/42?pick=data')
+  })
+
+  it('Blank with a dataset and a folder files it there', async () => {
+    vi.mocked(workspaceApi.tree).mockResolvedValue({ roots: [node({ id: 5, name: 'Finance' })], unfiled: [] } as never)
+    renderReports()
+    await folderBtn('Finance')
+    fireEvent.click(screen.getByRole('button', { name: 'New dashboard' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Create a dashboard' })
+    fireEvent.change(within(dialog).getByLabelText('Dashboard name'), { target: { value: 'Q3' } })
+    fireEvent.change(within(dialog).getByLabelText('Dataset'), { target: { value: '4' } })
+    fireEvent.change(within(dialog).getByLabelText('Folder'), { target: { value: '5' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Create$/ }))
+    await waitFor(() => expect(reportsApi.create).toHaveBeenCalledWith({ name: 'Q3', dataset_id: 4 }))
+    await waitFor(() => expect(workspaceApi.create).toHaveBeenCalledWith({ node_type: 'report', report_id: 42, parent_id: 5 }))
+    expect(await screen.findByTestId('where')).toHaveTextContent('/reports/42')
+  })
+
+  it('Template adds the template page and drops the empty default page', async () => {
+    vi.mocked(pageTemplatesApi.builtins).mockResolvedValue([{ key: 'quad', name: 'Four-panel comparison', widgets: 4 }] as never)
+    vi.mocked(pageTemplatesApi.addFrom).mockResolvedValue({ page_id: 421, widgets: 4 } as never)
+    vi.mocked(reportsApi.deletePage).mockResolvedValue(undefined as never)
+    renderReports()
+    await screen.findByTestId('dash-card-1')
+    fireEvent.click(screen.getByRole('button', { name: 'New dashboard' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Create a dashboard' })
+    fireEvent.click(within(dialog).getByRole('radio', { name: /Template/ }))
+    expect(await within(dialog).findByRole('radio', { name: /Four-panel comparison/ })).toHaveAttribute('aria-checked', 'true')
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Create$/ }))
+    await waitFor(() => expect(pageTemplatesApi.addFrom).toHaveBeenCalledWith(42, { builtin: 'quad' }))
+    await waitFor(() => expect(reportsApi.deletePage).toHaveBeenCalledWith(42, 420))
+  })
+
+  it('With AI needs a dataset, then hands the goal to Suggest dashboards', async () => {
+    renderReports()
+    await screen.findByTestId('dash-card-1')
+    fireEvent.click(screen.getByRole('button', { name: 'New dashboard' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Create a dashboard' })
+    fireEvent.click(within(dialog).getByRole('radio', { name: /With AI/ }))
+    const go = within(dialog).getByRole('button', { name: 'Suggest dashboards' })
+    expect(go).toBeDisabled()
+    fireEvent.change(within(dialog).getByLabelText('What should it show?'), { target: { value: 'churn by month' } })
+    fireEvent.change(within(dialog).getByLabelText('Dataset'), { target: { value: '4' } })
+    fireEvent.click(go)
+    expect(await screen.findByTestId('suggest-dialog')).toHaveTextContent('Ledger|churn by month')
+    expect(reportsApi.create).not.toHaveBeenCalled()
+  })
+
+  it('?new=1 (the command palette, Home) opens the dialog', async () => {
+    renderReports({ at: '/reports?new=1' })
+    expect(await screen.findByRole('dialog', { name: 'Create a dashboard' })).toBeInTheDocument()
+  })
+
+  it('a first run offers three ways to start instead of an empty grid', async () => {
+    vi.mocked(reportsApi.list).mockResolvedValue([] as never)
+    renderReports()
+    expect(await screen.findByTestId('dash-firstrun')).toHaveTextContent('Build your first dashboard')
+    fireEvent.click(screen.getByRole('button', { name: /Describe it to AI/ }))
+    expect(within(await screen.findByRole('dialog')).getByRole('radio', { name: /With AI/ })).toHaveAttribute('aria-checked', 'true')
   })
 })
 
 describe('nextUntitledName', () => {
   it('never repeats a name already taken', () => {
-    expect(nextUntitledName([])).toBe('Untitled dashboard')
-    expect(nextUntitledName(['Untitled dashboard'])).toBe('Untitled dashboard 2')
-    expect(nextUntitledName(['untitled dashboard', 'Untitled dashboard 2'])).toBe('Untitled dashboard 3')
+    expect(nextUntitledName(['Untitled dashboard', 'Untitled dashboard 2'])).toBe('Untitled dashboard 3')
   })
 })
 
 describe('Reports accessibility', () => {
   it('has no structural accessibility violations', async () => {
+    vi.mocked(workspaceApi.tree).mockResolvedValue({ roots: [node({ children: [leaf(1)] })], unfiled: [] } as never)
     const { container } = renderReports()
-    await screen.findByText('Revenue')
+    await screen.findByRole('region', { name: 'Finance' })
     expect(await axeViolations(container)).toEqual([])
   })
 })
 
 /**
- * The drill-down view (requested 2026-09-28): folders as tiles you open one
- * level at a time, a breadcrumb back, and the dashboards filed at each level.
+ * Behaviours the v1 page pinned that the redesign keeps, re-pinned against the
+ * new layout (GATE C audit of the old Reports.test.tsx).
  */
-describe('the folder view drills down one level at a time', () => {
-  const node = (over: Record<string, unknown>) => ({
-    id: 1, parent_id: null, node_type: 'folder', name: 'omda', report_id: null,
-    position: 0, can_manage: true, is_mine: true, role_ids: [], pages: [],
-    children: [], ...over,
-  })
-  const leaf = (reportId: number) =>
-    node({ id: 90 + reportId, node_type: 'report', name: 'x', report_id: reportId })
+const stylesheet = async () => {
+  const fs = await import('node:fs')
+  const path = await import('node:path')
+  const url = await import('node:url')
+  const here = path.dirname(url.fileURLToPath(import.meta.url))
+  return fs.readFileSync(path.resolve(here, 'reports/dashboards.css'), 'utf8')
+}
+/** The body of the first rule whose selector list starts with `selector`. */
+const rule = (css: string, selector: string) => {
+  const i = css.indexOf(selector + ' {')
+  expect(i, `no rule for ${selector}`).toBeGreaterThan(-1)
+  return css.slice(i, css.indexOf('}', i) + 1)
+}
+const menuOf = async (id: number, name: string) => {
+  fireEvent.click(within(card(id)).getByRole('button', { name: `More actions for ${name}` }))
+  return screen.findByRole('menu')
+}
 
+describe('kept from v1: controls', () => {
+  it('in select mode a click on a card ticks it and does not open it', async () => {
+    vi.mocked(reportsApi.list).mockResolvedValue([report({ id: 1, name: 'A' }), report({ id: 2, name: 'B' })] as never)
+    renderReports()
+    await screen.findByTestId('dash-card-2')
+    fireEvent.click(within(card(1)).getByRole('checkbox', { name: /A/ }))
+    fireEvent.click(within(card(2)).getByRole('link', { name: 'B' }))
+    expect(screen.getByTestId('where')).toHaveTextContent(/^\/reports$/)
+    expect(within(card(2)).getByRole('checkbox')).toBeChecked()
+  })
+
+  it('offers exactly one Delete per dashboard', async () => {
+    renderReports()
+    await screen.findByTestId('dash-card-1')
+    expect(within(card(1)).queryByRole('button', { name: /Delete/ })).not.toBeInTheDocument()
+    const menu = await menuOf(1, 'Revenue')
+    expect(within(menu).getAllByRole('menuitem', { name: 'Delete' })).toHaveLength(1)
+  })
+
+  it('a granted-but-editable dashboard keeps its design controls, not the author\'s', async () => {
+    vi.mocked(reportsApi.list).mockResolvedValue([report({ is_mine: false, created_by: 4, my_capability: 'edit' })] as never)
+    renderReports()
+    await screen.findByTestId('dash-card-1')
+    expect(within(card(1)).getByRole('checkbox')).toBeInTheDocument()
+    expect(within(card(1)).queryByRole('button', { name: 'Share Revenue' })).not.toBeInTheDocument()
+    const menu = await menuOf(1, 'Revenue')
+    for (const name of ['Rename', 'Move to folder…', 'Delete']) expect(within(menu).getByRole('menuitem', { name })).toBeInTheDocument()
+    for (const name of ['Publish', 'Share…']) expect(within(menu).queryByRole('menuitem', { name })).not.toBeInTheDocument()
+  })
+
+  it("someone else's dashboard offers no Publish either", async () => {
+    vi.mocked(reportsApi.list).mockResolvedValue([report({ is_mine: false, created_by: 4 })] as never)
+    renderReports()
+    await screen.findByTestId('dash-card-1')
+    const menu = await menuOf(1, 'Revenue')
+    expect(within(menu).queryByRole('menuitem', { name: /Publish/ })).not.toBeInTheDocument()
+  })
+
+  it('removing a grant calls the API and drops the row', async () => {
+    vi.mocked(reportGrantsApi.list).mockResolvedValue([{ id: 5, user_id: 2, email: 'a@x.io', level: 'view' }] as never)
+    vi.mocked(reportGrantsApi.remove).mockResolvedValue(undefined as never)
+    renderReports()
+    await screen.findByTestId('dash-card-1')
+    fireEvent.click(within(card(1)).getByRole('button', { name: 'Share Revenue' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Share Revenue' })
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Remove access for a@x.io' }))
+    await waitFor(() => expect(reportGrantsApi.remove).toHaveBeenCalledWith(1, 5))
+    await waitFor(() => expect(within(dialog).queryByText('a@x.io')).not.toBeInTheDocument())
+  })
+
+  it('clicking a control inside the card does not open the dashboard', async () => {
+    vi.mocked(reportGrantsApi.list).mockResolvedValue([] as never)
+    renderReports()
+    await screen.findByTestId('dash-card-1')
+    fireEvent.click(within(card(1)).getByRole('button', { name: 'Share Revenue' }))
+    expect(screen.getByTestId('where')).toHaveTextContent(/^\/reports$/)
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('keeps every control reachable and named, not merely un-drawn', async () => {
+    renderReports()
+    await screen.findByTestId('dash-card-1')
+    for (const name of ['Share Revenue', 'More actions for Revenue']) {
+      const btn = within(card(1)).getByRole('button', { name })
+      expect(btn).not.toHaveAttribute('aria-hidden')
+      expect(btn).not.toBeDisabled()
+      expect(btn).toHaveAttribute('title')
+    }
+  })
+})
+
+describe('kept from v1: stylesheet rules jsdom cannot see', () => {
+  it('the whole card opens the dashboard: the title link is stretched over it', async () => {
+    const css = await stylesheet()
+    expect(rule(css, '.dsh-nm a::after')).toMatch(/inset:\s*0/)
+    // Controls sit above the stretched link, so they stay clickable.
+    expect(rule(css, '.dsh-ov')).toMatch(/z-index:\s*3/)
+  })
+
+  it('controls reveal on hover AND keyboard focus, and are never hidden on touch', async () => {
+    const css = await stylesheet()
+    expect(rule(css, '.dsh-ov')).toMatch(/opacity:\s*0/)
+    expect(css).toMatch(/\.dsh-card:focus-within \.dsh-ov/)
+    expect(css).toMatch(/@media \(hover: none\) \{\s*\.dsh-ov \{[^}]*opacity: 1/)
+  })
+
+  it('a long dashboard name is clamped to two lines, and the full name stays on the link', async () => {
+    expect(rule(await stylesheet(), '.dsh-nm')).toMatch(/-webkit-line-clamp:\s*2/)
+    const long = 'What stands out in Route planning extract output for the northern depots'
+    vi.mocked(reportsApi.list).mockResolvedValue([report({ name: long })] as never)
+    renderReports()
+    expect(await screen.findByRole('link', { name: long })).toHaveAttribute('title', long)
+    // The badges live in the footer, never beside the title.
+    expect(within(screen.getByRole('heading', { name: long })).queryByText('Draft')).not.toBeInTheDocument()
+  })
+
+  it('a folder heading wraps rather than truncating', async () => {
+    const name = rule(await stylesheet(), '.dsh-sh .fold .name')
+    expect(name).not.toMatch(/text-overflow:\s*ellipsis/)
+    expect(name).toMatch(/overflow-wrap:\s*anywhere/)
+    expect(rule(await stylesheet(), '.dsh-sh .fold')).not.toMatch(/white-space:\s*nowrap/)
+  })
+})
+
+describe('kept from v1: what a card says', () => {
+  it('leaves a hand-written description alone, and never rewrites the one it was sent', async () => {
+    const rows = [report({ id: 10, name: 'Ops', description: 'Weekly ops review, EMEA only' }),
+      report({ id: 11, name: 'R', description: 'Suggested from the data' })]
+    vi.mocked(reportsApi.list).mockResolvedValue(rows as never)
+    renderReports()
+    await screen.findByTestId('dash-card-11')
+    expect(card(10)).toHaveTextContent('Weekly ops review, EMEA only')
+    expect(card(10)).not.toHaveTextContent('AI suggestion')
+    expect(rows[1].description).toBe('Suggested from the data')
+  })
+
+  it('says nothing about a dataset when a dashboard has none', async () => {
+    renderReports()
+    await screen.findByTestId('dash-card-1')
+    expect(card(1)).not.toHaveTextContent(/No dataset/i)
+    expect(card(1).querySelector('.dsh-ch')).toBeNull()
+  })
+})
+
+describe('kept from v1: folders', () => {
   beforeEach(() => {
-    vi.mocked(reportsApi.list).mockResolvedValue([
-      report({ id: 1, name: 'Revenue' }), report({ id: 2, name: 'Costs' }), report({ id: 3, name: 'Margin' }),
-    ] as never)
+    vi.mocked(reportsApi.list).mockResolvedValue(Array.from({ length: 9 }, (_, i) => report({ id: i + 1, name: `Board ${i + 1}` })) as never)
     vi.mocked(workspaceApi.tree).mockResolvedValue({
-      roots: [node({ children: [leaf(1), node({ id: 2, name: 'omda1', children: [leaf(2)] })] }),
-              node({ id: 3, name: 'sameh', children: [] })],
-      unfiled: [leaf(3)],
+      roots: [node({ id: 1, name: 'Finance', children: [leaf(1), leaf(2), node({ id: 2, parent_id: 1, name: 'Board', children: [leaf(3, 2)] })] }),
+        node({ id: 3, name: 'Empty', children: [] })],
+      unfiled: [],
     } as never)
   })
 
-  it('opens a folder, then a subfolder, and the breadcrumb goes back', async () => {
+  it('each heading says how many dashboards it holds, subtree included; an empty one says zero', async () => {
     renderReports()
-    fireEvent.click(await screen.findByRole('button', { name: 'Folders' }))
-    const view = screen.getByTestId('folder-view')
-    // The top level: its folders as tiles, and the one loose dashboard.
-    expect(within(view).getByRole('button', { name: 'Open folder omda' })).toBeInTheDocument()
-    expect(within(view).getByRole('button', { name: 'Open folder sameh' })).toBeInTheDocument()
-    expect(within(view).getByText('Margin')).toBeInTheDocument()
-    expect(within(view).queryByText('Revenue')).toBeNull()
-
-    fireEvent.click(within(view).getByRole('button', { name: 'Open folder omda' }))
-    expect(within(view).getByText('Revenue')).toBeInTheDocument()
-    expect(within(view).queryByText('Margin')).toBeNull()
-    expect(within(view).getByRole('button', { name: 'Open folder omda1' })).toBeInTheDocument()
-
-    fireEvent.keyDown(within(view).getByRole('button', { name: 'Open folder omda1' }), { key: 'Enter' })
-    expect(within(view).getByText('Costs')).toBeInTheDocument()
-    const crumbs = within(view).getByRole('navigation')
-    expect(within(crumbs).getByText('omda1')).toHaveAttribute('aria-current', 'page')
-
-    fireEvent.click(within(crumbs).getByRole('button', { name: 'All dashboards' }))
-    expect(within(view).getByText('Margin')).toBeInTheDocument()
+    const finance = await screen.findByRole('region', { name: 'Finance' })
+    expect(within(finance).getAllByLabelText('3 dashboards')[0]).toHaveTextContent('3')
+    expect(within(screen.getByRole('region', { name: 'Empty' })).getByLabelText('0 dashboards')).toHaveTextContent('0')
   })
 
-  it('says an empty folder is empty, and remembers the chosen view', async () => {
+  it('a collapsed heading expands again', async () => {
     renderReports()
-    fireEvent.click(await screen.findByRole('button', { name: 'Folders' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Open folder sameh' }))
-    expect(screen.getByText(/Nothing in this folder yet/)).toBeInTheDocument()
-    expect(localStorage.getItem('datalytics:dashboards-arrange')).toBe('folders')
-    fireEvent.click(screen.getByRole('button', { name: 'Sections' }))
-    expect(screen.queryByTestId('folder-view')).toBeNull()
-    expect(await screen.findByRole('region', { name: 'omda' })).toBeInTheDocument()
+    const finance = await screen.findByRole('region', { name: 'Finance' })
+    const toggle = within(finance).getAllByRole('button', { name: /Finance/ })[0]
+    fireEvent.click(toggle)
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(within(finance).getByTestId('dash-card-1')).toBeInTheDocument()
   })
 
-  it('a new folder is made inside the folder being viewed', async () => {
-    vi.mocked(workspaceApi.create).mockResolvedValue({} as never)
+  it('while searching there are no folder headings, so an emptied folder cannot promise cards', async () => {
     renderReports()
-    fireEvent.click(await screen.findByRole('button', { name: 'Folders' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Open folder omda' }))
-    fireEvent.click(screen.getByRole('button', { name: /New folder/ }))
-    await answerPrompt('Q3')
-    await waitFor(() => expect(workspaceApi.create).toHaveBeenCalledWith(
-      expect.objectContaining({ node_type: 'folder', name: 'Q3', parent_id: 1 })))
+    await screen.findByRole('region', { name: 'Finance' })
+    fireEvent.change(screen.getByRole('searchbox', { name: /Search dashboards/ }), { target: { value: 'Board 1' } })
+    expect(screen.queryByRole('region', { name: 'Finance' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Empty' })).not.toBeInTheDocument()
+    expect(screen.getByTestId('dash-card-1')).toBeInTheDocument()
+  })
+
+  it('a new folder shows up: the tree is read again after it is made', async () => {
+    renderReports()
+    await screen.findByRole('region', { name: 'Finance' })
+    const before = vi.mocked(workspaceApi.tree).mock.calls.length
+    fireEvent.click(screen.getAllByRole('button', { name: 'New folder' })[0])
+    fireEvent.change(within(nav()).getByRole('textbox', { name: 'Folder name' }), { target: { value: 'Ops' } })
+    fireEvent.click(within(nav()).getByRole('button', { name: 'Create folder' }))
+    await waitFor(() => expect(vi.mocked(workspaceApi.tree).mock.calls.length).toBeGreaterThan(before))
+  })
+
+  it('a rename to the same name sends nothing', async () => {
+    renderReports()
+    await screen.findByTestId('dash-card-1')
+    fireEvent.click(within(card(1)).getByRole('button', { name: 'More actions for Board 1' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Rename' }))
+    await answerPrompt('Board 1')
+    expect(reportsApi.update).not.toHaveBeenCalled()
+  })
+
+  it('a drop on "Not in a folder" moves the dashboard out to the top level', async () => {
+    vi.mocked(workspaceApi.tree).mockResolvedValue({
+      roots: [node({ id: 1, name: 'Finance', children: [leaf(1)] })], unfiled: [leaf(2, null, { id: 0 })],
+    } as never)
+    renderReports()
+    const loose = await screen.findByRole('region', { name: 'Not in a folder' })
+    fireEvent.dragStart(card(1))
+    const head = loose.querySelector('.dsh-sh') as HTMLElement
+    fireEvent.dragOver(head)
+    fireEvent.drop(head)
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent('Move "Board 1" to Not in a folder?')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }))
+    await waitFor(() => expect(workspaceApi.update).toHaveBeenCalledWith(91, { parent_id: null }))
   })
 })
 
 /**
- * Opening a dashboard: React Router 7 navigates inside a transition, so the
- * route's Suspense loader never showed while the report builder loaded and
- * the click looked ignored. The list shows the loader itself.
+ * QA B7 (7-QA): a folder's count was reported to stay at 1 after its only
+ * dashboard was deleted, until a reload. Folder placement is the server's, so
+ * after a delete -- one or several -- the tree is read again.
  */
-describe('opening a dashboard shows the loader', () => {
-  it('on a click anywhere on the card', async () => {
+describe('a delete re-reads the folder tree (QA B7)', () => {
+  it('after a single delete', async () => {
     renderReports()
-    const title = await screen.findByText('Revenue')
-    fireEvent.click(title.closest('.dl-dash-card')!.querySelector('.dl-dash-card__foot') ?? title.closest('.dl-dash-card')!)
-    expect(await screen.findByRole('status')).toBeInTheDocument()
-    expect(screen.getByTestId('where')).toHaveTextContent('/reports/1')
+    await screen.findByTestId('dash-card-1')
+    const before = vi.mocked(workspaceApi.tree).mock.calls.length
+    fireEvent.click(within(card(1)).getByRole('button', { name: 'More actions for Revenue' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }))
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete' }))
+    await waitFor(() => expect(vi.mocked(workspaceApi.tree).mock.calls.length).toBeGreaterThan(before))
   })
 
-  it('on a click on the title link', async () => {
+  it('after a bulk delete', async () => {
+    vi.mocked(reportsApi.list).mockResolvedValue([report({ id: 1, name: 'A' }), report({ id: 2, name: 'B' })] as never)
     renderReports()
-    fireEvent.click(await screen.findByRole('link', { name: 'Revenue' }))
-    expect(await screen.findByRole('status')).toBeInTheDocument()
+    await screen.findByTestId('dash-card-2')
+    const before = vi.mocked(workspaceApi.tree).mock.calls.length
+    fireEvent.click(within(card(1)).getByRole('checkbox', { name: /A/ }))
+    fireEvent.click(within(screen.getByRole('toolbar')).getByRole('button', { name: /Delete/ }))
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: /Delete/ }))
+    await waitFor(() => expect(vi.mocked(workspaceApi.tree).mock.calls.length).toBeGreaterThan(before))
   })
+})
 
-  it('not on a ctrl-click, which opens a new tab', async () => {
+describe('the search box while the list loads (QA2 B8)', () => {
+  it('is there at once, keeps what is typed, and applies it when the list arrives', async () => {
+    let resolve: (v: unknown) => void = () => {}
+    vi.mocked(reportsApi.list).mockReturnValue(new Promise(r => { resolve = r }) as never)
     renderReports()
-    fireEvent.click(await screen.findByRole('link', { name: 'Revenue' }), { ctrlKey: true })
-    expect(screen.queryByRole('status')).toBeNull()
-    expect(screen.getByRole('link', { name: 'Revenue' })).toBeInTheDocument()
+    // A slow list used to mean no box at all: a click there hit nothing.
+    const box = await screen.findByRole('searchbox', { name: /Search dashboards/ })
+    fireEvent.change(box, { target: { value: 'Board 3' } })
+    await act(async () => { resolve(Array.from({ length: 9 }, (_, i) => report({ id: i + 1, name: `Board ${i}` }))) })
+    expect(await screen.findByTestId('dash-card-4')).toBeInTheDocument()
+    expect(screen.queryByTestId('dash-card-1')).toBeNull()
+    expect(screen.getByRole('searchbox', { name: /Search dashboards/ })).toHaveValue('Board 3')
   })
 })

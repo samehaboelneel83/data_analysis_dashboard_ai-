@@ -1,8 +1,11 @@
-import { useState } from 'react'
-import { Pencil } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { ChevronDown, Pencil, Search } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { columnMetaApi, datasetsApi, type ColumnMeta, type Dataset } from '../../services/api'
-import { defaultSummary } from '../../lib/semanticGuard'
+import { defaultSummary, nonAdditiveKind } from '../../lib/semanticGuard'
+import { localDigits } from '../../lib/arabicFormats'
+import { typeTag, useColumnProfile, type Analysis } from '../../pages/datasetDetail/columnProfile'
+import '../../pages/datasetDetail/columns.css'
 import { useT, type MessageKey } from '../../i18n'
 
 /**
@@ -46,8 +49,6 @@ export function isCodeLike(v: string): boolean {
   return t.length <= 4 && t === t.toUpperCase()
 }
 
-/** "an Identifier", "a Measure" -- the toast read "is now a identifier". */
-const article = (word: string) => (/^[aeiou]/i.test(word) ? 'an' : 'a')
 
 /**
  * What each column MEANS, and where that sentence lives.
@@ -73,21 +74,66 @@ export interface ColumnMeaningPanelProps {
   canEdit: boolean
   /** Reload the dataset so the resolved descriptions come back fresh. */
   onSaved?: () => void
+  /** The saved profile, for the Distribution and Summary columns (redesign 3c). */
+  analysis?: Analysis
 }
 
+type Kind = 'all' | 'text' | 'number' | 'date'
+const kindOf = (dtype: string): Exclude<Kind, 'all'> =>
+  dtype === 'numeric' ? 'number' : dtype === 'datetime' ? 'date' : 'text'
+
+/** What the column is used as, in the words of the board's pill. */
+function useAs(name: string, dtype: string, meta: ColumnMeta | undefined, t: ReturnType<typeof useT>): { label: string; measure: boolean } {
+  const role = meta?.role
+  if (role === 'measure' || (!role && dtype === 'numeric' && nonAdditiveKind(name) === null)) {
+    const agg = meta?.aggregation ?? defaultSummary(name)
+    const aggWord = SUMMARY_LABEL[agg] ? t(`cols3.agg.${agg}` as MessageKey) : agg
+    return { label: t('cols3.use.measure', { agg: aggWord }), measure: true }
+  }
+  if (role === 'temporal' || (!role && dtype === 'datetime')) return { label: t('cols3.use.time'), measure: false }
+  if (role === 'identifier' || (!role && nonAdditiveKind(name) === 'identifier')) return { label: t('cols3.use.id'), measure: false }
+  if (role === 'freetext') return { label: t('cols3.use.text'), measure: false }
+  if (role === 'geography') return { label: t('cols3.use.geo'), measure: false }
+  return { label: t('cols3.use.dim'), measure: false }
+}
+
+/**
+ * The Columns tab (redesign step 3c): one row per column -- name and type,
+ * what it means (the description editor), its distribution, how much is empty,
+ * a summary, and what it is used as. The role, summary, outcome, suggestion
+ * and hidden settings open under the row from its "Use as" pill. Hidden
+ * columns are listed apart, behind "Hidden columns (n)".
+ */
 export default function ColumnMeaningPanel(
-  { dataset, canEdit, onSaved }: ColumnMeaningPanelProps,
+  { dataset, canEdit, onSaved, analysis = null }: ColumnMeaningPanelProps,
 ) {
   const t = useT()
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
+  const [query, setQuery] = useState('')
+  const [kind, setKind] = useState<Kind>('all')
+  const [open, setOpen] = useState<string | null>(null)
+  const [showHidden, setShowHidden] = useState(false)
 
   const described = dataset.column_descriptions ?? {}
   const labels = dataset.value_labels ?? {}
   const targets = dataset.column_targets ?? {}
   const ineligible = new Set(dataset.ineligible_columns ?? [])
   const meta = dataset.column_meta ?? {}
+  const cols = dataset.columns ?? []
+  const hidden = cols.filter(c => meta[c.name]?.hidden)
+  const visible = cols.filter(c => !meta[c.name]?.hidden)
+  const counts = useMemo(() => ({
+    all: visible.length,
+    text: visible.filter(c => kindOf(c.dtype) === 'text').length,
+    number: visible.filter(c => kindOf(c.dtype) === 'number').length,
+    date: visible.filter(c => kindOf(c.dtype) === 'date').length,
+  }), [visible])
+  const shown = (showHidden ? hidden : visible)
+    .filter(c => kind === 'all' || kindOf(c.dtype) === kind)
+    .filter(c => !query.trim() || `${c.name} ${described[c.name] ?? ''}`.toLowerCase().includes(query.trim().toLowerCase()))
+  const describedCount = cols.filter(c => described[c.name]).length
 
   /** Merge one column's change into the WHOLE map and send it back.
    *
@@ -130,184 +176,171 @@ export default function ColumnMeaningPanel(
     } finally { setBusy(false) }
   }
 
-  const input: React.CSSProperties = {
-    width: '100%', fontSize: 12, padding: '5px 8px', boxSizing: 'border-box',
-    background: 'var(--surface2)', border: '1px solid var(--border)',
-    borderRadius: 4, color: 'var(--text)',
-  }
-
   return (
-    <section>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 8 }}>
-        <h3 style={{ margin: 0, fontSize: 14 }}>What the columns mean</h3>
-        <span style={{ fontSize: 12, color: 'var(--muted)' }}>
-          Read by the dashboard designer, the agent and the insights engine. A
-          column that came from a connected table is described once, for every
-          dataset built from it.
-        </span>
-      </div>
-
+    <section className="dl-cols" aria-label="What the columns mean">
       {dataset.grain && (
-        <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 10px' }}>
-          <strong style={{ color: 'var(--text)' }}>
-            {dataset.business_name || dataset.name}
-          </strong>{' — '}{dataset.grain}
+        <p className="dl-cols__grain">
+          <strong>{dataset.business_name || dataset.name}</strong>{' — '}{dataset.grain}
         </p>
       )}
+      <div className="dl-cols__toolbar">
+        <label className="dl-cols__search">
+          <Search size={14} aria-hidden />
+          <input type="search" value={query} onChange={e => setQuery(e.target.value)}
+            placeholder={t('cols3.find')} aria-label={t('cols3.find')} />
+        </label>
+        <span className="dl-cols__seg" role="radiogroup" aria-label={t('cols3.kind')}>
+          {(['all', 'text', 'number', 'date'] as Kind[]).map(k => (
+            <button key={k} type="button" role="radio" aria-checked={kind === k} onClick={() => setKind(k)}>
+              {t(`cols3.kind.${k}` as MessageKey)} <span>{localDigits(String(counts[k]))}</span>
+            </button>
+          ))}
+        </span>
+        <span className="dl-cols__muted">{t('cols3.described', { n: localDigits(String(describedCount)), total: localDigits(String(cols.length)) })}</span>
+        <button type="button" className="btn btn-sm dl-cols__hidden-btn" aria-pressed={showHidden}
+          onClick={() => setShowHidden(v => !v)}>
+          {showHidden ? t('cols3.showVisible') : t('cols3.hidden', { n: localDigits(String(hidden.length)) })}
+        </button>
+      </div>
 
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-        <tbody>
-          {dataset.columns.map(c => {
-            const values = labels[c.name]
-            return (
-              <tr key={c.name} style={{ borderTop: '1px solid var(--border)' }}>
-                <td style={{ padding: '6px 8px', width: 200, verticalAlign: 'top' }}>
-                  <div style={{ fontWeight: 600 }}>{c.name}</div>
-                  <div style={{ color: 'var(--muted)', fontSize: 11 }}>{c.dtype}</div>
-                </td>
-                <td style={{ padding: '6px 8px', verticalAlign: 'top' }}>
-                  {editing === c.name ? (
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <input style={input} value={draft} autoFocus disabled={busy}
-                        placeholder="What is this column for?"
-                        onChange={e => setDraft(e.target.value)}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter') void save(c.name)
-                          if (e.key === 'Escape') setEditing(null)
-                        }} />
-                      <button onClick={() => void save(c.name)} disabled={busy}
-                        style={{ fontSize: 12, padding: '4px 10px', borderRadius: 6,
-                          border: 'none', background: 'var(--accent, #2563eb)',
-                          color: 'var(--mc-accent-fg)', cursor: 'pointer' }}>
-                        {busy ? 'Saving…' : 'Save'}
-                      </button>
-                      <button onClick={() => setEditing(null)} disabled={busy}
-                        style={{ fontSize: 12, padding: '4px 10px', borderRadius: 6,
-                          border: '1px solid var(--border)', background: 'var(--surface)',
-                          color: 'var(--text)', cursor: 'pointer' }}>
-                        Cancel
-                      </button>
-                    </div>
-                  ) : (
-                    <>
-                      <span style={{ color: described[c.name] ? 'var(--text)' : 'var(--muted)' }}>
-                        {described[c.name] || 'Not described yet'}
-                      </span>
-                      {canEdit && (
-                        <button aria-label={`Describe ${c.name}`} onClick={() => start(c.name)}
-                          style={{ background: 'none', border: 'none', cursor: 'pointer',
-                            color: 'var(--muted)', padding: '0 6px' }}>
-                          <Pencil size={12} />
-                        </button>
-                      )}
-                    </>
-                  )}
-                  {(() => {
-                    // Only glosses that SAY something: "d001 = Marketing", never
-                    // "Marketing = Marketing" (HR evaluation).
-                    const useful = Object.entries(values ?? {})
-                      .filter(([raw, label]) => isCodeLike(raw) && String(label).trim().toLowerCase() !== raw.trim().toLowerCase())
-                    return useful.length > 0 && (
-                      <div style={{ color: 'var(--muted)', fontSize: 11, marginTop: 2 }}>
-                        {useful.slice(0, 8).map(([raw, label]) => `${raw} = ${label}`).join(', ')}
-                      </div>
-                    )
-                  })()}
-
-                  {canEdit && (
-                    <div style={{ display: 'flex', gap: 14, alignItems: 'center',
-                      marginTop: 6, flexWrap: 'wrap' }}>
-                      <label style={{ fontSize: 11, color: 'var(--muted)',
-                        display: 'flex', alignItems: 'center', gap: 4 }}>
-                        Treat as
-                        <select disabled={busy} value={meta[c.name]?.role ?? ''}
-                          aria-label={`Role for ${c.name}`}
-                          onChange={e => void patchMeta(
-                            c.name,
-                            { role: (e.target.value || undefined) as ColumnMeta['role'] },
-                            e.target.value
-                              ? t(`meaning.now.${e.target.value}` as MessageKey, { col: c.name })
-                              : t('meaning.now.detected', { col: c.name }))}
-                          style={{ fontSize: 11, padding: '2px 4px',
-                            background: 'var(--surface2)', color: 'var(--text)',
-                            border: '1px solid var(--border)', borderRadius: 4 }}>
-                          <option value="">detected</option>
-                          {ROLES.map(r => (
-                            <option key={r.value} value={r.value} title={r.why}>
-                              {r.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-
-                      {(c.dtype === 'numeric' || meta[c.name]?.role === 'measure') && meta[c.name]?.role !== 'identifier'
-                        && meta[c.name]?.role !== 'category' && (
-                        <label style={{ fontSize: 11, color: 'var(--muted)',
-                          display: 'flex', alignItems: 'center', gap: 4 }}
-                          title="How this number is rolled up when a chart, an insight or an alert does not say. Salaries, prices and rates read best as an average.">
-                          Summarise as
-                          <select disabled={busy} value={meta[c.name]?.aggregation ?? ''}
-                            aria-label={`Summary for ${c.name}`}
-                            onChange={e => void patchMeta(
-                              c.name,
-                              { aggregation: e.target.value || undefined },
-                              e.target.value
-                                ? t('meaning.summaryNow', { col: c.name, how: (SUMMARY_LABEL[e.target.value] ?? e.target.value).toLowerCase() })
-                                : t('meaning.summaryAuto', { col: c.name }))}
-                            style={{ fontSize: 11, padding: '2px 4px',
-                              background: 'var(--surface2)', color: 'var(--text)',
-                              border: '1px solid var(--border)', borderRadius: 4 }}>
-                            <option value="">auto ({(SUMMARY_LABEL[defaultSummary(c.name)] ?? 'Sum').toLowerCase()})</option>
-                            {SUMMARIES.map(x => <option key={x.value} value={x.value}>{x.label}</option>)}
-                          </select>
-                        </label>
-                      )}
-
-                      {/* An OUTCOME worth explaining. This is what lets the
-                          "what drives X" analyses run without being told what X
-                          is -- the alternative is guessing from flag-shaped
-                          columns, which cannot know which question anybody has. */}
-                      <label style={{ fontSize: 11, color: 'var(--muted)',
-                        display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <input type="checkbox" disabled={busy}
-                          aria-label={`Explain ${c.name}`}
-                          checked={targets[c.name] !== undefined}
-                          onChange={e => void patchMeta(
-                            c.name,
-                            { target_candidate_priority: e.target.checked ? 10 : undefined },
-                            e.target.checked
-                              ? t('meaning.outcomeOn', { col: c.name })
-                              : t('meaning.outcomeOff', { col: c.name }))} />
-                        Worth explaining
-                        {targets[c.name] !== undefined && (
-                          <span style={{ opacity: .7 }}>({targets[c.name]})</span>
-                        )}
-                      </label>
-
-                      {/* Not the same as hiding it, and the tooltip has to say
-                          so or the two controls read as duplicates. */}
-                      <label style={{ fontSize: 11, color: 'var(--muted)',
-                        display: 'flex', alignItems: 'center', gap: 4 }}
-                        title="Still usable by anyone who asks for it. This only stops the platform offering charts of it unprompted.">
-                        <input type="checkbox" disabled={busy}
-                          aria-label={`Suggest ${c.name}`}
-                          checked={!ineligible.has(c.name)}
-                          onChange={e => void patchMeta(
-                            c.name,
-                            { eligible_for_suggestion: e.target.checked ? undefined : false },
-                            e.target.checked
-                              ? t('meaning.suggestOn', { col: c.name })
-                              : t('meaning.suggestOff', { col: c.name }))} />
-                        May be suggested
-                      </label>
-                    </div>
-                  )}
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
+      <div className="dl-cols__card">
+        <table className="dl-cols__table">
+          <thead>
+            <tr>
+              <th>{t('ov3.glance.column')}</th><th>{t('cols3.means')}</th><th>{t('ov3.glance.dist')}</th>
+              <th className="dl-ov__num">{t('ov3.glance.empty')}</th><th>{t('ov3.glance.summary')}</th><th>{t('cols3.useAs')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {shown.length === 0 && (
+              <tr><td colSpan={6} className="dl-cols__none">{showHidden ? t('cols3.noHidden') : t('cols3.noMatch')}</td></tr>
+            )}
+            {shown.map(c => (
+              <ColumnRow key={c.name} dataset={dataset} name={c.name} dtype={c.dtype} missing={c.missing_pct ?? 0}
+                analysis={analysis} meta={meta[c.name]} description={described[c.name]} values={labels[c.name]}
+                canEdit={canEdit} busy={busy} editing={editing === c.name} draft={draft} setDraft={setDraft}
+                onStart={() => start(c.name)} onSave={() => void save(c.name)} onCancel={() => setEditing(null)}
+                open={open === c.name} onToggle={() => setOpen(o => (o === c.name ? null : c.name))}
+                target={targets[c.name]} eligible={!ineligible.has(c.name)} patchMeta={patchMeta} />
+            ))}
+          </tbody>
+        </table>
+      </div>
     </section>
+  )
+}
+
+function ColumnRow(p: {
+  dataset: Dataset; name: string; dtype: string; missing: number; analysis: Analysis; meta?: ColumnMeta
+  description?: string; values?: Record<string, string>; canEdit: boolean; busy: boolean
+  editing: boolean; draft: string; setDraft: (v: string) => void; onStart: () => void; onSave: () => void; onCancel: () => void
+  open: boolean; onToggle: () => void; target?: number; eligible: boolean
+  patchMeta: (column: string, change: Partial<ColumnMeta>, note: string) => Promise<void>
+}) {
+  const t = useT()
+  const { dist, sum } = useColumnProfile(p.dataset, p.name, p.analysis)
+  const use = useAs(p.name, p.dtype, p.meta, t)
+  const c = { name: p.name, dtype: p.dtype }
+  // Only glosses that SAY something: "d001 = Marketing", never
+  // "Marketing = Marketing" (HR evaluation).
+  const useful = Object.entries(p.values ?? {})
+    .filter(([raw, label]) => isCodeLike(raw) && String(label).trim().toLowerCase() !== raw.trim().toLowerCase())
+  return (
+    <>
+      <tr data-open={p.open || undefined}>
+        <td className="dl-cols__name">
+          <span className="dl-ov__colname" dir="auto">{p.name}</span>
+          <span className="dl-ov__tag">{typeTag(p.dtype)}</span>
+        </td>
+        <td className="dl-cols__means">
+          {p.editing ? (
+            <div className="dl-cols__edit">
+              <input value={p.draft} autoFocus disabled={p.busy} placeholder="What is this column for?"
+                onChange={e => p.setDraft(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') p.onSave(); if (e.key === 'Escape') p.onCancel() }} />
+              <button type="button" className="btn btn-primary btn-sm" onClick={p.onSave} disabled={p.busy}>
+                {p.busy ? 'Saving…' : 'Save'}
+              </button>
+              <button type="button" className="btn btn-sm" onClick={p.onCancel} disabled={p.busy}>Cancel</button>
+            </div>
+          ) : p.canEdit ? (
+            <button type="button" className={`dl-cols__desc${p.description ? '' : ' dl-cols__desc--empty'}`}
+              aria-label={`Describe ${p.name}`} onClick={p.onStart} dir="auto">
+              {p.description || t('cols3.addDescription')} <Pencil size={11} aria-hidden />
+            </button>
+          ) : (
+            <span className={p.description ? '' : 'dl-cols__muted'} dir="auto">{p.description || 'Not described yet'}</span>
+          )}
+          {useful.length > 0 && (
+            <div className="dl-cols__gloss">{useful.slice(0, 8).map(([raw, label]) => `${raw} = ${label}`).join(', ')}</div>
+          )}
+        </td>
+        <td>{dist}</td>
+        <td className="dl-ov__num">{localDigits(`${Math.round(p.missing)}%`)}</td>
+        <td className="dl-ov__sum">{sum}</td>
+        <td>
+          {p.canEdit ? (
+            <button type="button" className={`dl-cols__use${use.measure ? ' dl-cols__use--measure' : ''}`}
+              aria-expanded={p.open} aria-label={t('cols3.editUse', { col: p.name })} onClick={p.onToggle}>
+              {use.label} <ChevronDown size={11} aria-hidden />
+            </button>
+          ) : (
+            <span className={`dl-cols__use${use.measure ? ' dl-cols__use--measure' : ''}`}>{use.label}</span>
+          )}
+        </td>
+      </tr>
+      {p.open && p.canEdit && (
+        <tr className="dl-cols__settings">
+          <td colSpan={6}>
+            <div>
+              <label>
+                Treat as
+                <select disabled={p.busy} value={p.meta?.role ?? ''} aria-label={`Role for ${c.name}`}
+                  onChange={e => void p.patchMeta(c.name, { role: (e.target.value || undefined) as ColumnMeta['role'] },
+                    e.target.value ? t(`meaning.now.${e.target.value}` as MessageKey, { col: c.name }) : t('meaning.now.detected', { col: c.name }))}>
+                  <option value="">detected</option>
+                  {ROLES.map(r => <option key={r.value} value={r.value} title={r.why}>{r.label}</option>)}
+                </select>
+              </label>
+              {(c.dtype === 'numeric' || p.meta?.role === 'measure') && p.meta?.role !== 'identifier' && p.meta?.role !== 'category' && (
+                <label title="How this number is rolled up when a chart, an insight or an alert does not say. Salaries, prices and rates read best as an average.">
+                  Summarise as
+                  <select disabled={p.busy} value={p.meta?.aggregation ?? ''} aria-label={`Summary for ${c.name}`}
+                    onChange={e => void p.patchMeta(c.name, { aggregation: e.target.value || undefined },
+                      e.target.value
+                        ? t('meaning.summaryNow', { col: c.name, how: (SUMMARY_LABEL[e.target.value] ?? e.target.value).toLowerCase() })
+                        : t('meaning.summaryAuto', { col: c.name }))}>
+                    <option value="">auto ({(SUMMARY_LABEL[defaultSummary(c.name)] ?? 'Sum').toLowerCase()})</option>
+                    {SUMMARIES.map(x => <option key={x.value} value={x.value}>{x.label}</option>)}
+                  </select>
+                </label>
+              )}
+              {/* An OUTCOME worth explaining: what lets the "what drives X"
+                  analyses run without being told what X is. */}
+              <label>
+                <input type="checkbox" disabled={p.busy} aria-label={`Explain ${c.name}`} checked={p.target !== undefined}
+                  onChange={e => void p.patchMeta(c.name, { target_candidate_priority: e.target.checked ? 10 : undefined },
+                    e.target.checked ? t('meaning.outcomeOn', { col: c.name }) : t('meaning.outcomeOff', { col: c.name }))} />
+                Worth explaining{p.target !== undefined && <span className="dl-cols__muted"> ({p.target})</span>}
+              </label>
+              {/* Not the same as hiding it, and the tooltip has to say so or
+                  the two controls read as duplicates. */}
+              <label title="Still usable by anyone who asks for it. This only stops the platform offering charts of it unprompted.">
+                <input type="checkbox" disabled={p.busy} aria-label={`Suggest ${c.name}`} checked={p.eligible}
+                  onChange={e => void p.patchMeta(c.name, { eligible_for_suggestion: e.target.checked ? undefined : false },
+                    e.target.checked ? t('meaning.suggestOn', { col: c.name }) : t('meaning.suggestOff', { col: c.name }))} />
+                May be suggested
+              </label>
+              <label title={t('cols3.hideTitle')}>
+                <input type="checkbox" disabled={p.busy} aria-label={`Hide ${c.name}`} checked={!!p.meta?.hidden}
+                  onChange={e => void p.patchMeta(c.name, { hidden: e.target.checked ? true : undefined },
+                    e.target.checked ? t('cols3.hiddenNow', { col: c.name }) : t('cols3.shownNow', { col: c.name }))} />
+                {t('cols3.hide')}
+              </label>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   )
 }

@@ -70,7 +70,8 @@ describe('AggregatesPanel', () => {
     render(<AggregatesPanel datasetId={5} mode="directquery" />)
     expect(await screen.findByText('by region')).toBeInTheDocument()
     expect(screen.getByText(/reads 'product'/)).toBeInTheDocument()
-    expect(screen.getByText(/tenant × region/)).toBeInTheDocument()
+    // The grain is drawn as one code chip per column (redesign 3c).
+    expect(screen.getByText('by region').closest('tr')).toHaveTextContent('tenant × region')
   })
 
   it('says why an import dataset has no aggregates tab content', async () => {
@@ -103,7 +104,8 @@ describe('AggregatesPanel', () => {
     render(<AggregatesPanel datasetId={5} mode="directquery" />)
     fireEvent.click(await screen.findByRole('button', { name: /edit/i }))
     expect((screen.getByLabelText('region') as HTMLInputElement).checked).toBe(true)
-    expect(screen.getByText(/sum\(amount\)/)).toBeInTheDocument()
+    // In the form's measure chips (the table row lists it too).
+    expect(screen.getByText(/sum\(amount\) →/)).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Refresh every (minutes)'), { target: { value: '30' } })
     fireEvent.click(screen.getByRole('button', { name: /save changes/i }))
     await waitFor(() => expect(aggregatesApi.update).toHaveBeenCalledWith(5, 9, {

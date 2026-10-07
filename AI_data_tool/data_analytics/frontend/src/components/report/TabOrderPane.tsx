@@ -1,10 +1,15 @@
 import type { Widget } from '../../types/report'
+import { useDirection } from '../../contexts/DirectionContext'
+import { tabOrder } from '../../lib/readingOrder'
 
 export default function TabOrderPane({ widgets, onUpdate }: {
   widgets: Widget[]
   onUpdate: (widgetId: number, config: Record<string, unknown>) => void
 }) {
-  const ordered = [...widgets].sort((a, b) => ((a.config as any).tabIndex ?? 999) - ((b.config as any).tabIndex ?? 999))
+  // QA3 A8: reading order unless the author set one (widgets carry the layout
+  // the canvas draws, so the order follows moves).
+  const { rtl } = useDirection()
+  const ordered = tabOrder(widgets, rtl)
 
   const move = (idx: number, dir: -1 | 1) => {
     const target = idx + dir

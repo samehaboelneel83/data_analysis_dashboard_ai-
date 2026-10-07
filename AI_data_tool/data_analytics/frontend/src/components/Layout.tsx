@@ -62,6 +62,15 @@ export default function Layout() {
   const expanded = railState.key === railKey ? railState.expanded : readRail(railKey)
   const setExpanded = (v: boolean | ((x: boolean) => boolean)) =>
     setRail(r => ({ key: r.key, expanded: typeof v === 'function' ? v(r.expanded) : v }))
+  // The builder opens with the icon rail (redesign 7e, S6): while it asks, the
+  // rail folds to icons for this visit only -- the saved choice is untouched,
+  // and the rail's own toggle lifts the fold so the user can still expand it.
+  const [builderCompact, setBuilderCompact] = useState(false)
+  useEffect(() => {
+    const on = (e: Event) => setBuilderCompact(!!(e as CustomEvent<boolean>).detail)
+    window.addEventListener('datalytics:builder-compact', on)
+    return () => window.removeEventListener('datalytics:builder-compact', on)
+  }, [])
   const [narrow, setNarrow] = useState(() => window.innerWidth < DRAWER_BREAKPOINT)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [folds, setFolds] = useState<Record<string, boolean>>(getInitialFolds)
@@ -112,7 +121,7 @@ export default function Layout() {
 
   // In the drawer the rail is always labeled: an icon-only overlay would be a
   // hieroglyph sheet floating over the page.
-  const labeled = expanded || (narrow && drawerOpen)
+  const labeled = (expanded && !builderCompact) || (narrow && drawerOpen)
 
   // NavLink hands the active flag to a className function; the rest of the
   // treatment (hover, the leading accent bar, the icons-only centring) lives
@@ -203,7 +212,7 @@ export default function Layout() {
         <span className="dl-rail__mark" title="Datalytics" aria-hidden>D</span>
         {labeled && <span className="dl-rail__wordmark">datalytics</span>}
         {labeled && (
-          <button onClick={() => narrow ? setDrawerOpen(false) : setExpanded(e => !e)}
+          <button onClick={() => narrow ? setDrawerOpen(false) : builderCompact ? setBuilderCompact(false) : setExpanded(e => !e)}
             aria-label={narrow ? t('nav.close') : t('nav.collapse')}
             title={narrow ? t('nav.close') : t('nav.collapse')}
             className="dl-rail__iconbtn" style={{ marginInlineStart: 'auto' }}>
@@ -215,7 +224,7 @@ export default function Layout() {
           no room beside the mark, and a button crushed against it reads as
           part of the logo. */}
       {!labeled && (
-        <button onClick={() => setExpanded(true)} aria-label={t('nav.expand')}
+        <button onClick={() => { setBuilderCompact(false); setExpanded(true) }} aria-label={t('nav.expand')}
           title={t('nav.expand')} className="dl-rail__iconbtn"
           style={{ alignSelf: 'center' }}>
           <ChevronsRight size={16} aria-hidden />

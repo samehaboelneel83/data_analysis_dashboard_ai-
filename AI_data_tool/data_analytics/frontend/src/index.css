@@ -36,8 +36,10 @@
    from the MCAIT neutrals; dark comes from the
    [data-product="datalytics"][data-theme="dark"] block in datalytics.css,
    which redefines those same --mc-* names on <html>. That is why this bridge
-   is written once rather than once per theme. */
-:root {
+   is written once rather than once per theme. Also declared on any element
+   carrying data-product, so a subtree can take its own theme (the print view
+   is always light, QA2 Visual 7): an alias resolves where it is declared. */
+:root, [data-product="datalytics"] {
   --bg:            var(--mc-canvas);
   --surface:       var(--mc-surface);
   --surface2:      var(--mc-canvas-2);
@@ -77,6 +79,11 @@ svg.lucide { stroke-width: var(--dl-icon-stroke); }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* Native scrollbars, their corner and form controls follow the theme (QA
+   V10: a white square where a dark table's two scrollbars meet). */
+:root { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+
 html, body, #root {
   height: 100%;
   background: var(--bg);
@@ -89,6 +96,9 @@ html, body, #root {
 /* Scrollbars */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
+/* Styled too (QA2 V10): with custom scrollbars Chrome paints the corner where
+   two meet white, whatever the theme -- the square on the dark Data table. */
+::-webkit-scrollbar-corner { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: var(--radius-pill); }
 
 /* Buttons */
@@ -505,14 +515,9 @@ svg.recharts-surface { direction: ltr; }
    at the card's edge (overflow: hidden clipped the last columns entirely). */
 .dl-table-card > .dl-table { min-inline-size: 560px; }
 @media (min-width: 700px) { .dl-table-card > .dl-table { min-inline-size: 0; } }
-/* BUG-037: a dataset's Data tab is two columns on a wide screen -- authoring
-   panels left, the preview table right -- by design. On a narrow one the
-   260px panel column squeezed the table, and stacked it came after four
-   panels, so the table (the thing you came to see) goes on top instead. */
-@media (max-width: 899px) {
-  .dl-data-tab { flex-direction: column-reverse; }
-  .dl-data-tab > .dl-data-tab__panels { width: auto !important; overflow-y: visible !important; }
-}
+/* BUG-037 (a 260px panel column squeezing the Data tab's table on a narrow
+   screen) is gone by construction since redesign 3c: the panels became a
+   toolbar above the table that wraps (pages/datasetDetail/data.css). */
 /* BUG-041, below the table card's 700px breakpoint: nothing said the table scrolled, and a
    description ended mid-word in an ellipsis. Scroll shadows: the two `local`
    covers travel with the content and hide the `scroll` shadows beneath them
@@ -1078,7 +1083,11 @@ svg.recharts-surface { direction: ltr; }
 
 /* ---- Shell ---- */
 
-.dl-shell { display: flex; block-size: 100%; }
+/* clip, not hidden (QA V5): nothing inside the shell can make the document
+   taller, and a clipped box cannot be scrolled from script either, so a focus
+   jump or scrollIntoView never nudges the whole shell (top bar and logo up
+   ~15px). Fixed-position popups are not clipped by it. */
+.dl-shell { display: flex; block-size: 100%; overflow: clip; }
 .dl-shell__main { flex: 1; display: flex; flex-direction: column; min-inline-size: 0; }
 .dl-shell__content { flex: 1; overflow: auto; background: var(--bg); }
 
@@ -1974,6 +1983,23 @@ html[data-presenting="1"] .dl-bleed { margin: 0; block-size: 100%; }
   overflow: hidden;
   text-overflow: ellipsis;
   min-inline-size: 0;
+}
+
+/* A narrower window (QA V4): the controls on the right are fixed, so the
+   trail is what gives. The muted section word in front goes first, so the
+   page's own name keeps the room ("Dashboards > Q" before). */
+/* At 125% zoom (QA2 V4: ~1150–1230 CSS px) the name was still cut: below
+   1280 Search shows only its icon (its aria-label is unchanged) and the model
+   picker's name truncates sooner. CSS only; TopBar.tsx is untouched. */
+@media (max-width: 1279px) {
+  .dl-crumbs + div + button { min-width: 0 !important; padding: 6px 8px !important; }
+  .dl-crumbs + div + button > span:not(:first-child) { display: none; }
+  [data-testid="llm-picker"] > button { max-width: 150px !important; }
+}
+
+@media (max-width: 1360px) {
+  .dl-crumbs > .dl-crumbs__section:first-child:not(.dl-crumbs__link),
+  .dl-crumbs > .dl-crumbs__section:first-child:not(.dl-crumbs__link) + .dl-crumbs__sep { display: none; }
 }
 
 /* ============================================================
@@ -3042,3 +3068,24 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--da
    its labels are longer (Chrome re-test). */
 .dl-builder-top > [data-testid="builder-header"] { flex: 1 1 auto !important; min-width: 0; max-width: 100%; border-bottom: none !important; }
 .dl-builder-top > .dl-panebar { flex: 1 1 auto; min-width: 0; border-block-end: none; }
+
+/* The model servers table on a narrow panel (QA2 V10): each server is a grid
+   of labelled fields, its buttons underneath, nothing scrolled out of sight. */
+.dl-llmep { container-type: inline-size; container-name: llmep; }
+@container llmep (max-width: 980px) {
+  .dl-llmep thead { display: none; }
+  .dl-llmep tr { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px 12px; padding: 10px 0; }
+  .dl-llmep td { display: flex; flex-direction: column; justify-content: flex-end; gap: 3px; padding: 0 !important; text-align: start !important; }
+  .dl-llmep td[data-label]::before { content: attr(data-label); font-size: 11px; font-weight: 600; color: var(--muted); }
+  .dl-llmep td .dl-field__input { min-width: 0 !important; width: 100% !important; }
+  .dl-llmep td input[type="checkbox"] { align-self: flex-start; }
+  .dl-llmep td.acts { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; gap: 6px; }
+}
+
+/* Chart tooltips (QA2 Visual 6): Recharts writes each item in its series
+   colour, unreadable when that is a dark green on the dark card. The value and
+   the label take the text colour; the series name keeps its colour as the cue.
+   CSS only -- no renderer code changes. */
+.recharts-tooltip-label { color: var(--text) !important; font-weight: 600; }
+.recharts-tooltip-item-value, .recharts-tooltip-item-separator { color: var(--text) !important; }
+[data-theme="dark"] .recharts-tooltip-item-name { filter: brightness(1.45) saturate(1.1); }

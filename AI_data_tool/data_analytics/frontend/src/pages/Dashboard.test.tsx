@@ -17,6 +17,11 @@ vi.mock('../services/api', () => ({
 vi.mock('react-hot-toast', () => ({
   default: { success: vi.fn(), error: vi.fn() },
 }))
+// The preview panel repeats the selected dataset's name; it has its own tests
+// (datasetsList.test.tsx), so these table tests render a stub in its place.
+vi.mock('./datasetsList/DatasetPreview', () => ({
+  default: ({ ds }: { ds: { id: number } | null }) => <aside data-testid="dataset-preview" data-id={ds?.id ?? ''} />,
+}))
 
 const renderDashboard = () =>
   render(
@@ -42,7 +47,7 @@ describe('Dashboard carries no demo-loading control', () => {
   // now; the endpoint stays, the button does not.
   it('offers none in the empty state, where it used to be loudest', async () => {
     renderDashboard()
-    await waitFor(() => expect(screen.getByText('No datasets yet')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Add your first dataset')).toBeInTheDocument())
     expect(screen.queryByRole('button', { name: /demo/i })).toBeNull()
   })
 
@@ -219,7 +224,7 @@ describe('Home summary strip', () => {
     // already says it, and better.
     vi.mocked(datasetsApi.list).mockResolvedValue([] as never)
     renderDashboard()
-    await screen.findByText(/No datasets yet/i)
+    await screen.findByText(/Add your first dataset/i)
     expect(screen.queryByRole('region', { name: 'Summary' })).not.toBeInTheDocument()
   })
 
@@ -245,8 +250,8 @@ describe('DirectQuery rows report what they know, not zero', () => {
     renderDashboard()
     const row = (await screen.findByText('live_orders')).closest('tr')!
     const cells = within(row).getAllByRole('cell')
-    expect(cells[2]).toHaveTextContent('—')
-    expect(cells[4]).toHaveTextContent('—')
+    expect(cells[3]).toHaveTextContent('—')
+    expect(cells[5]).toHaveTextContent('—')
   })
 
   it('fills in the live count once the source has been counted (4.5)', async () => {
@@ -255,10 +260,10 @@ describe('DirectQuery rows report what they know, not zero', () => {
     ;(datasetsApi as unknown as { liveCount: typeof liveCount }).liveCount = liveCount
     renderDashboard()
     const row = (await screen.findByText('live_orders')).closest('tr')!
-    await waitFor(() => expect(within(row).getAllByRole('cell')[2]).toHaveTextContent((240124).toLocaleString()))
+    await waitFor(() => expect(within(row).getAllByRole('cell')[3]).toHaveTextContent((240124).toLocaleString()))
     expect(liveCount).toHaveBeenCalledWith(3)
     // the size still does not apply: nothing is stored here
-    expect(within(row).getAllByRole('cell')[4]).toHaveTextContent('—')
+    expect(within(row).getAllByRole('cell')[5]).toHaveTextContent('—')
     delete (datasetsApi as unknown as { liveCount?: unknown }).liveCount
   })
 
@@ -266,7 +271,7 @@ describe('DirectQuery rows report what they know, not zero', () => {
     vi.mocked(datasetsApi.list).mockResolvedValue([live] as never)
     renderDashboard()
     const row = (await screen.findByText('live_orders')).closest('tr')!
-    expect(within(row).getAllByRole('cell')[3]).toHaveTextContent((8).toLocaleString())
+    expect(within(row).getAllByRole('cell')[4]).toHaveTextContent((8).toLocaleString())
   })
 
   it('leaves an import dataset showing its real zero', async () => {
@@ -278,7 +283,7 @@ describe('DirectQuery rows report what they know, not zero', () => {
     ] as never)
     renderDashboard()
     const row = (await screen.findByText('empty_upload')).closest('tr')!
-    expect(within(row).getAllByRole('cell')[2]).toHaveTextContent((0).toLocaleString())
+    expect(within(row).getAllByRole('cell')[3]).toHaveTextContent((0).toLocaleString())
   })
 })
 
@@ -339,7 +344,7 @@ describe('paging through a long inventory', () => {
   const rowNames = () =>
     within(screen.getByRole('table')).getAllByRole('row')
       .slice(1)                                   // drop the header row
-      .map(r => within(r).getAllByRole('cell')[1].textContent)
+      .map(r => within(within(r).getAllByRole('cell')[1]).getByRole('link').textContent)
 
   it('shows only the first eight of nineteen', async () => {
     vi.mocked(datasetsApi.list).mockResolvedValue(many(19) as never)
@@ -470,7 +475,7 @@ describe('paging through a long inventory', () => {
   it('shows no footer at all when there are no datasets', async () => {
     vi.mocked(datasetsApi.list).mockResolvedValue([] as never)
     renderDashboard()
-    await screen.findByText('No datasets yet')
+    await screen.findByText('Add your first dataset')
     expect(screen.queryByRole('navigation', { name: 'Dataset pages' })).toBeNull()
   })
 
@@ -533,17 +538,18 @@ describe('the Datasets table on a phone (BUG-041)', () => {
 })
 
 describe("a dataset's Data tab on a narrow screen (BUG-037)", () => {
-  it('index.css stacks it with the preview table on top, and leaves wide screens alone', async () => {
+  it('keeps the table first and full width: the tools are a wrapping toolbar above it', async () => {
     const fs = await import('node:fs')
     const path = await import('node:path')
     const url = await import('node:url')
     const here = path.dirname(url.fileURLToPath(import.meta.url))
-    const css = fs.readFileSync(path.resolve(here, '../index.css'), 'utf8')
+    const css = fs.readFileSync(path.resolve(here, './datasetDetail/data.css'), 'utf8')
     const detail = fs.readFileSync(path.resolve(here, './DatasetDetail.tsx'), 'utf8')
-    expect(css).toMatch(/@media \(max-width: 899px\) \{\s*\.dl-data-tab \{ flex-direction: column-reverse; \}/)
-    // The panels come first in the DOM, so column-reverse is what puts the table on top.
-    expect(detail.indexOf('className="dl-data-tab__panels"')).toBeGreaterThan(detail.indexOf('className="dl-data-tab"'))
-    expect(css).not.toMatch(/@media \(min-width[^)]*\) \{\s*\.dl-data-tab/)
+    // Redesign 3c: no side panel column to squeeze the table any more -- the
+    // tools are a toolbar ABOVE the table, and it wraps on a narrow screen.
+    expect(detail).not.toContain('dl-data-tab__panels')
+    expect(detail.indexOf('className="dl-data3__toolbar"')).toBeLessThan(detail.indexOf('className="dl-data3__main"'))
+    expect(css).toMatch(/\.dl-data3__toolbar \{[^}]*flex-wrap: wrap/)
   })
 })
 
@@ -560,16 +566,20 @@ describe('one catalog: what each dataset is and how current (E06)', () => {
     ] as never)
     renderDashboard()
     await waitFor(() => expect(screen.getByText('orders copy')).toBeInTheDocument())
-    expect(screen.getByRole('columnheader', { name: 'Data' })).toBeInTheDocument()
+    // Redesign 3a split the old "Data" column into Source and Freshness.
+    expect(screen.getByRole('columnheader', { name: 'Source' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Freshness' })).toBeInTheDocument()
     const cell = (id: number) => screen.getByTestId(`catalog-${id}`)
-    expect(cell(1)).toHaveTextContent('Uploaded file')
+    const src = (id: number) => screen.getByTestId(`source-${id}`)
+    expect(src(1)).toHaveTextContent('Uploaded file')
     expect(cell(1)).toHaveTextContent('Uploaded 2 days ago')
-    expect(cell(2)).toHaveTextContent('Copied from Warehouse')
+    // No lineage graph in this test, so no connector type: the catalog's words.
+    expect(src(2)).toHaveTextContent('Copied from Warehouse')
     expect(cell(2)).toHaveTextContent('Overdue: last refreshed 3 hours ago')
     expect(within(cell(2)).getByText(/Overdue/).className).toContain('dl-fresh--bad')
-    expect(cell(3)).toHaveTextContent('Live from Warehouse')
+    expect(src(3)).toHaveTextContent('Live from Warehouse')
     expect(cell(3)).toHaveTextContent('Always current')
-    expect(cell(4)).toHaveTextContent('Built from sales, another dataset')
+    expect(src(4)).toHaveTextContent('Built from sales, another dataset')
     expect(cell(4)).toHaveTextContent('Refreshed on request, 1 hour ago')
     expect(within(cell(5)).getByText(/Refresh due/).className).toContain('dl-fresh--warn')
   })

@@ -64,6 +64,20 @@ interface Props {
    *  mistake before it is drawn. Optional: absent, the pickers show no counts. */
   distinctCounts?: Record<string, number>
   onUpdate: (config: Record<string, unknown>, title: string) => void
+  /** The builder's Format / Data / Interactions (redesign 7e3): shows only
+   *  that section's tabs, and "All" means all of it. Absent, the panel is
+   *  v1's: every tab. Search always reaches everything. */
+  section?: 'format' | 'data' | 'interactions'
+  /** Asked when the panel itself moves to another section ("Assign data"
+   *  opens Data roles). */
+  onSection?: (s: 'format' | 'data' | 'interactions') => void
+}
+
+/** Which of v1's tabs each builder section holds. Every tab is in one. */
+export const SECTION_TABS: Record<'format' | 'data' | 'interactions', string[]> = {
+  format: ['Options', 'Display rules'],
+  data: ['Data', 'Data roles', 'Filters', 'Ranks'],
+  interactions: ['Actions'],
 }
 
 // Widget types dispatched to a shaper OTHER than shape_series
@@ -89,7 +103,7 @@ function extraKeyFor(wt: string, role: string, roleValues: Record<string, string
 const seedExtras = (cfg: Record<string, unknown>): Record<string, string[]> =>
   Object.fromEntries(Object.values(EXTRA_KEY_OF).map(k => [k, stringList(cfg[k])]))
 
-function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages, hierarchy, onHierarchyRefresh, bookmarks, ruleErrors, geography, distinctCounts, onUpdate }: Props) {
+function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages, hierarchy, onHierarchyRefresh, bookmarks, ruleErrors, geography, distinctCounts, onUpdate, section, onSection }: Props) {
   // E03: in the shape the panel edits -- a legacy `roles` dict flattened,
   // `agg` renamed (widgetConfigPanel/configShape.ts). Keyed on the stored
   // object, so it is recomputed when the widget or its config changes.
@@ -104,7 +118,13 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
   // Panel search box — not part of the widget config, so it is never seeded/reset by
   // the widget-switch effect and never written by the save effect.
   const [filterText, setFilterText] = useState('')
-  const [settingsTab, setSettingsTab] = useState('all')
+  const [chosenTab, setSettingsTab] = useState('all')
+  // In a builder section, a tab from another section reads as that
+  // section's "All" (the choice is held, not rewritten).
+  const inSection = section ? SECTION_TABS[section] : null
+  const settingsTab = inSection && chosenTab !== 'all' && !inSection.includes(chosenTab) ? 'all' : chosenTab
+  const onSectionRef = useRef(onSection)
+  onSectionRef.current = onSection
   // "Assign data" (on the tile, or right after inserting a widget) opens the
   // one tab that can finish it -- SAS opens Assign data straight into the roles
   // pane. Only on that request: selecting an existing widget keeps the tab the
@@ -118,9 +138,11 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
   const [addRole, setAddRole] = useState<string | null>(null)
   useEffect(() => {
     const onAssign = (e: Event) => {
-      const detail = (e as CustomEvent<{ widgetId: number; open?: boolean }>).detail
+      const detail = (e as CustomEvent<{ widgetId: number; open?: boolean; tab?: 'Filters' }>).detail
       if (detail?.widgetId !== widget.id) return
-      setSettingsTab('Data roles')
+      // QA3 A4: the quick toolbar's Filters asks for the Filters tab.
+      setSettingsTab(detail.tab ?? 'Data roles')
+      onSectionRef.current?.('data')
       if (detail.open !== false) { setAssignRole(null); setAssignOpen(true) }
     }
     window.addEventListener(ASSIGN_DATA_EVENT, onAssign)
@@ -1086,7 +1108,7 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
       const hit = groupMatches(title, terms)
       return { hidden: !hit, forceOpen: hit }
     }
-    if (settingsTab === 'all') return {}
+    if (settingsTab === 'all') return inSection ? { hidden: !inSection.includes(TAB_OF_GROUP[title]) } : {}
     return { hidden: TAB_OF_GROUP[title] !== settingsTab }
   }
 
@@ -1322,7 +1344,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
             for them under, rather than ten accordions in a single column. */}
         <div role="tablist" aria-label={L("Settings sections")}
           style={{ display:'flex', flexWrap:'wrap', gap:2, margin:'8px 0 2px' }}>
-          {SETTINGS_TABS.map(t => {
+          {(inSection ? ['All', ...inSection] : SETTINGS_TABS).map(t => {
             const key = t === 'All' ? 'all' : t
             const on = settingsTab === key
             return (
@@ -1353,7 +1375,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
             and the reachability pin count them like any other group. Left
             visible while a search is running, because that is what they did
             before the rail existed: the box narrows groups, not the object. */}
-        {(filterActive || settingsTab === 'all' || settingsTab === 'Options') && (
+        {(filterActive || (settingsTab === 'all' && (!inSection || inSection.includes('Options'))) || settingsTab === 'Options') && (
         <div data-group-id="object">
 
         {/* Dataset override — only shown when multiple datasets are attached to the report */}

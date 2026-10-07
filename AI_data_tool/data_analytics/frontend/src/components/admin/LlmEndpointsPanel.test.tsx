@@ -51,4 +51,25 @@ describe('LlmEndpointsPanel', () => {
     await screen.findByDisplayValue('http://10.0.0.5:8000/v1')
     expect(container.querySelector('[data-light="down"]')).not.toBeNull()
   })
+
+  it('the name and context boxes are wide enough for what they show (QA V10)', async () => {
+    // "تلقائي: 32768" and "Qwen 3.8 27B" were cut off in 110 px boxes.
+    render(<LlmEndpointsPanel />)
+    await screen.findByDisplayValue('http://10.0.0.5:8000/v1')
+    const px = (el: HTMLElement) => parseInt(el.style.width || el.style.minWidth, 10)
+    expect(px(screen.getAllByLabelText('Name')[0])).toBeGreaterThanOrEqual(140)
+    expect(px(screen.getByLabelText(/: Default$/, { selector: 'input[type="number"][step="1024"]' }))).toBeGreaterThanOrEqual(140)
+  })
+
+  it('on a narrow panel each server becomes labelled fields, nothing scrolled out of sight (QA2 V10)', async () => {
+    const fs = await import('node:fs'); const path = await import('node:path')
+    const css = fs.readFileSync(path.join(__dirname, '..', '..', 'index.css'), 'utf8')
+    const { container } = render(<LlmEndpointsPanel />)
+    await screen.findByDisplayValue('http://10.0.0.5:8000/v1')
+    expect(container.querySelector('.dl-llmep')).not.toBeNull()
+    const labels = Array.from(container.querySelectorAll('tbody td[data-label]')).map(td => td.getAttribute('data-label'))
+    expect(labels).toEqual(expect.arrayContaining(['Name', 'Context (tokens)', 'On']))
+    expect(css).toMatch(/@container llmep \(max-width: \d+px\)\s*\{[\s\S]*?\.dl-llmep td\[data-label\]::before/)
+  })
 })
+

@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import AskAI from './AskAI'
+import { renderWithProviders } from '../test/renderWithProviders'
 
 /**
  * The page's whole job is scope resolution: turn a URL or a picker choice
@@ -9,18 +10,25 @@ import AskAI from './AskAI'
  * mocked to a probe that reports what it was given.
  */
 
-vi.mock('../components/chat/ChatPane', () => ({
-  default: (props: { dataSourceId?: number; datasetIds?: number[]; conversationId?: number | null
-                     onConversationCreated?: (c: { id: number; title: string }) => void }) => (
-    <div data-testid="chat-pane">
+vi.mock('../components/chat/ChatPane', async () => {
+  const { useState } = await vi.importActual<typeof import('react')>('react')
+  return {
+  default: function Probe(props: { dataSourceId?: number; datasetIds?: number[]; conversationId?: number | null
+                     onConversationCreated?: (c: { id: number; title: string }) => void; initialInput?: string }) {
+    // What the real pane does: the box takes the question once, on mount.
+    const [initial] = useState(props.initialInput ?? '')
+    return (
+    <div data-testid="chat-pane" data-initial={initial}>
       {props.dataSourceId != null ? `source:${props.dataSourceId}` : `datasets:${props.datasetIds?.join(',')}`}
       {` conversation:${props.conversationId === undefined ? 'unset' : String(props.conversationId)}`}
       <button onClick={() => props.onConversationCreated?.({ id: 99, title: 'Made by pane' })}>
         probe-create
       </button>
     </div>
-  ),
-}))
+    )
+  },
+  }
+})
 
 vi.mock('../services/api', () => ({
   datasetsApi: { list: vi.fn() },
@@ -46,7 +54,7 @@ beforeEach(() => {
   vi.mocked(agentApi.remove).mockResolvedValue(undefined)
 })
 
-const renderAt = (path: string) => render(
+const renderAt = (path: string) => renderWithProviders(
   <MemoryRouter initialEntries={[path]}><AskAI /></MemoryRouter>,
 )
 
@@ -208,10 +216,12 @@ describe('AskAI — the conversation list', () => {
   })
 
   it('deletes a thread after confirming, and empties the pane if it was open', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     renderAt('/ask?dataset=32')
     await screen.findByRole('list', { name: /conversations/i })
     fireEvent.click(screen.getByRole('button', { name: /delete orders by city/i }))
+    // The app's own dialog, not window.confirm.
+    const dialog = await screen.findByRole('alertdialog', { name: 'Delete this conversation?' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
     await waitFor(() => expect(agentApi.remove).toHaveBeenCalledWith(55))
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: /^Orders by city/ })).not.toBeInTheDocument())
@@ -219,10 +229,12 @@ describe('AskAI — the conversation list', () => {
   })
 
   it('a declined confirm deletes nothing', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(false)
     renderAt('/ask?dataset=32')
     await screen.findByRole('list', { name: /conversations/i })
     fireEvent.click(screen.getByRole('button', { name: /delete orders by city/i }))
+    const dialog = await screen.findByRole('alertdialog', { name: 'Delete this conversation?' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
     expect(agentApi.remove).not.toHaveBeenCalled()
   })
 
@@ -243,5 +255,44 @@ describe('AskAI — the conversation list', () => {
                   { timeout: 5000 })
     expect(screen.queryByText('Live orders')).not.toBeInTheDocument()
     expect(screen.getByText('Warehouse')).toBeInTheDocument()
+  })
+})
+
+
+/**
+ * Home's question box hands its question over as `/ask?q=`. It is put in the
+ * question box -- never sent for the person -- and leaves the URL so a reload
+ * does not bring it back.
+ */
+describe('a question handed over from Home', () => {
+  it('waits in the hero until data is chosen', async () => {
+    renderAt('/ask?q=Which%20region%20grew')
+    expect(await screen.findByTestId('ask-pending-q')).toHaveTextContent('Which region grew')
+    expect(screen.queryByTestId('chat-pane')).not.toBeInTheDocument()
+  })
+
+  it('goes into the question box of the scoped chat, unsent', async () => {
+    renderAt('/ask?dataset=32&q=Total%20sales%20by%20region')
+    const pane = await screen.findByTestId('chat-pane')
+    expect(pane).toHaveAttribute('data-initial', 'Total sales by region')
+    expect(pane).toHaveTextContent('datasets:32')
+  })
+})
+
+/**
+ * QA B2 (7-QA): a dataset the picker hides as test-looking ("ID only (test)")
+ * could still be opened by link -- from Home's Ask AI action or its starters
+ * -- and the chat answered about it, but the picker said "Choose a dataset".
+ * The picker must name the dataset the page is about, hidden or not.
+ */
+describe('a test-looking dataset opened by link (QA B2)', () => {
+  it('is named in the picker', async () => {
+    vi.mocked(datasetsApi.list).mockResolvedValue([
+      { id: 32, name: 'Orders', mode: 'import', filename: 'orders.csv' } as any,
+      { id: 8, name: 'ID only (test)', mode: 'import', filename: 'id_only_test.csv' } as any,
+    ])
+    renderAt('/ask?dataset=8')
+    await screen.findByTestId('chat-pane')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'What to ask about' })).toHaveTextContent('ID only (test)'))
   })
 })

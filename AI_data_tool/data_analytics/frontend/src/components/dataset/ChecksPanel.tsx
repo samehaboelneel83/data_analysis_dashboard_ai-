@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
-import { ShieldCheck } from 'lucide-react'
+import { Check, Minus, Plus, ShieldCheck } from 'lucide-react'
+import '../../pages/datasetDetail/rules.css'
 import { datasetsApi, type CheckResult, type DataCheck, type DataCheckInput, type DataCheckKind,
          type DatasetRefreshRun } from '../../services/api'
 import { useT, type MessageKey } from '../../i18n'
@@ -19,7 +20,8 @@ const GOOD = 'color-mix(in oklab, var(--positive, #4caf82) 65%, var(--text))'
 const BAD = 'color-mix(in oklab, var(--negative, #e2606c) 75%, var(--text))'
 const WARN = 'color-mix(in oklab, #d9a441 60%, var(--text))'
 
-function summary(c: DataCheckInput, t: ReturnType<typeof useT>): string {
+/** A check in words ("margin_pct ≤ 100"); the Overview's trust card names a failing one with it. */
+export function summary(c: DataCheckInput, t: ReturnType<typeof useT>): string {
   const p = c.params ?? {}
   switch (c.kind) {
     case 'not_null': return t('checks.sum.not_null', { col: c.column ?? '' })
@@ -49,8 +51,10 @@ export function CheckResultList({ results }: { results: CheckResult[] }) {
   )
 }
 
-export default function ChecksPanel({ datasetId, columns, canEdit }: {
+export default function ChecksPanel({ datasetId, columns, canEdit, children }: {
   datasetId: number; columns: string[]; canEdit: boolean
+  /** Shown at the foot of the Quality rules card (the one-off quality report). */
+  children?: React.ReactNode
 }) {
   const t = useT()
   const [checks, setChecks] = useState<DataCheck[]>([])
@@ -66,6 +70,8 @@ export default function ChecksPanel({ datasetId, columns, canEdit }: {
   const [pct, setPct] = useState('50')
   const [expr, setExpr] = useState('')
   const [severity, setSeverity] = useState<'warn' | 'block'>('block')
+  // The add form opens from "+ Rule" (redesign 3c), and on its own while there is nothing to list.
+  const [adding, setAdding] = useState(false)
 
   const load = () => {
     datasetsApi.checks(datasetId).then(setChecks).catch(() => {})
@@ -85,6 +91,7 @@ export default function ChecksPanel({ datasetId, columns, canEdit }: {
     setBusy(true)
     try {
       await datasetsApi.addCheck(datasetId, body)
+      setAdding(false)
       setValues(''); setMin(''); setMax(''); setExpr('')
       setTried(null)
       load()
@@ -115,119 +122,129 @@ export default function ChecksPanel({ datasetId, columns, canEdit }: {
   const statusText = (st: string) => { const k = `jobs.status.${st}` as MessageKey; const v = t(k); return v && v !== k ? v : st }
 
   return (
-    <div style={{ maxWidth: 900 }}>
-      <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 0 }}>{t('checks.intro')}</p>
+    <div className="dl-rules__checks">
+      <section className="dl-rules__card">
+        <header className="dl-rules__head">
+          <div>
+            <h3>{t('rules3.quality')}</h3>
+            <p>{t('rules3.qualityCopy')}</p>
+          </div>
+          {canEdit && (
+            <div className="dl-rules__actions">
+              {checks.length > 0 && (
+                <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void tryNow()}
+                  aria-label={t('checks.tryNow')}>{t('rules3.runNow')}</button>
+              )}
+              <button type="button" className="btn btn-primary btn-sm" aria-expanded={adding}
+                aria-label={t('checks.add')} onClick={() => setAdding(a => !a)}>
+                <Plus size={14} aria-hidden /> {t('rules3.rule')}
+              </button>
+            </div>
+          )}
+        </header>
+        {tried && <p className="dl-rules__note">{t('checks.triedOn', { rows: tried.rows.toLocaleString() })}</p>}
 
-      {checks.length === 0 && !canEdit && (
-        <EmptyState icon={ShieldCheck} title={t('checks.none')} description={t('checks.noneBody')} />
-      )}
+        {checks.length === 0 && !adding && (
+          canEdit
+            ? <p className="dl-rules__empty">{t('checks.noneBody')}</p>
+            : <EmptyState icon={ShieldCheck} title={t('checks.none')} description={t('checks.noneBody')} />
+        )}
 
-      {checks.length > 0 && (
-        <div className="card dl-table-card" style={{ marginBottom: 16 }}><table className="dl-table" data-testid="checks-table">
-          <thead><tr>
-            <th>{t('checks.col.check')}</th>
-            <th>{t('checks.col.ifFails')}</th>
-            {tried && <th>{t('checks.col.now')}</th>}
-            {canEdit && <th aria-label={t('checks.col.actions')} />}
-          </tr></thead>
-          <tbody>
+        {checks.length > 0 && (
+          <ul className="dl-rules__list" data-testid="checks-table">
             {checks.map(c => {
               const r = resultFor(c)
+              const state = !r ? 'none' : r.passed ? 'ok' : c.severity === 'block' ? 'bad' : 'warn'
               return (
-                <tr key={c.id} style={{ opacity: c.enabled ? 1 : 0.55 }}>
-                  <td>{summary(c, t)}</td>
-                  <td style={{ whiteSpace: 'nowrap' }}>
-                    {canEdit ? (
-                      <select aria-label={t('checks.col.ifFails')} value={c.severity} className="input" style={{ fontSize: 12 }}
-                        onChange={e => void update(c, { severity: e.target.value as 'warn' | 'block' })}>
-                        <option value="block">{t('checks.block')}</option>
-                        <option value="warn">{t('checks.warn')}</option>
-                      </select>
-                    ) : t(c.severity === 'block' ? 'checks.block' : 'checks.warn')}
-                  </td>
-                  {tried && (
-                    <td style={{ color: !r ? 'var(--muted)' : r.passed ? GOOD : c.severity === 'block' ? BAD : WARN, fontSize: 12 }}>
-                      {!r ? '—' : r.passed ? t('checks.passes') : r.detail}
-                    </td>
+                <li key={c.id} data-off={!c.enabled || undefined}>
+                  <span className={`dl-ov__state dl-ov__state--${state}`} aria-hidden>
+                    {state === 'ok' ? <Check size={12} /> : state === 'none' ? <Minus size={12} /> : '!'}
+                  </span>
+                  <div className="dl-rules__what">
+                    <strong>{summary(c, t)}</strong>
+                    <span>{t(`checks.kind.${c.kind}` as MessageKey)}</span>
+                  </div>
+                  <span className="dl-rules__result" style={{ color: state === 'bad' ? BAD : state === 'warn' ? WARN : undefined }}>
+                    {!r ? (tried ? '—' : t('rules3.notRun')) : r.passed ? t('rules3.allPass') : r.detail}
+                  </span>
+                  {canEdit ? (
+                    <select aria-label={t('checks.col.ifFails')} value={c.severity}
+                      className={`dl-rules__sev dl-rules__sev--${c.severity}`}
+                      onChange={e => void update(c, { severity: e.target.value as 'warn' | 'block' })}>
+                      <option value="block">{t('rules3.block')}</option>
+                      <option value="warn">{t('rules3.warn')}</option>
+                    </select>
+                  ) : (
+                    <span className={`dl-rules__sev dl-rules__sev--${c.severity}`}>{t(c.severity === 'block' ? 'rules3.block' : 'rules3.warn')}</span>
                   )}
                   {canEdit && (
-                    <td style={{ whiteSpace: 'nowrap', textAlign: 'end' }}>
-                      <label style={{ fontSize: 12, marginInlineEnd: 10 }}>
+                    <span className="dl-rules__row-actions">
+                      <label>
                         <input type="checkbox" checked={c.enabled} onChange={e => void update(c, { enabled: e.target.checked })} />{' '}
                         {t('checks.on')}
                       </label>
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => void remove(c)}>{t('checks.remove')}</button>
-                    </td>
+                      <button type="button" className="dl-ov__linkish" onClick={() => void remove(c)}>{t('checks.remove')}</button>
+                    </span>
                   )}
-                </tr>
+                </li>
               )
             })}
-          </tbody>
-        </table></div>
-      )}
+          </ul>
+        )}
 
-      {canEdit && checks.length > 0 && (
-        <div style={{ marginBottom: 20 }}>
-          <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void tryNow()}>{t('checks.tryNow')}</button>
-          {tried && (
-            <span style={{ fontSize: 12, color: 'var(--muted)', marginInlineStart: 10 }}>
-              {t('checks.triedOn', { rows: tried.rows.toLocaleString() })}
-            </span>
-          )}
-        </div>
-      )}
-
-      {canEdit && (
-        <div className="card" style={{ padding: 14, marginBottom: 24 }}>
-          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 10 }}>{t('checks.add')}</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' }}>
-            <label style={{ fontSize: 12 }}>{t('checks.kindLabel')}<br />
-              <select className="input" value={kind} onChange={e => setKind(e.target.value as DataCheckKind)} style={{ fontSize: 12 }}>
-                {KINDS.map(k => <option key={k} value={k}>{t(`checks.kind.${k}` as MessageKey)}</option>)}
-              </select>
-            </label>
-            {COLUMN_KINDS.includes(kind) && (
-              <label style={{ fontSize: 12 }}>{t('checks.column')}<br />
-                <select className="input" value={column} onChange={e => setColumn(e.target.value)} style={{ fontSize: 12 }}>
-                  {columns.map(c => <option key={c} value={c}>{c}</option>)}
+        {canEdit && adding && (
+          <div className="dl-rules__form">
+            <div className="dl-rules__form-title">{t('checks.add')}</div>
+            <div className="dl-rules__form-row">
+              <label>{t('checks.kindLabel')}<br />
+                <select className="input" value={kind} onChange={e => setKind(e.target.value as DataCheckKind)} style={{ fontSize: 12 }}>
+                  {KINDS.map(k => <option key={k} value={k}>{t(`checks.kind.${k}` as MessageKey)}</option>)}
                 </select>
               </label>
-            )}
-            {kind === 'accepted_values' && (
-              <label style={{ fontSize: 12, flex: 1, minWidth: 200 }}>{t('checks.values')}<br />
-                <input className="input" dir="auto" value={values} onChange={e => setValues(e.target.value)}
-                  placeholder="open, closed" style={{ fontSize: 12, width: '100%' }} />
+              {COLUMN_KINDS.includes(kind) && (
+                <label>{t('checks.column')}<br />
+                  <select className="input" value={column} onChange={e => setColumn(e.target.value)} style={{ fontSize: 12 }}>
+                    {columns.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </label>
+              )}
+              {kind === 'accepted_values' && (
+                <label style={{ flex: 1, minWidth: 200 }}>{t('checks.values')}<br />
+                  <input className="input" dir="auto" value={values} onChange={e => setValues(e.target.value)}
+                    placeholder="open, closed" style={{ fontSize: 12, width: '100%' }} />
+                </label>
+              )}
+              {kind === 'row_count' && (<>
+                <label>{t('checks.min')}<br />
+                  <input className="input" type="number" min={0} value={min} onChange={e => setMin(e.target.value)} style={{ fontSize: 12, width: 110 }} />
+                </label>
+                <label>{t('checks.max')}<br />
+                  <input className="input" type="number" min={0} value={max} onChange={e => setMax(e.target.value)} style={{ fontSize: 12, width: 110 }} />
+                </label>
+              </>)}
+              {kind === 'row_drop' && (
+                <label>{t('checks.maxDrop')}<br />
+                  <input className="input" type="number" min={1} max={100} value={pct} onChange={e => setPct(e.target.value)} style={{ fontSize: 12, width: 90 }} />
+                </label>
+              )}
+              {kind === 'rule' && (
+                <label style={{ flex: 1, minWidth: 220 }}>{t('checks.rule')}<br />
+                  <input className="input" dir="ltr" value={expr} onChange={e => setExpr(e.target.value)}
+                    placeholder="amount >= 0" style={{ fontSize: 12, width: '100%', fontFamily: 'var(--mono)' }} />
+                </label>
+              )}
+              <label>{t('checks.col.ifFails')}<br />
+                <select className="input" value={severity} onChange={e => setSeverity(e.target.value as 'warn' | 'block')} style={{ fontSize: 12 }}>
+                  <option value="block">{t('checks.block')}</option>
+                  <option value="warn">{t('checks.warn')}</option>
+                </select>
               </label>
-            )}
-            {kind === 'row_count' && (<>
-              <label style={{ fontSize: 12 }}>{t('checks.min')}<br />
-                <input className="input" type="number" min={0} value={min} onChange={e => setMin(e.target.value)} style={{ fontSize: 12, width: 110 }} />
-              </label>
-              <label style={{ fontSize: 12 }}>{t('checks.max')}<br />
-                <input className="input" type="number" min={0} value={max} onChange={e => setMax(e.target.value)} style={{ fontSize: 12, width: 110 }} />
-              </label>
-            </>)}
-            {kind === 'row_drop' && (
-              <label style={{ fontSize: 12 }}>{t('checks.maxDrop')}<br />
-                <input className="input" type="number" min={1} max={100} value={pct} onChange={e => setPct(e.target.value)} style={{ fontSize: 12, width: 90 }} />
-              </label>
-            )}
-            {kind === 'rule' && (
-              <label style={{ fontSize: 12, flex: 1, minWidth: 220 }}>{t('checks.rule')}<br />
-                <input className="input" dir="ltr" value={expr} onChange={e => setExpr(e.target.value)}
-                  placeholder="amount >= 0" style={{ fontSize: 12, width: '100%', fontFamily: 'var(--mono)' }} />
-              </label>
-            )}
-            <label style={{ fontSize: 12 }}>{t('checks.col.ifFails')}<br />
-              <select className="input" value={severity} onChange={e => setSeverity(e.target.value as 'warn' | 'block')} style={{ fontSize: 12 }}>
-                <option value="block">{t('checks.block')}</option>
-                <option value="warn">{t('checks.warn')}</option>
-              </select>
-            </label>
-            <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => void add()}>{t('checks.addButton')}</button>
+              <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => void add()}>{t('checks.addButton')}</button>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+        {children}
+      </section>
 
       {canEdit && runs.length > 0 && (<>
         <h3 style={{ fontSize: 14, margin: '0 0 8px' }}>{t('checks.history')}</h3>

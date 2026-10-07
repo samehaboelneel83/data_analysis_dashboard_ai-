@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import { usePrompt } from '../ui/PromptDialog'
-import { AlertTriangle, Code2, Copy, Database, Download, RotateCcw, Sparkles, ThumbsDown, ThumbsUp, User } from 'lucide-react'
+import { AlertTriangle, Code2, Copy, Database, Download, Pencil, RotateCcw, Sparkles, ThumbsDown, ThumbsUp, User } from 'lucide-react'
 import { agentApi, dataSourcesApi } from '../../services/api'
 import type { AgentAnswer, AgentMessage, AgentPresentation, AgentResult, AnswerEvidence } from '../../services/api'
 import Pending from './Pending'
@@ -11,9 +11,14 @@ import ChoiceOptions, { isChoices } from './ChoiceOptions'
 import DashboardProposals, { type DashboardProposalsPresentation }
   from './DashboardProposals'
 import { useT, translate, type TranslateFn } from '../../i18n'
+import { useDirection } from '../../contexts/DirectionContext'
+import { majorityDir } from '../../lib/autoDir'
+import { renderTextWithLinks } from '../../lib/inlineMarkup'
 import { aiLimitMessage } from '../../lib/aiLimit'
 import Composer from './Composer'
 import AnswerText from './AnswerText'
+import { columnsMentioned } from './clarifyColumns'
+import { useAiOffline } from '../../pages/ask/useAiOffline'
 import AddToDashboard from './AddToDashboard'
 import SaveAsRule, { looksLikeDefinition } from './SaveAsRule'
 import { answerToWidget, type WidgetDraft } from './answerWidget'
@@ -57,6 +62,9 @@ export interface ChatPaneProps {
   /** Mounted inside a dashboard: "Add to this page" puts the answer straight
    *  onto the page being edited, instead of asking which dashboard. */
   onAddToPage?: (draft: WidgetDraft, title: string) => unknown
+  /** A question to start the box with (Home's question box and its starters
+   *  hand one over through `/ask?q=`). Put in the box, never sent for you. */
+  initialInput?: string
 }
 
 type MessageKind = 'answer' | 'clarify' | 'error' | 'limit'
@@ -130,9 +138,19 @@ function isProposals(p: unknown): p is DashboardProposalsPresentation {
 }
 
 export default function ChatPane({ dataSourceId, datasetIds, conversationId, onConversationCreated,
-  suggestions, datasetColumns, onAddToPage }: ChatPaneProps) {
+  suggestions, datasetColumns, onAddToPage, initialInput }: ChatPaneProps) {
   const t = useT()
+  const { direction } = useDirection()
+  // Model and server text: markup rendered, laid out by its majority script.
+  const modelText = (text: string) => renderTextWithLinks(text, { httpsOnly: true })
   const owned = conversationId !== undefined
+  // The top bar's model light, read from its own poll: while it is red the
+  // page's question box is locked. The builder mount (conversationId
+  // omitted) never locks; its copilot has its own handling.
+  const ai = useAiOffline()
+  const offline = owned && ai.offline
+  // "What was wrong?" after a thumbs down: the run it is about, and the text.
+  const [why, setWhy] = useState<{ run: number; text: string } | null>(null)
   const [convId, setConvId] = useState<number | null>(conversationId ?? null)
   // What the pane itself created or last loaded -- so a parent echoing the
   // id we just reported does not trigger a reload of the thread we hold.
@@ -141,7 +159,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [input, setInput] = useState('')
+  const [input, setInput] = useState(initialInput ?? '')
   const [busy, setBusy] = useState(false)
   /** The question currently in flight, so the pending bubble can name the
    *  work. "Designing dashboards · 2m 14s" reads very differently from a
@@ -200,7 +218,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
     setLoading(true)
     agentApi.messages(conversationId)
       .then(stored => { if (seq === loadSeq.current) setMessages(stored.map(fromStored)) })
-      .catch(() => { if (seq === loadSeq.current) setLoadError('Could not load this conversation.') })
+      .catch(() => { if (seq === loadSeq.current) setLoadError(t('chat.loadFailed')) })
       .finally(() => { if (seq === loadSeq.current) setLoading(false) })
   }, [owned, conversationId])
 
@@ -254,17 +272,19 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
       const limit = aiLimitMessage(e, t)
       setMessages(m => [...m, limit
         ? { id: nextId++, role: 'assistant', kind: 'limit', text: limit }
-        : { id: nextId++, role: 'assistant', kind: 'error', text: 'Could not reach the agent. Try again.' }])
+        : { id: nextId++, role: 'assistant', kind: 'error', text: t('chat.unreachable') }])
     } finally {
       setBusy(false)
       setPending(null)
     }
   }
 
-  const rate = async (runId: number, rating: 'up' | 'down') => {
+  const rate = async (runId: number, rating: 'up' | 'down', comment?: string) => {
     setFeedbackByRun(m => ({ ...m, [runId]: rating })) // optimistic
+    if (!comment) setWhy(rating === 'down' ? { run: runId, text: '' } : null)
     try {
-      if (convId != null) await agentApi.feedback(convId, { runId, rating })
+      if (convId != null) await agentApi.feedback(convId, comment ? { runId, rating, comment } : { runId, rating })
+      if (comment) toast.success(t('ans3.thanks'))
     } catch {
       // The click already reflects intent; a failed write just means it
       // wasn't persisted -- not worth interrupting the chat over.
@@ -307,7 +327,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
     try {
       await agentApi.downloadRunFile(runId, format)
     } catch {
-      toast.error('Could not download the file')
+      toast.error(t('chat.downloadFailed'))
     }
   }
 
@@ -328,17 +348,17 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
   const saveAsDataset = async (msg: ChatMessage) => {
     if (dataSourceId == null) return
     const sql = await sqlFor(msg)
-    if (!sql.length) { toast.error('There is no query behind this answer'); return }
+    if (!sql.length) { toast.error(t('chat.noQuery')); return }
     // The LAST step: a multi-step run's earlier queries are intermediate
     // working, and the final one is the answer the person is looking at.
     const statement = sql[sql.length - 1]
     const name = await prompt({
-      title: 'Name this dataset', label: 'Dataset name',
-      defaultValue: 'Ask AI result', confirmLabel: 'Save dataset',
+      title: t('chat.save.title'), label: t('chat.save.label'),
+      defaultValue: t('chat.save.default'), confirmLabel: t('chat.save.confirm'),
     })
     if (name === null) return
     const trimmed = name.trim()
-    if (!trimmed) { toast.error('A dataset needs a name'); return }
+    if (!trimmed) { toast.error(t('chat.save.needName')); return }
 
     setSaving(msg.runId ?? -1)
     try {
@@ -352,10 +372,8 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
             columns: cols, query: statement,
           })
           if (matches.length) {
-            const go = window.confirm(
-              `You may already have this: ${matches[0].name} covers `
-              + `${Math.round(matches[0].coverage * 100)}% of these columns.\n\n`
-              + 'Create a new dataset anyway?')
+            const go = window.confirm(t('chat.save.similar', {
+              name: matches[0].name, pct: Math.round(matches[0].coverage * 100) }))
             if (!go) return
           }
         }
@@ -363,20 +381,20 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
 
       const ds = await dataSourcesApi.import(
         dataSourceId, trimmed, undefined, statement, 'import')
-      toast.success(`Saved as "${ds.name}"`)
+      toast.success(t('chat.save.done', { name: ds.name }))
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail ?? 'Could not save this as a dataset')
+      toast.error(e?.response?.data?.detail ?? t('chat.save.failed'))
     } finally { setSaving(null) }
   }
 
   const copySql = async (msg: ChatMessage) => {
     const sql = await sqlFor(msg)
-    if (!sql.length) { toast.error('No SQL to copy'); return }
+    if (!sql.length) { toast.error(t('chat.noSql')); return }
     try {
       await navigator.clipboard.writeText(sql.join('\n\n'))
-      toast.success('SQL copied')
+      toast.success(t('chat.sqlCopied'))
     } catch {
-      toast.error('Could not copy')
+      toast.error(t('chat.copyFailed'))
     }
   }
 
@@ -385,7 +403,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
       await navigator.clipboard.writeText(msg.text)
       toast.success(t('ask.answerCopied'))
     } catch {
-      toast.error('Could not copy')
+      toast.error(t('chat.copyFailed'))
     }
   }
 
@@ -452,7 +470,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
                         <p className="dl-answer-error__title">
                           <AlertTriangle size={16} aria-hidden /> {t('ai.limit.title')}
                         </p>
-                        <p className="dl-answer-error__hint">{msg.text}</p>
+                        <p className="dl-answer-error__hint" dir={majorityDir(msg.text, direction)}>{modelText(msg.text)}</p>
                       </div>
                     ) : msg.kind === 'error' ? (
                       <div className="dl-answer-error">
@@ -470,13 +488,16 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
                         )}
                         <details className="dl-answer-error__details">
                           <summary>{t('ask.err.details')}</summary>
-                          <div dir="ltr" className="dl-answer-error__raw">{msg.text}</div>
+                          <div dir="ltr" className="dl-answer-error__raw">{modelText(msg.text)}</div>
                         </details>
                         {turn.question && (
                           <div className="dl-actions">
-                            <button type="button" className="dl-act" disabled={busy}
+                            <button type="button" className="dl-act" disabled={busy || offline}
                               onClick={() => void send(turn.question!.text)}>
                               <RotateCcw size={14} aria-hidden /> {t('ask.retry')}
+                            </button>
+                            <button type="button" className="dl-act" onClick={() => setInput(turn.question!.text)}>
+                              <Pencil size={14} aria-hidden /> {t('err3.edit')}
                             </button>
                           </div>
                         )}
@@ -484,11 +505,18 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
                     ) : msg.kind === 'clarify' ? (
                       <div className="dl-answer-clarify">
                         <span className="dl-answer-clarify__tag">{t('ask.needsDetail')}</span>
-                        <p>{msg.text}</p>
-                        {isChoices(msg.presentation) && (
-                          <ChoiceOptions presentation={msg.presentation} disabled={busy}
-                            onChoose={option => void send(option)} />
-                        )}
+                        <p dir={majorityDir(msg.text, direction)}>{modelText(msg.text)}</p>
+                        {(() => {
+                          // The columns the question back names, as "Use <column>"
+                          // chips, then the server's own choices.
+                          const cols = columnsMentioned(msg.text, datasetColumns ?? []).map(c => t('clar3.use', { col: c }))
+                          const server = isChoices(msg.presentation) ? msg.presentation.options : []
+                          const options = [...cols, ...server.filter(o => !cols.includes(o))]
+                          return options.length > 0 && (
+                            <ChoiceOptions presentation={{ kind: 'choices', options }} disabled={busy || offline}
+                              onChoose={option => void send(option)} />
+                          )
+                        })()}
                       </div>
                     ) : (
                       <>
@@ -515,7 +543,22 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
                             the test's -- a reader has to be able to tell which. */}
                         <AnswerSource msg={msg} />
                         {msg.runId != null && (
-                          <AnswerActions msg={msg} question={turn.question?.text} />
+                          answerActions(msg, turn.question?.text)
+                        )}
+                        {why && why.run === msg.runId && (
+                          <form className="dl-why" onSubmit={e => {
+                            e.preventDefault()
+                            if (!why.text.trim()) return
+                            void rate(why.run, 'down', why.text.trim())
+                            setWhy(null)
+                          }}>
+                            <label htmlFor={`dl-why-${why.run}`}>{t('ans3.whatWrong')}</label>
+                            <input id={`dl-why-${why.run}`} value={why.text} dir="auto" autoFocus
+                              placeholder={t('ans3.whatWrongHint')}
+                              onChange={e => setWhy({ run: why.run, text: e.target.value })} />
+                            <button type="submit" className="dl-act" disabled={!why.text.trim()}>{t('ans3.sendWhy')}</button>
+                            <button type="button" className="dl-act" onClick={() => setWhy(null)}>{t('common.cancel')}</button>
+                          </form>
                         )}
                       </>
                     )}
@@ -528,12 +571,18 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
         <div ref={endRef} />
       </div>
       <div className="dl-chat__composer">
-        <Composer value={input} onChange={setInput} onSend={() => void send()} busy={busy} />
+        {offline && <p role="status" className="dl-chat__note dl-chat__note--error dl-chat__offline" data-testid="ai-offline">{t('off.title')}</p>}
+        <Composer value={input} onChange={setInput} onSend={() => void send()} busy={busy}
+          locked={offline} lockedHint={offline ? t('off.composer') : undefined} />
       </div>
     </div>
   )
 
-  function AnswerActions({ msg, question }: { msg: ChatMessage; question?: string }) {
+  // Called as a function, not mounted as <AnswerActions/> (QA V10): a
+  // component declared in here is a new type on every render, so React
+  // remounted the bar -- a click whose mousedown came before a re-render never
+  // landed (the first 👎 did nothing) and AddToDashboard lost its state.
+  function answerActions(msg: ChatMessage, question?: string) {
     const runId = msg.runId!
     const sqlable = !(msg.intent === 'chat' || isProposals(msg.presentation)
       || isAnalysisResult(msg.presentation))
@@ -576,7 +625,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
                 onClick={() => void toggleSql(msg)}>
                 <Code2 size={14} aria-hidden /> {openRun.has(runId) ? t('ask.hideSql') : t('ask.showSql')}
               </button>
-              <button type="button" className="dl-act" onClick={() => void copySql(msg)} aria-label="Copy SQL">
+              <button type="button" className="dl-act" onClick={() => void copySql(msg)} aria-label={t('ask.copySql')}>
                 <Copy size={14} aria-hidden /> <span className="dl-act__text">{t('ask.copySql')}</span>
               </button>
               {/* Connection scope only: a dataset-mode answer runs
@@ -585,26 +634,26 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
                   present-and-failing. */}
               {dataSourceId != null && (
                 <button type="button" className="dl-act" onClick={() => void saveAsDataset(msg)}
-                  aria-label="Save as dataset" disabled={saving !== null}>
+                  aria-label={t('ask.saveDataset')} disabled={saving !== null}>
                   <Database size={14} aria-hidden />
-                  {saving === runId ? 'Saving…' : t('ask.saveDataset')}
+                  {saving === runId ? t('ans3.saving') : t('ask.saveDataset')}
                 </button>
               )}
             </>
           )}
           {msg.results && msg.results.some(r => r.total > 0) && (
             <>
-              <button type="button" aria-label="Download CSV" className="dl-act"
+              <button type="button" aria-label={t('chat.dl.csv')} className="dl-act"
                 onClick={() => downloadCsv(msg.results!, `ask-ai-result-${runId}.csv`)}>
                 <Download size={14} aria-hidden /> CSV
               </button>
               {/* Excel and PDF are built server-side from the
                   same stored snapshot the grid draws. */}
-              <button type="button" aria-label="Download Excel" className="dl-act"
+              <button type="button" aria-label={t('chat.dl.xlsx')} className="dl-act"
                 onClick={() => void downloadFile(runId, 'xlsx')}>
                 <Download size={14} aria-hidden /> Excel
               </button>
-              <button type="button" aria-label="Download PDF" className="dl-act"
+              <button type="button" aria-label={t('chat.dl.pdf')} className="dl-act"
                 onClick={() => void downloadFile(runId, 'pdf')}>
                 <Download size={14} aria-hidden /> PDF
               </button>
@@ -612,13 +661,13 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
           )}
           <span className="dl-actions__grow" />
           <button type="button" className="dl-act dl-act--icon"
-            aria-label="Good answer" title={t('ask.good')}
+            aria-label={t('ask.good')} title={t('ask.good')}
             aria-pressed={feedbackByRun[runId] === 'up'}
             onClick={() => void rate(runId, 'up')}>
             <ThumbsUp size={14} aria-hidden />
           </button>
           <button type="button" className="dl-act dl-act--icon"
-            aria-label="Bad answer" title={t('ask.bad')}
+            aria-label={t('ask.bad')} title={t('ask.bad')}
             aria-pressed={feedbackByRun[runId] === 'down'}
             onClick={() => void rate(runId, 'down')}>
             <ThumbsDown size={14} aria-hidden />
@@ -635,7 +684,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
             )}
             {msg.contextObjects && msg.contextObjects.length > 0 && (
               <div className="dl-sql__tables">
-                Tables considered: {msg.contextObjects.join(', ')}
+                {t('ans3.tables', { list: msg.contextObjects.join(', ') })}
               </div>
             )}
           </div>

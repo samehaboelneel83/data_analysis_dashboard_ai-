@@ -12,7 +12,10 @@
  * interaction; the panel builds its inputs from the schema instead. What they
  * share is how an answer LOOKS.
  */
-import type { StatisticalTestResult } from '../../services/api'
+import type { KeyInfluencersResult as KeyInfluencersPayload, StatisticalTestResult } from '../../services/api'
+import KeyInfluencersResult from './KeyInfluencersResult'
+import { useDirection } from '../../contexts/DirectionContext'
+import { majorityDir } from '../../lib/autoDir'
 
 export interface Factor {
   column: string
@@ -237,6 +240,10 @@ export function ResultFor({ kind, result, params }: {
   if (kind === 'decision_tree') {
     return <DecisionTree result={result as DecisionTreeResult} />
   }
+  if (kind === 'key_influencers' && Array.isArray((result as KeyInfluencersPayload | null)?.rows)
+      && (result as KeyInfluencersPayload).meta) {
+    return <KeyInfluencersResult result={result as KeyInfluencersPayload} />
+  }
   return <GenericResult kind={kind} result={result} />
 }
 
@@ -359,11 +366,12 @@ function RowTable({ rows }: { rows: Record<string, unknown>[] }) {
 function ResultCard({ result }: { result: StatisticalTestResult }) {
   const coefficients = (result.detail?.coefficients as Record<string, unknown>[]) ?? null
   const test = (result.detail?.test as string) ?? result.kind
+  const { direction } = useDirection()
 
   return (
     <div className="card" style={{ padding: 18 }}>
       <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>{test}</div>
-      <p style={{ fontSize: 14, fontWeight: 500, marginTop: 0 }}>{result.interpretation}</p>
+      <p dir={majorityDir(result.interpretation, direction)} style={{ fontSize: 14, fontWeight: 500, marginTop: 0 }}>{result.interpretation}</p>
 
       <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', margin: '14px 0' }}>
         <Stat label={result.effect_name.replace(/_/g, ' ')}

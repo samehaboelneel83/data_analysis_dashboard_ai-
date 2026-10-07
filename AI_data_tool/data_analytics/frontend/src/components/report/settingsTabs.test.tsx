@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, act } from '@testing-library/react'
+import { ASSIGN_DATA_EVENT } from './WidgetPlaceholder'
 import WidgetConfigPanel from './WidgetConfigPanel'
 import { CrossFilterProvider } from './CrossFilterContext'
 import type { Widget } from '../../types/report'
@@ -236,5 +237,60 @@ describe('pre-aggregated disclosure', () => {
   it('warns when countd (the real select value for Count Distinct) is chosen', () => {
     renderBar('countd')
     expect(screen.getByRole('note')).toHaveTextContent(/counts groups/)
+  })
+})
+
+describe('Format / Data / Interactions in the builder (redesign 7e3)', () => {
+  const sectioned = (section: 'format' | 'data' | 'interactions', wt: Widget['widget_type'] = 'bar') => render(
+    <CrossFilterProvider>
+      <WidgetConfigPanel widget={widget({ widget_type: wt })} columns={columns} onUpdate={vi.fn()} pages={[]} section={section} />
+    </CrossFilterProvider>,
+  )
+  const ids = () => Array.from(document.querySelectorAll('[data-group-id]')).map(e => e.getAttribute('data-group-id'))
+
+  it('Format shows Options and Display rules only, with those chips', () => {
+    sectioned('format')
+    const chips = Array.from(screen.getByRole('tablist', { name: /settings/i }).querySelectorAll('[role="tab"]')).map(t => t.textContent)
+    expect(chips).toEqual(['All', 'Options', 'Display rules'])
+    expect(groupHeading(/Appearance/)).toBeInTheDocument()
+    expect(groupHeading(/Ranking/)).not.toBeInTheDocument()
+  })
+
+  it('Data shows the data tabs only', () => {
+    sectioned('data')
+    expect(groupHeading(/Ranking/)).toBeInTheDocument()
+    expect(groupHeading(/Appearance/)).not.toBeInTheDocument()
+    expect(ids()).not.toContain('object')
+  })
+
+  it('the three sections together reach every group, so nothing is lost', () => {
+    for (const wt of ['bar', 'button'] as const) {
+      const { unmount } = render(
+        <CrossFilterProvider><WidgetConfigPanel widget={widget({ widget_type: wt })} columns={columns} onUpdate={vi.fn()} pages={[]} /></CrossFilterProvider>)
+      const all = ids().sort()
+      unmount()
+      const seen = new Set<string | null>()
+      for (const s of ['format', 'data', 'interactions'] as const) {
+        const r = sectioned(s, wt)
+        ids().forEach(i => seen.add(i))
+        r.unmount()
+      }
+      expect([...seen].sort(), wt).toEqual(all)
+    }
+  })
+
+  it('search still searches every section', () => {
+    sectioned('data')
+    fireEvent.change(screen.getByLabelText('Filter settings'), { target: { value: 'Border colour' } })
+    expect(groupHeading(/Appearance/)).toBeInTheDocument()
+  })
+})
+
+describe('the quick toolbar Filters button (QA3 A4)', () => {
+  it('opens the Filters tab, not Data roles, and no Assign data dialog', () => {
+    panel()
+    act(() => { window.dispatchEvent(new CustomEvent(ASSIGN_DATA_EVENT, { detail: { widgetId: 1, tab: 'Filters', open: false } })) })
+    expect(screen.getByRole('tab', { name: 'Filters' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 })

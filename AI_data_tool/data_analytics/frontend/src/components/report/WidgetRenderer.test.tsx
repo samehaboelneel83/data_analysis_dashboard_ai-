@@ -2296,6 +2296,20 @@ describe('clicking a map filters the page', () => {
     expect(screen.getByTestId('filters').textContent).toContain('country')
   }, 30000)
 
+  it('QA3 A6: in Edit a click on a mark does not filter the page', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({
+      type: 'series', rows: [{ name: 'France', value: 3 }], sampled: false } as never)
+    const { container } = render(
+      <CrossFilterProvider>
+        <WidgetRenderer widget={mapWidget()} datasetId={10} editMode />
+        <FilterReader />
+      </CrossFilterProvider>
+    )
+    fireEvent.click(await findRegion(container, 'France'))
+    await new Promise(r => setTimeout(r, 50))
+    expect(screen.getByTestId('filters').textContent).not.toContain('France')
+  }, 30000)
+
   it('two spellings of one region filter by both', async () => {
     // The merged-region case: filtering by "US" alone would drop every "USA"
     // row from the rest of the page, which is a wrong answer, not a partial one.
@@ -2771,5 +2785,46 @@ describe('a burst of filter changes costs one refetch, not one per click', () =>
     expect(widgetDataApi.query).toHaveBeenCalledTimes(2)                          // one more, for 'c'
     const [, config] = vi.mocked(widgetDataApi.query).mock.calls.at(-1)!
     expect((config as any).filters).toContainEqual({ column: 'region', op: 'eq', value: 'c' })
+  })
+})
+
+describe('the widget ⋮ menu in Arabic (QA2 T11)', () => {
+  it('speaks Arabic, with the question mark where Arabic puts it', async () => {
+    const { DirectionProvider } = await import('../../contexts/DirectionContext')
+    localStorage.setItem('datalytics.language', 'ar')
+    try {
+      vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'A', value: 1 }, { name: 'B', value: 2 }], sampled: false } as never)
+      render(<DirectionProvider><CrossFilterProvider>
+        <WidgetRenderer widget={barWidget()} datasetId={10}
+          datasets={{ 10: { id: 10, name: 'D', columns: [{ name: 'region', dtype: 'categorical' }, { name: 'sales', dtype: 'numeric' }] } } as never} />
+      </CrossFilterProvider></DirectionProvider>)
+      fireEvent.click(await screen.findByRole('button', { name: /^تحليل / }))
+      expect(screen.getByRole('menuitem', { name: 'لماذا أرى هذا؟' })).toBeInTheDocument()
+      expect(screen.getByRole('menuitem', { name: 'تصدير البيانات بصيغة CSV' })).toBeInTheDocument()
+      expect(screen.queryByRole('menuitem', { name: /Why am I|View as|Export data/ })).toBeNull()
+    } finally { localStorage.removeItem('datalytics.language') }
+  })
+})
+
+describe('the partial-period note in the reader\'s language (QA2 T14)', () => {
+  const data = {
+    type: 'series', rows: [{ name: '2025-11', value: 5 }, { name: '2025-12', value: 2 }], total: 2,
+    partial_period: { label: '2025-12', through: '2025-12-28', granularity: 'month',
+      text: '2025-12 is partial: the data runs to 28 Dec 2025, the month ends 31 Dec 2025' },
+  }
+  it('English reads as before', async () => {
+    renderWidget({ dataOverride: data })
+    expect((await screen.findByTestId('partial-period-note')).textContent).toBe('◔ 2025-12 is partial: the data runs to 28 Dec 2025, the month ends 31 Dec 2025')
+  })
+  it('Arabic is Arabic, the period isolated so it keeps its order', async () => {
+    const { DirectionProvider } = await import('../../contexts/DirectionContext')
+    localStorage.setItem('datalytics.language', 'ar')
+    try {
+      render(<DirectionProvider><CrossFilterProvider><WidgetRenderer widget={barWidget()} datasetId={10} dataOverride={data as never} /></CrossFilterProvider></DirectionProvider>)
+      const note = await screen.findByTestId('partial-period-note')
+      expect(note.textContent).toMatch(/جزئي/)
+      expect(note.textContent).not.toMatch(/is partial|the data runs/)
+      expect(note.querySelector('bdi')?.textContent).toBe('2025-12')
+    } finally { localStorage.removeItem('datalytics.language') }
   })
 })

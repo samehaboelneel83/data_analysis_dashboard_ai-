@@ -121,10 +121,21 @@ export default function PagePropertiesPanel({ reportId, page, columns, onUpdate,
     setBackgroundUrl(page.background_url ?? '')
     setInteractionMode(page.mobile_layout?.interaction_mode ?? 'manual')
   }, [page.id])
+  // QA3 A5: a rename made elsewhere (the page tab) shows here at once. The
+  // name this panel itself just sent is skipped, so a save landing while the
+  // author keeps typing never rolls the field back; the sync is not a change
+  // of its own, so it saves nothing.
+  const sentName = useRef(page.name)
+  useEffect(() => {
+    if (page.name === sentName.current) return
+    sentName.current = page.name
+    mounted.current = false
+    setName(page.name)
+  }, [page.name])
 
   useEffect(() => {
     if (!mounted.current) { mounted.current = true; return }
-    const timer = setTimeout(() => onUpdate({
+    const timer = setTimeout(() => { sentName.current = name || page.name; onUpdate({
       name:          name || page.name,
       title:         title || undefined,
       page_type:     pageType,
@@ -141,7 +152,7 @@ export default function PagePropertiesPanel({ reportId, page, columns, onUpdate,
         ...(interactionMode === 'manual'
           ? { interaction_mode: undefined }
           : { interaction_mode: interactionMode }) },
-    }), 500)
+    }) }, 500)
     return () => clearTimeout(timer)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [name, title, pageType, promptColumn, promptLabel, pageSize, interactionMode,

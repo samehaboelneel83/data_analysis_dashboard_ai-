@@ -61,9 +61,13 @@ describe('LanguageSwitcher', () => {
     // label renders with its punctuation on the wrong side.
     renderSwitcher()
     fireEvent.click(screen.getByRole('button', { name: /Language/ }))
+    // The LABEL carries it, not the row (QA V10): with dir on the whole row,
+    // the Arabic row's check and code sat mirrored against the English one.
     const arabic = screen.getByRole('menuitemradio', { name: /العربية/ })
-    expect(arabic).toHaveAttribute('lang', 'ar')
-    expect(arabic).toHaveAttribute('dir', 'rtl')
+    expect(arabic).not.toHaveAttribute('dir')
+    const label = screen.getByText('العربية')
+    expect(label).toHaveAttribute('lang', 'ar')
+    expect(label).toHaveAttribute('dir', 'rtl')
   })
 
   it('survives a reload', () => {

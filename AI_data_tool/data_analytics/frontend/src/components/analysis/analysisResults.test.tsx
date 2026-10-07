@@ -52,3 +52,76 @@ describe('automated prediction split (follow-up)', () => {
     expect(screen.getByTestId('prediction-split').textContent).toContain('_Partition_ (150 training rows)')
   })
 })
+
+describe('key influencers renderer (redesign KI-7)', () => {
+  const ki = {
+    kind: 'key_influencers',
+    columns: [{ name: 'units', dtype: 'int64' }],
+    rows: [
+      { factor: 'region', group: 'Africa', grouped_by: 'value', mean: 3755, baseline: 4316, lift: 0.87, rows: 400, share_of_rows: 0.2 },
+      { factor: 'units', group: '251 – 420', grouped_by: 'quantile', mean: 6992, baseline: 4316, lift: 1.62, rows: 500, share_of_rows: 0.25 },
+      { factor: 'product', group: 'Water bottles', grouped_by: 'value', mean: 2244, baseline: 4316, lift: 0.52, rows: 171, share_of_rows: 0.09 },
+    ],
+    meta: { method: 'group lift', target: 'revenue', target_value: null, measure: 'mean', baseline: 4316,
+            n_rows_used: 2000, n_rows_total: 2000, sampled: false, groups_considered: 12,
+            caveat: 'These factors move with the outcome; that is not proof they cause it.' },
+    warnings: [],
+  }
+
+  it('draws a ranked chart instead of the generic table, strongest effect first', () => {
+    render(<ResultFor kind="key_influencers" result={ki} params={{}} />)
+    expect(screen.getByTestId('key-influencers')).toBeInTheDocument()
+    const lifts = screen.getAllByTestId('influencer-lift').map(e => e.textContent)
+    expect(lifts[0]).toMatch(/1\.62× more/)
+    expect(lifts[1]).toMatch(/0\.52× less/)
+    expect(lifts[2]).toMatch(/0\.87× less/)
+    expect(screen.getAllByTestId('influencer-bar')).toHaveLength(3)
+  })
+
+  it('marks a group under 10% of the rows as a small group, and shows rows with their share', () => {
+    render(<ResultFor kind="key_influencers" result={ki} params={{}} />)
+    expect(screen.getAllByText('small group')).toHaveLength(1)
+    expect(screen.getByText('Water bottles', { exact: false }).closest('tr')).toHaveAttribute('data-small', 'true')
+    expect(screen.getByText(/· 25%/)).toBeInTheDocument()
+  })
+
+  it('a condition and its small-group mark never break across lines (QA V6)', () => {
+    // "month is 2024-02 [small group]" wrapped over 4–5 lines and broke the
+    // date at its hyphen; in Arabic "= 2024-02" split.
+    render(<ResultFor kind="key_influencers" result={ki} params={{}} />)
+    const cond = screen.getByText('Water bottles', { exact: false })
+    expect(cond).toHaveStyle({ whiteSpace: 'nowrap' })
+    expect(screen.getByText('small group')).toHaveStyle({ whiteSpace: 'nowrap' })
+    expect(screen.getAllByTestId('influencer-lift')[0]).toHaveStyle({ whiteSpace: 'nowrap' })
+  })
+
+  it('invents no p-values and keeps the not-causation caveat', () => {
+    render(<ResultFor kind="key_influencers" result={ki} params={{}} />)
+    expect(screen.queryByText(/p[- ]?value/i)).toBeNull()
+    expect(screen.getByText(/not proof they cause it/)).toBeInTheDocument()
+  })
+})
+
+describe('key influencers footnotes in Arabic (QA2 T1, new)', () => {
+  it('the caveat and the server\'s skip notes are Arabic; column names keep their spelling', async () => {
+    const { DirectionProvider } = await import('../../contexts/DirectionContext')
+    localStorage.setItem('datalytics.language', 'ar')
+    try {
+      const ki = {
+        kind: 'key_influencers', columns: [],
+        rows: [{ factor: 'region', group: 'Africa', grouped_by: 'value', mean: 3755, baseline: 4316, lift: 0.87, rows: 400, share_of_rows: 0.2 }],
+        meta: { method: 'group lift', target: 'revenue', target_value: null, measure: 'mean', baseline: 4316, n_rows_used: 2000, n_rows_total: 2000,
+          sampled: false, groups_considered: 1, caveat: 'These factors move with the outcome; that is not proof they cause it.' },
+        warnings: ["'date' skipped: 633 distinct values, too many to group", "'cost' skipped: it identifies rows rather than describing them",
+          "'notes' skipped: only one value", "'x' skipped: no values", 'analysed a 50,000-row sample of 120,000 rows', 'something new from the server'],
+      }
+      render(<DirectionProvider><ResultFor kind="key_influencers" result={ki} params={{}} /></DirectionProvider>)
+      const box = screen.getByTestId('key-influencers')
+      expect(box.textContent).not.toMatch(/not proof|skipped|too many|identifies rows|only one value|no values|analysed a/)
+      expect(box.textContent).toContain('date')
+      expect(box.textContent).toContain('633')
+      // An unknown sentence is shown as sent, never dropped.
+      expect(box.textContent).toContain('something new from the server')
+    } finally { localStorage.removeItem('datalytics.language') }
+  })
+})

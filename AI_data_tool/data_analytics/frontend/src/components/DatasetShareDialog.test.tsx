@@ -1,13 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderWithProviders as render, screen, fireEvent, waitFor } from '../test/renderWithProviders'
 import DatasetShareDialog from './DatasetShareDialog'
-import { adminUsersApi, datasetSharesApi } from '../services/api'
+import { DirectionProvider } from '../contexts/DirectionContext'
+import { adminUsersApi, datasetSharesApi, lineageApi } from '../services/api'
 
 vi.mock('../services/api', () => ({
   adminUsersApi: { list: vi.fn() },
   datasetSharesApi: { list: vi.fn(), create: vi.fn(), delete: vi.fn(), createGroup: vi.fn(), deleteGroup: vi.fn() },
   adminRolesApi: { list: vi.fn().mockResolvedValue([{ id: 3, name: 'HR managers', is_org_admin: false }]) },
   orgUnitsApi: { list: vi.fn().mockResolvedValue([]) },
+  lineageApi: { graph: vi.fn().mockResolvedValue({ sources: [], datasets: [], reports: [] }) },
 }))
 
 beforeEach(() => {
@@ -78,11 +80,43 @@ describe('DatasetShareDialog', () => {
     vi.mocked(datasetSharesApi.createGroup).mockResolvedValue({ id: 20, kind: 'role', role_id: 3, name: 'HR managers', level: 'view', created_at: '2026-10-01' })
     render(<DatasetShareDialog datasetId={5} onClose={() => {}} />)
     await screen.findByText('bob@example.com')
-    fireEvent.change(screen.getByLabelText('Share with'), { target: { value: 'role' } })
+    fireEvent.click(screen.getByRole('radio', { name: 'Role' }))
     await waitFor(() => expect((screen.getByLabelText('Role to share with') as HTMLSelectElement).options.length).toBe(2))
     fireEvent.change(screen.getByLabelText('Role to share with'), { target: { value: '3' } })
     fireEvent.click(screen.getByRole('button', { name: 'Share' }))
     await waitFor(() => expect(datasetSharesApi.createGroup).toHaveBeenCalledWith(5, { role_id: 3, level: 'view' }))
     expect(await screen.findByText('HR managers')).toBeInTheDocument()
+  })
+})
+
+describe('the redesigned share dialog (3c)', () => {
+  it('names the dataset and lists who can also open it, dashboards counted from lineage', async () => {
+    vi.mocked(lineageApi.graph).mockResolvedValue({ sources: [], datasets: [],
+      reports: [{ id: 1, name: 'A', dataset_ids: [5] }, { id: 2, name: 'B', dataset_ids: [5, 6] }, { id: 3, name: 'C', dataset_ids: [6] }] })
+    render(<DatasetShareDialog datasetId={5} datasetName="Demo — Sales" createdByMe onClose={() => {}} />)
+    expect(await screen.findByRole('heading', { name: 'Share “Demo — Sales”' })).toBeInTheDocument()
+    expect(await screen.findByText('Anyone who can open its 2 dashboards')).toBeInTheDocument()
+    expect(screen.getByText('You created this dataset')).toBeInTheDocument()
+    expect(screen.getByText('Workspace admins')).toBeInTheDocument()
+  })
+
+  it('does not claim the reader created it when they did not', async () => {
+    render(<DatasetShareDialog datasetId={5} onClose={() => {}} />)
+    expect(await screen.findByText('Its creator')).toBeInTheDocument()
+    expect(screen.queryByText('You created this dataset')).toBeNull()
+  })
+})
+
+describe('the share dialog in Arabic (QA T1)', () => {
+  it('the avatars speak Arabic, not "YOU"', async () => {
+    localStorage.setItem('datalytics.language', 'ar')
+    try {
+      vi.mocked(lineageApi.graph).mockResolvedValue({ sources: [], datasets: [], reports: [] })
+      const { container } = render(<DirectionProvider><DatasetShareDialog datasetId={5} datasetName="Demo — Sales" createdByMe onClose={() => {}} /></DirectionProvider>)
+      await waitFor(() => expect(container.ownerDocument.querySelectorAll('.dl-share__avatar').length).toBeGreaterThan(1))
+      const avatars = [...container.ownerDocument.querySelectorAll('.dl-share__avatar')].map(a => a.textContent)
+      expect(avatars).toContain('أنت')
+      expect(avatars.join(' ')).not.toMatch(/YOU|CR|AD/)
+    } finally { localStorage.removeItem('datalytics.language') }
   })
 })

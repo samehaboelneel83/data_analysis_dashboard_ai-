@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useT } from '../i18n'
 import { useParams, Link } from 'react-router-dom'
 import { reportsApi, datasetsApi, themesApi } from '../services/api'
 import { exportPrintViewToPptx } from '../lib/pptExport'
@@ -22,6 +23,7 @@ import { applyTheme } from '../components/report/chartUtils'
  * pipeline to drift or leak.
  */
 export default function ReportPrint() {
+  const t = useT()
   const { id } = useParams()
   const reportId = Number(id)
   const [report, setReport] = useState<Report | null>(null)
@@ -44,9 +46,23 @@ export default function ReportPrint() {
     }
   }, [reportId])
   useEffect(() => { load() }, [load])
+  // Paper is light (QA2 Visual 7). The whole page, not only this subtree: many
+  // dark styles are written as [data-theme="dark"] .x and still match through
+  // <html>. Set on the next tick, after the shell's own theme effect has run
+  // on mount; the reader's saved theme comes back on leaving.
+  useEffect(() => {
+    const root = document.documentElement
+    const id = setTimeout(() => root.setAttribute('data-theme', 'light'), 0)
+    return () => {
+      clearTimeout(id)
+      let saved: string | null = null
+      try { saved = localStorage.getItem('theme') } catch { /* blocked storage */ }
+      root.setAttribute('data-theme', saved === 'dark' ? 'dark' : 'light')
+    }
+  }, [])
 
   if (error) return <div style={{ padding: 40 }}><LoadError what="this report" error={error} onRetry={load} /></div>
-  if (!report) return <div style={{ padding: 40 }}><LoadingState label="Preparing print view…" /></div>
+  if (!report) return <div style={{ padding: 40 }}><LoadingState label={t('prt.preparing')} /></div>
 
   const calcCols: CalcColumn[] = dataset?.calculated_columns ?? []
   const formats: Record<string, CalcColumnFormat> = dataset?.column_formats ?? {}
@@ -54,7 +70,11 @@ export default function ReportPrint() {
   const pages = report.pages.filter((p: ReportPage) => p.page_type !== 'hidden')
 
   return (
-    <div style={{ background: '#fff', color: '#111', minHeight: '100%' }}>
+    // Paper is light (QA2 Visual 7): this subtree takes the light theme's
+    // tokens whatever the app's theme, so widgets draw light cards with dark
+    // text -- in dark mode they were dark cards with near-black text.
+    <div data-product="datalytics" data-theme="light" className="dl-paper"
+      style={{ background: '#fff', color: '#111', minHeight: '100%', colorScheme: 'light' }}>
       <style>{`
         @media print {
           .print-toolbar { display: none !important; }
@@ -68,18 +88,18 @@ export default function ReportPrint() {
       <div className="print-toolbar" style={{ display: 'flex', gap: 10, alignItems: 'center',
         padding: '10px 16px', borderBottom: '1px solid #ddd' }}>
         <h1 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>{report.name}</h1>
-        <span style={{ color: '#888', fontSize: 12 }}>{pages.length} page{pages.length === 1 ? '' : 's'}</span>
+        <span style={{ color: '#888', fontSize: 12 }}>{t('prt.pages', { n: pages.length })}</span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <button className="btn btn-primary btn-sm" onClick={() => window.print()}>
-            Print / Save as PDF
+            {t('prt.print')}
           </button>
           <button className="btn btn-sm" onClick={async () => {
             const n = await exportPrintViewToPptx(report.name, document.body)
             console.info(`Exported ${n} slides`)
           }}>
-            Download PowerPoint
+            {t('prt.pptx')}
           </button>
-          <Link className="btn btn-ghost btn-sm" to={`/reports/${reportId}`}>Back to report</Link>
+          <Link className="btn btn-ghost btn-sm" to={`/reports/${reportId}`}>{t('prt.back')}</Link>
         </div>
       </div>
 

@@ -9,6 +9,7 @@ import { useT } from '../i18n'
 import AskIllustration from './ask/AskIllustration'
 import DataPicker, { type PickerItem } from './ask/DataPicker'
 import HistoryPanel from './ask/HistoryPanel'
+import { useConfirm } from '../components/ui/ConfirmDialog'
 import { connectionSuggestions, datasetSuggestions } from './ask/suggestions'
 import './ask/ask.css'
 import DatasetListFilter, { useCleanDatasets } from '../components/dataset/DatasetListFilter'
@@ -25,6 +26,11 @@ import { isCertified } from '../lib/cleanDatasets'
  * The scope is in the URL (`/ask?dataset=32`, `/ask?source=3`) so a question
  * about a specific dataset can be LINKED to -- DatasetDetail's "Ask about
  * this data" points here.
+ *
+ * `?q=` carries a question from Home. It is read once, taken out of the URL
+ * (a reload must not bring it back), shown in the hero while no data is
+ * chosen, and put in the question box of the first chat that opens -- never
+ * sent on the person's behalf.
  *
  * The page owns the conversation list. It shows the user's threads for the
  * current scope, newest first, opens the newest by default, and hands the
@@ -49,13 +55,21 @@ export default function AskAI() {
   // 4.7: certified first, test-looking leftovers out of sight -- in the
   // picker a newcomer sees first.
   const clean = useCleanDatasets(usableDatasets)
-  const items: PickerItem[] = useMemo(() => [
-    ...clean.visible.map(d => ({
-      key: `d:${d.id}`, kind: 'dataset' as const, name: isCertified(d) ? `✓ ${d.name}` : d.name,
-      rows: d.row_count ?? null, cols: d.col_count ?? null, updated: d.updated_at ?? null,
-    })),
-    ...sourceItems,
-  ], [clean.visible, sourceItems])
+  // The dataset the URL is about is always listed, even one hidden as
+  // test-looking: a link (Home's Ask AI, a starter) can open it, and the
+  // picker must then name it rather than say "Choose a dataset" (QA B2).
+  const linkedId = params.get('dataset') ? Number(params.get('dataset')) : null
+  const items: PickerItem[] = useMemo(() => {
+    const linked = linkedId != null && !clean.visible.some(d => d.id === linkedId)
+      ? usableDatasets.filter(d => d.id === linkedId) : []
+    return [
+      ...[...linked, ...clean.visible].map(d => ({
+        key: `d:${d.id}`, kind: 'dataset' as const, name: isCertified(d) ? `✓ ${d.name}` : d.name,
+        rows: d.row_count ?? null, cols: d.col_count ?? null, updated: d.updated_at ?? null,
+      })),
+      ...sourceItems,
+    ]
+  }, [clean.visible, sourceItems, usableDatasets, linkedId])
   const [columnsById, setColumnsById] = useState<Record<number, DatasetColumn[]>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -66,6 +80,17 @@ export default function AskAI() {
   const [editing, setEditing] = useState<{ id: number; title: string } | null>(null)
   const [folded, setFolded] = useState(readFold)
   const [drawer, setDrawer] = useState(false)
+  const confirm = useConfirm()
+
+  // Home's question, read once and dropped from the URL (see the docstring).
+  const [pendingQ, setPendingQ] = useState(() => (params.get('q') ?? '').trim().slice(0, 2000))
+  useEffect(() => {
+    if (!params.has('q')) return
+    const next = new URLSearchParams(params)
+    next.delete('q')
+    setParams(next, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const datasetId = params.get('dataset') ? Number(params.get('dataset')) : null
   const sourceId = params.get('source') ? Number(params.get('source')) : null
@@ -163,7 +188,8 @@ export default function AskAI() {
   }
 
   const remove = async (c: AgentConversation) => {
-    if (!window.confirm(`Delete "${c.title}"? Its messages go with it.`)) return
+    if (!(await confirm({ title: t('ask3.deleteTitle'), body: t('ask3.deleteBody', { title: c.title }),
+      confirmLabel: t('ask3.delete') }))) return
     try {
       await agentApi.remove(c.id)
     } catch {
@@ -179,6 +205,10 @@ export default function AskAI() {
   })
 
   const scoped = sourceId != null || datasetId != null
+  // The pane copies the question into its box when it mounts; after that it is
+  // the pane's, so a later scope change does not put it back.
+  const paneOpen = scoped && selected !== undefined
+  useEffect(() => { if (paneOpen && pendingQ) setPendingQ('') }, [paneOpen, pendingQ])
   const columns = datasetId != null ? columnsById[datasetId] : undefined
   const suggestions = useMemo(
     () => (sourceId != null ? connectionSuggestions(t) : datasetSuggestions(columns, t)),
@@ -203,6 +233,11 @@ export default function AskAI() {
               <span className="dl-ask__eyebrow"><Sparkles size={14} aria-hidden /> {t('ask.hero.eyebrow')}</span>
               <h1 id="dl-ask-title" className="dl-ask__title">{t('ask.hero.title')}</h1>
               <p className="dl-ask__sub">{t('ask.hero.sub')}</p>
+              {pendingQ && (
+                <p className="dl-ask__pending" data-testid="ask-pending-q">
+                  {t('ask.pendingQ')} <q dir="auto">{pendingQ}</q>
+                </p>
+              )}
               <ul className="dl-ask__points">
                 <li><MessageSquareText size={16} aria-hidden /> {t('ask.hero.point1')}</li>
                 <li><BarChart3 size={16} aria-hidden /> {t('ask.hero.point2')}</li>
@@ -248,10 +283,10 @@ export default function AskAI() {
           {selected !== undefined && (
             sourceId != null
               ? <ChatPane key={scopeKey} dataSourceId={sourceId} conversationId={selected}
-                  onConversationCreated={created} suggestions={suggestions} />
+                  onConversationCreated={created} suggestions={suggestions} initialInput={pendingQ} />
               : <ChatPane key={scopeKey} datasetIds={[datasetId as number]} conversationId={selected}
                   onConversationCreated={created} suggestions={suggestions}
-                  datasetColumns={columns?.map(c => c.name)} />
+                  datasetColumns={columns?.map(c => c.name)} initialInput={pendingQ} />
           )}
         </div>
       </section>

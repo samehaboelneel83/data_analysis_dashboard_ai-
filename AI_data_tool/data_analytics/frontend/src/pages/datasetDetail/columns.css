@@ -1,0 +1,51 @@
+/* Columns tab (redesign step 3c). Reuses the Overview's profile classes
+   (.dl-ov__range, .dl-ov__tops, .dl-ov__months, .dl-ov__tag). */
+.dl-cols { display: flex; flex-direction: column; gap: 12px; }
+.dl-cols__muted { color: var(--muted); font-size: 12.5px; }
+.dl-cols__grain { font-size: 12.5px; color: var(--muted); margin: 0; }
+.dl-cols__grain strong { color: var(--text); }
+.dl-cols__toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dl-cols__search {
+  display: inline-flex; align-items: center; gap: 8px; padding: 0 10px; block-size: 34px; min-inline-size: 240px;
+  border-radius: var(--dl-radius-control, 8px); background: var(--mc-canvas-2, var(--surface2)); color: var(--muted);
+  border: 1px solid var(--border);
+}
+.dl-cols__search input { border: 0 !important; background: transparent !important; padding: 0 !important; font-size: 13px; color: var(--text); inline-size: 100%; outline: none; }
+.dl-cols__seg { display: inline-flex; padding: 3px; gap: 2px; border: 1px solid var(--border); border-radius: var(--dl-radius-control, 8px); background: var(--surface); }
+.dl-cols__seg button { border: 0; background: none; padding: 4px 10px; border-radius: 6px; font-size: 12.5px; color: var(--text); cursor: pointer; }
+.dl-cols__seg button span { color: var(--muted); margin-inline-start: 2px; }
+.dl-cols__seg button[aria-checked=true] { background: var(--mc-canvas-2, var(--surface2)); font-weight: 600; }
+.dl-cols__hidden-btn { margin-inline-start: auto; }
+
+.dl-cols__card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--dl-radius-card, 12px); overflow-x: auto; }
+.dl-cols__table { inline-size: 100%; border-collapse: collapse; font-size: 13px; }
+.dl-cols__table th { text-align: start; font-size: 12px; font-weight: 600; color: var(--muted); padding: 9px 12px; border-block-end: 1px solid var(--border); white-space: nowrap; }
+.dl-cols__table td { padding: 8px 12px; border-block-end: 1px solid var(--border); vertical-align: middle; }
+.dl-cols__table tr:last-child td { border-block-end: 0; }
+.dl-cols__name { inline-size: 130px; }
+.dl-cols__means { min-inline-size: 220px; }
+.dl-cols__desc {
+  display: inline-flex; align-items: center; gap: 6px; background: none; border: 0; padding: 0; cursor: pointer;
+  color: var(--text); font-size: 13px; text-align: start;
+}
+.dl-cols__desc svg { color: var(--muted); opacity: 0; }
+.dl-cols__desc:hover svg, .dl-cols__desc:focus-visible svg { opacity: 1; }
+.dl-cols__desc--empty { color: var(--muted); }
+.dl-cols__edit { display: flex; gap: 6px; }
+.dl-cols__edit input { flex: 1; font-size: 12.5px; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); }
+.dl-cols__gloss { color: var(--muted); font-size: 11px; margin-block-start: 2px; }
+.dl-cols__use {
+  display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; font-size: 12px; white-space: nowrap;
+  border-radius: var(--dl-radius-badge, 6px); background: var(--mc-canvas-2, var(--surface2)); color: var(--text); border: 0; cursor: pointer;
+}
+span.dl-cols__use { cursor: default; }
+.dl-cols__use--measure { background: var(--mc-info-soft, #e6f0fb); color: var(--mc-info, #2f6fb0); }
+.dl-cols__use svg { opacity: .6; }
+.dl-cols__table tr[data-open] > td { background: var(--mc-canvas-2, var(--surface2)); }
+.dl-cols__settings td { background: var(--mc-canvas-2, var(--surface2)); padding-block: 4px 12px; }
+.dl-cols__settings div { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--muted); }
+.dl-cols__settings label { display: inline-flex; align-items: center; gap: 6px; }
+.dl-cols__settings select { font-size: 12px; padding: 2px 4px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 4px; }
+.dl-cols__none { text-align: center; color: var(--muted); padding: 28px 12px !important; }
+.dl-cols__details { margin-block-start: 16px; }
+.dl-cols__details > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text); margin-block-end: 12px; }

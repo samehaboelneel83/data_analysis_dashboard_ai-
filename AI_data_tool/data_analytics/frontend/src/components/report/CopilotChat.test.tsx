@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import CopilotChat from './CopilotChat'
-import { insightsApi, reportsApi } from '../../services/api'
+import { api, insightsApi, llmApi, reportsApi } from '../../services/api'
 import { axeViolations } from '../../test/axe'
 
 /** The page copilot panel: opens without touching the canvas, sends the
@@ -288,3 +288,27 @@ describe('CopilotChat', () => {
     expect(await axeViolations(container)).toEqual([])
   })
 })
+
+describe('CopilotChat while the model server is unreachable (redesign 7e5)', () => {
+  const endpoints = (ok: boolean) => ({ data: {
+    llm_enabled: true, default: 'main', auto_pick: null, source: 'saved',
+    endpoints: [{ id: 'main', name: 'Main', model: 'm', enabled: true, is_default: true, strength: 5, context: null, status: { ok } }],
+  } })
+
+  it('says so in one line and locks the box, then unlocks when it is back', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue(endpoints(false) as any)
+    mount()
+    await act(async () => { await llmApi.endpoints() })
+    openPanel()
+    expect(await screen.findByTestId('copilot-offline')).toHaveTextContent('The model server isn’t reachable, so new questions are paused.')
+    const box = screen.getByLabelText('Message to Ask AI')
+    expect(box).toBeDisabled()
+    expect(box).toHaveAttribute('placeholder', 'New questions are paused while the model server is unreachable')
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
+    vi.mocked(api.get).mockResolvedValue(endpoints(true) as any)
+    await act(async () => { await llmApi.endpoints() })
+    await waitFor(() => expect(screen.queryByTestId('copilot-offline')).not.toBeInTheDocument())
+    expect(screen.getByLabelText('Message to Ask AI')).not.toBeDisabled()
+  })
+})
+

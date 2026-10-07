@@ -13,9 +13,12 @@
  */
 import { detailToText } from '../../lib/friendlyError'
 
-export default function LoadError({ what, error, onRetry }: {
+export default function LoadError({ what, error, onRetry, title, retryLabel }: {
   /** What failed to load, in the user's words: "reports", "the lineage graph". */
   what: string
+  /** A translated heading in place of "Could not load {what}" (the builder, 7e5). */
+  title?: string
+  retryLabel?: string
   error?: unknown
   onRetry?: () => void
 }) {
@@ -35,7 +38,7 @@ export default function LoadError({ what, error, onRetry }: {
   return (
     <div role="alert" className="card"
       style={{ padding: '20px 22px', borderInlineStart: '3px solid var(--danger, #c0392b)' }}>
-      <p style={{ fontWeight: 600, marginBottom: 6 }}>Could not load {what}</p>
+      <p style={{ fontWeight: 600, marginBottom: 6 }}>{title ?? `Could not load ${what}`}</p>
       <p style={{ color: 'var(--muted)', fontSize: 13, margin: 0 }}>
         {detail
           ? detail
@@ -44,7 +47,7 @@ export default function LoadError({ what, error, onRetry }: {
       </p>
       <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
         {onRetry && !gone && (
-          <button className="btn btn-sm" onClick={onRetry}>Try again</button>
+          <button className="btn btn-sm" onClick={onRetry}>{retryLabel ?? 'Try again'}</button>
         )}
         {gone && (
           <button className="btn btn-sm" onClick={() => window.history.back()}>Go back</button>

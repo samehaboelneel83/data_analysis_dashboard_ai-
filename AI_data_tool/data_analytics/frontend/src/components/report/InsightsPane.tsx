@@ -4,6 +4,8 @@ import { findingKey, insightsApi, pinsApi, suggestApi } from '../../services/api
 import IconLabel from '../ui/IconLabel'
 import { RefreshCw, Sparkles, Pin } from 'lucide-react'
 import type { Suggestion } from './SuggestionsPane'
+import { useT, type MessageKey } from '../../i18n'
+import { localDigits } from '../../lib/arabicFormats'
 
 interface Finding {
   kind: string; score: number; title: string; detail: string; columns: string[]
@@ -22,12 +24,18 @@ interface Finding {
 export default function InsightsPane({ datasetId, columnTypes, onAdd, reportId, onComposed }: {
   datasetId: number | null
   columnTypes: Record<string, string>          // column -> dtype
-  onAdd: (s: Suggestion) => void
+  /** Absent for a viewer (view mode, redesign 7d): findings are read, not
+   *  added to a page the server would not let them change. */
+  onAdd?: (s: Suggestion) => void
   /** Enables "Build a report" — composing writes a page, so it needs the report. */
   reportId?: number
   /** Called after a page is written, so the builder can reload and show it. */
   onComposed?: (pageId: number) => void
 }) {
+  const t = useT()
+  // The engine's kinds, in the reader's words (QA2 T12); an unknown kind is
+  // shown as sent.
+  const kindLabel = (k: string) => { const key = `ins.kind.${k}` as MessageKey; const v = t(key); return v !== key ? v : k.replace('_', ' ') }
   const [result, setResult] = useState<{ findings: Finding[]; narrative: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [composing, setComposing] = useState(false)
@@ -41,11 +49,11 @@ export default function InsightsPane({ datasetId, columnTypes, onAdd, reportId, 
     setComposing(true)
     try {
       const out = await suggestApi.autoCompose(reportId)
-      toast.success(`Built a page with ${out.widget_count} widgets`)
+      toast.success(t('ins.built', { n: localDigits(String(out.widget_count)) }))
       onComposed?.(out.page_id)
     } catch (e: unknown) {
       toast.error((e as { response?: { data?: { detail?: string } } })
-        ?.response?.data?.detail ?? 'Could not build a report')
+        ?.response?.data?.detail ?? t('ins.buildFailed'))
     } finally {
       setComposing(false)
     }
@@ -55,7 +63,7 @@ export default function InsightsPane({ datasetId, columnTypes, onAdd, reportId, 
     if (!datasetId) return
     setBusy(true); setError('')
     insightsApi.run(datasetId).then(setResult)
-      .catch(e => setError(e?.response?.data?.detail || 'Could not generate insights'))
+      .catch(e => setError(e?.response?.data?.detail || t('ins.failed')))
       .finally(() => setBusy(false))
   }
 
@@ -85,24 +93,27 @@ export default function InsightsPane({ datasetId, columnTypes, onAdd, reportId, 
     <div style={{ padding: 12, overflowY: 'auto', height: '100%' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
         <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
-          Insights
+          {t('ins.title')}
         </span>
-        <button className="btn" style={{ fontSize: 11, marginInlineStart: 'auto' }} disabled={busy || !datasetId} title={!datasetId ? 'Attach a dataset to this report first' : undefined} onClick={run}>
-          {busy ? 'Scanning…'
-          : result ? <IconLabel icon={RefreshCw}>Re-scan</IconLabel>
-          : <IconLabel icon={Sparkles}>Generate</IconLabel>}
+        <button className="btn" style={{ fontSize: 11, marginInlineStart: 'auto' }} disabled={busy || !datasetId} title={!datasetId ? t('ins.noData') : undefined} onClick={run}>
+          {busy ? t('ins.scanning')
+          : result ? <IconLabel icon={RefreshCw}>{t('ins.rescan')}</IconLabel>
+          : <IconLabel icon={Sparkles}>{t('ins.generate')}</IconLabel>}
         </button>
       </div>
-      {!datasetId && <p style={{ fontSize: 11, color: 'var(--muted)' }}>Attach a dataset to this report first.</p>}
+      {!datasetId && <p style={{ fontSize: 11, color: 'var(--muted)' }}>{t('ins.noData')}</p>}
       {error && <p role="alert" style={{ fontSize: 11, color: 'var(--danger)' }}>{error}</p>}
       {result && (
         <>
-          <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>{result.narrative}</p>
+          {/* The engine writes in English; dir="auto" keeps an English
+              sentence in order inside the Arabic panel (QA2 T12). */}
+          <p dir="auto" style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>{result.narrative}</p>
           {reportId != null && result.findings.length > 0 && (
             <button className="btn btn-primary" disabled={composing}
               onClick={() => void compose()}
               style={{ fontSize: 11, width: '100%', marginBottom: 10 }}>
-              {composing ? 'Building…' : '<IconLabel icon={Sparkles}>Build a report from these</IconLabel>'}
+              {/* QA2 N1: this was a string holding JSX, shown as raw markup. */}
+              {composing ? t('ins.building') : <IconLabel icon={Sparkles}>{t('ins.build')}</IconLabel>}
             </button>
           )}
           <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -114,19 +125,19 @@ export default function InsightsPane({ datasetId, columnTypes, onAdd, reportId, 
                   <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em',
                     color: f.kind === 'data_quality' ? '#e6a03c' : 'var(--accent)', marginBottom: 3,
                     display: 'flex', gap: 6, alignItems: 'center' }}>
-                    {f.kind.replace('_', ' ')}
+                    {kindLabel(f.kind)}
                     {/* What changed since the last scan. Only new/changed get a
                         badge: labelling `unchanged` too would give every card a
                         chip and the badge would stop meaning anything. */}
                     {(f.novelty === 'new' || f.novelty === 'changed') && (
                       <span style={{ background: 'var(--accent)', color: 'var(--surface)',
                         borderRadius: 3, padding: '0 4px', fontSize: 8 }}>
-                        {f.novelty === 'new' ? 'NEW' : 'CHANGED'}
+                        {f.novelty === 'new' ? t('ins.new') : t('ins.changed')}
                       </span>
                     )}
                   </div>
-                  <div style={{ fontSize: 12, fontWeight: 600 }}>{f.title}</div>
-                  <div style={{ fontSize: 11, color: 'var(--muted)', margin: '2px 0 6px' }}>{f.detail}</div>
+                  <div dir="auto" style={{ fontSize: 12, fontWeight: 600 }}>{f.title}</div>
+                  <div dir="auto" style={{ fontSize: 11, color: 'var(--muted)', margin: '2px 0 6px' }}>{f.detail}</div>
                   {f.evidence && f.p_value != null && (
                     // The evidence chip: a tested claim carries its test, population
                     // and effect -- and the adjusted p when several were run.
@@ -140,26 +151,28 @@ export default function InsightsPane({ datasetId, columnTypes, onAdd, reportId, 
                     </div>
                   )}
                   <div style={{ display: 'flex', gap: 6 }}>
+                    {onAdd && (
                     <button className="btn" style={{ fontSize: 11 }}
                       onClick={() => onAdd({ widget_type: 'text', title: '', reason: '',
                         config: { content: `${f.title}. ${f.detail}` } })}>
-                      + Add as text
+                      {t('ins.addText')}
                     </button>
+                    )}
                     {datasetId != null && (
                       <button className="btn" style={{ fontSize: 11 }}
-                        aria-label={`Pin finding: ${f.title}`}
-                        title="Pin to your dashboard — re-evaluated live on every visit"
+                        aria-label={t('ins.pinAria', { title: f.title })}
+                        title={t('ins.pinTitle')}
                         onClick={() => void pinsApi
                           .create({ dataset_id: datasetId, finding_key: findingKey(f) })
                           .then(r => toast.success(r.already_pinned
-                            ? 'Already on your dashboard' : 'Pinned to your dashboard'))
-                          .catch(() => toast.error('Could not pin this finding'))}>
-                        <IconLabel icon={Pin} size={11}>Pin</IconLabel>
+                            ? t('ins.pinAlready') : t('ins.pinned')))
+                          .catch(() => toast.error(t('ins.pinFailed')))}>
+                        <IconLabel icon={Pin} size={11}>{t('ins.pin')}</IconLabel>
                       </button>
                     )}
-                    {chart && (
+                    {chart && onAdd && (
                       <button className="btn btn-primary" style={{ fontSize: 11 }} onClick={() => onAdd(chart)}>
-                        + Chart it
+                        {t('ins.chart')}
                       </button>
                     )}
                   </div>

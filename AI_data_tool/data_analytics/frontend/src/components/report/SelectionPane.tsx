@@ -1,17 +1,21 @@
 import type { Widget } from '../../types/report'
 import { Eye, EyeOff } from 'lucide-react'
+import { useDirection } from '../../contexts/DirectionContext'
+import { readingOrder } from '../../lib/readingOrder'
 
 export default function SelectionPane({ widgets, onUpdate }: {
   widgets: Widget[]
   onUpdate: (widgetId: number, config: Record<string, unknown>) => void
 }) {
+  // QA3 A8: listed as a reader scans the page.
+  const { rtl } = useDirection()
   return (
     <div style={{ padding: '14px 14px 0' }}>
       <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
         Selection
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {widgets.map(w => {
+        {readingOrder(widgets, rtl).map(w => {
           const hidden = !!(w.config as any).hidden
           return (
             <button key={w.id} aria-label={`Toggle visibility: ${w.title}`}

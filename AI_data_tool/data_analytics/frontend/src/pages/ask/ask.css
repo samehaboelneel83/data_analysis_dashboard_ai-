@@ -46,6 +46,9 @@
 }
 .dl-ask__title { margin: 0; font-size: clamp(28px, 3.4vw, 42px); line-height: 1.1; font-weight: 700; letter-spacing: -0.02em; }
 .dl-ask__sub { margin: 12px 0 0; max-width: 520px; color: var(--muted); font-size: 15px; line-height: 1.6; }
+/* Home's question, waiting for a dataset to be chosen. */
+.dl-ask__pending { margin: 14px 0 0; max-width: 520px; font-size: 14px; color: var(--text); padding: 10px 12px; border-radius: var(--dl-radius-control, 8px); background: var(--accent-soft); }
+.dl-ask__pending q { font-weight: 600; unicode-bidi: isolate; }
 .dl-ask__points { list-style: none; margin: 22px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .dl-ask__points li { display: flex; align-items: center; gap: 10px; font-size: 13.5px; color: var(--text); }
 .dl-ask__points svg {
@@ -431,3 +434,12 @@
 /* Mixed-language titles (an English question in the Arabic UI) take their
    own direction, but still line up with the reading side of the panel. */
 .dl-hist__pick-title[dir="auto"], .dl-pick__opt-name[dir="auto"] { text-align: match-parent; }
+
+/* Kept from the reverted redesign, in v1's style: the offline line over the
+   locked question box, and "What was wrong?" after a thumbs down. */
+.dl-chat__offline { margin-block-end: 8px; }
+.dl-why { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; font-size: 12.5px; color: var(--muted); }
+.dl-why input {
+  flex: 1; min-width: 180px; padding: 5px 8px; font: inherit; font-size: 12.5px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text);
+}

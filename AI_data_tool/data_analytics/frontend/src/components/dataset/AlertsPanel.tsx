@@ -3,8 +3,10 @@ import { alertsApi, type AlertTestResult, type DataAlert, type DatasetColumn } f
 import ExpressionBuilder from '../expr/ExpressionBuilder'
 import LoadError from '../ui/LoadError'
 import EmptyState from '../ui/EmptyState'
-import { useT } from '../../i18n'
-import { BellRing } from 'lucide-react'
+import { useT, type TranslateFn } from '../../i18n'
+import { localDigits } from '../../lib/arabicFormats'
+import { Bell, BellRing } from 'lucide-react'
+import '../../pages/datasetDetail/rules.css'
 import { useConfirm } from '../ui/ConfirmDialog'
 
 /**
@@ -65,17 +67,17 @@ function splitEmails(text: string): string[] {
  * either a bug or an alert hammering the database on every tick — the opposite
  * of what it means. Caught by photographing the real page.
  */
-function cadence(minutes: number): string {
-  if (minutes <= 0) return 'not scheduled'
+function cadence(minutes: number, t: TranslateFn): string {
+  if (minutes <= 0) return t('al.cad.none')
   if (minutes >= 1440) {
     const days = Math.round(minutes / 1440)
-    return `every ${days} day${days === 1 ? '' : 's'}`
+    return t(days === 1 ? 'al.cad.day' : 'al.cad.days', { n: localDigits(String(days)) })
   }
   if (minutes >= 60) {
     const hours = Math.round(minutes / 60)
-    return `every ${hours} hour${hours === 1 ? '' : 's'}`
+    return t(hours === 1 ? 'al.cad.hour' : 'al.cad.hours', { n: localDigits(String(hours)) })
   }
-  return `every ${minutes} minutes`
+  return t('al.cad.minutes', { n: localDigits(String(minutes)) })
 }
 
 export default function AlertsPanel({ datasetId, columns }: {
@@ -167,21 +169,18 @@ export default function AlertsPanel({ datasetId, columns }: {
   if (!alerts) return <p style={{ color: 'var(--muted)' }}>Loading…</p>
 
   return (
-    <div style={{ maxWidth: 760 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    marginBottom: 12 }}>
+    <section className="dl-rules__card">
+      <header className="dl-rules__head">
         <div>
-          <div style={{ fontSize: 13, fontWeight: 600 }}>{t('alerts.title')}</div>
-          <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-            {t('alerts.desc')}
-          </div>
+          <h3>{t('alerts.title')}</h3>
+          <p>{t('alerts.desc')}</p>
         </div>
         {!adding && (
           <button className="btn btn-primary btn-sm" onClick={() => setAdding(true)}>
             {t('alerts.new')}
           </button>
         )}
-      </div>
+      </header>
 
       {adding && (
         <div className="card" style={{ padding: 16, marginBottom: 16 }}>
@@ -295,11 +294,12 @@ export default function AlertsPanel({ datasetId, columns }: {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {alerts.map(a => <AlertRow key={a.id} alert={a} onDelete={() => void remove(a)} />)}
       </div>
-    </div>
+    </section>
   )
 }
 
 function AlertRow({ alert, onDelete }: { alert: DataAlert; onDelete: () => void }) {
+  const t = useT()
   // The scheduler writes "clear", "fired, emailed 2", "still firing (no re-send)"
   // on success and "evaluation failed: ..." / "disabled: ..." on failure. Every
   // status but "ok" used to read as a failure here.
@@ -307,8 +307,8 @@ function AlertRow({ alert, onDelete }: { alert: DataAlert; onDelete: () => void 
   const failed = /failed|disabled|error|skipped/i.test(status) && !/^fired/i.test(status)
   const firing = alert.last_state === 'firing' || alert.last_state === true
   return (
-    <div className="card" style={{ padding: 12, display: 'flex', gap: 12,
-                                   alignItems: 'flex-start' }}>
+    <div className="dl-rules__alert">
+      <span className="dl-ov__state dl-ov__state--none" aria-hidden><Bell size={12} /></span>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 13, fontWeight: 600 }}>{alert.name}</div>
         <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)',
@@ -316,29 +316,29 @@ function AlertRow({ alert, onDelete }: { alert: DataAlert; onDelete: () => void 
           {alert.expression}
         </div>
         <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-          {alert.change_pct ? `fires on a ${alert.change_direction === 'up' ? 'rise' : alert.change_direction === 'down' ? 'fall' : 'move'} of ${alert.change_pct}% · ` : ''}
-          {[...alert.recipients, ...(alert.webhook_url ? ['webhook'] : [])].join(', ')} · {cadence(alert.interval_minutes)}
-          {alert.last_value != null ? ` · last value ${alert.last_value.toLocaleString()}` : ''}
+          {alert.change_pct ? `${t('al.fires', { dir: t(alert.change_direction === 'up' ? 'al.rise' : alert.change_direction === 'down' ? 'al.fall' : 'al.move'), pct: localDigits(String(alert.change_pct)) })} · ` : ''}
+          <bdi>{[...alert.recipients, ...(alert.webhook_url ? ['webhook'] : [])].join(', ')}</bdi> · {cadence(alert.interval_minutes, t)}
+          {alert.last_value != null ? ` · ${t('al.lastValue', { v: localDigits(alert.last_value.toLocaleString('en-US')) })}` : ''}
         </div>
         {/* A broken alert that looks fine is worse than no alert: nobody learns
             the condition stopped being watched. */}
         {failed ? (
           <div style={{ fontSize: 11, color: 'var(--danger)', marginTop: 4 }}>
-            Last check failed — {alert.last_status}
+            {t('al.failed')} — <bdi>{alert.last_status}</bdi>
           </div>
         ) : alert.last_checked_at ? (
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-            Checked {new Date(alert.last_checked_at).toLocaleString()}
-            {firing ? ' · currently firing, so the notice has already gone' : ' · quiet'}
+            {t('al.checked', { when: new Date(alert.last_checked_at).toLocaleString() })}
+            {` · ${t(firing ? 'al.firing' : 'al.quiet')}`}
           </div>
         ) : (
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-            Not yet checked.
+            {t('al.notYet')}
           </div>
         )}
       </div>
-      <button className="btn btn-sm" aria-label={`Delete ${alert.name}`}
-        onClick={onDelete}>Delete</button>
+      <button className="btn btn-sm" aria-label={t('al.deleteName', { name: alert.name })}
+        onClick={onDelete}>{t('al.delete')}</button>
     </div>
   )
 }

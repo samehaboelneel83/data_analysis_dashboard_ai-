@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import {
   AreaChart, BarChart3, BarChart4, BarChartHorizontal, Blocks, Boxes, Brain, Building2, ChevronDown,
   Circle, CircleDashed, Cloud, Code2, Compass, CreditCard, Crosshair, Filter, Frame, Gauge,
@@ -122,6 +122,33 @@ const shortLabel = (w: CatalogEntry) => SHORT[w.type] ?? w.label
   .replace(/\s+(Chart|Plot|Card)$/i, '')
   .replace(/^Dual Axis /, 'Dual axis ')
 
+/** The hover preview's "Best for" line (7e2): the everyday charts get their
+ *  own, everything else its group's. */
+const BEST: Record<string, string> = { bar: 'bar', line: 'line', area: 'area', pie: 'pie', donut: 'donut', table: 'table', kpi: 'kpi', treemap: 'treemap' }
+
+/** A schematic of the chart for the preview: shapes, not data. */
+function PreviewArt({ type, Icon }: { type: string; Icon: LucideIcon }) {
+  const c1 = 'var(--dl-series-1)', c2 = 'var(--dl-series-2)', c3 = 'var(--dl-series-3)'
+  const bars = [62, 88, 48, 74, 36]
+  if (type === 'bar') return <svg viewBox="0 0 120 70" aria-hidden>{bars.map((h, i) => <rect key={i} x={8 + i * 22} y={66 - h * 0.7} width="14" height={h * 0.7} rx="2" fill={c1} />)}</svg>
+  if (type === 'line' || type === 'area') {
+    const pts = '6,52 26,40 46,46 66,24 86,30 114,12'
+    return <svg viewBox="0 0 120 70" aria-hidden>{type === 'area' && <polygon points={`${pts} 114,66 6,66`} fill={c2} opacity=".25" />}<polyline points={pts} fill="none" stroke={c2} strokeWidth="3" strokeLinejoin="round" /></svg>
+  }
+  if (type === 'pie' || type === 'donut') return (
+    <svg viewBox="0 0 120 70" aria-hidden>
+      <circle cx="40" cy="35" r="26" fill="none" stroke={c1} strokeWidth={type === 'donut' ? 12 : 26} strokeDasharray="75 200" transform="rotate(-90 40 35)" pathLength="163" />
+      <circle cx="40" cy="35" r="26" fill="none" stroke={c2} strokeWidth={type === 'donut' ? 12 : 26} strokeDasharray="50 200" strokeDashoffset="-75" transform="rotate(-90 40 35)" pathLength="163" />
+      <circle cx="40" cy="35" r="26" fill="none" stroke={c3} strokeWidth={type === 'donut' ? 12 : 26} strokeDasharray="38 200" strokeDashoffset="-125" transform="rotate(-90 40 35)" pathLength="163" />
+      {[c1, c2, c3].map((c, i) => <g key={i}><rect x="80" y={18 + i * 14} width="8" height="8" rx="2" fill={c} /><rect x="92" y={20 + i * 14} width="22" height="4" rx="2" fill="var(--border)" /></g>)}
+    </svg>
+  )
+  if (type === 'table') return <svg viewBox="0 0 120 70" aria-hidden><rect x="4" y="6" width="112" height="10" rx="2" fill="var(--surface2)" />{[0, 1, 2, 3].map(i => <g key={i}><rect x="8" y={22 + i * 12} width="44" height="4" rx="2" fill="var(--border)" /><rect x="84" y={22 + i * 12} width="28" height="4" rx="2" fill={c1} opacity=".6" /></g>)}</svg>
+  if (type === 'kpi') return <svg viewBox="0 0 120 70" aria-hidden><rect x="10" y="12" width="40" height="5" rx="2" fill="var(--border)" /><text x="10" y="46" fontSize="24" fontWeight="700" fill="var(--text)">8.6M</text><polyline points="70,54 82,48 94,50 106,38 114,40" fill="none" stroke={c2} strokeWidth="2.5" /></svg>
+  if (type === 'treemap') return <svg viewBox="0 0 120 70" aria-hidden><rect x="4" y="4" width="62" height="62" rx="3" fill={c1} /><rect x="68" y="4" width="48" height="34" rx="3" fill={c2} /><rect x="68" y="40" width="22" height="26" rx="3" fill={c3} /><rect x="92" y="40" width="24" height="26" rx="3" fill={c1} opacity=".5" /></svg>
+  return <div className="dl-gallery__pvicon"><Icon size={40} strokeWidth={1.5} aria-hidden /></div>
+}
+
 export default function ChartGallery({ query, onQuery, onAdd }: {
   query: string
   onQuery: (q: string) => void
@@ -129,6 +156,22 @@ export default function ChartGallery({ query, onQuery, onAdd }: {
 }) {
   const [closed, setClosed] = useState<Record<string, boolean>>({})
   const t = useT()
+  const { rtl } = useDirection()
+  // The tile being pointed at (or focused), and where to float its preview:
+  // beside the panel, never over the tile itself.
+  const [pv, setPv] = useState<{ w: CatalogEntry; top: number; x: number } | null>(null)
+  const pvId = useId()
+  const showPv = (w: CatalogEntry, el: HTMLElement) => {
+    const r = el.getBoundingClientRect()
+    const panel = el.closest('.dl-gallery')?.getBoundingClientRect() ?? r
+    setPv({ w, top: Math.max(8, Math.min(r.top - 8, window.innerHeight - 250)), x: rtl ? window.innerWidth - panel.left + 8 : panel.right + 8 })
+  }
+  const best = (w: CatalogEntry) => {
+    if (BEST[w.type]) return t(`gallery.best.${BEST[w.type]}` as MessageKey)
+    const k = `gallery.bestGroup.${groupKey(groupOf(w)).slice('gallery.group.'.length)}` as MessageKey
+    const v = t(k)
+    return v && v !== k ? v : t('gallery.bestGroup.other')
+  }
   // Arabic names for the groups and the common tiles; everything else keeps
   // the catalog's English label. Search matches BOTH, so either works.
   const ar = useDirection().language === 'ar'
@@ -196,7 +239,10 @@ export default function ChartGallery({ query, onQuery, onAdd }: {
                   return (
                     <button key={w.type} type="button" className="dl-gallery__tile"
                       data-widget-type={w.type}
-                      onClick={() => onAdd(w.type)} title={w.label} aria-label={w.label}>
+                      aria-describedby={pv?.w.type === w.type ? pvId : undefined}
+                      onMouseEnter={e => showPv(w, e.currentTarget)} onMouseLeave={() => setPv(null)}
+                      onFocus={e => showPv(w, e.currentTarget)} onBlur={() => setPv(null)}
+                      onClick={() => onAdd(w.type)} aria-label={w.label}>
                       <Icon size={18} strokeWidth={1.9} aria-hidden />
                       <span className="dl-gallery__label">{tileName(w)}</span>
                     </button>
@@ -207,6 +253,17 @@ export default function ChartGallery({ query, onQuery, onAdd }: {
           </section>
         )
       })}
+      {pv && (() => {
+        const Icon = ICON_OF[pv.w.type] ?? Brain
+        return (
+          <div id={pvId} role="tooltip" className="dl-gallery__pv" data-testid="gallery-preview"
+            style={{ top: pv.top, [rtl ? 'right' : 'left']: pv.x }}>
+            <div className="dl-gallery__pvart"><PreviewArt type={pv.w.type} Icon={Icon} /></div>
+            <b>{tileName(pv.w)}</b>
+            <p>{best(pv.w)}</p>
+          </div>
+        )
+      })()}
     </div>
   )
 }

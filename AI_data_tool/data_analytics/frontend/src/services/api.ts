@@ -956,9 +956,20 @@ export interface LlmEndpointIn {
   context?: number
 }
 
+/** Every `/llm/endpoints` answer, broadcast as it arrives: the top bar polls
+ *  it, and the Ask AI page reads the same answers (offline banner, redesign
+ *  4b) instead of polling a second time. `lastLlmEndpoints` is the latest. */
+export const LLM_ENDPOINTS_EVENT = 'datalytics:llm-endpoints'
+let llmEndpointsSeen: { data: LlmEndpointsOut; at: number } | null = null
+export const lastLlmEndpoints = () => llmEndpointsSeen
+
 export const llmApi = {
   endpoints: (refresh = false) =>
-    api.get<LlmEndpointsOut>('/llm/endpoints', { params: refresh ? { refresh: true } : undefined }).then(r => r.data),
+    api.get<LlmEndpointsOut>('/llm/endpoints', { params: refresh ? { refresh: true } : undefined }).then(r => {
+      llmEndpointsSeen = { data: r.data, at: Date.now() }
+      window.dispatchEvent(new CustomEvent(LLM_ENDPOINTS_EVENT, { detail: llmEndpointsSeen }))
+      return r.data
+    }),
 }
 
 export interface BoundaryPack {
@@ -3188,10 +3199,12 @@ export const agentApi = {
     document.body.appendChild(a); a.click(); a.remove()
     URL.revokeObjectURL(url)
   },
-  feedback: (conversationId: number, body: { runId: number | null; rating: 'up' | 'down' }) =>
+  /** `comment` is the optional "What was wrong?" (the endpoint already takes it). */
+  feedback: (conversationId: number, body: { runId: number | null; rating: 'up' | 'down'; comment?: string }) =>
     api.post<{ id: number; run_id: number | null; rating: string; comment: string | null }>(
       `/agent/conversations/${conversationId}/feedback`,
-      { run_id: body.runId, rating: body.rating }).then(r => r.data),
+      body.comment ? { run_id: body.runId, rating: body.rating, comment: body.comment }
+        : { run_id: body.runId, rating: body.rating }).then(r => r.data),
 }
 
 /** Describe one of a dataset's columns. The response says WHERE the sentence

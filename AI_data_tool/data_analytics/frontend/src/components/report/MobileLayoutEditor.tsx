@@ -1,4 +1,6 @@
 import type { ReportPage, Widget } from '../../types/report'
+import { useDirection } from '../../contexts/DirectionContext'
+import { readingOrder } from '../../lib/readingOrder'
 
 interface Props {
   page: ReportPage
@@ -9,7 +11,9 @@ interface Props {
 export default function MobileLayoutEditor({ page, widgets, onUpdate }: Props) {
   const known = new Set(widgets.map(w => w.id))
   const savedOrder = (page.mobile_layout?.order ?? []).filter(id => known.has(id))
-  const missing = widgets.map(w => w.id).filter(id => !savedOrder.includes(id))
+  // QA3 A8: widgets with no saved place follow in reading order.
+  const { rtl } = useDirection()
+  const missing = readingOrder(widgets, rtl).map(w => w.id).filter(id => !savedOrder.includes(id))
   const order = [...savedOrder, ...missing]
   const hidden = page.mobile_layout?.hidden ?? []
 

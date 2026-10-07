@@ -1,4 +1,4 @@
-import PdfOptionsDialog from '../components/report/PdfOptionsDialog'
+import ExportDialog from '../components/report/share/ExportDialog'
 import HierarchyChains from '../components/report/HierarchyChains'
 import RelativeDateEditor from '../components/report/RelativeDateEditor'
 import AccessExplainer from '../components/report/AccessExplainer'
@@ -7,7 +7,7 @@ import { closeAll, closeOpen, markOpen, readOpen, type OpenReport } from '../lib
 import OpenReportsMenu from '../components/report/OpenReportsMenu'
 import { useEffect, useState, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
 import LoadError from '../components/ui/LoadError'
-import { useParams, Link, useNavigate } from 'react-router-dom'
+import { useParams, Link, useNavigate, useLocation } from 'react-router-dom'
 import { useCrumbTitle } from '../lib/crumb'
 import NotFound from './NotFound'
 import { useDirection } from '../contexts/DirectionContext'
@@ -32,7 +32,7 @@ import OutlierDetailsDialog from '../components/report/OutlierDetailsDialog'
 import CommentsPane from '../components/report/CommentsPane'
 import TranslationsPane from '../components/report/TranslationsPane'
 import InsightsPane from '../components/report/InsightsPane'
-import ShareLinksDialog from '../components/report/ShareLinksDialog'
+import ShareDashboardDialog from '../components/report/share/ShareDashboardDialog'
 import AccessDialog from '../components/report/AccessDialog'
 import { useOptionalAuth } from '../contexts/AuthContext'
 import ExplainDialog from '../components/report/ExplainDialog'
@@ -74,7 +74,7 @@ import CollapsibleSide from '../components/report/CollapsibleSide'
 import ReviewPane from '../components/report/ReviewPane'
 import PopupOverlay from '../components/report/PopupOverlay'
 import TooltipPageOverlay from '../components/report/TooltipPageOverlay'
-import { ArrowLeft, Plus, Eye, Undo2, Redo2, KeyRound, ShieldCheck, Pause, Play, FileDown, Printer, FileText, Package, Pencil, RefreshCw, ChevronUp, ChevronDown } from 'lucide-react'
+import { ArrowLeft, Plus, Eye, Undo2, Redo2, KeyRound, ShieldCheck, Pause, Play, FileDown, Share2, Maximize2, EllipsisVertical, SlidersHorizontal, Printer, FileText, Package, Pencil, RefreshCw, ChevronUp, ChevronDown, Database, Search, X, Settings2 } from 'lucide-react'
 import { updatedAgo } from '../lib/viewStyle'
 import { columnKind, usePageFilters } from '../lib/pageFilters'
 import PageFilterBar, { type PageFilterColumn } from '../components/report/PageFilterBar'
@@ -89,9 +89,27 @@ import toast from 'react-hot-toast'
 import ReleaseControl from '../components/report/ReleaseControl'
 import SubscribeButton from '../components/report/SubscribeButton'
 import ToolbarMenu from '../components/report/ToolbarMenu'
+import ActionMenu from '../components/ActionMenu'
+import AiMascot from '../components/ai/AiMascot'
+import ViewAssist, { type AssistTab } from './reportBuilder/ViewAssist'
+import FocusView from './reportBuilder/FocusView'
+import PresentControls from './reportBuilder/PresentControls'
+import { useAiOffline } from './ask/useAiOffline'
+import { datasetSuggestions } from './ask/suggestions'
+import './reportBuilder/viewMode.css'
+import './reportBuilder/builder.css'
+import PageTabs from './reportBuilder/PageTabs'
+import SaveState from './reportBuilder/SaveState'
+import ZoomControl, { ZOOM_MAX, ZOOM_MIN } from './reportBuilder/ZoomControl'
+import ShortcutsDialog from './reportBuilder/ShortcutsDialog'
+import { clickSelection, selectionCount } from './reportBuilder/selection'
+import { readingOrder, tabOrder } from '../lib/readingOrder'
+import BuilderSkeleton from './reportBuilder/BuilderSkeleton'
+import TemplatesPane from './reportBuilder/TemplatesPane'
+import { AI_MODES, AiTabs, PanelHead, RightRail } from './reportBuilder/RightRail'
+import { EditToolbar, EmptyResultNote, GroupBox, HeavyPageBanner, SelectionGuides } from './reportBuilder/CanvasOverlays'
 import { useConfirm } from '../components/ui/ConfirmDialog'
 import { useMeasuredWidth } from '../components/report/useMeasuredWidth'
-import { useModalDialog } from '../components/ui/useModalDialog'
 import {
   applyRecipe as applyLayoutRecipe,
   compact,
@@ -112,7 +130,7 @@ import {
 
 import {
   COLS, ROW_H, GAP, LEFT_SIDEBAR_W, RIGHT_PANEL_W, SUGGEST_PANEL_W, MIN_CANVAS_W,
-  CLASSIFICATION_LABELS, CLASSIFICATION_COLORS, gridStyle, canvasH,
+  CLASSIFICATION_LABELS, CLASSIFICATION_COLORS, gridStyle, canvasH, widgetIdAtPoint,
 } from './reportBuilder/grid'
 import { SyncSlicersPaneConnected, BookmarksPaneConnected } from './reportBuilder/BookmarksConnected'
 import { SchedulePanel } from './reportBuilder/SchedulePanel'
@@ -186,7 +204,7 @@ function conflictFrom(detail: ConflictDetail, mine: WidgetEdit, pageId: number, 
 }
 
 export default function ReportBuilder() {
-  const { language } = useDirection()
+  const { language, rtl } = useDirection()
   const tr = useT()
   // "Page 3" is the name the app gives a new page; shown in the reader's
   // language (the stored name stays as it is). HR evaluation, item 3.6.
@@ -274,7 +292,15 @@ export default function ReportBuilder() {
   // A phone opens a dashboard to READ it: the studio's two side panels left
   // no room for the canvas at 390px. It starts in View there (Edit remains a
   // tap away for someone who needs it).
-  const [editModeWanted, setEditMode] = useState(() => !window.matchMedia(MOBILE_QUERY).matches)
+  // QA2 N2: a dashboard opens for reading. Only a just-created one (?edit=1,
+  // or ?pick=data, which asks for its data) opens in Edit. v1 opened every
+  // dashboard in Edit for anyone who could edit it.
+  const routeLocation = useLocation()
+  const [editModeWanted, setEditMode] = useState(() => {
+    if (window.matchMedia(MOBILE_QUERY).matches) return false
+    const q = new URLSearchParams(routeLocation.search)
+    return q.has('edit') || q.has('pick')
+  })
   // Capability mirror (server enforces; this hides what it would refuse):
   // 'view' can't edit, only 'data' can reach the Data/Model authoring tabs.
   const myCapability = report?.my_capability ?? 'view'
@@ -286,6 +312,14 @@ export default function ReportBuilder() {
   // copilot) all answer to capability through this single line instead of
   // each having to remember to ask.
   const editMode = editModeWanted && canEdit
+  // S6 (redesign 7e1): the builder works with the icon rail. Every entry to
+  // edit mode folds it (QA3 A9: View → Edit used to bring back the full rail
+  // and squeeze the canvas); the saved choice is untouched, the rail's own
+  // toggle still expands it, and reading keeps the full rail.
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('datalytics:builder-compact', { detail: editMode }))
+  }, [editMode])
+  useEffect(() => () => { window.dispatchEvent(new CustomEvent('datalytics:builder-compact', { detail: false })) }, [])
   // Measured from the canvas element itself; 900 is only the value before one
   // exists. See useMeasuredWidth for why this cannot be an effect.
   const { width: containerW, attach: attachCanvas, ref: canvasRef } =
@@ -324,6 +358,14 @@ export default function ReportBuilder() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   // Kiosk playback: pages auto-advance on an interval; any key or click exits.
   const [kiosk, setKiosk] = useState(false)
+  // Reading (redesign 7d): the reader's AI panel, a question handed to it
+  // (remounts the chat with the question in its box, never sent), and the
+  // widget shown full screen.
+  const [aiOpen, setAiOpen] = useState(false)
+  const [aiTab, setAiTab] = useState<AssistTab>('ask')
+  const [askSeed, setAskSeed] = useState<{ q: string; n: number } | null>(null)
+  const [focusW, setFocusW] = useState<Widget | null>(null)
+  const aiOffline = useAiOffline().offline
   // Refresh in the Modern header remounts the canvas, so every widget asks again.
   const [refreshNonce, setRefreshNonce] = useState(0)
 
@@ -349,7 +391,12 @@ export default function ReportBuilder() {
   const [relationships, setRelationships] = useState<{ from_dataset_id: number; from_column: string; to_dataset_id: number; to_column: string }[]>([])
   useEffect(() => { relationshipsApi.list().then(setRelationships).catch(() => setRelationships([])) }, [])
   const [outlierColumn, setOutlierColumn] = useState<string | null>(null)
-  const [toolbarMoreOpen, setToolbarMoreOpen] = useState(false)
+  // 7e3: Properties can be pinned open beside another rail panel, and shows
+  // a widget's settings by section (Format / Data / Interactions).
+  const [pinProps, setPinProps] = useState(false)
+  // Version history opened from ⋮ while reading (QA2 N2): a panel over the view.
+  const [viewHistory, setViewHistory] = useState(false)
+  const [propSection, setPropSection] = useState<'format' | 'data' | 'interactions'>('format')
   const [shareOpen, setShareOpen] = useState(false)
   const [accessOpen, setAccessOpen] = useState(false)
   const isAdmin = !!useOptionalAuth()?.user?.role?.is_org_admin
@@ -437,6 +484,8 @@ export default function ReportBuilder() {
   // selected widget CHANGES, so without this it kept showing the editor's
   // refused values over the saved ones and its next autosave wrote them back.
   const [panelEpoch, setPanelEpoch] = useState(0)
+  const selectedIdRef = useRef<number | null>(null)
+  selectedIdRef.current = selectedW?.id ?? null
   useEffect(() => { loadedRevisionRef.current = loadedRevision }, [loadedRevision])
 
   // Load report
@@ -1541,6 +1590,10 @@ export default function ReportBuilder() {
       await write(after)
       pushUndo({ label: d.label, undo: () => write(before), redo: () => write(after) })
       await loadReport()
+      // QA3 A5: Properties seeds its fields per widget, so a change made from
+      // outside it (a field dropped on the widget, a fix offered on it) is
+      // shown by remounting it, as after a conflict.
+      if (selectedIdRef.current === d.widgetId) setPanelEpoch(n => n + 1)
     }
     window.addEventListener(PATCH_WIDGET_EVENT, onPatch)
     return () => window.removeEventListener(PATCH_WIDGET_EVENT, onPatch)
@@ -1567,6 +1620,7 @@ export default function ReportBuilder() {
       pushUndo({ label: d.label, undo: () => write(before), redo: () => write(after) })
       toast.success(d.label)
       await loadReport()
+      if (selectedIdRef.current === d.widgetId) setPanelEpoch(n => n + 1)
     }
     window.addEventListener(CONVERT_WIDGET_EVENT, onConvert)
     return () => window.removeEventListener(CONVERT_WIDGET_EVENT, onConvert)
@@ -1695,23 +1749,38 @@ export default function ReportBuilder() {
       const mod = e.ctrlKey || e.metaKey
       if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); void (e.shiftKey ? runRedoRef.current() : runUndoRef.current()); return }
       if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); void runRedoRef.current(); return }
-      if (e.key === 'Escape') { setSelectedW(null); setShortcutsOpen(false); return }
+      // 7e5, from the prototype's sheet: zoom and duplicate. (Ctrl+/ is the
+      // page copilot's own toggle, as in v1; binding it here too opened two
+      // things at once.)
+      if (mod && (e.key === '=' || e.key === '+')) { e.preventDefault(); setZoom(z => Math.min(ZOOM_MAX, z + 10)); return }
+      if (mod && e.key === '-') { e.preventDefault(); setZoom(z => Math.max(ZOOM_MIN, z - 10)); return }
+      if (e.key === 'Escape') {
+        // QA3 A10: every outline goes: the selection, a multi-selection, and
+        // the focus ring a clicked tile keeps.
+        setSelectedW(null); setMultiSelectedIds(new Set()); setShortcutsOpen(false)
+        const f = document.activeElement as HTMLElement | null
+        if (f?.closest?.('[data-canvas]')) f.blur()
+        return
+      }
       if (!selectedW || !activePage) return
+      if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); void widgetActionsRef.current.duplicateWidget(selectedW); return }
       const arrows: Record<string, [number, number]> = {
         ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
       }
       if (e.key in arrows) {
         e.preventDefault()
         const [dx, dy] = arrows[e.key]
-        const items = toLayoutItems(activePage.widgets)
+        // From where the widgets are drawn (QA3 A7), as a drag is.
+        const items = toLayoutItems(activePage.widgets.map(w => ({ ...w, layout: packedPreviewRef.current[w.id] ?? w.layout })))
+        const cur = items.find(i => i.id === selectedW.id)?.layout ?? selectedW.layout
         const packed = isPackedMode(activePage.layout_mode)
         const next = e.shiftKey
           ? (packed
-            ? resizePacked(items, selectedW.id, selectedW.layout.w + dx, selectedW.layout.h + dy)
-            : resizeFree(items, selectedW.id, selectedW.layout.w + dx, selectedW.layout.h + dy))
+            ? resizePacked(items, selectedW.id, cur.w + dx, cur.h + dy)
+            : resizeFree(items, selectedW.id, cur.w + dx, cur.h + dy))
           : (packed
-            ? dropPacked(items, selectedW.id, { x: selectedW.layout.x + dx, y: selectedW.layout.y + dy })
-            : dropFree(items, selectedW.id, { x: selectedW.layout.x + dx, y: selectedW.layout.y + dy }))
+            ? dropPacked(items, selectedW.id, { x: cur.x + dx, y: cur.y + dy })
+            : dropFree(items, selectedW.id, { x: cur.x + dx, y: cur.y + dy }))
         void persistWidgetLayouts(activePage, next, undefined,
           `${e.shiftKey ? 'Resize' : 'Move'} "${selectedW.title || selectedW.widget_type}"`)
         if (next[selectedW.id]) setSelectedW({ ...selectedW, layout: next[selectedW.id] })
@@ -1723,6 +1792,13 @@ export default function ReportBuilder() {
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [editMode, selectedW, activePage, persistWidgetLayouts])
+
+  // Present starts at the top of the page (QA2 Visual 8: it once opened
+  // scrolled down, the top row of cards cut off).
+  useEffect(() => {
+    if (!kiosk) return
+    document.querySelectorAll<HTMLElement>('[data-canvas-scroll], .dl-shell__content').forEach(el => { el.scrollTop = 0 })
+  }, [kiosk, activePage?.id])
 
   // ── Kiosk playback ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1737,20 +1813,25 @@ export default function ReportBuilder() {
     }
   }, [kiosk])
 
+  // Paging, auto-play and the keys now live in PresentControls (7d): v1
+  // advanced every 8 s and exited on ANY key, which left the arrows useless.
+
+  /** "Ask AI about this widget": the panel, with a question in its box. */
+  const askAbout = (w: Widget) => {
+    setFocusW(null); setAiOpen(true); setAiTab('ask')
+    setAskSeed(s => ({ q: tr('vw.fq.explain', { title: w.title || w.widget_type }), n: (s?.n ?? 0) + 1 }))
+  }
+
+  // Ctrl+/ opens the reader's AI panel. Edit mode has the page copilot on the
+  // same keys, mounted only there, so the two never compete.
   useEffect(() => {
-    if (!kiosk || !report) return
-    const id = setInterval(() => {
-      setActivePage(prev => {
-        const pages = report.pages.filter(p => p.page_type === 'normal')
-        if (pages.length < 2) return prev
-        const i = pages.findIndex(p => p.id === prev?.id)
-        return pages[(i + 1) % pages.length]
-      })
-    }, 8000)
-    const exit = () => setKiosk(false)
-    document.addEventListener('keydown', exit)
-    return () => { clearInterval(id); document.removeEventListener('keydown', exit) }
-  }, [kiosk, report])
+    if (editMode) return
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === '/') { e.preventDefault(); setAiOpen(o => !o) }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [editMode])
 
   /** SAS's Duplicate Object: another one of these, beside it.
    *
@@ -1776,7 +1857,9 @@ export default function ReportBuilder() {
             ? { show_subtotals: true, totals_position: 'after' } : {}),
           ...(w.config as Record<string, unknown>),
         },
-        layout: { ...w.layout, y: w.layout.y + w.layout.h },
+        // Below the original as it is drawn (an auto-packed page is not where
+        // its stored layout says).
+        layout: (() => { const at = shownLayout(w); return { ...at, y: at.y + at.h } })(),
       })
       {
         const pageId = activePage.id
@@ -1795,7 +1878,12 @@ export default function ReportBuilder() {
         )
       }
       await loadReport()
+      // QA3 A10: the copy is selected alone and brought into view; placed
+      // below its original it often landed off-screen.
+      setMultiSelectedIds(new Set())
       setSelectedW(copy)
+      setTimeout(() => document.querySelector(`[data-widget-id="${copy.id}"]`)
+        ?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }), 60)
       toast.success('Duplicated')
     } catch {
       toast.error('Could not duplicate this widget')
@@ -1837,19 +1925,23 @@ export default function ReportBuilder() {
   // identity between unrelated renders. Handlers route through refs holding
   // the LATEST implementation, so the callback identities never change while
   // the behavior always tracks current state.
-  const widgetActionsRef = useRef({ deleteWidget, duplicateWidget, selectWidget: (w: Widget, e: React.MouseEvent) => {
-    if (e.shiftKey) {
-      setMultiSelectedIds(prev => { const next = new Set(prev); next.has(w.id) ? next.delete(w.id) : next.add(w.id); return next })
-    } else {
-      setSelectedW(w)
-      setMultiSelectedIds(new Set())
-    }
-  } })
+  // QA3 A1: one rule (selection.ts) for plain and Shift clicks, so the count,
+  // the outlines and Properties agree. Refreshed every render below: it reads
+  // the current selection and page.
+  const selectWidget = (w: Widget, e: React.MouseEvent) => {
+    const next = clickSelection({ primary: selectedW?.id ?? null, multi: multiSelectedIds }, w.id, e.shiftKey)
+    setMultiSelectedIds(new Set(next.multi))
+    setSelectedW(next.primary == null ? null
+      : next.primary === w.id ? w
+      : (activePage?.widgets.find(x => x.id === next.primary) ?? null))
+  }
+  const widgetActionsRef = useRef({ deleteWidget, duplicateWidget, selectWidget })
   // Both refreshed every render, not just seeded in the initial ref value: the
   // one in the initial value is a closure over the FIRST render, where
   // `activePage` is still null and the action returns immediately.
   widgetActionsRef.current.deleteWidget = deleteWidget
   widgetActionsRef.current.duplicateWidget = duplicateWidget
+  widgetActionsRef.current.selectWidget = selectWidget
   const stableOnSetParameter = useCallback((name: string, value: string) =>
     setParamValues(prev => ({ ...prev, [name]: value })), [])
 
@@ -2154,7 +2246,8 @@ export default function ReportBuilder() {
       toast(`"${w.title || w.widget_type}" has no empty field left for ${columnName}`)
       return
     }
-    updateWidgetConfig(plan.config, w.title)
+    // QA3 A5: the open Properties shows the role just filled.
+    void updateWidgetConfig(plan.config, w.title).then(() => setPanelEpoch(n => n + 1))
   }, [liveSelected, updateWidgetConfig, planFieldOnWidget])
 
   // A measure always goes to the measure role — it is already an aggregate, so it has
@@ -2185,7 +2278,6 @@ export default function ReportBuilder() {
   }
 
   const confirm = useConfirm()
-  const shortcutsRef = useModalDialog<HTMLDivElement>(() => setShortcutsOpen(false))
   const deletePage = async (page: ReportPage) => {
     if (!await confirm({ title: `Delete page "${page.name}"?`, body: 'Its widgets are deleted with it.' })) return
     setSaving(true)
@@ -2230,6 +2322,31 @@ export default function ReportBuilder() {
     }
   }
 
+  /** Move left / right in the page tab menu (7e1): swap the page with its
+   *  neighbour among the tabs, through the same page update, undoable. */
+  const movePage = async (page: ReportPage, by: -1 | 1) => {
+    const list = tabPages
+    const i = list.findIndex(p => p.id === page.id)
+    const other = list[i + by]
+    if (i < 0 || !other) return
+    let a = page.position ?? i, b = other.position ?? i + by
+    if (a === b) { a = i; b = i + by }
+    const put = (x: number, y: number) => async () => {
+      await reportsApi.updatePage(reportId, pid(page.id), { position: x })
+      await reportsApi.updatePage(reportId, pid(other.id), { position: y })
+    }
+    setSaving(true)
+    try {
+      await put(b, a)()
+      pushUndo({ label: `Move page "${page.name}"`, undo: put(a, b), redo: put(b, a) })
+      await loadReport()
+    } catch (err) {
+      toast.error((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Could not move the page')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const updatePageProps = useCallback(async (data: Partial<ReportPage>) => {
     if (!activePage) return
     setSaving(true)
@@ -2260,6 +2377,11 @@ export default function ReportBuilder() {
   }
 
   // ── Drag ─────────────────────────────────────────────────────────────────
+  // What the canvas draws for a widget: a drag in progress, else the page's
+  // automatic packing (set below, where it is computed), else the stored layout.
+  const packedPreviewRef = useRef<Record<number, Widget['layout']>>({})
+  const shownLayout = useCallback((w: Widget) =>
+    localLayoutsRef.current[w.id] ?? packedPreviewRef.current[w.id] ?? w.layout, [])
   const handleDragStart = useCallback((widget: Widget) => (e: React.MouseEvent) => {
     e.preventDefault()
     const canvasEl = canvasRef.current
@@ -2271,16 +2393,17 @@ export default function ReportBuilder() {
     const rect = canvasEl.getBoundingClientRect()
     const scale = zoom / 100
     const cellW = (containerW - GAP * (COLS - 1)) / COLS
-    const widgetLeft = widget.layout.x * (cellW + GAP)
-    const widgetTop  = widget.layout.y * (ROW_H + GAP)
-    const items = toLayoutItems(activePage.widgets.map(w => ({
-      ...w,
-      layout: localLayoutsRef.current[w.id] ?? w.layout,
-    })))
+    // QA3 A7: from where the widgets are DRAWN. On a page still auto-packed,
+    // the stored layout is not what is on screen: measuring the grab from it
+    // dropped the widget rows away from the pointer, and the others jumped.
+    const shown = shownLayout(widget)
+    const widgetLeft = shown.x * (cellW + GAP)
+    const widgetTop  = shown.y * (ROW_H + GAP)
+    const items = toLayoutItems(activePage.widgets.map(w => ({ ...w, layout: shownLayout(w) })))
     setDragging({
       widgetId: widget.id,
       startX: e.clientX, startY: e.clientY,
-      layout: widget.layout,
+      layout: shown,
       offsetX: (e.clientX - rect.left) / scale - widgetLeft,
       offsetY: (e.clientY - rect.top)  / scale - widgetTop,
       packed: isPackedMode(activePage.layout_mode),
@@ -2292,12 +2415,9 @@ export default function ReportBuilder() {
     e.preventDefault()
     if (!activePage) return
     setResizing({
-      widgetId: widget.id, startX: e.clientX, startY: e.clientY, layout: widget.layout,
+      widgetId: widget.id, startX: e.clientX, startY: e.clientY, layout: shownLayout(widget),
       packed: isPackedMode(activePage.layout_mode),
-      items: toLayoutItems(activePage.widgets.map(w => ({
-        ...w,
-        layout: localLayoutsRef.current[w.id] ?? w.layout,
-      }))),
+      items: toLayoutItems(activePage.widgets.map(w => ({ ...w, layout: shownLayout(w) }))),
     })
   }, [activePage])
 
@@ -2387,11 +2507,14 @@ export default function ReportBuilder() {
   // Localised widget objects, memoized per (widgets, layouts, translations):
   // a fresh object per render would defeat React.memo on WidgetRenderer.
   // Declared ABOVE the !report early return -- hooks must run every render.
+  // Kept while dragging (QA3 A7): blanking it made every widget jump back to
+  // its stored place the moment a drag began. The drag's own layouts win anyway.
   const packedPreview = useMemo(() => {
-    if (!activePage?.widgets.length || dragging || resizing) return {} as Record<number, Widget['layout']>
+    if (!activePage?.widgets.length) return {} as Record<number, Widget['layout']>
     if (!needsAutoPack(activePage.layout_mode)) return {}
     return applyLayoutRecipe(toLayoutItems(activePage.widgets), DEFAULT_RECIPE)
-  }, [activePage, dragging, resizing])
+  }, [activePage])
+  packedPreviewRef.current = packedPreview
   const localisedWidgets = useMemo(() => {
     const m = new Map<number, Widget>()
     for (const w of (activePage?.widgets ?? [])) {
@@ -2400,6 +2523,10 @@ export default function ReportBuilder() {
     return m
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePage?.widgets, localLayouts, packedPreview, localise])
+  // The page's widgets where the canvas draws them (a drag, the automatic
+  // packing, else stored): what reading and Tab order are taken from (QA3 A8).
+  const shownWidgets = useMemo(() => (activePage?.widgets ?? []).map(w =>
+    ({ ...w, layout: localLayouts[w.id] ?? packedPreview[w.id] ?? w.layout })), [activePage?.widgets, localLayouts, packedPreview])
   const activePromptFilter = useMemo(() =>
     activePage && activePage.prompt_column && promptValues[activePage.id]
       ? { column: activePage.prompt_column, value: promptValues[activePage.id] }
@@ -2411,12 +2538,16 @@ export default function ReportBuilder() {
   if (loadError) {
     return (
       <div style={{ padding: 32 }}>
-        <LoadError what="this report" error={loadError}
+        {/* 7e5: the way back beside v1's retry. */}
+        <Link to="/reports" className="dl-vw-back" style={{ marginBottom: 12, display: 'inline-flex' }}>
+          <ArrowLeft size={14} className="flip-rtl" aria-hidden /> {tr('nav.dashboards')}
+        </Link>
+        <LoadError what="this report" title={tr('bd.loadErr.title')} retryLabel={tr('bd.loadErr.retry')} error={loadError}
           onRetry={() => { loadReport().catch(e => setLoadError(e ?? new Error('failed'))) }} />
       </div>
     )
   }
-  if (!report) return <p style={{ color: 'var(--muted)', padding: 32 }}>{tr('common.loading')}</p>
+  if (!report) return <BuilderSkeleton />
   // Every column the page's data offers to the filter bar: the report's
   // dataset first, then any added ones. A name already offered is not repeated
   // -- a filter is by column NAME, and reaches each chart that has it.
@@ -2467,6 +2598,149 @@ export default function ReportBuilder() {
   const viewPages = report.pages.filter(page => page.page_type !== 'hidden' && page.page_type !== 'popup'
     && page.page_type !== 'tooltip' && page.page_type !== 'drillthrough')
   const updated = updatedAgo(dataset?.last_refreshed_at, tr('ai.limit.locale'))
+  // The builder's page tabs: hidden and pop-up pages too (marked), never the
+  // tooltip and drill-through pages, which open from a widget.
+  const tabPages = report.pages.filter(page => (editMode || (page.page_type !== 'hidden' && page.page_type !== 'popup'))
+    && page.page_type !== 'tooltip' && page.page_type !== 'drillthrough')
+  const pageTabs = (
+    <PageTabs pages={tabPages} activeId={activePage?.id ?? null} label={pageLabel}
+      renamingId={editPid} renameValue={editPname} onRenameValue={setEditPname}
+      onSelect={pg => { const page = report.pages.find(x => x.id === pg.id); if (page) { setActivePage(page); setSelectedW(null) } }}
+      onStartRename={pg => { setEditPid(pg.id); setEditPname(pg.name) }}
+      onSaveName={pg => { const page = report.pages.find(x => x.id === pg.id); if (page) void savePageName(page) }}
+      onDelete={pg => { const page = report.pages.find(x => x.id === pg.id); if (page) void deletePage(page) }}
+      onMove={(pg, by) => { const page = report.pages.find(x => x.id === pg.id); if (page) void movePage(page, by) }}
+      onSettings={pg => { const page = report.pages.find(x => x.id === pg.id); if (page) { setActivePage(page); setSelectedW(null); setRightPanelMode('default') } }}
+      onAdd={() => void addPage()}
+      addExtra={<>
+        <button type="button" className="dl-bd-ib dl-bd-tpl" aria-label="Add page from a template" title={tr('bd.pg.fromTemplate')}
+          aria-expanded={pageMenuOpen} onClick={() => setPageMenuOpen(o => !o)}><ChevronDown size={13} aria-hidden /></button>
+        {pageMenuOpen && (
+          <PageTemplateMenu reportId={reportId} activePageId={activePage?.id ?? null}
+            onClose={() => setPageMenuOpen(false)} onAdded={() => { setPageMenuOpen(false); loadReport() }} />
+        )}
+      </>} />
+  )
+  // The Properties panel's contents (7e3): in the right panel, or pinned
+  // beside another rail panel.
+  const propertiesBody = (
+    <>
+                  <PanelHead mode="default" pinned={pinProps} onPin={() => setPinProps(p => !p)}
+                    extra={<button type="button" className="dl-bd-ib" aria-label={tr('builder.reportSettings')} title={tr('builder.reportSettings')}
+                      onClick={() => setRightPanelMode('parameters')}><Settings2 size={15} aria-hidden /></button>} />
+                  {/* The object card (7e3): what these settings belong to. */}
+                  <div className="dl-bd-obj">
+                    <span data-autodir-text className="nm"
+                      title={selectedW ? (selectedW.title || selectedW.widget_type) : (activePage?.name ?? '')}>
+                      {selectedW
+                        ? tr('builder.panelWidget', { name: selectedW.title || WIDGET_CATALOG.find(w => w.type === selectedW.widget_type)?.label || selectedW.widget_type })
+                        : tr('builder.panelPage', { name: activePage?.name ?? '' })}
+                    </span>
+                    {selectedW && <small className="ty" dir="ltr">{selectedW.widget_type}</small>}
+                    {selectedW && (
+                      <button aria-label="Deselect widget" title="Deselect widget" className="dl-bd-ib x"
+                        onClick={() => { setSelectedW(null); setMultiSelectedIds(new Set()) }}>
+                        <X size={14} aria-hidden />
+                      </button>
+                    )}
+                  </div>
+                  {editMode && multiSelectedIds.size >= 2 && (
+                    // 7e4: a multi-selection is laid out here (v1: a bar above
+                    // the canvas), every v1 mode kept.
+                    <section className="dl-bd-multi" aria-label={tr('bd.multi.n', { n: multiSelectedIds.size })}>
+                      <b className="hd">{tr('bd.multi.n', { n: multiSelectedIds.size })}</b>
+                      <div className="dl-bd-gh">{tr('bd.multi.layout')}</div>
+                      <div className="row">
+                        {([
+                          ['Align Left', () => applyAlign('left')], ['Align Center', () => applyAlign('center')], ['Align Right', () => applyAlign('right')],
+                          ['Align Top', () => applyAlign('top')], ['Align Middle', () => applyAlign('middle')], ['Align Bottom', () => applyAlign('bottom')],
+                          ['Distribute Horizontally', () => applyDistribute('horizontal')], ['Distribute Vertically', () => applyDistribute('vertical')],
+                        ] as const).map(([label, fn]) => (
+                          <button key={label} type="button" className="btn btn-ghost btn-sm dl-bd-line" onClick={fn}>{label}</button>
+                        ))}
+                      </div>
+                    </section>
+                  )}
+                  {selectedW && (
+                    <div className="dl-bd-sect" role="tablist" aria-label={tr('bd.sect.aria')}>
+                      {(['format', 'data', 'interactions'] as const).map(k => (
+                        <button key={k} type="button" role="tab" aria-selected={propSection === k} onClick={() => setPropSection(k)}>
+                          {tr(`bd.sect.${k}` as MessageKey)}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {/* Pick the object to edit, rather than finding it on the
+                      canvas. Every settings pane in SAS carries this, and it is
+                      what makes an object's settings reachable at all: a widget
+                      inside a container, a small one, or one sitting under
+                      another in a precision layout can be genuinely hard to
+                      click. The page is in the same list, because page settings
+                      are settings too. */}
+                  {activePage && (pageWidgets.length > 0) && (
+                    <div style={{ padding: '12px 14px 8px' }}>
+                      <label htmlFor="object-picker" style={{ display: 'block', fontSize: 11,
+                        fontWeight: 700, color: 'var(--muted)', marginBottom: 4 }}>
+                        {tr('builder.objectToEdit')}
+                      </label>
+                      <select id="object-picker" style={{ width: '100%', fontSize: 12 }}
+                        value={selectedW ? String(selectedW.id) : 'page'}
+                        onChange={e => {
+                          const v = e.target.value
+                          setSelectedW(v === 'page' ? null
+                            : pageWidgets.find(w => String(w.id) === v) ?? null)
+                        }}>
+                        <option value="page">{tr('builder.pageOption', { name: activePage.name })}</option>
+                        {pageWidgets.map(w => (
+                          <option key={w.id} value={String(w.id)}>
+                            {w.title || w.widget_type} ({w.widget_type})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {selectedW
+                    ? <WidgetConfigPanel key={`${selectedW.id}:${panelEpoch}`} section={propSection} onSection={setPropSection} geography={geography} widget={selectedW} columns={columns} datasets={datasets} primaryDatasetId={report.dataset_id} pages={report.pages} hierarchy={hierarchy} onHierarchyRefresh={refreshHierarchy} bookmarks={bookmarks} onUpdate={updateWidgetConfig} ruleErrors={perfStats[selectedW.id]?.ruleErrors}
+                      distinctCounts={Object.fromEntries(Object.entries(hints).flatMap(([k, h]) => typeof (h as { distinct?: unknown })?.distinct === 'number' ? [[k, (h as { distinct: number }).distinct]] : []))} />
+                    : activePage && <PagePropertiesPanel reportId={reportId} page={activePage} columns={columns} onUpdate={updatePageProps}
+                        pages={report.pages} bookmarks={bookmarks} onSelectWidget={setSelectedW}
+                        // The palette picker moved here from a row of unlabeled
+                        // dots in the header, where each theme was one colour
+                        // and no name.
+                        palettes={[
+                          ...Object.keys(THEMES).map(key => ({ key, name: PALETTE_NAME[key] ?? key[0].toUpperCase() + key.slice(1), colors: THEMES[key] })),
+                          ...Object.entries(orgThemes).map(([key, t]) => ({ key, name: t.name, colors: t.colors })),
+                        ]}
+                        currentPalette={report.theme ?? 'default'}
+                        onPalette={setThemeUndoable} />
+                  }
+    </>
+  )
+  const layoutMenu = (
+    <div className="dl-bd-menuw">
+      <button className="btn btn-ghost btn-sm" aria-label="Page layout" aria-expanded={layoutMenuOpen}
+        onClick={() => setLayoutMenuOpen(o => !o)}>
+        <IconLabel icon={LayoutTemplate}>{tr('builder.layout')}</IconLabel>
+      </button>
+      {layoutMenuOpen && (
+        <div role="menu" aria-label="Page layout" className="dl-bd-menu">
+          {RECIPES.map(r => {
+            const on = activePage?.layout_mode !== 'free' && (activePage?.layout_template === r.id || (!activePage?.layout_template && r.id === DEFAULT_RECIPE))
+            return (
+              <button key={r.id} role="menuitem" aria-current={on || undefined} onClick={() => { void applyPageRecipe(r.id) }}>
+                <b>{r.label}{r.id === DEFAULT_RECIPE ? ' (default)' : ''}</b><small>{r.hint}</small>
+              </button>
+            )
+          })}
+          <hr />
+          <button role="menuitem" aria-current={activePage?.layout_mode === 'free' || undefined} onClick={() => { void applyPageRecipe('free') }}>
+            <b>Free layout</b><small>Place tiles by hand; still no overlap or tiny charts</small>
+          </button>
+        </div>
+      )}
+    </div>
+  )
 
   return (
     // Negative margin cancels Layout's <main> padding so the editor stays edge-to-edge, and
@@ -2500,9 +2774,11 @@ export default function ReportBuilder() {
         {editMode && activeView === 'report' ? (
           // A segmented control, like Report / Data / Model: one of three is
           // always on, and the track says so.
-          <div style={{ padding:'4px 10px 8px', flexShrink:0 }}>
+          // 7e2: Insert / Fields / Templates, as the prototype (v1: Charts /
+          // Fields / More; the stored keys are unchanged).
+          <div className="dl-bd-lh">
             <div role="tablist" aria-label={tr('builder.panel')} className="dl-seg" style={{ display:'flex' }}>
-              {([['charts', tr('builder.tab.charts')], ['fields', tr('builder.tab.fields')], ['more', tr('builder.tab.more')]] as const).map(([k, l]) => (
+              {([['charts', tr('bd.tab.insert')], ['fields', tr('builder.tab.fields')], ['more', tr('bd.tab.templates')]] as const).map(([k, l]) => (
                 <button key={k} type="button" role="tab" aria-selected={leftTab === k} onClick={() => setLeftTab(k)}
                   className={`dl-seg__btn${leftTab === k ? ' dl-seg__btn--on' : ''}`}
                   style={{ flex: 1, justifyContent: 'center' }}>
@@ -2519,7 +2795,7 @@ export default function ReportBuilder() {
 
         {/* Panel content — this panel always shows the fields/hierarchy content
             that used to live behind the "Data View" tab. */}
-        <div style={{ flex:1, overflowY:'auto', overflowX:'auto', padding:10 }}>
+        <div className="dl-bd-lb" style={{ flex:1, overflowY:'auto', overflowX:'auto', padding:10 }}>
           <>
               {/* Widget catalog — add-widget buttons, edit mode only */}
               {editMode && activeView === 'report' && leftTab === 'charts' && (
@@ -2532,8 +2808,9 @@ export default function ReportBuilder() {
                   name, then drop it onto any report. The object-level analogue of a
                   DataView; apply is a plain insert carrying the saved config. */}
               {editMode && activeView === 'report' && leftTab === 'more' && (
-                <div style={{ marginBottom:12, paddingBottom:12, borderBottom:'1px solid var(--border)' }}>
-                  <div style={{ fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:6 }}>Templates</div>
+                <TemplatesPane reportId={reportId} activePageId={activePage?.id ?? null} onAdded={() => { loadReport() }}
+                  widgetTemplates={
+                <div className="dl-bd-wtpl">
                   <div style={{ display:'flex', gap:4, marginBottom:6 }}>
                     <input value={tplName} onChange={e => setTplName(e.target.value)}
                       placeholder={selectedW ? 'Template name' : 'Select a widget first'}
@@ -2563,15 +2840,17 @@ export default function ReportBuilder() {
                       </span>
                     ))}
                   </div>
-                </div>
+                </div>} />
               )}
 
               {/* Report filters — one filter definition applied to every widget on the
                   report. Defined once here, it propagates everywhere; a widget whose
                   dataset lacks the column is simply unaffected. */}
-              {editMode && activeView === 'report' && leftTab === 'more' && (
-                <div style={{ marginBottom:12, paddingBottom:12, borderBottom:'1px solid var(--border)' }}>
-                  <div style={{ fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:6 }}>Report filters</div>
+              {/* 7e2: report filters live under Fields (v1: More), after the
+                  field list -- they are about the data. */}
+              {editMode && activeView === 'report' && leftTab === 'fields' && (
+                <div className="dl-bd-sec dl-bd-rf">
+                  <div className="dl-bd-gh">Report filters</div>
                   {dateColumnOf() && (
                     <div role="group" aria-label={`Quick date filters on ${dateColumnOf()}`} data-testid="date-presets"
                       style={{ display:'flex', flexWrap:'wrap', gap:4, marginBottom:6 }}>
@@ -2623,25 +2902,21 @@ export default function ReportBuilder() {
               {/* Fields — always-visible field picker; clicking a field assigns it to the
                   selected widget's next open role matching the field's numeric-ness. */}
               {editMode && activeView === 'report' && leftTab === 'fields' && (
-                <div style={{ marginBottom:12, paddingBottom:12, borderBottom:'1px solid var(--border)' }}>
+                <div className="dl-bd-sec dl-bd-fields">
                   {!selectedW && (
                     <div style={{ fontSize: 11, color:'var(--muted)', marginBottom:6 }}>{tr('fields.hint')}</div>
                   )}
-                  <input aria-label="Filter fields" value={fieldFilter}
-                    onChange={e => setFieldFilter(e.target.value)}
-                    placeholder="Filter…"
-                    style={{ width:'100%', fontSize:11, padding:'4px 7px', marginBottom:6,
-                      background:'var(--surface2)', border:'1px solid var(--border)',
-                      borderRadius:6, color:'var(--text)', boxSizing:'border-box' }} />
+                  <label className="dl-bd-search">
+                    <Search size={14} aria-hidden />
+                    <input aria-label="Filter fields" value={fieldFilter} dir="auto"
+                      onChange={e => setFieldFilter(e.target.value)} placeholder={tr('bd.fields.search')} />
+                  </label>
                   {(['Dimensions', 'Dates', 'Geography', 'Hierarchies', 'Measures', 'Aggregated'] as const).map(group => {
                     const needle = fieldFilter.trim().toLowerCase()
                     const folded = collapsedGroups.has(group)
                     const heading = (
-                      <button type="button" aria-expanded={!folded} onClick={() => toggleGroup(group)}
-                        style={{ display: 'flex', alignItems: 'center', gap: 4, width: '100%', background: 'none', border: 'none',
-                          padding: 0, margin: '2px 0 4px', cursor: 'pointer', fontSize: 10.5, fontWeight: 700,
-                          color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', textAlign: 'start' }}>
-                        <span aria-hidden style={{ display: 'inline-block', transform: folded ? 'rotate(-90deg)' : 'none', fontSize: 9 }}>▾</span>
+                      <button type="button" aria-expanded={!folded} onClick={() => toggleGroup(group)} className="dl-bd-gh dl-bd-gh--b">
+                        <span aria-hidden className="ch" style={{ transform: folded ? 'rotate(-90deg)' : 'none' }}>▾</span>
                         {tr(`fields.${group}` as MessageKey)}
                       </button>
                     )
@@ -2703,11 +2978,12 @@ export default function ReportBuilder() {
                         {!folded && <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                           {cols.map(c => (
                             <div key={c.name}>
-                            <span data-field-row={c.name} style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+                            <span data-field-row={c.name} className="dl-bd-f" data-on={gatheredFields.includes(c.name) || undefined}
+                              data-gathering={gatheredFields.length > 0 || undefined}>
                             {/* Tick several and stage them as one chart (the bar above). */}
                             <input type="checkbox" aria-label={`Select ${columnMeta[c.name]?.label || c.name}`}
                               checked={gatheredFields.includes(c.name)} onChange={() => toggleGathered(c.name)}
-                              style={{ margin: 0, flex: 'none' }} />
+                              className="dl-bd-f__ck" />
                             <button onClick={e => {
                                 // Ctrl/cmd-click gathers instead of assigning:
                                 // charting several fields together is a
@@ -2739,27 +3015,21 @@ export default function ReportBuilder() {
                               }}
                               title={[selectedW ? `Add ${c.name} to ${selectedW.title}` : `Add ${c.name} to the page as a chart (or drag it where you want it)`,
                                       hintTitle(hints[c.name])].filter(Boolean).join(' — ')}
-                              style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '4px 7px',
-                                background: gatheredFields.includes(c.name)
-                                  ? 'color-mix(in srgb, var(--accent) 22%, var(--surface2))' : 'var(--surface2)',
-                                border: `1px solid ${gatheredFields.includes(c.name) ? 'var(--accent)' : 'var(--border)'}`,
-                                borderRadius: 6,
-                                cursor: 'pointer',
-                                fontSize: 11, color: 'var(--text)', fontFamily: 'var(--sans)', whiteSpace: 'nowrap' }}>
-                              <span style={{ fontSize: 11 }}>{c.dtype === 'calculated' ? 'ƒx' : isNumericField(c) ? '#' : 'Aa'}</span>
-                              {columnMeta[c.name]?.label || c.name}
+                              className="dl-bd-f__b">
+                              <span className="dl-bd-f__ty" data-k={c.dtype === 'calculated' ? 'calc' : isNumericField(c) ? 'measure' : group === 'Dates' ? 'date' : group === 'Geography' ? 'geo' : 'dim'}>
+                                {c.dtype === 'calculated' ? 'ƒx' : isNumericField(c) ? '#' : 'Aa'}</span>
+                              <span className="nm"><bdi>{columnMeta[c.name]?.label || c.name}</bdi></span>
                               {/* "Country - 47": how many distinct values this
                                   category holds, which is what decides whether
                                   it is a bar chart or a mistake. */}
                               {hints[c.name]?.distinct != null && (
-                                <span style={{ color: 'var(--muted)' }}>
-                                  {' - '}{countLabel(hints[c.name].distinct as number)}
-                                </span>
+                                <small className="n"><span className="dl-sr-only">{' - '}</span>{countLabel(hints[c.name].distinct as number)}</small>
                               )}
                               {hints[c.name]?.related && (
                                 <span title={hintTitle(hints[c.name])} style={{ color: 'var(--accent)', fontSize: 11 }}>≈</span>
                               )}
                             </button>
+                            <span className="dl-bd-f__acts">
                             {/* Classification, the way SAS's data pane offers it:
                                 a category can also be geography, and then every
                                 map built from it inherits its boundary set. Not
@@ -2901,6 +3171,7 @@ export default function ReportBuilder() {
                                 color: 'var(--muted)', fontSize: 12, padding: '0 2px', flex: 'none',
                                 transform: fieldProps === c.name ? 'rotate(180deg)' : 'none' }}>⌄</button>
                             </span>
+                            </span>
                             {fieldProps === c.name && fieldProperties(c)}
                             </div>
                           ))}
@@ -2946,9 +3217,10 @@ export default function ReportBuilder() {
               )}
 
               {(!editMode || activeView !== 'report' || leftTab === 'fields') && (<>
-              {/* Datasets section */}
-              <div style={{ marginBottom:12, paddingBottom:12, borderBottom:'1px solid var(--border)' }}>
-                <div style={{ fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:6 }}>{tr('builder.datasets')}</div>
+              {/* Datasets section: first in the Fields tab (7e2, as the
+                  prototype's dataset card), by flex order. */}
+              <div className="dl-bd-sec dl-bd-dss">
+                <div className="dl-bd-gh">{tr('builder.datasets')}</div>
 
                 {report.dataset_id && datasets[report.dataset_id] && (
                   <div style={{ display:'flex', alignItems:'center', gap:5, padding:'4px 7px', background:'var(--surface2)', borderRadius:5, marginBottom:3, fontSize:11 }}>
@@ -2995,8 +3267,8 @@ export default function ReportBuilder() {
                 </div>
               </div>
 
-              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
-                <span style={{ fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em' }}>{tr('builder.hierarchy')}</span>
+              <div className="dl-bd-hier" style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+                <span className="dl-bd-gh" style={{ margin: 0 }}>{tr('builder.hierarchy')}</span>
                 {dataset && (
                   <button className="btn btn-ghost btn-sm" onClick={autoGenHierarchy} style={{ fontSize: 11, padding:'2px 6px' }}>
                     Auto
@@ -3040,8 +3312,8 @@ export default function ReportBuilder() {
             there was no way for a person to reach the button that puts a report
             into edit mode. Wrapping costs a second row; not wrapping costs the
             control. */}
-        {topOpen && (
-        <div data-testid="builder-header"
+        {topOpen && !kiosk && (
+        <div data-testid="builder-header" className={modern ? undefined : 'dl-bd-top'}
           style={{ display:'flex', alignItems:'flex-start', flexWrap:'wrap', gap:10, padding:'10px 20px', borderBottom:'1px solid var(--border)', flexShrink:0, background:'var(--surface)' }}>
           {/* Two parts: everything that varies by mode wraps INSIDE this one,
               while the end part (Opened reports + the Edit/View button) stays
@@ -3059,15 +3331,13 @@ export default function ReportBuilder() {
           {modern ? (<>
             <Link to="/reports" className="dl-vw-back"><ArrowLeft size={14} className="flip-rtl" /> {tr('nav.dashboards')}</Link>
             <span className="dl-vw-vr" aria-hidden />
-          </>) : (<>
-          <Link to="/reports" style={{ color:'var(--muted)', display:'flex', alignItems:'center', gap:4, fontSize:12, textDecoration:'none' }}>
-            <ArrowLeft size={13} className="flip-rtl" /> {tr('nav.dashboards')}
+          </>) : (
+          <Link to="/reports" className="dl-bd-back" aria-label={tr('nav.dashboards')} title={tr('nav.dashboards')}>
+            <ArrowLeft size={16} className="flip-rtl" aria-hidden />
           </Link>
-          <span style={{ color:'var(--border)' }}>|</span>
-          </>)}
+          )}
           {editMode && renaming ? (
-            <input autoFocus aria-label="Dashboard name" defaultValue={report.name} maxLength={120}
-              style={{ fontWeight:700, fontSize:16, padding:'1px 6px', minWidth:220 }}
+            <input autoFocus aria-label="Dashboard name" defaultValue={report.name} maxLength={120} className="dl-bd-name-in" dir="auto"
               onBlur={e => void commitRename(e.currentTarget.value)}
               onKeyDown={e => {
                 if (e.key === 'Enter') e.currentTarget.blur()
@@ -3103,22 +3373,17 @@ export default function ReportBuilder() {
             <h1 style={{ fontWeight:700, fontSize:16, margin:0 }}>{report.name}</h1>
           )}
           {dataset && canEdit && !modern && (
-            <nav aria-label="Breadcrumb" style={{ display:'flex', alignItems:'center', gap:4 }}>
-              <span aria-hidden style={{ color:'var(--muted)', fontSize:12 }}>▸</span>
+            <nav aria-label="Breadcrumb" className="dl-bd-chips">
               {[dataset, ...(report.additional_dataset_ids ?? []).map(id => datasets[id]).filter((d): d is Dataset => !!d)]
-                .map((d, i) => (
-                  <span key={d.id} style={{ display:'flex', alignItems:'center', gap:4 }}>
-                    {i > 0 && <span aria-hidden style={{ color:'var(--muted)', fontSize:11 }}>,</span>}
-                    <Link to={`/datasets/${d.id}`} className="badge badge-categorical" style={{ textDecoration:'none' }}>{d.name}</Link>
-                  </span>
+                .map(d => (
+                  <Link key={d.id} to={`/datasets/${d.id}`} className="dl-bd-chip ds" title={d.name}>
+                    <Database size={13} aria-hidden /><span><bdi>{d.name}</bdi></span>
+                  </Link>
               ))}
               {dataset.data_source_id != null && (
-                <>
-                  <span aria-hidden style={{ color:'var(--muted)', fontSize:12 }}>▸</span>
-                  <Link to={`/connections/${dataset.data_source_id}/review`} style={{ fontSize:11, color:'var(--accent)' }}>
-                    {sourceName ?? 'Source'}
-                  </Link>
-                </>
+                <Link to={`/connections/${dataset.data_source_id}/review`} className="dl-bd-chip src">
+                  <span aria-hidden>▸</span> <bdi>{sourceName ?? 'Source'}</bdi>
+                </Link>
               )}
             </nav>
           )}
@@ -3139,29 +3404,34 @@ export default function ReportBuilder() {
               </span>
             )
           })()}
+          {/* Draft until published (7e1); a published dashboard shows its
+              release state instead (ReleaseControl, below). */}
+          {editMode && !report.published && report.created_by != null && (
+            <span className="dl-bd-chip" title={tr('home.draftTitle')}>{tr('dsh.badge.draft')}</span>
+          )}
+          {editMode && <SaveState saving={saving} />}
           {editMode && (
             <span style={{ display: 'inline-flex', gap: 2 }}>
+              <span className="dl-bd-vr" aria-hidden />
               {/* aria-disabled, not disabled: a disabled button shows no tooltip,
                   and "why can't I" must always have an answer. */}
-              <button className="btn btn-ghost btn-sm" aria-label="Undo"
+              <button className="dl-bd-ib" aria-label="Undo"
                 aria-disabled={!undoStack.undoLabel || undoStack.busy}
                 title={undoStack.undoLabel ? `Undo: ${undoStack.undoLabel} (Ctrl+Z)` : 'Nothing to undo yet'}
-                style={{ opacity: undoStack.undoLabel ? 1 : 0.4 }}
                 onClick={() => { if (undoStack.undoLabel) void runUndo() }}>
-                <Undo2 size={14} />
+                <Undo2 size={15} />
               </button>
-              <button className="btn btn-ghost btn-sm" aria-label="Redo"
+              <button className="dl-bd-ib" aria-label="Redo"
                 aria-disabled={!undoStack.redoLabel || undoStack.busy}
                 title={undoStack.redoLabel ? `Redo: ${undoStack.redoLabel} (Ctrl+Y)` : 'Nothing to redo'}
-                style={{ opacity: undoStack.redoLabel ? 1 : 0.4 }}
                 onClick={() => { if (undoStack.redoLabel) void runRedo() }}>
-                <Redo2 size={14} />
+                <Redo2 size={15} />
               </button>
             </span>
           )}
           {editMode && (
             <select aria-label="Sensitivity label" value={report.classification ?? ''}
-              title="Classify this report" style={{ fontSize: 11, padding: '2px 4px' }}
+              title="Classify this report" className="dl-bd-sel"
               onChange={async e => {
                 try {
                   const prev = report.classification ?? ''
@@ -3209,73 +3479,34 @@ export default function ReportBuilder() {
                 header wrapped onto a second line on a laptop. Each item keeps its
                 own gate -- a viewer sees no Share menu at all (every item in it is
                 edit/admin-only), and keeps Export and Subscribe. */}
-            <ToolbarMenu label={<IconLabel icon={Globe}>{tr('builder.share')}</IconLabel>} title="Links, guest access and permissions"
-              items={[
-                ...(canEdit ? [{ key: 'link', label: <IconLabel icon={Copy}>Copy link to this page</IconLabel>,
-                  onSelect: () => {
-                    // The link encodes the active page, so a colleague lands where the
-                    // sender was looking rather than on page 1.
-                    const url = new URL(window.location.href)
-                    if (activePage) url.searchParams.set('page', String(activePage.id))
-                    navigator.clipboard.writeText(url.toString())
-                      .then(() => toast.success('Link copied'))
-                      .catch(() => toast.error('Could not copy the link'))
-                  } }] : []),
-                ...(canEdit ? [{ key: 'guest', label: <IconLabel icon={Globe}>Guest links…</IconLabel>,
-                  title: access.share_link && !access.share_link.allowed ? access.share_link.reason : 'Read-only access without a login',
-                  disabled: access.share_link ? !access.share_link.allowed : false,
-                  onSelect: () => setShareOpen(true) }] : []),
-                ...(Object.keys(access).length ? [{ key: 'why', label: <IconLabel icon={KeyRound}>Your access, and why…</IconLabel>,
-                  title: 'What you can do here, and the rule behind each', onSelect: () => setAccessOpen2(true) }] : []),
-                ...(isAdmin ? [{ key: 'access', label: <IconLabel icon={ShieldCheck}>Access by role…</IconLabel>,
-                  title: 'Set per-role capability levels for this report', onSelect: () => setAccessOpen(true) }] : []),
-              ]} />
+            {/* One Share dialog (redesign 7c): people, general access, the
+                page link, guest links, embedding and schedules, each behind
+                its own v1 gate inside. A viewer gets "View only · why?". */}
+            {(canEdit || isAdmin) && (
+              <button type="button" className={editMode ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm'} onClick={() => setShareOpen(true)}
+                title={tr('shx.shareTitle')}>
+                <IconLabel icon={Share2}>{tr('builder.share')}</IconLabel>
+              </button>
+            )}
             {canEdit && (
-            <button className="btn btn-ghost btn-sm" title="Kiosk playback: pages advance every 8s; any key exits"
+            <button className="btn btn-ghost btn-sm dl-bd-icn" title="Kiosk playback: pages advance every 8s; any key exits"
               aria-pressed={kiosk}
-              onClick={() => { setEditMode(false); setKiosk(k => !k) }}>
+              onClick={() => { setEditMode(false); setAiOpen(false); setFocusW(null); setKiosk(k => !k) }}>
               {kiosk ? <IconLabel icon={Pause}>{tr('builder.stop')}</IconLabel> : <IconLabel icon={Play}>{tr('builder.present')}</IconLabel>}
             </button>
             )}
-            <ToolbarMenu label={<IconLabel icon={FileDown}>{tr('builder.export')}</IconLabel>} title="Print or download this dashboard"
-              items={[
-                { key: 'print', label: <IconLabel icon={Printer}>Print…</IconLabel>, title: 'Print or save as PDF from the browser',
-                  onSelect: () => navigate(`/reports/${reportId}/print`) },
-                { key: 'pdf', label: <IconLabel icon={FileText}>Download PDF…</IconLabel>,
-                  title: access.download && !access.download.allowed ? access.download.reason
-                    : "Server-rendered PDF: cover, contents, every page's visuals — choose paper, orientation and pages",
-                  disabled: access.download ? !access.download.allowed : false,
-                  onSelect: () => setPdfDialog(true) },
-                { key: 'xlsx', label: <IconLabel icon={FileText}>Excel (one sheet per chart)</IconLabel>,
-                  disabled: access.download ? !access.download.allowed : false,
-                  title: access.download && !access.download.allowed ? access.download.reason
-                    : "Every chart's data as you see it, one sheet each",
-                  onSelect: () => { reportsApi.downloadXlsx(reportId, report.name)
-                    .then(r => toast.success(r.withheld
-                      ? tr('export.xlsxDoneWithheld', { n: String(r.sheets), w: String(r.withheld) })
-                      : tr('export.xlsxDone', { n: String(r.sheets) })))
-                    // The reason travels in a Blob (responseType 'blob'), so
-                    // it is read back out rather than replaced with a guess.
-                    .catch(async (e: { response?: { data?: Blob } }) => {
-                      let msg = tr('export.xlsxFailed')
-                      try {
-                        const body = JSON.parse(await (e.response?.data as Blob).text()) as { detail?: string }
-                        if (body.detail) msg = body.detail
-                      } catch { /* keep the generic sentence */ }
-                      toast.error(msg)
-                    }) } },
-                { key: 'package', label: <IconLabel icon={Package}>Offline package</IconLabel>,
-                  disabled: access.download ? !access.download.allowed : false,
-                  title: access.download && !access.download.allowed ? access.download.reason
-                    : 'One HTML file that opens without the platform: every visible page, frozen as you see it now',
-                  onSelect: () => { reportsApi.downloadPackage(reportId, report.name)
-                    .then(() => toast.success(tr('export.packageDone')))
-                    .catch(() => toast.error(tr('export.packageFailed'))) } },
-              ]} />
+            {/* The Export dialog (7c): PDF, Excel, offline package, print. The
+                export policy greys the downloads inside, with its reason. */}
+            <button type="button" className="btn btn-ghost btn-sm dl-bd-icn" onClick={() => setPdfDialog(true)}
+              title={tr('shx.exportTitle')}>
+              <IconLabel icon={FileDown}>{tr('builder.export')}</IconLabel>
+            </button>
             {/* Beside PDF on purpose: a subscription is the recurring version of
                 that same export, and it needs only view -- so it must sit OUTSIDE
                 the editMode-gated toolbar, which a viewer never sees. */}
-            <SubscribeButton reportId={reportId} />
+            {/* Icon-only while building (7e1: the prototype's header has no
+                Subscribe); the word stays its accessible name. */}
+            <span className="dl-bd-sub"><SubscribeButton reportId={reportId} /></span>
             {/* The reports open in this tab, as SAS lists them: one button and a
                 menu, not a strip of tabs above the page. */}
             {!kiosk && (
@@ -3288,16 +3519,40 @@ export default function ReportBuilder() {
                 }}
                 onCloseAll={() => { setOpenReports(closeAll()); navigate('/reports') }} />
             )}
+            {/* The rest, behind ⋮ (7d), in both modes and just before the mode
+                button, so that button never moves. Version history and report
+                settings are edits: from reading they switch to edit mode. */}
+            {(
+              <ActionMenu label={tr('vw.more')} align="end" portal triggerClassName="btn btn-ghost btn-sm dl-vw-more"
+                trigger={<EllipsisVertical size={15} aria-hidden />}
+                items={[
+                  { key: 'print', label: tr('shx.ex.print'), icon: <Printer size={14} />, onSelect: () => navigate(`/reports/${reportId}/print`) },
+                  ...(canEdit ? [
+                    // QA2 N2: over the view while reading; the rail panel while editing.
+                    { key: 'history', label: tr('shx.vh.title'), icon: <History size={14} />, onSelect: () => {
+                      if (editMode) { setRightPanelMode('history'); setRightOpenSignal(n => n + 1) } else { setAiOpen(false); setViewHistory(true) } } },
+                    { key: 'settings', label: tr('builder.reportSettings'), icon: <SlidersHorizontal size={14} />, onSelect: () => { setEditMode(true); setRightPanelMode('parameters') } },
+                  ] : []),
+                  ...(Object.keys(access).length ? [{ key: 'why', label: tr('shx.why'), icon: <KeyRound size={14} />, onSelect: () => setAccessOpen2(true) }] : []),
+                  ...(isAdmin ? [{ key: 'role', label: tr('shx.byRole'), icon: <ShieldCheck size={14} />, onSelect: () => setAccessOpen(true) }] : []),
+                ]} />
+            )}
             {canEdit ? (
               // ONE button that flips in place: "Edit" while reading, "View"
               // while editing. The old two-part switch appeared only in edit
               // mode, so the control changed shape and moved on every switch.
               editMode ? (
-                <button type="button" aria-label="View mode" data-testid="mode-toggle"
-                  className="btn btn-sm dl-modebtn" title={tr('builder.view')}
-                  onClick={() => setEditMode(false)}>
-                  <Eye size={13} aria-hidden /> {tr('builder.view')}
-                </button>
+                // Edit is where you are; View is the button (7e1, after the
+                // prototype's Edit / View switch). Still the one mode button,
+                // last, as v1 and 7d keep it.
+                <span className="dl-bd-mode" role="group" aria-label={tr('bd.mode')}>
+                  <span className="on" aria-current="true"><Pencil size={13} aria-hidden /> {tr('builder.edit')}</span>
+                  <button type="button" aria-label="View mode" data-testid="mode-toggle"
+                    className="dl-modebtn" title={tr('builder.view')}
+                    onClick={() => setEditMode(false)}>
+                    <Eye size={13} aria-hidden /> {tr('builder.view')}
+                  </button>
+                </span>
               ) : (
                 <button type="button" aria-label="Edit mode" data-testid="mode-toggle"
                   className="btn btn-primary btn-sm dl-modebtn" title={tr('builder.edit')}
@@ -3320,7 +3575,7 @@ export default function ReportBuilder() {
         {/* Report / Data / Model view strip — authors only. A viewer has one
             surface (the dashboard); these tabs are the studio. */}
         {topOpen && canEdit && !kiosk && !modern && (
-        <div className="dl-panebar">
+        <div className="dl-panebar dl-bd-bar">
           {/* Scoped to just these three: other tests use `within(view-strip)` to look
               for a button named /Report/i, and "Report rules" below would otherwise
               also match that regex if it shared this container.
@@ -3337,72 +3592,18 @@ export default function ReportBuilder() {
               </button>
             ))}
           </div>
-          {activeView === 'report' && editMode && (() => {
-            // Toolbar architecture: the most-used panels stay as buttons; the
-            // rest live behind ⋯ More. Thirteen co-equal toggles overflowed the
-            // strip and made every panel equally hard to find. The primaries
-            // are further split into three families with a hairline between
-            // them -- build, AI, collaborate -- so eight buttons read as three
-            // small groups rather than one long run of words.
-            const pl = (m: RightPanelMode) => tr(`builder.pane.${m}` as MessageKey)
-            const GROUPS: [RightPanelMode, string, LucideIcon][][] = [
-              [['outline', pl('outline'), PanelLeft], ['parameters', pl('parameters'), AtSign]],
-              // Ask and Insights sit side by side as primaries: same AI
-              // family, same discoverability. Insights was in the overflow,
-              // which left the engine's builder surface effectively hidden
-              // while its lesser sibling had a top-level button.
-              [['suggestions', pl('suggestions'), Lightbulb], ['ask', pl('ask'), Bot], ['insights', pl('insights'), Sparkles]],
-              [['review', pl('review'), CheckCheck], ['comments', pl('comments'), MessageSquare], ['schedule', pl('schedule'), Clock]],
-            ]
-            const OVERFLOW: [RightPanelMode, string, LucideIcon][] = [
-              ['mobile', pl('mobile'), Smartphone], ['selection', pl('selection'), MousePointerClick],
-              ['sync', pl('sync'), Link2], ['bookmarks', pl('bookmarks'), BookmarkIcon],
-              ['taborder', pl('taborder'), ArrowRightLeft], ['performance', pl('performance'), PerfGauge],
-              ['reportrules', pl('reportrules'), Palette], ['translations', pl('translations'), Languages],
-              ['history', pl('history'), History],
-            ]
-            const overflowActive = OVERFLOW.find(([m]) => m === rightPanelMode)
-            const toggleMode = (m: RightPanelMode) => setRightPanelMode(cur => cur === m ? 'default' : m)
-            const paneClass = (active: boolean) => `dl-panebtn${active ? ' dl-panebtn--on' : ''}`
-            return (
-              <div className="dl-panebar__tools">
-                {GROUPS.map((group, gi) => (
-                  <div key={gi} className="dl-panebar__group">
-                    {group.map(([m, label, Icon]) => (
-                      <button key={m} onClick={() => toggleMode(m)} aria-pressed={rightPanelMode === m}
-                        className={paneClass(rightPanelMode === m)} title={label}>
-                        {/* The word collapses to the icon when the strip is narrow
-                            (a container query in index.css), except on the open
-                            panel; it stays in the accessible name either way. */}
-                        <IconLabel icon={Icon}><span className="dl-panebtn__text">{label}</span></IconLabel>
-                      </button>
-                    ))}
-                  </div>
-                ))}
-                <div style={{ position: 'relative' }}>
-                  <button onClick={() => setToolbarMoreOpen(o => !o)}
-                    aria-label={tr('builder.morePanels')} aria-expanded={toolbarMoreOpen}
-                    className={paneClass(!!overflowActive || toolbarMoreOpen)}>
-                    {overflowActive
-                      ? <IconLabel icon={overflowActive[2]}>{overflowActive[1]}</IconLabel>
-                      : <IconLabel icon={MoreHorizontal}>{tr('builder.more')}</IconLabel>}
-                  </button>
-                  {toolbarMoreOpen && (
-                    <div role="menu" aria-label={tr('builder.morePanels')} className="dl-menu"
-                      style={{ position: 'absolute', insetInlineEnd: 0, top: '110%', zIndex: 700, minWidth: 180 }}>
-                      {OVERFLOW.map(([m, label, Icon]) => (
-                        <button key={m} role="menuitem"
-                          onClick={() => { toggleMode(m); setToolbarMoreOpen(false) }}
-                          className={`dl-menu__item${rightPanelMode === m ? ' dl-menu__item--on' : ''}`}>
-                          <IconLabel icon={Icon}>{label}</IconLabel>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )
-          })()}
+          {/* The prototype's second row (7e1): pages, then Layout and zoom. */}
+          {activeView === 'report' && editMode && (<>
+            <span className="dl-bd-vr" aria-hidden />
+            {pageTabs}
+            <span className="sp" />
+            {layoutMenu}
+            <span className="dl-bd-vr" aria-hidden />
+            <ZoomControl zoom={zoom} onZoom={setZoom} />
+            {pageFilterBar}
+          </>)}
+          {/* The panel toggles that sat here (eight words and "More panels")
+              are the right rail since 7e3. */}
         </div>
         )}
         </div>
@@ -3429,7 +3630,7 @@ export default function ReportBuilder() {
         {/* Concurrent-edit warning. Non-blocking on purpose: the other session's
             change is already saved, so the useful action is to pull it in. */}
         {editConflict && canEdit && (
-          <div data-testid="edit-conflict" role="alert" style={{ display:'flex', alignItems:'center', gap:10, padding:'7px 14px',
+          <div data-testid="edit-conflict" role="alert" className="dl-bd-conflict" style={{ display:'flex', alignItems:'center', gap:10, padding:'7px 14px',
             background:'rgba(220,80,60,.12)', borderBottom:'1px solid rgba(220,80,60,.4)',
             fontSize:12, color:'var(--text)', flexShrink:0, flexWrap:'wrap' }}>
             <span style={{ flex:1, minWidth:200 }}>{editConflict.message}</span>
@@ -3517,126 +3718,28 @@ export default function ReportBuilder() {
           </div>
         )}
 
-        {/* Page tabs */}
-        {!modern && (
-        <div style={{ display:'flex', alignItems:'center', gap:3, padding:'0 16px', borderBottom:'1px solid var(--border)', flexShrink:0, background:'var(--surface)' }}>
-          {!topOpen && (
-            <span className="dl-topfold-lead">
-              <button type="button" className="dl-topfold" data-testid="top-expand"
-                aria-expanded={false} aria-label={tr('builder.top.expand')} title={tr('builder.top.expand')}
-                onClick={() => setTopOpen(true)}>
-                <ChevronDown size={14} aria-hidden />
-              </button>
-              <h1 className="dl-topfold-name" title={report.name}>{report.name}</h1>
-            </span>
-          )}
-          {report.pages
-            .filter(page => (editMode || (page.page_type !== 'hidden' && page.page_type !== 'popup')) && page.page_type !== 'tooltip' && page.page_type !== 'drillthrough')
-            .map(page => {
-              const typeIcon = page.page_type === 'hidden' ? ' [H]' : page.page_type === 'popup' ? ' [P]' : ''
-              const isActive = page.id === activePage?.id
-              return (
-                <div key={page.id} style={{ display:'flex', alignItems:'center', borderBottom: isActive ? '2px solid var(--accent)' : '2px solid transparent', marginBottom:-1,
-                  opacity: page.page_type === 'hidden' ? 0.55 : 1 }}>
-                  {editPid === page.id ? (
-                    <input value={editPname} onChange={e => setEditPname(e.target.value)}
-                      onBlur={() => savePageName(page)} onKeyDown={e => e.key==='Enter' && savePageName(page)}
-                      style={{ fontSize:12, padding:'5px 8px', width:90 }} autoFocus />
-                  ) : (
-                    <button
-                      style={{ padding:'7px 13px', border:'none', background:'none', cursor:'pointer', fontSize:12,
-                        color: isActive ? 'var(--accent)' : 'var(--muted)',
-                        fontWeight: isActive ? 600 : 400, fontFamily:'var(--sans)' }}
-                      onClick={() => { setActivePage(page); setSelectedW(null) }}
-                      onDoubleClick={() => {
-                        if (!editMode) return
-                        setEditPid(page.id); setEditPname(page.name)
-                      }}
-                    >{pageLabel(page.name)}{typeIcon}</button>
-                  )}
-                  {editMode && report.pages.length > 1 && (
-                    <button style={{ background:'none', border:'none', color:'var(--muted)', cursor:'pointer', padding:'0 4px', fontSize:13 }}
-                      aria-label={`Delete page "${page.name}"`} title={`Delete page "${page.name}" (undoable)`}
-                      onClick={() => deletePage(page)}>x</button>
-                  )}
-                </div>
-              )
-            })}
-          {editMode && (
-            <div style={{ position: 'relative', display: 'inline-flex', gap: 2 }}>
-              <button className="btn btn-ghost btn-sm" onClick={addPage} style={{ marginBottom:3, fontSize:11 }}>
-                <Plus size={11}/> {tr('builder.page')}
-              </button>
-              <button className="btn btn-ghost btn-sm" aria-label="Add page from a template"
-                aria-expanded={pageMenuOpen}
-                onClick={() => setPageMenuOpen(o => !o)} style={{ marginBottom:3, fontSize:11, padding:'4px 6px' }}>
-                ▾
-              </button>
-              {pageMenuOpen && (
-                <PageTemplateMenu
-                  reportId={reportId}
-                  activePageId={activePage?.id ?? null}
-                  onClose={() => setPageMenuOpen(false)}
-                  onAdded={() => { setPageMenuOpen(false); loadReport() }}
-                />
-              )}
-            </div>
-          )}
-          {editMode && (
-            <div style={{ position: 'relative', marginInlineStart: 8, marginBottom: 3 }}>
-              <button className="btn btn-ghost btn-sm" aria-label="Page layout"
-                aria-expanded={layoutMenuOpen}
-                onClick={() => setLayoutMenuOpen(o => !o)}
-                style={{ fontSize: 11 }}>
-                <IconLabel icon={LayoutTemplate}>{tr('builder.layout')}</IconLabel>
-              </button>
-              {layoutMenuOpen && (
-                <div role="menu" aria-label="Page layout"
-                  style={{ position: 'absolute', insetInlineStart: 0, top: '110%', zIndex: 700, minWidth: 220,
-                    background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8,
-                    boxShadow: '0 8px 24px rgba(0,0,0,.25)', padding: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  {RECIPES.map(r => {
-                    const on = activePage?.layout_mode !== 'free' && (activePage?.layout_template === r.id || (!activePage?.layout_template && r.id === DEFAULT_RECIPE))
-                    return (
-                      <button key={r.id} role="menuitem"
-                        onClick={() => { void applyPageRecipe(r.id) }}
-                        style={{ textAlign: 'start', width: '100%', padding: '6px 8px', border: 'none', borderRadius: 6,
-                          background: on ? 'var(--accent)' : 'transparent', color: on ? 'var(--mc-accent-fg)' : 'var(--text)',
-                          cursor: 'pointer', fontSize: 12 }}>
-                        <div style={{ fontWeight: 600 }}>{r.label}{r.id === DEFAULT_RECIPE ? ' (default)' : ''}</div>
-                        <div style={{ fontSize: 11, opacity: 0.8 }}>{r.hint}</div>
-                      </button>
-                    )
-                  })}
-                  <button role="menuitem"
-                    onClick={() => { void applyPageRecipe('free') }}
-                    style={{ textAlign: 'start', width: '100%', padding: '6px 8px', border: 'none', borderRadius: 6, marginTop: 4,
-                      background: activePage?.layout_mode === 'free' ? 'var(--accent)' : 'transparent',
-                      color: activePage?.layout_mode === 'free' ? 'var(--mc-accent-fg)' : 'var(--text)',
-                      cursor: 'pointer', fontSize: 12 }}>
-                    <div style={{ fontWeight: 600 }}>Free layout</div>
-                    <div style={{ fontSize: 11, opacity: 0.8 }}>Place tiles by hand; still no overlap or tiny charts</div>
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
+        {/* Page tabs while the top is folded (7e1): with it open they sit in
+            the second row. Present pages through with its own controls, and a
+            reader gets the 7d bar. */}
+        {!modern && !kiosk && !topOpen && (
+        <div className="dl-bd-bar">
+          <span className="dl-topfold-lead">
+            <button type="button" className="dl-topfold" data-testid="top-expand"
+              aria-expanded={false} aria-label={tr('builder.top.expand')} title={tr('builder.top.expand')}
+              onClick={() => setTopOpen(true)}>
+              <ChevronDown size={14} aria-hidden />
+            </button>
+            <h1 className="dl-topfold-name" title={report.name}>{report.name}</h1>
+          </span>
+          {editMode && pageTabs}
+          <span className="sp" />
+          {editMode && layoutMenu}
           {pageFilterBar}
         </div>
         )}
 
-        {editMode && multiSelectedIds.size >= 2 && (
-          <div style={{ display: 'flex', gap: 4, alignItems: 'center', padding: '6px 16px', borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
-            <span style={{ fontSize: 11, color: 'var(--muted)', marginInlineEnd: 4 }}>Align/Distribute:</span>
-            {([
-              ['Align Left', () => applyAlign('left')], ['Align Center', () => applyAlign('center')], ['Align Right', () => applyAlign('right')],
-              ['Align Top', () => applyAlign('top')], ['Align Middle', () => applyAlign('middle')], ['Align Bottom', () => applyAlign('bottom')],
-              ['Distribute Horizontally', () => applyDistribute('horizontal')], ['Distribute Vertically', () => applyDistribute('vertical')],
-            ] as const).map(([label, fn]) => (
-              <button key={label} onClick={fn} style={{ fontSize: 11, padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface2)', color: 'var(--text)', cursor: 'pointer' }}>{label}</button>
-            ))}
-          </div>
-        )}
+        {/* The Align / Distribute bar that sat here is in Properties since 7e4
+            ("N widgets selected"), with quick actions on the group box. */}
 
         {/* Canvas + right panel */}
         <CrossFilterProvider
@@ -3668,13 +3771,15 @@ export default function ReportBuilder() {
             <FilterBar variant="chips" />
           </div>
         )}
-        <div style={{ display:'flex', flex:1, gap:10, padding:'10px 16px', overflow:'hidden', minHeight:0 }}>
+        <div className={kiosk ? 'dl-pr-stage' : undefined} style={{ display:'flex', flex:1, gap:10, padding:'10px 16px', overflow:'hidden', minHeight:0, position:'relative' }}>
 
           {/* Canvas */}
-          <div key={refreshNonce} style={{ flex:1, overflowY:'auto', overflowX:'auto' }}>
+          <div key={refreshNonce} data-canvas-scroll style={{ flex:1, overflowY:'auto', overflowX:'auto' }}>
             {/* Report (h1) > page (h2) > widget titles (level 3), the outline
                 ReportPrint draws too; without it the widgets skip a level. */}
             {activePage && <h2 className="dl-sr-only">{activePage.title || activePage.name}</h2>}
+            {/* 7e4: the prototype's heavy-page hint. */}
+            {editMode && <HeavyPageBanner n={pageWidgets.length} onPerformance={() => { setRightPanelMode('performance'); setRightOpenSignal(n => n + 1) }} />}
             {editMode && recoverable.length > 0 && (
               <div role="status" data-testid="recovery-banner"
                 style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', margin:'0 0 8px', padding:'6px 10px',
@@ -3690,7 +3795,7 @@ export default function ReportBuilder() {
             )}
             {/* 5.9: with page filters in use, the old "Filters: No selections"
                 line beside them read as "no filters apply" -- the opposite. */}
-            {!modern && !(pageFilters?.length > 0) && <FilterBar />}
+            {!modern && !kiosk && !(pageFilters?.length > 0) && <FilterBar />}
             {/* The same filters, reachable after scrolling: the strip above is
                 at the top of the canvas and a tall dashboard scrolls it away. */}
             <FloatingFilterWindow />
@@ -3717,8 +3822,7 @@ export default function ReportBuilder() {
               <div data-testid="mobile-stack" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {(() => {
                   if (!datasetsReady) return null
-                  const byPosition = [...pageWidgets].sort((a, b) =>
-                    ((a.layout as any)?.y ?? 0) - ((b.layout as any)?.y ?? 0) || ((a.layout as any)?.x ?? 0) - ((b.layout as any)?.x ?? 0))
+                  const byPosition = readingOrder(shownWidgets, rtl)
                   const knownIds = byPosition.map(w => w.id)
                   const savedOrder = (activePage.mobile_layout?.order ?? []).filter(id => knownIds.includes(id))
                   const missing = knownIds.filter(id => !savedOrder.includes(id))
@@ -3764,7 +3868,7 @@ export default function ReportBuilder() {
                 onDragOver={e => { if (e.dataTransfer.types.includes('application/x-fields') || e.dataTransfer.types.includes('application/x-field') || e.dataTransfer.types.includes('application/x-hierarchy')) {
                   e.preventDefault(); e.dataTransfer.dropEffect = 'copy'
                   const single = e.dataTransfer.types.includes('application/x-field') && !e.dataTransfer.types.includes('application/x-fields')
-                  const wid = single ? Number((e.target as HTMLElement).closest?.('[data-widget-id]')?.getAttribute('data-widget-id')) || null : null
+                  const wid = single ? widgetIdAtPoint(e.currentTarget, e.clientX, e.clientY) : null
                   if (wid !== dropTargetId) setDropTargetId(wid)
                 } }}
                 onDragLeave={e => { if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node | null)) setDropTargetId(null) }}
@@ -3786,7 +3890,10 @@ export default function ReportBuilder() {
                     // Dropped ON a widget: fill its next empty compatible role
                     // (SAS's drop-onto-object). Anywhere else, or a widget with
                     // no room left, makes a new chart -- and says which.
-                    const wid = Number((e.target as HTMLElement).closest?.('[data-widget-id]')?.getAttribute('data-widget-id'))
+                    // QA3 A2: by the pointer, not by the element under it. An
+                    // overlay drawn over the widget (outlines, the size tag,
+                    // the hover toolbar) is not inside it, and lost the drop.
+                    const wid = widgetIdAtPoint(e.currentTarget, e.clientX, e.clientY)
                     const target = wid ? pageWidgets.find(w => w.id === wid) : undefined
                     const col = columns.find(c => c.name === field)
                     const plan = target && col ? planFieldOnWidget(target, field, isNumericField(col)) : null
@@ -3817,8 +3924,8 @@ export default function ReportBuilder() {
                   // the page, or start from a page template"). The drag-a-field
                   // gesture is the builder's best one -- a field dropped here
                   // becomes the right chart -- and nothing used to mention it.
-                  <div data-testid="empty-page" style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', flexDirection:'column', gap:10, color:'var(--muted)', pointerEvents:'none', textAlign:'center', padding:16 }}>
-                    <span style={{ fontSize:36, opacity:.2 }}>⊞</span>
+                  <div data-testid="empty-page" className="dl-bd-emptypage" style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', flexDirection:'column', gap:10, color:'var(--muted)', pointerEvents:'none', textAlign:'center', padding:16 }}>
+                    <span className="ic" aria-hidden><LayoutTemplate size={26} /></span>
                     {!editMode && <span style={{ fontSize:13 }}>{tr('builder.noWidgets')}</span>}
                     {editMode && (<>
                       <span style={{ fontSize:15, fontWeight:600, color:'var(--text)' }}>{tr('builder.designPage')}</span>
@@ -3842,15 +3949,20 @@ export default function ReportBuilder() {
                             {tr('builder.addData')}
                           </button>
                         )}
-                        <button type="button" className="btn btn-ghost btn-sm"
-                          onClick={() => { window.scrollTo({ top: 0 }); setPageMenuOpen(true) }}>
+                        {/* 7e5: opens the Templates tab, where the layouts are
+                            cards (v1 opened the page tabs' menu, still there). */}
+                        <button type="button" className="btn btn-ghost btn-sm dl-bd-line"
+                          onClick={() => { setLeftTab('more'); setLeftOpenSignal(n => n + 1) }}>
                           {tr('builder.addFromTemplate')}
                         </button>
                       </span>
                     </>)}
                   </div>
                 )}
-                {datasetsReady && pageWidgets
+                {/* QA3 A8: for a reader the DOM is in Tab order (reading order
+                    unless the author set one), so Tab moves as the eye does.
+                    Positions are absolute, so nothing moves on screen. */}
+                {datasetsReady && (editMode ? pageWidgets : tabOrder(shownWidgets, rtl).map(w => pageWidgets.find(x => x.id === w.id)!))
                   .filter(w => editMode || !(w.config as any).hidden)
                   /* A widget assigned to a container renders INSIDE it, so it is
                      skipped at canvas level -- rendering both places would fetch and
@@ -3873,6 +3985,36 @@ export default function ReportBuilder() {
                       opacity: isHidden || (editMode && (widget.config as any).container_id) ? 0.5 : 1,
                       ...(dropTargetId === widget.id ? { outline: '2px dashed var(--accent)', outlineOffset: -2, borderRadius: 'var(--radius)' } : {}) }}
                       title={dropTargetId === widget.id ? `Drop to add the field to "${widget.title || widget.widget_type}"` : undefined}>
+                      {/* Reading (7d): ask about this widget, or see it full
+                          screen. Beside the widget's own controls, never on them:
+                          WidgetRenderer and its menu are unchanged. */}
+                      {modern && (
+                        <div className="dl-vw-wt" role="toolbar" aria-label={tr('vw.wt.aria', { title: widget.title || widget.widget_type })}>
+                          <button type="button" onClick={() => askAbout(widget)} disabled={aiOffline}
+                            aria-label={tr('vw.wt.ask', { title: widget.title || widget.widget_type })}
+                            title={aiOffline ? tr('off.composer') : tr('vw.wt.askShort')}>
+                            <span className="dl-vw-av" aria-hidden><AiMascot size={15} /></span>
+                          </button>
+                          <button type="button" onClick={() => setFocusW(widget)}
+                            aria-label={tr('vw.wt.focus', { title: widget.title || widget.widget_type })} title={tr('vw.wt.focusShort')}>
+                            <Maximize2 size={15} aria-hidden />
+                          </button>
+                        </div>
+                      )}
+                      {/* Building (7e4): the prototype's quick actions over the
+                          widget. Beside WidgetRenderer, which keeps its own header. */}
+                      {editMode && (
+                        <EditToolbar title={widget.title || widget.widget_type}
+                          onDuplicate={perWidgetHandlers.get(widget.id)?.onDuplicate}
+                          onAssign={() => {
+                            setSelectedW(widget); setRightPanelMode('default'); setPropSection('data'); setRightOpenSignal(n => n + 1)
+                            setTimeout(() => window.dispatchEvent(new CustomEvent(ASSIGN_DATA_EVENT, { detail: { widgetId: widget.id } })), 0)
+                          }}
+                          onFilters={() => {
+                            setSelectedW(widget); setRightPanelMode('default'); setPropSection('data'); setRightOpenSignal(n => n + 1)
+                            setTimeout(() => window.dispatchEvent(new CustomEvent(ASSIGN_DATA_EVENT, { detail: { widgetId: widget.id, tab: 'Filters', open: false } })), 0)
+                          }} />
+                      )}
                       <WidgetRenderer
                         widget={localisedWidgets.get(widget.id) ?? widget}
                         datasetId={report.dataset_id}
@@ -3904,14 +4046,84 @@ export default function ReportBuilder() {
                         onApplyBookmark={handleButtonApplyBookmark}
                         eagerFetch={kiosk}
                       />
+                      {/* An empty result under the reader's filters says so, with
+                          the way out (7e4). */}
+                      <EmptyResultNote rowCount={perfStats[widget.id]?.rowCount} pageFiltered={pageFilters.length > 0}
+                        onClearPage={() => setPageFilters([])} />
                     </div>
                   )
                 })}
+                {/* 7e4: guides for the selected widget, the box around a
+                    multi-selection. They read the layout; they never move it. */}
+                {editMode && selectedW && multiSelectedIds.size < 2 && !dragging && !resizing && pageWidgets.some(w => w.id === selectedW.id) && (() => {
+                  const eff = (w: Widget) => localLayouts[w.id] ?? packedPreview[w.id] ?? w.layout
+                  const sw = pageWidgets.find(w => w.id === selectedW.id)!
+                  return <SelectionGuides layout={eff(sw)} containerW={containerW}
+                    others={pageWidgets.filter(w => w.id !== sw.id).map(eff)} />
+                })()}
+                {editMode && multiSelectedIds.size >= 2 && (
+                  <GroupBox containerW={containerW}
+                    layouts={pageWidgets.filter(w => multiSelectedIds.has(w.id)).map(w => localLayouts[w.id] ?? packedPreview[w.id] ?? w.layout)}
+                    onAlignLeft={() => applyAlign('left')} onAlignTop={() => applyAlign('top')} onDistribute={() => applyDistribute('horizontal')} />
+                )}
               </div>
             </div>
             )}
           </div>
 
+          {!editMode && !kiosk && viewHistory && !aiOpen && (
+            <aside className="dl-vw-ai" data-testid="view-history" aria-label={tr('shx.vh.title')}>
+              <div className="dl-vw-ai__h">
+                <div className="tt"><h2>{tr('shx.vh.title')}</h2></div>
+                <button type="button" className="dl-vw-ai__x" onClick={() => setViewHistory(false)} aria-label={tr('bd.keys.close')} title={tr('bd.keys.close')}>
+                  <X size={16} aria-hidden />
+                </button>
+              </div>
+              <div className="dl-vw-ai__b">
+                <VersionHistoryPane reportId={reportId} currentRevision={loadedRevision}
+                  onRestored={() => { loadReport().catch(() => {}) }} />
+              </div>
+            </aside>
+          )}
+          {/* Reading (7d): the AI panel beside the dashboard, or the button
+              that opens it. Present keeps the panel and has its own button. */}
+          {!editMode && aiOpen && (
+            <ViewAssist tab={aiTab} onTab={setAiTab} onClose={() => setAiOpen(false)}
+              context={`${report.name} · ${activePage ? pageLabel(activePage.name) : ''}`}
+              ask={chatDatasetIds.length > 0 ? (
+                <ChatPane key={`ask-view-${reportId}-${askSeed?.n ?? 0}`} datasetIds={chatDatasetIds}
+                  conversationId={reportChatId} onConversationCreated={c => rememberReportChat(c.id)}
+                  datasetColumns={columns.map(c => c.name)} initialInput={askSeed?.q}
+                  suggestions={datasetSuggestions(columns, tr)}
+                  onAddToPage={canEdit ? (draft, title) => addSuggestedWidget({
+                    widget_type: draft.widget_type, title, reason: 'from Ask', config: draft.config }) : undefined} />
+              ) : dataset?.data_source_id != null ? (
+                <ChatPane key={`ask-view-src-${askSeed?.n ?? 0}`} dataSourceId={dataset.data_source_id} conversationId={null} initialInput={askSeed?.q} />
+              ) : (
+                <p style={{ padding: 14, fontSize: 13, color: 'var(--muted)', margin: 0 }}>{tr('vw.ai.noData')}</p>
+              )}
+              insights={<InsightsPane datasetId={report.dataset_id ?? null}
+                columnTypes={Object.fromEntries(columns.map(c => [c.name,
+                  columnMeta[c.name]?.role === 'category' ? 'categorical'
+                    : columnMeta[c.name]?.role === 'measure' ? 'numeric' : c.dtype]))}
+                onAdd={canEdit ? s => { void addSuggestedWidget(s) } : undefined}
+                reportId={canEdit ? reportId : undefined}
+                onComposed={canEdit ? () => { void loadReport() } : undefined} />}
+              suggest={canEdit ? (
+                <SuggestionsPane columns={columns} analysis={analysis} onAdd={addSuggestedWidget} reportId={reportId}
+                  datasetId={report.dataset_id} pageWidgets={activePage?.widgets ?? []} columnMeta={columnMeta} />
+              ) : undefined} />
+          )}
+          {modern && !aiOpen && (
+            <button type="button" className="dl-vw-fab" onClick={() => setAiOpen(true)} aria-keyshortcuts="Control+/" data-testid="view-ai-open">
+              <span className="dl-vw-av lg" aria-hidden><AiMascot size={24} alive={!aiOffline} /></span>{tr('nav.askAi')}
+            </button>
+          )}
+
+          {/* Pinned Properties beside the open rail panel (7e3). */}
+          {editMode && pinProps && rightPanelMode !== 'default' && (
+            <aside className="dl-bd-pinned" aria-label={tr('bd.rail.properties')}>{propertiesBody}</aside>
+          )}
           {/* Right: config panel */}
           {editMode && (
             <CollapsibleSide
@@ -3924,11 +4136,15 @@ export default function ReportBuilder() {
               style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)' }}
               scrollResetKey={rightPanelMode !== 'default' ? rightPanelMode : selectedW ? `widget-${selectedW.id}` : activePage ? `page-${activePage.id}` : 'none'}
             >
+              {rightPanelMode !== 'default' && (
+                <PanelHead mode={rightPanelMode} />
+              )}
+              {AI_MODES.includes(rightPanelMode) && <AiTabs mode={rightPanelMode} onPick={setRightPanelMode} />}
               {rightPanelMode === 'mobile' && (
-                activePage && <MobileLayoutEditor page={activePage} widgets={pageWidgets} onUpdate={updatePageProps} />
+                activePage && <MobileLayoutEditor page={activePage} widgets={shownWidgets} onUpdate={updatePageProps} />
               )}
               {rightPanelMode === 'selection' && (
-                <SelectionPane widgets={pageWidgets} onUpdate={(id, config) =>
+                <SelectionPane widgets={shownWidgets} onUpdate={(id, config) =>
                   reportsApi.updateWidget(reportId, activePage!.id, id, { config }).then(loadReport)} />
               )}
               {rightPanelMode === 'sync' && <SyncSlicersPaneConnected pages={report.pages} />}
@@ -3937,7 +4153,7 @@ export default function ReportBuilder() {
                   onRestored={loadReport} />
               )}
               {rightPanelMode === 'taborder' && (
-                <TabOrderPane widgets={pageWidgets} onUpdate={(id, config) =>
+                <TabOrderPane widgets={shownWidgets} onUpdate={(id, config) =>
                   reportsApi.updateWidget(reportId, activePage!.id, id, { config }).then(loadReport)} />
               )}
               {rightPanelMode === 'performance' && (
@@ -4176,93 +4392,46 @@ export default function ReportBuilder() {
                   </div>
                 )
               )}
-              {rightPanelMode === 'default' && (
-                <>
-                  <div style={{ padding:'9px 13px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'space-between', gap:8 }}>
-                    <span data-autodir-text
-                      title={selectedW ? (selectedW.title || selectedW.widget_type) : (activePage?.name ?? '')}
-                      style={{ fontSize:12, fontWeight:600, color:'var(--text)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                      {selectedW
-                        ? tr('builder.panelWidget', { name: selectedW.title || WIDGET_CATALOG.find(w => w.type === selectedW.widget_type)?.label || selectedW.widget_type })
-                        : tr('builder.panelPage', { name: activePage?.name ?? '' })}
-                    </span>
-                    <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
-                      <button style={{ background:'none', border:'none', color:'var(--accent)', cursor:'pointer', fontSize:11, padding:0 }}
-                        onClick={() => setRightPanelMode('parameters')}>
-                        {tr('builder.reportSettings')}
-                      </button>
-                      {selectedW && (
-                        <button aria-label="Deselect widget" title="Deselect widget"
-                          style={{ background:'none', border:'none', color:'var(--muted)', cursor:'pointer', fontSize:14 }}
-                          onClick={() => setSelectedW(null)}>
-                          x
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  {/* Pick the object to edit, rather than finding it on the
-                      canvas. Every settings pane in SAS carries this, and it is
-                      what makes an object's settings reachable at all: a widget
-                      inside a container, a small one, or one sitting under
-                      another in a precision layout can be genuinely hard to
-                      click. The page is in the same list, because page settings
-                      are settings too. */}
-                  {activePage && (pageWidgets.length > 0) && (
-                    <div style={{ padding: '0 14px 8px' }}>
-                      <label htmlFor="object-picker" style={{ display: 'block', fontSize: 11,
-                        fontWeight: 700, color: 'var(--muted)', marginBottom: 4 }}>
-                        {tr('builder.objectToEdit')}
-                      </label>
-                      <select id="object-picker" style={{ width: '100%', fontSize: 12 }}
-                        value={selectedW ? String(selectedW.id) : 'page'}
-                        onChange={e => {
-                          const v = e.target.value
-                          setSelectedW(v === 'page' ? null
-                            : pageWidgets.find(w => String(w.id) === v) ?? null)
-                        }}>
-                        <option value="page">{tr('builder.pageOption', { name: activePage.name })}</option>
-                        {pageWidgets.map(w => (
-                          <option key={w.id} value={String(w.id)}>
-                            {w.title || w.widget_type} ({w.widget_type})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-
-                  {selectedW
-                    ? <WidgetConfigPanel key={`${selectedW.id}:${panelEpoch}`} geography={geography} widget={selectedW} columns={columns} datasets={datasets} primaryDatasetId={report.dataset_id} pages={report.pages} hierarchy={hierarchy} onHierarchyRefresh={refreshHierarchy} bookmarks={bookmarks} onUpdate={updateWidgetConfig} ruleErrors={perfStats[selectedW.id]?.ruleErrors}
-                      distinctCounts={Object.fromEntries(Object.entries(hints).flatMap(([k, h]) => typeof (h as { distinct?: unknown })?.distinct === 'number' ? [[k, (h as { distinct: number }).distinct]] : []))} />
-                    : activePage && <PagePropertiesPanel reportId={reportId} page={activePage} columns={columns} onUpdate={updatePageProps}
-                        pages={report.pages} bookmarks={bookmarks} onSelectWidget={setSelectedW}
-                        // The palette picker moved here from a row of unlabeled
-                        // dots in the header, where each theme was one colour
-                        // and no name.
-                        palettes={[
-                          ...Object.keys(THEMES).map(key => ({ key, name: PALETTE_NAME[key] ?? key[0].toUpperCase() + key.slice(1), colors: THEMES[key] })),
-                          ...Object.entries(orgThemes).map(([key, t]) => ({ key, name: t.name, colors: t.colors })),
-                        ]}
-                        currentPalette={report.theme ?? 'default'}
-                        onPalette={setThemeUndoable} />
-                  }
-                </>
-              )}
+              {rightPanelMode === 'default' && propertiesBody}
             </CollapsibleSide>
           )}
+          {/* The right rail (7e3): every panel, one icon each. */}
+          {editMode && (
+            <RightRail mode={rightPanelMode} pinned={pinProps}
+              onPick={m => {
+                // Pressing the open panel again returns to Properties, as v1's
+                // toggles did; AI counts as open on any of its three tabs.
+                const open = m === 'ask' ? AI_MODES.includes(rightPanelMode) : rightPanelMode === m
+                if (m === 'default' && pinProps && rightPanelMode !== 'default') setPinProps(false)
+                setRightPanelMode(open && m !== 'default' ? 'default' : m)
+                setRightOpenSignal(n => n + 1)
+              }} />
+          )}
         </div>
+        {/* Inside the cross-filter provider: the focused widget is a
+            WidgetRenderer like any other on the page. */}
+        {focusW && !editMode && (
+        <FocusView widget={localisedWidgets.get(focusW.id) ?? focusW} onClose={() => setFocusW(null)}
+          askDisabled={aiOffline}
+          onAsk={q => { setFocusW(null); setAiOpen(true); setAiTab('ask'); setAskSeed(s => ({ q, n: (s?.n ?? 0) + 1 })) }}
+          render={w => (
+            <WidgetRenderer widget={w} datasetId={report.dataset_id} reportId={reportId}
+              parameters={effectiveParams} onSetParameter={stableOnSetParameter}
+              calculatedColumns={calcCols} columnFormats={columnFormats} geography={geography}
+              datasets={datasets} relationships={relationships} editMode={false}
+              promptFilter={activePromptFilter} onFetchComplete={handleFetchComplete}
+              pages={report.pages} reportDisplayRules={report.display_rules ?? EMPTY_RULES}
+              reportFilters={report.common_filters ?? []} pageFilters={pageQueryFilters}
+              onDrillthrough={handleDrillthrough} hierarchy={hierarchy} bookmarks={bookmarks}
+              onNavigateToPage={handleButtonNavigate} onApplyBookmark={handleButtonApplyBookmark} />
+          )} />
+      )}
         </CrossFilterProvider>
         </>
         )}
 
         {pdfDialog && (
-          <PdfOptionsDialog pages={report.pages.filter(p => (p.page_type ?? 'normal') === 'normal').map(p => ({ id: p.id, name: p.name }))}
-            onClose={() => setPdfDialog(false)}
-            onDownload={o => {
-              setPdfDialog(false)
-              reportsApi.downloadPdf(reportId, report.name, o)
-                .then(() => toast.success('PDF downloaded'))
-                .catch(() => toast.error('Could not generate the PDF'))
-            }} />
+          <ExportDialog report={report} activePageId={activePage?.id ?? null} onClose={() => setPdfDialog(false)} />
         )}
 
         {geoCheck && report.dataset_id != null && (
@@ -4274,47 +4443,27 @@ export default function ReportBuilder() {
           </Suspense>
         )}
 
-        {shortcutsOpen && (
-          <div
-            onClick={() => setShortcutsOpen(false)}
-            style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.45)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            {/* The role belongs on the panel; the backdrop is the scrim, not
-                the dialog. And a keyboard-shortcuts reference that cannot be
-                closed from the keyboard is its own contradiction. */}
-            <div ref={shortcutsRef} role="dialog" aria-modal="true" aria-label="Keyboard shortcuts"
-              onClick={e => e.stopPropagation()}
-              style={{ background: 'var(--surface)', border: '1px solid var(--border)',
-                borderRadius: 'var(--radius)', padding: 20, minWidth: 320, fontSize: 13 }}>
-              <div style={{ fontWeight: 700, marginBottom: 10 }}>Keyboard shortcuts</div>
-              <table style={{ borderCollapse: 'collapse' }}>
-                <tbody>
-                  {[['Ctrl+K', 'Jump to any report, dataset or page'],
-                    ['Arrow keys', 'Move the selected widget'],
-                    ['Shift + arrows', 'Resize the selected widget'],
-                    ['Delete', 'Remove the selected widget'],
-                    ['Ctrl+Z', 'Undo the last change (the toolbar names it)'],
-                    ['Ctrl+Y / Ctrl+Shift+Z', 'Redo'],
-                    ['Escape', 'Deselect / close'],
-                    ['?', 'Toggle this reference']].map(([k, d]) => (
-                    <tr key={k}>
-                      <td style={{ padding: '3px 14px 3px 0' }}><kbd style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 6px', fontSize: 11 }}>{k}</kbd></td>
-                      <td style={{ padding: '3px 0', color: 'var(--muted)' }}>{d}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
+        {shortcutsOpen && <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />}
 
-        <StatusBar
-          pageIndex={report.pages.findIndex(p => p.id === activePage?.id)}
-          pageCount={report.pages.length}
-          saveState={saving ? 'saving' : 'saved'}
-          zoom={zoom}
-          onZoomChange={setZoom}
-        />
+        {!kiosk && (editMode ? (
+          // Building (7e1): zoom is in the second row and the save state in the
+          // header; the footer counts the page's widgets and the selection.
+          <StatusBar
+            pageIndex={report.pages.findIndex(p => p.id === activePage?.id)}
+            pageCount={report.pages.length}
+            widgets={pageWidgets.length}
+            selected={selectionCount({ primary: selectedW?.id ?? null, multi: multiSelectedIds })}
+            onShortcuts={() => setShortcutsOpen(true)}
+          />
+        ) : (
+          <StatusBar
+            pageIndex={report.pages.findIndex(p => p.id === activePage?.id)}
+            pageCount={report.pages.length}
+            saveState={saving ? 'saving' : 'saved'}
+            zoom={zoom}
+            onZoomChange={setZoom}
+          />
+        ))}
       </div>
       {/* The page copilot: edit THIS page in plain language. Edit mode only —
           it writes through the same endpoints as the GUI, so offering it to a
@@ -4328,8 +4477,21 @@ export default function ReportBuilder() {
           widgetCount={activePage.widgets?.length ?? 0} datasetId={report.dataset_id}
           onApplied={onCopilotApplied} />
       )}
+      {kiosk && (
+        <PresentControls title={report.name}
+          pages={report.pages.filter(p => (p.page_type ?? 'normal') === 'normal').map(p => ({ id: p.id, name: pageLabel(p.title || p.name) }))}
+          activeId={activePage?.id ?? null}
+          onGo={id => { const p = report.pages.find(x => x.id === id); if (p) setActivePage(p) }}
+          onExit={() => { setKiosk(false); setAiOpen(false) }}
+          onAsk={() => { setAiOpen(true); setAiTab('ask') }}
+          aiOpen={aiOpen} onCloseAi={() => setAiOpen(false)} />
+      )}
       {shareOpen && (
-        <ShareLinksDialog reportId={report.id} onClose={() => setShareOpen(false)} />
+        <ShareDashboardDialog report={report} canEdit={canEdit} isAdmin={isAdmin} pageId={activePage?.id ?? null}
+          onClose={() => setShareOpen(false)}
+          onPublishedChange={published => setReport(r => r ? { ...r, published } : r)}
+          onAccessWhy={Object.keys(access).length ? () => { setShareOpen(false); setAccessOpen2(true) } : undefined}
+          onAccessByRole={() => { setShareOpen(false); setAccessOpen(true) }} />
       )}
       {accessOpen2 && (
         <AccessExplainer decisions={Object.values(access)}

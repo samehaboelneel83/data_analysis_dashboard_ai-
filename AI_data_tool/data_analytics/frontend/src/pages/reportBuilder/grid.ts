@@ -4,8 +4,8 @@ import type { Widget } from '../../types/report'
 export const COLS = 12
 export const ROW_H = 58    // px per grid row unit
 export const GAP = 8
-export const LEFT_SIDEBAR_W = 220
-export const RIGHT_PANEL_W = 245
+export const LEFT_SIDEBAR_W = 264
+export const RIGHT_PANEL_W = 300
 /** The right panel while it shows Suggestions: each card draws a live chart,
  *  and at 245px a chart with axes is unreadable (measured: a 197x118 preview
  *  showed a histogram as a smear and a scatter as a line). */
@@ -31,4 +31,22 @@ export function gridStyle(layout: Widget['layout'], containerW: number): CSSProp
 export function canvasH(widgets: Widget[]) {
   if (!widgets.length) return 560
   return Math.max(560, Math.max(...widgets.map(w => w.layout.y + w.layout.h)) * (ROW_H + GAP) + 80)
+}
+
+/**
+ * QA3 A2: the widget under a point on the canvas, by its drawn box, topmost
+ * first. A drop used to read `e.target.closest('[data-widget-id]')`, which
+ * misses whenever something not inside the widget is drawn over it. Boxes are
+ * screen coordinates, so zoom and right-to-left need no special case.
+ */
+export function widgetIdAtPoint(canvas: Element, x: number, y: number): number | null {
+  const tiles = [...canvas.querySelectorAll<HTMLElement>('[data-widget-id]')].reverse()
+  for (const el of tiles) {
+    const r = el.getBoundingClientRect()
+    if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+      const id = Number(el.getAttribute('data-widget-id'))
+      if (id) return id
+    }
+  }
+  return null
 }

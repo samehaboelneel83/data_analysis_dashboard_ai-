@@ -47,3 +47,19 @@ describe('code and name together (Chrome re-test)', () => {
     expect(groupedBars(r)).toBeNull()
   })
 })
+
+describe('autoChart with numeric-looking labels (redesign 1d)', () => {
+  it('charts faculty names against their average as bars', () => {
+    expect(autoChart(res(['faculty', 'average_final_score'],
+      [['Engineering', 61.53500000000001], ['Science', 70.2], ['Arts', 58.1], ['Law', 66.4]]))).toBe('bar')
+  })
+
+  it('charts faculty codes 1-4 as bars instead of falling back to the grid', () => {
+    expect(autoChart(res(['faculty', 'average_final_score'],
+      [[1, 61.5], [2, 70.2], [3, 58.1], [4, 66.4]]))).toBe('bar')
+  })
+
+  it('keeps the grid when the numeric first column repeats', () => {
+    expect(autoChart(res(['faculty', 'score'], [[1, 61.5], [1, 70.2], [2, 58.1]]))).toBeNull()
+  })
+})
