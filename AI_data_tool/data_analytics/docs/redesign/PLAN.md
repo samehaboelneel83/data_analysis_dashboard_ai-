@@ -920,6 +920,11 @@ The QA3 report and screenshots were not on this machine. `qa-3/QA_REPORT_3.md` i
 QA4 confirmed N3 (opening Demo — Sales Overview in Edit left revision 39 unchanged) and almost all of 7-QA3. N3 is fixed on the client; the batch layout endpoint and the 50-version cap remain backend items. The report and screenshots are in `redesign-captures/qa-4/`.
 
 **Broken:**
+- **E0 (the owner's, after QA4)** The whole document scrolled on Home: the shell slid up over an empty strip.
+  - Cause: Home's visually hidden "Actions" table header (`.dl-sr-only`, `position: absolute`, added in 7a `3ed767f`) had no positioned ancestor, so it was placed against the document at its static position, y≈1557 in a 1080px window. The clipping shell and the page scroller do not clip an absolute element whose containing block is above them.
+  - Confirmed: `before-redesign` is clean (1080 on every page); `da76a61` and HEAD before the fix had Home at 1557, and a wheel over the sidebar scrolled the window 477px.
+  - Fix: `.dl-shell` and `.dl-shell__content` are `position: relative`, so every absolutely positioned element in the app is contained and clipped by the shell. The QA V5 rule (the shell clips) is kept.
+  - Check: `e2e/journeys/document_scroll_journey.mjs`, Home, Dashboards, Datasets and the Builder, EN and AR, dark, 1920×1080: `scrollHeight === innerHeight`, and after a long wheel over the content and over the sidebar the window has not scrolled and the shell's top is 0. 8/8 pass; the old build fails Home in both languages (1557, scrolled 477). Pinned by a CSS rule test.
 - **E1** A new display rule starts on what the server can evaluate:
   - "> 0" on the first numeric column;
   - with none, a colour per value (`value_map`), which fits a text column.
@@ -972,5 +977,5 @@ QA4 confirmed N3 (opening Demo — Sales Overview in Edit left revision 39 uncha
   - the colour-map test (a new rule now starts on the first numeric column);
   - the crumb rule test.
 - `e2e/capture/redesign/cap_qa4.mjs`: before (:3002 at `da76a61`) and after (:3001) into `qa-4-fixes/{before,after}`, EN/AR × light/dark. V9 has no capture (it needs a live LLM answer); its unit test covers it.
-- Full suite: 311 files / 3983 tests pass (run with 4 workers). With the default worker count, while the capture servers were busy, three slow tests timed out (the map click 24s, geo time-play 11s, report-level display rules 7.8s); each passes alone. Type-check and build pass.
+- Full suite: 311 files / 3984 tests pass (run with 4 workers), after E0. With the default worker count, while the capture servers were busy, three slow tests timed out (the map click 24s, geo time-play 11s, report-level display rules 7.8s); each passes alone. Type-check and build pass.
 - Seen while capturing (not in the QA report): on the Datasets page, the first click on a non-selected row's ⋯ sometimes opens and at once closes its menu in Playwright; a second click opens it. The QA opened it normally with a real browser. Watch in QA5.

@@ -1087,9 +1087,15 @@ svg.recharts-surface { direction: ltr; }
    taller, and a clipped box cannot be scrolled from script either, so a focus
    jump or scrollIntoView never nudges the whole shell (top bar and logo up
    ~15px). Fixed-position popups are not clipped by it. */
-.dl-shell { display: flex; block-size: 100%; overflow: clip; }
+.dl-shell { display: flex; block-size: 100%; overflow: clip; position: relative; }   /* QA4 E0: contains the rail's and top bar's absolutes too */
 .dl-shell__main { flex: 1; display: flex; flex-direction: column; min-inline-size: 0; }
-.dl-shell__content { flex: 1; overflow: auto; background: var(--bg); }
+/* QA4 E0: positioned, so it is the containing block of anything absolutely
+   positioned inside the page (a visually hidden table header, a popover).
+   Without it such an element is placed against the DOCUMENT: Home's hidden
+   "Actions" header (7a) sat at y≈1557 in a 1080px window and made the whole
+   document scroll, the shell moving up over an empty strip. The shell still
+   clips (QA V5); this keeps every page's content inside it. */
+.dl-shell__content { flex: 1; overflow: auto; background: var(--bg); position: relative; }
 
 /* Present / kiosk: the dashboard fills the window. Any-key exit is wired in
    ReportBuilder; the shell just gets out of the way. */

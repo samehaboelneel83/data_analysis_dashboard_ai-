@@ -24,6 +24,13 @@ describe('app shell (QA V5)', () => {
   it('the shell clips rather than hides, so nothing can scroll it', () => {
     expect(css).toMatch(/\.dl-shell\s*\{[^}]*overflow:\s*clip/)
   })
+
+  it('QA4 E0: the shell and the page area are containing blocks, so nothing positioned inside them stretches the document', () => {
+    // Home's visually hidden "Actions" header was placed against the document
+    // (y≈1557 in a 1080px window) and the whole window scrolled.
+    expect(css).toMatch(/\.dl-shell\s*\{[^}]*position:\s*relative/)
+    expect(css).toMatch(/\.dl-shell__content\s*\{[^}]*overflow:\s*auto[^}]*position:\s*relative/)
+  })
 })
 
 describe('dark theme natives (QA V10)', () => {
