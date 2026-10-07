@@ -1198,6 +1198,73 @@ describe('ReportBuilder zoom-aware drag math', () => {
   })
 })
 
+describe('opening an old dashboard writes nothing (QA3 N3)', () => {
+  const oldPage = (layout_mode: string | null, widgets: any[]) => {
+    const r = baseReport()
+    ;(r.pages[0] as any).layout_mode = layout_mode
+    r.pages[0].widgets = widgets as any
+    return r
+  }
+  const kpi = (id: number, x: number, y: number, w = 12, h = 5) =>
+    ({ id, page_id: 100, widget_type: 'kpi', title: `KPI ${id}`, config: { measure: 'revenue' }, layout: { x, y, w, h }, created_at: '2026-01-01' })
+
+  it.each([
+    ['no layout mode', null, [kpi(1, 0, 0), kpi(2, 0, 5)]],
+    ['packed, overlapping', 'packed', [kpi(1, 0, 0, 6, 4), kpi(2, 3, 2, 6, 4)]],
+  ])('%s: zero widget or page writes on opening in Edit', async (_, mode, widgets) => {
+    vi.mocked(reportsApi.get).mockResolvedValue(oldPage(mode as any, widgets) as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    vi.mocked(reportsApi.updateWidget).mockClear()
+    vi.mocked(reportsApi.updatePage).mockClear()
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    await screen.findByText('KPI 1')
+    await new Promise(r => setTimeout(r, 300))
+    expect(reportsApi.updateWidget).not.toHaveBeenCalled()
+    expect(reportsApi.updatePage).not.toHaveBeenCalled()
+  })
+
+  it('the first real edit stores what was shown, page first, one write at a time; undo restores it all', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue(oldPage(null, [kpi(1, 0, 0), kpi(2, 0, 5), kpi(3, 0, 10)]) as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    const order: string[] = []; let inFlight = 0, maxInFlight = 0
+    const slow = (what: string) => async () => {
+      order.push(what); inFlight++; maxInFlight = Math.max(maxInFlight, inFlight)
+      await new Promise(r => setTimeout(r, 5)); inFlight--; return {} as any
+    }
+    vi.mocked(reportsApi.updateWidget).mockReset().mockImplementation(((_r: number, _p: number, id: number) => slow(`widget ${id}`)()) as any)
+    vi.mocked(reportsApi.updatePage).mockReset().mockImplementation(((_r: number, _p: number, d: any) => slow(`page ${d.layout_mode === '' ? 'restore' : d.layout_mode}`)()) as any)
+    const realRect = Element.prototype.getBoundingClientRect
+    Element.prototype.getBoundingClientRect = vi.fn(() => ({ left: 0, top: 0, right: 900, bottom: 600, width: 900, height: 600, x: 0, y: 0, toJSON: () => {} })) as any
+    try {
+      renderBuilder()
+      await screen.findByTestId('view-strip')
+      const grip = (await screen.findAllByText('⠿'))[0].closest('div') as HTMLElement
+      fireEvent.mouseDown(grip, { clientX: 0, clientY: 0 })
+      fireEvent.mouseMove(window, { clientX: 0, clientY: 20 * 66 })
+      fireEvent.mouseUp(window)
+      await waitFor(() => expect(order.filter(o => o.startsWith('widget')).length).toBeGreaterThanOrEqual(2))
+      await new Promise(r => setTimeout(r, 100))
+      expect(order[0]).toBe('page packed')
+      expect(maxInFlight).toBe(1)
+      // every widget the automatic layout moved is stored where it was shown
+      const stored = vi.mocked(reportsApi.updateWidget).mock.calls.map(c => c[2])
+      expect(new Set(stored)).toEqual(new Set([1, 2, 3]))
+
+      order.length = 0
+      fireEvent.click(await screen.findByRole('button', { name: 'Undo' }))
+      await waitFor(() => expect(order).toContain('page restore'))
+      expect(maxInFlight).toBe(1)
+      const undone = vi.mocked(reportsApi.updateWidget).mock.calls.slice(-3).map(c => [c[2], (c[3] as any).layout])
+      expect(Object.fromEntries(undone)).toEqual({ 1: { x: 0, y: 0, w: 12, h: 5 }, 2: { x: 0, y: 5, w: 12, h: 5 }, 3: { x: 0, y: 10, w: 12, h: 5 } })
+    } finally {
+      Element.prototype.getBoundingClientRect = realRect
+    }
+  })
+})
+
 describe('Assign data on a widget that is not selected (QA3)', () => {
   it('selects it and opens the Assign data dialog', async () => {
     const r = baseReport()

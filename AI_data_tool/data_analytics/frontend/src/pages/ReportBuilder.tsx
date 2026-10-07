@@ -117,7 +117,6 @@ import {
   dropPacked,
   isPackedMode,
   isRecipeId,
-  itemsOverlap,
   layoutChanged,
   minSize,
   needsAutoPack,
@@ -126,6 +125,7 @@ import {
   resizePacked,
   toLayoutItems,
   DEFAULT_RECIPE,
+  shownLayouts,
 } from '../lib/dashboardLayout'
 
 import {
@@ -580,54 +580,60 @@ export default function ReportBuilder() {
     /** When set, the layout change is one undoable step with this sentence. */
     undoLabel?: string,
   ) => {
-    const writes: Promise<unknown>[] = []
+    // QA3 N3: a page shown in an automatic layout it has not stored (no layout
+    // mode, or a packed page whose widgets overlap) stores what is SHOWN on its
+    // first real edit, with the layout mode, in the same step. Opening it
+    // writes nothing (see shownLayouts).
+    const merged = { ...shownLayouts(page), ...layouts }
+    const firstEdit = needsAutoPack(page.layout_mode) && !(pagePatch && 'layout_mode' in pagePatch)
+    const patch: Partial<ReportPage> | undefined = firstEdit
+      ? { ...pagePatch, layout_mode: 'packed', layout_template: DEFAULT_RECIPE }
+      : pagePatch
     const before: Record<number, Widget['layout']> = {}
     const after: Record<number, Widget['layout']> = {}
-    if (pagePatch) writes.push(reportsApi.updatePage(reportId, page.id, pagePatch))
     for (const w of page.widgets) {
-      const next = layouts[w.id]
-      if (next && layoutChanged(w.layout, next)) {
-        writes.push(reportsApi.updateWidget(reportId, page.id, w.id, { layout: next }))
-        before[w.id] = w.layout
-        after[w.id] = next
+      const next = merged[w.id]
+      if (next && layoutChanged(w.layout, next)) { before[w.id] = w.layout; after[w.id] = next }
+    }
+    if (!patch && !Object.keys(after).length) return
+    // One write at a time, in order (QA3 N3): parallel saves read the same
+    // revision and the server snapshotted each with a repeated number.
+    const writeLayouts = async (m: Record<number, Widget['layout']>) => {
+      for (const [id, layout] of Object.entries(m)) {
+        await reportsApi.updateWidget(reportId, pageIds.current.resolve(page.id), widgetIds.current.resolve(Number(id)), { layout })
       }
     }
-    if (!writes.length) return
+    // Undo puts the page back exactly: its stored layouts and, for a first
+    // edit, "no layout mode" ('' -- the API drops a null, and '' means the same).
+    const undoPatch: Partial<ReportPage> | undefined = firstEdit
+      ? { layout_mode: (page.layout_mode ?? '') as ReportPage['layout_mode'], layout_template: page.layout_template ?? '' }
+      : undefined
     if (undoLabel && Object.keys(before).length) {
-      const apply = (m: Record<number, Widget['layout']>) => Promise.all(Object.entries(m).map(([id, layout]) =>
-        reportsApi.updateWidget(reportId, pageIds.current.resolve(page.id), widgetIds.current.resolve(Number(id)), { layout }))).then(() => {})
-      pushUndo({ label: undoLabel, undo: () => apply(before), redo: () => apply(after) })
+      pushUndo({ label: undoLabel,
+        undo: async () => {
+          await writeLayouts(before)
+          if (undoPatch) await reportsApi.updatePage(reportId, pageIds.current.resolve(page.id), undoPatch)
+        },
+        redo: async () => {
+          if (patch) await reportsApi.updatePage(reportId, pageIds.current.resolve(page.id), patch)
+          await writeLayouts(after)
+        } })
     }
     const alreadySaving = savingRef.current
     if (!alreadySaving) setSaving(true)
     try {
-      await Promise.all(writes)
+      if (patch) await reportsApi.updatePage(reportId, page.id, patch)
+      await writeLayouts(after)
       await loadReport()
     } finally {
       if (!alreadySaving) setSaving(false)
     }
   }, [reportId, loadReport, pushUndo])
 
-  const packingPageRef = useRef<Set<number>>(new Set())
-  useEffect(() => {
-    if (!editMode || !canEdit || !activePage) return
-    if (!needsAutoPack(activePage.layout_mode)) return
-    if (packingPageRef.current.has(activePage.id)) return
-    packingPageRef.current.add(activePage.id)
-    const layouts = applyLayoutRecipe(toLayoutItems(activePage.widgets), DEFAULT_RECIPE)
-    void persistWidgetLayouts(activePage, layouts, {
-      layout_mode: 'packed',
-      layout_template: DEFAULT_RECIPE,
-    })
-  }, [activePage, editMode, canEdit, persistWidgetLayouts])
-
-  useEffect(() => {
-    if (!editMode || !activePage || dragging || resizing) return
-    if (!isPackedMode(activePage.layout_mode) || needsAutoPack(activePage.layout_mode)) return
-    const items = toLayoutItems(activePage.widgets)
-    if (!itemsOverlap(items)) return
-    void persistWidgetLayouts(activePage, compact(items))
-  }, [activePage, editMode, dragging, resizing, persistWidgetLayouts])
+  // QA3 N3: no layout is written when a page opens. v1 saved its automatic
+  // packing here (one request per widget, a version each) and compacted a
+  // packed page with overlaps the same way; both are drawn now (packedPreview)
+  // and stored on the first real edit (persistWidgetLayouts).
 
   const applyPageRecipe = async (choice: 'free' | typeof DEFAULT_RECIPE | string) => {
     if (!activePage) return
@@ -2538,11 +2544,8 @@ export default function ReportBuilder() {
   // Declared ABOVE the !report early return -- hooks must run every render.
   // Kept while dragging (QA3 A7): blanking it made every widget jump back to
   // its stored place the moment a drag began. The drag's own layouts win anyway.
-  const packedPreview = useMemo(() => {
-    if (!activePage?.widgets.length) return {} as Record<number, Widget['layout']>
-    if (!needsAutoPack(activePage.layout_mode)) return {}
-    return applyLayoutRecipe(toLayoutItems(activePage.widgets), DEFAULT_RECIPE)
-  }, [activePage])
+  const packedPreview = useMemo(() =>
+    activePage ? shownLayouts(activePage) : {} as Record<number, Widget['layout']>, [activePage])
   packedPreviewRef.current = packedPreview
   const localisedWidgets = useMemo(() => {
     const m = new Map<number, Widget>()

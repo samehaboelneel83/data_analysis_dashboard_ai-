@@ -110,7 +110,7 @@ Nothing is pushed.
   - >> GATE A: stop, captures EN + AR before/after
   - [x] Batches B–D
   - >> GATE B–D: stop, captures EN/AR × light/dark
-- [ ] 7-QA3-N3 Stop the save burst at its source (frontend only, owner-approved after GATE A).
+- [x] 7-QA3-N3 Stop the save burst at its source (frontend only, owner-approved after GATE A).
   - Evaluated: no backend change is needed.
   - Today `persistWidgetLayouts` fires `updatePage` and one `updateWidget` per widget with `Promise.all`. Two effects call it just by opening a page in Edit: the automatic Executive packing of a page with no layout mode, and the compaction of a packed page whose widgets overlap.
   - The fix:
@@ -168,6 +168,7 @@ Not part of the frontend steps (1–7); candidates for the handoff's section 7 p
 | 7-QA2 B4 / 13 / 16 | Answers (and clarifications) come back in a language other than the UI's: an Arabic follow-up answered in English, the AI panel in English in the Arabic UI, an Arabic clarification in the English UI | The answer language must follow the UI language (AP3), sent with each question. |
 | 7-QA2 B6 | "average by" took about 3.5 minutes; an Arabic follow-up spun for over 2.5 minutes with no cancel | A server-side timeout and a Stop / cancel endpoint (AN2). |
 | 7-QA3 N3 (top priority; the client half is step 7-QA3-N3) | Re-checked in QA3: still open at the root. QA2 only grouped the burst in the history ("39 changes"). Opening a page with no layout mode in Edit still runs the automatic packing, which sends one `updateWidget` per widget in parallel (`persistWidgetLayouts`), so the server snapshots a version per widget. `VERSIONS_KEPT = 50` (`routers/reports.py`), so one such open can push most of the older history out. | One version per user action: a batch layout endpoint (or coalescing saves seconds apart), an atomic revision increment, and retention that counts actions rather than rows. |
+| 7-QA3-N3 (after the client fix) | Opening no longer writes. A layout edit still costs one version per widget it stores: the first edit of an old 4-widget page added 5 (the page + 4 widgets), its undo 5 more. | Still needed: a batch layout endpoint (one version per action), an atomic revision, and a way to clear `layout_mode` (PATCH drops a null, so undo writes `''`). The 50-version cap stays. |
 | 7-QA2 N3 | One automatic layout pass (Executive packing when a page is first edited) left 39 versions in half a second, with repeated revision numbers; the burst can also push older versions past the retention window | Every widget save snapshots a version and the revision is read-then-bumped without a lock. Needs one version per user action (a batch layout endpoint, or coalescing saves seconds apart) and an atomic revision increment. The history now shows such a burst as one entry. |
 | 7-QA2 T12 (seen again in QA3) | Insights narrative, finding titles and details are English in the Arabic UI | The insights endpoint takes no language; the engine writes English. Needs the UI language on the request (AP3). The pane's own words are translated. |
 | 7-QA B6 | Ask AI is slow (about 70 s for a simple answer, about 4 min before a clarification), with no timeout or cancel | Needs a server-side timeout and a cancel endpoint (AN2: stream progress + cancel). |
@@ -867,3 +868,38 @@ The QA3 report and screenshots were not on this machine. `qa-3/QA_REPORT_3.md` i
   - five Insights queries use whole-text matches.
 - `e2e/capture/redesign/cap_qa3_bd.mjs` captures before (:3002) and after (:3001) into `qa-3-fixes/{before,after}/B*,C*,D*`, in EN/AR × light/dark (C in Arabic only: the English is unchanged by design).
 - Full suite: 305 files / 3941 tests pass. Under full load "ReportBuilder report-level display rules > persists …" once timed out (4.6s); it passes 3/3 alone and passed in the run before. Added to FINAL's flaky-test watch list. Type-check and build pass.
+
+### 7-QA3-N3 Stop the save burst at its source — the commit that adds this entry
+
+**Change (frontend only):**
+- `shownLayouts(page)` (lib/dashboardLayout) is what the canvas draws:
+  - the automatic layout for a page with no layout mode;
+  - a packed page with overlapping widgets compacted;
+  - otherwise the stored layout.
+- The two effects that SAVED those on opening in Edit are gone (v1: one parallel `updateWidget` per widget, plus a page update).
+- `persistWidgetLayouts`, the path every user layout change takes (drag, resize, nudge, align, distribute, recipe):
+  - merges the shown positions into the change;
+  - on a page with no layout mode, sets `layout_mode: 'packed'` and the template in the same step;
+  - writes page-then-widgets one request at a time (was `Promise.all`).
+- Undo writes the pre-edit layouts back, one at a time, and puts a first edit's page back to "no layout mode" (`''`: PATCH drops a null, and the client reads `''` as no mode).
+
+**Version counts (real API):**
+- Measured by `e2e/journeys/n3_versions_journey.mjs` on a scratch dashboard with two pages: "Old" (no layout mode, 4 widgets) and "Overlap" (packed, 2 overlapping widgets).
+
+| Step | Before (HEAD, :3002) | After (:3001) |
+|---|---|---|
+| Open in Edit and visit both pages | 8 → 14 (+6), and both pages' stored layouts rewritten | 8 → 8 (+0), stored layouts unchanged |
+| Re-open the reset page | +5 | +0 (18 → 18) |
+| First real edit (drag one widget on "Old") | +1, but only because opening had already stored everything | +5 = 5 sequential PATCHes (page, then 4 widgets), 0 in flight together. Stored = shown: after a reload, the 3 other widgets are drawn where they were |
+| Undo of that edit | +1; layouts NOT restored (packed values); mode stays "packed"; 4 writes overlapping | +5; stored layouts restored exactly; mode back to "no layout mode"; 0 overlapping |
+
+**Tests:**
+- New:
+  - `shownLayouts` (3);
+  - builder: zero writes on opening, for no layout mode and for packed-with-overlaps (2);
+  - first edit page-first, sequential (max 1 in flight), every shown widget stored; undo restores layouts and mode (1);
+  - the real-API journey (12 checks).
+- Full suite: 305 files / 3947 tests pass. Type-check and build pass.
+- The journey's first in-flight counter waited for Playwright's `requestfinished`, which fires late. It now ends a request at its response; the request log confirms strict order.
+
+**Still open (backend row):** one version per stored widget (+5 for one drag on an old 4-widget page).
