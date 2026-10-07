@@ -2,6 +2,8 @@ import { useEffect, useState, type CSSProperties } from 'react'
 import toast from 'react-hot-toast'
 import { ArrowDown, ArrowUp, Plus, RefreshCw, RotateCcw, Trash2 } from 'lucide-react'
 import { useT } from '../../i18n'
+import { useDirection } from '../../contexts/DirectionContext'
+import { isolate } from '../../i18n/pages/adminPlatform'
 import { llmApi, platformSettingsApi, type LlmEndpoint, type LlmEndpointsOut } from '../../services/api'
 import { endpointLight, Led } from '../LlmPicker'
 
@@ -47,6 +49,10 @@ let seq = 0
 
 export default function LlmEndpointsPanel() {
   const t = useT()
+  const { language } = useDirection()
+  /** "{field}: {name}" -- the row's own name isolated in Arabic. */
+  const fieldOf = (field: string, name: string) => t('pg.adminPlatform.ep.fieldOf', { field, name })
+  const named = (name: string) => isolate(language, name)
   const [data, setData] = useState<LlmEndpointsOut | null>(null)
   const [rows, setRows] = useState<Row[]>([])
   const [def, setDef] = useState('auto')
@@ -152,7 +158,7 @@ export default function LlmEndpointsPanel() {
         <table aria-labelledby="llm-ep-title" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
           <thead>
             <tr style={{ textAlign: 'start', color: 'var(--muted)', fontSize: 11 }}>
-              <th style={cell} aria-label="status" />
+              <th style={cell} aria-label={t('pg.adminPlatform.ep.status')} />
               <th style={{ ...cell, textAlign: 'start' }}>{t('llm.ep.name')}</th>
               <th style={{ ...cell, textAlign: 'start' }}>{t('llm.ep.url')}</th>
               <th style={{ ...cell, textAlign: 'start' }}>{t('llm.ep.model')}</th>
@@ -176,17 +182,18 @@ export default function LlmEndpointsPanel() {
                       onChange={e => edit(i, { name: e.target.value })} style={{ minWidth: 140 }} />
                   </td>
                   <td style={cell} data-label={t('llm.ep.url')}>
-                    <input className="dl-field__input" value={r.base_url} aria-label={`${t('llm.ep.url')}: ${r.name}`}
-                      onChange={e => edit(i, { base_url: e.target.value })} style={{ minWidth: 200 }}
-                      placeholder="http://host:8000/v1" dir="ltr" />
+                    <input className="dl-field__input" value={r.base_url} aria-label={fieldOf(t('llm.ep.url'), r.name)}
+                      onChange={e => edit(i, { base_url: e.target.value })} style={{ minWidth: 200 }} dir="ltr"
+                      placeholder="http://host:8000/v1" // i18n-ok: a URL
+                    />
                   </td>
                   <td style={cell} data-label={t('llm.ep.model')}>
-                    <input className="dl-field__input" value={r.model} aria-label={`${t('llm.ep.model')}: ${r.name}`}
+                    <input className="dl-field__input" value={r.model} aria-label={fieldOf(t('llm.ep.model'), r.name)}
                       onChange={e => edit(i, { model: e.target.value })} style={{ minWidth: 110 }} dir="ltr" />
                   </td>
                   <td style={cell} data-label={t('llm.ep.key')}>
                     <input className="dl-field__input" type="password" autoComplete="new-password" value={r.api_key}
-                      aria-label={`${t('llm.ep.key')}: ${r.name}`} disabled={r.clear_key}
+                      aria-label={fieldOf(t('llm.ep.key'), r.name)} disabled={r.clear_key}
                       placeholder={r.has_api_key && !r.clear_key ? t('llm.ep.keyKeep') : t('llm.ep.keyNone')}
                       onChange={e => edit(i, { api_key: e.target.value })} style={{ minWidth: 110 }} />
                     {r.has_api_key && (
@@ -198,18 +205,18 @@ export default function LlmEndpointsPanel() {
                   </td>
                   <td style={cell} data-label={t('llm.ep.strength')}>
                     <input className="dl-field__input" type="number" min={1} max={10} value={r.strength}
-                      aria-label={`${t('llm.ep.strength')}: ${r.name}`} placeholder={String(r.guessedStrength)}
+                      aria-label={fieldOf(t('llm.ep.strength'), r.name)} placeholder={String(r.guessedStrength)}
                       title={t('llm.ep.strengthHint')}
                       onChange={e => edit(i, { strength: e.target.value })} style={{ width: 64 }} />
                   </td>
                   <td style={cell} data-label={t('llm.ep.context')}>
                     <input className="dl-field__input" type="number" min={0} step={1024} value={r.context}
-                      aria-label={`${t('llm.ep.context')}: ${r.name}`}
+                      aria-label={fieldOf(t('llm.ep.context'), r.name)}
                       placeholder={r.detectedContext ? t('llm.ep.contextAuto', { n: r.detectedContext }) : ''}
                       onChange={e => edit(i, { context: e.target.value })} style={{ width: 140 }} />
                   </td>
                   <td style={{ ...cell, textAlign: 'center' }} data-label={t('llm.ep.enabled')}>
-                    <input type="checkbox" checked={r.enabled} aria-label={`${t('llm.ep.enabled')}: ${r.name}`}
+                    <input type="checkbox" checked={r.enabled} aria-label={fieldOf(t('llm.ep.enabled'), r.name)}
                       onChange={e => edit(i, { enabled: e.target.checked })} />
                   </td>
                   <td style={{ ...cell, whiteSpace: 'nowrap' }} className="acts">
@@ -217,11 +224,11 @@ export default function LlmEndpointsPanel() {
                       {testing === r.key ? t('settings.testing') : t('llm.ep.test')}
                     </button>{' '}
                     <button type="button" className="btn btn-sm" disabled={i === 0} onClick={() => move(i, -1)}
-                      aria-label={t('llm.ep.up', { name: r.name })} title={t('llm.ep.up', { name: r.name })}><ArrowUp size={12} /></button>{' '}
+                      aria-label={t('llm.ep.up', { name: named(r.name) })} title={t('llm.ep.up', { name: named(r.name) })}><ArrowUp size={12} /></button>{' '}
                     <button type="button" className="btn btn-sm" disabled={i === rows.length - 1} onClick={() => move(i, 1)}
-                      aria-label={t('llm.ep.down', { name: r.name })} title={t('llm.ep.down', { name: r.name })}><ArrowDown size={12} /></button>{' '}
+                      aria-label={t('llm.ep.down', { name: named(r.name) })} title={t('llm.ep.down', { name: named(r.name) })}><ArrowDown size={12} /></button>{' '}
                     <button type="button" className="btn btn-sm" disabled={rows.length === 1} onClick={() => remove(i)}
-                      aria-label={t('llm.ep.remove', { name: r.name })} title={t('llm.ep.remove', { name: r.name })}
+                      aria-label={t('llm.ep.remove', { name: named(r.name) })} title={t('llm.ep.remove', { name: named(r.name) })}
                       style={{ color: 'var(--danger)' }}><Trash2 size={12} /></button>
                   </td>
                 </tr>

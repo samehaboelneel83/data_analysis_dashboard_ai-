@@ -12,6 +12,8 @@
  * rather than to create something.
  */
 import { detailToText } from '../../lib/friendlyError'
+import { useT } from '../../i18n'
+import { useDirection } from '../../contexts/DirectionContext'
 
 export default function LoadError({ what, error, onRetry, title, retryLabel }: {
   /** What failed to load, in the user's words: "reports", "the lineage graph". */
@@ -34,23 +36,27 @@ export default function LoadError({ what, error, onRetry, title, retryLabel }: {
     : (error instanceof Error && error.message !== 'Network Error' ? error.message : undefined)
   // A 404 is not something "trying again" can fix.
   const gone = status === 404
+  // 8-i18n: the shared words in the reader's language. `what` is an English
+  // phrase from the caller, so the Arabic heading does not use it.
+  const t = useT()
+  const { language } = useDirection()
+  const heading = title ?? (language === 'ar' ? t('bc.dialogs.loadErr.title') : `Could not load ${what}`)   // i18n-ok: English names what failed; Arabic uses the generic heading
 
   return (
     <div role="alert" className="card"
       style={{ padding: '20px 22px', borderInlineStart: '3px solid var(--danger, #c0392b)' }}>
-      <p style={{ fontWeight: 600, marginBottom: 6 }}>{title ?? `Could not load ${what}`}</p>
+      <p style={{ fontWeight: 600, marginBottom: 6 }}>{heading}</p>
       <p style={{ color: 'var(--muted)', fontSize: 13, margin: 0 }}>
         {detail
           ? detail
-          : 'The server did not respond. This does not mean the data is missing — ' +
-            'it means we could not reach it.'}
+          : t('bc.dialogs.loadErr.body')}
       </p>
       <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
         {onRetry && !gone && (
-          <button className="btn btn-sm" onClick={onRetry}>{retryLabel ?? 'Try again'}</button>
+          <button className="btn btn-sm" onClick={onRetry}>{retryLabel ?? t('bc.dialogs.loadErr.retry')}</button>
         )}
         {gone && (
-          <button className="btn btn-sm" onClick={() => window.history.back()}>Go back</button>
+          <button className="btn btn-sm" onClick={() => window.history.back()}>{t('bc.dialogs.loadErr.back')}</button>
         )}
       </div>
     </div>

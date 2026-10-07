@@ -1,3 +1,5 @@
+import { useT } from '../../i18n'
+
 /**
  * Author-placed pins on a coordinate map: "our new depot", "the flood line".
  *
@@ -61,19 +63,21 @@ export function toDraftPin(pin: StoredPin): MapPin {
   }
 }
 
-/** Why this pin will not be drawn, or null when it is fine. */
-export function pinProblem(pin: MapPin): string | null {
+/** Why this pin will not be drawn (as a message key), or null when it is fine. */
+export function pinProblem(pin: MapPin): PinProblem | null {
   const lat = pinCoord(pin.lat)
   const lon = pinCoord(pin.lon)
   if (lat === null || lon === null) {
-    return "Needs both a latitude and a longitude — this pin won't be drawn."
+    return 'pg.modelsMaps.pin.needsBoth'
   }
   // Out of range still projects, just to somewhere meaningless: nothing errors
   // and the author is left doubting the map rather than the number.
-  if (lat < -90 || lat > 90) return 'Latitude must be between -90 and 90.'
-  if (lon < -180 || lon > 180) return 'Longitude must be between -180 and 180.'
+  if (lat < -90 || lat > 90) return 'pg.modelsMaps.pin.latRange'
+  if (lon < -180 || lon > 180) return 'pg.modelsMaps.pin.lonRange'
   return null
 }
+
+type PinProblem = 'pg.modelsMaps.pin.needsBoth' | 'pg.modelsMaps.pin.latRange' | 'pg.modelsMaps.pin.lonRange'
 
 const cell: React.CSSProperties = {
   fontSize: 11, padding: '3px 5px', border: '1px solid var(--border)',
@@ -84,6 +88,7 @@ export default function MapPinsEditor({ value, onChange }: {
   value: MapPin[]
   onChange: (pins: MapPin[]) => void
 }) {
+  const t = useT()
   const pins = value ?? []
 
   const patch = (i: number, next: Partial<MapPin>) =>
@@ -92,19 +97,16 @@ export default function MapPinsEditor({ value, onChange }: {
   return (
     <div style={{ marginBottom: 12 }}>
       <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: 'var(--muted)', marginBottom: 4 }}>
-        Pins
+        {t('pg.modelsMaps.pin.pins')}
       </label>
 
       {pins.length === 0 && (
-        <p style={{ fontSize: 11, color: 'var(--muted)', margin: '0 0 6px' }}>
-          No pins. A pin marks a place on the map — it is not part of the data,
-          so it never filters the page.
-        </p>
+        <p style={{ fontSize: 11, color: 'var(--muted)', margin: '0 0 6px' }}>{t('pg.modelsMaps.pin.empty')}</p>
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {pins.map((p, i) => {
-          const name = p.label || `pin ${i + 1}`
+          const name = p.label || t('pg.modelsMaps.pin.fallbackName', { n: i + 1 })
           const problem = pinProblem(p)
           return (
             <div key={i} style={{
@@ -112,39 +114,39 @@ export default function MapPinsEditor({ value, onChange }: {
               display: 'flex', flexDirection: 'column', gap: 4,
             }}>
               <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                <input value={p.label ?? ''} placeholder="Label"
-                  aria-label={`Label for ${name}`}
+                <input value={p.label ?? ''} placeholder={t('pg.modelsMaps.pin.label')}
+                  aria-label={t('pg.modelsMaps.pin.labelFor', { name })}
                   onChange={e => patch(i, { label: e.target.value })}
                   style={{ ...cell, flex: 1 }} />
                 <button onClick={() => onChange(pins.filter((_, j) => j !== i))}
-                  aria-label={`Remove pin ${name}`} title={`Remove pin ${name}`}
+                  aria-label={t('pg.modelsMaps.pin.remove', { name })} title={t('pg.modelsMaps.pin.remove', { name })}
                   style={{ background: 'none', border: 'none', color: 'var(--muted)',
                     cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: '0 2px' }}>
                   ×
                 </button>
               </div>
               <div style={{ display: 'flex', gap: 4 }}>
-                <input value={p.lat ?? ''} placeholder="Latitude" inputMode="decimal"
-                  aria-label={`Latitude for ${name}`}
+                <input value={p.lat ?? ''} placeholder={t('pg.modelsMaps.ml.latitude')} inputMode="decimal"
+                  aria-label={t('pg.modelsMaps.pin.latFor', { name })}
                   onChange={e => patch(i, { lat: e.target.value })}
                   style={{ ...cell, flex: 1 }} />
-                <input value={p.lon ?? ''} placeholder="Longitude" inputMode="decimal"
-                  aria-label={`Longitude for ${name}`}
+                <input value={p.lon ?? ''} placeholder={t('pg.modelsMaps.ml.longitude')} inputMode="decimal"
+                  aria-label={t('pg.modelsMaps.pin.lonFor', { name })}
                   onChange={e => patch(i, { lon: e.target.value })}
                   style={{ ...cell, flex: 1 }} />
               </div>
               {problem && (
-                <p style={{ fontSize: 10, color: 'var(--danger)', margin: 0 }}>{problem}</p>
+                <p style={{ fontSize: 10, color: 'var(--danger)', margin: 0 }}>{t(problem)}</p>
               )}
             </div>
           )
         })}
       </div>
 
-      <button onClick={() => onChange([...pins, { label: `Pin ${pins.length + 1}`, lat: '', lon: '' }])}
+      <button onClick={() => onChange([...pins, { label: t('pg.modelsMaps.pin.defaultLabel', { n: pins.length + 1 }), lat: '', lon: '' }])}
         className="btn btn-ghost btn-sm"
         style={{ fontSize: 10, padding: '3px 8px', marginTop: 6 }}>
-        Add pin
+        {t('pg.modelsMaps.pin.add')}
       </button>
     </div>
   )

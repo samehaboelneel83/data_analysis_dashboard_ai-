@@ -19,6 +19,10 @@ export const en = {
   'bc.dialogs.deleteDashboard': 'Delete dashboard "{name}"?',
   'bc.dialogs.deleteFolder': 'Delete the folder "{name}"?',
   'bc.dialogs.moveDashboard': 'Move "{name}" to {to}?',
+  'bc.dialogs.loadErr.title': 'Could not load this',
+  'bc.dialogs.loadErr.body': 'The server did not respond. This does not mean the data is missing — it means we could not reach it.',
+  'bc.dialogs.loadErr.retry': 'Try again',
+  'bc.dialogs.loadErr.back': 'Go back',
 } as const
 
 export const ar: Record<keyof typeof en, string> = {
@@ -30,4 +34,8 @@ export const ar: Record<keyof typeof en, string> = {
   'bc.dialogs.deleteDashboard': 'حذف اللوحة «⁨{name}⁩»؟',
   'bc.dialogs.deleteFolder': 'حذف المجلد «⁨{name}⁩»؟',
   'bc.dialogs.moveDashboard': 'نقل «⁨{name}⁩» إلى ⁨{to}⁩؟',
+  'bc.dialogs.loadErr.title': 'تعذّر تحميل هذه البيانات',
+  'bc.dialogs.loadErr.body': 'لم يستجب الخادم. هذا لا يعني أن البيانات مفقودة، بل إننا لم نتمكن من الوصول إليها.',
+  'bc.dialogs.loadErr.retry': 'حاول مرة أخرى',
+  'bc.dialogs.loadErr.back': 'رجوع',
 }

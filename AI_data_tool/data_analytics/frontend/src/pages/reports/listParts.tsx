@@ -2,6 +2,7 @@ import { type ReactNode, type HTMLAttributes } from 'react'
 import type { ReportSummary } from '../../services/api'
 import type { WorkspaceNode, WorkspaceTree } from '../../types/report'
 import { ChevronDown, ChevronRight, Folder } from 'lucide-react'
+import { useT } from '../../i18n'
 
 /** A folder with something to show: its own dashboards, then its subfolders. */
 export interface FolderSection {
@@ -73,6 +74,7 @@ export function Fold({ name, tier, heading, count, note, actions, dropProps, dro
   children: ReactNode
 }) {
   const Heading = heading
+  const t = useT()
   return (
     <section className={`dl-fold dl-fold--${tier}`} aria-label={name}>
       <div className="dl-fold__head"
@@ -91,7 +93,7 @@ export function Fold({ name, tier, heading, count, note, actions, dropProps, dro
           </button>
         </Heading>
         <span className="dl-fold__count"
-          aria-label={`${count} ${count === 1 ? 'dashboard' : 'dashboards'}`}>
+          aria-label={t('pg.dataPages.list.dashboardCount', { n: count })}>
           {count}
         </span>
         {actions && <span className="dl-fold__actions">{actions}</span>}

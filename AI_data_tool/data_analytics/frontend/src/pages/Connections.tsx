@@ -102,9 +102,9 @@ export default function Connections() {
     try {
       const r = await dataSourcesApi.test(ds.id)
       setTestResults(p => ({ ...p, [ds.id]: r.ok }))
-      if (r.ok) toast.success(`${ds.name} — connected`)
-      else toast.error(r.error ?? 'Connection failed')
-    } catch { toast.error('Test failed') }
+      if (r.ok) toast.success(t('pg.dataPages.conn.connectedToast', { name: ds.name }))
+      else toast.error(r.error ?? t('pg.dataPages.conn.connectionFailed'))
+    } catch { toast.error(t('pg.dataPages.conn.testFailed')) }
     finally { setTesting(null) }
   }
 
@@ -121,7 +121,7 @@ export default function Connections() {
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {sources.length > 0 && (
               <button className="btn btn-ghost" onClick={() => setCombining(true)}>
-                Combine databases
+                {t('pg.dataPages.combine.open')}
               </button>
             )}
             <button className="btn btn-primary" onClick={() => setModal('add')}>
@@ -139,7 +139,7 @@ export default function Connections() {
       {loading && <p className="dl-muted-line">{t('common.loading')}</p>}
 
       {!loading && !!loadError && (
-        <LoadError what="connections" error={loadError}
+        <LoadError what="connections" title={t('pg.dataPages.conn.loadError')} error={loadError}
           onRetry={() => window.location.reload()} />
       )}
 

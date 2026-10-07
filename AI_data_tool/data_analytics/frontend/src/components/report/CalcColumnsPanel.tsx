@@ -5,7 +5,7 @@ import type { CalcColumn, CalcColumnFormat, CustomFunction, DatasetColumn } from
 import CustomFunctionsPanel from './CustomFunctionsPanel'
 import { useConfirm } from '../ui/ConfirmDialog'
 
-import { FUNC_CATS, type FuncCat } from './calcColumns/catalog'
+import { funcCats, type FuncCat } from './calcColumns/catalog'
 import { BuilderModal } from './calcColumns/BuilderModal'
 import { useT } from '../../i18n'
 // ── Props ─────────────────────────────────────────────────────────────────────
@@ -36,7 +36,7 @@ export default function CalcColumnsPanel({ datasetId, columns, onChanged }: Prop
   }, [datasetId])
 
   const customCat: FuncCat | null = customFunctions.length === 0 ? null : {
-    label: 'Custom', color: '#818cf8',
+    label: tr('pg.panelsA.calc.custom'), color: '#818cf8',
     items: customFunctions.map(fn => {
       const n = fn.params.length
       return {
@@ -48,7 +48,7 @@ export default function CalcColumnsPanel({ datasetId, columns, onChanged }: Prop
     }),
   }
 
-  const functionsCatalog = customCat ? [...FUNC_CATS, customCat] : FUNC_CATS
+  const functionsCatalog = customCat ? [...funcCats(tr), customCat] : funcCats(tr)
 
   const openAdd  = ()                => setEditing({ ...BLANK })
   const openEdit = (col: CalcColumn) => setEditing({ name: col.name, expression: col.expression, format: col.format })
@@ -61,8 +61,8 @@ export default function CalcColumnsPanel({ datasetId, columns, onChanged }: Prop
     // Referenced by name, like a measure: widgets and other calculated columns
     // built on this one stop resolving, across every report.
     if (!await confirm({
-      title: `Delete the calculated column "${name}"?`,
-      body: 'Any widget or calculation built on it stops working, in this report and every other one. This cannot be undone.',
+      title: tr('pg.panelsA.calc.deleteTitle', { name }),
+      body: tr('pg.panelsA.calc.deleteBody'),
     })) return
     let updated: CalcColumn[]
     try {
@@ -72,9 +72,9 @@ export default function CalcColumnsPanel({ datasetId, columns, onChanged }: Prop
       // This used to reject unhandled -- the person confirmed and nothing happened.
       if (e?.response?.status !== 409) throw e
       if (!await confirm({
-        title: `"${name}" is still in use`,
-        body: `${e.response.data?.detail ?? ''} Deleting it breaks those.`.replace(/ Delete anyway with \?force=true\./, ''),
-        confirmLabel: 'Delete anyway', destructive: true,
+        title: tr('pg.panelsA.inUse', { name }),
+        body: tr('pg.panelsA.inUseBody', { detail: String(e.response.data?.detail ?? '').replace(/ Delete anyway with \?force=true\./, '') }),
+        confirmLabel: tr('pg.panelsA.deleteAnyway'), destructive: true,
       })) return
       updated = await calcColumnsApi.delete(datasetId, name, true)
     }
@@ -89,7 +89,7 @@ export default function CalcColumnsPanel({ datasetId, columns, onChanged }: Prop
           {tr('calc.title')}
         </span>
         <button className="btn btn-ghost btn-sm" onClick={openAdd} style={{ fontSize: 11, padding:'2px 7px' }}>
-          + Add
+          {tr('pg.panelsA.calc.add')}
         </button>
       </div>
 
@@ -111,7 +111,7 @@ export default function CalcColumnsPanel({ datasetId, columns, onChanged }: Prop
               setCalcCols(cols); onChanged(cols)
             } catch { /* the API rejected it; the list stays as it was */ }
           }}>
-          <option value="">— choose a column —</option>
+          <option value="">{tr('pg.panelsA.chooseColumn')}</option>
           {columns.filter(c => c.dtype !== 'calculated').map(c =>
             <option key={c.name} value={c.name}>{c.name}</option>)}
         </select>
@@ -123,14 +123,14 @@ export default function CalcColumnsPanel({ datasetId, columns, onChanged }: Prop
           background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:5, marginBottom:4 }}>
           <span style={{ color:'var(--accent)', fontSize:11, flexShrink:0 }}>ƒx</span>
           <div style={{ flex:1, minWidth:0 }}>
-            <div style={{ fontSize:12, fontWeight:600, color:'var(--text)' }}>{col.name}</div>
+            <div style={{ fontSize:12, fontWeight:600, color:'var(--text)' }}><bdi>{col.name}</bdi></div>
             <div style={{ fontSize: 11, color:'var(--muted)', overflow:'hidden', textOverflow:'ellipsis',
-              whiteSpace:'nowrap', fontFamily:'var(--mono)' }}>{col.expression}</div>
+              whiteSpace:'nowrap', fontFamily:'var(--mono)' }}><bdi dir="ltr">{col.expression}</bdi></div>
           </div>
           <button style={{ background:'none', border:'none', cursor:'pointer', color:'var(--muted)', fontSize:12, padding:'0 3px' }}
-            title="Edit" onClick={() => openEdit(col)}>✏</button>
+            title={tr('pg.panelsA.edit')} onClick={() => openEdit(col)}>✏</button>
           <button style={{ background:'none', border:'none', cursor:'pointer', color:'var(--muted)', fontSize:14, padding:'0 3px' }}
-            title="Delete" onClick={() => del(col.name)}>×</button>
+            title={tr('pg.panelsA.delete')} onClick={() => del(col.name)}>×</button>
         </div>
       ))}
 

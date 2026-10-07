@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useT } from '../../i18n'
+import { useT, type MessageKey } from '../../i18n'
 import { Link } from 'react-router-dom'
 import { Send } from 'lucide-react'
 import { monitoringApi } from '../../services/api'
@@ -48,7 +48,7 @@ export default function MonitoringDeliveries() {
       {loading && <LoadingState />}
 
       {!loading && loadError != null && (
-        <LoadError what="deliveries" error={loadError} onRetry={load} />
+        <LoadError what="deliveries" title={t('pg.dataPages.del.loadError')} error={loadError} onRetry={load} />
       )}
 
       {!loading && loadError == null && rows.length === 0 && (
@@ -81,19 +81,19 @@ export default function MonitoringDeliveries() {
                       ? <span>{r.subject}</span>
                       : <span style={{ color: 'var(--muted)' }}>—</span>}
                 </td>
-                <td>{r.kind}</td>
+                <td>{t(`pg.dataPages.del.kind.${r.kind}` as MessageKey) || r.kind}</td>
                 <td style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                   title={r.recipients ?? undefined}>{r.recipients || <span style={{ color: 'var(--muted)' }}>—</span>}</td>
                 <td title={r.file_name ?? undefined}>
                   {r.file_name ?? (r.artifact_kind === 'none' ? '—' : r.artifact_kind)}
                 </td>
                 <td style={{ whiteSpace: 'nowrap' }}>
-                  {r.duration_ms != null ? `${r.duration_ms} ms` : '—'}
+                  {r.duration_ms != null ? t('pg.dataPages.jobs.ms', { n: r.duration_ms }) : '—'}
                 </td>
                 <td style={{
                   color: r.status === 'ok' ? 'var(--success)' : 'var(--danger)' }}
                   title={r.error ?? undefined}>
-                  {r.status === 'ok' ? 'ok' : `failed${r.error ? ` — ${r.error}` : ''}`}
+                  {r.status === 'ok' ? t('jobs.status.ok') : r.error ? t('pg.dataPages.del.failedWith', { error: r.error }) : t('jobs.status.failed')}
                 </td>
               </tr>
             ))}

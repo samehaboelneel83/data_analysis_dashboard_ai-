@@ -11,6 +11,7 @@
  * names the drifted ones and the panel offers a one-click update.
  */
 import type { ReportPage, Widget } from '../types/report'
+import { translate, type TranslateFn } from '../i18n'
 
 export type ComparableKind = 'linear' | 'logistic' | 'tree'
 
@@ -73,16 +74,19 @@ export function compareCandidates(pages: ReportPage[] | undefined, self: Widget)
 }
 
 /** Why a candidate cannot join the current selection; null when it can. */
-export function candidateBlockReason(spec: ModelSpec, chosen: ModelSpec[]): string | null {
-  if (!spec.response) return 'has no response yet'
+const EN: TranslateFn = (key, vars) => translate('en', key, vars)
+
+/** Why `spec` cannot join `chosen`, in the reader's language (`t`; English by default). */
+export function candidateBlockReason(spec: ModelSpec, chosen: ModelSpec[], t: TranslateFn = EN): string | null {
+  if (!spec.response) return t('pg.panelsA.lib.model.noResponse')
   const others = chosen.filter(c => c.id !== spec.id && c.response)
   const first = others[0]
   if (first && first.response !== spec.response) {
-    return `predicts ${spec.response}, the others predict ${first.response}`
+    return t('pg.panelsA.lib.model.predicts', { mine: spec.response, theirs: String(first.response) })
   }
   const part = others.find(c => c.partition)?.partition
   if (part && spec.partition && spec.partition !== part) {
-    return `holds out ${spec.partition}, the others hold out ${part}`
+    return t('pg.panelsA.lib.model.holdsOut', { mine: spec.partition, theirs: part })
   }
   return null
 }

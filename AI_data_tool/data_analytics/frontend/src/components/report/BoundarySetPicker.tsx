@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { boundarySetsApi, type BoundaryPack, type BoundarySetSummary } from '../../services/api'
 import PackTermsConfirm from './PackTermsConfirm'
+import { useT, type TranslateFn } from '../../i18n'
+import { rich } from '../../i18n/pages/modelsMaps'
 
 /**
  * Which shapes a region map draws — and how a new set gets here.
@@ -27,6 +29,7 @@ export default function BoundarySetPicker({ value, onChange, inheritedName }: {
    *  disagrees with the picture sends the author to fix the wrong thing. */
   inheritedName?: string | null
 }) {
+  const t = useT()
   const [sets, setSets] = useState<BoundarySetSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -57,7 +60,7 @@ export default function BoundarySetPicker({ value, onChange, inheritedName }: {
       onChange(String(made.id))
     } catch (e: unknown) {
       setError((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-        ?? `Could not install ${pack.name}`)
+        ?? t('pg.modelsMaps.bs.installFailed', { name: pack.name }))
     } finally {
       setBusy(false)
     }
@@ -71,9 +74,9 @@ export default function BoundarySetPicker({ value, onChange, inheritedName }: {
       const text = await file.text()
       let parsed: unknown
       try { parsed = JSON.parse(text) } catch {
-        throw new Error('That file is not JSON. GeoJSON and TopoJSON are supported.')
+        throw new Error(t('pg.modelsMaps.bs.notJson'))
       }
-      const geometry = await toGeoJson(parsed)
+      const geometry = await toGeoJson(parsed, t)
       // The file name without its extension: a name is required, and asking for
       // one before the file has even been checked is a form nobody fills in.
       const name = file.name.replace(/\.[^.]+$/, '').slice(0, 200) || 'Boundaries'
@@ -86,7 +89,7 @@ export default function BoundarySetPicker({ value, onChange, inheritedName }: {
       // generic would leave the author guessing at a file they cannot read.
       setError((e as { response?: { data?: { detail?: string } }; message?: string })
         ?.response?.data?.detail ?? (e as Error)?.message
-        ?? 'The boundary file could not be read')
+        ?? t('pg.modelsMaps.bs.unreadable'))
     } finally {
       setBusy(false)
       if (fileRef.current) fileRef.current.value = ''
@@ -98,18 +101,17 @@ export default function BoundarySetPicker({ value, onChange, inheritedName }: {
       <label htmlFor="cfg-boundary-set" style={{
         display: 'block', fontSize: 11, fontWeight: 700,
         color: 'var(--muted)', marginBottom: 4,
-      }}>Boundaries</label>
+      }}>{t('pg.modelsMaps.ml.boundaries')}</label>
 
       {!value && inheritedName && (
         <p style={{ fontSize: 11, color: 'var(--muted)', margin: '0 0 4px' }}>
-          Drawing <strong>{inheritedName}</strong>, from the column's geography
-          classification. Choosing here overrides it for this widget only.
+          {rich(t, 'pg.modelsMaps.bs.inherited', { name: <strong><bdi>{inheritedName}</bdi></strong> })}
         </p>
       )}
 
       <select id="cfg-boundary-set" value={value} style={{ width: '100%' }}
         onChange={e => onChange(e.target.value)}>
-        <option value="">Countries (built in)</option>
+        <option value="">{t('pg.modelsMaps.ml.countries')}</option>
         {(sets ?? []).map(s => (
           <option key={s.id} value={String(s.id)}>
             {s.name} ({s.feature_count})
@@ -123,7 +125,7 @@ export default function BoundarySetPicker({ value, onChange, inheritedName }: {
             display would be lying about what the map draws. */}
         {value && !(sets ?? []).some(s => String(s.id) === value) && (
           <option value={value}>
-            {sets === null ? 'Loading…' : `Set ${value} (unavailable)`}
+            {sets === null ? t('pg.modelsMaps.loading') : t('pg.modelsMaps.bs.unavailable', { id: value })}
           </option>
         )}
       </select>
@@ -133,21 +135,22 @@ export default function BoundarySetPicker({ value, onChange, inheritedName }: {
           empty map. */}
       {chosen && chosen.sample_names.length > 0 && (
         <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>
-          Matches on {chosen.key_properties.join(', ')} — e.g.{' '}
-          {chosen.sample_names.slice(0, 4).join(', ')}
-          {chosen.feature_count > 4 ? '…' : ''}
+          {t('pg.modelsMaps.bs.matches', {
+            keys: chosen.key_properties.join(', '),
+            samples: chosen.sample_names.slice(0, 4).join(', ') + (chosen.feature_count > 4 ? '…' : ''),
+          })}
         </div>
       )}
 
       {installable.length > 0 && (
         <div data-testid="boundary-packs" style={{ marginTop: 6 }}>
-          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 3 }}>Starter packs:</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 3 }}>{t('pg.modelsMaps.bs.starter')}</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
             {installable.map(p => (
               <button key={p.id} type="button" className="btn btn-sm" disabled={busy}
-                title={`${p.description ?? ''}\nSource: ${p.source}. Licence: ${p.license}.`}
+                title={t('pg.modelsMaps.bs.packTitle', { description: p.description ?? '', source: p.source, license: p.license })}
                 onClick={() => void install(p)}>
-                + {p.name} ({p.feature_count}){p.requires_acceptance ? ' · terms' : ''}
+                {t(p.requires_acceptance ? 'pg.modelsMaps.bs.packTerms' : 'pg.modelsMaps.bs.pack', { name: p.name, n: p.feature_count })}
               </button>
             ))}
           </div>
@@ -160,11 +163,11 @@ export default function BoundarySetPicker({ value, onChange, inheritedName }: {
       )}
 
       <input ref={fileRef} type="file" accept=".json,.geojson,.topojson,application/json"
-        aria-label="Boundary file" style={{ display: 'none' }}
+        aria-label={t('pg.modelsMaps.bs.fileAria')} style={{ display: 'none' }}
         onChange={e => { const f = e.target.files?.[0]; if (f) void upload(f) }} />
       <button className="btn btn-sm" disabled={busy} style={{ marginTop: 6 }}
         onClick={() => fileRef.current?.click()}>
-        {busy ? 'Reading…' : 'Upload boundaries…'}
+        {busy ? t('pg.modelsMaps.bs.reading') : t('pg.modelsMaps.bs.upload')}
       </button>
 
       {error && (
@@ -183,18 +186,16 @@ export default function BoundarySetPicker({ value, onChange, inheritedName }: {
  * boundary file does not pay for it on the config panel's chunk — it is already
  * in the charts chunk for the world atlas, and that is where it should stay.
  */
-async function toGeoJson(parsed: unknown): Promise<unknown> {
+async function toGeoJson(parsed: unknown, t: TranslateFn): Promise<unknown> {
   const doc = parsed as { type?: string; objects?: Record<string, unknown> }
   if (doc?.type !== 'Topology') return parsed
   const objects = Object.values(doc.objects ?? {})
   if (objects.length === 0) {
-    throw new Error('That TopoJSON file contains no layers.')
+    throw new Error(t('pg.modelsMaps.bs.topoEmpty'))
   }
   if (objects.length > 1) {
     // Guessing which layer somebody meant is how the wrong shapes get drawn.
-    throw new Error(
-      `That TopoJSON file has ${objects.length} layers. Export the one you want `
-      + 'as GeoJSON and upload that.')
+    throw new Error(t('pg.modelsMaps.bs.topoMany', { n: objects.length }))
   }
   const { feature } = await import('topojson-client')
   return feature(doc as never, objects[0] as never)

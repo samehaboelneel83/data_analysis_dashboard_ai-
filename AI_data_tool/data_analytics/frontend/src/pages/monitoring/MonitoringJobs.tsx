@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useT, type MessageKey } from '../../i18n'
+import { useT, type MessageKey, type TranslateFn } from '../../i18n'
 import { Link } from 'react-router-dom'
 import { monitoringApi } from '../../services/api'
 import type { MonitoringJobRow, RefreshRunRow } from '../../services/api'
@@ -41,25 +41,28 @@ function jobLink(j: MonitoringJobRow): string | null {
   }
 }
 
-const WEEKDAY = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+const WEEKDAY: MessageKey[] = [
+  'pg.dataPages.jobs.wd0', 'pg.dataPages.jobs.wd1', 'pg.dataPages.jobs.wd2', 'pg.dataPages.jobs.wd3',
+  'pg.dataPages.jobs.wd4', 'pg.dataPages.jobs.wd5', 'pg.dataPages.jobs.wd6',
+]
 /** The job's schedule in words -- a calendar spec when there is one. */
-function schedule(j: MonitoringJobRow): string {
+function schedule(j: MonitoringJobRow, t: TranslateFn): string {
   const c = j.calendar
   if (c) {
-    const at = `${String(c.hour).padStart(2, '0')}:${String(c.minute).padStart(2, '0')}${j.timezone ? ` ${j.timezone}` : ' UTC'}`
-    if (c.kind === 'weekly') return `weekly (${WEEKDAY[c.weekday ?? 0]}) ${at}`
-    if (c.kind === 'monthly') return `monthly (day ${c.monthday ?? 1}) ${at}`
-    return `daily ${at}`
+    const at = `${String(c.hour).padStart(2, '0')}:${String(c.minute).padStart(2, '0')} ${j.timezone || 'UTC'}`
+    if (c.kind === 'weekly') return t('pg.dataPages.jobs.weeklyAt', { day: t(WEEKDAY[c.weekday ?? 0]), at })
+    if (c.kind === 'monthly') return t('pg.dataPages.jobs.monthlyAt', { day: c.monthday ?? 1, at })
+    return t('pg.dataPages.jobs.dailyAt', { at })
   }
-  return interval(j.interval_minutes)
+  return interval(j.interval_minutes, t)
 }
 
-function interval(minutes: number): string {
+function interval(minutes: number, t: TranslateFn): string {
   // Some seeded rows carry 0 -- "runs on demand", not "every 0 minutes".
   if (minutes <= 0) return '—'
-  if (minutes % 1440 === 0) return minutes === 1440 ? 'daily' : `every ${minutes / 1440} days`
-  if (minutes % 60 === 0) return minutes === 60 ? 'hourly' : `every ${minutes / 60} h`
-  return `every ${minutes} min`
+  if (minutes % 1440 === 0) return minutes === 1440 ? t('pg.dataPages.jobs.daily') : t('pg.dataPages.jobs.everyDays', { n: minutes / 1440 })
+  if (minutes % 60 === 0) return minutes === 60 ? t('pg.dataPages.jobs.hourly') : t('pg.dataPages.jobs.everyHours', { n: minutes / 60 })
+  return t('pg.dataPages.jobs.everyMinutes', { n: minutes })
 }
 
 /** ok/clear read as healthy, anything with "fail"/"error" as broken; the rest
@@ -80,11 +83,12 @@ const TONE_COLOR = {
   info: 'color-mix(in oklab, #d9a441 55%, var(--text))',
 }
 
-function duration(ms: number | null): string {
+function duration(ms: number | null, t: TranslateFn): string {
   if (ms == null) return '—'
-  if (ms < 1000) return `${ms} ms`
+  if (ms < 1000) return t('pg.dataPages.jobs.ms', { n: ms })
   const s = ms / 1000
-  return s < 60 ? `${s.toFixed(1)} s` : `${Math.floor(s / 60)} min ${Math.round(s % 60)} s`
+  return s < 60 ? t('pg.dataPages.jobs.seconds', { n: s.toFixed(1) })
+    : t('pg.dataPages.jobs.minSec', { m: Math.floor(s / 60), s: Math.round(s % 60) })
 }
 
 /** Pipeline plan, phase 1: every refresh and dataflow run, newest first, so
@@ -116,7 +120,7 @@ function RefreshHistory() {
         </label>
       </div>
       {loading && <LoadingState />}
-      {!loading && loadError != null && <LoadError what="refresh history" error={loadError} onRetry={load} />}
+      {!loading && loadError != null && <LoadError what="refresh history" title={t('pg.dataPages.jobs.historyLoadError')} error={loadError} onRetry={load} />}
       {!loading && loadError == null && runs.length === 0 && (
         <p style={{ color: 'var(--muted)' }}>{failedOnly ? t('jobs.history.noFailures') : t('jobs.history.empty')}</p>
       )}
@@ -151,7 +155,7 @@ function RefreshHistory() {
                     )}
                   </td>
                   <td style={{ textAlign: 'end', fontVariantNumeric: 'tabular-nums' }}>{r.rows != null ? r.rows.toLocaleString() : '—'}</td>
-                  <td style={{ textAlign: 'end', whiteSpace: 'nowrap' }}>{duration(r.duration_ms)}</td>
+                  <td style={{ textAlign: 'end', whiteSpace: 'nowrap' }}>{duration(r.duration_ms, t)}</td>
                 </tr>
               )
             })}
@@ -203,7 +207,7 @@ export default function MonitoringJobs() {
       {loading && <LoadingState />}
 
       {!loading && loadError != null && (
-        <LoadError what="jobs" error={loadError} onRetry={load} />
+        <LoadError what="jobs" title={t('pg.dataPages.jobs.loadError')} error={loadError} onRetry={load} />
       )}
 
       {!loading && loadError == null && jobs.length === 0 && (
@@ -240,7 +244,7 @@ export default function MonitoringJobs() {
                       ? <Link to={jobLink(j)!} className="row-name" style={{ color: 'var(--text)' }}>{j.name}</Link>
                       : j.name}
                   </td>
-                  <td style={{ whiteSpace: 'nowrap' }}>{schedule(j)}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>{schedule(j, t)}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>
                     {j.last_run_at ? formatDate(j.last_run_at) : t('jobs.never')}
                   </td>

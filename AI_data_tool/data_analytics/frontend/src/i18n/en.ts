@@ -4,11 +4,19 @@ import { en as bcRules } from './builder/rules'
 import { en as bcShell } from './builder/shell'
 import { en as bcStats } from './builder/stats'
 import { en as bcDialogs } from './builder/dialogs'
+import { en as pgAdminSecurity } from './pages/adminSecurity'
+import { en as pgAdminPlatform } from './pages/adminPlatform'
+import { en as pgDataPages } from './pages/dataPages'
+import { en as pgPanelsA } from './pages/panelsA'
+import { en as pgPanelsB } from './pages/panelsB'
+import { en as pgModelsMaps } from './pages/modelsMaps'
 
 /** English UI strings. Arabic lives in `ar.ts`; keep the two key sets identical. */
 export const en = {
   // QA3 Batch C: the builder's strings, one module per area (i18n/builder/).
   ...bcCanvas, ...bcPanes, ...bcRules, ...bcShell, ...bcStats, ...bcDialogs,
+  // 8-i18n: the pages outside the Builder, one module per area (i18n/pages/).
+  ...pgAdminSecurity, ...pgAdminPlatform, ...pgDataPages, ...pgPanelsA, ...pgPanelsB, ...pgModelsMaps,
   'nav.home': 'Home',
   'nav.askAi': 'Ask AI',
   'nav.datasets': 'Datasets',

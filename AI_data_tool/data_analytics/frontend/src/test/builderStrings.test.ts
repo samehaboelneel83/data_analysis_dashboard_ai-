@@ -23,6 +23,7 @@ export const BUILDER_FILES = [
   'components/report/StatusBar.tsx',
   'components/report/DataBarEditor.tsx', 'components/report/IntervalEditor.tsx', 'components/report/ValueMapEditor.tsx',
   'components/report/CollapsibleSide.tsx', 'components/report/FilterBar.tsx', 'components/report/FloatingFilterWindow.tsx',
+  'components/ui/LoadError.tsx',
 ]
 
 describe('no hard-coded English in the Builder (QA3 Batch C)', () => {

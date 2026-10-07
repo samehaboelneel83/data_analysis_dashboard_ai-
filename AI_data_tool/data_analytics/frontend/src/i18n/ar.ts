@@ -5,10 +5,18 @@ import { ar as bcRules } from './builder/rules'
 import { ar as bcShell } from './builder/shell'
 import { ar as bcStats } from './builder/stats'
 import { ar as bcDialogs } from './builder/dialogs'
+import { ar as pgAdminSecurity } from './pages/adminSecurity'
+import { ar as pgAdminPlatform } from './pages/adminPlatform'
+import { ar as pgDataPages } from './pages/dataPages'
+import { ar as pgPanelsA } from './pages/panelsA'
+import { ar as pgPanelsB } from './pages/panelsB'
+import { ar as pgModelsMaps } from './pages/modelsMaps'
 
 /** Arabic UI strings. Keys must match `en.ts` exactly. */
 export const ar: Record<MessageKey, string> = {
   ...bcCanvas, ...bcPanes, ...bcRules, ...bcShell, ...bcStats, ...bcDialogs,
+  // 8-i18n: the pages outside the Builder, one module per area (i18n/pages/).
+  ...pgAdminSecurity, ...pgAdminPlatform, ...pgDataPages, ...pgPanelsA, ...pgPanelsB, ...pgModelsMaps,
   'nav.home': 'الرئيسية',
   'nav.askAi': 'اسأل الذكاء الاصطناعي',
   'nav.datasets': 'مجموعات البيانات',

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useT } from '../../i18n'
+import { richNodes } from '../../i18n/pages/adminPlatform'
 import toast from 'react-hot-toast'
 import { boundarySetsApi, type BoundaryPack, type BoundarySetSummary } from '../../services/api'
 import BasemapSettings from '../../components/admin/BasemapSettings'
@@ -37,41 +38,44 @@ export default function AdminMaps() {
     try {
       await boundarySetsApi.installPack(p.id, accepted)
       setPendingTerms(null)
-      toast.success(`${p.name} installed`)
+      toast.success(t('pg.adminPlatform.maps.installed', { name: p.name }))
       load()
     } catch (e) {
-      toast.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Could not install')
+      toast.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? t('pg.adminPlatform.maps.installFailed'))
     }
   }
 
   if (loading) return <LoadingState />
-  if (loadError) return <LoadError what="the map settings" error={loadError} onRetry={load} />
+  if (loadError) return <LoadError what={t('pg.adminPlatform.maps.loadWhat')} title={t('pg.adminPlatform.loadErr', { what: t('pg.adminPlatform.maps.loadWhat') })}
+    retryLabel={t('pg.adminPlatform.retry')} error={loadError} onRetry={load} />
   const installable = packs.filter(p => !sets.some(s => s.name === p.name))
   return (
     <div style={{ maxWidth: 820 }}>
       <h1 className="dl-page-title" style={{ marginBottom: 4 }}>{t('nav.maps')}</h1>
       <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 0 }}>
-        Basemap tiles and region boundaries for every map in the organisation.
+        {t('pg.adminPlatform.maps.intro')}
       </p>
 
       <BasemapSettings />
 
       <section className="card" style={{ padding: 16, marginTop: 16 }}>
-        <h2 style={{ fontSize: 15, marginTop: 0 }}>Boundary sets</h2>
-        {sets.length === 0 ? <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>None yet.</p> : (
+        <h2 style={{ fontSize: 15, marginTop: 0 }}>{t('pg.adminPlatform.maps.sets')}</h2>
+        {sets.length === 0 ? <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>{t('pg.adminPlatform.maps.none')}</p> : (
           <ul style={{ fontSize: 13, paddingInlineStart: 18 }}>
-            {sets.map(s => <li key={s.id}>{s.name} <span style={{ color: 'var(--muted)' }}>— {s.feature_count} regions</span></li>)}
+            {sets.map(s => <li key={s.id}><bdi>{s.name}</bdi> <span style={{ color: 'var(--muted)' }}>{t('pg.adminPlatform.maps.regions', { n: s.feature_count })}</span></li>)}
           </ul>
         )}
         {installable.length > 0 && (
           <>
-            <h3 style={{ fontSize: 13, marginBottom: 6 }}>Starter packs</h3>
+            <h3 style={{ fontSize: 13, marginBottom: 6 }}>{t('pg.adminPlatform.maps.packs')}</h3>
             <ul style={{ fontSize: 13, paddingInlineStart: 18 }}>
               {installable.map(p => (
                 <li key={p.id} style={{ marginBottom: 6 }}>
-                  <b>{p.name}</b> <span style={{ color: 'var(--muted)' }}>— {p.feature_count} regions. {p.description} Source: {p.source}; licence: {p.license}.</span>{' '}
+                  <b><bdi>{p.name}</bdi></b> <span style={{ color: 'var(--muted)' }}>{richNodes(
+                    t('pg.adminPlatform.maps.packLine', { n: p.feature_count }),
+                    { description: <bdi>{p.description}</bdi>, source: <bdi>{p.source}</bdi>, license: <bdi>{p.license}</bdi> })}</span>{' '}
                   <button className="btn btn-sm" onClick={() => void install(p)}>
-                    {p.requires_acceptance ? 'Review terms & install' : 'Install'}
+                    {p.requires_acceptance ? t('pg.adminPlatform.maps.reviewInstall') : t('pg.adminPlatform.maps.install')}
                   </button>
                   {pendingTerms === p.id && (
                     <PackTermsConfirm pack={p}
@@ -83,7 +87,7 @@ export default function AdminMaps() {
             </ul>
           </>
         )}
-        <p style={{ fontSize: 11.5, color: 'var(--muted)' }}>Custom boundary files are uploaded from any region map’s Boundaries picker.</p>
+        <p style={{ fontSize: 11.5, color: 'var(--muted)' }}>{t('pg.adminPlatform.maps.customFiles')}</p>
       </section>
     </div>
   )

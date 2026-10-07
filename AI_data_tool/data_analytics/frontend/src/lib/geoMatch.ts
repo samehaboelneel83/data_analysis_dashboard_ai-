@@ -9,6 +9,7 @@
  * use, so the number the dialog shows is the number the map will draw.
  */
 import { matchRegion, type RegionFeature, type RegionSet } from '../components/report/geo/worldGeometry'
+import { translate, type TranslateFn } from '../i18n'
 
 export interface ValueCount { name: unknown; count: number }
 
@@ -49,13 +50,17 @@ export function geoMatchReport(values: readonly ValueCount[], set: RegionSet): G
   return { matchedRows, totalRows, pctRows, matchedValues, totalValues, unmatched, matchedFeatures }
 }
 
-/** "86% of rows mapped · 3 of 27 values unmatched: England (120 rows), …" */
-export function geoMatchSentence(r: GeoMatchReport, maxNames = 3): string {
-  if (r.totalValues === 0) return 'No values to map.'
-  const head = `${r.pctRows}% of rows mapped`
-  if (r.unmatched.length === 0) return `${head} · all ${r.totalValues} values found`
+const EN: TranslateFn = (key, vars) => translate('en', key, vars)
+
+/** "86% of rows mapped · 3 of 27 values unmatched: England (120 rows), …",
+ *  in the reader's language (`t`; English by default). */
+export function geoMatchSentence(r: GeoMatchReport, maxNames = 3, t: TranslateFn = EN): string {
+  if (r.totalValues === 0) return t('pg.panelsA.lib.geo.none')
+  const head = t('pg.panelsA.lib.geo.head', { pct: r.pctRows })
+  if (r.unmatched.length === 0) return t('pg.panelsA.lib.geo.allFound', { head, total: r.totalValues })
   const names = r.unmatched.slice(0, maxNames)
-    .map(u => `${u.name} (${u.count.toLocaleString()} row${u.count === 1 ? '' : 's'})`).join(', ')
-  const more = r.unmatched.length > maxNames ? `, +${r.unmatched.length - maxNames} more` : ''
-  return `${head} · ${r.unmatched.length} of ${r.totalValues} values unmatched: ${names}${more}`
+    .map(u => t('pg.panelsA.lib.geo.value', { name: String(u.name), n: u.count.toLocaleString() }))
+    .join(t('pg.panelsA.lib.geo.sep'))
+  const more = r.unmatched.length > maxNames ? t('pg.panelsA.lib.geo.more', { n: r.unmatched.length - maxNames }) : ''
+  return t('pg.panelsA.lib.geo.unmatched', { head, k: r.unmatched.length, total: r.totalValues, names, more })
 }

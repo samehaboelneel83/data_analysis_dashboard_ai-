@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { fieldStyle } from '../../components/ui/fieldStyle'
 import { useT } from '../../i18n'
+import { richNodes } from '../../i18n/pages/adminPlatform'
 import toast from 'react-hot-toast'
 import { apiOrigin, ssoApi, type SsoConfig } from '../../services/api'
 import { useConfirm } from '../../components/ui/ConfirmDialog'
@@ -12,6 +13,8 @@ const REDACTED = '__SECRET_UNCHANGED__'
 // Under the same-origin production build this resolves to the browser's
 // own address rather than a useless relative path.
 const API_ORIGIN = apiOrigin()
+/** Protocol names, the same in every language. */
+const PROTOCOL_NAME = { oidc: 'OpenID Connect', saml: 'SAML 2.0' } as const
 
 /** Org-admin screen to configure this organization's identity provider — OpenID Connect
  *  or SAML 2.0. SSO authenticates users an admin has already created here; it never
@@ -61,27 +64,27 @@ export default function AdminSso() {
 
   const save = async () => {
     if (!domain.trim() || !issuer.trim()) {
-      toast.error(protocol === 'oidc' ? 'Domain and issuer URL are required'
-                                      : 'Domain and IdP entity ID are required')
+      toast.error(protocol === 'oidc' ? t('pg.adminPlatform.sso.reqIssuer')
+                                      : t('pg.adminPlatform.sso.reqEntity'))
       return
     }
     const body: SsoConfig = { protocol, enabled, email_domain: domain.trim(), issuer: issuer.trim() }
     if (protocol === 'oidc') {
-      if (!clientId.trim()) { toast.error('Client ID is required'); return }
-      if (!configured && !secret.trim()) { toast.error('A client secret is required'); return }
+      if (!clientId.trim()) { toast.error(t('pg.adminPlatform.sso.reqClientId')); return }
+      if (!configured && !secret.trim()) { toast.error(t('pg.adminPlatform.sso.reqSecret')); return }
       body.client_id = clientId.trim()
       body.client_secret = secret.trim() ? secret.trim() : REDACTED
     } else {
-      if (!ssoUrl.trim() || !cert.trim()) { toast.error('SSO URL and signing certificate are required'); return }
+      if (!ssoUrl.trim() || !cert.trim()) { toast.error(t('pg.adminPlatform.sso.reqSaml')); return }
       body.config = { sso_url: ssoUrl.trim(), x509_cert: cert.trim() }
     }
     setSaving(true)
     try {
       await ssoApi.putConfig(body)
-      toast.success('SSO settings saved')
+      toast.success(t('pg.adminPlatform.sso.saved'))
       load()
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail ?? 'Could not save SSO settings')
+      toast.error(e?.response?.data?.detail ?? t('pg.adminPlatform.sso.saveFailed'))
     } finally {
       setSaving(false)
     }
@@ -89,16 +92,16 @@ export default function AdminSso() {
 
   const remove = async () => {
     if (!await confirm({
-      title: 'Remove SSO for this organization?',
-      body: 'Everyone signs in with a password instead. Anyone without one must reset it before they can get back in.',
-      confirmLabel: 'Remove SSO',
+      title: t('pg.adminPlatform.sso.removeTitle'),
+      body: t('pg.adminPlatform.sso.removeBody'),
+      confirmLabel: t('sso.remove'),
     })) return
     try {
       await ssoApi.deleteConfig()
-      toast.success('SSO removed')
+      toast.success(t('pg.adminPlatform.sso.removed'))
       setConfigured(false); setHasSecret(false); setSecret('')
       setIssuer(''); setClientId(''); setSsoUrl(''); setCert(''); setDomain('')
-    } catch { toast.error('Could not remove SSO') }
+    } catch { toast.error(t('pg.adminPlatform.sso.removeFailed')) }
   }
 
   const inp: React.CSSProperties = fieldStyle
@@ -111,9 +114,12 @@ export default function AdminSso() {
   )
   const acs = `${API_ORIGIN}/api/v1/auth/sso/saml/acs`
   const callback = `${API_ORIGIN}/api/v1/auth/sso/oidc/callback`
+  const metadata = `${API_ORIGIN}/api/v1/auth/sso/saml/metadata`
 
   if (loading) return <div><LoadingState /></div>
-  if (loadError != null) return <div style={{ maxWidth: 640 }}><LoadError what="SSO settings" error={loadError} onRetry={load} /></div>
+  if (loadError != null) return <div style={{ maxWidth: 640 }}><LoadError what={t('pg.adminPlatform.sso.loadWhat')}
+    title={t('pg.adminPlatform.loadErr', { what: t('pg.adminPlatform.sso.loadWhat') })} retryLabel={t('pg.adminPlatform.retry')}
+    error={loadError} onRetry={load} /></div>
 
   return (
     <div style={{ maxWidth: 640 }}>
@@ -130,51 +136,53 @@ export default function AdminSso() {
             <button key={p} type="button" aria-pressed={protocol === p}
               className={`dl-seg__btn${protocol === p ? ' dl-seg__btn--on' : ''}`}
               onClick={() => setProtocol(p)} style={{ flex: 1, justifyContent: 'center' }}>
-              {p === 'oidc' ? 'OpenID Connect' : 'SAML 2.0'}
+              {PROTOCOL_NAME[p]}
             </button>
           ))}
         </div>
       ), protocol === 'oidc'
-        ? 'Azure AD / Entra, Okta, Google, Auth0, Keycloak.'
-        : 'ADFS, Shibboleth, or any SAML 2.0 IdP.')}
+        ? 'Azure AD / Entra, Okta, Google, Auth0, Keycloak.' // i18n-ok: product names
+        : t('pg.adminPlatform.sso.samlIdps'))}
 
       {field(t('sso.emailDomain'), <input style={inp} value={domain}
-        onChange={e => setDomain(e.target.value)} placeholder="acme.com" />,
+        onChange={e => setDomain(e.target.value)} placeholder="acme.com" dir="ltr" />, // i18n-ok
         t('sso.emailDomainHint'))}
 
       {protocol === 'oidc' ? (
         <>
-          {field('Issuer URL', <input style={inp} value={issuer}
+          {field(t('pg.adminPlatform.sso.issuer'), <input style={inp} value={issuer} dir="ltr"
             onChange={e => setIssuer(e.target.value)}
-            placeholder="https://login.microsoftonline.com/<tenant>/v2.0" />,
-            'Its /.well-known/openid-configuration is read automatically.')}
-          {field('Client ID', <input style={inp} value={clientId}
-            onChange={e => setClientId(e.target.value)} placeholder="application (client) id"
+            placeholder="https://login.microsoftonline.com/<tenant>/v2.0" />, // i18n-ok: a URL
+            t('pg.adminPlatform.sso.issuerHint'))}
+          {field(t('pg.adminPlatform.sso.clientId'), <input style={inp} value={clientId} dir="ltr"
+            onChange={e => setClientId(e.target.value)} placeholder={t('pg.adminPlatform.sso.clientIdPh')}
             autoComplete="off" name="sso-client-id" />)}
-          {field('Client secret', <input style={inp} type="password" value={secret}
+          {field(t('pg.adminPlatform.sso.clientSecret'), <input style={inp} type="password" value={secret}
             onChange={e => setSecret(e.target.value)}
             autoComplete="new-password" name="sso-client-secret"
-            placeholder={hasSecret ? '•••••••• (unchanged)' : 'client secret'} />,
-            hasSecret ? 'Leave blank to keep the stored secret.' : undefined)}
+            placeholder={hasSecret ? t('pg.adminPlatform.sso.secretPhKeep') : t('pg.adminPlatform.sso.secretPh')} />,
+            hasSecret ? t('pg.adminPlatform.sso.secretKeepHint') : undefined)}
           <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 16 }}>
-            Redirect URI for your IdP: <code>{callback}</code>
+            {richNodes(t('pg.adminPlatform.sso.redirect'), { url: <code dir="ltr">{callback}</code> })}
           </p>
         </>
       ) : (
         <>
-          {field('IdP entity ID', <input style={inp} value={issuer}
-            onChange={e => setIssuer(e.target.value)} placeholder="https://idp.example.com/entity" />,
-            'The IssuerName / EntityID from your IdP metadata.')}
-          {field('SSO URL', <input style={inp} value={ssoUrl}
-            onChange={e => setSsoUrl(e.target.value)} placeholder="https://idp.example.com/sso" />,
-            'The IdP’s HTTP-Redirect SingleSignOnService location.')}
-          {field('Signing certificate (X.509)', <textarea style={{ ...inp, minHeight: 120, fontFamily: 'monospace' }}
-            value={cert} onChange={e => setCert(e.target.value)}
-            placeholder="-----BEGIN CERTIFICATE----- … or the bare base64 from IdP metadata" />,
-            'The public certificate the IdP signs assertions with.')}
+          {field(t('pg.adminPlatform.sso.entityId'), <input style={inp} value={issuer} dir="ltr"
+            onChange={e => setIssuer(e.target.value)} placeholder="https://idp.example.com/entity" />, // i18n-ok: a URL
+            t('pg.adminPlatform.sso.entityHint'))}
+          {field(t('pg.adminPlatform.sso.ssoUrl'), <input style={inp} value={ssoUrl} dir="ltr"
+            onChange={e => setSsoUrl(e.target.value)} placeholder="https://idp.example.com/sso" />, // i18n-ok: a URL
+            t('pg.adminPlatform.sso.ssoUrlHint'))}
+          {field(t('pg.adminPlatform.sso.cert'), <textarea style={{ ...inp, minHeight: 120, fontFamily: 'monospace' }}
+            value={cert} onChange={e => setCert(e.target.value)} dir="ltr"
+            placeholder={t('pg.adminPlatform.sso.certPh')} />,
+            t('pg.adminPlatform.sso.certHint'))}
           <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 16 }}>
-            Give your IdP this ACS URL: <code>{acs}</code> · SP metadata:{' '}
-            <code>{API_ORIGIN}/api/v1/auth/sso/saml/metadata</code>
+            {richNodes(t('pg.adminPlatform.sso.acs'), {
+              acs: <code dir="ltr">{acs}</code>,
+              meta: <code dir="ltr">{metadata}</code>,
+            })}
           </p>
         </>
       )}

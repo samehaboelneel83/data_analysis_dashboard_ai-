@@ -121,7 +121,7 @@ Nothing is pushed.
   - One real edit still writes one version per moved widget. Batching that into one version is the backend row.
 - [x] 7-QA4 Fixes from the fourth QA report `/media/saeed/New Volume1/projects/redesign-captures/qa-4/QA_REPORT_4.md`: Broken E1 (new display rule's raw server error), E2 (a dropped field filling a second role); Visual V1–V9; Arabic T1–T6. One GATE at the end; then straight on to 8-i18n, and QA5 over both.
   - >> GATE QA4
-- [ ] 8-i18n The QA report's T1 strings on pages the redesign has not reached (Glossary, Organizations, Platform settings, Admin settings Basemap, Org units, Row/column security, API keys, Custom connectors, SSO, Maps, Models "random forest", Activity codes, Connections "Combine databases"). QA3 adds: Glossary "Business terms"; Admin Settings Basemap; Platform settings, including the endpoint list scrambled in RTL; SSO "Issuer URL", "Client ID" and the redirect line. QA4 adds:
+- [x] 8-i18n The QA report's T1 strings on pages the redesign has not reached (Glossary, Organizations, Platform settings, Admin settings Basemap, Org units, Row/column security, API keys, Custom connectors, SSO, Maps, Models "random forest", Activity codes, Connections "Combine databases"). QA3 adds: Glossary "Business terms"; Admin Settings Basemap; Platform settings, including the endpoint list scrambled in RTL; SSO "Issuer URL", "Client ID" and the redirect line. QA4 adds:
   - Activity action codes (report.create, …);
   - the admin pages' confirm dialogs (ApiKeys, AdminUsers, AdminRoles, AdminOrgUnits, AdminSso, AdminCustomConnectors, row/column security rules);
   - the Connections toasts ("— connected", "Connection failed", "Test failed") and SourceReview toasts;
@@ -179,6 +179,7 @@ Not part of the frontend steps (1–7); candidates for the handoff's section 7 p
 | 7-QA3 N3 (client half fixed in 7-QA3-N3, confirmed by QA4: opening Demo — Sales Overview in Edit left revision 39 unchanged) | Re-checked in QA3: still open at the root. QA2 only grouped the burst in the history ("39 changes"). Opening a page with no layout mode in Edit still runs the automatic packing, which sends one `updateWidget` per widget in parallel (`persistWidgetLayouts`), so the server snapshots a version per widget. `VERSIONS_KEPT = 50` (`routers/reports.py`), so one such open can push most of the older history out. | One version per user action: a batch layout endpoint (or coalescing saves seconds apart), an atomic revision increment, and retention that counts actions rather than rows. |
 | 7-QA4 E1 | A display rule whose operator does not fit its column ("date > 0") fails on the server with Python's own message, `'>' not supported between instances of 'str' and 'int'` | The client now picks a fitting default, offers only operators that fit the column's type, and shows a short translated message (server text as detail). The server should validate rule types when a rule is saved and answer with a code, not a Python exception. |
 | 7-QA4 T5 (with T12) | "Is this difference real?" sends English prose | Shown as sent, `dir="auto"`: `summary`, `tests[].business.sentence`, error `detail`s. Composed by the client in Arabic from the numbers: `tests[].sentence`. Matched by pattern (breaks quietly if the wording changes): the three `caveats[]`. Should be codes: `tests[].question`, `tests[].effect_label`, `tests[].test`. Source: `app/services/analysis/inferential.py`. |
+| 8-i18n | The platform settings catalog (GET /platform/settings), the connector catalog's labels, boundary-pack descriptions/source/licence, the Activity `entity` text ("report #386") and model notes/warnings are English prose from the server | The client now translates the settings catalog BY KEY (12 categories, 75 labels, 23 help texts) and the 101 audit action codes, falling back to the server's English for anything unknown; a reworded server label keeps the old translation. The server should send stable codes/keys and parameters, not prose. |
 | 7-QA3-N3 (after the client fix) | Opening no longer writes. A layout edit still costs one version per widget it stores: the first edit of an old 4-widget page added 5 (the page + 4 widgets), its undo 5 more. | Still needed: a batch layout endpoint (one version per action), an atomic revision, and a way to clear `layout_mode` (PATCH drops a null, so undo writes `''`). The 50-version cap stays. |
 | 7-QA2 N3 | One automatic layout pass (Executive packing when a page is first edited) left 39 versions in half a second, with repeated revision numbers; the burst can also push older versions past the retention window | Every widget save snapshots a version and the revision is read-then-bumped without a lock. Needs one version per user action (a batch layout endpoint, or coalescing saves seconds apart) and an atomic revision increment. The history now shows such a burst as one entry. |
 | 7-QA2 T12 (seen again in QA3) | Insights narrative, finding titles and details are English in the Arabic UI | The insights endpoint takes no language; the engine writes English. Needs the UI language on the request (AP3). The pane's own words are translated. |
@@ -979,3 +980,43 @@ QA4 confirmed N3 (opening Demo — Sales Overview in Edit left revision 39 uncha
 - `e2e/capture/redesign/cap_qa4.mjs`: before (:3002 at `da76a61`) and after (:3001) into `qa-4-fixes/{before,after}`, EN/AR × light/dark. V9 has no capture (it needs a live LLM answer); its unit test covers it.
 - Full suite: 311 files / 3984 tests pass (run with 4 workers), after E0. With the default worker count, while the capture servers were busy, three slow tests timed out (the map click 24s, geo time-play 11s, report-level display rules 7.8s); each passes alone. Type-check and build pass.
 - Seen while capturing (not in the QA report): on the Datasets page, the first click on a non-selected row's ⋯ sometimes opens and at once closes its menu in Playwright; a second click opens it. The QA opened it normally with a real browser. Watch in QA5.
+
+### 8-i18n Pages outside the Builder in Arabic — the commit that adds this entry
+
+**Approach (as in the Builder):**
+- One message module per area in `src/i18n/pages/` (`adminSecurity`, `adminPlatform`, `dataPages`, `panelsA`, `panelsB`, `modelsMaps`), spread into `en.ts`/`ar.ts`: about 1,900 keys.
+- Full templates with placeholders and ICU plurals (Arabic dual and few/many forms).
+- Names isolated: `<bdi>` in JSX, «\u2068…\u2069» in plain strings.
+- Codes and values sent to the server unchanged.
+- English byte-identical: the 20 English captures are pixel-identical before/after (SSO differs only by the server port in its callback URL).
+- Six agents worked in parallel on disjoint files, plus one for the leftovers, then the result was reviewed in Arabic captures.
+
+**Covered** (each file in its area's guard, `src/test/strings.<area>.test.ts`):
+- **Admin security:** row and column security rules, connection rules, roles, users (incl. bulk import), export policy.
+- **Admin and platform:**
+  - Organizations, Org units, SSO, API keys, Custom connectors, Maps, Admin settings with Basemap.
+  - Platform settings: the server's catalog is translated by key, with the server's English as fallback. Non-secret string values (the LLM_ENDPOINTS JSON, URLs, ids) are LTR-isolated, which fixes the endpoint list scrambled in RTL.
+- **Data pages:**
+  - Connections (toasts, the connection dialog, Combine databases), Source review, Glossary ("Business terms").
+  - Activity: the 101 audit action codes, in words in Arabic. English keeps the raw code, which a test pins; an unknown code shows raw, LTR.
+  - Jobs, Deliveries, the dashboards-list group label, and the Home dashboards delete confirm (name isolated).
+- **Report panels:**
+  - Measures, Column formats, Custom functions, Calc columns (with the function catalog's 10 categories and 84 hints), Custom categories, Hierarchy tree, Access dialog and explainer, Subscribe, Suggestions, Pack terms.
+  - The prep pipeline (panel, steps, step editor, join note), Outlier details, Data views, Relative dates.
+  - Models tab ("random forest" → الغابة العشوائية), model settings and view, map/pin/graph layers, boundary sets, geo match.
+- **Shared:** `LoadError`'s default heading, body and buttons. In Arabic the heading is generic, because callers pass `what` in English.
+
+**Left in English, and why:**
+- Server prose: settings help without a key, connector catalog labels, model notes and warnings, the Activity entity text, error `detail`s. These are in the backend row.
+- Formulas, function signatures, snippets, SQL and expression samples, product and protocol names (OpenID Connect, SAML 2.0, PostgreSQL), and metric abbreviations (AUC, R², RMSE). These are marked `// i18n-ok`.
+- Data values a step writes (Training/Validation/Test, the catch-all "Other"), and saved defaults the user can edit ("Joined dataset", "Boundaries").
+- Not on this step's list, still English: DatasetDetail's own text, CommandPalette, WorkspaceTree, QueryBuilderDialog/QueryCanvas, ExpressionBuilder, analysisResults, the dataset side panels (Alerts, Aggregates, Data quality, Column meaning), FolderShare/DatasetShare dialogs, Upload, SharedReport, `lib/friendlyError`. The scanner counts them. They are the next i18n list, under "Then: Upload, Connections, Lineage, the AI button".
+
+**Spotted, not changed:** the export-policy tooltip's English "Everything is allowed: untick "All" to choose" shows when every export is OFF. The Arabic says what the screen does; the English is kept for the owner to decide.
+
+**Tests:**
+- New: six area guards (59 files); Arabic render tests per area (adminSecurity 6, adminPlatform 6, dataPages 5, panelsA 8 + 3, panelsB 9, modelsMaps 7).
+- Re-pinned: the palette-wiring allow-list (the model card's arrow now mirrors in RTL).
+- Full suite: 323 files / 4091 tests pass (4 workers). Type-check and build pass.
+- Captures: `e2e/capture/redesign/cap_8i18n.mjs`, 20 pages × EN light / AR light / AR dark, before (:3002 at `4bd4025`) and after, in `redesign-captures/8-i18n/{before,after}/`.
+
