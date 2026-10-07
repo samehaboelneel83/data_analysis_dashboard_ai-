@@ -12,12 +12,14 @@
  * Read-only and secured: every request goes through the same endpoints (row
  * security, column security) the widget itself does, and nothing persists.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { describeSpec, parseSpec } from '../../lib/relativeDates'
-import { analysisCatalogueApi, differenceApi, explainApi, type DatasetColumn, type DifferenceCheck } from '../../services/api'
+import { analysisCatalogueApi, differenceApi, explainApi, type DatasetColumn, type DifferenceCheck, type DifferenceTest } from '../../services/api'
 import { chartForFields } from '../../lib/autoChart'
 import { useModalDialog } from '../ui/useModalDialog'
 import { useT, type MessageKey, type TranslateFn } from '../../i18n'
+import { useDirection } from '../../contexts/DirectionContext'
+import { isolateNumbers } from '../../lib/isolateNumbers'
 
 /** Widget types that draw the plain dimension+measure series, so any one of
  *  them can show another's data with no new query. */
@@ -294,17 +296,66 @@ export function WhyDialog({ title, sections, footnote, onClose }: {
 
 const EFFECT_WORD: Record<string, string> = { cohens_d: "Cohen's d", cohens_h: "Cohen's h", rank_biserial: 'rank-biserial r' }
 
+/* QA4 T5: the words the stats engine picks from a fixed set, in the reader's
+ * language. Anything not listed is shown as sent. */
+const EFFECT_LABEL_KEY: Record<string, MessageKey> = {
+  negligible: 'bc.stats.effectNegligible', small: 'bc.stats.effectSmall',
+  medium: 'bc.stats.effectMedium', large: 'bc.stats.effectLarge',
+}
+const QUESTION_KEY: Record<string, MessageKey> = { 'row counts': 'bc.stats.qRowCounts', 'typical row': 'bc.stats.qTypicalRow' }
+const TEST_KEY: Record<string, MessageKey> = {
+  "Welch's t-test": 'bc.stats.testWelch', 'Mann-Whitney U': 'bc.stats.testMannWhitney',
+  'Exact binomial test (even split)': 'bc.stats.testBinomial',
+}
+const known = (t: TranslateFn, table: Record<string, MessageKey>, v: string) => (table[v] ? t(table[v]) : v)
+
+/** A message whose placeholders are elements (a number in its own LTR
+ *  isolate, a name in its own isolate), so an Arabic sentence never reorders
+ *  them. The template is still one whole sentence per message key. */
+function fill(t: TranslateFn, key: MessageKey, vars: Record<string, ReactNode>): ReactNode {
+  const names = Object.keys(vars)
+  const marked = t(key, Object.fromEntries(names.map((n, i) => [n, `\uE000${i}\uE001`])))
+  return marked.split(/\uE000(\d+)\uE001/).map((part, i) => (i % 2 ? <span key={i}>{vars[names[Number(part)]]}</span> : part))
+}
+// QA4: never broken across lines ("p =" / "0.8487)" read as "p =) 0.8487)").
+const num = (v: ReactNode) => <bdi dir="ltr" style={{ whiteSpace: 'nowrap' }}>{v}</bdi>
+const nameOf = (v: ReactNode) => <bdi>{v}</bdi>
+
+/** The verdict on one test, composed from its numbers (Arabic; English shows
+ *  the server's sentence, which these templates repeat word for word). */
+function verdict(t: TranslateFn, test: DifferenceTest, a: string, b: string, measure: string | null): ReactNode {
+  const what = test.question === 'row counts' ? 'counts' : test.effect_name === 'rank_biserial' ? 'median' : 'mean'
+  const form = !test.significant ? 'NotSig' : test.effect_label === 'negligible' ? 'SigNegligible' : 'Sig'
+  return fill(t, `bc.stats.${what}${form}` as MessageKey, {
+    a: nameOf(a), b: nameOf(b), measure: nameOf(measure ?? ''), p: num(test.p_text),
+    label: known(t, EFFECT_LABEL_KEY, test.effect_label),
+  })
+}
+
+/** The server's three fixed footnotes, recognised and translated; any other
+ *  caveat is shown as sent. */
+function footnote(t: TranslateFn, c: string): ReactNode {
+  const tested = /^Tested on the ([\d,]+) rows behind these two bars, after this chart's filters\.$/.exec(c)
+  if (tested) return fill(t, 'bc.stats.footTested', { n: num(tested[1]) })
+  const sig = /^Significance at (\d+%); with many rows, tiny differences are 'significant'\. The effect size says how much the groups overlap; the size of the gap says how much it matters\.$/.exec(c)
+  if (sig) return fill(t, 'bc.stats.footSignificance', { alpha: num(sig[1]) })
+  if (c === 'An observed difference, not a cause.') return t('bc.stats.footNotCause')
+  return isolateNumbers(c)
+}
+
 /** The evidence chip: test, p, effect size and its label -- never p alone. */
 export function EvidenceChip({ test, p_text, effect_name, effect_size, effect_label, significant }: {
   test: string; p_text: string; effect_name: string; effect_size: number; effect_label: string; significant: boolean
 }) {
   const t = useT()
+  const testName = known(t, TEST_KEY, test)
+  const label = known(t, EFFECT_LABEL_KEY, effect_label)
   return (
-    <span data-testid="evidence-chip" title={`${test}; ${p_text}; ${EFFECT_WORD[effect_name] ?? effect_name} = ${effect_size} (${effect_label})`}
+    <span data-testid="evidence-chip" title={`${testName}; ${p_text}; ${EFFECT_WORD[effect_name] ?? effect_name} = ${effect_size} (${label})`}
       style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 10.5, padding: '1px 8px', borderRadius: 99,
         border: `1px solid ${significant && effect_label !== 'negligible' ? 'var(--accent)' : 'var(--border)'}`,
         color: 'var(--muted)', whiteSpace: 'nowrap' }}>
-      {t('bc.canvas.effectChip', { test, p: p_text, label: effect_label, name: EFFECT_WORD[effect_name] ?? effect_name, size: effect_size })}
+      {t('bc.canvas.effectChip', { test: testName, p: p_text, label, name: EFFECT_WORD[effect_name] ?? effect_name, size: effect_size })}
     </span>
   )
 }
@@ -324,6 +375,14 @@ export function DifferenceDialog({ datasetId, dimension, measure, aggregation, g
   const [res, setRes] = useState<DifferenceCheck | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const tr = useT()
+  // QA4 T5: in English the server's sentences are shown as sent (they are
+  // English); in another language the dialog composes them from the numbers.
+  const local = useDirection().language !== 'en'
+  // QA4: the aggregation in words in Arabic ("sum لـ«revenue»" read as code).
+  const aggWord = (agg: string) => {
+    if (!local) return agg
+    const k = `rb.agg.${agg}` as MessageKey; const v = tr(k); return v !== k ? v : agg
+  }
   useEffect(() => {
     setRes(null); setErr(null)
     if (!a || !b || a === b) { setErr(tr('bc.canvas.pickTwoBars')); return }
@@ -344,27 +403,31 @@ export function DifferenceDialog({ datasetId, dimension, measure, aggregation, g
       <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
         {pick(a, setA, tr('bc.canvas.firstBar'))} <span style={{ color: 'var(--muted)' }}>{tr('bc.canvas.vs')}</span> {pick(b, setB, tr('bc.canvas.secondBar'))}
         <span style={{ fontSize: 11, color: 'var(--muted)' }}>· {measure
-          ? tr('bc.canvas.diffAggOf', { agg: aggregation, measure, dimension })
-          : tr('bc.canvas.diffAggRows', { agg: aggregation, dimension })}</span>
+          ? tr('bc.canvas.diffAggOf', { agg: aggWord(aggregation), measure, dimension })
+          : tr('bc.canvas.diffAggRows', { agg: aggWord(aggregation), dimension })}</span>
       </div>
       {err && <div role="alert" dir="auto" style={{ color: 'var(--danger)' }}>{err}</div>}
       {!res && !err && <div style={{ color: 'var(--muted)' }}>{tr('bc.canvas.testingRows')}</div>}
       {res && (
         <div data-testid="difference-result" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div dir="auto" style={{ fontWeight: 600 }}>{res.summary}</div>
+          <div dir="auto" style={{ fontWeight: 600 }}>{local ? isolateNumbers(res.summary) : res.summary}</div>
           {res.tests.map((t, i) => (
             <div key={i} style={{ borderInlineStart: '2px solid var(--border)', paddingInlineStart: 8 }}>
-              <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.04em' }} dir="auto">{t.question}</div>
-              <div style={{ fontSize: 12.5 }} dir="auto">{t.sentence}</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.04em' }} dir="auto">{known(tr, QUESTION_KEY, t.question)}</div>
+              <div style={{ fontSize: 12.5 }} dir="auto">
+                {local ? verdict(tr, t, res.population.group_a, res.population.group_b, res.population.measure) : t.sentence}
+              </div>
               {t.business && (
                 <div data-testid="difference-business" style={{ fontSize: 12.5, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '2px 8px', margin: '4px 0' }}>
-                  <span style={{ color: 'var(--muted)' }}>{tr('bc.canvas.gapSize')}</span><b dir="auto">{t.business.sentence}</b>
+                  <span style={{ color: 'var(--muted)' }}>{tr('bc.canvas.gapSize')}</span><b dir="auto">{local ? isolateNumbers(t.business.sentence) : t.business.sentence}</b>
                   <span style={{ color: 'var(--muted)' }}>{tr('bc.canvas.statEffect')}</span>
-                  <span>{tr('bc.canvas.effectOverlap', { label: t.effect_label })}</span>
+                  <span>{tr('bc.canvas.effectOverlap', { label: known(tr, EFFECT_LABEL_KEY, t.effect_label) })}</span>
                 </div>
               )}
               <div style={{ fontSize: 12, margin: '2px 0' }} dir="auto">
-                {Object.entries(t.values).map(([k, v]) => `${k}: ${v.toLocaleString()}`).join(' · ')}
+                {local
+                  ? Object.entries(t.values).map(([k, v], j) => <span key={k}>{j ? ' · ' : ''}{nameOf(k)}: {num(v.toLocaleString())}</span>)
+                  : Object.entries(t.values).map(([k, v]) => `${k}: ${v.toLocaleString()}`).join(' · ')}
                 {' ' + (t.question === 'typical row'
                   ? tr(res.population.aggregation === 'median' ? 'bc.canvas.medianPerRow' : 'bc.canvas.meanPerRow')
                   : tr('bc.canvas.rowsWord'))}
@@ -373,11 +436,14 @@ export function DifferenceDialog({ datasetId, dimension, measure, aggregation, g
             </div>
           ))}
           <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-            {tr('bc.canvas.population', { a: res.population.rows_a.toLocaleString(), ga: res.population.group_a,
-              b: res.population.rows_b.toLocaleString(), gb: res.population.group_b })}
+            {local
+              ? fill(tr, 'bc.canvas.population', { a: num(res.population.rows_a.toLocaleString()), ga: nameOf(res.population.group_a),
+                  b: num(res.population.rows_b.toLocaleString()), gb: nameOf(res.population.group_b) })
+              : tr('bc.canvas.population', { a: res.population.rows_a.toLocaleString(), ga: res.population.group_a,
+                  b: res.population.rows_b.toLocaleString(), gb: res.population.group_b })}
           </div>
           <ul style={{ margin: 0, paddingInlineStart: 18, fontSize: 11, color: 'var(--muted)' }}>
-            {res.caveats.map((c, i) => <li key={i} dir="auto">{c}</li>)}
+            {res.caveats.map((c, i) => <li key={i} dir="auto">{local ? footnote(tr, c) : c}</li>)}
           </ul>
         </div>
       )}

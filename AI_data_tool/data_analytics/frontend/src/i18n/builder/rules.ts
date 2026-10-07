@@ -147,6 +147,8 @@ export const en = {
   'bc.rules.map.color': 'Colour for mapping {n}',
   'bc.rules.map.remove': 'Remove mapping {n}',
   'bc.rules.map.add': 'Add mapping',
+  'bc.rules.dr.error': 'This rule can\'t be applied to this column\'s values. Pick another column or condition.',
+  'bc.rules.dr.errorDetail': 'Details',
 } as const
 
 export const ar: Record<keyof typeof en, string> = {
@@ -288,4 +290,6 @@ export const ar: Record<keyof typeof en, string> = {
   'bc.rules.map.color': 'لون المطابقة {n}',
   'bc.rules.map.remove': 'إزالة المطابقة {n}',
   'bc.rules.map.add': 'إضافة مطابقة',
+  'bc.rules.dr.error': 'لا يمكن تطبيق هذه القاعدة على قيم هذا العمود. اختر عمودًا أو شرطًا آخر.',
+  'bc.rules.dr.errorDetail': 'التفاصيل',
 }

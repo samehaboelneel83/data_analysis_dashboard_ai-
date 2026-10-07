@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { reviewApi, type PerfEvaluation } from '../../services/api'
 import { missingRequiredRoles } from './WidgetPlaceholder'
+import { roleLabel } from './panelLabels'
 import { translate, useT, type MessageKey } from '../../i18n'
 import { richT } from '../../i18n/builder/panes'
 import { useDirection } from '../../contexts/DirectionContext'
@@ -270,8 +271,9 @@ export default function ReviewPane({ report, perfStats, onSelectWidget, mapping,
   const findings = useMemo(() => reviewReport(report, perfStats, mapping), [report, perfStats, mapping])
   /** The finding in the reader's language; a list of role names takes the
    *  reader's list comma. */
+  // QA4 T1: the role names themselves in the reader's language too ("Measure").
   const say = (f: Finding) => richT(t, f.key, f.roles && language === 'ar'
-    ? { ...f.vars, roles: f.roles.join('، ') } : f.vars)
+    ? { ...f.vars, roles: f.roles.map(r => roleLabel(language, r)).join('، ') } : f.vars)
   const [perf, setPerf] = useState<PerfEvaluation | null>(null)
   const [perfBusy, setPerfBusy] = useState(false)
   const [perfErr, setPerfErr] = useState<string | null>(null)

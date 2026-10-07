@@ -69,8 +69,10 @@ describe('breadcrumb gives way in order, at any zoom (QA3 D1)', () => {
     expect(rule('.dl-crumbs__section')).toMatch(/text-overflow:\s*ellipsis/)
     expect(rule('.dl-crumbs > .dl-crumbs__link')).toMatch(/flex-shrink:\s*1000/)
   })
-  it('the page name does not shrink while the trail can (Arabic showed "D.")', () => {
-    expect(rule('.dl-crumbs__page')).toMatch(/flex:\s*0 0 auto/)
-    expect(rule('.dl-crumbs__page')).toMatch(/max-inline-size:\s*60%/)
+  it('the page name gives way last and keeps a readable minimum (Arabic showed "D.")', () => {
+    expect(rule('.dl-crumbs__page')).toMatch(/flex:\s*0 1 auto/)
+    // QA4 V8: no cap and no floor -- either cut a crumb with room to spare
+    expect(rule('.dl-crumbs__page')).not.toMatch(/max-inline-size/)
+    expect(rule('.dl-crumbs__page')).toMatch(/min-inline-size:\s*0/)
   })
 })

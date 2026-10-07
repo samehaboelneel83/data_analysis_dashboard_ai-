@@ -35,3 +35,20 @@ describe('builder CSS (QA3 Batch B)', () => {
     expect(rule(index, ':root:has(.dl-statusbar)')).toMatch(/--dl-toast-bottom:\s*\d+px/)
   })
 })
+
+describe('builder CSS (QA4)', () => {
+  it('V2: on a narrow header the dataset chip is its icon and the title part keeps 360px', () => {
+    const q = builder.match(/@container bdtop \(max-width: 1020px\)\s*\{([\s\S]*?)\n\}/)![1]
+    expect(q).toMatch(/\.dl-bd-chip\.ds > span\s*\{\s*font-size:\s*0/)
+    expect(q).toMatch(/\.dl-hdr-main\s*\{\s*min-width:\s*min\(100%, 360px\)/)
+  })
+  it('V3: panel headers stay at the top while their panel scrolls', () => {
+    expect(rule(builder, '.dl-bd-ph')).toMatch(/position:\s*sticky/)
+    expect(rule(builder, '.dl-bd-ph')).toMatch(/background:\s*var\(--surface\)/)
+  })
+  it('V7: Arabic is never letter-spaced; the coord tag words are in the text font', () => {
+    expect(index).toMatch(/:root\[dir="rtl"\] \*:not\(code\):not\(kbd\):not\(pre\)\s*\{\s*letter-spacing:\s*0 !important/)
+    expect(rule(builder, '.dl-bd-coord')).toMatch(/var\(--sans\)/)
+    expect(rule(builder, '.dl-bd-coord bdi')).toMatch(/var\(--mono\)/)
+  })
+})

@@ -2,11 +2,13 @@ import { en as bcCanvas } from './builder/canvas'
 import { en as bcPanes } from './builder/panes'
 import { en as bcRules } from './builder/rules'
 import { en as bcShell } from './builder/shell'
+import { en as bcStats } from './builder/stats'
+import { en as bcDialogs } from './builder/dialogs'
 
 /** English UI strings. Arabic lives in `ar.ts`; keep the two key sets identical. */
 export const en = {
   // QA3 Batch C: the builder's strings, one module per area (i18n/builder/).
-  ...bcCanvas, ...bcPanes, ...bcRules, ...bcShell,
+  ...bcCanvas, ...bcPanes, ...bcRules, ...bcShell, ...bcStats, ...bcDialogs,
   'nav.home': 'Home',
   'nav.askAi': 'Ask AI',
   'nav.datasets': 'Datasets',

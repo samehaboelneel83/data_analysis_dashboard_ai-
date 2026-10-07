@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef, useState } from 'react'
 import { AlignHorizontalDistributeCenter, AlignStartHorizontal, AlignStartVertical, Copy, Database, Filter, FilterX, Gauge } from 'lucide-react'
 import type { Widget } from '../../types/report'
 import { useCrossFilter } from '../../components/report/CrossFilterContext'
@@ -41,6 +42,22 @@ export function SelectionGuides({ layout, others, containerW, canvasH }: { layou
   const fits = (top: number) => top >= 0 && (canvasH == null || top + TAG_H <= canvasH)
   const below = b.top + b.height + 2, above = b.top - TAG_H - 2
   const top = fits(below) ? below : fits(above) ? above : b.top + b.height - TAG_H - 4
+  // QA4 V4: the numbers above are estimates (the tag's width from its text,
+  // the canvas from its rows). After drawing, the real boxes decide: a tag
+  // that would cross the canvas's bottom or end edge goes above the widget,
+  // or into its own corner, and never past the side.
+  const tagRef = useRef<HTMLSpanElement>(null)
+  const [fix, setFix] = useState<{ left: number; top: number } | null>(null)
+  useLayoutEffect(() => {
+    const tag = tagRef.current, box = tag?.parentElement
+    if (!tag || !box) return
+    const w = tag.offsetWidth, h = tag.offsetHeight, W = box.clientWidth, H = box.clientHeight
+    if (!W || !H) return
+    let t = top, l = left
+    if (t + h > H) t = b.top - h - 2 >= 0 ? b.top - h - 2 : Math.max(0, b.top + b.height - h - 4)
+    if (l + w > W) l = Math.max(0, W - w)
+    setFix(t !== top || l !== left ? { left: l, top: t } : null)
+  }, [top, left, b.top, b.height])
   return (
     <div className="dl-bd-guides" aria-hidden data-testid="selection-guides">
       <i className="v" style={{ left: b.left }} />
@@ -48,7 +65,7 @@ export function SelectionGuides({ layout, others, containerW, canvasH }: { layou
       <i className="h" style={{ top: b.top }} />
       <i className="h" style={{ top: b.top + b.height }} />
       {/* The ranges are isolated left-to-right: in Arabic "1–3" read "3–1". */}
-      <span className="dl-bd-coord" style={{ left, top }}>
+      <span ref={tagRef} className="dl-bd-coord" style={fix ?? { left, top }}>
         {t('bd.guide.col')} <bdi dir="ltr">{cols}</bdi> · {t('bd.guide.row')} <bdi dir="ltr">{rows}</bdi>{extra}
       </span>
     </div>

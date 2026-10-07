@@ -1,4 +1,5 @@
 import { formatDate } from '../../lib/dateFormat'
+import { contrastTokens } from '../../lib/contrastTokens'
 import { lazy, memo, Suspense, useContext, useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import type { PartialPeriod, RelativeNote } from '../../lib/relativeDates'
 import { partialPeriodEnd } from '../../lib/relativeDates'
@@ -1222,6 +1223,9 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
         // white (surface) box over a custom one. Transparent tiles keep surface.
         ['--dl-wbg' as string]: (() => { const bg = ruleStyles?.widget?.background ?? cfg.widget_background
           return bg && bg !== 'transparent' ? bg : 'var(--surface)' })(),
+        // QA4 V1: text, icons, ticks and labels follow a custom background's
+        // contrast, not the theme (white on #fde68a in the dark theme).
+        ...contrastTokens(ruleStyles?.widget?.background ?? cfg.widget_background),
         overflow: 'hidden', cursor: 'default',
         boxShadow: isDragging ? '0 8px 24px rgba(0,0,0,.25)' : selected ? '0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent)' : skinShadow(cfg.widget_skin),
         outline: isMultiSelected ? '2px solid var(--success)' : undefined,

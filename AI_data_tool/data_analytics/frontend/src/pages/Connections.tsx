@@ -90,10 +90,10 @@ export default function Connections() {
 
   const confirm = useConfirm()
   const handleDelete = async (ds: DataSource) => {
-    if (!await confirm({ title: `Delete "${ds.name}"?`, body: 'This cannot be undone.' })) return
+    if (!await confirm({ title: t('bc.dialogs.deleteNamed', { name: ds.name }), body: t('bc.dialogs.cannotUndo') })) return
     await dataSourcesApi.delete(ds.id)
     setSources(prev => prev.filter(s => s.id !== ds.id))
-    toast.success('Deleted')
+    toast.success(t('bc.dialogs.deleted'))
   }
 
   const handleTest = async (ds: DataSource) => {

@@ -3,8 +3,9 @@ import { ArrowLeftRight, ChevronRight } from 'lucide-react'
 import type { Widget } from '../../types/report'
 import { conversionsFor } from '../../lib/convertWidget'
 import { chartGroup, chartIcon, chartLabel, CHART_GROUP_ORDER } from './ChartGallery'
-import { useT, type MessageKey } from '../../i18n'
+import { useT } from '../../i18n'
 import { useDirection } from '../../contexts/DirectionContext'
+import { chartName } from '../../lib/chartName'
 
 /** The builder converts on this event: `{ widgetId, widget_type, config, label }`,
  *  saved as one undoable step. */
@@ -25,11 +26,7 @@ export default function ConvertToMenu({ widget, itemStyle, onDone }: {
   const { language } = useDirection()
   // QA3 C6: chart names in the reader's language (the gallery's own names);
   // English keeps chartLabel exactly, as the menu always read.
-  const name = (type: string) => {
-    if (language !== 'ar') return chartLabel(type)
-    const k = `gallery.tile.${type}` as MessageKey; const v = t(k)
-    return v !== k ? v : chartLabel(type)
-  }
+  const name = (type: string) => language === 'ar' ? chartName(type, t, language) : chartLabel(type)
   const [open, setOpen] = useState(false)
   const [group, setGroup] = useState<string | null>(null)
   const options = useMemo(() => conversionsFor(widget.widget_type, (widget.config ?? {}) as Record<string, unknown>),

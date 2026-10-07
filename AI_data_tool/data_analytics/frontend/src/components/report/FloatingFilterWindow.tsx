@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import { useCrossFilter } from './CrossFilterContext'
+import { useT } from '../../i18n'
 
 /**
  * What is filtering this page, reachable from anywhere on it.
@@ -27,6 +28,7 @@ import { useCrossFilter } from './CrossFilterContext'
  *   worse lie than no window.
  */
 export default function FloatingFilterWindow() {
+  const tr = useT()
   const { activeFilters, clearFilter, clearAllFilters } = useCrossFilter()
   const [open, setOpen] = useState(false)
   //: Offset from the default corner, in pixels. Session-only on purpose: a
@@ -81,8 +83,8 @@ export default function FloatingFilterWindow() {
               padding: '6px 8px 6px 10px', borderBottom: '1px solid var(--border)' }}>
             <strong style={{ fontSize: 11, flex: 1 }}>{label}</strong>
             <button onClick={clearAllFilters} className="btn btn-ghost btn-sm"
-              style={{ fontSize: 11, padding: '2px 6px' }}>Clear all</button>
-            <button onClick={() => setOpen(false)} aria-label="Collapse filters" title="Collapse"
+              style={{ fontSize: 11, padding: '2px 6px' }}>{tr('bc.shell.flt.clearAll')}</button>
+            <button onClick={() => setOpen(false)} aria-label={tr('bc.shell.flt.collapse')} title={tr('bc.shell.flt.collapseShort')}
               style={{ background: 'none', border: 'none', cursor: 'pointer',
                 color: 'var(--muted)', fontSize: 13, lineHeight: 1 }}>–</button>
           </div>
@@ -96,7 +98,7 @@ export default function FloatingFilterWindow() {
                     can be removed without finding the widget that set it, and a
                     column of unlabelled buttons is unusable by keyboard. */}
                 <button onClick={() => clearFilter(f.column, f.sourceWidgetId)}
-                  aria-label={`Remove filter ${f.label}`} title={`Remove filter ${f.label}`}
+                  aria-label={tr('bc.shell.flt.remove', { label: f.label })} title={tr('bc.shell.flt.remove', { label: f.label })}
                   style={{ background: 'none', border: 'none', color: 'var(--muted)',
                     cursor: 'pointer', fontSize: 13, lineHeight: 1, padding: 0 }}>×</button>
               </li>

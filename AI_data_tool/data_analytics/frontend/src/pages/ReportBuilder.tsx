@@ -104,6 +104,9 @@ import ZoomControl, { ZOOM_MAX, ZOOM_MIN } from './reportBuilder/ZoomControl'
 import ShortcutsDialog from './reportBuilder/ShortcutsDialog'
 import { clickSelection, selectionCount } from './reportBuilder/selection'
 import { readingOrder, tabOrder } from '../lib/readingOrder'
+import { roleForField } from '../lib/fieldPlacement'
+import { chartName } from '../lib/chartName'
+import { roleLabel } from '../components/report/panelLabels'
 import BuilderSkeleton from './reportBuilder/BuilderSkeleton'
 import TemplatesPane from './reportBuilder/TemplatesPane'
 import { AI_MODES, AiTabs, PanelHead, RightRail } from './reportBuilder/RightRail'
@@ -333,6 +336,13 @@ export default function ReportBuilder() {
   // toggle still expands it, and reading keeps the full rail.
   useEffect(() => {
     window.dispatchEvent(new CustomEvent('datalytics:builder-compact', { detail: editMode }))
+  }, [editMode])
+  // QA4 V6: switching to Edit starts with nothing selected; a widget a reader
+  // clicked in View stayed outlined, with its settings open, in Edit.
+  const wasEditing = useRef(editMode)
+  useEffect(() => {
+    if (editMode && !wasEditing.current) { setSelectedW(null); setMultiSelectedIds(new Set()) }
+    wasEditing.current = editMode
   }, [editMode])
   useEffect(() => () => { window.dispatchEvent(new CustomEvent('datalytics:builder-compact', { detail: false })) }, [])
   // Measured from the canvas element itself; 900 is only the value before one
@@ -2090,8 +2100,6 @@ export default function ReportBuilder() {
     setSelectedW(w => w && w.id === widgetId ? { ...w, config } : w)
   }, [report, reportId])
 
-  const isNumericRole = (rf: RoleField) => /numeric/i.test(rf.label ?? '') || rf.role.startsWith('measure') || rf.role === 'size'
-
   // SAS's 'change classification' / PBI's summarization override: flip a column
   // between measure and category. Detection stays the truth of dtype; the role
   // is an OVERRIDE stored in column_meta, so flipping back to the detected
@@ -2236,11 +2244,11 @@ export default function ReportBuilder() {
    *  widget has no empty role left. One rule for click-to-assign and for a
    *  drop onto the widget, so the two gestures can never disagree. */
   const planFieldOnWidget = useCallback((w: Widget, columnName: string, isNumericField: boolean) => {
-    const specs = (ROLE_SPECS[w.widget_type] ?? []).filter(rf => !rf.multi)
     const cfg = w.config as Record<string, unknown>
-    const empty = specs.filter(rf => !cfg[configKeyFor(rf.role)])
-    if (empty.length === 0) return null
-    const target = empty.find(rf => isNumericRole(rf) === isNumericField) ?? empty.find(rf => rf.required) ?? empty[0]
+    // QA4 E2: one rule (lib/fieldPlacement): never the same column twice,
+    // never a text field in a numeric role; null makes a new chart instead.
+    const target = roleForField(ROLE_SPECS[w.widget_type] ?? [], cfg, columnName, isNumericField)
+    if (!target) return null
     const next = { ...cfg, [configKeyFor(target.role)]: columnName }
     // The point of classifying a column as geography: a map built from it draws
     // the right shapes without the author choosing them again. Applied here,
@@ -3780,6 +3788,7 @@ export default function ReportBuilder() {
           pageMode={(activePage?.mobile_layout as { interaction_mode?: 'manual' | 'linked' | 'oneway' | 'twoway' } | null)?.interaction_mode ?? 'manual'}
           widgets={activePage?.widgets ?? []}
           onPersistInteraction={persistInteraction}>
+        <ClearSelectionOnEdit editMode={editMode} />
         {modern && (
           <div className="dl-vw-bar">
             {!topOpen && (
@@ -3936,8 +3945,9 @@ export default function ReportBuilder() {
                     const plan = target && col ? planFieldOnWidget(target, field, isNumericField(col)) : null
                     if (target && plan) {
                       window.dispatchEvent(new CustomEvent(PATCH_WIDGET_EVENT, { detail: { widgetId: target.id, patch: plan.config,
-                        label: tr('bc.shell.u.setRole', { role: plan.roleLabel, widget: target.title || target.widget_type, field }) } }))
-                      toast.success(tr('bc.shell.t.roleSet', { field, role: plan.roleLabel, widget: target.title || target.widget_type }))
+                        label: tr('bc.shell.u.setRole', { role: roleLabel(language, plan.roleLabel), widget: target.title || target.widget_type, field }) } }))
+                      // QA4 T1: the role in the reader's language ("في Measure").
+                      toast.success(tr('bc.shell.t.roleSet', { field, role: roleLabel(language, plan.roleLabel), widget: target.title || target.widget_type }))
                     } else {
                       if (target) toast(tr('bc.shell.t.becameNew', { widget: target.title || target.widget_type, field }))
                       void addWidgetFromField(field)
@@ -4041,7 +4051,10 @@ export default function ReportBuilder() {
                       )}
                       {/* Building (7e4): the prototype's quick actions over the
                           widget. Beside WidgetRenderer, which keeps its own header. */}
-                      {editMode && (
+                      {/* QA4 V5: not during a multi-selection -- the group bar
+                          ("3 selected") acts on all of them, and in Arabic it
+                          sat on top of this one. */}
+                      {editMode && multiSelectedIds.size < 2 && (
                         <EditToolbar title={widget.title || widget.widget_type}
                           onDuplicate={perWidgetHandlers.get(widget.id)?.onDuplicate}
                           onAssign={() => {
@@ -4218,8 +4231,11 @@ export default function ReportBuilder() {
                               )}
                             </div>
                             <div style={{ display: 'flex', gap: 10, color: 'var(--muted)' }}>
-                              <span>{w.widget_type}</span>
-                              <span style={{ fontFamily: 'var(--mono)' }}>{stat ? tr('bc.shell.perf.ms', { n: stat.durationMs.toFixed(0) }) : '—'}</span>
+                              <span>{chartName(w.widget_type, tr, language)}</span>
+                              {/* QA4 V7: the number in mono, the unit in the text font (Arabic
+                                  "ملّي ثانية" set in mono lost its joins). */}
+                              <span>{stat ? (() => { const [a, z] = tr('bc.shell.perf.ms', { n: '\u0000' }).split('\u0000')
+                                return <>{a}<span dir="ltr" style={{ fontFamily: 'var(--mono)' }}>{stat.durationMs.toFixed(0)}</span>{z}</> })() : '—'}</span>
                               <span>{stat ? tr('bc.shell.perf.rows', { n: stat.rowCount }) : ''}</span>
                             </div>
                           </div>
@@ -4614,3 +4630,18 @@ export default function ReportBuilder() {
     </div>
   )
 }
+
+/** QA4 V6: switching from reading to editing starts with no selection. A bar a
+ *  reader clicked in View stayed picked in Edit, with its cross-filter on every
+ *  widget ("1 filter"); a click in Edit no longer filters (QA3 A6), so nothing
+ *  there could clear it. Inside the provider, which the builder's body is not. */
+function ClearSelectionOnEdit({ editMode }: { editMode: boolean }) {
+  const { clearAllFilters } = useCrossFilter()
+  const was = useRef(editMode)
+  useEffect(() => {
+    if (editMode && !was.current) clearAllFilters()
+    was.current = editMode
+  }, [editMode, clearAllFilters])
+  return null
+}
+

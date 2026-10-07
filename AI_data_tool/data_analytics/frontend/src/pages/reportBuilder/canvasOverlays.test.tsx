@@ -76,3 +76,28 @@ describe('canvas overlays (7e4)', () => {
     expect(perf).toHaveBeenCalled()
   })
 })
+
+describe('the col · row tag at the canvas edge (QA4 V4)', () => {
+  it('a widget ending at the bottom of the canvas gets its tag above it, inside the canvas', () => {
+    const props = (proto: object, k: string) => Object.getOwnPropertyDescriptor(proto, k)!
+    const real = { ow: props(HTMLElement.prototype, 'offsetWidth'), oh: props(HTMLElement.prototype, 'offsetHeight'),
+      cw: props(Element.prototype, 'clientWidth'), ch: props(Element.prototype, 'clientHeight') }
+    Object.defineProperty(HTMLElement.prototype, 'offsetWidth', { configurable: true, get: () => 160 })
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, get: () => 16 })
+    Object.defineProperty(Element.prototype, 'clientWidth', { configurable: true, get: () => 1200 })
+    // the canvas is only as tall as the widget's bottom edge (5 rows)
+    Object.defineProperty(Element.prototype, 'clientHeight', { configurable: true, get: () => 5 * 66 - 8 })
+    try {
+      const { container } = render(<SelectionGuides layout={{ x: 0, y: 2, w: 6, h: 3 }} containerW={1200} others={[]} />)
+      const tag = container.querySelector('.dl-bd-coord') as HTMLElement
+      const top = parseFloat(tag.style.top)
+      expect(top + 16).toBeLessThanOrEqual(5 * 66 - 8)
+      expect(top).toBeLessThan(2 * 66)
+    } finally {
+      Object.defineProperty(HTMLElement.prototype, 'offsetWidth', real.ow)
+      Object.defineProperty(HTMLElement.prototype, 'offsetHeight', real.oh)
+      Object.defineProperty(Element.prototype, 'clientWidth', real.cw)
+      Object.defineProperty(Element.prototype, 'clientHeight', real.ch)
+    }
+  })
+})

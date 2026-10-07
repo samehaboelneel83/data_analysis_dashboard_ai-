@@ -1991,12 +1991,14 @@ html[data-presenting="1"] .dl-bleed { margin: 0; block-size: 100%; }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  /* QA3 D1: the name does not shrink while the trail in front of it can;
-     a very long one ellipsizes at 60% of the trail (all of it when alone). */
-  flex: 0 0 auto;
-  max-inline-size: 60%;
+  /* QA3 D1 / QA4 V8: the name gives way last -- weight 1 against the trail's
+     400 and 1000, so it shrinks only once the crumbs in front are stubs. No
+     cap and no floor: QA3's 60% cap cut a short Arabic trail
+     ("لوحات المعلو…"), and a floor wider than a short name ("Datasets")
+     overflowed the trail and cut the crumb in front with room to spare. */
+  flex: 0 1 auto;
+  min-inline-size: 0;
 }
-.dl-crumbs__page:only-child { max-inline-size: 100%; flex-shrink: 1; min-inline-size: 0; }
 
 /* A narrower window (QA V4): the controls on the right are fixed, so the
    trail is what gives. The muted section word in front goes first, so the
@@ -3127,3 +3129,8 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--da
 @container dlwidget (max-width: 260px) {
   .dl-widget--selected .dl-wdel { display: none; }
 }
+
+/* QA4 V7: Arabic is never letter-spaced -- spacing pulls its joined letters
+   apart ("م ل ّ ي"). Many headings set letter-spacing inline for Latin caps;
+   in a right-to-left page it is reset, code and key caps excepted. */
+:root[dir="rtl"] *:not(code):not(kbd):not(pre) { letter-spacing: 0 !important; }

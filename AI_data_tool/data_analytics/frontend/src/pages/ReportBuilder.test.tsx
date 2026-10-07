@@ -323,6 +323,8 @@ describe('ReportBuilder multi-select and Align/Distribute toolbar', () => {
     fireEvent.click(await screen.findByText('Second Widget'), { shiftKey: true })
     expect(await screen.findByText('2 selected')).toBeInTheDocument()
     expect(screen.getAllByText('2 widgets selected').length).toBeGreaterThan(0)
+    // QA4 V5: no per-widget quick toolbar under the group bar
+    expect(screen.queryByRole('toolbar', { name: /^Quick actions for/ })).toBeNull()
     fireEvent.keyDown(document.body, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByText('2 selected')).toBeNull())
   })
@@ -482,10 +484,14 @@ describe('ReportBuilder Fields pane', () => {
     // from the pre-save config and sent {dimension} alone, wiping the measure.
     const first = reportWithWidget(); (first.pages[0].widgets[0] as any).config = {}
     const second = reportWithWidget(); (second.pages[0].widgets[0] as any).config = { measure: 'sales' }
-    vi.mocked(reportsApi.get).mockResolvedValueOnce(first as any).mockResolvedValue(second as any)
+    // The server's copy: empty until the first save lands (QA4 E2: a fixture
+    // that served `second` from the second load on had "sales" on the widget
+    // before it was clicked, and the old planner put it in a second role).
+    let saved = false
+    vi.mocked(reportsApi.get).mockImplementation(async () => (saved ? second : first) as any)
     vi.mocked(datasetsApi.get).mockResolvedValue(datasetWithColumns() as any)
     vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
-    vi.mocked(reportsApi.updateWidget).mockResolvedValue({} as any)
+    vi.mocked(reportsApi.updateWidget).mockReset().mockImplementation(async () => { saved = true; return {} as any })
     renderBuilder()
     await screen.findByTestId('view-strip')
     fireEvent.click(await screen.findByText('Sales by Region', {}, { timeout: 3000 }))
@@ -1262,6 +1268,25 @@ describe('opening an old dashboard writes nothing (QA3 N3)', () => {
     } finally {
       Element.prototype.getBoundingClientRect = realRect
     }
+  })
+})
+
+describe('View → Edit starts with nothing selected (QA4 V6)', () => {
+  it('a value a reader picked (and its cross-filter) does not follow them into Edit', async () => {
+    const report = baseReport()
+    report.pages[0].widgets = [
+      { id: 5, page_id: 100, widget_type: 'list', title: 'Regions', config: { dimension: 'region' }, layout: { x: 0, y: 0, w: 6, h: 5 }, created_at: '2026-01-01' },
+      { id: 6, page_id: 100, widget_type: 'bar', title: 'Other', config: { dimension: 'region', measure: 'revenue' }, layout: { x: 6, y: 0, w: 6, h: 5 }, created_at: '2026-01-01' },
+    ] as any
+    vi.mocked(reportsApi.get).mockResolvedValue(report as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'North', value: 5 }], sampled: false })
+    renderBuilder('/reports/1')
+    fireEvent.click(await screen.findByText('North'))
+    expect(await screen.findAllByText(/region = North/)).not.toHaveLength(0)
+    fireEvent.click(screen.getByTestId('mode-toggle'))
+    await screen.findByTestId('view-strip')
+    await waitFor(() => expect(screen.queryByText(/region = North/)).toBeNull())
   })
 })
 

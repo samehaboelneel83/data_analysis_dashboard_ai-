@@ -3,10 +3,12 @@ import { ar as bcCanvas } from './builder/canvas'
 import { ar as bcPanes } from './builder/panes'
 import { ar as bcRules } from './builder/rules'
 import { ar as bcShell } from './builder/shell'
+import { ar as bcStats } from './builder/stats'
+import { ar as bcDialogs } from './builder/dialogs'
 
 /** Arabic UI strings. Keys must match `en.ts` exactly. */
 export const ar: Record<MessageKey, string> = {
-  ...bcCanvas, ...bcPanes, ...bcRules, ...bcShell,
+  ...bcCanvas, ...bcPanes, ...bcRules, ...bcShell, ...bcStats, ...bcDialogs,
   'nav.home': 'الرئيسية',
   'nav.askAi': 'اسأل الذكاء الاصطناعي',
   'nav.datasets': 'مجموعات البيانات',
