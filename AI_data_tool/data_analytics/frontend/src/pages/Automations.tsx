@@ -23,6 +23,7 @@ import LoadError from '../components/ui/LoadError'
 import LoadingState from '../components/ui/LoadingState'
 import DatasetListFilter, { useCleanDatasets } from '../components/dataset/DatasetListFilter'
 import { isCertified } from '../lib/cleanDatasets'
+import { formatDate } from '../lib/dateFormat'
 
 const STATUS_KEY: Record<AutomationRunRow['status'], MessageKey> = {
   pending: 'auto.status.pending', running: 'auto.status.running', failed: 'auto.status.failed',
@@ -75,7 +76,7 @@ export function runSummary(run: AutomationRunRow, t: (k: MessageKey, v?: Record<
 const STEP_MARK: Record<AutomationStepRow['status'], string> = { pending: '○', running: '◐', ok: '●', failed: '✕' }
 
 function when(iso: string | null): string {
-  return iso ? localDigits(new Date(iso).toLocaleString()) : '—'
+  return iso ? localDigits(formatDate(iso)) : '—'
 }
 
 export default function Automations() {

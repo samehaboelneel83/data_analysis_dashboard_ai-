@@ -8,6 +8,7 @@ import { useListFilter } from '../../components/ui/ListFilter'
 import EmptyState from '../../components/ui/EmptyState'
 import LoadError from '../../components/ui/LoadError'
 import LoadingState from '../../components/ui/LoadingState'
+import { formatDate } from '../../lib/dateFormat'
 
 /**
  * The org's delivery log, newest first -- every schedule send, alert fire and
@@ -72,7 +73,7 @@ export default function MonitoringDeliveries() {
           <tbody>
             {filtered.map(r => (
               <tr key={r.id}>
-                <td style={{ whiteSpace: 'nowrap' }}>{new Date(r.created_at).toLocaleString()}</td>
+                <td style={{ whiteSpace: 'nowrap' }}>{formatDate(r.created_at)}</td>
                 <td style={{ fontWeight: 600 }}>
                   {r.report_id != null
                     ? <Link to={`/reports/${r.report_id}`} style={{ color: 'var(--text)' }}>{r.report_name ?? `#${r.report_id}`}</Link>

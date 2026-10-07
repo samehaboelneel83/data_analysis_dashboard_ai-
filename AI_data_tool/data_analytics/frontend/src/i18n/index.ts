@@ -1,3 +1,4 @@
+import { formatDate } from '../lib/dateFormat'
 import { useCallback } from 'react'
 import { useDirection, type Language } from '../contexts/DirectionContext'
 import { en, type MessageKey } from './en'
@@ -154,7 +155,7 @@ export function formatTimeAgo(iso: string | undefined, t: TranslateFn): string |
   if (days < 30) {
     return t(days === 1 ? 'time.daysAgo' : 'time.daysAgo_other', { n: days })
   }
-  return new Date(iso).toLocaleDateString()
+  return formatDate(iso, 'date')   // QA3 D4: in the UI language, not the browser's
 }
 
 export type TranslateFn = (key: MessageKey, vars?: Record<string, string | number>) => string

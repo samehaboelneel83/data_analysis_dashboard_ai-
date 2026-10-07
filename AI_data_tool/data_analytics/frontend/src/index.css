@@ -1961,7 +1961,16 @@ html[data-presenting="1"] .dl-bleed { margin: 0; block-size: 100%; }
 .dl-crumbs__section {
   color: var(--muted);
   white-space: nowrap;
+  /* QA3 D1: when the bar is short of room the trail gives way in order --
+     the middle link first, then the leading section word -- and the page's
+     own name keeps a readable minimum. Flex weights, not breakpoints, so it
+     holds at any zoom (the QA's scaled 125% showed "D." in Arabic). */
+  flex: 0 400 auto;
+  min-inline-size: 1.75em;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+.dl-crumbs > .dl-crumbs__link { flex-shrink: 1000; }
 
 .dl-crumbs__sep {
   display: inline-flex;
@@ -1982,8 +1991,12 @@ html[data-presenting="1"] .dl-bleed { margin: 0; block-size: 100%; }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  min-inline-size: 0;
+  /* QA3 D1: the name does not shrink while the trail in front of it can;
+     a very long one ellipsizes at 60% of the trail (all of it when alone). */
+  flex: 0 0 auto;
+  max-inline-size: 60%;
 }
+.dl-crumbs__page:only-child { max-inline-size: 100%; flex-shrink: 1; min-inline-size: 0; }
 
 /* A narrower window (QA V4): the controls on the right are fixed, so the
    trail is what gives. The muted section word in front goes first, so the
@@ -2462,14 +2475,16 @@ html[data-presenting="1"] .dl-bleed { margin: 0; block-size: 100%; }
   align-items: center;
   gap: 4px;
   padding-inline-start: 18px;
-  /* Fades the title out under the controls instead of cutting it hard. */
-  background: linear-gradient(to left, var(--surface) 70%, transparent);
+  /* Fades the title out under the controls instead of cutting it hard. Solid
+     under the icons and in the widget's own colour (QA3 B4: a white box on a
+     custom background, and chips showing through as "- -"). */
+  background: linear-gradient(to left, var(--dl-wbg, var(--surface)) calc(100% - 18px), transparent);
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--dl-dur) var(--dl-ease);
 }
 
-[dir="rtl"] .dl-whead__ctl { background: linear-gradient(to right, var(--surface) 70%, transparent); }
+[dir="rtl"] .dl-whead__ctl { background: linear-gradient(to right, var(--dl-wbg, var(--surface)) calc(100% - 18px), transparent); }
 
 .dl-whead__ctl:empty { display: none; }
 
@@ -2968,10 +2983,17 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--da
    title's end edge; reserve that room so the title ellipsizes instead of
    having its first letters painted over (QA 2026-09-26). Hover alone keeps
    the overlay, so tiles don't reflow as the pointer passes. */
-.dl-widget--selected .dl-whead:has(.dl-whead__ctl:not(:empty)),
-.dl-whead:focus-within:has(.dl-whead__ctl:not(:empty)) {
-  padding-inline-end: 84px !important;
+/* QA3 B4: selected or focused, the controls join the header row instead of
+   floating over it (a fixed 84px reserve was too little in Edit and cut the
+   title to "QA3 R…"). The title keeps a readable minimum; the status chips
+   (sampled, showing n/m, filters) give way and clip instead. Hover alone keeps
+   the overlay, so tiles don't reflow as the pointer passes. */
+.dl-widget--selected .dl-whead__ctl,
+.dl-whead:focus-within .dl-whead__ctl {
+  position: static; flex: none; padding-inline-start: 0; background: none;
 }
+.dl-whead > .dl-whead__title { min-width: min(8em, 45%) !important; }
+.dl-whead > :not(.dl-whead__title):not(.dl-whead__ctl) { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
 /* The widget title takes its direction from its text (dir="auto") so an
    English title in the Arabic UI ellipsizes at its END, not its start; it
@@ -3088,4 +3110,20 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--da
    CSS only -- no renderer code changes. */
 .recharts-tooltip-label { color: var(--text) !important; font-weight: 600; }
 .recharts-tooltip-item-value, .recharts-tooltip-item-separator { color: var(--text) !important; }
-[data-theme="dark"] .recharts-tooltip-item-name { filter: brightness(1.45) saturate(1.1); }
+/* QA3 D2 (QA2 N8 again): on dark the series name ("sum(revenue)", "count")
+   stayed grey even brightened, so it takes the text token there too. */
+[data-theme="dark"] .recharts-tooltip-item-name { color: var(--text) !important; filter: none; }
+
+/* QA3 B6: toasts rise above the builder's status bar (its Shortcuts link). */
+:root:has(.dl-statusbar) { --dl-toast-bottom: 44px; }
+
+/* QA3 B4: while a widget is selected its controls share the header row; the
+   cross-filter markers (→ ←) give their room to the title -- the Interactions
+   tab in Properties says the same thing. */
+.dl-widget--selected .dl-wmark { display: none; }
+/* …and on a narrow widget the delete icon too (it is in the ⋮ menu and on
+   the Delete key), so a 3-column KPI keeps more than "Reven…". */
+.dl-widget { container: dlwidget / inline-size; }
+@container dlwidget (max-width: 260px) {
+  .dl-widget--selected .dl-wdel { display: none; }
+}

@@ -5,6 +5,7 @@ import { useModalDialog } from '../ui/useModalDialog'
 import IconLabel from '../ui/IconLabel'
 import { Bell, BellRing } from 'lucide-react'
 import { useT } from '../../i18n'
+import { formatDate } from '../../lib/dateFormat'
 
 const CADENCES = ['daily', 'weekly', 'monthly'] as const
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -172,7 +173,7 @@ export default function SubscribeButton({ reportId }: { reportId: number }) {
 
             {subscribed && sub?.last_run_at && (
               <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>
-                Last sent {new Date(sub.last_run_at).toLocaleString()}
+                Last sent {formatDate(sub.last_run_at)}
                 {sub.last_status ? ` · ${sub.last_status}` : ''}
               </p>
             )}

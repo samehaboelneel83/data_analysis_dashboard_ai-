@@ -1,5 +1,12 @@
+import { en as bcCanvas } from './builder/canvas'
+import { en as bcPanes } from './builder/panes'
+import { en as bcRules } from './builder/rules'
+import { en as bcShell } from './builder/shell'
+
 /** English UI strings. Arabic lives in `ar.ts`; keep the two key sets identical. */
 export const en = {
+  // QA3 Batch C: the builder's strings, one module per area (i18n/builder/).
+  ...bcCanvas, ...bcPanes, ...bcRules, ...bcShell,
   'nav.home': 'Home',
   'nav.askAi': 'Ask AI',
   'nav.datasets': 'Datasets',
@@ -916,7 +923,8 @@ export const en = {
   'bd.keys.ask': 'Ask AI',
   'bd.keys.jump': 'Jump to a report, dataset or page',
   'bd.keys.sheet': 'This cheat sheet',
-  'bd.guide.where': 'col {from}–{to} · row {row}',
+  'bd.guide.col': 'col',
+  'bd.guide.row': 'row',
   'bd.guide.aligned': 'aligned ×{n}',
   'bd.group.aria': 'Selected widgets',
   'bd.group.n': '{n} selected',

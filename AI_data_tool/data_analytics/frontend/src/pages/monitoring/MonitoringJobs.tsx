@@ -8,6 +8,7 @@ import { RefreshCw, GitBranch, Mail, Bell, CalendarClock, type LucideIcon } from
 import EmptyState from '../../components/ui/EmptyState'
 import LoadError from '../../components/ui/LoadError'
 import LoadingState from '../../components/ui/LoadingState'
+import { formatDate } from '../../lib/dateFormat'
 
 /**
  * Every scheduled thing in the org, in one list: dataset refreshes, dataflow
@@ -136,7 +137,7 @@ function RefreshHistory() {
               const tone = statusTone(r.status)
               return (
                 <tr key={r.id}>
-                  <td style={{ whiteSpace: 'nowrap' }}>{r.started_at ? new Date(r.started_at).toLocaleString() : '—'}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>{r.started_at ? formatDate(r.started_at) : '—'}</td>
                   <td style={{ fontWeight: 600 }}>
                     {r.name != null
                       ? <Link to={link(r)} className="row-name" style={{ color: 'var(--text)' }}>{r.name}</Link>
@@ -241,7 +242,7 @@ export default function MonitoringJobs() {
                   </td>
                   <td style={{ whiteSpace: 'nowrap' }}>{schedule(j)}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>
-                    {j.last_run_at ? new Date(j.last_run_at).toLocaleString() : t('jobs.never')}
+                    {j.last_run_at ? formatDate(j.last_run_at) : t('jobs.never')}
                   </td>
                   <td style={{ color: tone ? TONE_COLOR[tone] : 'var(--muted)' }}
                     title={j.error ?? undefined}>
@@ -254,7 +255,7 @@ export default function MonitoringJobs() {
                     )}
                     {j.next_retry_at && (
                       <div style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 2 }}>
-                        {t('jobs.nextRetry', { when: new Date(j.next_retry_at).toLocaleString() })}
+                        {t('jobs.nextRetry', { when: formatDate(j.next_retry_at) })}
                       </div>
                     )}
                   </td>

@@ -9,7 +9,29 @@ describe('canvas overlays (7e4)', () => {
   it('guides say where the selected widget sits and how many edges it shares', () => {
     render(<SelectionGuides layout={{ x: 0, y: 7, w: 6, h: 5 }} containerW={1200}
       others={[{ x: 0, y: 0, w: 3, h: 3 }, { x: 6, y: 7, w: 6, h: 5 }, { x: 8, y: 20, w: 2, h: 2 }]} />)
-    expect(screen.getByTestId('selection-guides')).toHaveTextContent('col 1–6 · row 8 · aligned ×2')
+    expect(screen.getByTestId('selection-guides')).toHaveTextContent('col 1–6 · row 8–12 · aligned ×2')
+  })
+
+  it('QA3 B2: the tag sits in the gutter under the widget, inside the canvas; ranges are isolated left-to-right', () => {
+    const { container } = render(<SelectionGuides layout={{ x: 0, y: 0, w: 6, h: 2 }} containerW={1200} canvasH={8 * 66}
+      others={[{ x: 0, y: 2, w: 6, h: 3 }]} />)
+    const tag = container.querySelector('.dl-bd-coord') as HTMLElement
+    // just under the widget (2 rows × 66 − gap), not inside it over its own controls
+    expect(parseFloat(tag.style.top)).toBeGreaterThanOrEqual(2 * 66 - 8)
+    expect(tag.querySelectorAll('bdi[dir="ltr"]')).toHaveLength(2)
+    expect(tag.querySelector('bdi')!.textContent).toBe('1–6')
+  })
+
+  it('QA3 B2: at the canvas bottom it goes above the widget, never off the canvas', () => {
+    const { container } = render(<SelectionGuides layout={{ x: 0, y: 5, w: 6, h: 3 }} containerW={1200} canvasH={8 * 66} others={[]} />)
+    const top = parseFloat((container.querySelector('.dl-bd-coord') as HTMLElement).style.top)
+    expect(top + 16).toBeLessThanOrEqual(8 * 66)
+    expect(top).toBeLessThan(5 * 66)
+  })
+
+  it('QA3 B2: one-row and one-column spans read as one number', () => {
+    render(<SelectionGuides layout={{ x: 2, y: 0, w: 1, h: 1 }} containerW={1200} others={[]} />)
+    expect(screen.getByTestId('selection-guides')).toHaveTextContent('col 3 · row 1')
   })
 
   it('the group box counts the selection and lays it out', () => {

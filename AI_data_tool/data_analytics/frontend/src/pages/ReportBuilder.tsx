@@ -5,7 +5,7 @@ import AccessExplainer from '../components/report/AccessExplainer'
 import { DEFAULT_SPEC, PRESETS, describeSpec, parseSpec, specProblem, type RelativeSpec } from '../lib/relativeDates'
 import { closeAll, closeOpen, markOpen, readOpen, type OpenReport } from '../lib/openReports'
 import OpenReportsMenu from '../components/report/OpenReportsMenu'
-import { useEffect, useState, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef, lazy, Suspense, Fragment, type ReactNode } from 'react'
 import LoadError from '../components/ui/LoadError'
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom'
 import { useCrumbTitle } from '../lib/crumb'
@@ -206,6 +206,21 @@ function conflictFrom(detail: ConflictDetail, mine: WidgetEdit, pageId: number, 
 export default function ReportBuilder() {
   const { language, rtl } = useDirection()
   const tr = useT()
+  /** A translated sentence with JSX in its slots: a value (wrapped in <bdi> by
+   *  the caller) or a bold word stays an element, and the words around it come
+   *  from the one template, never glued from fragments. */
+  const trx = (key: MessageKey, nodes: Record<string, ReactNode>, vars: Record<string, string | number> = {}) => {
+    const marks = Object.fromEntries(Object.keys(nodes).map(k => [k, `\u0000${k}\u0000`]))
+    return tr(key, { ...vars, ...marks }).split('\u0000')
+      .map((part, i) => i % 2 ? <Fragment key={i}>{nodes[part]}</Fragment> : part)
+  }
+  /** A relative-date preset's name in the reader's language (lib/relativeDates
+   *  keeps the English one). */
+  const presetName = (p: { id: string; label: string }) => {
+    const k = `bc.shell.preset.${p.id}` as MessageKey
+    const s = tr(k)
+    return s === k ? p.label : s
+  }
   // "Page 3" is the name the app gives a new page; shown in the reader's
   // language (the stored name stays as it is). HR evaluation, item 3.6.
   const pageLabel = (name: string) => {
@@ -324,6 +339,11 @@ export default function ReportBuilder() {
   // exists. See useMeasuredWidth for why this cannot be an effect.
   const { width: containerW, attach: attachCanvas, ref: canvasRef } =
     useMeasuredWidth(900)
+  // QA3 B5: a column narrower than the canvas's minimum (Properties pinned
+  // beside another panel) scales the page down to fit, instead of cutting
+  // widgets off behind a sideways scroll. Drag and resize use the same scale.
+  const { width: columnW, attach: attachColumn } = useMeasuredWidth(0)
+  const fitScale = columnW > 0 && columnW < MIN_CANVAS_W ? columnW / MIN_CANVAS_W : 1
   // The render in which the CANVAS changed width (a side panel or the rail
   // opened or closed, the window resized). Tiles snap to their new boxes in
   // that render instead of easing there: an eased tile hands its chart a new
@@ -349,6 +369,7 @@ export default function ReportBuilder() {
     setSavingState(next)
   }, [])
   const [zoom, setZoom] = useState(100)
+  const canvasScale = (zoom / 100) * fitScale
   const [multiSelectedIds, setMultiSelectedIds] = useState<Set<number>>(new Set())
   useEffect(() => { setZoom(100); setMultiSelectedIds(new Set()) }, [activePage?.id])
   type RightPanelMode = 'default' | 'mobile' | 'selection' | 'sync' | 'bookmarks' | 'taborder' | 'performance' | 'reportrules' | 'parameters' | 'schedule' | 'review' | 'comments' | 'outline' | 'suggestions' | 'translations' | 'insights' | 'ask' | 'history'
@@ -538,7 +559,7 @@ export default function ReportBuilder() {
   const pid = (id: number) => pageIds.current.resolve(id)
   const undoStack = useUndoStack(
     async () => { await loadReport() },
-    (label) => toast.error(`Could not undo "${label}" — what it changed no longer exists`),
+    (label) => toast.error(tr('bc.shell.undoFailed', { label })),
   )
   const pushUndo = undoStack.push
   const recreateWidget = useCallback(async (
@@ -769,7 +790,7 @@ export default function ReportBuilder() {
     if (before != null) {
       let after: number | null = null
       pushUndo({
-        label: `Copilot: ${change?.summary ?? 'page edit'}`,
+        label: tr('bc.shell.u.copilot', { summary: change?.summary ?? tr('bc.shell.u.pageEdit') }),
         undo: async () => {
           const r = await reportsApi.restoreVersion(reportId, before)
           after = r.saved_current_as_version_id ?? null
@@ -844,7 +865,7 @@ export default function ReportBuilder() {
     const before = report.display_rules ?? []
     // One entry per burst of rule editing (typing a threshold, dragging a
     // colour): coalescing keeps the state from before the burst as the undo.
-    pushUndo({ label: 'Change report display rules', coalesceKey: `report-rules:${id}`,
+    pushUndo({ label: tr('bc.shell.u.reportRules'), coalesceKey: `report-rules:${id}`,
       undo: () => reportsApi.update(id, { display_rules: before }).then(() => {}),
       redo: () => reportsApi.update(id, { display_rules: rules }).then(() => {}) })
     setReport(r => (r ? { ...r, display_rules: rules } : r))
@@ -853,7 +874,7 @@ export default function ReportBuilder() {
     reportRulesSaveTimer.current = setTimeout(() => {
       pendingReportRules.current = null
       reportsApi.update(id, { display_rules: rules }).catch(() => {
-        toast.error('Failed to save display rules')
+        toast.error(tr('bc.shell.t.rulesFailed'))
       })
     }, 600)
   }
@@ -866,15 +887,15 @@ export default function ReportBuilder() {
     // list, hierarchy and every widget's role pickers read the PRIMARY, so the
     // first dataset attached must become it -- appending it to the additional
     // list left the builder with no columns anywhere and no message saying why.
-    const name = allDatasets.find(d => d.id === dsId)?.name ?? `dataset ${dsId}`
+    const name = allDatasets.find(d => d.id === dsId)?.name ?? tr('bc.shell.datasetN', { id: dsId })
     if (!report.dataset_id) {
       await reportsApi.update(report.id, { dataset_id: dsId })
-      pushUndo({ label: `Attach data "${name}"`,
+      pushUndo({ label: tr('bc.shell.u.attachData', { name }),
         undo: () => reportsApi.update(reportId, { dataset_id: null as unknown as number }).then(() => {}),
         redo: () => reportsApi.update(reportId, { dataset_id: dsId }).then(() => {}) })
     } else {
       await reportsApi.update(report.id, { additional_dataset_ids: [...current, dsId] })
-      pushUndo({ label: `Attach data "${name}"`,
+      pushUndo({ label: tr('bc.shell.u.attachData', { name }),
         undo: () => reportsApi.update(reportId, { additional_dataset_ids: current }).then(() => {}),
         redo: () => reportsApi.update(reportId, { additional_dataset_ids: [...current, dsId] }).then(() => {}) })
     }
@@ -885,7 +906,7 @@ export default function ReportBuilder() {
     if (!report) return
     const current = report.additional_dataset_ids ?? []
     await reportsApi.update(report.id, { additional_dataset_ids: current.filter(id => id !== dsId) })
-    pushUndo({ label: `Remove data "${datasets[dsId]?.name ?? `dataset ${dsId}`}"`,
+    pushUndo({ label: tr('bc.shell.u.removeData', { name: datasets[dsId]?.name ?? tr('bc.shell.datasetN', { id: dsId }) }),
       undo: () => reportsApi.update(reportId, { additional_dataset_ids: current }).then(() => {}),
       redo: () => reportsApi.update(reportId, { additional_dataset_ids: current.filter(id => id !== dsId) }).then(() => {}) })
     setDatasets(p => { const n = { ...p }; delete n[dsId]; return n })
@@ -894,7 +915,7 @@ export default function ReportBuilder() {
 
   // â”€â”€ Widgets â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const addWidget = async (type: WidgetType, config: Record<string, unknown> = {}, title?: string) => {
-    if (!activePage) return toast.error('Select a page first')
+    if (!activePage) return toast.error(tr('bc.shell.t.selectPage'))
     const ws = activePage.widgets
     const maxY = ws.length ? Math.max(...ws.map(w => w.layout.y + w.layout.h)) : 0
     const cat = WIDGET_CATALOG.find(c => c.type === type)
@@ -923,7 +944,7 @@ export default function ReportBuilder() {
         const pageId = activePage.id
         const snap: Partial<Widget> = { widget_type: type, title: title ?? cat?.label ?? type, config, layout: widget.layout }
         pushUndo({
-          label: `Add ${snap.title}`,
+          label: tr('bc.shell.u.add', { name: snap.title ?? '' }),
           undo: () => removeWidgetById(pageId, widget.id),
           redo: async () => { await recreateWidget(pageId, widget.id, snap) },
         })
@@ -949,7 +970,7 @@ export default function ReportBuilder() {
       if (missingRequiredRoles(widget).length) {
         setTimeout(() => window.dispatchEvent(new CustomEvent(ASSIGN_DATA_EVENT, { detail: { widgetId: widget.id } })), 0)
       }
-      toast.success(`${title ?? cat?.label ?? type} added`)
+      toast.success(tr('bc.shell.t.added', { name: title ?? cat?.label ?? type }))
     } catch (e) {
       // A refused add said nothing at all: the click just did nothing.
       toast.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
@@ -966,20 +987,20 @@ export default function ReportBuilder() {
 
   const saveAsTemplate = async () => {
     const name = tplName.trim()
-    if (!selectedW) return toast.error('Select a widget first')
-    if (!name) return toast.error('Name the template first')
+    if (!selectedW) return toast.error(tr('bc.shell.t.selectWidget'))
+    if (!name) return toast.error(tr('bc.shell.t.nameTemplate'))
     await widgetTemplatesApi.create({ name, widget_type: selectedW.widget_type,
       config: selectedW.config as Record<string, unknown> })
     setTplName('')
     loadTemplates()
-    toast.success(`Saved template "${name}"`)
+    toast.success(tr('bc.shell.t.templateSaved', { name }))
   }
 
   const insertFromTemplate = (t: WidgetTemplate) =>
     addWidget(t.widget_type as WidgetType, { ...t.config }, t.name)
 
   const deleteTemplate = async (t: WidgetTemplate) => {
-    if (!await confirm({ title: `Delete template "${t.name}"?`, body: 'This cannot be undone.' })) return
+    if (!await confirm({ title: tr('bc.shell.c.deleteTemplate', { name: t.name }), body: tr('bc.shell.c.cannotUndo') })) return
     await widgetTemplatesApi.delete(t.id)
     loadTemplates()
   }
@@ -988,7 +1009,7 @@ export default function ReportBuilder() {
   // skips any whose column a given widget's dataset lacks). Edits update local state
   // directly so all widgets re-query at once, which is what "propagates" means here.
   const addReportFilter = async () => {
-    if (!cfCol) return toast.error('Choose a column')
+    if (!cfCol) return toast.error(tr('bc.shell.t.chooseColumn'))
     if (cfOp === 'relative' && specProblem(cfSpec)) return toast.error(specProblem(cfSpec)!)
     const value = cfOp === 'relative' ? cfSpec : cfOp === 'in'
       ? cfVal.split(',').map(s => s.trim()).filter(Boolean)
@@ -1000,12 +1021,12 @@ export default function ReportBuilder() {
     {
       // Redo mints a new filter id; the holder keeps undo pointing at the live one.
       const live = { id: created.id as number }
-      pushUndo({ label: `Add report filter "${describeFilter(body)}"`,
+      pushUndo({ label: tr('bc.shell.u.addReportFilter', { filter: describeFilter(body) }),
         undo: () => reportsApi.deleteCommonFilter(reportId, live.id).then(() => {}),
         redo: async () => { live.id = (await reportsApi.addCommonFilter(reportId, body)).id as number } })
     }
     setCfCol(''); setCfVal('')
-    toast.success('Report filter added')
+    toast.success(tr('bc.shell.t.filterAdded'))
   }
   /** "Last 30 days is one click" (Part IV criterion 9): a preset applied to
    *  the dataset's date column as a report filter. A second preset REPLACES the
@@ -1028,7 +1049,7 @@ export default function ReportBuilder() {
     void syncRevisionAfterOwnWrite()
     const live = { id: created.id as number }
     const oldBody = old ? { column: old.column, op: old.op, value: old.value } : null
-    pushUndo({ label: `Filter the report to ${preset.label.toLowerCase()}`,
+    pushUndo({ label: tr('bc.shell.u.filterTo', { preset: presetName(preset).toLowerCase() }),
       undo: async () => {
         await reportsApi.deleteCommonFilter(reportId, live.id)
         if (oldBody) await reportsApi.addCommonFilter(reportId, oldBody as never)
@@ -1039,7 +1060,7 @@ export default function ReportBuilder() {
         if (cur) await reportsApi.deleteCommonFilter(reportId, cur.id)
         live.id = (await reportsApi.addCommonFilter(reportId, body)).id as number
       } })
-    toast.success(`Report filtered to ${preset.label.toLowerCase()} of ${dateColumn}`)
+    toast.success(tr('bc.shell.t.filteredTo', { preset: presetName(preset).toLowerCase(), col: dateColumn }))
   }
   const removeReportFilter = async (fid: number) => {
     const gone = (report?.common_filters ?? []).find(f => f.id === fid)
@@ -1047,7 +1068,7 @@ export default function ReportBuilder() {
     if (gone) {
       const body = { column: gone.column, op: gone.op, value: gone.value }
       const live = { id: fid }
-      pushUndo({ label: `Remove report filter "${describeFilter(body as never)}"`,
+      pushUndo({ label: tr('bc.shell.u.removeReportFilter', { filter: describeFilter(body as never) }),
         undo: async () => { live.id = (await reportsApi.addCommonFilter(reportId, body as never)).id as number },
         redo: () => reportsApi.deleteCommonFilter(reportId, live.id).then(() => {}) })
     }
@@ -1066,7 +1087,7 @@ export default function ReportBuilder() {
     const prev = report?.theme ?? 'default'
     if (prev === next) return
     await reportsApi.update(reportId, { theme: next })
-    pushUndo({ label: `Change theme to ${orgThemes[next]?.name ?? next}`,
+    pushUndo({ label: tr('bc.shell.u.theme', { name: orgThemes[next]?.name ?? next }),
       undo: () => reportsApi.update(reportId, { theme: prev }).then(() => {}),
       redo: () => reportsApi.update(reportId, { theme: next }).then(() => {}) })
     await loadReport()
@@ -1100,7 +1121,7 @@ export default function ReportBuilder() {
     const write = (c: Record<string, unknown>) =>
       reportsApi.updateWidget(reportId, pid(pageId), widgetIds.current.resolve(wid), { config: c }).then(() => {})
     reportsApi.updateWidget(reportId, activePage.id, selectedW.id, { config }).then(() => {
-      pushUndo({ label: `Set ${selectedW.title || 'widget'} to hierarchy ${node.name || node.column_name}`,
+      pushUndo({ label: tr('bc.shell.u.hierarchy', { widget: selectedW.title || tr('bc.shell.widgetWord'), node: node.name || node.column_name || '' }),
         undo: () => write(before), redo: () => write(config) })
       return loadReport()
     })
@@ -1110,7 +1131,7 @@ export default function ReportBuilder() {
     const node = firstHierarchyNode(folderId)
     if (!node) return
     await addSuggestedWidget({
-      widget_type: 'bar', title: `By ${node.name || node.column_name}`, reason: '',
+      widget_type: 'bar', title: tr('bc.shell.byTitle', { name: node.name || node.column_name || '' }), reason: '',
       config: { dimension: node.column_name, hierarchyNodeId: node.id,
         aggregation: 'count',
         ...(node.format ? { dimension_granularity: node.format } : {}) },
@@ -1163,7 +1184,7 @@ export default function ReportBuilder() {
       setGeoCheck({ column, setId: made.id, setName: made.name })
     } catch (e) {
       toast.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-        ?? `Could not install ${pack.name}`)
+        ?? tr('bc.shell.t.installFailed', { name: pack.name }))
     }
   }
 
@@ -1201,11 +1222,11 @@ export default function ReportBuilder() {
     setGeoField(null)
     try {
       await setColumnMetaUndoable(report.dataset_id, meta,
-        setId == null ? `Make ${columnName} an ordinary category` : `Make ${columnName} geography`)
+        setId == null ? tr('bc.shell.u.makeCategory', { col: columnName }) : tr('bc.shell.u.makeGeo', { col: columnName }))
       toast.success(setId == null
-        ? `${columnName} is an ordinary category again`
-        : `${columnName} is geography`)
-    } catch { toast.error('Could not save the classification') }
+        ? tr('bc.shell.t.categoryAgain', { col: columnName })
+        : tr('bc.shell.t.isGeo', { col: columnName }))
+    } catch { toast.error(tr('bc.shell.t.classSaveFailed')) }
   }
 
   /** Narrows the field list. SAS's Data pane has had one since forever, and a
@@ -1261,13 +1282,13 @@ export default function ReportBuilder() {
       const def = { name, expression: choice.expression }
       const next = await measuresApi.save(dsId, def)
       setMeasures(next)
-      pushUndo({ label: `Add measure "${name}"`,
+      pushUndo({ label: tr('bc.shell.u.addMeasure', { name }),
         undo: async () => { setMeasures(await measuresApi.delete(dsId, name)) },
         redo: async () => { setMeasures(await measuresApi.save(dsId, def)) } })
-      toast.success(`Added measure "${name}"`)
+      toast.success(tr('bc.shell.t.measureAdded', { name }))
     } catch (e) {
       const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      toast.error(detail || 'Could not add the calculation')
+      toast.error(detail || tr('bc.shell.t.calcFailed'))
     }
   }
 
@@ -1325,7 +1346,7 @@ export default function ReportBuilder() {
     }
     await addSuggestedWidget(choice.suggestion as Suggestion)
     if (choice.ignored.length) {
-      toast(`${choice.ignored.join(', ')} could not be used in this chart`)
+      toast(tr('bc.shell.t.unused', { fields: choice.ignored.join(tr('bc.shell.listSep')) }))
     }
   }
 
@@ -1335,7 +1356,7 @@ export default function ReportBuilder() {
   const addWidgetFromField = async (columnName: string) => addWidgetFromFields([columnName])
 
   const addSuggestedWidget = async (sug: Suggestion) => {
-    if (!activePage) return toast.error('Select a page first')
+    if (!activePage) return toast.error(tr('bc.shell.t.selectPage'))
     const ws = activePage.widgets
     const maxY = ws.length ? Math.max(...ws.map(w => w.layout.y + w.layout.h)) : 0
     setSaving(true)
@@ -1351,7 +1372,7 @@ export default function ReportBuilder() {
         const pageId = activePage.id
         const snap: Partial<Widget> = { widget_type: sug.widget_type as WidgetType, title: sug.title, config: sug.config, layout: widget.layout }
         pushUndo({
-          label: `Add ${sug.title}`,
+          label: tr('bc.shell.u.add', { name: sug.title }),
           undo: () => removeWidgetById(pageId, widget.id),
           redo: async () => { await recreateWidget(pageId, widget.id, snap) },
         })
@@ -1365,7 +1386,7 @@ export default function ReportBuilder() {
       }
       await loadReport()
       setSelectedW(widget)
-      toast.success(`${sug.title} added`)
+      toast.success(tr('bc.shell.t.added', { name: sug.title }))
     } finally {
       setSaving(false)
     }
@@ -1534,11 +1555,11 @@ export default function ReportBuilder() {
   // drop the selection -- it may name a widget the step just removed.
   const runUndo = async () => {
     const label = await undoStack.undo()
-    if (label) { setSelectedW(null); toast.success(`Undone: ${label}`) }
+    if (label) { setSelectedW(null); toast.success(tr('bc.shell.undone', { label })) }
   }
   const runRedo = async () => {
     const label = await undoStack.redo()
-    if (label) { setSelectedW(null); toast.success(`Redone: ${label}`) }
+    if (label) { setSelectedW(null); toast.success(tr('bc.shell.redone', { label })) }
   }
   // "Assign data" on an unfinished widget: select it and bring its settings
   // up (the panel itself switches to Data roles on the same event).
@@ -1548,13 +1569,21 @@ export default function ReportBuilder() {
   const [leftOpenSignal, setLeftOpenSignal] = useState(0)
   useEffect(() => {
     const onAssign = (e: Event) => {
-      const id = (e as CustomEvent<{ widgetId: number }>).detail?.widgetId
+      const detail = (e as CustomEvent<{ widgetId: number; relayed?: boolean }>).detail
+      const id = detail?.widgetId
       const w = activePage?.widgets.find(x => x.id === id)
       if (!w) return
+      const wasSelected = selectedIdRef.current === w.id
       setRightPanelMode('default')
       setMultiSelectedIds(new Set())
       setSelectedW(w)
       setRightOpenSignal(n => n + 1)
+      // "Assign data" on a widget that was not selected: its settings panel
+      // mounts after this event, so it never heard it and no dialog opened.
+      // Say it once more when the panel is there (once: `relayed`).
+      if (!wasSelected && !detail.relayed) {
+        setTimeout(() => window.dispatchEvent(new CustomEvent(ASSIGN_DATA_EVENT, { detail: { ...detail, relayed: true } })), 0)
+      }
     }
     window.addEventListener(ASSIGN_DATA_EVENT, onAssign)
     return () => window.removeEventListener(ASSIGN_DATA_EVENT, onAssign)
@@ -1614,7 +1643,7 @@ export default function ReportBuilder() {
       try {
         await write(after)
       } catch (err) {
-        toast.error((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Could not convert this object')
+        toast.error((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? tr('bc.shell.t.convertFailed'))
         return
       }
       pushUndo({ label: d.label, undo: () => write(before), redo: () => write(after) })
@@ -1655,12 +1684,12 @@ export default function ReportBuilder() {
       reportsApi.updateWidget(reportId, pid(pageId), widgetIds.current.resolve(e.widgetId),
         which === 'after' ? { config: e.config, title: e.title } : before))).then(() => {})
     await apply('after')
-    pushUndo({ label: `Restore unsaved changes to ${items.length} widget${items.length === 1 ? '' : 's'}`,
+    pushUndo({ label: tr('bc.shell.u.restore', { n: items.length }),
       undo: () => apply('before'), redo: () => apply('after') })
     recoverable.forEach(e => clearPending(e.widgetId))
     setRecoverable([])
     await loadReport()
-    toast.success('Unsaved changes restored')
+    toast.success(tr('bc.shell.t.restored'))
   }
   const discardPending = () => { recoverable.forEach(e => clearPending(e.widgetId)); setRecoverable([]) }
   // A dashboard just created from "New dashboard" arrives with ?pick=data: ask
@@ -1723,11 +1752,11 @@ export default function ReportBuilder() {
       await write(next)
     } catch (e: any) {
       setReport(r => r ? { ...r, name: before } : r)
-      toast.error(e?.response?.data?.detail ?? 'Could not rename the dashboard')
+      toast.error(e?.response?.data?.detail ?? tr('bc.shell.t.renameFailed'))
       return
     }
-    toast.success('Renamed')
-    pushUndo({ label: `Rename dashboard "${before}" to "${next}"`, undo: () => write(before), redo: () => write(next) })
+    toast.success(tr('bc.shell.t.renamed'))
+    pushUndo({ label: tr('bc.shell.u.renameDash', { from: before, to: next }), undo: () => write(before), redo: () => write(next) })
     await loadReport()
   }
   const runUndoRef = useRef(runUndo)
@@ -1848,7 +1877,7 @@ export default function ReportBuilder() {
     try {
       const copy = await reportsApi.addWidget(reportId, activePage.id, {
         widget_type: w.widget_type,
-        title: `${w.title || w.widget_type} (copy)`,
+        title: tr('bc.shell.t.copyTitle', { name: w.title || w.widget_type }),
         // A table made before the totals defaults changed carries neither key, and
         // the server stamps NEW tables with the new defaults -- so the copy states
         // the defaults its original was built with, or it would render differently.
@@ -1865,7 +1894,7 @@ export default function ReportBuilder() {
         const pageId = activePage.id
         const snap: Partial<Widget> = { widget_type: copy.widget_type, title: copy.title, config: copy.config, layout: copy.layout }
         pushUndo({
-          label: `Duplicate "${w.title || w.widget_type}"`,
+          label: tr('bc.shell.u.duplicate', { name: w.title || w.widget_type }),
           undo: () => removeWidgetById(pageId, copy.id),
           redo: async () => { await recreateWidget(pageId, copy.id, snap) },
         })
@@ -1884,9 +1913,9 @@ export default function ReportBuilder() {
       setSelectedW(copy)
       setTimeout(() => document.querySelector(`[data-widget-id="${copy.id}"]`)
         ?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }), 60)
-      toast.success('Duplicated')
+      toast.success(tr('bc.shell.t.duplicated'))
     } catch {
-      toast.error('Could not duplicate this widget')
+      toast.error(tr('bc.shell.t.duplicateFailed'))
     } finally {
       setSaving(false)
     }
@@ -1901,7 +1930,7 @@ export default function ReportBuilder() {
         const pageId = activePage.id
         const snap: Partial<Widget> = { widget_type: w.widget_type, title: w.title, config: w.config, layout: w.layout }
         pushUndo({
-          label: `Delete "${w.title || w.widget_type}"`,
+          label: tr('bc.shell.u.delete', { name: w.title || w.widget_type }),
           undo: async () => { await recreateWidget(pageId, w.id, snap) },
           redo: () => removeWidgetById(pageId, w.id),
         })
@@ -1978,7 +2007,7 @@ export default function ReportBuilder() {
         const write = (c: Record<string, unknown>, t: string) =>
           reportsApi.updateWidget(reportId, pid(pageId), widgetIds.current.resolve(id), { config: c, title: t }).then(() => {})
         pushUndo({
-          label: describeConfigChange(beforeTitle || before.widget_type, beforeCfg, config, beforeTitle, title),
+          label: describeConfigChange(beforeTitle || before.widget_type, beforeCfg, config, beforeTitle, title, tr),
           // One step per burst of edits to the same setting (typing a title).
           coalesceKey: `cfg:${id}:${keys.join(',')}:${beforeTitle !== title}`,
           undo: () => write(beforeCfg, beforeTitle),
@@ -2081,7 +2110,7 @@ export default function ReportBuilder() {
     if (!dsId) return
     const prev = (columnFormats as Record<string, CalcColumnFormat>)[name] ?? null
     setColumnFormats(await columnFormatsApi.set(dsId, name, fmt))
-    pushUndo({ label: `Format ${name}`,
+    pushUndo({ label: tr('bc.shell.u.format', { col: name }),
       undo: async () => { setColumnFormats(await columnFormatsApi.set(dsId, name, prev)) },
       redo: async () => { setColumnFormats(await columnFormatsApi.set(dsId, name, fmt)) } })
   }
@@ -2103,12 +2132,12 @@ export default function ReportBuilder() {
 
   /** SAS-style format presets over the per-column formats. */
   const FORMAT_PRESETS: { key: string; label: string; fmt: CalcColumnFormat | null }[] = [
-    { key: '', label: 'Default', fmt: null },
-    { key: 'comma', label: 'Comma (1,234)', fmt: { type: 'number', decimals: 0 } },
-    { key: 'number2', label: 'Number (1,234.56)', fmt: { type: 'number', decimals: 2 } },
-    { key: 'integer', label: 'Integer (1234)', fmt: { type: 'integer' } },
-    { key: 'currency', label: 'Currency ($1,234)', fmt: { type: 'currency', symbol: '$', decimals: 0 } },
-    { key: 'percent', label: 'Percent (12.3%)', fmt: { type: 'percent', decimals: 1 } },
+    { key: '', label: tr('bc.shell.fmt.default'), fmt: null },
+    { key: 'comma', label: tr('bc.shell.fmt.comma'), fmt: { type: 'number', decimals: 0 } },
+    { key: 'number2', label: tr('bc.shell.fmt.number2'), fmt: { type: 'number', decimals: 2 } },
+    { key: 'integer', label: tr('bc.shell.fmt.integer'), fmt: { type: 'integer' } },
+    { key: 'currency', label: tr('bc.shell.fmt.currency'), fmt: { type: 'currency', symbol: '$', decimals: 0 } },
+    { key: 'percent', label: tr('bc.shell.fmt.percent'), fmt: { type: 'percent', decimals: 1 } },
   ]
   const presetOf = (f: CalcColumnFormat | undefined): string => {
     if (!f || f.type === 'none') return ''
@@ -2125,25 +2154,25 @@ export default function ReportBuilder() {
     const numeric = isNumericField(c)
     const cls = group === 'Measures' ? 'measure' : group === 'Geography' ? 'geography' : group === 'Dates' ? 'date' : 'category'
     const clsOptions: [string, string][] = c.dtype === 'datetime' ? [['date', tr('fields.Dates')]]
-      : c.dtype === 'numeric' ? [['measure', 'Measure'], ['category', 'Category']]
-      : [['category', 'Category'], ['geography', 'Geography']]
+      : c.dtype === 'numeric' ? [['measure', tr('bc.shell.cls.measure')], ['category', tr('bc.shell.cls.category')]]
+      : [['category', tr('bc.shell.cls.category')], ['geography', tr('bc.shell.cls.geography')]]
     const lab = { display: 'block', fontSize: 10.5, color: 'var(--muted)', margin: '6px 0 2px' } as const
     const fmtNow = (columnFormats as Record<string, CalcColumnFormat>)[c.name]
     const preset = presetOf(fmtNow)
     const commitName = (v: string) => {
       const next = v.trim()
       if (next === (meta.label ?? '') || (next === c.name && !meta.label)) return
-      void setFieldMeta(c.name, { label: next === c.name ? undefined : next }, `Rename ${c.name} to "${next || c.name}"`)
+      void setFieldMeta(c.name, { label: next === c.name ? undefined : next }, tr('bc.shell.u.renameField', { col: c.name, name: next || c.name }))
     }
     return (
-      <div role="group" aria-label={`Properties of ${meta.label || c.name}`} data-testid="field-properties"
+      <div role="group" aria-label={tr('bc.shell.fp.aria', { name: meta.label || c.name })} data-testid="field-properties"
         style={{ margin: '4px 0 8px 22px', padding: '6px 8px', borderInlineStart: '2px solid var(--border)', fontSize: 11.5 }}>
-        <label style={lab} htmlFor={`fp-name-${c.name}`}>Name:</label>
+        <label style={lab} htmlFor={`fp-name-${c.name}`}>{tr('bc.shell.fp.name')}</label>
         <input id={`fp-name-${c.name}`} defaultValue={meta.label || c.name} key={`n-${meta.label ?? ''}`}
           onBlur={e => commitName(e.currentTarget.value)}
           onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
           style={{ width: '100%', fontSize: 11.5, padding: '3px 6px' }} />
-        <label style={lab} htmlFor={`fp-cls-${c.name}`}>Classification:</label>
+        <label style={lab} htmlFor={`fp-cls-${c.name}`}>{tr('bc.shell.fp.classification')}</label>
         <select id={`fp-cls-${c.name}`} value={cls} disabled={clsOptions.length < 2} style={{ width: '100%', fontSize: 11.5 }}
           onChange={e => {
             const v = e.target.value
@@ -2155,20 +2184,20 @@ export default function ReportBuilder() {
           {clsOptions.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
         </select>
         {numeric && (<>
-          <label style={lab} htmlFor={`fp-fmt-${c.name}`}>Format:</label>
+          <label style={lab} htmlFor={`fp-fmt-${c.name}`}>{tr('bc.shell.fp.format')}</label>
           <select id={`fp-fmt-${c.name}`} value={preset} style={{ width: '100%', fontSize: 11.5 }}
             onChange={e => {
               if (e.target.value === 'custom') return
               void setFieldFormat(c.name, FORMAT_PRESETS.find(p => p.key === e.target.value)?.fmt ?? null)
             }}>
             {FORMAT_PRESETS.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
-            {preset === 'custom' && <option value="custom">Custom (set in the Data view)</option>}
+            {preset === 'custom' && <option value="custom">{tr('bc.shell.fp.custom')}</option>}
           </select>
-          <label style={lab} htmlFor={`fp-agg-${c.name}`}>Aggregation:</label>
+          <label style={lab} htmlFor={`fp-agg-${c.name}`}>{tr('bc.shell.fp.aggregation')}</label>
           <select id={`fp-agg-${c.name}`} value={meta.aggregation ?? ''} style={{ width: '100%', fontSize: 11.5 }}
             onChange={e => void setFieldMeta(c.name, { aggregation: e.target.value || undefined },
-              `Aggregate ${c.name} by ${e.target.value || 'default'}`)}>
-            <option value="">Default (Sum)</option>
+              tr('bc.shell.u.aggregate', { col: c.name, agg: e.target.value || tr('bc.shell.u.aggDefault') }))}>
+            <option value="">{tr('bc.shell.fp.defaultSum')}</option>
             {AGGREGATIONS.filter(a => a.value !== 'none' && a.value !== 'pct').map(a =>
               <option key={a.value} value={a.value}>{a.label}</option>)}
           </select>
@@ -2192,7 +2221,7 @@ export default function ReportBuilder() {
     if (Object.keys(entry).length === 0) delete meta[c.name]
     else meta[c.name] = entry
     await setColumnMetaUndoable(report.dataset_id, meta,
-      `Make ${c.name} a ${next === 'measure' ? 'measure' : 'category'}`)
+      next === 'measure' ? tr('bc.shell.u.toMeasure', { col: c.name }) : tr('bc.shell.u.toCategory', { col: c.name }))
     toast.success(tr(next === 'measure' ? 'meaning.now.measure' : 'meaning.now.category', { col: c.name }))
   }
 
@@ -2243,7 +2272,7 @@ export default function ReportBuilder() {
     if (!w) return
     const plan = planFieldOnWidget(w, columnName, isNumericField)
     if (!plan) {
-      toast(`"${w.title || w.widget_type}" has no empty field left for ${columnName}`)
+      toast(tr('bc.shell.t.noEmptyLeft', { widget: w.title || w.widget_type, col: columnName }))
       return
     }
     // QA3 A5: the open Properties shows the role just filled.
@@ -2266,12 +2295,12 @@ export default function ReportBuilder() {
     try {
       const spec = { name: `${tr('builder.page')} ${pos + 1}`, position: pos, layout_mode: 'packed' as const, layout_template: DEFAULT_RECIPE }
       const page = await reportsApi.addPage(reportId, spec)
-      pushUndo({ label: `Add page "${spec.name}"`,
+      pushUndo({ label: tr('bc.shell.u.addPage', { name: spec.name }),
         undo: () => reportsApi.deletePage(reportId, pid(page.id)).then(() => {}),
         redo: async () => { const again = await reportsApi.addPage(reportId, spec); pageIds.current.set(pid(page.id), again.id) } })
       await loadReport()
       setActivePage(page)
-      toast.success('Page added')
+      toast.success(tr('bc.shell.t.pageAdded'))
     } finally {
       setSaving(false)
     }
@@ -2279,14 +2308,14 @@ export default function ReportBuilder() {
 
   const confirm = useConfirm()
   const deletePage = async (page: ReportPage) => {
-    if (!await confirm({ title: `Delete page "${page.name}"?`, body: 'Its widgets are deleted with it.' })) return
+    if (!await confirm({ title: tr('bc.shell.c.deletePage', { name: `\u2068${pageLabel(page.name)}\u2069` /* isolated: a mixed-direction name stays whole */ }), body: tr('bc.shell.c.deletePageBody') })) return
     setSaving(true)
     try {
       await reportsApi.deletePage(reportId, page.id)
       // Undo rebuilds the page and its widgets; both come back under new ids,
       // which the alias maps carry for every older entry.
       const snapshot = { ...page, widgets: [...(page.widgets ?? [])] }
-      pushUndo({ label: `Delete page "${page.name}"`,
+      pushUndo({ label: tr('bc.shell.u.deletePage', { name: page.name }),
         undo: async () => {
           const { id: _id, widgets: ws, report_id: _r, created_at: _c, ...props } = snapshot as ReportPage & Record<string, unknown>
           const again = await reportsApi.addPage(reportId, props as Partial<ReportPage> & { name: string; position: number })
@@ -2299,7 +2328,7 @@ export default function ReportBuilder() {
         },
         redo: () => reportsApi.deletePage(reportId, pid(page.id)).then(() => {}) })
       await loadReport()
-      toast.success('Page deleted')
+      toast.success(tr('bc.shell.t.pageDeleted'))
     } finally {
       setSaving(false)
     }
@@ -2311,7 +2340,7 @@ export default function ReportBuilder() {
       const before = page.name, after = editPname
       await reportsApi.updatePage(reportId, page.id, { name: after })
       if (before !== after) {
-        pushUndo({ label: `Rename page "${before}" to "${after}"`,
+        pushUndo({ label: tr('bc.shell.u.renamePage', { from: before, to: after }),
           undo: () => reportsApi.updatePage(reportId, pid(page.id), { name: before }).then(() => {}),
           redo: () => reportsApi.updatePage(reportId, pid(page.id), { name: after }).then(() => {}) })
       }
@@ -2338,10 +2367,10 @@ export default function ReportBuilder() {
     setSaving(true)
     try {
       await put(b, a)()
-      pushUndo({ label: `Move page "${page.name}"`, undo: put(a, b), redo: put(b, a) })
+      pushUndo({ label: tr('bc.shell.u.movePage', { name: page.name }), undo: put(a, b), redo: put(b, a) })
       await loadReport()
     } catch (err) {
-      toast.error((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Could not move the page')
+      toast.error((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? tr('bc.shell.t.moveFailed'))
     } finally {
       setSaving(false)
     }
@@ -2354,7 +2383,7 @@ export default function ReportBuilder() {
       await reportsApi.updatePage(reportId, activePage.id, data)
       const pageId = activePage.id
       const before = Object.fromEntries(Object.keys(data).map(k => [k, (activePage as unknown as Record<string, unknown>)[k] ?? null])) as Partial<ReportPage>
-      pushUndo({ label: `Change page ${Object.keys(data).join(', ').replace(/_/g, ' ')}`,
+      pushUndo({ label: tr('bc.shell.u.changePage', { props: Object.keys(data).join(', ').replace(/_/g, ' ') }),
         coalesceKey: `page:${pageId}:${Object.keys(data).sort().join(',')}`,
         undo: () => reportsApi.updatePage(reportId, pid(pageId), before).then(() => {}),
         redo: () => reportsApi.updatePage(reportId, pid(pageId), data).then(() => {}) })
@@ -2365,13 +2394,13 @@ export default function ReportBuilder() {
   }, [activePage, reportId, loadReport, pushUndo])
 
   const autoGenHierarchy = async () => {
-    if (!report?.dataset_id) return toast.error('Attach a dataset first')
+    if (!report?.dataset_id) return toast.error(tr('bc.shell.t.attachFirst'))
     try {
       const nodes = await hierarchyApi.autoGenerate(report.dataset_id)
       setHierarchy(nodes)
-      toast.success('Hierarchy generated from column types')
+      toast.success(tr('bc.shell.t.hierGenerated'))
     } catch (err: any) {
-      const msg = err?.response?.data?.detail ?? 'Failed to generate hierarchy'
+      const msg = err?.response?.data?.detail ?? tr('bc.shell.t.hierFailed')
       toast.error(msg)
     }
   }
@@ -2391,7 +2420,7 @@ export default function ReportBuilder() {
       try { target.setPointerCapture((e as React.PointerEvent).pointerId) } catch { /* jsdom */ }
     }
     const rect = canvasEl.getBoundingClientRect()
-    const scale = zoom / 100
+    const scale = canvasScale
     const cellW = (containerW - GAP * (COLS - 1)) / COLS
     // QA3 A7: from where the widgets are DRAWN. On a page still auto-packed,
     // the stored layout is not what is on screen: measuring the grab from it
@@ -2409,7 +2438,7 @@ export default function ReportBuilder() {
       packed: isPackedMode(activePage.layout_mode),
       items,
     })
-  }, [containerW, zoom, activePage])
+  }, [containerW, canvasScale, activePage])
 
   const handleResizeStart = useCallback((widget: Widget) => (e: React.MouseEvent) => {
     e.preventDefault()
@@ -2444,7 +2473,7 @@ export default function ReportBuilder() {
 
   useEffect(() => {
     if (!dragging && !resizing) return
-    const scale = zoom / 100
+    const scale = canvasScale
     const cellW = (containerW - GAP * (COLS - 1)) / COLS
 
     const onMove = (e: MouseEvent | PointerEvent) => {
@@ -2502,7 +2531,7 @@ export default function ReportBuilder() {
     }
     // localLayouts deliberately absent (read via ref): listeners attach once
     // per drag session, not once per mousemove.
-  }, [dragging, resizing, containerW, zoom, activePage, persistWidgetLayouts, commitLocalLayouts])
+  }, [dragging, resizing, containerW, canvasScale, activePage, persistWidgetLayouts, commitLocalLayouts])
 
   // Localised widget objects, memoized per (widgets, layouts, translations):
   // a fresh object per render would defeat React.memo on WidgetRenderer.
@@ -2613,7 +2642,7 @@ export default function ReportBuilder() {
       onSettings={pg => { const page = report.pages.find(x => x.id === pg.id); if (page) { setActivePage(page); setSelectedW(null); setRightPanelMode('default') } }}
       onAdd={() => void addPage()}
       addExtra={<>
-        <button type="button" className="dl-bd-ib dl-bd-tpl" aria-label="Add page from a template" title={tr('bd.pg.fromTemplate')}
+        <button type="button" className="dl-bd-ib dl-bd-tpl" aria-label={tr('bc.shell.addPageTpl')} title={tr('bd.pg.fromTemplate')}
           aria-expanded={pageMenuOpen} onClick={() => setPageMenuOpen(o => !o)}><ChevronDown size={13} aria-hidden /></button>
         {pageMenuOpen && (
           <PageTemplateMenu reportId={reportId} activePageId={activePage?.id ?? null}
@@ -2638,7 +2667,7 @@ export default function ReportBuilder() {
                     </span>
                     {selectedW && <small className="ty" dir="ltr">{selectedW.widget_type}</small>}
                     {selectedW && (
-                      <button aria-label="Deselect widget" title="Deselect widget" className="dl-bd-ib x"
+                      <button aria-label={tr('bc.shell.deselect')} title={tr('bc.shell.deselect')} className="dl-bd-ib x"
                         onClick={() => { setSelectedW(null); setMultiSelectedIds(new Set()) }}>
                         <X size={14} aria-hidden />
                       </button>
@@ -2652,11 +2681,11 @@ export default function ReportBuilder() {
                       <div className="dl-bd-gh">{tr('bd.multi.layout')}</div>
                       <div className="row">
                         {([
-                          ['Align Left', () => applyAlign('left')], ['Align Center', () => applyAlign('center')], ['Align Right', () => applyAlign('right')],
-                          ['Align Top', () => applyAlign('top')], ['Align Middle', () => applyAlign('middle')], ['Align Bottom', () => applyAlign('bottom')],
-                          ['Distribute Horizontally', () => applyDistribute('horizontal')], ['Distribute Vertically', () => applyDistribute('vertical')],
-                        ] as const).map(([label, fn]) => (
-                          <button key={label} type="button" className="btn btn-ghost btn-sm dl-bd-line" onClick={fn}>{label}</button>
+                          ['bc.shell.al.left', () => applyAlign('left')], ['bc.shell.al.center', () => applyAlign('center')], ['bc.shell.al.right', () => applyAlign('right')],
+                          ['bc.shell.al.top', () => applyAlign('top')], ['bc.shell.al.middle', () => applyAlign('middle')], ['bc.shell.al.bottom', () => applyAlign('bottom')],
+                          ['bc.shell.al.distH', () => applyDistribute('horizontal')], ['bc.shell.al.distV', () => applyDistribute('vertical')],
+                        ] as const).map(([key, fn]) => (
+                          <button key={key} type="button" className="btn btn-ghost btn-sm dl-bd-line" onClick={fn}>{tr(key)}</button>
                         ))}
                       </div>
                     </section>
@@ -2719,23 +2748,23 @@ export default function ReportBuilder() {
   )
   const layoutMenu = (
     <div className="dl-bd-menuw">
-      <button className="btn btn-ghost btn-sm" aria-label="Page layout" aria-expanded={layoutMenuOpen}
+      <button className="btn btn-ghost btn-sm" aria-label={tr('bc.shell.pageLayout')} aria-expanded={layoutMenuOpen}
         onClick={() => setLayoutMenuOpen(o => !o)}>
         <IconLabel icon={LayoutTemplate}>{tr('builder.layout')}</IconLabel>
       </button>
       {layoutMenuOpen && (
-        <div role="menu" aria-label="Page layout" className="dl-bd-menu">
+        <div role="menu" aria-label={tr('bc.shell.pageLayout')} className="dl-bd-menu">
           {RECIPES.map(r => {
             const on = activePage?.layout_mode !== 'free' && (activePage?.layout_template === r.id || (!activePage?.layout_template && r.id === DEFAULT_RECIPE))
             return (
               <button key={r.id} role="menuitem" aria-current={on || undefined} onClick={() => { void applyPageRecipe(r.id) }}>
-                <b>{r.label}{r.id === DEFAULT_RECIPE ? ' (default)' : ''}</b><small>{r.hint}</small>
+                <b>{r.id === DEFAULT_RECIPE ? tr('bc.shell.recipeDefault', { name: r.label }) : r.label}</b><small>{r.hint}</small>
               </button>
             )
           })}
           <hr />
           <button role="menuitem" aria-current={activePage?.layout_mode === 'free' || undefined} onClick={() => { void applyPageRecipe('free') }}>
-            <b>Free layout</b><small>Place tiles by hand; still no overlap or tiny charts</small>
+            <b>{tr('bc.shell.freeLayout')}</b><small>{tr('bc.shell.freeLayoutHint')}</small>
           </button>
         </div>
       )}
@@ -2765,7 +2794,7 @@ export default function ReportBuilder() {
         width={LEFT_SIDEBAR_W}
         openSignal={leftOpenSignal}
         onOpenChange={setLeftOpen}
-        title="Fields"
+        title={tr('builder.tab.fields')}
         style={{ background:'var(--surface)', borderInlineEnd:'1px solid var(--border)' }}
       >
 
@@ -2789,7 +2818,7 @@ export default function ReportBuilder() {
           </div>
         ) : (
           <div style={{ padding:'9px 16px 5px', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.08em', flexShrink:0 }}>
-            Analytics
+            {tr('bc.shell.analytics')}
           </div>
         )}
 
@@ -2813,29 +2842,29 @@ export default function ReportBuilder() {
                 <div className="dl-bd-wtpl">
                   <div style={{ display:'flex', gap:4, marginBottom:6 }}>
                     <input value={tplName} onChange={e => setTplName(e.target.value)}
-                      placeholder={selectedW ? 'Template name' : 'Select a widget first'}
-                      aria-label="Template name" disabled={!selectedW} title={!selectedW ? 'Select a widget first' : undefined}
+                      placeholder={selectedW ? tr('bc.shell.tplName') : tr('bc.shell.t.selectWidget')}
+                      aria-label={tr('bc.shell.tplName')} disabled={!selectedW} title={!selectedW ? tr('bc.shell.t.selectWidget') : undefined}
                       style={{ flex:1, minWidth:0, fontSize: 11 }} />
                     <button onClick={saveAsTemplate} disabled={!selectedW || !tplName.trim()}
-                      title="Save the selected widget as a reusable template"
+                      title={tr('bc.shell.tplSaveTitle')}
                       style={{ padding:'4px 7px', background:'var(--surface2)', border:'1px solid var(--border)',
                         borderRadius:6, cursor:'pointer', fontSize: 11, color:'var(--text)', whiteSpace:'nowrap' }}>
-                      Save
+                      {tr('bc.shell.save')}
                     </button>
                   </div>
                   {templates.length === 0 && (
-                    <div style={{ fontSize: 11, color:'var(--muted)' }}>No saved templates yet</div>
+                    <div style={{ fontSize: 11, color:'var(--muted)' }}>{tr('bc.shell.noTemplates')}</div>
                   )}
                   <div style={{ display:'flex', flexWrap:'wrap', gap:4 }}>
                     {templates.map(t => (
                       <span key={t.id} style={{ display:'inline-flex', alignItems:'center', gap:3,
                         background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:6, fontSize: 11 }}>
-                        <button onClick={() => insertFromTemplate(t)} title={`Insert ${t.widget_type} from template`}
+                        <button onClick={() => insertFromTemplate(t)} title={tr('bc.shell.tplInsert', { type: t.widget_type })}
                           style={{ padding:'4px 6px', background:'none', border:'none', cursor:'pointer',
                             color:'var(--text)', fontSize: 11, fontFamily:'var(--sans)' }}>
-                          {t.name}
+                          <bdi>{t.name}</bdi>
                         </button>
-                        <button onClick={() => deleteTemplate(t)} aria-label={`Delete template ${t.name}`}
+                        <button onClick={() => deleteTemplate(t)} aria-label={tr('bc.shell.tplDelete', { name: t.name })}
                           style={{ padding:'0 5px 0 0', background:'none', border:'none', cursor:'pointer', color:'var(--muted)' }}>✕</button>
                       </span>
                     ))}
@@ -2850,48 +2879,48 @@ export default function ReportBuilder() {
                   field list -- they are about the data. */}
               {editMode && activeView === 'report' && leftTab === 'fields' && (
                 <div className="dl-bd-sec dl-bd-rf">
-                  <div className="dl-bd-gh">Report filters</div>
+                  <div className="dl-bd-gh">{tr('bc.shell.rf.title')}</div>
                   {dateColumnOf() && (
-                    <div role="group" aria-label={`Quick date filters on ${dateColumnOf()}`} data-testid="date-presets"
+                    <div role="group" aria-label={tr('bc.shell.rf.quick', { col: dateColumnOf() ?? '' })} data-testid="date-presets"
                       style={{ display:'flex', flexWrap:'wrap', gap:4, marginBottom:6 }}>
                       {['l7d', 'l30d', 'mtd', 'ytd', 'pm'].map(id => {
                         const p = PRESETS.find(x => x.id === id)!
                         return (
                           <button key={id} type="button" className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding:'1px 6px' }}
-                            title={`Show only ${p.label.toLowerCase()} of ${dateColumnOf()}, counted back from the latest date in the data`}
-                            onClick={() => void applyDatePreset(id)}>{p.label}</button>
+                            title={tr('bc.shell.rf.presetTitle', { preset: presetName(p).toLowerCase(), col: dateColumnOf() ?? '' })}
+                            onClick={() => void applyDatePreset(id)}>{presetName(p)}</button>
                         )
                       })}
                     </div>
                   )}
                   <div style={{ display:'flex', flexWrap:'wrap', gap:4, marginBottom:6 }}>
-                    <select aria-label="Report filter column" value={cfCol} onChange={e => setCfCol(e.target.value)}
+                    <select aria-label={tr('bc.shell.rf.column')} value={cfCol} onChange={e => setCfCol(e.target.value)}
                       style={{ fontSize: 11, flex:1, minWidth:80 }}>
-                      <option value="">— column —</option>
+                      <option value="">{tr('bc.shell.rf.columnPh')}</option>
                       {visibleColumns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
                     </select>
-                    <select aria-label="Report filter operator" value={cfOp} onChange={e => setCfOp(e.target.value)} style={{ fontSize: 11 }}>
+                    <select aria-label={tr('bc.shell.rf.operator')} value={cfOp} onChange={e => setCfOp(e.target.value)} style={{ fontSize: 11 }}>
                       {['eq','neq','gt','gte','lt','lte','in','like'].map(o => <option key={o} value={o}>{o}</option>)}
-                      <option value="relative">relative date</option>
+                      <option value="relative">{tr('bc.shell.rf.relative')}</option>
                     </select>
                   </div>
                   <div style={{ display:'flex', gap:4, marginBottom:6, flexWrap: cfOp === 'relative' ? 'wrap' : undefined }}>
                     {cfOp === 'relative'
-                      ? <RelativeDateEditor label="Report filter" value={cfSpec} onChange={setCfSpec} compact />
-                      : <input aria-label="Report filter value" value={cfVal} onChange={e => setCfVal(e.target.value)}
-                      placeholder={cfOp === 'in' ? 'a, b, c' : 'value'} style={{ fontSize: 11, flex:1, minWidth:0 }} />}
-                    <button className="btn" style={{ fontSize: 11, whiteSpace:'nowrap' }} onClick={addReportFilter}>+ Add report filter</button>
+                      ? <RelativeDateEditor label={tr('bc.shell.rf.filter')} value={cfSpec} onChange={setCfSpec} compact />
+                      : <input aria-label={tr('bc.shell.rf.value')} value={cfVal} onChange={e => setCfVal(e.target.value)}
+                      placeholder={cfOp === 'in' ? tr('bc.shell.rf.listPh') : tr('bc.shell.rf.valuePh')} style={{ fontSize: 11, flex:1, minWidth:0 }} />}
+                    <button className="btn" style={{ fontSize: 11, whiteSpace:'nowrap' }} onClick={addReportFilter}>{tr('bc.shell.rf.add')}</button>
                   </div>
                   {(report.common_filters ?? []).length === 0 && (
-                    <div style={{ fontSize: 11, color:'var(--muted)' }}>No report filters</div>
+                    <div style={{ fontSize: 11, color:'var(--muted)' }}>{tr('bc.shell.rf.none')}</div>
                   )}
                   <div style={{ display:'flex', flexWrap:'wrap', gap:4 }}>
                     {(report.common_filters ?? []).map(f => (
-                      <span key={f.id} title="Applies to every widget" style={{ display:'inline-flex', alignItems:'center', gap:3,
+                      <span key={f.id} title={tr('bc.shell.rf.everywhere')} style={{ display:'inline-flex', alignItems:'center', gap:3,
                         background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:6, fontSize: 11, padding:'2px 4px 2px 7px' }}>
                         {f.op === 'relative' ? `${f.column}: ${describeSpec(parseSpec(f.value))}`
                           : <>{f.column} {f.op} {Array.isArray(f.value) ? (f.value as unknown[]).join(', ') : String(f.value)}</>}
-                        <button onClick={() => removeReportFilter(f.id)} aria-label={`Remove report filter ${f.column}`}
+                        <button onClick={() => removeReportFilter(f.id)} aria-label={tr('bc.shell.rf.remove', { col: f.column })}
                           style={{ background:'none', border:'none', cursor:'pointer', color:'var(--muted)' }}>✕</button>
                       </span>
                     ))}
@@ -2908,7 +2937,7 @@ export default function ReportBuilder() {
                   )}
                   <label className="dl-bd-search">
                     <Search size={14} aria-hidden />
-                    <input aria-label="Filter fields" value={fieldFilter} dir="auto"
+                    <input aria-label={tr('bc.shell.f.filter')} value={fieldFilter} dir="auto"
                       onChange={e => setFieldFilter(e.target.value)} placeholder={tr('bd.fields.search')} />
                   </label>
                   {(['Dimensions', 'Dates', 'Geography', 'Hierarchies', 'Measures', 'Aggregated'] as const).map(group => {
@@ -2937,7 +2966,7 @@ export default function ReportBuilder() {
                                   setHierarchy(await hierarchyApi.reorder(dsId, ids))
                                 } catch (e) {
                                   setHierarchy(before)
-                                  toast.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Could not reorder the levels')
+                                  toast.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? tr('bc.shell.t.reorderFailed'))
                                 }
                               }} />
                           )}
@@ -2981,7 +3010,7 @@ export default function ReportBuilder() {
                             <span data-field-row={c.name} className="dl-bd-f" data-on={gatheredFields.includes(c.name) || undefined}
                               data-gathering={gatheredFields.length > 0 || undefined}>
                             {/* Tick several and stage them as one chart (the bar above). */}
-                            <input type="checkbox" aria-label={`Select ${columnMeta[c.name]?.label || c.name}`}
+                            <input type="checkbox" aria-label={tr('bc.shell.f.select', { name: columnMeta[c.name]?.label || c.name })}
                               checked={gatheredFields.includes(c.name)} onChange={() => toggleGathered(c.name)}
                               className="dl-bd-f__ck" />
                             <button onClick={e => {
@@ -3013,11 +3042,11 @@ export default function ReportBuilder() {
                                 e.dataTransfer.setData('application/x-field', c.name)
                                 e.dataTransfer.effectAllowed = 'copy'
                               }}
-                              title={[selectedW ? `Add ${c.name} to ${selectedW.title}` : `Add ${c.name} to the page as a chart (or drag it where you want it)`,
+                              title={[selectedW ? tr('bc.shell.f.addTo', { col: c.name, widget: selectedW.title }) : tr('bc.shell.f.addPage', { col: c.name }),
                                       hintTitle(hints[c.name])].filter(Boolean).join(' — ')}
                               className="dl-bd-f__b">
                               <span className="dl-bd-f__ty" data-k={c.dtype === 'calculated' ? 'calc' : isNumericField(c) ? 'measure' : group === 'Dates' ? 'date' : group === 'Geography' ? 'geo' : 'dim'}>
-                                {c.dtype === 'calculated' ? 'ƒx' : isNumericField(c) ? '#' : 'Aa'}</span>
+                                {c.dtype === 'calculated' ? 'ƒx' : isNumericField(c) ? '#' : 'Aa'}</span>{/* // i18n-ok: type glyphs, not words */}
                               <span className="nm"><bdi>{columnMeta[c.name]?.label || c.name}</bdi></span>
                               {/* "Country - 47": how many distinct values this
                                   category holds, which is what decides whether
@@ -3038,9 +3067,9 @@ export default function ReportBuilder() {
                             {!isNumericField(c) && (
                               <span style={{ position: 'relative' }}>
                                 <button
-                                  aria-label={`Classify ${c.name}`}
+                                  aria-label={tr('bc.shell.f.classify', { col: c.name })}
                                   title={columnMeta[c.name]?.role === 'geography'
-                                    ? `${c.name} is geography` : `Classify ${c.name}`}
+                                    ? tr('bc.shell.t.isGeo', { col: c.name }) : tr('bc.shell.f.classify', { col: c.name })}
                                   onClick={() => openGeoMenu(c.name)}
                                   style={{ background: 'none', border: 'none', cursor: 'pointer',
                                     color: columnMeta[c.name]?.role === 'geography'
@@ -3054,13 +3083,13 @@ export default function ReportBuilder() {
                                     background: 'var(--surface)', border: '1px solid var(--border)',
                                     borderRadius: 6, boxShadow: '0 6px 20px rgba(0,0,0,.25)' }}>
                                     <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)',
-                                      textTransform: 'uppercase', padding: '4px 6px' }}>Classification</div>
+                                      textTransform: 'uppercase', padding: '4px 6px' }}>{tr('bc.shell.f.classification')}</div>
                                     <button role="menuitem"
                                       onClick={() => void classifyGeography(c.name, null)}
                                       style={{ display: 'block', width: '100%', textAlign: 'start',
                                         background: 'none', border: 'none', cursor: 'pointer',
                                         padding: '4px 6px', fontSize: 11, color: 'var(--text)' }}>
-                                      Not geography
+                                      {tr('bc.shell.f.notGeo')}
                                     </button>
                                     {boundarySets.map(bs => (
                                       <button key={bs.id} role="menuitem"
@@ -3068,7 +3097,7 @@ export default function ReportBuilder() {
                                         style={{ display: 'block', width: '100%', textAlign: 'start',
                                           background: 'none', border: 'none', cursor: 'pointer',
                                           padding: '4px 6px', fontSize: 11, color: 'var(--text)' }}>
-                                        Geography — {bs.name}
+                                        {trx('bc.shell.f.geoSet', { name: <bdi>{bs.name}</bdi> })}
                                       </button>
                                     ))}
                                     {boundaryPacks.map(pk => (
@@ -3077,8 +3106,8 @@ export default function ReportBuilder() {
                                         style={{ display: 'block', width: '100%', textAlign: 'start',
                                           background: 'none', border: 'none', cursor: 'pointer',
                                           padding: '4px 6px', fontSize: 11, color: 'var(--text)' }}>
-                                        Geography — {pk.name} <span style={{ color: 'var(--muted)' }}>
-                                          (starter pack{pk.requires_acceptance ? ', terms' : ''})</span>
+                                        {trx('bc.shell.f.geoSet', { name: <bdi>{pk.name}</bdi> })} <span style={{ color: 'var(--muted)' }}>
+                                          {tr(pk.requires_acceptance ? 'bc.shell.f.packTerms' : 'bc.shell.f.pack')}</span>
                                       </button>
                                     ))}
                                     {packTerms && packTerms.column === c.name && (
@@ -3090,7 +3119,7 @@ export default function ReportBuilder() {
                                     )}
                                     {boundarySets.length === 0 && boundaryPacks.length === 0 && (
                                       <div style={{ fontSize: 10.5, color: 'var(--muted)', padding: '4px 6px' }}>
-                                        No boundary sets uploaded yet.
+                                        {tr('bc.shell.f.noBoundary')}
                                       </div>
                                     )}
                                   </div>
@@ -3106,8 +3135,8 @@ export default function ReportBuilder() {
                             {quickCalcsFor({ name: c.name, dtype: c.dtype, numeric: isNumericField(c) }).length > 0 && (
                               <span data-quickcalc-menu style={{ position: 'relative' }}>
                                 <button
-                                  aria-label={`Calculations from ${c.name}`}
-                                  title={`Calculations from ${c.name}`}
+                                  aria-label={tr('bc.shell.f.calcs', { col: c.name })}
+                                  title={tr('bc.shell.f.calcs', { col: c.name })}
                                   onClick={() => setQuickCalcField(f => f === c.name ? null : c.name)}
                                   style={{ background: 'none', border: 'none', cursor: 'pointer',
                                     color: 'var(--muted)', fontSize: 11, padding: '0 2px' }}>
@@ -3128,7 +3157,7 @@ export default function ReportBuilder() {
                                       </button>
                                     ))}
                                     <div style={{ fontSize: 10.5, color: 'var(--muted)', padding: '2px 6px' }}>
-                                      Saved as a measure, computed at each widget's grain
+                                      {tr('bc.shell.f.calcsNote')}
                                     </div>
                                   </div>
                                 )}
@@ -3140,32 +3169,32 @@ export default function ReportBuilder() {
                                 of this dialog found exactly that. */}
                             {c.dtype === 'numeric' && (
                               <span role="button" tabIndex={0}
-                                aria-label={`Reclassify ${c.name} as ${isNumericField(c) ? 'category' : 'measure'}`}
+                                aria-label={tr(isNumericField(c) ? 'bc.shell.f.reclassCat' : 'bc.shell.f.reclassMeasure', { col: c.name })}
                                 title={isNumericField(c)
-                                  ? `Treat ${c.name} as a category (group by it instead of summing it)`
-                                  : `Treat ${c.name} as a measure again`}
+                                  ? tr('bc.shell.f.treatCat', { col: c.name })
+                                  : tr('bc.shell.f.treatMeasure', { col: c.name })}
                                 onClick={e => { e.stopPropagation(); void flipFieldRole(c) }}
                                 onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); void flipFieldRole(c) } }}
                                 style={{ color: 'var(--muted)', fontSize: 11, cursor: 'pointer' }}>⇄</span>
                             )}
                             {isNumericField(c) && (
-                              <span role="button" tabIndex={0} aria-label={`Explain ${c.name}`}
-                                title={`What moves ${c.name}? Ranked factor importance`}
+                              <span role="button" tabIndex={0} aria-label={tr('bc.shell.f.explain', { col: c.name })}
+                                title={tr('bc.shell.f.explainTitle', { col: c.name })}
                                 onClick={e => { e.stopPropagation(); setExplainColumn(c.name) }}
                                 onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); setExplainColumn(c.name) } }}
                                 style={{ color: 'var(--accent)', fontSize: 11, cursor: 'pointer' }}>?</span>
                             )}
                             {hints[c.name]?.outliers && (
-                              <span role="button" tabIndex={0} aria-label={`Show outlier details for ${c.name}`}
-                                title={hintTitle(hints[c.name]) + ' — click for details'}
+                              <span role="button" tabIndex={0} aria-label={tr('bc.shell.f.outliers', { col: c.name })}
+                                title={tr('bc.shell.f.outliersTitle', { hint: hintTitle(hints[c.name]) })}
                                 onClick={e => { e.stopPropagation(); setOutlierColumn(c.name) }}
                                 onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); setOutlierColumn(c.name) } }}
                                 style={{ color: '#e6a03c', fontSize: 11, cursor: 'pointer' }}>⚠</span>
                             )}
                             {/* The field's properties, as SAS's data pane opens them. */}
                             <button type="button" aria-expanded={fieldProps === c.name}
-                              aria-label={`Properties of ${columnMeta[c.name]?.label || c.name}`}
-                              title="Name, classification, format and aggregation"
+                              aria-label={tr('bc.shell.fp.aria', { name: columnMeta[c.name]?.label || c.name })}
+                              title={tr('bc.shell.fp.title')}
                               onClick={() => setFieldProps(p => p === c.name ? null : c.name)}
                               style={{ marginInlineStart: 'auto', background: 'none', border: 'none', cursor: 'pointer',
                                 color: 'var(--muted)', fontSize: 12, padding: '0 2px', flex: 'none',
@@ -3183,7 +3212,7 @@ export default function ReportBuilder() {
                     !(columnMeta[c.name]?.label || c.name).toLowerCase()
                       .includes(fieldFilter.trim().toLowerCase())) && (
                     <div style={{ fontSize: 11, color: 'var(--muted)', padding: '6px 2px' }}>
-                      No fields match “{fieldFilter.trim()}”
+                      {trx('bc.shell.f.noMatch', { q: <bdi>{fieldFilter.trim()}</bdi> })}
                     </div>
                   )}
                   {/* The selection bar, at the foot of the pane as SAS keeps it: the
@@ -3225,13 +3254,13 @@ export default function ReportBuilder() {
                 {report.dataset_id && datasets[report.dataset_id] && (
                   <div style={{ display:'flex', alignItems:'center', gap:5, padding:'4px 7px', background:'var(--surface2)', borderRadius:5, marginBottom:3, fontSize:11 }}>
                     <span style={{ color:'var(--accent)' }}>★</span>
-                    <span style={{ flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{datasets[report.dataset_id].name}</span>
+                    <span style={{ flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}><bdi>{datasets[report.dataset_id].name}</bdi></span>
                     {datasets[report.dataset_id].aggregate_of_dataset_id && (
-                      <span title={PRE_AGGREGATED_HINT} style={{ fontSize: 10.5, color:'var(--accent)', background:'color-mix(in srgb, var(--accent) 15%, transparent)', borderRadius:3, padding:'1px 4px', flexShrink:0 }}>Σ pre-aggregated</span>
+                      <span title={PRE_AGGREGATED_HINT} style={{ fontSize: 10.5, color:'var(--accent)', background:'color-mix(in srgb, var(--accent) 15%, transparent)', borderRadius:3, padding:'1px 4px', flexShrink:0 }}>{tr('bc.shell.ds.preAgg')}</span>
                     )}
                     {datasets[report.dataset_id].default_filter_expr
-                      ? <span title={datasets[report.dataset_id].default_filter_expr!} style={{ fontSize: 10.5, color:'var(--accent)', background:'color-mix(in srgb, var(--accent) 15%, transparent)', borderRadius:3, padding:'1px 4px', flexShrink:0 }}>⊙ filtered</span>
-                      : <span style={{ fontSize: 10.5, color:'var(--muted)', flexShrink:0 }}>primary</span>
+                      ? <span title={datasets[report.dataset_id].default_filter_expr!} style={{ fontSize: 10.5, color:'var(--accent)', background:'color-mix(in srgb, var(--accent) 15%, transparent)', borderRadius:3, padding:'1px 4px', flexShrink:0 }}>{tr('bc.shell.ds.filtered')}</span>
+                      : <span style={{ fontSize: 10.5, color:'var(--muted)', flexShrink:0 }}>{tr('bc.shell.ds.primary')}</span>
                     }
                   </div>
                 )}
@@ -3239,14 +3268,14 @@ export default function ReportBuilder() {
                 {(report.additional_dataset_ids ?? []).map(dsId => (
                   <div key={dsId} style={{ display:'flex', alignItems:'center', gap:5, padding:'4px 7px', background:'var(--surface2)', borderRadius:5, marginBottom:3, fontSize:11 }}>
                     <span style={{ color:'var(--muted)' }}>◉</span>
-                    <span style={{ flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{datasets[dsId]?.name ?? `Unavailable dataset (#${dsId})`}</span>
+                    <span style={{ flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{datasets[dsId]?.name ? <bdi>{datasets[dsId].name}</bdi> : tr('bc.shell.ds.unavailable', { id: dsId })}</span>
                     {datasets[dsId]?.aggregate_of_dataset_id && (
-                      <span title={PRE_AGGREGATED_HINT} style={{ fontSize: 10.5, color:'var(--accent)', background:'color-mix(in srgb, var(--accent) 15%, transparent)', borderRadius:3, padding:'1px 4px', flexShrink:0 }}>Σ pre-aggregated</span>
+                      <span title={PRE_AGGREGATED_HINT} style={{ fontSize: 10.5, color:'var(--accent)', background:'color-mix(in srgb, var(--accent) 15%, transparent)', borderRadius:3, padding:'1px 4px', flexShrink:0 }}>{tr('bc.shell.ds.preAgg')}</span>
                     )}
                     {datasets[dsId]?.default_filter_expr && (
-                      <span title={datasets[dsId].default_filter_expr!} style={{ fontSize: 10.5, color:'var(--accent)', background:'color-mix(in srgb, var(--accent) 15%, transparent)', borderRadius:3, padding:'1px 4px', flexShrink:0 }}>⊙ filtered</span>
+                      <span title={datasets[dsId].default_filter_expr!} style={{ fontSize: 10.5, color:'var(--accent)', background:'color-mix(in srgb, var(--accent) 15%, transparent)', borderRadius:3, padding:'1px 4px', flexShrink:0 }}>{tr('bc.shell.ds.filtered')}</span>
                     )}
-                    <button onClick={() => detachDataset(dsId)} title="Remove"
+                    <button onClick={() => detachDataset(dsId)} title={tr('bc.shell.remove')}
                       style={{ background:'none', border:'none', color:'var(--muted)', cursor:'pointer', fontSize:14, lineHeight:1, padding:'0 2px', flexShrink:0 }}>×</button>
                   </div>
                 ))}
@@ -3254,13 +3283,13 @@ export default function ReportBuilder() {
                 <div style={{ position:'relative', marginTop:5 }}>
                   <button id="add-dataset-button" className="btn btn-ghost btn-sm" style={{ width:'100%', fontSize: 11 }}
                     onClick={() => { setShowDsMenu(m => !m); if (!showDsMenu) datasetsApi.list().then(setAllDatasets) }}>
-                    + Add Dataset
+                    {tr('bc.shell.ds.add')}
                   </button>
                   {showDsMenu && (
                     <DatasetPickerDialog
                       datasets={allDatasets}
                       excludeIds={[...(report.dataset_id ? [report.dataset_id] : []), ...(report.additional_dataset_ids ?? [])]}
-                      title={report.dataset_id ? 'Add another dataset to this dashboard' : 'Choose the data for this dashboard'}
+                      title={report.dataset_id ? tr('bc.shell.ds.pickAnother') : tr('bc.shell.ds.pickFirst')}
                       onPick={d => { void attachDataset(d.id); setShowDsMenu(false) }}
                       onClose={() => setShowDsMenu(false)} />
                   )}
@@ -3271,12 +3300,12 @@ export default function ReportBuilder() {
                 <span className="dl-bd-gh" style={{ margin: 0 }}>{tr('builder.hierarchy')}</span>
                 {dataset && (
                   <button className="btn btn-ghost btn-sm" onClick={autoGenHierarchy} style={{ fontSize: 11, padding:'2px 6px' }}>
-                    Auto
+                    {tr('bc.shell.ds.auto')}
                   </button>
                 )}
               </div>
               {!dataset
-                ? <p style={{ fontSize:12, color:'var(--muted)', textAlign:'center', marginTop:20 }}>Attach a dataset to this report to browse columns.</p>
+                ? <p style={{ fontSize:12, color:'var(--muted)', textAlign:'center', marginTop:20 }}>{tr('bc.shell.ds.attachToBrowse')}</p>
                 : <HierarchyTree nodes={hierarchy} datasetId={dataset.id} onRefresh={refreshHierarchy} />
               }
 
@@ -3337,7 +3366,7 @@ export default function ReportBuilder() {
           </Link>
           )}
           {editMode && renaming ? (
-            <input autoFocus aria-label="Dashboard name" defaultValue={report.name} maxLength={120} className="dl-bd-name-in" dir="auto"
+            <input autoFocus aria-label={tr('bc.shell.h.name')} defaultValue={report.name} maxLength={120} className="dl-bd-name-in" dir="auto"
               onBlur={e => void commitRename(e.currentTarget.value)}
               onKeyDown={e => {
                 if (e.key === 'Enter') e.currentTarget.blur()
@@ -3348,7 +3377,7 @@ export default function ReportBuilder() {
             {/* The page's one <h1>: the top bar's crumb is not a heading. The
                 visible name here is a rename button, so the heading is hidden. */}
             <h1 className="dl-sr-only">{report.name}</h1>
-            <button type="button" title={report.name} aria-label="Rename this dashboard" onClick={() => setRenaming(true)}
+            <button type="button" title={report.name} aria-label={tr('bc.shell.h.rename')} onClick={() => setRenaming(true)}
               className="dl-report-name"
               style={{ fontWeight:700, fontSize:16, background:'none', border:'1px dashed transparent', borderRadius:4,
                 padding:'1px 4px', cursor:'text', color:'var(--text)', font:'inherit' }}
@@ -3373,7 +3402,7 @@ export default function ReportBuilder() {
             <h1 style={{ fontWeight:700, fontSize:16, margin:0 }}>{report.name}</h1>
           )}
           {dataset && canEdit && !modern && (
-            <nav aria-label="Breadcrumb" className="dl-bd-chips">
+            <nav aria-label={tr('bc.shell.h.breadcrumb')} className="dl-bd-chips">
               {[dataset, ...(report.additional_dataset_ids ?? []).map(id => datasets[id]).filter((d): d is Dataset => !!d)]
                 .map(d => (
                   <Link key={d.id} to={`/datasets/${d.id}`} className="dl-bd-chip ds" title={d.name}>
@@ -3382,7 +3411,7 @@ export default function ReportBuilder() {
               ))}
               {dataset.data_source_id != null && (
                 <Link to={`/connections/${dataset.data_source_id}/review`} className="dl-bd-chip src">
-                  <span aria-hidden>▸</span> <bdi>{sourceName ?? 'Source'}</bdi>
+                  <span aria-hidden>▸</span> <bdi>{sourceName ?? tr('bc.shell.h.source')}</bdi>
                 </Link>
               )}
             </nav>
@@ -3393,8 +3422,8 @@ export default function ReportBuilder() {
             return (
               <span data-testid="sensitivity-badge"
                 title={inherited
-                  ? `Sensitivity in force: ${shown}, inherited from its data — ${sens?.effective_reasons?.[0] ?? ''}`
-                  : 'Sensitivity label'}
+                  ? tr('bc.shell.h.sensInherited', { label: shown, reason: sens?.effective_reasons?.[0] ?? '' })
+                  : tr('bc.shell.h.sensLabel')}
                 style={{
                 fontSize: 11, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase',
                 color: '#fff', padding: '2px 7px', borderRadius: 4,
@@ -3409,41 +3438,44 @@ export default function ReportBuilder() {
           {editMode && !report.published && report.created_by != null && (
             <span className="dl-bd-chip" title={tr('home.draftTitle')}>{tr('dsh.badge.draft')}</span>
           )}
-          {editMode && <SaveState saving={saving} />}
+          {/* QA3 B3: the save state and undo/redo are one unbreakable group, and
+              the state has a fixed width, so a longer "Saved · 2 min ago" never
+              pushes undo/redo onto the next row. */}
           {editMode && (
-            <span style={{ display: 'inline-flex', gap: 2 }}>
+            <span className="dl-bd-saveundo" style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+              <SaveState saving={saving} />
               <span className="dl-bd-vr" aria-hidden />
               {/* aria-disabled, not disabled: a disabled button shows no tooltip,
                   and "why can't I" must always have an answer. */}
-              <button className="dl-bd-ib" aria-label="Undo"
+              <button className="dl-bd-ib" aria-label={tr('bc.shell.undo')}
                 aria-disabled={!undoStack.undoLabel || undoStack.busy}
-                title={undoStack.undoLabel ? `Undo: ${undoStack.undoLabel} (Ctrl+Z)` : 'Nothing to undo yet'}
+                title={undoStack.undoLabel ? tr('bc.shell.undoTitle', { label: undoStack.undoLabel }) : tr('bc.shell.nothingUndo')}
                 onClick={() => { if (undoStack.undoLabel) void runUndo() }}>
                 <Undo2 size={15} />
               </button>
-              <button className="dl-bd-ib" aria-label="Redo"
+              <button className="dl-bd-ib" aria-label={tr('bc.shell.redo')}
                 aria-disabled={!undoStack.redoLabel || undoStack.busy}
-                title={undoStack.redoLabel ? `Redo: ${undoStack.redoLabel} (Ctrl+Y)` : 'Nothing to redo'}
+                title={undoStack.redoLabel ? tr('bc.shell.redoTitle', { label: undoStack.redoLabel }) : tr('bc.shell.nothingRedo')}
                 onClick={() => { if (undoStack.redoLabel) void runRedo() }}>
                 <Redo2 size={15} />
               </button>
             </span>
           )}
           {editMode && (
-            <select aria-label="Sensitivity label" value={report.classification ?? ''}
-              title="Classify this report" className="dl-bd-sel"
+            <select aria-label={tr('bc.shell.h.sensLabel')} value={report.classification ?? ''}
+              title={tr('bc.shell.h.classify')} className="dl-bd-sel"
               onChange={async e => {
                 try {
                   const prev = report.classification ?? ''
                   const next = e.target.value
                   const updated = await reportsApi.setClassification(reportId, next)
                   setReport(updated)
-                  pushUndo({ label: next ? `Classify report ${next}` : 'Clear report classification',
+                  pushUndo({ label: next ? tr('bc.shell.u.classify', { label: next }) : tr('bc.shell.u.clearClass'),
                     undo: () => reportsApi.setClassification(reportId, prev).then(() => {}),
                     redo: () => reportsApi.setClassification(reportId, next).then(() => {}) })
-                  toast.success(e.target.value ? `Classified ${e.target.value}` : 'Classification cleared')
+                  toast.success(e.target.value ? tr('bc.shell.t.classified', { label: e.target.value }) : tr('bc.shell.t.classCleared'))
                 } catch (err) {
-                  toast.error((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Could not classify')
+                  toast.error((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? tr('bc.shell.t.classifyFailed'))
                 }
               }}>
               {(() => {
@@ -3455,8 +3487,8 @@ export default function ReportBuilder() {
                   <option value="" disabled={floorIdx >= 0}>{tr('class.unclassified')}</option>
                   {CLASSIFICATION_LABELS.map((l, i) => (
                     <option key={l} value={l} disabled={i < floorIdx}
-                      title={i < floorIdx ? `Below its data: ${why}` : undefined}>
-                      {l}{i < floorIdx ? ' (below its data)' : ''}
+                      title={i < floorIdx ? tr('bc.shell.h.below', { why }) : undefined}>
+                      {i < floorIdx ? tr('bc.shell.h.belowOption', { label: l }) : l}
                     </option>
                   ))}
                 </>)
@@ -3489,7 +3521,7 @@ export default function ReportBuilder() {
               </button>
             )}
             {canEdit && (
-            <button className="btn btn-ghost btn-sm dl-bd-icn" title="Kiosk playback: pages advance every 8s; any key exits"
+            <button className="btn btn-ghost btn-sm dl-bd-icn" title={tr('bc.shell.h.kiosk')}
               aria-pressed={kiosk}
               onClick={() => { setEditMode(false); setAiOpen(false); setFocusW(null); setKiosk(k => !k) }}>
               {kiosk ? <IconLabel icon={Pause}>{tr('builder.stop')}</IconLabel> : <IconLabel icon={Play}>{tr('builder.present')}</IconLabel>}
@@ -3547,14 +3579,14 @@ export default function ReportBuilder() {
                 // last, as v1 and 7d keep it.
                 <span className="dl-bd-mode" role="group" aria-label={tr('bd.mode')}>
                   <span className="on" aria-current="true"><Pencil size={13} aria-hidden /> {tr('builder.edit')}</span>
-                  <button type="button" aria-label="View mode" data-testid="mode-toggle"
+                  <button type="button" aria-label={tr('bc.shell.h.viewMode')} data-testid="mode-toggle"
                     className="dl-modebtn" title={tr('builder.view')}
                     onClick={() => setEditMode(false)}>
                     <Eye size={13} aria-hidden /> {tr('builder.view')}
                   </button>
                 </span>
               ) : (
-                <button type="button" aria-label="Edit mode" data-testid="mode-toggle"
+                <button type="button" aria-label={tr('bc.shell.h.editMode')} data-testid="mode-toggle"
                   className="btn btn-primary btn-sm dl-modebtn" title={tr('builder.edit')}
                   onClick={() => setEditMode(true)}>
                   <Pencil size={13} aria-hidden /> {tr('builder.edit')}
@@ -3562,10 +3594,10 @@ export default function ReportBuilder() {
               )
             ) : (
               <button type="button" className="btn btn-ghost btn-sm" data-testid="view-only-why"
-                title={access.edit?.reason ? `View only — ${access.edit.reason}` : 'You have view-only access to this report'}
+                title={access.edit?.reason ? tr('bc.shell.h.viewOnlyReason', { reason: access.edit.reason }) : tr('bc.shell.h.viewOnlyAccess')}
                 onClick={() => { if (Object.keys(access).length) setAccessOpen2(true) }}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--muted)', padding: '0 8px' }}>
-                <Eye size={12}/> View only · why?
+                <Eye size={12}/> {tr('bc.shell.h.viewOnlyWhy')}
               </button>
             )}
           </div>
@@ -3661,14 +3693,13 @@ export default function ReportBuilder() {
             fontSize:12, color:'var(--text)', flexShrink:0 }}>
             <span style={{ fontSize:13 }}>⚠</span>
             <span style={{ flex:1 }}>
-              This report was changed in another session. Reload to see those edits —
-              anything you change first may overwrite them.
+              {tr('bc.shell.stale')}
             </span>
             <button className="btn btn-sm" onClick={() => loadReport()}
               style={{ fontSize:11, background:'var(--accent)', color:'var(--mc-accent-fg)', border:'none' }}>
-              Reload
+              {tr('bc.shell.reload')}
             </button>
-            <button onClick={() => setStaleRevision(null)} title="Dismiss"
+            <button onClick={() => setStaleRevision(null)} title={tr('bc.shell.dismiss')}
               style={{ background:'none', border:'none', color:'var(--muted)', cursor:'pointer', fontSize:15, lineHeight:1 }}>
               ×
             </button>
@@ -3774,7 +3805,7 @@ export default function ReportBuilder() {
         <div className={kiosk ? 'dl-pr-stage' : undefined} style={{ display:'flex', flex:1, gap:10, padding:'10px 16px', overflow:'hidden', minHeight:0, position:'relative' }}>
 
           {/* Canvas */}
-          <div key={refreshNonce} data-canvas-scroll style={{ flex:1, overflowY:'auto', overflowX:'auto' }}>
+          <div key={refreshNonce} data-canvas-scroll ref={attachColumn} style={{ flex:1, overflowY:'auto', overflowX:'auto' }}>
             {/* Report (h1) > page (h2) > widget titles (level 3), the outline
                 ReportPrint draws too; without it the widgets skip a level. */}
             {activePage && <h2 className="dl-sr-only">{activePage.title || activePage.name}</h2>}
@@ -3786,8 +3817,10 @@ export default function ReportBuilder() {
                   fontSize:12, background:'color-mix(in srgb, var(--accent) 10%, var(--surface))',
                   border:'1px solid color-mix(in srgb, var(--accent) 35%, var(--border))', borderRadius:'var(--radius)' }}>
                 <span style={{ flex:1, minWidth:200 }}>
-                  Changes to {recoverable.length === 1 ? 'one widget' : `${recoverable.length} widgets`} from your last session were not saved
-                  {' '}({recoverable.map(e => `"${e.title || 'untitled'}"`).join(', ')}).
+                  {trx('bc.shell.recovery', {
+                    titles: recoverable.map((e, i) => (
+                      <Fragment key={e.widgetId}>{i > 0 && tr('bc.shell.listSep')}<bdi>{tr('bc.shell.quoted', { name: e.title || tr('bc.shell.untitled') })}</bdi></Fragment>)),
+                  }, { n: recoverable.length })}
                 </span>
                 <button className="btn btn-primary btn-sm" onClick={() => void restorePending()}>{tr('builder.restore')}</button>
                 <button className="btn btn-ghost btn-sm" onClick={discardPending}>{tr('builder.discard')}</button>
@@ -3802,11 +3835,11 @@ export default function ReportBuilder() {
             {activePage?.prompt_column && (
               <div style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 12px', background:'var(--surface)', borderBottom:'1px solid var(--border)', flexShrink:0, marginBottom:8 }}>
                 <span style={{ fontSize:12, fontWeight:600, color:'var(--muted)', whiteSpace:'nowrap' }}>
-                  {activePage.prompt_label || ('Filter by ' + activePage.prompt_column)}
+                  {activePage.prompt_label || tr('bc.shell.promptFilter', { col: activePage.prompt_column })}
                 </span>
                 <input value={promptValues[activePage.id] ?? ''}
                   onChange={e => setPromptValues(p => ({ ...p, [activePage.id]: e.target.value }))}
-                  placeholder={'Enter ' + activePage.prompt_column + '...'}
+                  placeholder={tr('bc.shell.promptEnter', { col: activePage.prompt_column })}
                   style={{ flex:1, fontSize:12, padding:'4px 8px' }} />
                 {promptValues[activePage.id] && (
                   <button onClick={() => setPromptValues(p => { const n = {...p}; delete n[activePage.id]; return n })}
@@ -3862,7 +3895,8 @@ export default function ReportBuilder() {
                 })()}
               </div>
             ) : (
-            <div style={{ height: canvasH(pageWidgets.map(w => ({ ...w, layout: localLayouts[w.id] ?? packedPreview[w.id] ?? w.layout }))) * (zoom / 100), minWidth: MIN_CANVAS_W }}>
+            <div style={{ height: canvasH(pageWidgets.map(w => ({ ...w, layout: localLayouts[w.id] ?? packedPreview[w.id] ?? w.layout }))) * canvasScale,
+              minWidth: MIN_CANVAS_W * fitScale, overflow: fitScale < 1 && zoom <= 100 ? 'hidden' : undefined }}>
               <div ref={attachCanvas}
                 data-canvas
                 onDragOver={e => { if (e.dataTransfer.types.includes('application/x-fields') || e.dataTransfer.types.includes('application/x-field') || e.dataTransfer.types.includes('application/x-hierarchy')) {
@@ -3899,10 +3933,10 @@ export default function ReportBuilder() {
                     const plan = target && col ? planFieldOnWidget(target, field, isNumericField(col)) : null
                     if (target && plan) {
                       window.dispatchEvent(new CustomEvent(PATCH_WIDGET_EVENT, { detail: { widgetId: target.id, patch: plan.config,
-                        label: `Set ${plan.roleLabel} of "${target.title || target.widget_type}" to ${field}` } }))
-                      toast.success(`${field} → ${plan.roleLabel} of "${target.title || target.widget_type}"`)
+                        label: tr('bc.shell.u.setRole', { role: plan.roleLabel, widget: target.title || target.widget_type, field }) } }))
+                      toast.success(tr('bc.shell.t.roleSet', { field, role: plan.roleLabel, widget: target.title || target.widget_type }))
                     } else {
-                      if (target) toast(`"${target.title || target.widget_type}" has no empty field for ${field}, so it became a new chart`)
+                      if (target) toast(tr('bc.shell.t.becameNew', { widget: target.title || target.widget_type, field }))
                       void addWidgetFromField(field)
                     }
                   }
@@ -3918,7 +3952,8 @@ export default function ReportBuilder() {
                       backgroundSize: 'cover', backgroundPosition: 'center' }
                   : { background:'var(--surface2)' }),
                 borderRadius:'var(--radius)', border:'1px solid var(--border)',
-                transform: `scale(${zoom / 100})`, transformOrigin: 'top left' }}>
+                ...(fitScale < 1 ? { width: MIN_CANVAS_W } : {}),
+                transform: `scale(${canvasScale})`, transformOrigin: 'top left' }}>
                 {pageWidgets.length === 0 && (
                   // An empty page TEACHES (SAS: "Drag objects or data items onto
                   // the page, or start from a page template"). The drag-a-field
@@ -3932,7 +3967,7 @@ export default function ReportBuilder() {
                       <span style={{ fontSize:13, maxWidth:440 }}>
                         {report.dataset_id
                           ? (leftOpen
-                              ? <>Drag a <b>field</b> from the left panel onto the page and it becomes the right chart — or pick a chart type and assign data to it.</>
+                              ? <>{trx(rtl ? 'bc.shell.emptyRight' : 'bc.shell.emptyLeft', { field: <b>{tr('bc.shell.emptyField')}</b> })}</>
                               : <>{tr('builder.fieldsClosed')}</>)
                           : <>{tr('builder.startData')}</>}
                       </span>
@@ -3984,7 +4019,7 @@ export default function ReportBuilder() {
                       zIndex: isBeingDragged ? Z_DRAG : 1,
                       opacity: isHidden || (editMode && (widget.config as any).container_id) ? 0.5 : 1,
                       ...(dropTargetId === widget.id ? { outline: '2px dashed var(--accent)', outlineOffset: -2, borderRadius: 'var(--radius)' } : {}) }}
-                      title={dropTargetId === widget.id ? `Drop to add the field to "${widget.title || widget.widget_type}"` : undefined}>
+                      title={dropTargetId === widget.id ? tr('bc.shell.dropTo', { name: widget.title || widget.widget_type }) : undefined}>
                       {/* Reading (7d): ask about this widget, or see it full
                           screen. Beside the widget's own controls, never on them:
                           WidgetRenderer and its menu are unchanged. */}
@@ -4055,10 +4090,14 @@ export default function ReportBuilder() {
                 })}
                 {/* 7e4: guides for the selected widget, the box around a
                     multi-selection. They read the layout; they never move it. */}
-                {editMode && selectedW && multiSelectedIds.size < 2 && !dragging && !resizing && pageWidgets.some(w => w.id === selectedW.id) && (() => {
+                {/* Shown while moving and resizing too (QA3 B2): the tag reads
+                    the layout being dragged, so it updates live. */}
+                {editMode && selectedW && multiSelectedIds.size < 2 && pageWidgets.some(w => w.id === selectedW.id) && (() => {
                   const eff = (w: Widget) => localLayouts[w.id] ?? packedPreview[w.id] ?? w.layout
-                  const sw = pageWidgets.find(w => w.id === selectedW.id)!
+                  const moving = dragging?.widgetId ?? resizing?.widgetId
+                  const sw = pageWidgets.find(w => w.id === (moving ?? selectedW.id)) ?? pageWidgets.find(w => w.id === selectedW.id)!
                   return <SelectionGuides layout={eff(sw)} containerW={containerW}
+                    canvasH={canvasH(shownWidgets)}
                     others={pageWidgets.filter(w => w.id !== sw.id).map(eff)} />
                 })()}
                 {editMode && multiSelectedIds.size >= 2 && (
@@ -4131,7 +4170,7 @@ export default function ReportBuilder() {
               side="right"
               width={RIGHT_PANEL_W}
               minWidth={rightPanelMode === 'suggestions' ? SUGGEST_PANEL_W : undefined}
-              title="Settings"
+              title={tr('bc.shell.settings')}
               openSignal={rightOpenSignal}
               style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)' }}
               scrollResetKey={rightPanelMode !== 'default' ? rightPanelMode : selectedW ? `widget-${selectedW.id}` : activePage ? `page-${activePage.id}` : 'none'}
@@ -4159,10 +4198,10 @@ export default function ReportBuilder() {
               {rightPanelMode === 'performance' && (
                 <div style={{ padding: '14px 14px 0' }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
-                    Performance
+                    {tr('builder.pane.performance')}
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 11 }}>
-                    {pageWidgets.length === 0 && <span style={{ color: 'var(--muted)' }}>No widgets on this page</span>}
+                    {pageWidgets.length === 0 && <span style={{ color: 'var(--muted)' }}>{tr('bc.shell.perf.none')}</span>}
                     {[...pageWidgets]
                       .sort((a, b) => (perfStats[b.id]?.durationMs ?? -1) - (perfStats[a.id]?.durationMs ?? -1))
                       .map(w => {
@@ -4170,15 +4209,15 @@ export default function ReportBuilder() {
                         return (
                           <div key={w.id} style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '5px 7px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6 }}>
                             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                              <span style={{ flex: 1, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.title || w.widget_type}</span>
+                              <span style={{ flex: 1, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}><bdi>{w.title || w.widget_type}</bdi></span>
                               {stat?.sampled && (
-                                <span style={{ fontSize: 10.5, background: 'rgba(230,160,60,.18)', color: '#e6a03c', padding: '1px 5px', borderRadius: 99 }}>sampled</span>
+                                <span style={{ fontSize: 10.5, background: 'rgba(230,160,60,.18)', color: '#e6a03c', padding: '1px 5px', borderRadius: 99 }}>{tr('bc.shell.perf.sampled')}</span>
                               )}
                             </div>
                             <div style={{ display: 'flex', gap: 10, color: 'var(--muted)' }}>
                               <span>{w.widget_type}</span>
-                              <span style={{ fontFamily: 'var(--mono)' }}>{stat ? `${stat.durationMs.toFixed(0)} ms` : '—'}</span>
-                              <span>{stat ? `${stat.rowCount} rows` : ''}</span>
+                              <span style={{ fontFamily: 'var(--mono)' }}>{stat ? tr('bc.shell.perf.ms', { n: stat.durationMs.toFixed(0) }) : '—'}</span>
+                              <span>{stat ? tr('bc.shell.perf.rows', { n: stat.rowCount }) : ''}</span>
                             </div>
                           </div>
                         )
@@ -4248,11 +4287,10 @@ export default function ReportBuilder() {
               {rightPanelMode === 'parameters' && (
                 <div style={{ padding: 12 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
-                    Report parameters
+                    {tr('bc.shell.p.title')}
                   </div>
                   <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>
-                    Reference a parameter as @name in a filter value or a calculated expression.
-                    Viewers set values in the bar above the canvas.
+                    {trx('bc.shell.p.help', { token: <bdi dir="ltr">@name</bdi> })}{/* // i18n-ok: a code token */}
                   </p>
 
                   {/* System parameters -- always available, no setup needed. Expanded
@@ -4260,21 +4298,19 @@ export default function ReportBuilder() {
                       evaluated: dataset filters, calculated columns, measures, RLS rules. */}
                   <div style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 8, marginBottom: 10 }}>
                     <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>
-                      System parameters
+                      {tr('bc.shell.p.system')}
                     </div>
                     <p style={{ fontSize: 10.5, color: 'var(--muted)', margin: '0 0 6px' }}>
-                      Always available in any expression -- no setup needed. Resolve to the
-                      viewing user, so e.g. <code>owner == USEREMAIL()</code> scopes a filter
-                      to "my data" for everyone who opens the report.
+                      {trx('bc.shell.p.systemHelp', { code: <code dir="ltr">owner == USEREMAIL()</code> })}{/* // i18n-ok: a code sample */}
                     </p>
                     {[
-                      { token: 'USEREMAIL()', label: 'Current user email' },
-                      { token: 'USERID()',    label: 'Current user id' },
-                      { token: 'ORGID()',     label: 'Current organization id' },
-                      { token: 'ORGNAME()',   label: 'Current organization name' },
+                      { token: 'USEREMAIL()', label: tr('bc.shell.p.userEmail') },
+                      { token: 'USERID()',    label: tr('bc.shell.p.userId') },
+                      { token: 'ORGID()',     label: tr('bc.shell.p.orgId') },
+                      { token: 'ORGNAME()',   label: tr('bc.shell.p.orgName') },
                     ].map(p => (
                       <div key={p.token} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 10.5, padding: '2px 0' }}>
-                        <span style={{ fontFamily: 'var(--mono)', color: 'var(--accent)' }}>{p.token}</span>
+                        <span dir="ltr" style={{ fontFamily: 'var(--mono)', color: 'var(--accent)' }}>{p.token}</span>
                         <span style={{ color: 'var(--muted)' }}>{p.label}</span>
                       </div>
                     ))}
@@ -4282,29 +4318,29 @@ export default function ReportBuilder() {
 
                   {paramDefs.map((d, i) => (
                     <div key={i} style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 8, marginBottom: 8, display: 'flex', flexDirection: 'column', gap: 5 }}>
-                      <input aria-label={`Parameter ${i + 1} name`} value={d.name} placeholder="name"
+                      <input aria-label={tr('bc.shell.p.name', { n: i + 1 })} value={d.name} placeholder={tr('bc.shell.p.namePh')}
                         onChange={e => setParamDefs(defs => defs.map((x, j) => j === i ? { ...x, name: e.target.value } : x))}
                         style={{ fontSize: 11 }} />
-                      <select aria-label={`Parameter ${i + 1} type`} value={d.param_type}
+                      <select aria-label={tr('bc.shell.p.type', { n: i + 1 })} value={d.param_type}
                         onChange={e => setParamDefs(defs => defs.map((x, j) => j === i ? { ...x, param_type: e.target.value as never } : x))}
                         style={{ fontSize: 11 }}>
-                        <option value="number">Number</option>
-                        <option value="text">Text</option>
-                        <option value="date">Date</option>
-                        <option value="expression">Expression (computed)</option>
+                        <option value="number">{tr('bc.shell.p.number')}</option>
+                        <option value="text">{tr('bc.shell.p.text')}</option>
+                        <option value="date">{tr('bc.shell.p.date')}</option>
+                        <option value="expression">{tr('bc.shell.p.expression')}</option>
                       </select>
-                      <input aria-label={`Parameter ${i + 1} default`} value={d.default_value ?? ''}
-                        placeholder={d.param_type === 'expression' ? 'expression e.g. AVG(revenue)' : 'default value'}
+                      <input aria-label={tr('bc.shell.p.default', { n: i + 1 })} value={d.default_value ?? ''}
+                        placeholder={d.param_type === 'expression' ? tr('bc.shell.p.exprPh') : tr('bc.shell.p.defaultPh')}
                         onChange={e => setParamDefs(defs => defs.map((x, j) => j === i ? { ...x, default_value: e.target.value } : x))}
                         style={{ fontSize: 11 }} />
                       {d.param_type === 'expression' && (
-                        <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>Computed over the whole source (immune to filters); viewers cannot change it. Import datasets only.</span>
+                        <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>{tr('bc.shell.p.exprHelp')}</span>
                       )}
                       {d.param_type === 'number' && (
                         <div style={{ display: 'flex', gap: 4 }}>
                           {(['min', 'max', 'step'] as const).map((part, k) => (
-                            <input key={part} aria-label={`Parameter ${i + 1} ${part}`}
-                              placeholder={part} type="number"
+                            <input key={part} aria-label={tr(`bc.shell.p.${part}`, { n: i + 1 })}
+                              placeholder={tr(`bc.shell.p.${part}Ph`)} type="number"
                               value={(d.options ?? [])[k] ?? ''}
                               onChange={e => setParamDefs(defs => defs.map((x, j) => {
                                 if (j !== i) return x
@@ -4318,23 +4354,23 @@ export default function ReportBuilder() {
                         </div>
                       )}
                       {d.param_type === 'number' && (
-                        <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>min/max/step turn this into a what-if slider</span>
+                        <span style={{ fontSize: 10.5, color: 'var(--muted)' }}>{tr('bc.shell.p.sliderHelp')}</span>
                       )}
                       {d.param_type === 'text' && (
-                        <input aria-label={`Parameter ${i + 1} options`} value={(d.options ?? []).join(', ')} placeholder="options, comma separated (optional)"
+                        <input aria-label={tr('bc.shell.p.options', { n: i + 1 })} value={(d.options ?? []).join(', ')} placeholder={tr('bc.shell.p.optionsPh')}
                           onChange={e => setParamDefs(defs => defs.map((x, j) => j === i ? { ...x, options: e.target.value.split(',').map(o => o.trim()).filter(Boolean) } : x))}
                           style={{ fontSize: 11 }} />
                       )}
                       <button className="btn btn-ghost btn-sm" style={{ alignSelf: 'flex-end', fontSize: 11 }}
                         onClick={() => setParamDefs(defs => defs.filter((_, j) => j !== i))}>
-                        Remove
+                        {tr('bc.shell.remove')}
                       </button>
                     </div>
                   ))}
                   <div style={{ display: 'flex', gap: 6 }}>
                     <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}
                       onClick={() => setParamDefs(defs => [...defs, { name: '', param_type: 'number', default_value: '' }])}>
-                      + Add parameter
+                      {tr('bc.shell.p.add')}
                     </button>
                     <button className="btn btn-primary btn-sm" style={{ fontSize: 11 }}
                       onClick={() => {
@@ -4343,14 +4379,14 @@ export default function ReportBuilder() {
                         return parametersApi.save(reportId, next)
                         .then(saved => {
                           setParamDefs(saved); savedParams.current = saved
-                          pushUndo({ label: 'Change report parameters',
+                          pushUndo({ label: tr('bc.shell.u.params'),
                             undo: async () => { const r = await parametersApi.save(reportId, prev); setParamDefs(r); savedParams.current = r },
                             redo: async () => { const r = await parametersApi.save(reportId, next); setParamDefs(r); savedParams.current = r } })
                         })
-                        .then(() => toast.success('Parameters saved'))
-                        .catch(e => toast.error(e?.response?.data?.detail ?? 'Could not save parameters'))
+                        .then(() => toast.success(tr('bc.shell.t.paramsSaved')))
+                        .catch(e => toast.error(e?.response?.data?.detail ?? tr('bc.shell.t.paramsFailed')))
                       }}>
-                      Save
+                      {tr('bc.shell.save')}
                     </button>
                   </div>
                 </div>
@@ -4388,7 +4424,7 @@ export default function ReportBuilder() {
                   <ChatPane dataSourceId={dataset.data_source_id} />
                 ) : (
                   <div style={{ padding: 14, fontSize: 12, color: 'var(--muted)' }}>
-                    Attach a dataset to this report before asking questions.
+                    {tr('bc.shell.askAttach')}
                   </div>
                 )
               )}
@@ -4513,8 +4549,8 @@ export default function ReportBuilder() {
         <PopupOverlay page={popupPage} onClose={() => setPopupPage(null)}
           onExport={access.download && !access.download.allowed ? undefined : () => {
             reportsApi.downloadPdf(reportId, `${report.name} — ${popupPage.name}`, { pages: [popupPage.id] })
-              .then(() => toast.success('PDF downloaded'))
-              .catch(() => toast.error('Could not build the PDF'))
+              .then(() => toast.success(tr('bc.shell.t.pdfDone')))
+              .catch(() => toast.error(tr('bc.shell.t.pdfFailed')))
           }}
           renderWidget={widget => (
             <WidgetRenderer

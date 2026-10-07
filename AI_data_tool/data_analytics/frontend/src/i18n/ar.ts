@@ -1,7 +1,12 @@
 import type { MessageKey } from './en'
+import { ar as bcCanvas } from './builder/canvas'
+import { ar as bcPanes } from './builder/panes'
+import { ar as bcRules } from './builder/rules'
+import { ar as bcShell } from './builder/shell'
 
 /** Arabic UI strings. Keys must match `en.ts` exactly. */
 export const ar: Record<MessageKey, string> = {
+  ...bcCanvas, ...bcPanes, ...bcRules, ...bcShell,
   'nav.home': 'الرئيسية',
   'nav.askAi': 'اسأل الذكاء الاصطناعي',
   'nav.datasets': 'مجموعات البيانات',
@@ -918,7 +923,8 @@ export const ar: Record<MessageKey, string> = {
   'bd.keys.ask': 'اسأل الذكاء الاصطناعي',
   'bd.keys.jump': 'الانتقال إلى تقرير أو مجموعة بيانات أو صفحة',
   'bd.keys.sheet': 'ورقة الاختصارات هذه',
-  'bd.guide.where': 'عمود {from}–{to} · صف {row}',
+  'bd.guide.col': 'عمود',
+  'bd.guide.row': 'صف',
   'bd.guide.aligned': 'محاذاة ×{n}',
   'bd.group.aria': 'العناصر المحددة',
   'bd.group.n': 'المحدد: {n}',

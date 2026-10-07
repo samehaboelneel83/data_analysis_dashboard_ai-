@@ -7,6 +7,7 @@ import { useListFilter } from '../../components/ui/ListFilter'
 import EmptyState from '../../components/ui/EmptyState'
 import LoadError from '../../components/ui/LoadError'
 import LoadingState from '../../components/ui/LoadingState'
+import { formatDate } from '../../lib/dateFormat'
 
 /**
  * The org's general activity log -- logins, uploads, report edits, deletes.
@@ -69,7 +70,7 @@ export default function MonitoringActivity() {
           <tbody>
             {filtered.map(r => (
               <tr key={r.id}>
-                <td style={{ whiteSpace: 'nowrap' }}>{new Date(r.created_at).toLocaleString()}</td>
+                <td style={{ whiteSpace: 'nowrap' }}>{formatDate(r.created_at)}</td>
                 <td>{r.user_email ?? '—'}</td>
                 <td style={{ fontWeight: 600 }}>{r.action}</td>
                 <td>

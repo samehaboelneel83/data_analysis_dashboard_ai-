@@ -56,3 +56,16 @@ describe('Dashboards list layout (QA V1–V3)', () => {
   })
 })
 
+
+describe('the row ⋯ column (QA3 D3)', () => {
+  it('holds open, share and ⋯ (3 × 30px + gaps) with the cell padding', () => {
+    const w = Number(rule('.dsh-tbl .c-act').match(/width:\s*(\d+)px/)?.[1])
+    expect(w).toBeGreaterThanOrEqual(3 * 30 + 2 * 2 + 2 * 12)
+  })
+
+  it('on a narrow table the hover shortcuts go and the narrow width beats the base rule', () => {
+    const q = css.match(/@container dshtbl \(max-width: 719px\)\s*\{([\s\S]*?)\n\}/)![1]
+    expect(q).toMatch(/\.dsh-tbl th\.c-act, \.dsh-tbl td\.c-act\s*\{[^}]*width:\s*60px/)
+    expect(q).toMatch(/\.dsh-ra \.q\s*\{\s*display:\s*none/)
+  })
+})

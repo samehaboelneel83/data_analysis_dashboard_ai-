@@ -6,6 +6,7 @@
  */
 import { useEffect, useState } from 'react'
 import { prepApi, type JoinCheck, type PrepStep } from '../../../services/api'
+import { formatDate } from '../../../lib/dateFormat'
 
 /** A key list the backend will accept: at least one pair with both sides named. */
 function hasKeyPair(step: PrepStep): boolean {
@@ -89,7 +90,7 @@ export default function JoinMatchNote({ datasetId, steps, index, joined }: {
       {joined && (
         <div data-testid="join-freshness" style={{ color: 'var(--muted)' }}>
           {joined.last_refreshed_at
-            ? `“${joined.name}” was last loaded ${ago(joined.last_refreshed_at)} (${new Date(joined.last_refreshed_at).toLocaleDateString()}).`
+            ? `“${joined.name}” was last loaded ${ago(joined.last_refreshed_at)} (${formatDate(joined.last_refreshed_at, 'date')}).`
             : `“${joined.name}” has no load time recorded.`}
         </div>
       )}

@@ -1,3 +1,4 @@
+import type { TranslateFn } from '../../i18n'
 /**
  * Builder undo/redo -- a command log, not state snapshots.
  *
@@ -107,16 +108,22 @@ export function describeConfigChange(
   widgetName: string,
   before: Record<string, unknown>, after: Record<string, unknown>,
   beforeTitle: string, afterTitle: string,
+  /** QA3 C6: the reader's language ("Undo: …" in Arabic); English without it. */
+  t?: TranslateFn,
 ): string {
   const keys = changedKeys(before, after)
   const renamed = beforeTitle !== afterTitle
-  if (renamed && keys.length === 0) return `Rename "${beforeTitle}" to "${afterTitle}"`
+  if (renamed && keys.length === 0) return t
+    ? t('bc.shell.undo.rename', { from: beforeTitle, to: afterTitle })
+    : `Rename "${beforeTitle}" to "${afterTitle}"`
   if (keys.length === 1 && !renamed) {
     const k = keys[0]
-    return `Change ${settingName(k)} of "${widgetName}" from ${show(before[k])} to ${show(after[k])}`
+    return t
+      ? t('bc.shell.undo.change1', { setting: settingName(k), name: widgetName, from: show(before[k]), to: show(after[k]) })
+      : `Change ${settingName(k)} of "${widgetName}" from ${show(before[k])} to ${show(after[k])}`
   }
   const n = keys.length + (renamed ? 1 : 0)
-  return `Change ${n} settings of "${widgetName}"`
+  return t ? t(n === 2 ? 'bc.shell.undo.changeN_two' : 'bc.shell.undo.changeN', { n, name: widgetName }) : `Change ${n} settings of "${widgetName}"`
 }
 
 // ── React binding ────────────────────────────────────────────────────────────

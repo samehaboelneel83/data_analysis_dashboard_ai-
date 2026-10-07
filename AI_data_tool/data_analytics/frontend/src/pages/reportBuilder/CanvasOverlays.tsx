@@ -22,19 +22,34 @@ const px = (l: Layout, w: number) => gridStyle(l, w) as { left: number; top: num
 /** The selected widget's edges carried across the page as dashed guides, and
  *  where it sits: "col 1–6 · row 8 · aligned ×5" (edges it shares with other
  *  widgets). */
-export function SelectionGuides({ layout, others, containerW }: { layout: Layout; others: Layout[]; containerW: number }) {
+export function SelectionGuides({ layout, others, containerW, canvasH }: { layout: Layout; others: Layout[]; containerW: number; canvasH?: number }) {
   const t = useT()
   const b = px(layout, containerW)
   const shares = others.filter(o => o.x === layout.x || o.x + o.w === layout.x + layout.w || o.y === layout.y || o.y + o.h === layout.y + layout.h).length
-  const where = t('bd.guide.where', { from: localDigits(String(layout.x + 1)), to: localDigits(String(layout.x + layout.w)), row: localDigits(String(layout.y + 1)) })
+  const span = (a: number, z: number) => localDigits(a === z ? String(a) : `${a}–${z}`)
+  const cols = span(layout.x + 1, layout.x + layout.w)
+  const rows = span(layout.y + 1, layout.y + layout.h)
+  const extra = shares > 0 ? ` · ${t('bd.guide.aligned', { n: localDigits(String(shares)) })}` : ''
+  // QA3 B2: where the tag goes. In the gutter under the widget while that is
+  // inside the canvas: at 16px it reaches only into the next widget's empty
+  // top padding, never its title or axis (it used to run off the canvas's
+  // bottom and sit on a chart's labels). At the canvas bottom, above it; with
+  // no room there either, inside its own bottom corner.
+  const TAG_H = 16
+  const tagW = 10 + 6 * (t('bd.guide.col').length + t('bd.guide.row').length + cols.length + rows.length + extra.length + 6)
+  const left = Math.max(0, Math.min(b.left, containerW - tagW))
+  const fits = (top: number) => top >= 0 && (canvasH == null || top + TAG_H <= canvasH)
+  const below = b.top + b.height + 2, above = b.top - TAG_H - 2
+  const top = fits(below) ? below : fits(above) ? above : b.top + b.height - TAG_H - 4
   return (
     <div className="dl-bd-guides" aria-hidden data-testid="selection-guides">
       <i className="v" style={{ left: b.left }} />
       <i className="v" style={{ left: b.left + b.width }} />
       <i className="h" style={{ top: b.top }} />
       <i className="h" style={{ top: b.top + b.height }} />
-      <span className="dl-bd-coord" style={{ left: b.left, top: b.top + b.height + 4 }}>
-        {where}{shares > 0 && ` · ${t('bd.guide.aligned', { n: localDigits(String(shares)) })}`}
+      {/* The ranges are isolated left-to-right: in Arabic "1–3" read "3–1". */}
+      <span className="dl-bd-coord" style={{ left, top }}>
+        {t('bd.guide.col')} <bdi dir="ltr">{cols}</bdi> · {t('bd.guide.row')} <bdi dir="ltr">{rows}</bdi>{extra}
       </span>
     </div>
   )

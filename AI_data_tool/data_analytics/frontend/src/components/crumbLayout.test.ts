@@ -61,3 +61,16 @@ describe('chart tooltips in dark mode (QA2 Visual 6)', () => {
   })
 })
 
+
+describe('breadcrumb gives way in order, at any zoom (QA3 D1)', () => {
+  const rule = (sel: string) => css.match(new RegExp(sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\{([^}]*)\\}'))?.[1] ?? ''
+  it('the middle link shrinks first, then the section word; both keep a stub', () => {
+    expect(rule('.dl-crumbs__section')).toMatch(/flex:\s*0 400 auto/)
+    expect(rule('.dl-crumbs__section')).toMatch(/text-overflow:\s*ellipsis/)
+    expect(rule('.dl-crumbs > .dl-crumbs__link')).toMatch(/flex-shrink:\s*1000/)
+  })
+  it('the page name does not shrink while the trail can (Arabic showed "D.")', () => {
+    expect(rule('.dl-crumbs__page')).toMatch(/flex:\s*0 0 auto/)
+    expect(rule('.dl-crumbs__page')).toMatch(/max-inline-size:\s*60%/)
+  })
+})

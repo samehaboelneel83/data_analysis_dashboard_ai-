@@ -25,7 +25,10 @@
 .dl-bd-chip.ds { background: color-mix(in srgb, var(--dl-series-2) 13%, transparent); color: color-mix(in srgb, var(--dl-series-2) 70%, var(--text)); }
 .dl-bd-chip.ds:hover { text-decoration: underline; }
 .dl-bd-chip.src { background: none; padding: 0 4px; font-weight: 500; color: var(--mc-accent-ink); }
-.dl-bd-save { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.dl-bd-save { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); white-space: nowrap;
+  width: 104px; flex: none; }   /* QA3 B3: fixed, so undo/redo never move; longer text ellipsizes, full in the tooltip */
+.dl-bd-save > .tx { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.dl-bd-saveundo { flex: none; white-space: nowrap; }
 .dl-bd-save > svg { color: var(--success); flex: none; }
 .dl-bd-save[data-saving] > svg { color: var(--muted); }
 .dl-spin { animation: dl-spin 1s linear infinite; }
@@ -35,7 +38,9 @@
   cursor: pointer; padding: 0; flex: none; }
 .dl-bd-ib:hover:not(:disabled):not([aria-disabled="true"]) { background: var(--surface2); color: var(--text); }
 .dl-bd-ib:disabled, .dl-bd-ib[aria-disabled="true"] { opacity: .4; cursor: default; }
-.dl-bd-sel { height: 28px; font-size: 12px !important; padding: 0 4px !important; border-radius: 8px !important; max-width: 128px; width: auto !important; }
+/* QA3 B3: a fixed width that holds "— Unclassified" / "— غير مصنّف" and the arrow. */
+.dl-bd-sel { height: 28px; font-size: 12px !important; padding: 0 4px !important; border-radius: 8px !important;
+  width: 124px !important; flex: none; }
 /* The mode switch: Edit is where you are, View is the button. */
 .dl-bd-mode { display: inline-flex; align-items: center; padding: 3px; gap: 2px; border-radius: 10px; background: var(--surface2); flex: none; }
 .dl-bd-mode > * { height: 28px; display: inline-flex; align-items: center; gap: 6px; padding: 0 11px; border-radius: 7px; font-size: 13px; font-weight: 600;
@@ -53,8 +58,9 @@
 @container bdtop (max-width: 1180px) {
   .dl-bd-top .dl-bd-icn > span { font-size: 0; gap: 0 !important; }
   .dl-bd-top .dl-bd-icn { width: 32px; padding: 0; justify-content: center; }
-  .dl-bd-top .dl-report-name { max-width: 180px; }
-  .dl-bd-sel { max-width: 112px; }
+  /* QA3 B3: the name gives way (it ellipsizes, full on hover); the select
+     is never cut ("— Unclassifiec"). */
+  .dl-bd-top .dl-report-name { max-width: 120px; }
   .dl-bd-mode > * { padding: 0 9px; }
 }
 @container bdtop (max-width: 1020px) {
@@ -219,7 +225,7 @@
 .dl-bd-guides i { position: absolute; border: 0 dashed var(--dl-series-4, var(--accent)); }
 .dl-bd-guides i.v { top: 0; bottom: 0; width: 0; border-left-width: 1.5px; }
 .dl-bd-guides i.h { left: 0; right: 0; height: 0; border-top-width: 1.5px; }
-.dl-bd-coord { position: absolute; white-space: nowrap; font: 600 11px var(--mono); padding: 2px 6px; border-radius: 5px; color: #fff;
+.dl-bd-coord { position: absolute; white-space: nowrap; font: 600 10px/14px var(--mono); padding: 1px 5px; border-radius: 5px; color: #fff;
   background: var(--dl-series-4, var(--accent)); }
 .dl-bd-group { position: absolute; z-index: 8; border: 1.5px dashed var(--accent); border-radius: 12px; pointer-events: none; }
 .dl-bd-group__bar { position: absolute; top: -40px; left: 0; display: flex; align-items: center; gap: 2px; padding: 3px 4px 3px 10px; border-radius: 10px;

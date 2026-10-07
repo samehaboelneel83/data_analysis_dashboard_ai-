@@ -56,7 +56,7 @@ export default function TemplatesPane({ reportId, activePageId, onAdded, widgetT
           <div className="r">
             <div className="tx"><b>{TEMPLATE_NAMES[b.key] ? t(TEMPLATE_NAMES[b.key]) : b.name}</b><small>{n(b.widgets)}</small></div>
             <button type="button" className="btn btn-ghost btn-sm dl-bd-line" disabled={busy}
-              aria-label={`${t('bd.tpl.addPage')}: ${TEMPLATE_NAMES[b.key] ? t(TEMPLATE_NAMES[b.key]) : b.name}`}
+              aria-label={t('bc.rules.tpl.addPageAria', { name: TEMPLATE_NAMES[b.key] ? t(TEMPLATE_NAMES[b.key]) : b.name })}
               onClick={() => void add({ builtin: b.key })}><Plus size={13} aria-hidden />{t('bd.tpl.addPage')}</button>
           </div>
         </article>
@@ -68,14 +68,14 @@ export default function TemplatesPane({ reportId, activePageId, onAdded, widgetT
           <div className="th"><Thumb widgets={[]} /></div>
           <div className="r">
             <div className="tx"><b><bdi>{s.name}</bdi></b><small>{n(s.widgets)}</small></div>
-            <button type="button" className="dl-bd-ib" aria-label={`Delete template ${s.name}`} title={t('bd.tpl.delete')}
+            <button type="button" className="dl-bd-ib" aria-label={t('bc.rules.tpl.deleteAria', { name: s.name })} title={t('bd.tpl.delete')}
               onClick={async () => {
-                if (!await confirm({ title: t('bd.tpl.deleteTitle', { name: s.name }), body: t('bd.tpl.deleteBody'), confirmLabel: t('bd.tpl.deleteBtn') })) return
+                if (!await confirm({ title: t('bc.rules.tpl.deleteTitle', { name: s.name }), body: t('bd.tpl.deleteBody'), confirmLabel: t('bd.tpl.deleteBtn'), cancelLabel: t('bc.rules.cancel') })) return
                 try { await pageTemplatesApi.delete(s.id); setSaved(l => l.filter(x => x.id !== s.id)) }
                 catch { toast.error(t('bd.tpl.deleteFailed')) }
               }}><Trash2 size={14} aria-hidden /></button>
             <button type="button" className="btn btn-ghost btn-sm dl-bd-line" disabled={busy}
-              aria-label={`${t('bd.tpl.addPage')}: ${s.name}`}
+              aria-label={t('bc.rules.tpl.addPageAria', { name: s.name })}
               onClick={() => void add({ template_id: s.id })}><Plus size={13} aria-hidden />{t('bd.tpl.addPage')}</button>
           </div>
         </article>
@@ -87,14 +87,14 @@ export default function TemplatesPane({ reportId, activePageId, onAdded, widgetT
         </button>
       ) : (
         <div className="dl-bd-tplsave">
-          <input aria-label="New template name" autoFocus value={naming} dir="auto" placeholder={t('bd.tpl.namePh')}
+          <input aria-label={t('bc.rules.tpl.nameAria')} autoFocus value={naming} dir="auto" placeholder={t('bd.tpl.namePh')}
             onChange={e => setNaming(e.target.value)} onKeyDown={e => { if (e.key === 'Escape') setNaming(null) }} />
-          <button type="button" className="btn btn-primary btn-sm" aria-label="Save page template" disabled={!naming.trim()}
+          <button type="button" className="btn btn-primary btn-sm" aria-label={t('bc.rules.tpl.saveAria')} disabled={!naming.trim()}
             onClick={() => {
               const name = naming.trim()
               pageTemplatesApi.saveFrom(reportId, activePageId, name)
                 .then(() => {
-                  toast.success(t('bd.tpl.saved', { name })); setNaming(null)
+                  toast.success(t('bc.rules.tpl.saved', { name })); setNaming(null)
                   pageTemplatesApi.list().then(setSaved).catch(() => {})
                 })
                 .catch(() => toast.error(t('bd.tpl.saveFailed')))
@@ -104,7 +104,7 @@ export default function TemplatesPane({ reportId, activePageId, onAdded, widgetT
 
       {reports.length > 0 && (<>
         <h3 className="dl-bd-gh">{t('bd.tpl.import')}</h3>
-        <select aria-label="Source report" className="dl-bd-in" value={source?.id ?? ''}
+        <select aria-label={t('bc.rules.tpl.sourceAria')} className="dl-bd-in" value={source?.id ?? ''}
           onChange={e => {
             const id = Number(e.target.value)
             if (!id) { setSource(null); return }

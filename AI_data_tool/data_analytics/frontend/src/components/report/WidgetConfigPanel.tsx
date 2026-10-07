@@ -9,7 +9,8 @@ import { DEFAULT_SPEC, parseSpec, specProblem } from '../../lib/relativeDates'
 import type { Widget, WidgetType, ReportPage, HierarchyNode, Bookmark } from '../../types/report'
 import BoundarySetPicker from './BoundarySetPicker'
 import GeoMatchStatus from './GeoMatchStatus'
-import { usePanelLabel } from './panelLabels'
+import { usePanelLabel, useRoleLabel } from './panelLabels'
+import { useDirection } from '../../contexts/DirectionContext'
 // Lazy: matching a column against map regions needs the bundled world geometry.
 const GeoMatchLine = lazy(() => import('./GeoMatchLine'))
 import { boundarySetsApi, calendarSettingsApi } from '../../services/api'
@@ -114,6 +115,9 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
   // The panel's own words in the reader's language (panelLabels.ts). Field
   // names, option values and anything from the data stay as they are.
   const L = usePanelLabel()
+  // Data-role names and field groups (Numbers, Dates...) in the reader's language.
+  const roleL = useRoleLabel()
+  const { language } = useDirection()
 
   // Panel search box — not part of the widget config, so it is never seeded/reset by
   // the widget-switch effect and never written by the save effect.
@@ -893,7 +897,7 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
     const kept = idNumCols.filter(c => selected.includes(c.name))
     return [...numCols, ...kept].map(c => ({
       value: c.name,
-      label: isIdLikeColumn(c) ? `${c.name} (id)` : c.name,
+      label: isIdLikeColumn(c) ? `${c.name} (id)` : c.name, // i18n-ok: a column name and its "id" tag
     }))
   }
 
@@ -949,10 +953,10 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
           <select id="fiscal-start-month" value={fiscalStart} onChange={e => setFiscalStart(e.target.value)}
             style={{ width:'100%', fontSize:11 }}>
             <option value="">{orgFiscalStart
-              ? `the organisation's month (${monthName(orgFiscalStart, 'en')})`
-              : "the organisation's month"}</option>
+              ? L("the organisation's month ({month})", { month: monthName(orgFiscalStart, language) })
+              : L("the organisation's month")}</option>
             {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
-              <option key={m} value={String(m)}>{monthName(m, 'en')}</option>
+              <option key={m} value={String(m)}>{monthName(m, language)}</option>
             ))}
           </select>
           <div style={{ fontSize: 11, color:'var(--muted)', marginTop:2 }}>
@@ -990,7 +994,7 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
         <option value="">{L(ph)}</option>
         {options.filter(o => !o.group).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         {groups.map(g => (
-          <optgroup key={g} label={g}>
+          <optgroup key={g} label={roleL(g)}>
             {options.filter(o => o.group === g).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </optgroup>
         ))}
@@ -1002,7 +1006,7 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
   const fieldLabel = (c: DatasetColumn) => {
     const marker = c.dtype === 'calculated' ? 'ƒx' : c.dtype === 'numeric' ? '#' : c.dtype === 'datetime' ? '◷' : 'Aa'
     const n = distinctCounts?.[c.name]
-    return `${marker} ${c.name}${n != null && c.dtype !== 'numeric' ? ` · ${n.toLocaleString()} value${n === 1 ? '' : 's'}` : ''}`
+    return `${marker} ${c.name}${n != null && c.dtype !== 'numeric' ? ` · ${L(n === 1 ? '{n} value' : '{n} values', { n: n.toLocaleString() })}` : ''}`
   }
   const fieldGroup = (c: DatasetColumn) =>
     c.dtype === 'calculated' ? 'Calculated' : c.dtype === 'numeric' ? 'Numbers' : c.dtype === 'datetime' ? 'Dates' : 'Categories'
@@ -1200,9 +1204,9 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
   // why it is closed while the other is in use.
   const addBlocked = (role: string): string | null =>
     role === 'category2' && MULTI_MEASURE_WIDGETS.includes(wt) && extraMeasures.length > 0
-      ? 'A series split and several measures cannot be drawn together. Keep one measure to split it by a series.'
+      ? L('A series split and several measures cannot be drawn together. Keep one measure to split it by a series.')
       : null
-  const displayName = (role: string, f: string) => role === 'category' && hierarchyNodeId ? `${f} (hierarchy)` : f
+  const displayName = (role: string, f: string) => role === 'category' && hierarchyNodeId ? L('{name} (hierarchy)', { name: f }) : f
   const detailLabel = { display:'block', fontSize: 12, color:'var(--muted)', marginBottom:3 } as const
   const nameField = (id: string, value: string, set: (v: string) => void, placeholder: string) => (
     <div style={{ marginBottom: 8 }}>
@@ -1298,7 +1302,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
         effectiveCols.find(c => c.name === o.value)?.dtype === 'datetime')
     : colOptions
     return (chosen && !narrowed.some(o => o.value === chosen))
-      ? [...narrowed, { value: chosen, label: `${chosen} (current)` }]
+      ? [...narrowed, { value: chosen, label: L('{name} (current)', { name: chosen }) }]
       : narrowed
   }
   /** The dimension, from a column or (`h:<id>`) a hierarchy level. */
@@ -1390,7 +1394,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           }} style={{ width:'100%' }}>
             <option value="">{primaryDatasetId && datasets[primaryDatasetId] ? L('{name} (default)', { name: datasets[primaryDatasetId].name }) : L('— report default —')}</option>
             {Object.values(datasets).map(ds => (
-              <option key={ds.id} value={ds.id}>{ds.name}{ds.aggregate_of_dataset_id ? ' · pre-aggregated' : ''}</option>
+              <option key={ds.id} value={ds.id}>{ds.name}{ds.aggregate_of_dataset_id ? ' · ' + L('pre-aggregated') : ''}</option>
             ))}
           </select>
         )}
@@ -1424,7 +1428,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
             <label htmlFor="image-url-input" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
               {L("Image URL")}
             </label>
-            <input id="image-url-input" value={imageUrl} onChange={e => setImageUrl(e.target.value)} style={{ width:'100%' }} placeholder="https://…" />
+            <input id="image-url-input" value={imageUrl} onChange={e => setImageUrl(e.target.value)} style={{ width:'100%' }} placeholder="https://…" /> {/* // i18n-ok: a URL / code sample */}
           </div>
           <div style={{ marginBottom: 12 }}>
             {/* Distinct from the Appearance group's "Widget description" control --
@@ -1453,7 +1457,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
             <label htmlFor="web-url-input" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
               {L("Web page URL")}
             </label>
-            <input id="web-url-input" value={webUrl} onChange={e => setWebUrl(e.target.value)} style={{ width:'100%' }} placeholder="https://…" />
+            <input id="web-url-input" value={webUrl} onChange={e => setWebUrl(e.target.value)} style={{ width:'100%' }} placeholder="https://…" /> {/* // i18n-ok: a URL / code sample */}
             <div style={{ fontSize: 11, color:'var(--muted)', marginTop:4 }}>
               {L("Embedded in a sandboxed frame. Only http(s) URLs load; some sites block being framed.")}
             </div>
@@ -1465,10 +1469,10 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
             <label htmlFor="custom-url-input" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
               {L("Visualisation URL")}
             </label>
-            <input id="custom-url-input" value={customUrl} onChange={e => setCustomUrl(e.target.value)} style={{ width:'100%' }} placeholder="https://…" />
+            <input id="custom-url-input" value={customUrl} onChange={e => setCustomUrl(e.target.value)} style={{ width:'100%' }} placeholder="https://…" /> {/* // i18n-ok: a URL / code sample */}
             <div style={{ fontSize: 11, color:'var(--muted)', marginTop:4 }}>
-              {L("A sandboxed page that receives this widget's data via")} <code>postMessage</code>
-              (<code>{'{ type: "datalytics:data", version: 1, data, context }'}</code>{L("). Bind a dimension/measure below to choose the data. Build one with the SDK,")} <code>/sdk/datalytics-visual-1.js</code>; <code>/sdk/example-bars.html</code> {L("is a working example.")}
+              {L("A sandboxed page that receives this widget's data via")} <code>postMessage</code> {/* // i18n-ok: a URL / code sample */}
+              (<code>{'{ type: "datalytics:data", version: 1, data, context }'}</code>{L("). Bind a dimension/measure below to choose the data. Build one with the SDK,")} <code>/sdk/datalytics-visual-1.js</code>; <code>/sdk/example-bars.html</code> {L("is a working example.")} {/* // i18n-ok: a URL / code sample */}
             </div>
           </div>
         )}
@@ -1509,16 +1513,16 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
         {wt === 'script' && (
           <div style={{ marginBottom: 12 }}>
             <label htmlFor="script-code" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
-              Python
+              {'Python' /* // i18n-ok: a language name */}
             </label>
             <textarea id="script-code" value={scriptCode} rows={10}
               onChange={e => setScriptCode(e.target.value)}
               spellCheck={false}
-              placeholder={"result = df.groupby('region', as_index=False)['revenue'].sum()"}
+              placeholder={"result = df.groupby('region', as_index=False)['revenue'].sum()"} // i18n-ok: a code sample
               style={{ width:'100%', fontFamily:'var(--mono)', fontSize:11.5,
                 boxSizing:'border-box', resize:'vertical' }} />
             <div style={{ fontSize: 11, color:'var(--muted)', marginTop:4 }}>
-              {L("Runs on the server over this widget's own filtered, row- and column-secured frame, which arrives as")} <code>df</code>{L(". Assign what the tile should show to")} <code>result</code> {L("— a DataFrame, a Series or a single number.")} <code>print()</code> {L("output is shown under the table.")}
+              {L("Runs on the server over this widget's own filtered, row- and column-secured frame, which arrives as")} <code>df</code>{L(". Assign what the tile should show to")} <code>result</code> {L("— a DataFrame, a Series or a single number.")} <code>print()</code> {L("output is shown under the table.")} {/* // i18n-ok: a URL / code sample */}
             </div>
             <div style={{ fontSize: 11, color:'var(--muted)', marginTop:4 }}>
               {L("Only an organisation admin can save a script tile: this is code running on the server, in a separate process with no access to the application's credentials, but with whatever access the server itself has.")}
@@ -1651,7 +1655,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
             into its own named group, open by default for buttons since it's the whole
             reason to configure one. Same fields, same state keys as before. */}
         {wt === 'button' && (
-          <ExpandableGroup id="actions" title="Actions" defaultOpen
+          <ExpandableGroup id="actions" title="Actions" defaultOpen // i18n-ok: ExpandableGroup translates its title
             searchTerms={ACTIONS_SEARCH_TERMS} {...groupFilterProps('Actions', ACTIONS_SEARCH_TERMS)}>
             <div style={{ marginBottom: 12 }}>
               <label htmlFor="button-action-select" style={{ display:'block', fontSize: 11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:4 }}>
@@ -1692,7 +1696,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                   {L("Target URL")}
                 </label>
                 <input id="button-action-url-input" value={actionUrl} onChange={e => setActionUrl(e.target.value)}
-                  placeholder="https://…" style={{ width:'100%' }} />
+                  placeholder="https://…" style={{ width:'100%' }} /> {/* // i18n-ok: a URL / code sample */}
                 <span style={{ fontSize: 11, color:'var(--muted)' }}>{L("Opens in a new tab. Only http(s) links are allowed.")}</span>
               </div>
             )}
@@ -1739,7 +1743,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
         )}
 
         {wt !== 'text' && wt !== 'button' && wt !== 'image' && wt !== 'shape' && (<>
-          <ExpandableGroup id="roles" title="Fields" defaultOpen
+          <ExpandableGroup id="roles" title="Fields" defaultOpen // i18n-ok: ExpandableGroup translates its title
             searchTerms={FIELDS_SEARCH_TERMS} {...groupFilterProps('Fields', FIELDS_SEARCH_TERMS)}>
           {dataRolesPane}
           {/* A model's own options (event level, depth, which models to compare)
@@ -1751,7 +1755,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           </ExpandableGroup>
 
           {!isModel && (<>
-          <ExpandableGroup id="data" title="Data & aggregation" defaultOpen
+          <ExpandableGroup id="data" title="Data & aggregation" defaultOpen // i18n-ok: ExpandableGroup translates its title
             searchTerms={DATA_SEARCH_TERMS} {...groupFilterProps('Data & aggregation', DATA_SEARCH_TERMS)}>
           {wt === 'bar' && (
             <div style={{ marginBottom: 12 }}>
@@ -1783,7 +1787,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           )}
           {wt === 'map_choropleth' && roleValues.category && (
             <Suspense fallback={(Number(datasetId) || primaryDatasetId)
-              ? <GeoMatchStatus>{`Checking ${roleValues.category} against the map…`}</GeoMatchStatus> : null}>
+              ? <GeoMatchStatus>{L('Checking {column} against the map…', { column: roleValues.category })}</GeoMatchStatus> : null}>
               <GeoMatchLine datasetId={Number(datasetId) || primaryDatasetId || null} column={roleValues.category}
                 setId={boundarySetId ? Number(boundarySetId) : (geography?.[roleValues.category] ?? null)} />
             </Suspense>
@@ -1838,8 +1842,8 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                         <label key={c.name} style={{ display:'flex', alignItems:'center', gap:6,
                                                      fontSize:12, cursor: atCap ? 'not-allowed' : 'pointer',
                                                      opacity: atCap ? 0.45 : 1 }}>
-                          <input type="checkbox" checked={idx !== -1} disabled={atCap} title={atCap ? 'This role is full: remove a field to add another' : undefined}
-                            aria-label={`Level ${c.name}`}
+                          <input type="checkbox" checked={idx !== -1} disabled={atCap} title={atCap ? L('This role is full: remove a field to add another') : undefined}
+                            aria-label={L('Level {name}', { name: c.name })}
                             onChange={() => setHierLevels(prev =>
                               prev.includes(c.name)
                                 ? prev.filter(x => x !== c.name)
@@ -2094,7 +2098,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               </select>
               <div style={{ fontSize: 11, color:'var(--muted)', marginTop:3 }}>
                 {L(AGGREGATIONS.find(a => a.value === (agg2 || agg))?.label ?? (agg2 || agg))}
-                {` of ${roleValues.measure2}`}
+                {' ' + L('of {measure}', { measure: roleValues.measure2 })}
               </div>
             </div>
           )}
@@ -2129,7 +2133,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           </>)}
 
           {(LATTICE_WIDGETS as readonly string[]).includes(wt) && (
-          <ExpandableGroup id="lattice" title="Lattice (small multiples)"
+          <ExpandableGroup id="lattice" title="Lattice (small multiples)" // i18n-ok: ExpandableGroup translates its title
             searchTerms={LATTICE_SEARCH_TERMS} {...groupFilterProps('Lattice (small multiples)', LATTICE_SEARCH_TERMS)}>
             <p style={{ fontSize: 11, color:'var(--muted)', marginBottom:8 }}>
               {L("Repeat this chart once per value — a grid of panels on one shared axis, so panels compare honestly.")}
@@ -2157,7 +2161,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           )}
 
           {(ANIMATION_WIDGETS as readonly string[]).includes(wt) && (
-          <ExpandableGroup id="animation" title="Animation (play through)"
+          <ExpandableGroup id="animation" title="Animation (play through)" // i18n-ok: ExpandableGroup translates its title
             searchTerms={ANIMATION_SEARCH_TERMS} {...groupFilterProps('Animation (play through)', ANIMATION_SEARCH_TERMS)}>
             <p style={{ fontSize: 11, color:'var(--muted)', marginBottom:8 }}>
               {L("Play this chart through an ordered field — a date, a year — one frame per value, on one fixed axis.")}
@@ -2181,20 +2185,20 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           </ExpandableGroup>
           )}
 
-          <ExpandableGroup id="objfilters" title="Filters"
+          <ExpandableGroup id="objfilters" title="Filters" // i18n-ok: ExpandableGroup translates its title
             searchTerms={FILTERS_SEARCH_TERMS} {...groupFilterProps('Filters', FILTERS_SEARCH_TERMS)}>
           <p style={{ fontSize: 11, color:'var(--muted)', marginBottom:8 }}>
             {L("This object's own row filters — applied before aggregation, on top of dataset filters and cross-filters.")}
           </p>
           {objFilters.map((f, i) => (
             <div key={i} style={{ display:'flex', gap:4, marginBottom:6, flexWrap:'wrap' }}>
-              <select aria-label={`Filter ${i + 1} column`} value={f.column}
+              <select aria-label={L('Filter {n} column', { n: i + 1 })} value={f.column}
                 onChange={e => setObjFilters(p => p.map((x, k) => k === i ? { ...x, column: e.target.value } : x))}
                 style={{ fontSize:11, flex:1, minWidth:90 }}>
                 <option value="">{L("— column —")}</option>
                 {colOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
-              <select aria-label={`Filter ${i + 1} operator`} value={f.op}
+              <select aria-label={L('Filter {n} operator', { n: i + 1 })} value={f.op}
                 onChange={e => {
                   const op = e.target.value
                   setObjFilters(p => p.map((x, k) => k !== i ? x : {
@@ -2206,15 +2210,15 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 <option value="relative">{L("relative date")}</option>
               </select>
               {f.op === 'relative' ? (
-                <RelativeDateEditor label={`Filter ${i + 1}`} value={parseSpec(f.value)}
+                <RelativeDateEditor label={L('Filter {n}', { n: i + 1 })} value={parseSpec(f.value)}
                   onChange={spec => setObjFilters(p => p.map((x, k) => k === i ? { ...x, value: JSON.stringify(spec) } : x))} />
               ) : (
-              <input aria-label={`Filter ${i + 1} value`} value={f.value}
-                placeholder={f.op === 'in' ? 'a, b, c' : 'value'}
+              <input aria-label={L('Filter {n} value', { n: i + 1 })} value={f.value}
+                placeholder={f.op === 'in' ? 'a, b, c' : L('value')}
                 onChange={e => setObjFilters(p => p.map((x, k) => k === i ? { ...x, value: e.target.value } : x))}
                 style={{ fontSize:11, width:90 }} />
               )}
-              <button aria-label={`Remove filter ${i + 1}`}
+              <button aria-label={L('Remove filter {n}', { n: i + 1 })}
                 onClick={() => setObjFilters(p => p.filter((_, k) => k !== i))}
                 style={{ border:'none', background:'none', color:'var(--danger)', cursor:'pointer' }}>✕</button>
             </div>
@@ -2224,7 +2228,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           </ExpandableGroup>
 
           {!isModel && (<>
-          <ExpandableGroup id="sort" title="Sort & limit"
+          <ExpandableGroup id="sort" title="Sort & limit" // i18n-ok: ExpandableGroup translates its title
             searchTerms={SORT_SEARCH_TERMS} {...groupFilterProps('Sort & limit', SORT_SEARCH_TERMS)}>
           {/* Sort */}
           {sortOpts === 'all' && (
@@ -2268,19 +2272,19 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               </label>
               {sortKeys.map((k, i) => (
                 <div key={i} style={{ display:'flex', gap:4, marginBottom:6, flexWrap:'wrap' }}>
-                  <select aria-label={`Sort key ${i + 1} column`} value={k.col}
+                  <select aria-label={L('Sort key {n} column', { n: i + 1 })} value={k.col}
                     onChange={e => setSortKeys(p => p.map((x, j) => j === i ? { ...x, col: e.target.value } : x))}
                     style={{ fontSize:11, flex:1, minWidth:90 }}>
                     <option value="">{L("— column —")}</option>
                     {colOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
-                  <select aria-label={`Sort key ${i + 1} direction`} value={k.dir}
+                  <select aria-label={L('Sort key {n} direction', { n: i + 1 })} value={k.dir}
                     onChange={e => setSortKeys(p => p.map((x, j) => j === i ? { ...x, dir: e.target.value } : x))}
                     style={{ fontSize:11 }}>
                     <option value="asc">{L("Asc")}</option>
                     <option value="desc">{L("Desc")}</option>
                   </select>
-                  <button aria-label={`Remove sort key ${i + 1}`}
+                  <button aria-label={L('Remove sort key {n}', { n: i + 1 })}
                     onClick={() => setSortKeys(p => p.filter((_, j) => j !== i))}
                     style={{ border:'none', background:'none', color:'var(--danger)', cursor:'pointer' }}>✕</button>
                 </div>
@@ -2335,7 +2339,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 <option value="eq">{L("equal to")}</option>
               </select>
               <input type="number" value={havingValue} onChange={e => setHavingValue(e.target.value)}
-                aria-label={L("Aggregate filter value")} style={{ width:'100%' }} placeholder={L("value")} disabled={!havingOp} title={!havingOp ? 'Choose a condition first' : undefined} />
+                aria-label={L("Aggregate filter value")} style={{ width:'100%' }} placeholder={L("value")} disabled={!havingOp} title={!havingOp ? L('Choose a condition first') : undefined} />
             </div>
             <span style={{ fontSize: 11, color:'var(--muted)' }}>{L("Applies to the aggregated value of each category — e.g. keep regions whose total exceeds 1000.")}</span>
           </div>
@@ -2360,7 +2364,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               onChange={e => setSuppressBelow(e.target.value)} style={{ width:'100%' }} placeholder={L("minimum rows per group (off)")} />
             <label style={{ display:'flex', alignItems:'center', gap:6, fontSize:11, marginTop:6, cursor:'pointer' }}>
               <input type="checkbox" checked={suppressComplement} onChange={e => setSuppressComplement(e.target.checked)}
-                disabled={suppressBelow === '' || Number(suppressBelow) <= 0} title={suppressBelow === '' || Number(suppressBelow) <= 0 ? 'Set a minimum group size above first' : undefined} />
+                disabled={suppressBelow === '' || Number(suppressBelow) <= 0} title={suppressBelow === '' || Number(suppressBelow) <= 0 ? L('Set a minimum group size above first') : undefined} />
               {L("Also hide the smallest surviving group (blocks back-computation)")}
             </label>
             <span style={{ fontSize: 11, color:'var(--muted)' }}>{L("Hides any category aggregated from fewer rows than this — confidentiality suppression for small cells.")}</span>
@@ -2440,7 +2444,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               (widgetCapabilities.ts -- a control wired to nothing is a
               defect, not a cosmetic). */}
           {supportsRanking(wt) && (
-            <ExpandableGroup id="ranking" title="Ranking"
+            <ExpandableGroup id="ranking" title="Ranking" // i18n-ok: ExpandableGroup translates its title
               searchTerms={RANKING_SEARCH_TERMS} {...groupFilterProps('Ranking', RANKING_SEARCH_TERMS)}>
 
           <div style={{ marginBottom: 12 }}>
@@ -2454,15 +2458,15 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                 <option value="bottom">{L("Bottom N")}</option>
               </select>
               <input type="text" value={rankN} onChange={e => setRankN(e.target.value)}
-                aria-label={L("Rank count")} style={{ width:'100%' }} placeholder={L("N or @parameter")} disabled={!rankMode} title={!rankMode ? 'Choose Top or Bottom first' : undefined} />
+                aria-label={L("Rank count")} style={{ width:'100%' }} placeholder={L("N or @parameter")} disabled={!rankMode} title={!rankMode ? L('Choose Top or Bottom first') : undefined} />
             </div>
             <div style={{ display:'flex', gap:12, marginTop:4 }}>
               <label style={{ fontSize:11, display:'flex', alignItems:'center', gap:4 }}>
-                <input type="checkbox" checked={rankPercent} onChange={e => setRankPercent(e.target.checked)} disabled={!rankMode} title={!rankMode ? 'Choose Top or Bottom first' : undefined} />
+                <input type="checkbox" checked={rankPercent} onChange={e => setRankPercent(e.target.checked)} disabled={!rankMode} title={!rankMode ? L('Choose Top or Bottom first') : undefined} />
                 {L("N is a percent of categories")}
               </label>
               <label style={{ fontSize:11, display:'flex', alignItems:'center', gap:4 }}>
-                <input type="checkbox" checked={rankOther} onChange={e => setRankOther(e.target.checked)} disabled={!rankMode} title={!rankMode ? 'Choose Top or Bottom first' : undefined} />
+                <input type="checkbox" checked={rankOther} onChange={e => setRankOther(e.target.checked)} disabled={!rankMode} title={!rankMode ? L('Choose Top or Bottom first') : undefined} />
                 {L("Bucket the rest as “All Other”")}
               </label>
             </div>
@@ -2476,7 +2480,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
               gated on the specific capability it writes, so a widget type never gets
               offered an option its renderer would silently ignore. */}
           {formatCaps.length > 0 && (
-            <ExpandableGroup id="formatting" title="Formatting" defaultOpen={false}
+            <ExpandableGroup id="formatting" title="Formatting" defaultOpen={false} // i18n-ok: ExpandableGroup translates its title
               searchTerms={FORMATTING_SEARCH_TERMS} {...groupFilterProps('Formatting', FORMATTING_SEARCH_TERMS)}>
               {formatCaps.includes('axes') && (<>
                 <div style={{ marginBottom: 12 }}>
@@ -2785,7 +2789,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
             widget_padding and alt_text regardless of wt), so this group lives outside
             the type-conditional block above and is not gated on formattingCapabilities
             at all. */}
-        <ExpandableGroup id="appearance" title="Appearance" defaultOpen={false}
+        <ExpandableGroup id="appearance" title="Appearance" defaultOpen={false} // i18n-ok: ExpandableGroup translates its title
           searchTerms={APPEARANCE_SEARCH_TERMS} {...groupFilterProps('Appearance', APPEARANCE_SEARCH_TERMS)}>
           <div style={{ display:'flex', gap:8, marginBottom:12 }}>
             <div>
@@ -2881,7 +2885,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
       {/* Display rules */}
       {supportsDisplayRules && (
         <div style={{ borderTop: '1px solid var(--border)', padding: '12px 14px' }}>
-          <ExpandableGroup id="rules" title="Display rules"
+          <ExpandableGroup id="rules" title="Display rules" // i18n-ok: ExpandableGroup translates its title
             searchTerms={RULES_SEARCH_TERMS} {...groupFilterProps('Display rules', RULES_SEARCH_TERMS)}>
             <DisplayRulesPanel
               key={widget.id}
@@ -2896,7 +2900,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
       )}
 
       {/* Visual interaction settings */}
-      <ExpandableGroup id="interactions" title="Interactions"
+      <ExpandableGroup id="interactions" title="Interactions" // i18n-ok: ExpandableGroup translates its title
         searchTerms={INTERACTIONS_SEARCH_TERMS} {...groupFilterProps('Interactions', INTERACTIONS_SEARCH_TERMS)}>
         <InteractionSettings widget={widget}
           pageWidgets={pages?.find(pg => pg.id === widget.page_id)?.widgets ?? []} />
@@ -2919,7 +2923,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
           ...(withHierarchy ? hierarchyOptions.map(o => ({ value: `h:${o.id}`, label: o.label, group: 'Hierarchies' })) : [])]
         return (
           <AddFieldDialog heading={heading} multi={!!rf.multi} choices={choices} selected={selected}
-            emptyText={emptyPickerReason(effectiveCols.length > 0, roleAccepts(rf.role)) ?? undefined}
+            emptyText={(r => r && L(r))(emptyPickerReason(effectiveCols.length > 0, roleAccepts(rf.role))) ?? undefined}
             onClose={() => setAddRole(null)}
             onApply={values => setFields(rf, values)} />
         )

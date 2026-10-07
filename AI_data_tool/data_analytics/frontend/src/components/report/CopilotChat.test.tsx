@@ -312,3 +312,18 @@ describe('CopilotChat while the model server is unreachable (redesign 7e5)', () 
   })
 })
 
+
+describe('the Ask AI button stays over the canvas (QA3 B1)', () => {
+  it('keeps clear of everything beside the canvas column: panel, pinned Properties and rail', () => {
+    const col = document.createElement('div')
+    col.setAttribute('data-canvas-scroll', '')
+    col.getBoundingClientRect = () => ({ left: 320, right: 1000, top: 0, bottom: 800, width: 680, height: 800, x: 320, y: 0, toJSON: () => ({}) })
+    document.body.append(col)
+    try {
+      const { container } = render(<CopilotChat reportId={9} pageId={4} onApplied={vi.fn()} />)
+      const box = container.querySelector('.dl-askai') as HTMLElement
+      // window 1024 wide in jsdom: 24 px of room plus the button's own 24
+      expect(box.style.insetInlineEnd).toBe(`${window.innerWidth - 1000 + 24}px`)
+    } finally { col.remove() }
+  })
+})

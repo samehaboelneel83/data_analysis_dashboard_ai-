@@ -1198,6 +1198,46 @@ describe('ReportBuilder zoom-aware drag math', () => {
   })
 })
 
+describe('Assign data on a widget that is not selected (QA3)', () => {
+  it('selects it and opens the Assign data dialog', async () => {
+    const r = baseReport()
+    r.pages[0].widgets = [
+      { id: 7, page_id: 100, widget_type: 'kpi', title: 'Empty KPI', config: {}, layout: { x: 0, y: 0, w: 3, h: 2 }, created_at: '2026-01-01' },
+      { id: 8, page_id: 100, widget_type: 'kpi', title: 'Other', config: { measure: 'revenue' }, layout: { x: 3, y: 0, w: 3, h: 2 }, created_at: '2026-01-01' },
+    ] as any
+    vi.mocked(reportsApi.get).mockResolvedValue(r as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    fireEvent.click(await screen.findByText('Other'))
+    const tile = document.querySelector('[data-widget-id="7"]') as HTMLElement
+    fireEvent.click(within(tile).getByRole('button', { name: 'Assign data' }))
+    expect(await screen.findByRole('dialog', { name: /^Assign data/ })).toBeInTheDocument()
+  })
+})
+
+describe('a canvas column narrower than the page (QA3 B5)', () => {
+  it('scales the page down to fit instead of cutting widgets off', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    // every box 400 wide: the column Properties-pinned-beside-a-panel leaves
+    const real = Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth')!
+    Object.defineProperty(Element.prototype, 'clientWidth', { configurable: true, get: () => 400 })
+    try {
+      renderBuilder()
+      await screen.findByTestId('view-strip')
+      const canvas = document.querySelector('[data-canvas]') as HTMLElement
+      await waitFor(() => expect(canvas.style.transform).toMatch(/scale\(0\.66/))
+      expect(canvas.style.width).toBe('600px')
+      expect((canvas.parentElement as HTMLElement).style.minWidth).toBe('400px')
+    } finally {
+      Object.defineProperty(Element.prototype, 'clientWidth', real)
+    }
+  })
+})
+
 describe('ReportBuilder zoom (in the second row since 7e1)', () => {
   it('zooms the canvas in and updates the displayed percentage', async () => {
     vi.mocked(reportsApi.get).mockResolvedValue(baseReport() as any)
@@ -2786,7 +2826,7 @@ describe('canvas overlays (redesign 7e4)', () => {
     renderBuilder()
     await screen.findByTestId('view-strip')
     fireEvent.click(await screen.findByText('Sales by Region'))
-    expect(await screen.findByTestId('selection-guides')).toHaveTextContent('col 1–6 · row 1')
+    expect(await screen.findByTestId('selection-guides')).toHaveTextContent('col 1–6 · row 1–5')
     // QA3 A1: the plain click already selected it; Shift+click adds the second.
     fireEvent.click(await screen.findByText('Second Widget'), { shiftKey: true })
     expect(screen.getByTestId('group-box')).toHaveTextContent('2 selected')

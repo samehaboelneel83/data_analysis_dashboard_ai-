@@ -9,6 +9,7 @@ import BasemapSettings from '../../components/admin/BasemapSettings'
 import LlmEndpointsPanel from '../../components/admin/LlmEndpointsPanel'
 import LoadError from '../../components/ui/LoadError'
 import LoadingState from '../../components/ui/LoadingState'
+import { formatDate } from '../../lib/dateFormat'
 
 /**
  * Admin -> Settings: every setting in one place.
@@ -85,7 +86,7 @@ function SettingRow({ s, draft, onChange, onReset, busy }: {
         {!s.editable && <span className="dl-setting__badge"><Lock size={11} aria-hidden /> {t('settings.readOnly')}</span>}
         {s.editable && s.source === 'saved' && (
           <span className="dl-setting__badge dl-setting__badge--saved"
-            title={s.updated_by ? `${s.updated_by}${s.updated_at ? ', ' + new Date(s.updated_at).toLocaleString() : ''}` : undefined}>
+            title={s.updated_by ? `${s.updated_by}${s.updated_at ? ', ' + formatDate(s.updated_at) : ''}` : undefined}>
             {t('settings.source.saved')}
           </span>
         )}

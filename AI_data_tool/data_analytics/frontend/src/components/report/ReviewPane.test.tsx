@@ -253,3 +253,44 @@ describe('report quality as CI (Phase 7.4)', () => {
     expect(perf.textContent).toContain('Slow for every reader')
   })
 })
+
+describe('ReviewPane in Arabic (QA3 Batch C)', () => {
+  const inArabic = async (r: Report) => {
+    localStorage.setItem('datalytics.language', 'ar')
+    const { DirectionProvider } = await import('../../contexts/DirectionContext')
+    return render(<DirectionProvider><ReviewPane report={r} perfStats={{}} onSelectWidget={vi.fn()} /></DirectionProvider>)
+  }
+
+  it('reads in Arabic, with «» around the name and the name isolated inside them', async () => {
+    try {
+      const r = {
+        id: 1, name: 'R', dataset_id: 1, additional_dataset_ids: [],
+        pages: [{ id: 10, report_id: 1, name: 'P1', page_type: 'normal', position: 0, widgets: [
+          { id: 1, page_id: 10, widget_type: 'bar', title: 'Sales', layout: { x: 0, y: 0, w: 6, h: 4 },
+            config: { dimension: 'region', interaction: { actions: [{ targetId: 99, mode: 'filter' }] } } },
+        ] }],
+      } as never as Report
+      await inArabic(r)
+      expect(screen.getByText('مراجعة')).toBeInTheDocument()
+      expect(screen.getByText('ربط')).toBeInTheDocument()
+      const name = screen.getByText('Sales')
+      expect(name.tagName).toBe('BDI')
+      // The quote marks are the template's, either side of the isolate: the
+      // QA report had them pulled to the wrong ends of a Latin name.
+      expect(name.previousSibling?.textContent?.endsWith('«')).toBe(true)
+      expect(name.nextSibling?.textContent?.startsWith('»')).toBe(true)
+      expect(name.parentElement?.textContent).toBe(
+        'في «Sales» إجراء يشير إلى عنصر لم يعد موجودًا (#99). حُذف الهدف، فلن يعمل الإجراء أبدًا.')
+      expect(document.body.textContent).not.toMatch(/no longer exists|WIRING|Review/)
+    } finally { localStorage.removeItem('datalytics.language') }
+  })
+
+  it('counts in natural Arabic and keeps the English message unchanged', async () => {
+    const f = reviewReport(report([w({ title: 'Revenue' })]),
+      { 1: { durationMs: 10, rowCount: 5, ruleErrors: [{ message: 'x' }, { message: 'y' }] } })
+    expect(f[0].message).toBe('"Revenue" has 2 broken display rule(s) — rules fail open, so they silently stop applying')
+    const { translate } = await import('../../i18n')
+    expect(translate('ar', f[0].key, f[0].vars)).toBe(
+      'في «Revenue» قاعدتا عرض معطلتان. القاعدة المعطلة تتوقف عن العمل دون أي تنبيه.')
+  })
+})

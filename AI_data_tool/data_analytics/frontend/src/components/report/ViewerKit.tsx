@@ -17,6 +17,7 @@ import { describeSpec, parseSpec } from '../../lib/relativeDates'
 import { analysisCatalogueApi, differenceApi, explainApi, type DatasetColumn, type DifferenceCheck } from '../../services/api'
 import { chartForFields } from '../../lib/autoChart'
 import { useModalDialog } from '../ui/useModalDialog'
+import { useT, type MessageKey, type TranslateFn } from '../../i18n'
 
 /** Widget types that draw the plain dimension+measure series, so any one of
  *  them can show another's data with no new query. */
@@ -49,6 +50,7 @@ export function viewAsOptions(widgetType: string, cfg: Record<string, unknown>, 
 
 function Dialog({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   const ref = useModalDialog<HTMLDivElement>(onClose)
+  const t = useT()
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.45)',
       display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -58,7 +60,7 @@ function Dialog({ title, onClose, children }: { title: string; onClose: () => vo
           display: 'flex', flexDirection: 'column', gap: 10, fontSize: 13 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <b>{title}</b>
-          <button type="button" className="btn btn-sm" aria-label="Close" onClick={onClose}>×</button>
+          <button type="button" className="btn btn-sm" aria-label={t('bc.canvas.close')} onClick={onClose}>×</button>
         </div>
         {children}
       </div>
@@ -80,28 +82,29 @@ export function ExplainDialog({ datasetId, measure, filters, onClose }: {
 }) {
   const [res, setRes] = useState<ExplainResult | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const t = useT()
   useEffect(() => {
     let live = true
     explainApi.explain(datasetId, measure, filters)
       .then((r: ExplainResult) => { if (live) setRes(r) })
-      .catch((e: { response?: { data?: { detail?: string } } }) => { if (live) setErr(e?.response?.data?.detail ?? 'Could not explain this') })
+      .catch((e: { response?: { data?: { detail?: string } } }) => { if (live) setErr(e?.response?.data?.detail ?? t('bc.canvas.couldNotExplain')) })
     return () => { live = false }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [datasetId, measure, JSON.stringify(filters)])
   return (
-    <Dialog title={`What moves ${measure}`} onClose={onClose}>
-      {err && <div role="alert" style={{ color: 'var(--danger)' }}>{err}</div>}
-      {!res && !err && <div style={{ color: 'var(--muted)' }}>Looking at every column…</div>}
+    <Dialog title={t('bc.canvas.whatMoves', { column: measure })} onClose={onClose}>
+      {err && <div role="alert" dir="auto" style={{ color: 'var(--danger)' }}>{err}</div>}
+      {!res && !err && <div style={{ color: 'var(--muted)' }}>{t('bc.canvas.lookingAtColumns')}</div>}
       {res && (
         <>
           {res.narrative && (
-            <p style={{ margin: 0 }}>{res.narrative} {res.narrative_source === 'model' && <span style={{ fontSize: 11, color: 'var(--muted)' }}>(sentence written by the AI from the figures below)</span>}</p>
+            <p style={{ margin: 0 }}><span dir="auto">{res.narrative}</span> {res.narrative_source === 'model' && <span style={{ fontSize: 11, color: 'var(--muted)' }}>{t('bc.canvas.aiSentence')}</span>}</p>
           )}
-          {res.note && <p style={{ margin: 0, color: 'var(--muted)' }}>{res.note}</p>}
+          {res.note && <p dir="auto" style={{ margin: 0, color: 'var(--muted)' }}>{res.note}</p>}
           <div data-testid="explain-factors" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {res.factors.slice(0, 8).map(f => (
               <div key={f.column} style={{ display: 'grid', gridTemplateColumns: 'minmax(90px, 35%) 1fr 48px', gap: 6, alignItems: 'center', fontSize: 12 }}>
-                <span>{f.column}{f.direction ? ` (${f.direction === '+' ? 'rises with' : 'falls as it rises'})` : ''}</span>
+                <span>{f.direction ? t(f.direction === '+' ? 'bc.canvas.risesWith' : 'bc.canvas.fallsAsItRises', { column: f.column }) : f.column}</span>
                 <div style={{ background: 'var(--surface2)', borderRadius: 4, height: 10 }}>
                   <div style={{ width: `${Math.round(f.relative * 100)}%`, height: '100%', borderRadius: 4, background: 'var(--accent)' }} />
                 </div>
@@ -110,10 +113,10 @@ export function ExplainDialog({ datasetId, measure, filters, onClose }: {
             ))}
           </div>
           <p style={{ margin: 0, fontSize: 11, color: 'var(--muted)' }}>
-            Strength of each column's relationship with {measure}, the strongest set to 1. Relationship, not cause.
-            {res.rows != null && ` Over the ${res.rows.toLocaleString()} rows this widget shows`}
-            {res.rows != null && res.rows_before_filters != null && res.rows_before_filters > res.rows
-              ? ` (of ${res.rows_before_filters.toLocaleString()} before its filters).` : res.rows != null ? '.' : ''}
+            {t('bc.canvas.strengthNote', { measure })}
+            {res.rows != null && ' ' + (res.rows_before_filters != null && res.rows_before_filters > res.rows
+              ? t('bc.canvas.overRowsOf', { n: res.rows.toLocaleString(), m: res.rows_before_filters.toLocaleString() })
+              : t('bc.canvas.overRows', { n: res.rows.toLocaleString() }))}
           </p>
         </>
       )}
@@ -134,6 +137,7 @@ interface ScenarioResult {
 }
 
 function Spark({ series }: { series: { name: string; values: number[]; color: string; dashed?: boolean }[] }) {
+  const tr = useT()
   const W = 460, H = 120
   const all = series.flatMap(s => s.values)
   const lo = Math.min(...all), hi = Math.max(...all)
@@ -141,7 +145,7 @@ function Spark({ series }: { series: { name: string; values: number[]; color: st
   const x = (i: number) => (i / Math.max(1, n - 1)) * (W - 8) + 4
   const y = (v: number) => H - 6 - ((v - lo) / (hi - lo || 1)) * (H - 12)
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Projection" style={{ background: 'var(--surface2)', borderRadius: 6 }}>
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label={tr('bc.canvas.projection')} style={{ background: 'var(--surface2)', borderRadius: 6 }}>
       {series.map(s => (
         <polyline key={s.name} fill="none" stroke={s.color} strokeWidth={2} strokeDasharray={s.dashed ? '5 4' : undefined}
           points={s.values.map((v, i) => `${x(i + (n - s.values.length))},${y(v)}`).join(' ')} />
@@ -158,6 +162,7 @@ export function ScenarioDialog({ datasetId, dateColumn, measure, candidates, onC
   const [res, setRes] = useState<ScenarioResult | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const sig = JSON.stringify([factors, moves])
+  const tr = useT()
   useEffect(() => {
     if (!factors.length) { setRes(null); setErr(null); return }
     let live = true
@@ -167,16 +172,16 @@ export function ScenarioDialog({ datasetId, dateColumn, measure, candidates, onC
         adjustments: Object.fromEntries(factors.map(f => [f, (moves[f] ?? 0) / 100])),
       })
         .then(r => { if (live) { setRes(r.result as ScenarioResult); setErr(null) } })
-        .catch((e: { response?: { data?: { detail?: string } } }) => { if (live) { setRes(null); setErr(e?.response?.data?.detail ?? 'Could not project this') } })
+        .catch((e: { response?: { data?: { detail?: string } } }) => { if (live) { setRes(null); setErr(e?.response?.data?.detail ?? tr('bc.canvas.couldNotProject')) } })
     }, 350)
     return () => { live = false; clearTimeout(t) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [datasetId, dateColumn, measure, sig])
   const pct = (a: number, b: number) => (b ? `${a >= 0 ? '+' : ''}${((a / b) * 100).toFixed(1)}%` : '')
   return (
-    <Dialog title={`What if… (${measure})`} onClose={onClose}>
+    <Dialog title={tr('bc.canvas.whatIf', { measure })} onClose={onClose}>
       <div style={{ fontSize: 12 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', marginBottom: 4 }}>Factors</div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', marginBottom: 4 }}>{tr('bc.canvas.factors')}</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
           {candidates.map(c => (
             <label key={c} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
@@ -193,15 +198,15 @@ export function ScenarioDialog({ datasetId, dateColumn, measure, candidates, onC
             <span style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span>{f}: <b>{(moves[f] ?? 0) >= 0 ? '+' : ''}{moves[f] ?? 0}%</b></span>
               {info && <span style={{ color: info.p_value > 0.05 ? 'var(--danger)' : 'var(--muted)', fontSize: 11 }}>
-                p = {info.p_value < 0.001 ? '< 0.001' : info.p_value.toFixed(3)}{info.p_value > 0.05 ? ' — weak evidence' : ''}
+                p = {info.p_value < 0.001 ? '< 0.001' : info.p_value.toFixed(3)}{info.p_value > 0.05 ? ' ' + tr('bc.canvas.weakEvidence') : ''}
               </span>}
             </span>
-            <input type="range" min={-50} max={50} step={5} value={moves[f] ?? 0} aria-label={`Change ${f} by percent`}
+            <input type="range" min={-50} max={50} step={5} value={moves[f] ?? 0} aria-label={tr('bc.canvas.changeByPercent', { column: f })}
               onChange={e => setMoves(m => ({ ...m, [f]: Number(e.target.value) }))} style={{ width: '100%' }} />
           </label>
         )
       })}
-      {err && <div role="alert" style={{ color: 'var(--danger)', fontSize: 12 }}>{err}</div>}
+      {err && <div role="alert" dir="auto" style={{ color: 'var(--danger)', fontSize: 12 }}>{err}</div>}
       {res && (
         <>
           <Spark series={[
@@ -210,16 +215,16 @@ export function ScenarioDialog({ datasetId, dateColumn, measure, candidates, onC
             { name: 'scenario', values: [...res.history.map(p => p.value), ...res.scenario.map(p => p.value)], color: 'var(--accent)' },
           ]} />
           <div data-testid="scenario-summary" style={{ fontSize: 12 }}>
-            Next {res.scenario.length} periods: <b>{res.scenario_total.toLocaleString()}</b> vs {res.baseline_total.toLocaleString()} if nothing changes
-            {' '}(<b style={{ color: res.difference >= 0 ? 'var(--success, #2e7d32)' : 'var(--danger)' }}>{pct(res.difference, res.baseline_total)}</b>).
+            {tr('bc.canvas.scenarioNext', { n: res.scenario.length })} <b><bdi>{res.scenario_total.toLocaleString()}</bdi></b> {tr('bc.canvas.vs')} <bdi>{res.baseline_total.toLocaleString()}</bdi> {tr('bc.canvas.ifNothingChanges')}
+            {' '}(<b style={{ color: res.difference >= 0 ? 'var(--success, #2e7d32)' : 'var(--danger)' }}><bdi dir="ltr">{pct(res.difference, res.baseline_total)}</bdi></b>).
           </div>
           {res.extrapolating && (
             <div role="alert" style={{ fontSize: 11.5, padding: '6px 8px', borderRadius: 6, border: '1px solid var(--warning, #d68910)' }}>
-              ⚠ This scenario goes outside anything observed — the projection is an extrapolation, not evidence.
+              ⚠ {tr('bc.canvas.extrapolating')}
             </div>
           )}
           <ul style={{ margin: 0, paddingInlineStart: 18, fontSize: 11, color: 'var(--muted)' }}>
-            {res.caveats.map((c, i) => <li key={i}>{c}</li>)}
+            {res.caveats.map((c, i) => <li key={i} dir="auto">{c}</li>)}
           </ul>
         </>
       )}
@@ -241,11 +246,20 @@ const OP_WORDS: Record<string, string> = {
   eq: 'is', neq: 'is not', gt: '>', lt: '<', gte: '≥', lte: '≤', in: 'is one of', like: 'contains',
 }
 
-/** One filter as a sentence fragment: "region is North". */
-export function describeFilter(f: FilterLike): string {
+const OP_KEYS: Record<string, MessageKey> = {
+  eq: 'bc.canvas.op.eq', neq: 'bc.canvas.op.neq', in: 'bc.canvas.op.in', like: 'bc.canvas.op.like',
+}
+
+/** One filter as a sentence fragment: "region is North". Given a translator,
+ *  in the reader's language; without one (undo labels), in English. Column
+ *  names and values are shown as they are. */
+export function describeFilter(f: FilterLike, t?: TranslateFn): string {
   if (f.op === 'relative') return `${f.column}: ${describeSpec(parseSpec(f.value))}`
   const v = Array.isArray(f.value) ? f.value.map(String).join(', ') : String(f.value)
-  return `${f.column} ${OP_WORDS[f.op ?? 'eq'] ?? f.op} ${v}${f.granularity ? ` (${f.granularity})` : ''}`
+  const opKey = OP_KEYS[f.op ?? 'eq']
+  const op = t && opKey ? t(opKey) : OP_WORDS[f.op ?? 'eq'] ?? f.op
+  const base = t ? t('bc.canvas.filterDesc', { column: f.column, op: op ?? '', value: v }) : `${f.column} ${op} ${v}`
+  return `${base}${f.granularity ? ` (${f.granularity})` : ''}`
 }
 
 export interface WhySection { title: string; items: string[]; empty: string }
@@ -259,8 +273,9 @@ export interface WhySection { title: string; items: string[]; empty: string }
 export function WhyDialog({ title, sections, footnote, onClose }: {
   title: string; sections: WhySection[]; footnote?: string; onClose: () => void
 }) {
+  const t = useT()
   return (
-    <Dialog title={`Why am I seeing this? — ${title}`} onClose={onClose}>
+    <Dialog title={t('bc.canvas.whyTitle', { title })} onClose={onClose}>
       <div data-testid="why-sections" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {sections.map(s => (
           <div key={s.title}>
@@ -283,12 +298,13 @@ const EFFECT_WORD: Record<string, string> = { cohens_d: "Cohen's d", cohens_h: "
 export function EvidenceChip({ test, p_text, effect_name, effect_size, effect_label, significant }: {
   test: string; p_text: string; effect_name: string; effect_size: number; effect_label: string; significant: boolean
 }) {
+  const t = useT()
   return (
     <span data-testid="evidence-chip" title={`${test}; ${p_text}; ${EFFECT_WORD[effect_name] ?? effect_name} = ${effect_size} (${effect_label})`}
       style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 10.5, padding: '1px 8px', borderRadius: 99,
         border: `1px solid ${significant && effect_label !== 'negligible' ? 'var(--accent)' : 'var(--border)'}`,
         color: 'var(--muted)', whiteSpace: 'nowrap' }}>
-      {test} · {p_text} · {effect_label} effect ({EFFECT_WORD[effect_name] ?? effect_name} {effect_size})
+      {t('bc.canvas.effectChip', { test, p: p_text, label: effect_label, name: EFFECT_WORD[effect_name] ?? effect_name, size: effect_size })}
     </span>
   )
 }
@@ -307,13 +323,14 @@ export function DifferenceDialog({ datasetId, dimension, measure, aggregation, g
   const [b, setB] = useState(initial[1])
   const [res, setRes] = useState<DifferenceCheck | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const tr = useT()
   useEffect(() => {
     setRes(null); setErr(null)
-    if (!a || !b || a === b) { setErr('Pick two different bars'); return }
+    if (!a || !b || a === b) { setErr(tr('bc.canvas.pickTwoBars')); return }
     let live = true
     differenceApi.check(datasetId, { dimension, groups: [a, b], measure, aggregation, granularity, filters })
       .then(r => { if (live) setRes(r) })
-      .catch((e: { response?: { data?: { detail?: string } } }) => { if (live) setErr(e?.response?.data?.detail ?? 'Could not test this') })
+      .catch((e: { response?: { data?: { detail?: string } } }) => { if (live) setErr(e?.response?.data?.detail ?? tr('bc.canvas.couldNotTest')) })
     return () => { live = false }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [datasetId, a, b, dimension, measure, aggregation, granularity, JSON.stringify(filters)])
@@ -323,39 +340,44 @@ export function DifferenceDialog({ datasetId, dimension, measure, aggregation, g
     </select>
   )
   return (
-    <Dialog title="Is this difference real?" onClose={onClose}>
+    <Dialog title={tr('bc.canvas.diffTitle')} onClose={onClose}>
       <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-        {pick(a, setA, 'First bar')} <span style={{ color: 'var(--muted)' }}>vs</span> {pick(b, setB, 'Second bar')}
-        <span style={{ fontSize: 11, color: 'var(--muted)' }}>· {aggregation}{measure ? ` of ${measure}` : ' of rows'} by {dimension}</span>
+        {pick(a, setA, tr('bc.canvas.firstBar'))} <span style={{ color: 'var(--muted)' }}>{tr('bc.canvas.vs')}</span> {pick(b, setB, tr('bc.canvas.secondBar'))}
+        <span style={{ fontSize: 11, color: 'var(--muted)' }}>· {measure
+          ? tr('bc.canvas.diffAggOf', { agg: aggregation, measure, dimension })
+          : tr('bc.canvas.diffAggRows', { agg: aggregation, dimension })}</span>
       </div>
-      {err && <div role="alert" style={{ color: 'var(--danger)' }}>{err}</div>}
-      {!res && !err && <div style={{ color: 'var(--muted)' }}>Testing the rows behind both bars…</div>}
+      {err && <div role="alert" dir="auto" style={{ color: 'var(--danger)' }}>{err}</div>}
+      {!res && !err && <div style={{ color: 'var(--muted)' }}>{tr('bc.canvas.testingRows')}</div>}
       {res && (
         <div data-testid="difference-result" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ fontWeight: 600 }}>{res.summary}</div>
+          <div dir="auto" style={{ fontWeight: 600 }}>{res.summary}</div>
           {res.tests.map((t, i) => (
             <div key={i} style={{ borderInlineStart: '2px solid var(--border)', paddingInlineStart: 8 }}>
-              <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.04em' }}>{t.question}</div>
-              <div style={{ fontSize: 12.5 }}>{t.sentence}</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.04em' }} dir="auto">{t.question}</div>
+              <div style={{ fontSize: 12.5 }} dir="auto">{t.sentence}</div>
               {t.business && (
                 <div data-testid="difference-business" style={{ fontSize: 12.5, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '2px 8px', margin: '4px 0' }}>
-                  <span style={{ color: 'var(--muted)' }}>Size of the gap</span><b dir="auto">{t.business.sentence}</b>
-                  <span style={{ color: 'var(--muted)' }}>Statistical effect</span>
-                  <span>{t.effect_label} — how much the two groups overlap, not how much the gap matters</span>
+                  <span style={{ color: 'var(--muted)' }}>{tr('bc.canvas.gapSize')}</span><b dir="auto">{t.business.sentence}</b>
+                  <span style={{ color: 'var(--muted)' }}>{tr('bc.canvas.statEffect')}</span>
+                  <span>{tr('bc.canvas.effectOverlap', { label: t.effect_label })}</span>
                 </div>
               )}
               <div style={{ fontSize: 12, margin: '2px 0' }} dir="auto">
                 {Object.entries(t.values).map(([k, v]) => `${k}: ${v.toLocaleString()}`).join(' · ')}
-                {t.question === 'typical row' ? ` (${res.population.aggregation === 'median' ? 'median' : 'mean'} per row)` : ' rows'}
+                {' ' + (t.question === 'typical row'
+                  ? tr(res.population.aggregation === 'median' ? 'bc.canvas.medianPerRow' : 'bc.canvas.meanPerRow')
+                  : tr('bc.canvas.rowsWord'))}
               </div>
               <EvidenceChip {...t} />
             </div>
           ))}
           <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-            Population: {res.population.rows_a.toLocaleString()} rows of {res.population.group_a} and {res.population.rows_b.toLocaleString()} of {res.population.group_b}.
+            {tr('bc.canvas.population', { a: res.population.rows_a.toLocaleString(), ga: res.population.group_a,
+              b: res.population.rows_b.toLocaleString(), gb: res.population.group_b })}
           </div>
           <ul style={{ margin: 0, paddingInlineStart: 18, fontSize: 11, color: 'var(--muted)' }}>
-            {res.caveats.map((c, i) => <li key={i}>{c}</li>)}
+            {res.caveats.map((c, i) => <li key={i} dir="auto">{c}</li>)}
           </ul>
         </div>
       )}
