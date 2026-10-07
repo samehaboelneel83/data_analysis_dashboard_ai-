@@ -1012,7 +1012,7 @@ QA4 confirmed N3 (opening Demo — Sales Overview in Edit left revision 39 uncha
 - Data values a step writes (Training/Validation/Test, the catch-all "Other"), and saved defaults the user can edit ("Joined dataset", "Boundaries").
 - Not on this step's list, still English: DatasetDetail's own text, CommandPalette, WorkspaceTree, QueryBuilderDialog/QueryCanvas, ExpressionBuilder, analysisResults, the dataset side panels (Alerts, Aggregates, Data quality, Column meaning), FolderShare/DatasetShare dialogs, Upload, SharedReport, `lib/friendlyError`. The scanner counts them. They are the next i18n list, under "Then: Upload, Connections, Lineage, the AI button".
 
-**Spotted, not changed:** the export-policy tooltip's English "Everything is allowed: untick "All" to choose" shows when every export is OFF. The Arabic says what the screen does; the English is kept for the owner to decide.
+**Export-policy tooltip:** its English "Everything is allowed: untick "All" to choose" showed when every export is OFF. Fixed after the gate (owner's call): "All exports are off: untick "All off" to choose", the same meaning as the Arabic, pinned by a test.
 
 **Tests:**
 - New: six area guards (59 files); Arabic render tests per area (adminSecurity 6, adminPlatform 6, dataPages 5, panelsA 8 + 3, panelsB 9, modelsMaps 7).

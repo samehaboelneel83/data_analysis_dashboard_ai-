@@ -189,7 +189,7 @@ export const en = {
   'pg.adminSecurity.exp.allOffAria': 'All exports off for {name}',
   'pg.adminSecurity.exp.formatOffAria': '{f} export off for {name}',
   'pg.adminSecurity.exp.autoAria': 'Auto-disable when private for {name}',
-  'pg.adminSecurity.exp.untickAll': 'Everything is allowed: untick "All" to choose',
+  'pg.adminSecurity.exp.untickAll': 'All exports are off: untick "All off" to choose',
 } as const
 
 export const ar: Record<keyof typeof en, string> = {
