@@ -4,6 +4,7 @@ import type { CalcColumn, DatasetColumn } from '../../services/api'
 import { groupingExpression, binningExpression, defaultBinEdges } from '../../lib/customCategories'
 import type { ValueGroup } from '../../lib/customCategories'
 import { useT } from '../../i18n'
+import { dtypeName } from '../../lib/dtypeName'
 import { useDirection } from '../../contexts/DirectionContext'
 
 /**
@@ -164,7 +165,7 @@ export default function CustomCategoryPanel({ datasetId, columns, onSaved }: Pro
           style={{ width: '100%', fontSize: 11 }}>
           <option value="">{t('pg.panelsA.cc.pick')}</option>
           {columns.filter(c => c.dtype !== 'calculated').map(c => (
-            <option key={c.name} value={c.name}>{c.name} ({c.dtype})</option>
+            <option key={c.name} value={c.name}>{c.name} ({dtypeName(t, c.dtype)})</option>
           ))}
         </select>
       </div>

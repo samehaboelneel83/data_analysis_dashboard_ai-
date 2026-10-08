@@ -1,4 +1,5 @@
 import { useT, type MessageKey, type TranslateFn } from '../../i18n'
+import { dtypeName } from '../../lib/dtypeName'
 import { richT } from '../../i18n/builder/panes'
 import React, { useState, useEffect, useRef } from 'react'
 import { Check } from 'lucide-react'
@@ -344,7 +345,7 @@ export default function PagePropertiesPanel({ reportId, page, columns, onUpdate,
         {fld('Filter column', (
           <select value={promptColumn} onChange={e => setPromptColumn(e.target.value)} style={{ width: '100%' }}>
             <option value="">{tr('bc.panes.page.noPrompt')}</option>
-            {columns.map(c => <option key={c.name} value={c.name}>{c.name} ({c.dtype})</option>)}
+            {columns.map(c => <option key={c.name} value={c.name}>{c.name} ({dtypeName(tr, c.dtype)})</option>)}
           </select>
         ))}
 

@@ -47,6 +47,7 @@ export default function BasemapSettings({ headingLevel = 2 }: { headingLevel?: 2
     <label style={{ display: 'block', marginBottom: 12, fontSize: 13 }}>
       <span style={{ display: 'block', fontWeight: 600, marginBottom: 4 }}>{label}</span>
       <input value={form[key] ?? ''} placeholder={placeholder} style={{ width: '100%', maxWidth: 560 }} dir={ltr ? 'ltr' : undefined}
+        id={`basemap-${key}`} name={`basemap-${key}`} autoComplete="off"
         onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))} />
       <span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)', marginTop: 3 }}>{hint}</span>
     </label>

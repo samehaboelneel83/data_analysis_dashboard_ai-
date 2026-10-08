@@ -5,6 +5,10 @@ describe('text follows a custom widget background (QA4 V1)', () => {
   it('a light background (#fde68a) gets dark text in either theme', () => {
     expect(contrastTokens('#fde68a')['--text']).toBe('#1f2328')
   })
+  it('QA5 F1: tooltips inside get a matching card: white under dark text, dark under light text', () => {
+    expect(contrastTokens('#fde68a')['--surface']).toBe('#ffffff')
+    expect(contrastTokens('#1e293b')['--surface']).toBe('#1b1f24')
+  })
   it('a dark background gets light text', () => {
     expect(contrastTokens('#1e293b')['--text']).toBe('#f3f5f7')
     expect(contrastTokens('rgb(20, 30, 40)')['--text']).toBe('#f3f5f7')

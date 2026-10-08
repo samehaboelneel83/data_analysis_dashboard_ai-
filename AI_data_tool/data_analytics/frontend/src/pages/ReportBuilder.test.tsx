@@ -1568,7 +1568,8 @@ describe('ReportBuilder report-level common filters', () => {
 
     await waitFor(() => expect(reportsApi.addCommonFilter).toHaveBeenCalledWith(1, { column: 'region', op: 'eq', value: 'North' }))
     // the active filter chip is shown
-    await waitFor(() => expect(screen.getByText(/region eq North/)).toBeInTheDocument())
+    // QA5 L5: the operator as a word, the code underneath
+    await waitFor(() => expect(screen.getByText((_, el) => el?.tagName === 'SPAN' && !!el.textContent?.replace(/\s+/g, ' ').trim().startsWith('region equals (=) North'))).toBeInTheDocument())
   })
 
   it('parses a comma list into an array for the in operator', async () => {

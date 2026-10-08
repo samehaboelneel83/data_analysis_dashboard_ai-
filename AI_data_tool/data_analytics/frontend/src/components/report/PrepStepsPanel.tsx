@@ -193,10 +193,12 @@ export default function PrepStepsPanel({ datasetId, columns, onPipelineChange }:
       </select>
     </div>
   )
-  const textInput = (key: string, title: string, placeholder = '') => (
+  // `code`: the field holds an expression, typed and shown left-to-right in
+  // any language (QA5 R1: ">=" read "=<" in Arabic).
+  const textInput = (key: string, title: string, placeholder = '', code = false) => (
     <div key={key}>
       <label htmlFor={`prep-${key}`} style={label}>{title}</label>
-      <input id={`prep-${key}`} value={draft[key] ?? ''} placeholder={placeholder}
+      <input id={`prep-${key}`} value={draft[key] ?? ''} placeholder={placeholder} dir={code ? 'ltr' : undefined}
         onChange={e => setDraft(p => ({ ...p, [key]: e.target.value }))} style={{ width: '100%' }} />
     </div>
   )
@@ -228,7 +230,7 @@ export default function PrepStepsPanel({ datasetId, columns, onPipelineChange }:
       case 'retype':          return [colSelect('column', t('pg.panelsB.steps.column')), choice('to', t('pg.panelsB.steps.newType'), ['numeric', 'text', 'datetime'], 'type')]
       case 'split':           return [colSelect('column', t('pg.panelsB.steps.column')), textInput('delimiter', t('pg.panelsB.steps.delimiter'), t('pg.panelsB.ed.eg', { v: '-' })),
         textInput('into', t('pg.panelsB.steps.newCols'))]
-      case 'filter_rows':     return [textInput('expression', t('pg.panelsB.steps.expression'), '`amount` > 0')] // i18n-ok
+      case 'filter_rows':     return [textInput('expression', t('pg.panelsB.steps.expression'), '`amount` > 0', true)] // i18n-ok
       case 'remove_columns':  return [textInput('columns', t('pg.panelsB.steps.columns'))]
       case 'join':            return [
         <div key="dataset_id">

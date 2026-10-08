@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useT } from '../../i18n'
-import { richNodes } from '../../i18n/pages/adminPlatform'
+import { packText, richNodes } from '../../i18n/pages/adminPlatform'
+import { useDirection } from '../../contexts/DirectionContext'
 import toast from 'react-hot-toast'
 import { boundarySetsApi, type BoundaryPack, type BoundarySetSummary } from '../../services/api'
 import BasemapSettings from '../../components/admin/BasemapSettings'
@@ -16,8 +17,13 @@ import PackTermsConfirm from '../../components/report/PackTermsConfirm'
  * tile service to fall back to: an org that wants streets and terrain under its
  * maps points this at its own XYZ tile server.
  */
+/** A block line inside a pack's entry; `isolate` keeps a dir="auto" line's punctuation its own. */
+const PACK_LINE = { display: 'block', unicodeBidi: 'isolate' } as const
+
 export default function AdminMaps() {
   const t = useT()
+  const { language } = useDirection()
+  const pack = (p: BoundaryPack, field: 'name' | 'description' | 'license') => packText(t, language, p.id, field, p[field])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<unknown>(null)
   const [sets, setSets] = useState<BoundarySetSummary[]>([])
@@ -38,7 +44,7 @@ export default function AdminMaps() {
     try {
       await boundarySetsApi.installPack(p.id, accepted)
       setPendingTerms(null)
-      toast.success(t('pg.adminPlatform.maps.installed', { name: p.name }))
+      toast.success(t('pg.adminPlatform.maps.installed', { name: pack(p, 'name') }))
       load()
     } catch (e) {
       toast.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? t('pg.adminPlatform.maps.installFailed'))
@@ -71,9 +77,18 @@ export default function AdminMaps() {
             <ul style={{ fontSize: 13, paddingInlineStart: 18 }}>
               {installable.map(p => (
                 <li key={p.id} style={{ marginBottom: 6 }}>
-                  <b><bdi>{p.name}</bdi></b> <span style={{ color: 'var(--muted)' }}>{richNodes(
-                    t('pg.adminPlatform.maps.packLine', { n: p.feature_count }),
-                    { description: <bdi>{p.description}</bdi>, source: <bdi>{p.source}</bdi>, license: <bdi>{p.license}</bdi> })}</span>{' '}
+                  {/* QA5 L7: the description and the source/licence line are
+                      blocks of their own: server prose that wraps inside an
+                      Arabic sentence scattered its punctuation. Any English the
+                      server sends is isolated with dir="auto". */}
+                  <b><bdi>{pack(p, 'name')}</bdi></b> <span style={{ color: 'var(--muted)' }}>
+                    {t('pg.adminPlatform.maps.packCount', { n: p.feature_count })}
+                    {p.description && <> <span dir="auto" style={PACK_LINE}>{pack(p, 'description')}</span></>}
+                    {' '}<span style={PACK_LINE}>{richNodes(t('pg.adminPlatform.maps.packSource'), {
+                      source: <bdi dir="ltr">{p.source}</bdi>,
+                      license: <bdi dir="auto">{pack(p, 'license')}</bdi>,
+                    })}</span>
+                  </span>{' '}
                   <button className="btn btn-sm" onClick={() => void install(p)}>
                     {p.requires_acceptance ? t('pg.adminPlatform.maps.reviewInstall') : t('pg.adminPlatform.maps.install')}
                   </button>

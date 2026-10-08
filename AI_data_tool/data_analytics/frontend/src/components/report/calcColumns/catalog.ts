@@ -149,7 +149,7 @@ export const funcCats = (t: TranslateFn): FuncCat[] => [
 
 export interface OpItem { label: string; snippet: string; back?: number }
 export const OP_GROUPS: { label: string; items: OpItem[] }[] = [
-  { label: 'Arithmetic', items: [ // i18n-ok: a group key, never rendered (the builder flattens the groups)
+  { label: 'Arithmetic', items: [ // i18n-ok: a group key, translated by ExpressionBuilder (GROUP_KEY)
     { label: '+',  snippet: ' + '  },
     { label: '-',  snippet: ' - '  },
     { label: '*',  snippet: ' * '  },
@@ -157,7 +157,7 @@ export const OP_GROUPS: { label: string; items: OpItem[] }[] = [
     { label: '**', snippet: ' ** ' },
     { label: '%',  snippet: ' % '  },
   ]},
-  { label: 'Comparison', items: [ // i18n-ok: a group key, never rendered (the builder flattens the groups)
+  { label: 'Comparison', items: [ // i18n-ok: a group key, translated by ExpressionBuilder (GROUP_KEY)
     { label: '==', snippet: ' == ' },
     { label: '!=', snippet: ' != ' },
     { label: '>',  snippet: ' > '  },
@@ -165,7 +165,7 @@ export const OP_GROUPS: { label: string; items: OpItem[] }[] = [
     { label: '>=', snippet: ' >= ' },
     { label: '<=', snippet: ' <= ' },
   ]},
-  { label: 'Logical', items: [ // i18n-ok: a group key, never rendered (the builder flattens the groups)
+  { label: 'Logical', items: [ // i18n-ok: a group key, translated by ExpressionBuilder (GROUP_KEY)
     { label: 'and', snippet: ' and ' }, // i18n-ok: an operator, code
     { label: 'or',  snippet: ' or '  }, // i18n-ok: an operator, code
     { label: 'not', snippet: ' not ' }, // i18n-ok: an operator, code

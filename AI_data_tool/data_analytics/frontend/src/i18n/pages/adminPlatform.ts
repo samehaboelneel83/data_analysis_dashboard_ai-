@@ -363,6 +363,47 @@ export const en = {
   'pg.adminPlatform.set.upload_dir': 'Upload folder',
   'pg.adminPlatform.set.duckdb_cache_path': 'Metadata cache file',
   'pg.adminPlatform.set.valkey_url': 'Shared cache (Valkey)',
+
+  // QA5 L6: connector config fields, by field key (the server sends English labels;
+  // when a key has two wordings, `.alt` / `.alt2` hold the others). QA5 SSO and L7 maps.
+  'pg.adminPlatform.cf.host': 'Host',
+  'pg.adminPlatform.cf.port': 'Port',
+  'pg.adminPlatform.cf.database': 'Database',
+  'pg.adminPlatform.cf.username': 'Username',
+  'pg.adminPlatform.cf.password': 'Password',
+  'pg.adminPlatform.cf.schema': 'Schema (optional)',
+  'pg.adminPlatform.cf.ssl_mode': 'TLS',
+  'pg.adminPlatform.cf.ssl_root_cert': 'CA certificate file on the server (verify modes)',
+  'pg.adminPlatform.cf.api_key': 'API key',
+  'pg.adminPlatform.cf.auth_type': 'Auth',
+  'pg.adminPlatform.cf.json_path': 'JSON path (optional)',
+  'pg.adminPlatform.cf.key_header': 'Key header',
+  'pg.adminPlatform.cf.method': 'Method',
+  'pg.adminPlatform.cf.service_name': 'Service Name',
+  'pg.adminPlatform.cf.token': 'Bearer token',
+  'pg.adminPlatform.cf.filepath': 'File Path',
+  'pg.adminPlatform.cf.filepath.alt': 'File Path (blank = in-memory)',
+  'pg.adminPlatform.cf.url': 'URL',
+  'pg.adminPlatform.cf.url.alt': 'SQLAlchemy URL',
+  'pg.adminPlatform.cf.url.alt2': 'SQLAlchemy ODBC URL',
+  'pg.adminPlatform.sso.oidcIdps': '{list}.',
+  'pg.adminPlatform.maps.packCount': '— {n} regions.',
+  'pg.adminPlatform.maps.packSource': 'Source: {source}; licence: {license}.',
+  'pg.adminPlatform.maps.pack.egypt-governorates.name': 'Egypt governorates',
+  'pg.adminPlatform.maps.pack.egypt-governorates.description': 'All 27 governorates. Matches English (Cairo), transliterated (Al Qahirah), Arabic (القاهرة, with or without محافظة, with or without hamza), ISO 3166-2 (EG-C) and common spellings (Sharkia, Fayoum, Menoufia...).',
+  'pg.adminPlatform.maps.pack.egypt-governorates.license': 'Public domain (Natural Earth terms of use)',
+  'pg.adminPlatform.maps.pack.us-states.name': 'US states',
+  'pg.adminPlatform.maps.pack.us-states.description': '50 states and the District of Columbia. Matches names, USPS postal codes (CA), ISO 3166-2 (US-CA) and FIPS codes.',
+  'pg.adminPlatform.maps.pack.us-states.license': 'Public domain (Natural Earth terms of use)',
+  'pg.adminPlatform.maps.pack.saudi-regions.name': 'Saudi Arabia regions',
+  'pg.adminPlatform.maps.pack.saudi-regions.description': 'All 13 regions. Matches English (Riyadh, Makkah, Eastern Province), Arabic (الرياض) and ISO 3166-2 (SA-01).',
+  'pg.adminPlatform.maps.pack.saudi-regions.license': 'Public domain (Natural Earth terms of use)',
+  'pg.adminPlatform.maps.pack.uae-emirates.name': 'UAE emirates',
+  'pg.adminPlatform.maps.pack.uae-emirates.description': 'All 7 emirates. Matches English (Dubai), Arabic (دبي) and ISO 3166-2 (AE-DU). Natural Earth\'s neutral zones are left out.',
+  'pg.adminPlatform.maps.pack.uae-emirates.license': 'Public domain (Natural Earth terms of use)',
+  'pg.adminPlatform.maps.pack.eu-nuts1.name': 'EU NUTS-1 regions',
+  'pg.adminPlatform.maps.pack.eu-nuts1.description': '123 NUTS-1 regions (2021 classification) of the EU, EFTA and candidate countries. Matches the region\'s own-language name (Bayern, Comunidad de Madrid, Île-de-France) and its NUTS code (DE2, ES3, FR1).',
+  'pg.adminPlatform.maps.pack.eu-nuts1.license': 'Eurostat GISCO terms: reuse with attribution; commercial use needs Eurostat\'s permission',
 } as const
 
 export const ar: Record<keyof typeof en, string> = {
@@ -700,6 +741,46 @@ export const ar: Record<keyof typeof en, string> = {
   'pg.adminPlatform.set.upload_dir': 'مجلد الرفع',
   'pg.adminPlatform.set.duckdb_cache_path': 'ملف ذاكرة البيانات الوصفية المؤقتة',
   'pg.adminPlatform.set.valkey_url': 'الذاكرة المؤقتة المشتركة (Valkey)',
+
+  // QA5 L6 / SSO / L7
+  'pg.adminPlatform.cf.host': 'المضيف',
+  'pg.adminPlatform.cf.port': 'المنفذ',
+  'pg.adminPlatform.cf.database': 'قاعدة البيانات',
+  'pg.adminPlatform.cf.username': 'اسم المستخدم',
+  'pg.adminPlatform.cf.password': 'كلمة المرور',
+  'pg.adminPlatform.cf.schema': 'المخطط (اختياري)',
+  'pg.adminPlatform.cf.ssl_mode': 'تشفير TLS',
+  'pg.adminPlatform.cf.ssl_root_cert': 'ملف شهادة جهة الإصدار (CA) على الخادم (لأوضاع التحقق)',
+  'pg.adminPlatform.cf.api_key': 'مفتاح API',
+  'pg.adminPlatform.cf.auth_type': 'المصادقة',
+  'pg.adminPlatform.cf.json_path': 'مسار JSON (اختياري)',
+  'pg.adminPlatform.cf.key_header': 'ترويسة المفتاح',
+  'pg.adminPlatform.cf.method': 'الطريقة',
+  'pg.adminPlatform.cf.service_name': 'اسم الخدمة',
+  'pg.adminPlatform.cf.token': 'رمز Bearer',
+  'pg.adminPlatform.cf.filepath': 'مسار الملف',
+  'pg.adminPlatform.cf.filepath.alt': 'مسار الملف (فارغ = في الذاكرة)',
+  'pg.adminPlatform.cf.url': 'عنوان URL',
+  'pg.adminPlatform.cf.url.alt': 'عنوان SQLAlchemy',
+  'pg.adminPlatform.cf.url.alt2': 'عنوان SQLAlchemy ODBC',
+  'pg.adminPlatform.sso.oidcIdps': 'يعمل مع {list} وغيرها.',
+  'pg.adminPlatform.maps.packCount': '— {n, plural, zero {لا مناطق} one {منطقة واحدة} two {منطقتان} few {# مناطق} many {# منطقة} other {# منطقة}}.',
+  'pg.adminPlatform.maps.packSource': 'المصدر: {source}؛ الترخيص: {license}.',
+  'pg.adminPlatform.maps.pack.egypt-governorates.name': 'محافظات مصر',
+  'pg.adminPlatform.maps.pack.egypt-governorates.description': 'جميع المحافظات الـ27. تطابق الأسماء الإنجليزية (Cairo) والمكتوبة بحروف لاتينية (Al Qahirah) والعربية (القاهرة، مع كلمة «محافظة» أو بدونها، ومع الهمزة أو بدونها) ورموز ISO 3166-2 ‏(EG-C) والتهجئات الشائعة (Sharkia وFayoum وMenoufia…).',
+  'pg.adminPlatform.maps.pack.egypt-governorates.license': 'ملكية عامة (وفق شروط استخدام Natural Earth)',
+  'pg.adminPlatform.maps.pack.us-states.name': 'الولايات الأمريكية',
+  'pg.adminPlatform.maps.pack.us-states.description': '50 ولاية ومقاطعة كولومبيا. تطابق الأسماء ورموز البريد الأمريكي (CA) ورموز ISO 3166-2 ‏(US-CA) ورموز FIPS.',
+  'pg.adminPlatform.maps.pack.us-states.license': 'ملكية عامة (وفق شروط استخدام Natural Earth)',
+  'pg.adminPlatform.maps.pack.saudi-regions.name': 'مناطق المملكة العربية السعودية',
+  'pg.adminPlatform.maps.pack.saudi-regions.description': 'جميع المناطق الـ13. تطابق الأسماء الإنجليزية (Riyadh وMakkah وEastern Province) والعربية (الرياض) ورموز ISO 3166-2 ‏(SA-01).',
+  'pg.adminPlatform.maps.pack.saudi-regions.license': 'ملكية عامة (وفق شروط استخدام Natural Earth)',
+  'pg.adminPlatform.maps.pack.uae-emirates.name': 'إمارات دولة الإمارات',
+  'pg.adminPlatform.maps.pack.uae-emirates.description': 'جميع الإمارات السبع. تطابق الأسماء الإنجليزية (Dubai) والعربية (دبي) ورموز ISO 3166-2 ‏(AE-DU). المناطق المحايدة في Natural Earth مستبعدة.',
+  'pg.adminPlatform.maps.pack.uae-emirates.license': 'ملكية عامة (وفق شروط استخدام Natural Earth)',
+  'pg.adminPlatform.maps.pack.eu-nuts1.name': 'مناطق NUTS-1 في الاتحاد الأوروبي',
+  'pg.adminPlatform.maps.pack.eu-nuts1.description': '123 منطقة من مستوى NUTS-1 (تصنيف 2021) في الاتحاد الأوروبي ورابطة التجارة الحرة الأوروبية (EFTA) والدول المرشحة. تطابق اسم المنطقة بلغتها (Bayern وComunidad de Madrid وÎle-de-France) ورمز NUTS الخاص بها (DE2 وES3 وFR1).',
+  'pg.adminPlatform.maps.pack.eu-nuts1.license': 'شروط Eurostat GISCO: إعادة الاستخدام مع ذكر المصدر؛ والاستخدام التجاري يحتاج إلى إذن من Eurostat',
 }
 
 /** In Arabic only, wrap a value in Unicode isolates (U+2068 … U+2069) for a
@@ -716,4 +797,37 @@ export function richNodes(template: string, nodes: Record<string, ReactNode>): R
   const parts = template.split(/\{(\w+)\}/)
   return createElement(Fragment, null, ...parts.map((p, i) =>
     i % 2 ? createElement(Fragment, { key: i }, p in nodes ? nodes[p] : `{${p}}`) : p))
+}
+
+type Translate = (key: keyof typeof en) => string
+const has = (k: string): k is keyof typeof en => k in en
+
+/**
+ * QA5 L6: a connector config field's label, translated on the client by its
+ * field KEY. The server's connector catalog sends English labels; English shows
+ * them exactly as sent. In Arabic, the key's wording whose recorded English
+ * matches the server's label wins (`cf.url` vs `cf.url.alt` "SQLAlchemy URL"),
+ * then the plain key; a key this client does not know keeps the server's text.
+ * (Backend follow-up: the server should send label keys, not English.)
+ */
+export function connectorFieldLabel(t: Translate, language: string, name: string, label: string): string {
+  if (language === 'en' || !label) return label
+  const base = `pg.adminPlatform.cf.${name}`
+  for (const k of [base, `${base}.alt`, `${base}.alt2`]) if (has(k) && en[k] === label) return t(k)
+  return has(base) ? t(base) : label
+}
+
+/**
+ * QA5 L7: a boundary starter pack's name, description or licence, translated by
+ * pack id. The name follows the id; the description and licence are prose, so
+ * they are translated only while the server still sends the English recorded
+ * here, and otherwise show the server's own text (render that isolated, `dir="auto"`).
+ * (Backend follow-up: the pack manifest should carry keys or Arabic text.)
+ */
+export function packText(t: Translate, language: string, id: string, field: 'name' | 'description' | 'license', server: string | null | undefined): string {
+  const text = server ?? ''
+  if (language === 'en') return text
+  const k = `pg.adminPlatform.maps.pack.${id}.${field}`
+  if (!has(k)) return text
+  return field === 'name' || en[k] === text ? t(k) : text
 }

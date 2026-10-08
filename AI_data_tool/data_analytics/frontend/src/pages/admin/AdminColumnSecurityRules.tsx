@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { fieldStyle } from '../../components/ui/fieldStyle'
 import { useT } from '../../i18n'
+import { dtypeName } from '../../lib/dtypeName'
 import { nodesT } from '../../i18n/pages/adminSecurity'
 import { EyeOff, Plus } from 'lucide-react'
 import { columnSecurityApi, adminRolesApi, datasetsApi } from '../../services/api'
@@ -112,7 +113,7 @@ function RuleModal({ roles, datasets, onSaved, onClose }: {
                 padding: '4px 0', cursor: 'pointer' }}>
                 <input type="checkbox" checked={denied.has(c.name)} onChange={() => toggle(c.name)} />
                 <span style={{ fontFamily: 'var(--mono)', flex: 1 }}><bdi>{c.name}</bdi></span>
-                <span style={{ color: 'var(--muted)', fontSize: 11 }}>{c.dtype}</span>
+                <span style={{ color: 'var(--muted)', fontSize: 11 }}>{dtypeName(t, c.dtype)}</span>
               </label>
             ))}
           </div>

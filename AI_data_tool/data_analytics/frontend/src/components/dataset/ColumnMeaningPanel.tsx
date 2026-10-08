@@ -250,7 +250,7 @@ function ColumnRow(p: {
       <tr data-open={p.open || undefined}>
         <td className="dl-cols__name">
           <span className="dl-ov__colname" dir="auto">{p.name}</span>
-          <span className="dl-ov__tag">{typeTag(p.dtype)}</span>
+          <span className="dl-ov__tag">{typeTag(t, p.dtype)}</span>
         </td>
         <td className="dl-cols__means">
           {p.editing ? (

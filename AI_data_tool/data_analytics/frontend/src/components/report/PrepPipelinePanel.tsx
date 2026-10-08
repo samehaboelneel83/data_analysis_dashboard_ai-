@@ -327,7 +327,8 @@ export default function PrepPipelinePanel({ datasetId, columns, datasetName, ini
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 11, fontWeight: 600 }}>{kindLabel(t, s.kind)}</div>
                   <div style={{ fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {summaryOf(s, t)}
+                    {/* QA5 R1: an expression is code, laid out left-to-right in any language. */}
+                    {s.kind === 'filter_rows' && s.expression ? <bdi dir="ltr">{summaryOf(s, t)}</bdi> : summaryOf(s, t)}
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 2 }} onClick={e => e.stopPropagation()}>

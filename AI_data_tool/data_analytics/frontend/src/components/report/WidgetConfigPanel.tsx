@@ -23,6 +23,8 @@ import { toDraftPin, toStoredPin } from './MapPinsEditor'
 import type { MapPin, StoredPin } from './MapPinsEditor'
 import { ADDITIVE_AGGREGATIONS, BOUNDARY_SET_WIDGETS, PIN_WIDGETS, FACETABLE_WIDGETS, FACET_MAX_PANELS, FORECAST_DEFAULT_PERIODS, FORECAST_MAX_PERIODS, FORECAST_MIN_PERIODS, HIERARCHY_WIDGETS, HIER_MAX_DEPTH, PARTITION_WIDGETS } from '../../types/report'
 import { AGGREGATIONS, DUAL_MEASURE_WIDGETS, MULTI_MEASURE_WIDGETS, PIVOT_WIDGETS, ROLE_SPECS, configKeyFor, roleAccepts } from '../../types/report'
+import { dtypeShort } from '../../lib/dtypeName'
+import { useT } from '../../i18n'
 import { ASSIGN_DATA_EVENT, ADD_DATASET_EVENT, emptyPickerReason } from './WidgetPlaceholder'
 import { semanticAggregationWarning, nonAdditiveKind, SAFE_AGGREGATION } from '../../lib/semanticGuard'
 import { savePending, clearPending } from '../../lib/pendingEdits'
@@ -115,6 +117,7 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
   // The panel's own words in the reader's language (panelLabels.ts). Field
   // names, option values and anything from the data stay as they are.
   const L = usePanelLabel()
+  const tt = useT()   // QA5 L3: type badges by name, not code
   // Data-role names and field groups (Numbers, Dates...) in the reader's language.
   const roleL = useRoleLabel()
   const { language } = useDirection()
@@ -2123,7 +2126,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                     <input type="checkbox" checked={tableCols.includes(c.name)}
                       onChange={e => setTableCols(p => e.target.checked ? [...p, c.name] : p.filter(x => x !== c.name))} />
                     <span style={{ color: tableCols.includes(c.name) ? 'var(--text)' : 'var(--muted)' }}>{c.name}</span>
-                    <span className={`badge badge-${c.dtype}`} style={{ marginInlineStart:'auto', padding:'1px 5px', fontSize: 10.5 }}>{c.dtype}</span>
+                    <span className={`badge badge-${c.dtype}`} style={{ marginInlineStart:'auto', padding:'1px 5px', fontSize: 10.5 }}>{dtypeShort(tt, c.dtype)}</span>
                   </label>
                 ))}
               </div>

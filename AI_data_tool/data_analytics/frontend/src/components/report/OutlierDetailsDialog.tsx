@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { formatCell } from '../../lib/displayNumber'
 import { outlierApi } from '../../services/api'
 import { useModalDialog } from '../ui/useModalDialog'
 import { useT, type MessageKey } from '../../i18n'
@@ -93,8 +94,11 @@ export default function OutlierDetailsDialog({ datasetId, column, onClose }: {
               <div style={{ position: 'absolute', top: 2, bottom: 2, left: pct(s.median), width: 2, background: 'var(--accent)' }} />
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--muted)', marginBottom: 12 }}>
-              <span>{t('pg.panelsB.out.min', { v: fmt(s.min) })}</span><span>{t('pg.panelsB.out.q1', { v: fmt(s.q1) })}</span><span>{t('pg.panelsB.out.median', { v: fmt(s.median) })}</span>
-              <span>{t('pg.panelsB.out.q3', { v: fmt(s.q3) })}</span><span>{t('pg.panelsB.out.max', { v: fmt(s.max) })}</span>
+              {/* QA5 R2: each number isolated whole, so a minus or a range stays
+                  on its side in Arabic ("12,012-"). */}
+              {(['min', 'q1', 'median', 'q3', 'max'] as const).map(k => (
+                <span key={k}>{tNodes(t, `pg.panelsB.out.${k}`, {}, { v: <bdi dir="ltr">{fmt(s[k])}</bdi> })}</span>
+              ))}
             </div>
 
             <div style={{ fontSize: 12, borderTop: '1px solid var(--border)', paddingTop: 10, marginBottom: 12 }}>
@@ -120,7 +124,10 @@ export default function OutlierDetailsDialog({ datasetId, column, onClose }: {
                   <thead><tr>{details.outliers.columns.map(c => <th key={c}>{c}</th>)}</tr></thead>
                   <tbody>
                     {details.outliers.rows.map((row, i) => (
-                      <tr key={i}>{row.map((v, j) => <td key={j}>{v == null ? '—' : String(v)}</td>)}</tr>
+                      <tr key={i}>{row.map((v, j) => <td key={j}>{v == null ? '—'
+                        // QA5 F3: the app's cell format ("-6208.69", not "-6208.6900000000005"), whole and LTR
+                        : typeof v === 'number' || (typeof v === 'string' && /^[-+]?\d+(\.\d+)?$/.test(v.trim()))
+                          ? <bdi dir="ltr">{formatCell(v as string | number)}</bdi> : String(v)}</td>)}</tr>
                     ))}
                   </tbody>
                 </table>

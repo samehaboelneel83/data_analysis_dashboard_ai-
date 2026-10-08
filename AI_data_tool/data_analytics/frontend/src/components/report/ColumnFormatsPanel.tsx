@@ -3,6 +3,7 @@ import { MENA_CURRENCIES } from '../../lib/arabicFormats'
 import { columnFormatsApi } from '../../services/api'
 import type { CalcColumnFormat, DatasetColumn } from '../../services/api'
 import { useT, type MessageKey } from '../../i18n'
+import { dtypeName } from '../../lib/dtypeName'
 
 interface Props {
   datasetId: number
@@ -79,7 +80,7 @@ export default function ColumnFormatsPanel({ datasetId, columns, columnFormats: 
                 textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 <bdi>{col.name}</bdi>
               </span>
-              <span style={{ fontSize: 10.5, color: 'var(--muted)', flexShrink: 0 }}>{col.dtype}</span>
+              <span style={{ fontSize: 10.5, color: 'var(--muted)', flexShrink: 0 }}>{dtypeName(t, col.dtype)}</span>
               <select value={fmt.type}
                 onChange={e => setType(col.name, e.target.value as CalcColumnFormat['type'])}
                 style={{ ...inp, width: 'auto', fontSize: 11, flexShrink: 0 }}>

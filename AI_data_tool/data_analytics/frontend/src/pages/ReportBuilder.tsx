@@ -106,7 +106,8 @@ import { clickSelection, selectionCount } from './reportBuilder/selection'
 import { readingOrder, tabOrder } from '../lib/readingOrder'
 import { roleForField } from '../lib/fieldPlacement'
 import { chartName } from '../lib/chartName'
-import { roleLabel } from '../components/report/panelLabels'
+import AnchoredMenu from '../components/ui/AnchoredMenu'
+import { roleLabel, panelLabel } from '../components/report/panelLabels'
 import BuilderSkeleton from './reportBuilder/BuilderSkeleton'
 import TemplatesPane from './reportBuilder/TemplatesPane'
 import { AI_MODES, AiTabs, PanelHead, RightRail } from './reportBuilder/RightRail'
@@ -1827,7 +1828,8 @@ export default function ReportBuilder() {
             ? dropPacked(items, selectedW.id, { x: cur.x + dx, y: cur.y + dy })
             : dropFree(items, selectedW.id, { x: cur.x + dx, y: cur.y + dy }))
         void persistWidgetLayouts(activePage, next, undefined,
-          `${e.shiftKey ? 'Resize' : 'Move'} "${selectedW.title || selectedW.widget_type}"`)
+          // QA5 L8: the verb in the reader's language too
+          tr(e.shiftKey ? 'bc.shell.u.resizeW' : 'bc.shell.u.moveW', { name: selectedW.title || selectedW.widget_type }))
         if (next[selectedW.id]) setSelectedW({ ...selectedW, layout: next[selectedW.id] })
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault()
@@ -2213,7 +2215,8 @@ export default function ReportBuilder() {
               tr('bc.shell.u.aggregate', { col: c.name, agg: e.target.value || tr('bc.shell.u.aggDefault') }))}>
             <option value="">{tr('bc.shell.fp.defaultSum')}</option>
             {AGGREGATIONS.filter(a => a.value !== 'none' && a.value !== 'pct').map(a =>
-              <option key={a.value} value={a.value}>{a.label}</option>)}
+              // QA5 L4: the panel's own aggregation names, in the reader's language
+              <option key={a.value} value={a.value}>{panelLabel(language, a.label)}</option>)}
           </select>
         </>)}
       </div>
@@ -2423,6 +2426,9 @@ export default function ReportBuilder() {
   // What the canvas draws for a widget: a drag in progress, else the page's
   // automatic packing (set below, where it is computed), else the stored layout.
   const packedPreviewRef = useRef<Record<number, Widget['layout']>>({})
+  // QA5 F2: the field pop-ups' anchors (one open at a time).
+  const geoAnchorRef = useRef<HTMLButtonElement>(null)
+  const qcAnchorRef = useRef<HTMLButtonElement>(null)
   const shownLayout = useCallback((w: Widget) =>
     localLayoutsRef.current[w.id] ?? packedPreviewRef.current[w.id] ?? w.layout, [])
   const handleDragStart = useCallback((widget: Widget) => (e: React.MouseEvent) => {
@@ -2526,8 +2532,7 @@ export default function ReportBuilder() {
       if (page && Object.keys(layouts).length) {
         const moved = dragging ?? resizing
         const mw = moved ? page.widgets.find(x => x.id === moved.widgetId) : undefined
-        const name = mw ? `"${mw.title || mw.widget_type}"` : 'widget'
-        await persistWidgetLayouts(page, layouts, undefined, `${dragging ? 'Move' : 'Resize'} ${name}`)
+        await persistWidgetLayouts(page, layouts, undefined, tr(dragging ? 'bc.shell.u.moveW' : 'bc.shell.u.resizeW', { name: mw ? (mw.title || mw.widget_type) : tr('bc.shell.u.widget') }))
       }
     }
 
@@ -2911,7 +2916,8 @@ export default function ReportBuilder() {
                       {visibleColumns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
                     </select>
                     <select aria-label={tr('bc.shell.rf.operator')} value={cfOp} onChange={e => setCfOp(e.target.value)} style={{ fontSize: 11 }}>
-                      {['eq','neq','gt','gte','lt','lte','in','like'].map(o => <option key={o} value={o}>{o}</option>)}
+                      {/* QA5 L5: words, not codes ("equals" / «يساوي»); the code is what is saved */}
+                      {['eq','neq','gt','gte','lt','lte','in','like'].map(o => <option key={o} value={o}>{tr(`bc.shell.rf.op.${o}` as MessageKey)}</option>)}
                       <option value="relative">{tr('bc.shell.rf.relative')}</option>
                     </select>
                   </div>
@@ -2930,7 +2936,7 @@ export default function ReportBuilder() {
                       <span key={f.id} title={tr('bc.shell.rf.everywhere')} style={{ display:'inline-flex', alignItems:'center', gap:3,
                         background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:6, fontSize: 11, padding:'2px 4px 2px 7px' }}>
                         {f.op === 'relative' ? `${f.column}: ${describeSpec(parseSpec(f.value))}`
-                          : <>{f.column} {f.op} {Array.isArray(f.value) ? (f.value as unknown[]).join(', ') : String(f.value)}</>}
+                          : <><bdi>{f.column}</bdi> {(() => { const k = `bc.shell.rf.op.${f.op}` as MessageKey; const v = tr(k); return v !== k ? v : f.op })()} <bdi>{Array.isArray(f.value) ? (f.value as unknown[]).join(', ') : String(f.value)}</bdi></>}
                         <button onClick={() => removeReportFilter(f.id)} aria-label={tr('bc.shell.rf.remove', { col: f.column })}
                           style={{ background:'none', border:'none', cursor:'pointer', color:'var(--muted)' }}>✕</button>
                       </span>
@@ -3082,15 +3088,17 @@ export default function ReportBuilder() {
                                   title={columnMeta[c.name]?.role === 'geography'
                                     ? tr('bc.shell.t.isGeo', { col: c.name }) : tr('bc.shell.f.classify', { col: c.name })}
                                   onClick={() => openGeoMenu(c.name)}
+                                  ref={geoField === c.name ? geoAnchorRef : undefined}
                                   style={{ background: 'none', border: 'none', cursor: 'pointer',
                                     color: columnMeta[c.name]?.role === 'geography'
                                       ? 'var(--accent)' : 'var(--muted)',
                                     fontSize: 11, padding: '0 2px' }}>
                                   ⌖
                                 </button>
+                                {/* QA5 F2: portalled and kept inside the window -- inside
+                                    the fields panel it was clipped to a sliver. */}
                                 {geoField === c.name && (
-                                  <div role="menu" style={{ position: 'absolute', zIndex: 30, top: '100%',
-                                    insetInlineStart: 0, minWidth: 170, padding: 4,
+                                  <AnchoredMenu anchorRef={geoAnchorRef} rtl={rtl} style={{ minWidth: 170, padding: 4,
                                     background: 'var(--surface)', border: '1px solid var(--border)',
                                     borderRadius: 6, boxShadow: '0 6px 20px rgba(0,0,0,.25)' }}>
                                     <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)',
@@ -3133,7 +3141,7 @@ export default function ReportBuilder() {
                                         {tr('bc.shell.f.noBoundary')}
                                       </div>
                                     )}
-                                  </div>
+                                  </AnchoredMenu>
                                 )}
                               </span>
                             )}
@@ -3149,13 +3157,13 @@ export default function ReportBuilder() {
                                   aria-label={tr('bc.shell.f.calcs', { col: c.name })}
                                   title={tr('bc.shell.f.calcs', { col: c.name })}
                                   onClick={() => setQuickCalcField(f => f === c.name ? null : c.name)}
+                                  ref={quickCalcField === c.name ? qcAnchorRef : undefined}
                                   style={{ background: 'none', border: 'none', cursor: 'pointer',
                                     color: 'var(--muted)', fontSize: 11, padding: '0 2px' }}>
                                   Σ
                                 </button>
                                 {quickCalcField === c.name && (
-                                  <div role="menu" style={{ position: 'absolute', zIndex: 30, top: '100%',
-                                    insetInlineStart: 0, minWidth: 150, padding: 4,
+                                  <AnchoredMenu anchorRef={qcAnchorRef} rtl={rtl} data-quickcalc-menu="" style={{ minWidth: 150, padding: 4,
                                     background: 'var(--surface)', border: '1px solid var(--border)',
                                     borderRadius: 6, boxShadow: '0 6px 20px rgba(0,0,0,.25)' }}>
                                     {quickCalcsFor({ name: c.name, dtype: c.dtype, numeric: isNumericField(c) }).map(qc => (
@@ -3164,13 +3172,13 @@ export default function ReportBuilder() {
                                         style={{ display: 'block', width: '100%', textAlign: 'start',
                                           background: 'none', border: 'none', cursor: 'pointer',
                                           padding: '4px 6px', fontSize: 11, color: 'var(--text)' }}>
-                                        {qc.label}
+                                        {(() => { const k = `bc.shell.qc.${qc.key}` as MessageKey; const v = tr(k); return v !== k ? v : qc.label })()}
                                       </button>
                                     ))}
                                     <div style={{ fontSize: 10.5, color: 'var(--muted)', padding: '2px 6px' }}>
                                       {tr('bc.shell.f.calcsNote')}
                                     </div>
-                                  </div>
+                                  </AnchoredMenu>
                                 )}
                               </span>
                             )}

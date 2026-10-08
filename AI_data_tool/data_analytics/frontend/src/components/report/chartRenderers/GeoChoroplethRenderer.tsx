@@ -143,9 +143,12 @@ export default function GeoChoroplethRenderer({ rows, data, cfg, measureFmt, bro
       </MapSvg>
       <MapDataTable caption={kind} entries={entries} measureFmt={measureFmt} unmatched={unmatched} />
       {hover && (
-        <div style={{ ...TT, position: 'absolute', left: hover.x + 10, top: hover.y + 10,
+        // QA5 R4: the line takes the direction of the place's name, and the
+        // value is isolated whole ("United States of America: $ 703,236",
+        // not "$ 703,236 :United States of America").
+        <div dir="auto" style={{ ...TT, position: 'absolute', left: hover.x + 10, top: hover.y + 10,
           padding: '4px 8px', pointerEvents: 'none' }}>
-          {hover.name}: {fmtStr(hover.value, measureFmt)}
+          <bdi>{hover.name}</bdi>: <bdi dir="ltr">{fmtStr(hover.value, measureFmt)}</bdi>
         </div>
       )}
       {loading && (

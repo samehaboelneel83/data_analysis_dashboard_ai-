@@ -82,7 +82,8 @@ export default function ApiKeys() {
 
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: 16, marginBottom: 16 }}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <input aria-label={t('pg.adminPlatform.keys.keyName')} placeholder={t('pg.adminPlatform.keys.keyNamePh')} value={name} onChange={e => setName(e.target.value)} {...inp} />
+          <input aria-label={t('pg.adminPlatform.keys.keyName')} placeholder={t('pg.adminPlatform.keys.keyNamePh')} value={name} onChange={e => setName(e.target.value)} {...inp}
+            id="api-key-name" name="api-key-name" autoComplete="off" />
           <button className="btn btn-primary btn-sm" onClick={create} disabled={creating}>
             {creating ? t('pg.adminPlatform.creating') : t('pg.adminPlatform.keys.create')}
           </button>

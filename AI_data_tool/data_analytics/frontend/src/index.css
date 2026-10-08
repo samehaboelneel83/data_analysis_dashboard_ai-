@@ -3140,3 +3140,19 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--da
    apart ("م ل ّ ي"). Many headings set letter-spacing inline for Latin caps;
    in a right-to-left page it is reset, code and key caps excepted. */
 :root[dir="rtl"] *:not(code):not(kbd):not(pre) { letter-spacing: 0 !important; }
+
+/* QA5 F1: on a widget with its own background colour, legend labels take the
+   widget's text colour (a yellow series named in yellow on a yellow card was
+   invisible) and each swatch gets a thin outline so a series the colour of
+   the card still shows its key. Every chart's legend is Recharts'. */
+.dl-widget[data-contrast] .recharts-legend-item-text { color: var(--text) !important; }
+.dl-widget[data-contrast] .recharts-legend-item .recharts-surface path,
+.dl-widget[data-contrast] .recharts-legend-item .recharts-surface rect { stroke: var(--muted); stroke-width: 1px; }
+
+/* QA5 R2: numbers keep their sign and symbol in place in Arabic. A table cell
+   takes the direction of its own text: one with no letters ("-6208.69",
+   "$1,234", "12.3%") reads left to right, so "-12,012" never becomes
+   "12,012-"; one that starts in Arabic stays right to left. A chart
+   tooltip's value is always a number, and is isolated left to right. */
+[dir="rtl"] td, [dir="rtl"] th { unicode-bidi: plaintext; }
+.recharts-tooltip-item-value { unicode-bidi: isolate; direction: ltr; }

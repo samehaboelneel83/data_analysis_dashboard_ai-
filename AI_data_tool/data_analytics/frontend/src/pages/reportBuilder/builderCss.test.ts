@@ -52,3 +52,10 @@ describe('builder CSS (QA4)', () => {
     expect(rule(builder, '.dl-bd-coord bdi')).toMatch(/var\(--mono\)/)
   })
 })
+
+describe('numbers in Arabic (QA5 R2)', () => {
+  it('table cells take their own direction; tooltip values are isolated LTR', () => {
+    expect(index).toMatch(/\[dir="rtl"\] td, \[dir="rtl"\] th\s*\{\s*unicode-bidi:\s*plaintext/)
+    expect(rule(index, '.recharts-tooltip-item-value')).toMatch(/unicode-bidi:\s*isolate;\s*direction:\s*ltr/)
+  })
+})

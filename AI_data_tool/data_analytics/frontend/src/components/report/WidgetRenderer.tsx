@@ -1193,6 +1193,8 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
     <div
       ref={widgetRootRef}
       className={`dl-widget${selected ? ' dl-widget--selected' : ''}`}
+      // QA5 F1: legends follow the widget's own text colour (index.css)
+      data-contrast={Object.keys(contrastTokens(ruleStyles?.widget?.background ?? cfg.widget_background)).length ? '' : undefined}
       role="figure"
       aria-label={(cfg.alt_text as string) || widget.title || wt}
       tabIndex={isPreview ? undefined : 0}

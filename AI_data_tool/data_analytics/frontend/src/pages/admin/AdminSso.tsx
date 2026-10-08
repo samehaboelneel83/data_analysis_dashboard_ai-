@@ -15,6 +15,8 @@ const REDACTED = '__SECRET_UNCHANGED__'
 const API_ORIGIN = apiOrigin()
 /** Protocol names, the same in every language. */
 const PROTOCOL_NAME = { oidc: 'OpenID Connect', saml: 'SAML 2.0' } as const
+/** Product names, the same in every language; isolated LTR inside the sentence. */
+const OIDC_IDPS = 'Azure AD / Entra, Okta, Google, Auth0, Keycloak' // i18n-ok: product names
 
 /** Org-admin screen to configure this organization's identity provider — OpenID Connect
  *  or SAML 2.0. SSO authenticates users an admin has already created here; it never
@@ -105,7 +107,7 @@ export default function AdminSso() {
   }
 
   const inp: React.CSSProperties = fieldStyle
-  const field = (label: string, node: React.ReactNode, hint?: string) => (
+  const field = (label: string, node: React.ReactNode, hint?: React.ReactNode) => (
     <label style={{ display: 'block', marginBottom: 16 }}>
       <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 5 }}>{label}</div>
       {node}
@@ -141,11 +143,14 @@ export default function AdminSso() {
           ))}
         </div>
       ), protocol === 'oidc'
-        ? 'Azure AD / Entra, Okta, Google, Auth0, Keycloak.' // i18n-ok: product names
+        // QA5: the English list is isolated, so in Arabic the sentence's own
+        // punctuation stays at its end instead of the list's period flipping left.
+        ? richNodes(t('pg.adminPlatform.sso.oidcIdps'), { list: <bdi dir="ltr">{OIDC_IDPS}</bdi> })
         : t('pg.adminPlatform.sso.samlIdps'))}
 
       {field(t('sso.emailDomain'), <input style={inp} value={domain}
-        onChange={e => setDomain(e.target.value)} placeholder="acme.com" dir="ltr" />, // i18n-ok
+        onChange={e => setDomain(e.target.value)} placeholder="acme.com" dir="ltr" // i18n-ok
+        id="sso-email-domain" name="sso-email-domain" autoComplete="off" />,
         t('sso.emailDomainHint'))}
 
       {protocol === 'oidc' ? (
@@ -156,10 +161,10 @@ export default function AdminSso() {
             t('pg.adminPlatform.sso.issuerHint'))}
           {field(t('pg.adminPlatform.sso.clientId'), <input style={inp} value={clientId} dir="ltr"
             onChange={e => setClientId(e.target.value)} placeholder={t('pg.adminPlatform.sso.clientIdPh')}
-            autoComplete="off" name="sso-client-id" />)}
+            autoComplete="off" id="sso-client-id" name="sso-client-id" />)}
           {field(t('pg.adminPlatform.sso.clientSecret'), <input style={inp} type="password" value={secret}
             onChange={e => setSecret(e.target.value)}
-            autoComplete="new-password" name="sso-client-secret"
+            autoComplete="new-password" id="sso-client-secret" name="sso-client-secret"
             placeholder={hasSecret ? t('pg.adminPlatform.sso.secretPhKeep') : t('pg.adminPlatform.sso.secretPh')} />,
             hasSecret ? t('pg.adminPlatform.sso.secretKeepHint') : undefined)}
           <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 16 }}>

@@ -10,6 +10,8 @@ import { useModalDialog } from '../../components/ui/useModalDialog'
 import { blankConfigFor } from './typeMaps'
 import { friendlyMessage } from '../../lib/friendlyError'
 import { useT } from '../../i18n'
+import { useDirection } from '../../contexts/DirectionContext'
+import { connectorFieldLabel } from '../../i18n/pages/adminPlatform'
 
 /* ── Connection Form Modal ─────────────────────────────── */
 export function ConnectionModal({ initial, catalog, onSave, onClose }: {
@@ -19,6 +21,9 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
   onClose: () => void
 }) {
   const tr = useT()
+  const { language } = useDirection()
+  // QA5 L6: the server's field labels, translated by field key.
+  const fieldLabel = (f: ConnectorSpec['config_fields'][number]) => connectorFieldLabel(tr, language, f.name, f.label)
   const dialogRef = useModalDialog<HTMLDivElement>(onClose)
   const isEdit = !!initial
   const specOf = (t: string) => catalog.find(s => s.key === t)
@@ -79,7 +84,7 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
       if (!f.required) continue
       const v = cfg[f.name]
       if (f.kind === 'password' && isEdit && !pwTouched) continue
-      if (v === undefined || v === null || String(v).trim() === '') out.push(f.label)
+      if (v === undefined || v === null || String(v).trim() === '') out.push(fieldLabel(f))
     }
     return out
   }
@@ -164,6 +169,7 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
         <label style={{ display: 'block', marginBottom: 12 }}>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{tr('pg.dataPages.conn.nameLabel')}</div>
           <input value={name} onChange={e => setName(e.target.value)} placeholder={tr('pg.dataPages.conn.namePlaceholder')} maxLength={120}
+            id="conn-display-name" name="conn-display-name" autoComplete="off"
             aria-invalid={showErrors && !name.trim() ? true : undefined} {...inp} />
           {showErrors && !name.trim() && <div className="dl-field__error">{tr('pg.dataPages.conn.nameRequired')}</div>}
         </label>
@@ -209,7 +215,7 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
           .map(f => (
             <label key={f.name} style={{ display: 'block', marginBottom: 8 }}>
               <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 3 }}>
-                {f.label}{f.required ? ' *' : ''}
+                {fieldLabel(f)}{f.required ? ' *' : ''}
               </div>
               {f.kind === 'select' ? (
                 <select value={(cfg[f.name] as string) ?? (f.default as string) ?? ''}
@@ -224,10 +230,10 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
                   placeholder={f.kind === 'password' && isEdit && !pwTouched ? tr('pg.dataPages.conn.keepPassword') : f.placeholder}
                   aria-invalid={fieldMissing(f) ? true : undefined}
                   autoComplete={f.kind === 'password' ? 'new-password' : 'off'}
-                  name={`conn-${f.name}`}
+                  id={`conn-${f.name}`} name={`conn-${f.name}`}
                   {...inp} />
               )}
-              {fieldMissing(f) && <div className="dl-field__error">{tr('pg.dataPages.conn.fieldRequired', { name: f.label })}</div>}
+              {fieldMissing(f) && <div className="dl-field__error">{tr('pg.dataPages.conn.fieldRequired', { name: fieldLabel(f) })}</div>}
             </label>
           ))}
 

@@ -1735,7 +1735,7 @@ export default function DatasetDetail() {
                                   color: 'inherit', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}>
                               {calcColNames.has(c)
                                 ? <span className="dl-data3__type dl-data3__type--fx">ƒx</span>
-                                : <span className="dl-data3__type">{typeTag(colTypes[c] ?? '')}</span>}
+                                : <span className="dl-data3__type">{typeTag(tr, colTypes[c] ?? '')}</span>}
                               {c}
                               <span aria-hidden="true" style={{ marginInlineStart: 4, color: isSorted ? 'var(--accent)' : 'var(--border)', fontSize: 11 }}>
                                 {isSorted ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}

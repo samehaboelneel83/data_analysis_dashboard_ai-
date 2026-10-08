@@ -63,14 +63,16 @@ function UserModal({ initial, roles, onSave, onClose }: {
 
         <label style={{ display: 'block', marginBottom: 12 }}>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{t('pg.adminSecurity.users.emailLabel')}</div>
-          <input type="email" value={email} onChange={e => setEmail(e.target.value)} {...inp} />
+          <input type="email" value={email} onChange={e => setEmail(e.target.value)} {...inp}
+            id="managed-user-email" name="managed-user-email" autoComplete="off" />
         </label>
 
         <label style={{ display: 'block', marginBottom: 12 }}>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>
             {isEdit ? t('pg.adminSecurity.users.newPasswordLabel') : t('pg.adminSecurity.users.passwordLabel')}
           </div>
-          <input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="new-password" {...inp} />
+          <input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="new-password" {...inp}
+            id="managed-user-password" name="managed-user-password" />
         </label>
 
         <label style={{ display: 'block', marginBottom: 12 }}>

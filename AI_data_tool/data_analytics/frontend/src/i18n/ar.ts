@@ -11,12 +11,13 @@ import { ar as pgDataPages } from './pages/dataPages'
 import { ar as pgPanelsA } from './pages/panelsA'
 import { ar as pgPanelsB } from './pages/panelsB'
 import { ar as pgModelsMaps } from './pages/modelsMaps'
+import { ar as pgTypes } from './pages/types'
 
 /** Arabic UI strings. Keys must match `en.ts` exactly. */
 export const ar: Record<MessageKey, string> = {
   ...bcCanvas, ...bcPanes, ...bcRules, ...bcShell, ...bcStats, ...bcDialogs,
   // 8-i18n: the pages outside the Builder, one module per area (i18n/pages/).
-  ...pgAdminSecurity, ...pgAdminPlatform, ...pgDataPages, ...pgPanelsA, ...pgPanelsB, ...pgModelsMaps,
+  ...pgAdminSecurity, ...pgAdminPlatform, ...pgDataPages, ...pgPanelsA, ...pgPanelsB, ...pgModelsMaps, ...pgTypes,
   'nav.home': 'الرئيسية',
   'nav.askAi': 'اسأل الذكاء الاصطناعي',
   'nav.datasets': 'مجموعات البيانات',
@@ -1145,7 +1146,7 @@ export const ar: Record<MessageKey, string> = {
   'shx.gl.warning': 'يرى الضيوف هذه اللوحة للقراءة فقط بصلاحيات بياناتك أنت. ويراها زميل مسجّل الدخول بصلاحياته هو. يمكنك إلغاء أي رابط من هنا في أي وقت.',
   'shx.gl.expires': 'انتهاء الرابط',
   'shx.gl.day': 'يوم واحد',
-  'shx.gl.days': '{n} يومًا',
+  'shx.gl.days': '{n, plural, one {يوم واحد} two {يومان} few {# أيام} many {# يومًا} other {# يوم}}',
   'shx.gl.pin': 'تثبيت التخطيط الحالي',
   'shx.gl.pinWhy': '(تبقى الصفحات والعناصر كما هي الآن، وتبقى البيانات محدّثة)',
   'shx.gl.create': 'إنشاء رابط ضيف',

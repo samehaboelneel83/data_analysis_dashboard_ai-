@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { fieldStyle } from '../../components/ui/fieldStyle'
 import { useT } from '../../i18n'
+import { useDirection } from '../../contexts/DirectionContext'
+import { connectorFieldLabel } from '../../i18n/pages/adminPlatform'
 import { Plug, Plus } from 'lucide-react'
 import { customConnectorsApi, dataSourcesApi } from '../../services/api'
 import type { CustomConnector, ConnectorSpec } from '../../services/api'
@@ -19,6 +21,7 @@ function PresetModal({ initial, catalog, onSave, onClose }: {
   onClose: () => void
 }) {
   const t = useT()
+  const { language } = useDirection()
   const dialogRef = useModalDialog<HTMLDivElement>(onClose)
   const isEdit = !!initial
   const [key, setKey] = useState(initial?.key ?? '')
@@ -64,12 +67,14 @@ function PresetModal({ initial, catalog, onSave, onClose }: {
         <label style={{ display: 'block', marginBottom: 12 }}>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{t('pg.adminPlatform.cc.label')}</div>
           <input value={label} onChange={e => setLabel(e.target.value)} {...inp}
+            id="connector-label" name="connector-label" autoComplete="off"
             placeholder="Acme Snowflake" // i18n-ok: an example name
           />
         </label>
         <label style={{ display: 'block', marginBottom: 12 }}>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{t('pg.adminPlatform.cc.key')}</div>
           <input value={key} onChange={e => setKey(e.target.value)} placeholder="acme-snowflake" dir="ltr" {...inp} disabled={isEdit} // i18n-ok: an example id
+            id="connector-key" name="connector-key" autoComplete="off"
             title={isEdit ? t('pg.adminPlatform.cc.keyFixed') : undefined} />
         </label>
         <label style={{ display: 'block', marginBottom: 16 }}>
@@ -82,9 +87,14 @@ function PresetModal({ initial, catalog, onSave, onClose }: {
         {spec?.config_fields.map(f => (
           <div key={f.name} style={{ display: 'flex', alignItems: 'flex-end', gap: 8, marginBottom: 10 }}>
             <label style={{ flex: 1 }}>
-              <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{f.label}</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{connectorFieldLabel(t, language, f.name, f.label)}</div>
+              {/* QA5 F4: not the admin's own login -- distinct name/id and
+                  autocomplete off / new-password, so the browser does not
+                  fill the admin's saved username and password in here. */}
               <input value={(values[f.name] as string) ?? ''} onChange={e => setValues(p => ({ ...p, [f.name]: e.target.value }))}
-                type={f.kind === 'password' ? 'password' : 'text'} {...inp} />
+                type={f.kind === 'password' ? 'password' : 'text'} {...inp}
+                id={`connector-${f.name}`} name={`connector-${f.name}`}
+                autoComplete={f.kind === 'password' ? 'new-password' : 'off'} />
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--muted)', paddingBottom: 6 }}>
               <input type="checkbox" checked={locked.has(f.name)} onChange={() => toggleLocked(f.name)} />

@@ -26,10 +26,14 @@ export function luminance([r, g, b]: [number, number, number]): number {
   return 0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(b)
 }
 
+// QA5 F1: `--surface` too, so every tooltip and popover drawn inside the
+// widget (they paint with --surface and write with --text) gets one matching
+// pair -- dark text on a white card, light text on a dark one. Before, the
+// card stayed the theme's dark surface under the widget's dark text.
 const ON_LIGHT = { '--text': '#1f2328', '--muted': '#4d5560', '--border': 'rgba(0, 0, 0, .16)',
-  '--surface2': 'rgba(0, 0, 0, .05)', '--dl-table-rule': 'rgba(0, 0, 0, .10)' }
+  '--surface': '#ffffff', '--surface2': 'rgba(0, 0, 0, .05)', '--dl-table-rule': 'rgba(0, 0, 0, .10)' }
 const ON_DARK = { '--text': '#f3f5f7', '--muted': '#c3cad3', '--border': 'rgba(255, 255, 255, .22)',
-  '--surface2': 'rgba(255, 255, 255, .07)', '--dl-table-rule': 'rgba(255, 255, 255, .14)' }
+  '--surface': '#1b1f24', '--surface2': 'rgba(255, 255, 255, .07)', '--dl-table-rule': 'rgba(255, 255, 255, .14)' }
 
 export function contrastTokens(background: unknown): Record<string, string> {
   if (typeof background !== 'string') return {}

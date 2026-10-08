@@ -15,6 +15,9 @@ const FILES: string[] = [
   'components/report/DataView.tsx',
   'components/report/DataViewsBar.tsx',
   'components/report/RelativeDateEditor.tsx',
+  // QA5 L1/L2: the expression builder (calc-column builder, filter-rows step);
+  // calcColumns/* is guarded in strings.panelsA.test.ts.
+  'components/expr/ExpressionBuilder.tsx',
 ]
 
 describe('no hard-coded English: panelsB (8-i18n)', () => {

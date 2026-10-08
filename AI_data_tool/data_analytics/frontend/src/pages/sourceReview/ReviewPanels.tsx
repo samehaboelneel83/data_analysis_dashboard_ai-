@@ -6,6 +6,7 @@ import {
 } from '../../services/api'
 import { useState } from 'react'
 import { useT } from '../../i18n'
+import { dtypeName } from '../../lib/dtypeName'
 import { withNode } from '../../i18n/pages/dataPages'
 
 export function RelationshipRow({ rel, checked, onToggle, onReject }: {
@@ -73,7 +74,7 @@ export function ColumnReview({ grouped, total, onSave, onSaveLabels }: {
                   <tr key={col.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                     <td style={{ padding: 6, fontWeight: 600, width: 200 }}>{col.name}</td>
                     <td style={{ padding: 6, color: '#64748b', width: 110 }}>
-                      {col.semantic_type ?? col.dtype}
+                      {col.semantic_type ?? dtypeName(tr, col.dtype)}
                     </td>
                     <td style={{ padding: 6 }}>
                       <input
