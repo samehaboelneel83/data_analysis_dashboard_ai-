@@ -84,6 +84,17 @@ def test_a_frame_level_sum_fx_column_listed_row_by_row_when_aggregation_is_none(
     assert raw["total"] == 3
 
 
+def test_a_raw_table_shows_the_columns_it_names():
+    """Live 2026-10-08: a table asked for price, make, model and link, with
+    aggregation none and a measure, listed price alone."""
+    df = pd.DataFrame({"price": [1, 2], "make": ["Kia", "Fiat"], "link": ["u1", "u2"], "x": [0, 0]})
+    raw = shape_series(df, {"measure": "price", "aggregation": "none", "columns": ["make", "link"]})
+    assert raw["type"] == "table"
+    assert raw["columns"] == ["make", "link", "price"]
+    plain = shape_series(df, {"aggregation": "none", "columns": ["link", "make"]})
+    assert plain["columns"] == ["link", "make"]
+
+
 def test_the_copilot_agg_key_is_read_as_aggregation(sample_df):
     via_alias = shape_series(sample_df, {"dimension": "region", "measure": "revenue",
                                          "agg": "avg"})

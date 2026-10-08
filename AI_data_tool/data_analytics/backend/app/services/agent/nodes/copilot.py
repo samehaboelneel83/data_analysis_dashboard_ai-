@@ -118,6 +118,7 @@ Message: create a new fx expression useful -> {"reply": "Added the calculated co
 Message: add a KPI of all_employee_count -> {"reply": "Added a KPI of all_employee_count.", "data_question": null, "actions": [{"op": "create", "widget_type": "kpi", "widget_id": null, "title": "All employee count", "config": [{"key": "measure", "value": "all_employee_count"}, {"key": "aggregation", "value": "sum"}], "layout": null}]}
 Message: ƒx Calculated columns can i add one for new chart -> {"reply": "Added doubled_count and a KPI that uses it.", "data_question": null, "actions": [{"op": "add_calculated_column", "widget_type": null, "widget_id": null, "title": null, "config": [{"key": "name", "value": "doubled_count"}, {"key": "expression", "value": "employee_count * 2"}], "layout": null}, {"op": "create", "widget_type": "kpi", "widget_id": null, "title": "Doubled count", "config": [{"key": "measure", "value": "doubled_count"}, {"key": "aggregation", "value": "sum"}], "layout": null}]}
 Message: dont sum please i need to see data individual -> {"reply": "Showing every all_employee_count row in a table, with no summing.", "data_question": null, "actions": [{"op": "update", "widget_type": "table", "widget_id": 41, "title": null, "config": [{"key": "aggregation", "value": "none"}, {"key": "measure", "value": "all_employee_count"}], "layout": null}]}
+Message: add a table of each sale with its region, revenue and units -> {"reply": "Added a table listing each sale's region, revenue and units.", "data_question": null, "actions": [{"op": "create", "widget_type": "table", "widget_id": null, "title": "Sales", "config": [{"key": "columns", "value": "region, revenue, units"}, {"key": "aggregation", "value": "none"}], "layout": null}]}
 Message: sum all_employee_count on this chart -> {"reply": "Set the selected chart to sum all_employee_count.", "data_question": null, "actions": [{"op": "update", "widget_type": null, "widget_id": 41, "title": null, "config": [{"key": "aggregation", "value": "sum"}, {"key": "measure", "value": "all_employee_count"}], "layout": null}]}"""
 
 
@@ -244,7 +245,10 @@ async def resolve_copilot(message: str, history: list[dict],
             "on title or type. `config` values are scalars; when creating a "
             "chart choose `dimension`, `measure` and `aggregation` (sum, avg, "
             "count, min, max, none) from the dataset's real columns or "
-            "calculated columns. "
+            "calculated columns. A TABLE that lists rows takes the columns "
+            "to show as ONE comma-separated value under `columns` (e.g. "
+            "\"price, make, model, item_url\") with `aggregation` none; "
+            "never claim a column is shown unless it is in `columns`. "
             "Time-like settings "
             "are in the unit the key names (auto_reload_seconds is seconds). "
             "For `update`, send ONLY the keys being changed; a non-null "

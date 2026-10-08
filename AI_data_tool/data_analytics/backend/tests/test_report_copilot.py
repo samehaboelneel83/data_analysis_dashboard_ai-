@@ -538,6 +538,20 @@ class TestCalculatedColumns:
         assert widget.widget_type == "table"
         assert widget.config.get("aggregation") == "none"
 
+    async def test_a_table_gets_every_column_asked_for(
+            self, client, auth_headers, world, columns, model, db_session):
+        # Live 2026-10-08: "a table of price, make, model and the link" was
+        # answered "Added" while the list was dropped -- price alone showed.
+        model.append({"reply": "Added the table.", "data_question": None,
+                      "actions": [action(op="create", widget_type="table", title="Listing",
+                                         config={"columns": "region, Revenue, nope",
+                                                 "aggregation": "none"})]})
+        r = await call(client, auth_headers["a"], world, "a table of region and revenue")
+        assert r.status_code == 200, r.text
+        created = (await db_session.execute(select(ReportWidget).where(
+            ReportWidget.title == "Listing"))).scalar_one()
+        assert created.config["columns"] == ["region", "revenue"]
+
     async def test_an_unsafe_expression_is_skipped_not_saved(
             self, client, auth_headers, world, columns, model, db_session):
         model.append({"reply": "Added it.", "data_question": None,

@@ -2615,7 +2615,9 @@ export const dataSourcesApi = {
     api.get<IndexAdvice>(`/data-sources/${id}/index-advice`, { params: { days } }).then(r => r.data),
   connectors: () => api.get<ConnectorSpec[]>('/data-sources/connectors').then(r => r.data),
   list:    ()                                              => api.get<DataSource[]>('/data-sources').then(r => r.data),
-  create:  (body: { name: string; type: string; config: Record<string, unknown>; custom_connector_id?: number | null; sensitivity?: string | null }) =>
+  create:  (body: { name: string; type: string; config: Record<string, unknown>; custom_connector_id?: number | null; sensitivity?: string | null
+                     /** May the model read sample rows to describe it (guided setup D1; server default on). */
+                     allow_llm_sampling?: boolean }) =>
     api.post<DataSource>('/data-sources', body).then(r => r.data),
   update:  (id: number, body: Partial<{ name: string; type: string; config: Record<string, unknown>; custom_connector_id: number | null; sensitivity: string }>) =>
     api.put<DataSource>(`/data-sources/${id}`, body).then(r => r.data),
@@ -3431,4 +3433,237 @@ export const migrationApi = {
   signOff: (id: number, body: { note?: string; accept_differences?: boolean }) =>
     api.post<MigrationItem>(`/migration/items/${id}/sign-off`, body).then(r => r.data),
   withdrawSignOff: (id: number) => api.delete<MigrationItem>(`/migration/items/${id}/sign-off`).then(r => r.data),
+}
+
+// ── Guided setup (docs/guided-setup/PLAN.md) ─────────────────────────────────
+
+export type SetupStep = 'understand' | 'data' | 'check' | 'dashboard' | 'done'
+
+/** "About you": every field optional; hints for the model, never rules. */
+export interface SetupBrief {
+  work?: string
+  focus?: string
+  questions?: string
+  exclude?: string
+}
+
+export interface SetupJourney {
+  id: number
+  source: { id: number; name: string; type: string }
+  step: SetupStep
+  /** 1-based step on the progress bar; `total` is always 4. */
+  position: number
+  total: number
+  brief: SetupBrief
+  dataset_ids: number[]
+  report_id: number | null
+  updated_at: string | null
+}
+
+export type SetupTableGroup = 'main' | 'supporting' | 'technical'
+
+export interface SetupTable {
+  id: number
+  name: string
+  schema: string | null
+  kind: string
+  /** A short business name, when the AI wrote one. */
+  title: string | null
+  what: string | null
+  /** Who wrote `what`: you (a confirmed edit), the database's own comment, or the AI. */
+  what_source: 'you' | 'database' | 'ai' | null
+  useful_for: string | null
+  group: SetupTableGroup
+  rows: number | null
+  columns_count: number
+  measures: string[]
+  dates: string[]
+  date_from: string | null
+  date_to: string | null
+  /** False when the date range comes from a sample (approximate). */
+  dates_exact: boolean
+  related: string[]
+  canonical: boolean
+  deprecated: boolean
+}
+
+export interface SetupSummary {
+  status: 'ready' | 'syncing' | 'failed' | 'empty'
+  source: { id: number; name: string; type: string; allow_ai: boolean }
+  sync: { status: string; last_synced_at: string | null }
+  can_edit: boolean
+  language: 'en' | 'ar'
+  /** True while the exact date ranges are being measured (the page asks again). */
+  ranges_pending?: boolean
+  /** Present when status is 'ready'. `pending`: the AI is still writing; ask again shortly. */
+  ai?: { used: boolean; pending: boolean; reason: 'off' | 'unavailable' | 'failed' | null }
+  overview?: string | null
+  overview_source?: 'you' | 'ai' | null
+  totals?: { tables: number; views: number; rows: number; date_from: string | null
+             date_to: string | null; dates_exact: boolean }
+  tables?: SetupTable[]
+  relationships?: { from_table: string; to_table: string }[]
+  questions?: string[]
+}
+
+export interface SetupSample {
+  columns: string[]
+  rows: Record<string, unknown>[]
+  /** A row rule narrowed this sample to what you may see. */
+  restricted: boolean
+  error: 'restricted' | 'unreachable' | null
+}
+
+export interface SetupProposal {
+  id: string
+  name: string
+  purpose: string
+  sql: string
+  tables: string[]
+  includes: string[]
+  leaves_out: string[]
+  why: string
+  /** ai: written by the model; auto: built from the facts when the model was not used. */
+  source: 'ai' | 'auto'
+  test: { columns: string[]; rows: Record<string, unknown>[]; row_count: number | null; error: string | null }
+  history: { role: 'user' | 'assistant'; text: string }[]
+  /** Set while a change asked in the chat is being made. */
+  refining?: string
+  /** Why the last change could not be made ('off' | 'failed' | 'unusable'). */
+  refine_failed?: string
+}
+
+export interface SetupDatasetsStep {
+  proposals: { pending: boolean; failed: string | null; items: SetupProposal[]; language: string | null; asked: boolean }
+  brief: SetupBrief
+  existing: { id: number; name: string; rows: number | null; mode: string | null }[]
+  chosen: number[]
+  can_create: boolean
+  allow_ai: boolean
+}
+
+export interface SetupCreateResult {
+  items: { proposal_id: string; name: string; job_id: number | null; dataset_id: number | null; error: string | null }[]
+}
+
+export interface SetupFindingItem {
+  id: string
+  tone: 'problem' | 'warning' | 'info' | 'good' | 'insight'
+  kind: string
+  column?: string | null
+  what: string
+  why: string
+  todo: string | null
+  rows?: number | null
+  /** What "Fix it" does; `rule` is present when it can also be saved as a check. */
+  action: { kind: string; label: string; column?: string; expression?: string; rule?: string } | null
+}
+
+export interface SetupFindings {
+  pending: boolean
+  failed: string | null
+  health: SetupFindingItem[]
+  insights: SetupFindingItem[]
+  rows: number | null
+  columns: number | null
+  /** "<item id>|fix" or "<item id>|check" for what was already done. */
+  fixed: string[]
+  language: string | null
+  checked: boolean
+}
+
+export interface SetupCheckStep {
+  datasets: { id: number; name: string; mode: string; row_count: number | null; findings: SetupFindings }[]
+}
+
+export interface SetupDesign {
+  id: string
+  dataset_id: number
+  dataset_name: string
+  proposal: DashboardSuggestion
+  derived: { measures?: MeasureDef[]; calculated_columns?: CalcColumn[] }
+  history: { role: 'user' | 'assistant'; text: string }[]
+  changing?: string
+  change_failed?: string
+}
+
+export interface SetupDashboardStep {
+  designs: { pending: boolean; failed: string | null; items: SetupDesign[]; asked: boolean; report_id: number | null; language?: string | null }
+  has_data: boolean
+  datasets: { id: number; name: string }[]
+}
+
+export interface DataChangeOptions {
+  can_change: boolean
+  /** Why not: not_from_connection | live | admin_only | no_edit */
+  reason: string | null
+  columns: string[]
+  addable: { name: string; table: string; dtype: string | null; semantic_type: string | null; description: string | null }[]
+  allow_ai: boolean
+  source: { id: number; name: string } | null
+}
+
+export interface DataChangePreview {
+  sql?: string
+  adds?: string[]
+  removes?: string[]
+  /** Removed columns something still uses; the change cannot be applied while any. */
+  blocked?: { column: string; used_by: { kind?: string; name?: string; report?: string }[] }[]
+  test?: { columns: string[]; rows: Record<string, unknown>[]; row_count: number | null }
+  reply?: string | null
+  error: string | null
+}
+
+export const setupApi = {
+  changeOptions: (datasetId: number) =>
+    api.get<DataChangeOptions>(`/setup/datasets/${datasetId}/change`).then(r => r.data),
+  changePreview: (datasetId: number, body: { add?: string[]; message?: string }, lang: string) =>
+    api.post<DataChangePreview>(`/setup/datasets/${datasetId}/change/preview`, body, { params: { lang } }).then(r => r.data),
+  changeApply: (datasetId: number, sql: string) =>
+    api.post<{ job_id: number }>(`/setup/datasets/${datasetId}/change/apply`, { sql }).then(r => r.data),
+  /** Quick plain health for ANY dataset (uploads too): no model, seconds. */
+  datasetHealth: (datasetId: number, lang: string) =>
+    api.get<SetupFindings>(`/setup/datasets/${datasetId}/health`, { params: { lang } }).then(r => r.data),
+  datasetFix: (datasetId: number, action: Record<string, unknown>, lang: string) =>
+    api.post<{ steps: unknown[] }>(`/setup/datasets/${datasetId}/fix`, { action }, { params: { lang } }).then(r => r.data),
+  dashboard: (sourceId: number, lang: string) =>
+    api.get<SetupDashboardStep>(`/setup/${sourceId}/dashboard`, { params: { lang } }).then(r => r.data),
+  suggestDashboards: (sourceId: number, lang: string) =>
+    api.post<{ designs: SetupDashboardStep['designs'] }>(`/setup/${sourceId}/dashboard/suggest`, null, { params: { lang } }).then(r => r.data),
+  refineDashboard: (sourceId: number, did: string, message: string, lang: string) =>
+    api.post<{ designs: SetupDashboardStep['designs'] }>(`/setup/${sourceId}/dashboard/${did}/refine`, { message }, { params: { lang } }).then(r => r.data),
+  check: (sourceId: number, lang: string) =>
+    api.get<SetupCheckStep>(`/setup/${sourceId}/check`, { params: { lang } }).then(r => r.data),
+  runCheck: (sourceId: number, datasetId: number, lang: string) =>
+    api.post<{ findings: SetupFindings }>(`/setup/${sourceId}/check/${datasetId}/run`, null, { params: { lang } }).then(r => r.data),
+  fix: (sourceId: number, datasetId: number, itemId: string, how: 'fix' | 'check', lang: string) =>
+    api.post<{ findings: SetupFindings }>(`/setup/${sourceId}/check/${datasetId}/fix`, { item_id: itemId, how }, { params: { lang } }).then(r => r.data),
+  /** The latest setup findings for a dataset (plain summaries on its own pages). */
+  findings: (datasetId: number) =>
+    api.get<{ findings: SetupFindings | null; source_id: number | null }>(`/setup/findings/${datasetId}`).then(r => r.data),
+  datasets: (sourceId: number, lang: string) =>
+    api.get<SetupDatasetsStep>(`/setup/${sourceId}/datasets`, { params: { lang } }).then(r => r.data),
+  suggestDatasets: (sourceId: number, lang: string) =>
+    api.post<{ proposals: SetupDatasetsStep['proposals'] }>(`/setup/${sourceId}/datasets/suggest`, null, { params: { lang } }).then(r => r.data),
+  refineDataset: (sourceId: number, pid: string, message: string, lang: string) =>
+    api.post<{ proposals: SetupDatasetsStep['proposals'] }>(`/setup/${sourceId}/datasets/${pid}/refine`, { message }, { params: { lang } }).then(r => r.data),
+  createDatasets: (sourceId: number, items: { id: string; name: string }[], mode: 'import' | 'directquery') =>
+    api.post<SetupCreateResult>(`/setup/${sourceId}/datasets/create`, { items, mode }).then(r => r.data),
+  summary: (sourceId: number, lang: string) =>
+    api.get<SetupSummary>(`/setup/${sourceId}/summary`, { params: { lang } }).then(r => r.data),
+  refreshSummary: (sourceId: number, lang: string) =>
+    api.post<SetupSummary>(`/setup/${sourceId}/summary/refresh`, null, { params: { lang } }).then(r => r.data),
+  sample: (sourceId: number, objectId: number, limit = 5) =>
+    api.get<SetupSample>(`/setup/${sourceId}/tables/${objectId}/sample`, { params: { limit } }).then(r => r.data),
+  editOverview: (sourceId: number, text: string) =>
+    api.patch<{ overview: string | null; overview_source: 'you' | null }>(`/setup/${sourceId}/overview`, { text }).then(r => r.data),
+  editTable: (sourceId: number, objectId: number, text: string) =>
+    api.patch<{ id: number; what: string | null; what_source: 'you' | null }>(`/setup/${sourceId}/tables/${objectId}`, { text }).then(r => r.data),
+  /** My unfinished setups, newest first (Home's "Continue"). */
+  journeys: () => api.get<SetupJourney[]>('/setup/journeys').then(r => r.data),
+  /** My setup of this connection; started on first visit. */
+  get: (sourceId: number) => api.get<SetupJourney>(`/setup/${sourceId}`).then(r => r.data),
+  update: (sourceId: number, body: Partial<{ step: SetupStep; brief: SetupBrief
+                                             dataset_ids: number[]; report_id: number | null }>) =>
+    api.patch<SetupJourney>(`/setup/${sourceId}`, body).then(r => r.data),
 }

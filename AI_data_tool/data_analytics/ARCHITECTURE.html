@@ -251,11 +251,11 @@
   <div class="stack">
     <a class="slab" data-l="1" href="#l1"><span class="sn">01</span><span class="st">Data Sources &amp; Connectivity</span><span class="sd">45 connectors · DirectQuery</span></a>
     <a class="slab" data-l="2" href="#l2"><span class="sn">02</span><span class="st">Ingestion &amp; Metadata</span><span class="sd">profile · introspect · drift</span></a>
-    <a class="slab" data-l="3" href="#l3"><span class="sn">03</span><span class="st">Storage &amp; Persistence</span><span class="sd">86 tables · Valkey cache</span></a>
+    <a class="slab" data-l="3" href="#l3"><span class="sn">03</span><span class="st">Storage &amp; Persistence</span><span class="sd">92 tables · Valkey cache</span></a>
     <a class="slab" data-l="4" href="#l4"><span class="sn">04</span><span class="st">Query &amp; Semantic</span><span class="sd">25 aggregations · RLS</span></a>
     <a class="slab" data-l="5" href="#l5"><span class="sn">05</span><span class="st">Analytics &amp; AI</span><span class="sd">stats · forecast · NL→SQL</span></a>
     <a class="slab" data-l="6" href="#l6"><span class="sn">06</span><span class="st">API &amp; Services</span><span class="sd">19 routers · auth · delivery</span></a>
-    <a class="slab" data-l="7" href="#l7"><span class="sn">07</span><span class="st">Presentation</span><span class="sd">57 widgets · 20 pages</span></a>
+    <a class="slab" data-l="7" href="#l7"><span class="sn">07</span><span class="st">Presentation</span><span class="sd">57 widgets · 22 pages</span></a>
   </div>
   <p class="flowhint">↑ data flows upward · dependencies point downward ↓</p>
 
@@ -621,7 +621,7 @@ STAT_FAMILIES       = {"postgresql"}</code></pre>
   <p class="owns"><strong>Owns:</strong> durable state, cached state, and schema evolution.</p>
 
   <h3>Relational store</h3>
-  <p>PostgreSQL 16 Alpine. <strong>86 tables</strong> defined in <code>models/models.py</code> via async SQLAlchemy, grouped by concern.</p>
+  <p>PostgreSQL 16 Alpine. <strong>92 tables</strong> defined in <code>models/models.py</code> via async SQLAlchemy, grouped by concern.</p>
   <div class="scroll">
     <table>
       <thead><tr><th>Group</th><th>Representative tables</th></tr></thead>
@@ -646,7 +646,7 @@ STAT_FAMILIES       = {"postgresql"}</code></pre>
       </tbody>
     </table>
   </div>
-  <p>Schema changes go through <strong>Alembic</strong> (<code>backend/alembic/</code>, 46 revisions). <code>postgres/init.sql</code> provides the initial schema and indexes. Every timestamp column is <code>TIMESTAMPTZ</code> and the app writes naive UTC; <code>core/database.py</code> marks each bound naive datetime as UTC (asyncpg would read it as the process's local time) and pins the session time zone to UTC, so stored times are right on a server whose clock is not UTC.</p>
+  <p>Schema changes go through <strong>Alembic</strong> (<code>backend/alembic/</code>, 59 revisions). <code>postgres/init.sql</code> provides the initial schema and indexes. Every timestamp column is <code>TIMESTAMPTZ</code> and the app writes naive UTC; <code>core/database.py</code> marks each bound naive datetime as UTC (asyncpg would read it as the process's local time) and pins the session time zone to UTC, so stored times are right on a server whose clock is not UTC.</p>
 
   <h3>Cache</h3>
   <p><code>services/cache_backend.py</code> defines a <code>CacheBackend</code> interface with two implementations — <code>InProcessCache</code> for single-process or test runs, and <code>ValkeyCache</code> for the deployed stack. <code>frame_cache.py</code> caches computed result frames. With <code>VALKEY_URL</code> set, the rate limiter's buckets and the AI concurrent-ask counter live in the same Valkey (<code>core/shared_limits.py</code>), so every API process shares one ceiling; without it, or while Valkey is down, each process keeps its own.</p>
@@ -755,7 +755,7 @@ STAT_FAMILIES       = {"postgresql"}</code></pre>
   widget list. <code>suggest_dataset_dashboard.py</code> starts from a
   <strong>dataset that already exists</strong> and a person&rsquo;s own description of
   their job, and returns whole dashboards for that person.</p>
-  <p>It is fenced three ways, because a model handed 74 widget types will
+  <p>It is fenced three ways, because a model handed 75 widget types will
   otherwise propose tiles that render blank:</p>
   <ol>
     <li><code>dataset_profile.py</code> builds what the model is told &mdash;
@@ -833,7 +833,7 @@ llm_reserved_interactive = 2</code></pre>
   <p class="owns"><strong>Owns:</strong> the HTTP surface, identity, and everything that leaves the system.</p>
 
   <h3>Routers</h3>
-  <p><strong>35 router modules</strong>, mounted with 37 <code>include_router</code> calls in <code>main.py</code> — <code>analysis</code> and <code>metadata</code> each expose a second router. All under <code>/api/v1</code> except the agent.</p>
+  <p><strong>36 router modules</strong>, mounted with 37 <code>include_router</code> calls in <code>main.py</code> — <code>analysis</code> and <code>metadata</code> each expose a second router. All under <code>/api/v1</code> except the agent.</p>
   <div class="scroll">
     <table>
       <thead><tr><th>Router</th><th>Surface</th></tr></thead>
@@ -994,7 +994,7 @@ llm_reserved_interactive = 2</code></pre>
   <p class="owns"><strong>Owns:</strong> authoring and rendering reports. React 18 · TypeScript · Vite · Recharts.</p>
 
   <h3>Pages</h3>
-  <p><strong>20 pages</strong> in <code>frontend/src/pages/</code>.</p>
+  <p><strong>22 pages</strong> in <code>frontend/src/pages/</code>.</p>
   <div class="scroll">
     <table>
       <thead><tr><th>Page</th><th>Purpose</th></tr></thead>
@@ -1022,7 +1022,7 @@ llm_reserved_interactive = 2</code></pre>
   </div>
 
   <h3>Widget system</h3>
-  <p><strong>74 widget types</strong> declared in <code>types/report.ts</code> as <code>WidgetType</code> and catalogued in <code>WIDGET_CATALOG</code> — the source of truth; do not maintain a parallel list.</p>
+  <p><strong>75 widget types</strong> declared in <code>types/report.ts</code> as <code>WidgetType</code> and catalogued in <code>WIDGET_CATALOG</code> — the source of truth; do not maintain a parallel list.</p>
   <div class="scroll">
     <table>
       <thead><tr><th>Category</th><th>Types</th></tr></thead>
@@ -1161,8 +1161,8 @@ llm_reserved_interactive = 2</code></pre>
     <table>
       <thead><tr><th>Suite</th><th>Scope</th><th>Count</th></tr></thead>
       <tbody>
-        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~6,670 tests · 428 modules</td></tr>
-        <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~3,410 tests · 250 files</td></tr>
+        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~6,670 tests · 471 modules</td></tr>
+        <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~3,410 tests · 338 files</td></tr>
         <tr><th>Evals</th><td><code>backend/evals/</code></td><td>Agent quality gates (<code>run_eval_gate.ps1</code>)</td></tr>
         <tr><th>Conformance</th><td><code>tests/test_layer_conformance.py</code></td><td>Enforces the layer boundaries above</td></tr>
         <tr><th>Doc audit</th><td><code>tests/test_architecture_doc.py</code></td><td>Enforces the <em>counts</em> in this document</td></tr>

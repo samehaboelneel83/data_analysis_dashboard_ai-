@@ -27,6 +27,7 @@ const Glossary = lazy(() => import('./pages/Glossary'))
 const Dataflows = lazy(() => import('./pages/Dataflows'))
 const Migration = lazy(() => import('./pages/Migration'))
 const SourceReview = lazy(() => import('./pages/SourceReview'))
+const Setup = lazy(() => import('./pages/Setup'))
 const SharedReport = lazy(() => import('./pages/SharedReport'))
 const EmbeddedReport = lazy(() => import('./pages/EmbeddedReport'))
 const AdminRoles = lazy(() => import('./pages/admin/AdminRoles'))
@@ -119,6 +120,9 @@ export default function App() {
           {/* Layer 1 — confirm the relationships and descriptions that
               metadata inference proposed for one connection. */}
           <Route path="connections/:id/review" element={<SourceReview />} />
+          {/* Guided setup (docs/guided-setup/PLAN.md): understand the database,
+              choose data, check it, build a dashboard. */}
+          <Route path="setup/:id" element={<Setup />} />
               <Route element={<RequireAdmin />}>
                 <Route path="admin/roles" element={<AdminRoles />} />
                 <Route path="admin/custom-connectors" element={<AdminCustomConnectors />} />

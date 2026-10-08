@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import LoadError from '../components/ui/LoadError'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useOptionalAuth } from '../contexts/AuthContext'
-import { dataSourcesApi } from '../services/api'
-import type { DataSource, ConnectorSpec } from '../services/api'
+import { dataSourcesApi, setupApi } from '../services/api'
+import type { DataSource, ConnectorSpec, SetupJourney } from '../services/api'
+import { localDigits } from '../lib/arabicFormats'
 import toast from 'react-hot-toast'
 import { useConfirm } from '../components/ui/ConfirmDialog'
 import QueryBuilderDialog from '../components/QueryBuilderDialog'
@@ -27,6 +28,8 @@ export { SchemaBrowser } from './connections/SchemaBrowser'
 export default function Connections() {
   const t = useT()
   const [sources,  setSources]  = useState<DataSource[]>([])
+  // Guided setup: where this person stopped on each connection ("Continue setup").
+  const [journeys, setJourneys] = useState<Record<number, SetupJourney>>({})
   const srcFilter = useListFilter(sources,
     d => [d.name, d.type], t('search.connections'))
   const [catalog,  setCatalog]  = useState<ConnectorSpec[]>([])
@@ -47,6 +50,16 @@ export default function Connections() {
   const goTo = useNavigate()
   const [browser,  setBrowser]  = useState<DataSource | null>(null)
   const [building, setBuilding] = useState<DataSource | null>(null)
+  // Guided setup "Build it myself": ?browse=<id> opens the schema browser and
+  // ?build=<id> the query builder for that connection, once the list is in.
+  const [params, setParams] = useSearchParams()
+  useEffect(() => {
+    const browse = Number(params.get('browse')), build = Number(params.get('build'))
+    if (!sources.length || (!browse && !build) || !canAdminister) return
+    const ds = sources.find(s => s.id === (browse || build))
+    if (ds) { if (browse) setBrowser(ds); else setBuilding(ds) }
+    setParams({}, { replace: true })
+  }, [sources, params, canAdminister, setParams])
   // Bumped when the schema browser queues an import, so the Imports list
   // shows it without waiting for its next poll.
   const [queueKey, setQueueKey] = useState(0)
@@ -63,6 +76,10 @@ export default function Connections() {
       .finally(() => setLoading(false))
     // Fetch the connector catalog and populate the icon/label maps in place so
     // list rows and the schema browser render a friendly name for any type.
+    // Optional: without it every row still offers to start the setup.
+    Promise.resolve(setupApi.journeys?.()).then(js => {
+      if (js) setJourneys(Object.fromEntries(js.map(j => [j.source.id, j])))
+    }).catch(() => {})
     dataSourcesApi.connectors().then(specs => {
       setCatalog(specs)
       for (const s of specs) { TYPE_ICON[s.key] = s.icon; TYPE_LABEL[s.key] = s.label }
@@ -85,7 +102,11 @@ export default function Connections() {
     //
     // Only when a sync actually started: with no run to watch, the review page
     // is an empty queue and the list is the more useful place to be.
-    if (isNew && ds.sync_run_id) goTo(`/connections/${ds.id}/review`)
+    //
+    // Guided setup (docs/guided-setup/PLAN.md): that page is now the setup's
+    // first step, which explains the source in plain words and waits for the
+    // sync itself -- so it is where every new connection goes.
+    if (isNew) goTo(`/setup/${ds.id}`)
   }
 
   const confirm = useConfirm()
@@ -212,6 +233,21 @@ export default function Connections() {
                   the same distance from the cursor as Test; the three kept are
                   the ones you reach for while USING a source, and the menu
                   spells out the rest instead of making them compete. */}
+              {/* Guided setup: for everyone who can see the connection. The
+                  review page is readable by them too (editing stays admin). */}
+              <div className="dl-conn__actions">
+                <Link className="btn btn-sm" to={`/setup/${ds.id}`}>
+                  {journeys[ds.id]
+                    ? t('setup.continueStep', { n: localDigits(String(journeys[ds.id].position)),
+                                                total: localDigits(String(journeys[ds.id].total)) })
+                    : t('setup.start')}
+                </Link>
+                {!canAdminister && (
+                  <Link className="btn btn-ghost btn-sm" to={`/connections/${ds.id}/review`}>
+                    {t('connections.metadata')}
+                  </Link>
+                )}
+              </div>
               {canAdminister && (
                 <div className="dl-conn__actions">
                   <button className="btn btn-ghost btn-sm" onClick={() => handleTest(ds)}

@@ -84,26 +84,10 @@ def _may_administer(ds: DataSource, user: User) -> bool:
 async def _visible_source_ids(db: AsyncSession, user: User) -> set[int] | None:
     """Connections this user may SEE. None means all of them (admins).
 
-    Yours, plus any that backs a dataset you can read -- a member who was
-    given a dataset still needs to see the connection behind it for the
-    dataset picker and the Ask-AI scope selector to make sense. Seeing a
-    connection is not using it: the config comes back redacted, importing
-    stays admin-only, and changing it needs `_may_administer` below.
-    """
-    if user.role and user.role.is_org_admin:
-        return None
-    ids = set((await db.execute(
-        select(DataSource.id).where(
-            DataSource.org_id == user.org_id,
-            or_(DataSource.created_by == user.id, DataSource.created_by.is_(None)))
-    )).scalars().all())
-    readable = await readable_dataset_ids(db, user)
-    q = select(Dataset.data_source_id).where(
-        Dataset.org_id == user.org_id, Dataset.data_source_id.isnot(None))
-    if readable is not None:
-        q = q.where(Dataset.id.in_(readable or {-1}))
-    ids |= set(x for x in (await db.execute(q)).scalars().all() if x is not None)
-    return ids
+    The rule lives in services/guided_setup/access.py so services (the guided
+    setup, the review catalog) can apply it without reaching into a router."""
+    from ..services.guided_setup.access import visible_source_ids
+    return await visible_source_ids(db, user)
 
 
 def _valid_label(label: str | None) -> str | None:
@@ -156,7 +140,8 @@ async def create_data_source(body: DataSourceCreate, db: AsyncSession = Depends(
     ds = DataSource(name=body.name, type=ds_type, config=config,
                     custom_connector_id=(preset.id if preset else None),
                     org_id=current_user.org_id, created_by=current_user.id,
-                    sensitivity=_valid_label(body.sensitivity))
+                    sensitivity=_valid_label(body.sensitivity),
+                    allow_llm_sampling=body.allow_llm_sampling)
     db.add(ds)
     await db.commit()
     await db.refresh(ds)

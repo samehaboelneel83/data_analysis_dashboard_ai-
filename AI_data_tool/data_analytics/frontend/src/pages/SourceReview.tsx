@@ -1,5 +1,7 @@
 import { useCallback, useContext, useEffect, useMemo, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
+import { useT } from '../i18n'
+import SourceSummary from '../components/setup/SourceSummary'
 import { dataSourcesApi, type IndexAdvice } from '../services/api'
 import toast from 'react-hot-toast'
 import {
@@ -15,7 +17,6 @@ import { AuthContext } from '../contexts/AuthContext'
 import SuggestFromSourceDialog from '../components/review/SuggestFromSourceDialog'
 import LoadError from '../components/ui/LoadError'
 import LoadingState from '../components/ui/LoadingState'
-import { useT } from '../i18n'
 import {
   RelationshipRow, ColumnReview, EntityReview, DriftPanel, SourceHealthPanel,
 } from './sourceReview/ReviewPanels'
@@ -308,6 +309,9 @@ export default function SourceReview() {
         </button>
       </header>
 
+      {/* Guided setup phase 5c: plain first; the full review is below. */}
+      <SourceSummary sourceId={sourceId} />
+
       <input
         className="input"
         type="search"
@@ -358,12 +362,17 @@ export default function SourceReview() {
       <section className="card" style={{ marginBottom: 20, padding: 12,
         display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <div style={{ flex: 1 }}><SyncProgress run={run} /></div>
-        {/* The step BEFORE a dataset exists: someone has connected a database,
-            has no dataset, and does not know which of its tables to join. The
-            backend has answered this since it shipped and nothing called it. */}
-        <button type="button" className="btn btn-primary" onClick={() => setSuggesting(true)}
+        {/* Guided setup 4c: one designer. "Suggest a dashboard" used to open a
+            single-proposal designer of its own; the guided setup now walks from
+            this source to a dashboard (data, checks, three designs), so this is
+            its door. The old dialog stays reachable for a quick one-off. */}
+        <Link to={`/setup/${sourceId}`} className="btn btn-primary"
           style={{ whiteSpace: 'nowrap', alignSelf: 'flex-start' }}>
-          {tr('pg.dataPages.sr.suggest')}
+          {tr('setup.review.cta')}
+        </Link>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSuggesting(true)}
+          style={{ whiteSpace: 'nowrap', alignSelf: 'flex-start' }}>
+          {tr('setup.review.quick')}
         </button>
       </section>
 

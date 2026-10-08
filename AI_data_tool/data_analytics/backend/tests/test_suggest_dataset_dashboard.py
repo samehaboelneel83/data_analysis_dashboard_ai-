@@ -258,6 +258,16 @@ class TestPolish:
             profile)
         assert got["config"]["dimension_granularity"] == "year"
 
+    def test_a_time_axis_is_never_cut_by_a_row_limit(self, profile):
+        # A limit keeps the EARLIEST periods: a 2000-2026 index trend stopped at
+        # 2004-Q4 (guided-setup walkthrough, 2026-10-07).
+        got = polish_widget(
+            {"widget_type": "line", "title": "x",
+             "config": {"dimension": "arrived_at", "measure": "encounter_id",
+                        "aggregation": "count", "dimension_granularity": "quarter", "limit": 20}},
+            profile)
+        assert "limit" not in got["config"]
+
     def test_a_non_date_dimension_gets_none(self, profile):
         got = polish_widget(
             {"widget_type": "bar", "title": "x",

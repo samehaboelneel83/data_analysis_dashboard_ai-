@@ -94,6 +94,19 @@ describe('TopBar', () => {
     expect(logout).toHaveBeenCalledTimes(1)
   })
 
+  it('turns "Always show details" on and off from the account menu', () => {
+    localStorage.clear()
+    renderAt('/')
+    fireEvent.click(screen.getByRole('button', { name: 'Account menu' }))
+    const item = screen.getByRole('menuitemcheckbox', { name: /Always show details/ })
+    expect(item).toHaveAttribute('aria-checked', 'false')
+    fireEvent.click(item)
+    expect(item).toHaveAttribute('aria-checked', 'true')
+    expect(localStorage.getItem('datalytics.alwaysShowDetails')).toBe('1')
+    fireEvent.click(item)
+    expect(item).toHaveAttribute('aria-checked', 'false')
+  })
+
   it('Escape closes the account menu', () => {
     renderAt('/')
     fireEvent.click(screen.getByRole('button', { name: 'Account menu' }))

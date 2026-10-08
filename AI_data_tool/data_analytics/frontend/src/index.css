@@ -3156,3 +3156,7 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--da
    tooltip's value is always a number, and is isolated left to right. */
 [dir="rtl"] td, [dir="rtl"] th { unicode-bidi: plaintext; }
 .recharts-tooltip-item-value { unicode-bidi: isolate; direction: ltr; }
+
+/* Guided setup phase 5: "What you should know" on dataset pages */
+.dl-health { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+.dl-health__more { margin: 0; font-size: 13px; }

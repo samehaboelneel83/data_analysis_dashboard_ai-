@@ -1142,7 +1142,7 @@ relationships, a profile, and no unmasked personal data.
 
 ### Relational store
 
-PostgreSQL 16 Alpine. **86 tables** defined in `models/models.py` via async
+PostgreSQL 16 Alpine. **92 tables** defined in `models/models.py` via async
 SQLAlchemy, grouped by concern:
 
 | Group | Representative tables |
@@ -1166,7 +1166,7 @@ SQLAlchemy, grouped by concern:
 | Platform | `saml_authn_requests`, `org_mcp_access`, `eval_runs` |
 | Ops | `sync_runs`, `schema_versions`, `column_stats`, `materializations`, `quotas`, `query_runs`, `ai_usage`, `migration_items` |
 
-Schema changes go through **Alembic** (`backend/alembic/`, 46 revisions).
+Schema changes go through **Alembic** (`backend/alembic/`, 59 revisions).
 Every timestamp column is `TIMESTAMPTZ` and the app writes naive UTC; `core/database.py` marks each bound naive datetime as UTC (asyncpg would read it as the process's local time) and pins the session time zone to UTC, so stored times are right on a server whose clock is not UTC.
 `postgres/init.sql` provides the initial schema and indexes.
 
@@ -1499,7 +1499,7 @@ breaks an org's tokens down by day, feature and person.
 
 ### Routers
 
-**35 router modules**, mounted with 37 `include_router` calls in `main.py` --
+**36 router modules**, mounted with 37 `include_router` calls in `main.py` --
 `analysis` and `metadata` each expose a second router. All under `/api/v1`
 except the agent:
 
@@ -2092,7 +2092,7 @@ React 18 · TypeScript · Vite · Recharts.
 
 ### Pages
 
-**20 pages** in `frontend/src/pages/`:
+**22 pages** in `frontend/src/pages/`:
 
 | Page | Purpose |
 |------|---------|
@@ -2119,7 +2119,7 @@ React 18 · TypeScript · Vite · Recharts.
 
 ### Widget system
 
-**74 widget types** declared in `types/report.ts` as `WidgetType` and catalogued
+**75 widget types** declared in `types/report.ts` as `WidgetType` and catalogued
 in `WIDGET_CATALOG` (the source of truth — do not maintain a parallel list):
 
 | Category | Types |
@@ -2348,8 +2348,8 @@ Agent pane (7)
 
 | Suite | Scope | Count |
 |-------|-------|-------|
-| Backend | `backend/tests/` | ~6,670 tests across 428 modules |
-| Frontend | colocated `*.test.ts(x)` | ~3,410 tests across 250 files |
+| Backend | `backend/tests/` | ~6,670 tests across 471 modules |
+| Frontend | colocated `*.test.ts(x)` | ~3,410 tests across 338 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |
 | Doc audit | `tests/test_architecture_doc.py` | Enforces the *counts* in this document |

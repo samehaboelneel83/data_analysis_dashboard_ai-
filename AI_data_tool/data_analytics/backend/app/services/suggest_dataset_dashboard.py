@@ -991,7 +991,18 @@ def polish_widget(widget: dict, profile: dict) -> dict:
             and config.get("dimension_granularity"):
         config.pop("dimension_granularity")
 
-    if isinstance(dim, str) and not config.get("limit"):
+    # A row limit on a grouped TIME axis keeps the earliest N periods: "EGX30
+    # index trend" stopped at 2004-Q4 on data running to 2026 (guided-setup
+    # walkthrough, 2026-10-07). "The last 12 months" is a filter, never a
+    # limit, so a limit here -- the model's or the default below -- goes.
+    if isinstance(axis, str) and known.get(axis, {}).get("role") == "datetime" \
+            and config.get("dimension_granularity"):
+        config.pop("limit", None)
+        is_time_axis = True
+    else:
+        is_time_axis = False
+
+    if isinstance(dim, str) and not config.get("limit") and not is_time_axis:
         distinct = known.get(dim, {}).get("distinct") or 0
         is_time = known.get(dim, {}).get("role") == "datetime"
         if distinct > HIGH_CARDINALITY:

@@ -58,9 +58,12 @@ class ConfirmRequest(BaseModel):
 
 
 async def _get_source(db: AsyncSession, source_id: int, user: User) -> DataSource:
-    source = await db.get(DataSource, source_id)
-    check_org(source, user, "Data source not found")
-    return source
+    """The connection, if this user may SEE it -- the same rule as the
+    Connections list. Org membership alone used to be enough here, so a
+    member could read the catalog (tables, columns, value lists) of a
+    connection the list hid from them. 404, not 403: see the module notes."""
+    from .guided_setup import source_or_404
+    return await source_or_404(db, source_id, user)
 
 
 # ── sync ────────────────────────────────────────────────────────────────────

@@ -155,6 +155,14 @@ export default function DashboardProposals(
   const rtl = (brief?.language || '').toLowerCase().startsWith('ar')
   return (
     <div style={{ marginTop: 8 }} dir={rtl ? 'rtl' : undefined}>
+      {/* Guided setup 4c: the same journey, step by step (data, checks, designs). */}
+      <div style={{ fontSize: 12, marginBottom: 6 }}>
+        <a href={`/setup/${presentation.source_id}`}
+          onClick={e => { e.preventDefault(); navigate(`/setup/${presentation.source_id}`) }}>
+          {rtl ? 'جرّب الإعداد الموجَّه: اختيار البيانات وفحصها ثم تصميم اللوحة خطوة بخطوة'
+               : 'Try the guided setup: choose and check the data, then design the dashboard step by step'}
+        </a>
+      </div>
       {brief && (
         <div style={{ ...card, fontSize: 12 }}>
           {brief.role && <div><b>{rtl ? 'دورك: ' : 'Your role: '}</b>{brief.role}</div>}
