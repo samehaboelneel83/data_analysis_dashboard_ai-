@@ -980,8 +980,14 @@ def shape_series(df: pd.DataFrame, config: dict) -> dict:
     if not dim and not meas:
         cols = [c for c in (explicit_cols or list(df.columns)) if c in df.columns]
     elif agg in ("none", "raw") and not dim:
-        cols = [meas] if meas in df.columns else [
-            c for c in (explicit_cols or list(df.columns)) if c in df.columns]
+        # Columns named for the table win; then the measure alone; then all.
+        # (The measure alone used to win over a named list, so "price, make,
+        # model and link" showed price only -- 2026-10-08.)
+        named = [c for c in explicit_cols if c in df.columns]
+        if named:
+            cols = named + ([meas] if meas in df.columns and meas not in named else [])
+        else:
+            cols = [meas] if meas in df.columns else list(df.columns)
     else:
         cols = None
     if cols is not None:

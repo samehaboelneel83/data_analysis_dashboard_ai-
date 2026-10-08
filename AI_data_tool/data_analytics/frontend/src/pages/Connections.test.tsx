@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { renderWithProviders } from '../test/renderWithProviders'
 import Connections, { SchemaBrowser } from './Connections'
 import { dataSourcesApi, jobsApi } from '../services/api'
@@ -140,6 +140,54 @@ describe('ConnectionModal custom preset resolution', () => {
     const call = vi.mocked(dataSourcesApi.create).mock.calls[0][0]
     expect(call.type).not.toBe('custom:7')
     expect(call.custom_connector_id).not.toBeUndefined()
+  })
+
+  it('takes a new connection straight into the guided setup, and offers it on every row', async () => {
+    vi.mocked(dataSourcesApi.connectors).mockResolvedValue([BUILTIN, CUSTOM])
+    vi.mocked(dataSourcesApi.list).mockResolvedValue([DS])
+    vi.mocked(dataSourcesApi.create).mockResolvedValue({
+      id: 100, name: 'cars', type: 'postgresql', config: {}, created_at: '2026-01-01',
+    })
+    const auth = {
+      user: { id: 1, email: 'admin@x.y', role: { id: 1, name: 'Admin', is_org_admin: true } },
+      login: vi.fn(), logout: vi.fn(), loading: false,
+    }
+    renderWithProviders(
+      <AuthContext.Provider value={auth as never}>
+        <MemoryRouter initialEntries={['/connections']}>
+          <Routes>
+            <Route path="/connections" element={<Connections />} />
+            <Route path="/setup/:id" element={<p>setup page</p>} />
+          </Routes>
+        </MemoryRouter>
+      </AuthContext.Provider>
+    )
+    expect(await screen.findByRole('link', { name: 'Guided setup' })).toHaveAttribute('href', '/setup/1')
+    fireEvent.click(screen.getByRole('button', { name: /New Connection/ }))
+    fireEvent.change(await screen.findByLabelText('Connection name *'), { target: { value: 'cars' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create connection' }))
+    expect(await screen.findByText('setup page')).toBeInTheDocument()
+  })
+
+  it('lets AI describe a new connection unless the box is unticked', async () => {
+    vi.mocked(dataSourcesApi.create).mockClear()
+    vi.mocked(dataSourcesApi.connectors).mockResolvedValue([BUILTIN, CUSTOM])
+    vi.mocked(dataSourcesApi.list).mockResolvedValue([])
+    vi.mocked(dataSourcesApi.create).mockResolvedValue({
+      id: 100, name: 'cars', type: 'postgresql', config: {}, created_at: '2026-01-01',
+    })
+
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: /New Connection/ }))
+    const box = await screen.findByRole('checkbox', { name: /Let AI read a few sample rows/ })
+    expect(box).toBeChecked()
+    fireEvent.click(box)
+    fireEvent.change(screen.getByLabelText('Connection name *'), { target: { value: 'cars' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create connection' }))
+
+    await waitFor(() => expect(dataSourcesApi.create).toHaveBeenCalledWith(
+      expect.objectContaining({ allow_llm_sampling: false })
+    ))
   })
 
   it('tests the settings in the form before anything is saved', async () => {

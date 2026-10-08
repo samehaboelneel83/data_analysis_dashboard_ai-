@@ -2535,3 +2535,42 @@ class AppSetting(Base):
     value      = Column(JSON, nullable=True)
     updated_by = Column(String(255))           # email, denormalised like the audit log
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class SetupJourney(Base):
+    """Where one person is in the guided setup of one connection
+    (docs/guided-setup/PLAN.md, step 0c).
+
+    A guide, not a store: everything the setup makes is an ordinary object
+    (the connection's description, datasets, a dashboard) found later on its
+    usual page. This row only remembers the step reached, the answers to
+    "About you" -- asked once, reused by every later step -- and what the
+    setup made, so Home can say "Continue: cars, step 2 of 4".
+    """
+    __tablename__ = "setup_journeys"
+    __table_args__ = (UniqueConstraint("user_id", "data_source_id", name="uq_setup_journeys_user_source"),)
+    id             = Column(Integer, primary_key=True)
+    org_id         = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id        = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    data_source_id = Column(Integer, ForeignKey("data_sources.id", ondelete="CASCADE"), nullable=False, index=True)
+    #: understand | data | check | dashboard | done
+    step           = Column(String(20), nullable=False, default="understand", server_default="understand")
+    #: {"work", "focus", "questions", "exclude"} -- hints for the model, never rules
+    brief          = Column(JSON, nullable=True)
+    #: ids of the datasets this setup created or adopted
+    dataset_ids    = Column(JSON, nullable=True)
+    report_id      = Column(Integer, ForeignKey("reports.id", ondelete="SET NULL"), nullable=True)
+    #: The model's words for the Understand step, one entry per language:
+    #: {"en": {"attempt", "words", ...}, "ar": {...}}. Asked once and kept until
+    #: the user presses "Ask AI again" (routers/guided_setup.py `_entries`).
+    summary        = Column(JSON, nullable=True)
+    #: Choose data: the proposed datasets, kept until "Suggest again"
+    #: {"lang", "attempt", "pending", "failed", "items": [...], "at"}.
+    proposals      = Column(JSON, nullable=True)
+    #: Check & discover: the plain health notes and insights per dataset,
+    #: {"<dataset id>": {...}} -- kept until "Check again".
+    findings       = Column(JSON, nullable=True)
+    #: Dashboard: the proposed dashboards, kept until "Suggest again".
+    designs        = Column(JSON, nullable=True)
+    created_at     = Column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at     = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)

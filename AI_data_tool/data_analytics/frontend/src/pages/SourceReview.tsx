@@ -1,5 +1,7 @@
 import { useCallback, useContext, useEffect, useMemo, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
+import { useT } from '../i18n'
+import SourceSummary from '../components/setup/SourceSummary'
 import { dataSourcesApi, type IndexAdvice } from '../services/api'
 import toast from 'react-hot-toast'
 import {
@@ -52,6 +54,7 @@ export default function SourceReview() {
   // The connection-level dashboard proposal. Opened from the header rather
   // than a tab: it is an action taken ON this source, not another view of it.
   const [suggesting, setSuggesting] = useState(false)
+  const t = useT()
   // Writing vocabulary is admin-gated the way the endpoint is; READING it is
   // not, because the glossary is documentation and hiding it helps nobody.
   // `useContext` rather than `useAuth()`: the hook THROWS outside a provider,
@@ -307,6 +310,9 @@ export default function SourceReview() {
         </button>
       </header>
 
+      {/* Guided setup phase 5c: plain first; the full review is below. */}
+      <SourceSummary sourceId={sourceId} />
+
       <input
         className="input"
         type="search"
@@ -357,12 +363,17 @@ export default function SourceReview() {
       <section className="card" style={{ marginBottom: 20, padding: 12,
         display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <div style={{ flex: 1 }}><SyncProgress run={run} /></div>
-        {/* The step BEFORE a dataset exists: someone has connected a database,
-            has no dataset, and does not know which of its tables to join. The
-            backend has answered this since it shipped and nothing called it. */}
-        <button type="button" className="btn btn-primary" onClick={() => setSuggesting(true)}
+        {/* Guided setup 4c: one designer. "Suggest a dashboard" used to open a
+            single-proposal designer of its own; the guided setup now walks from
+            this source to a dashboard (data, checks, three designs), so this is
+            its door. The old dialog stays reachable for a quick one-off. */}
+        <Link to={`/setup/${sourceId}`} className="btn btn-primary"
           style={{ whiteSpace: 'nowrap', alignSelf: 'flex-start' }}>
-          Suggest a dashboard
+          {t('setup.review.cta')}
+        </Link>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSuggesting(true)}
+          style={{ whiteSpace: 'nowrap', alignSelf: 'flex-start' }}>
+          {t('setup.review.quick')}
         </button>
       </section>
 

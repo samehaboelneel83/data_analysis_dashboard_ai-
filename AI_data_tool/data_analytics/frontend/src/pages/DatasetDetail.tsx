@@ -53,6 +53,9 @@ import { useJob } from '../components/jobs/useJob'
 import { newIdempotencyKey } from '../components/jobs/idempotency'
 import { isJobActive, jobsApi, type Job } from '../services/api'
 import DataQualityPanel from '../components/dataset/DataQualityPanel'
+import DatasetHealth from '../components/setup/DatasetHealth'
+import ChangeDataDialog from '../components/setup/ChangeDataDialog'
+import { isMissingLabel } from '../lib/missingLabel'
 
 import { type Tab, OPS, FILTER_FUNC_CATS, PAGE_SIZE, tabFromKey } from './datasetDetail/constants'
 import './datasetDetail/overview.css'
@@ -188,6 +191,7 @@ export default function DatasetDetail() {
   const { job: refreshJob, setJob: setRefreshJob } = useJob(refreshJobId, j => { void onRefreshSettled(j) })
   const refreshing = queueing || (refreshJobId != null && (!refreshJob || isJobActive(refreshJob)))
   // F3: load-mode picker -- full reload vs. watermark-driven incremental append.
+  const [changingData, setChangingData] = useState(false)
   const [showRefreshMenu, setShowRefreshMenu] = useState(false)
   // The refresh options hang from the button's end edge; when the header has
   // wrapped and the button sits at the start, that runs under the side nav.
@@ -814,6 +818,12 @@ export default function DatasetDetail() {
                 {refreshing ? refreshStage
                   : <IconLabel icon={RefreshCw}>{ds.data_source_id ? tr('dataset.refreshFromSource') : tr('dataset.refreshSchedule')}</IconLabel>}
               </button>
+              {/* 2026-10-08: add what the dataset left out, without SQL. */}
+              {ds.data_source_id && (
+                <button className="btn btn-ghost btn-sm" onClick={() => setChangingData(true)}>
+                  {tr('change.button')}
+                </button>
+              )}
               {refreshJob && isJobActive(refreshJob) && !refreshJob.cancel_requested && (
                 <button className="btn btn-ghost btn-sm" data-testid="refresh-stop"
                   onClick={() => { void jobsApi.cancel(refreshJob.id).then(setRefreshJob).catch(() => {}) }}>
@@ -949,6 +959,11 @@ export default function DatasetDetail() {
           })}
       </div>
 
+      {changingData && ds && (
+        <ChangeDataDialog datasetId={ds.id} datasetName={ds.name} onClose={() => setChangingData(false)}
+          onChanged={() => { loadDataset() }} />
+      )}
+
       {/* Columns (redesign 3c): one row per column -- meaning, distribution,
           empty share, summary and use -- with v1's full per-column statistics
           kept underneath, folded. */}
@@ -959,6 +974,8 @@ export default function DatasetDetail() {
                 Based on a live sample of {analysis.sample_size?.toLocaleString()} of {analysis.total_rows?.toLocaleString()} rows.
               </div>
             )}
+          {/* Guided setup phase 5: plain first, the full column table below. */}
+          <DatasetHealth datasetId={ds.id} dataSourceId={ds.data_source_id} onChanged={loadDataset} showInsights={false} />
           <ColumnMeaningPanel dataset={ds} canEdit onSaved={loadDataset} analysis={analysis} />
           {analysis && (numCols.length > 0 || dtCols.length > 0 || catCols.length > 0) && (
             <details className="dl-cols__details">
@@ -1070,7 +1087,7 @@ export default function DatasetDetail() {
                       <div style={{ fontWeight: 700, marginBottom: 6 }}>{col} <span style={{ color: 'var(--muted)', fontSize: 12, fontWeight: 400 }}>({s.n_unique} unique)</span></div>
                       {(s.top_values ?? []).slice(0, 5).map((v: any) => (
                         <div key={v.value} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '2px 0', color: 'var(--muted)' }}>
-                          <span style={{ color: 'var(--text)' }}>{v.value}</span>
+                          <span style={{ color: 'var(--text)' }}>{isMissingLabel(v.value) ? <em>{tr('setup.u.emptyValue')}</em> : v.value}</span>
                           <span style={{ fontFamily: 'var(--mono)' }}>{v.pct}%</span>
                         </div>
                       ))}
@@ -1355,6 +1372,8 @@ export default function DatasetDetail() {
           one, with their row-level security. */}
       {tab === 'rules' && ds && (
         <div className="dl-rules">
+          {/* Guided setup phase 5: the quality report in plain words, on top. */}
+          <DatasetHealth datasetId={ds.id} dataSourceId={ds.data_source_id} onChanged={loadDataset} showInsights={false} />
           {ds.mode !== 'directquery' && (
             <ChecksPanel datasetId={ds.id} columns={(ds.columns ?? []).map(c => c.name)}
               canEdit={!!pipelineHealth?.can_edit}>

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { isMissingLabel } from '../../lib/missingLabel'
 import { useDirection } from '../../contexts/DirectionContext'
 import { useT } from '../../i18n'
 import { localDigits } from '../../lib/arabicFormats'
@@ -59,7 +60,7 @@ export function useColumnProfile(ds: Dataset, name: string, analysis: Analysis):
       dist: (
         <span className="dl-ov__tops">
           {top.map(v => (
-            <span key={v.value}><em dir="auto">{v.value}</em><b style={{ inlineSize: `${Math.max(4, v.pct * 0.4)}px` }} /><small>{localDigits(String(Math.round(v.pct)))}%</small></span>
+            <span key={v.value}><em dir="auto">{isMissingLabel(v.value) ? t('setup.u.emptyValue') : v.value}</em><b style={{ inlineSize: `${Math.max(4, v.pct * 0.4)}px` }} /><small>{localDigits(String(Math.round(v.pct)))}%</small></span>
           ))}
         </span>
       ),

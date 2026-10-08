@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Database, LayoutDashboard, Plug, RefreshCw } from 'lucide-react'
 import {
-  agentApi, dataSourcesApi, datasetsApi, lineageApi, monitoringApi, reportsApi,
+  agentApi, dataSourcesApi, datasetsApi, lineageApi, monitoringApi, reportsApi, setupApi,
   type ActivityRow, type DataSource, type DatasetSummary, type LineageGraph, type RecentReport, type RefreshRunRow,
 } from '../services/api'
 import type { Report } from '../types/report'
@@ -16,6 +16,7 @@ import { datasetSuggestions } from './ask/suggestions'
 import { typeName } from './datasetsList/classify'
 import { Continue, Hero, Onboarding, Quick, Stats, type HeroChips, type Tile } from './home/parts'
 import DashboardsSection from './home/DashboardsSection'
+import SetupContinue from './home/SetupContinue'
 import DatasetsSection, { askable, recentDatasets } from './home/DatasetsSection'
 import { ActivityCard, JobsCard } from './home/AdminCards'
 import { feedItems, handle, jobsDigest } from './home/feeds'
@@ -63,6 +64,8 @@ export default function Home() {
   const user = useOptionalAuth()?.user ?? null
   const isAdmin = !!user?.role?.is_org_admin
   const { offline } = useAiOffline()
+  // Guided setup: unfinished setups to continue (plan 1c). Optional; silent on failure.
+  const setups = useSlot(() => setupApi.journeys())
   const askRef = useRef<HTMLInputElement>(null)
   const navigate = useNavigate()
 
@@ -178,6 +181,7 @@ export default function Home() {
         ? <Quick onAsk={askLocked ? undefined : focusAsk} askTo={askLocked ? '/ask' : undefined} />
         : <Onboarding done={[datasets.length > 0, reports.length > 0, (convs.data?.length ?? 0) > 0]}
             onAsk={askLocked ? () => navigate('/ask') : focusAsk} />}
+      <SetupContinue journeys={setups.data} />
       <Continue items={continueItems.slice(0, RECENT)} loading={loading || recent.loading} error={recent.error}
         onRetry={recent.reload} onOpen={open} />
       {isAdmin ? (

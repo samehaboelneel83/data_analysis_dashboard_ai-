@@ -3089,3 +3089,7 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--da
 .recharts-tooltip-label { color: var(--text) !important; font-weight: 600; }
 .recharts-tooltip-item-value, .recharts-tooltip-item-separator { color: var(--text) !important; }
 [data-theme="dark"] .recharts-tooltip-item-name { filter: brightness(1.45) saturate(1.1); }
+
+/* Guided setup phase 5: "What you should know" on dataset pages */
+.dl-health { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+.dl-health__more { margin: 0; font-size: 13px; }

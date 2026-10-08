@@ -11,6 +11,7 @@ import { Database } from 'lucide-react'
 import { useT } from '../i18n'
 import DatasetListFilter, { useCleanDatasets } from '../components/dataset/DatasetListFilter'
 import { isCertified } from '../lib/cleanDatasets'
+import SetupInsights from '../components/setup/SetupInsights'
 
 /**
  * Pick a dataset, see what stands out in it.
@@ -138,6 +139,8 @@ export default function InsightsHub() {
             {input}
             <DatasetListFilter state={clean} />
           </div>
+          {/* Guided setup phase 5d: what the setup found, in plain words, first. */}
+          {selected != null && <SetupInsights datasetId={selected} />}
 
           {selected == null && (
             <p data-testid="insights-pick-first" style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 16px' }}>

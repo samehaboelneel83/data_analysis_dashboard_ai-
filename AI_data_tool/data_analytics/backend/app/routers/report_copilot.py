@@ -161,6 +161,23 @@ def _clean_config(cfg: dict | None, columns: set[str], notes: list[str], *,
             if keep_removals:
                 out[k] = None
             continue
+        # A table's column list arrives as one comma-separated value (the
+        # schema keeps values scalar for strict providers). Without this the
+        # list was dropped and the copilot said "a table of price, make,
+        # model and link" over a table of price alone (2026-10-08).
+        if k == "columns" and isinstance(v, str):
+            names = []
+            for part in [x.strip() for x in v.split(",") if x.strip()]:
+                match = part if part in columns else next(
+                    (c for c in columns if str(c).casefold() == part.casefold()), None)
+                if match is None:
+                    notes.append(f'Skipped "{part}": no column of that name.')
+                    continue
+                names.append(match)
+            if not names:
+                return None
+            out[k] = names
+            continue
         if k in MEASURE_SLOTS and measures and v in measures:
             out[k] = v                      # a defined measure, by its exact name
             continue

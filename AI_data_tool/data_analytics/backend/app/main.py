@@ -18,6 +18,7 @@ from .routers import boundary_sets, map_settings, calendar_settings, prediction_
 from .routers import workspace
 from .routers import dataflows
 from .routers import pins
+from .routers import guided_setup
 from .routers import jobs as jobs_router
 from .routers import automation as automation_router
 from .routers import agent as agent_router
@@ -121,6 +122,12 @@ async def _migrate(conn):
         "ALTER TABLE datasets ADD COLUMN IF NOT EXISTS description_source VARCHAR(20)",
         "ALTER TABLE datasets ADD COLUMN IF NOT EXISTS last_profiled_at TIMESTAMP WITH TIME ZONE",
         "ALTER TABLE data_sources ADD COLUMN IF NOT EXISTS allow_llm_sampling BOOLEAN NOT NULL DEFAULT FALSE",
+        # Guided setup (0059): the Understand step's kept summary, added after the
+        # table first shipped -- create_all never adds a column to a live table.
+        "ALTER TABLE setup_journeys ADD COLUMN IF NOT EXISTS summary JSON",
+        "ALTER TABLE setup_journeys ADD COLUMN IF NOT EXISTS proposals JSON",
+        "ALTER TABLE setup_journeys ADD COLUMN IF NOT EXISTS findings JSON",
+        "ALTER TABLE setup_journeys ADD COLUMN IF NOT EXISTS designs JSON",
         "ALTER TABLE data_sources ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMP WITH TIME ZONE",
         "ALTER TABLE data_sources ADD COLUMN IF NOT EXISTS sync_status VARCHAR(20) NOT NULL DEFAULT 'pending'",
         "ALTER TABLE data_sources ADD COLUMN IF NOT EXISTS description TEXT",
@@ -725,6 +732,8 @@ app.include_router(automation_router.router, prefix="/api/v1")
 # statistics under a dataset.
 app.include_router(metadata.router,      prefix="/api/v1")
 app.include_router(metadata.stats_router, prefix="/api/v1")
+# Guided setup (docs/guided-setup/PLAN.md): one journey per person and connection.
+app.include_router(guided_setup.router, prefix="/api/v1")
 # Layer 4 — agent chat surface. Mounted under /api/v1 like every other router.
 #
 # It was previously mounted bare, on the reasoning that the router "owns its own

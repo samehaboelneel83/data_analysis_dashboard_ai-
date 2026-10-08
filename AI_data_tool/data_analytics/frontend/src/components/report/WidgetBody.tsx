@@ -1,4 +1,5 @@
 import { semanticAggregationWarning, nonAdditiveKind, SAFE_AGGREGATION } from '../../lib/semanticGuard'
+import { CellLink, isWebAddress } from '../../lib/cellLink'
 import PivotTable, { type PivotData } from './PivotTable'
 import { Suspense, useEffect, useMemo, useState } from 'react'
 import { renderTextWithLinks } from '../../lib/inlineMarkup'
@@ -238,7 +239,7 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
                   <tr key={i}>{(row as unknown[]).map((v, j) => (
                     <td key={j} style={{ fontFamily: typeof v === 'number' ? 'var(--mono)' : undefined }}>
                       {v == null ? <span style={{ color: 'var(--muted)' }}>—</span>
-                        : typeof v === 'number' ? v.toLocaleString() : String(v)}
+                        : typeof v === 'number' ? v.toLocaleString() : isWebAddress(v) ? <CellLink url={v} /> : String(v)}
                     </td>))}</tr>
                 ))}
               </tbody>
@@ -771,7 +772,7 @@ function WindowedTable({ rtl, cfg, data, cols: inCols, rows: inRows, ruleStyles,
                       )}
                       <span style={{ position: 'relative', zIndex: 1, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                         {painted?.icon && <span aria-hidden="true">{painted.icon}</span>}
-                        {formatValue(v, allFormats?.[cols[j]])}
+                        {isWebAddress(v) ? <CellLink url={v} /> : formatValue(v, allFormats?.[cols[j]])}
                       </span>
                     </td>
                   )

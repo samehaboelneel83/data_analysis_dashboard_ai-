@@ -600,6 +600,11 @@ class DataSourceCreate(BaseModel):
     config: dict = {}
     custom_connector_id: Optional[int] = None
     sensitivity: Optional[str] = None
+    # Whether the model may read sample rows to describe this source. On by
+    # default (guided setup, decision D1): without it the first sync writes no
+    # description and the setup has nothing to explain. The person adding the
+    # connection can turn it off in the form, and an admin later on the review page.
+    allow_llm_sampling: bool = True
 
 class DataSourceUpdate(BaseModel):
     name: Optional[str] = None

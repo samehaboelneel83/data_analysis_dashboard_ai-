@@ -9,6 +9,7 @@ import { Check, TriangleAlert, X as XIcon } from 'lucide-react'
 import { useModalDialog } from '../../components/ui/useModalDialog'
 import { blankConfigFor } from './typeMaps'
 import { friendlyMessage } from '../../lib/friendlyError'
+import { useT } from '../../i18n'
 
 /* ── Connection Form Modal ─────────────────────────────── */
 export function ConnectionModal({ initial, catalog, onSave, onClose }: {
@@ -22,6 +23,9 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
   const specOf = (t: string) => catalog.find(s => s.key === t)
   const [name,    setName]    = useState(initial?.name ?? '')
   const [label,   setLabel]   = useState<string>(initial?.sensitivity ?? '')
+  // Guided setup D1: on by default; changed later on the review page.
+  const [allowAi, setAllowAi] = useState(true)
+  const t = useT()
   const initialType = initial?.custom_connector_id != null
     ? (catalog.find(s => s.custom_connector_id === initial.custom_connector_id)?.key ?? initial?.type ?? catalog[0]?.key ?? 'postgresql')
     : (initial?.type ?? catalog[0]?.key ?? 'postgresql')
@@ -134,7 +138,7 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
         : cfg
       const result = isEdit
         ? await dataSourcesApi.update(initial!.id, { name, type: submitType, custom_connector_id: customConnectorId, config: submitCfg, sensitivity: label })
-        : await dataSourcesApi.create({ name, type: submitType, custom_connector_id: customConnectorId, config: submitCfg, sensitivity: label || null })
+        : await dataSourcesApi.create({ name, type: submitType, custom_connector_id: customConnectorId, config: submitCfg, sensitivity: label || null, allow_llm_sampling: allowAi })
       onSave(result)
       toast.success(isEdit ? 'Updated' : 'Connection created')
     } catch (e: any) {
@@ -179,6 +183,19 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
             <option value="Restricted">Restricted</option>
           </select>
         </label>
+
+        {/* Guided setup D1: the AI reads with this person's own access, and
+            only describes the source when allowed to look at a few rows. */}
+        {!initial && (
+          <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 12, cursor: 'pointer' }}>
+            <input type="checkbox" checked={allowAi} onChange={e => setAllowAi(e.target.checked)}
+              style={{ marginTop: 3 }} />
+            <span>
+              <span style={{ display: 'block', fontSize: 13 }}>{t('conn.allowAi')}</span>
+              <span style={{ display: 'block', fontSize: 11, color: 'var(--muted)' }}>{t('conn.allowAiHint')}</span>
+            </span>
+          </label>
+        )}
 
         {/* Type — grouped by category, from the catalog */}
         <label style={{ display: 'block', marginBottom: 16 }}>

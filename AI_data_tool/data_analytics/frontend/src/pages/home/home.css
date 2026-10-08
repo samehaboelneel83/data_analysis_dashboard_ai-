@@ -294,3 +294,13 @@
 .hm-chip:disabled { opacity: .55; cursor: default; }
 .hm .dl-spin, .hm-chip .dl-spin { animation: hm-spin 1s linear infinite; }
 @keyframes hm-spin { to { transform: rotate(360deg); } }
+
+/* Guided setup: "Continue setting up" (plan 1c) */
+.hm-setup__title { margin: 0 0 8px; font-size: 15px; font-weight: 600; }
+.hm-setup { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.hm-setup__item {
+  display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--surface);
+}
+.hm-setup__item > svg { color: var(--accent); flex: none; }
+.hm-setup__text { flex: 1; min-width: 0; font-size: 14px; }
