@@ -1347,7 +1347,7 @@ export default function ReportBuilder() {
   const addWidgetFromFields = async (names: string[]) => {
     if (!activePage) return
     const fields = names.map(toAutoField).filter(Boolean) as AutoField[]
-    const choice = chartForFields(fields)
+    const choice = chartForFields(fields, tr)
     setGatheredFields([])
     if (!choice) return
     // A ticked date level keeps its grain on the axis it became (Month, Week),
@@ -3239,7 +3239,7 @@ export default function ReportBuilder() {
                       rule table a drop uses, lib/autoChart), and the button that
                       puts it on the page. Fields the rule cannot place are named. */}
                   {gatheredFields.length > 0 && (() => {
-                    const choice = chartForFields(gatheredFields.map(toAutoField).filter(Boolean) as AutoField[])
+                    const choice = chartForFields(gatheredFields.map(toAutoField).filter(Boolean) as AutoField[], tr)
                     return (
                       <div role="region" aria-label={tr('fields.staged')} data-testid="fields-staging"
                         style={{ position: 'sticky', bottom: 0, zIndex: 2, display: 'flex', flexWrap: 'wrap', alignItems: 'center',

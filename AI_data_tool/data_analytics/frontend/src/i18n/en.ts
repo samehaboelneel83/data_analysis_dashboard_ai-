@@ -2475,6 +2475,7 @@ export const en = {
   'audit.byTargetPh': 'Filter by target…',
   'audit.apply': 'Apply',
   'audit.none': 'No audit entries match.',
+  'audit.loadWhat': 'the audit trail',
   'col.actor': 'Actor',
   'col.target': 'Target',
 
@@ -2755,6 +2756,17 @@ export const en = {
 
   'misc.useInPython': 'Use in Python',
   'misc.useInPythonTitle': 'Read this dataset from a notebook, under your own security',
+  // QA5b S5: the dataset sensitivity control's words.
+  'sens.title': 'Sensitivity label',
+  'sens.aria': 'Dataset sensitivity',
+  'sens.inForceWhy': 'In force: {label} — {reason}',
+  'sens.enforceRestricted': 'No guest links or embeds; downloads need data-level access; not e-mailed.',
+  'sens.enforceConfidential': 'Guest links need a signed-in member.',
+  'sens.enforceRedacted': 'Guest links need a signed-in member; {cols} redacted from links, embeds and files.',
+  'sens.listSep': ', ',
+  'sens.labelled': 'Labelled {label}',
+  'sens.cleared': 'Label cleared',
+  'sens.failed': 'Could not label this dataset',
   'sens.none': '— Unlabelled —',
   'sens.Public': 'Public',
   'sens.Internal': 'Internal',

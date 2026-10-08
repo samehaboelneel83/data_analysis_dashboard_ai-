@@ -13,7 +13,7 @@ export const BUILDER_FILES = [
   'pages/reportBuilder/BookmarksConnected.tsx', 'pages/reportBuilder/CanvasOverlays.tsx', 'pages/reportBuilder/PageTabs.tsx',
   'pages/reportBuilder/PageTemplateMenu.tsx', 'pages/reportBuilder/RightRail.tsx', 'pages/reportBuilder/SaveState.tsx',
   'pages/reportBuilder/SchedulePanel.tsx', 'pages/reportBuilder/ShortcutsDialog.tsx', 'pages/reportBuilder/TemplatesPane.tsx',
-  'pages/reportBuilder/ZoomControl.tsx',
+  'pages/reportBuilder/ZoomControl.tsx', 'lib/autoChart.ts',
   'components/report/BookmarksPane.tsx', 'components/report/CommentsPane.tsx', 'components/report/DataRolesList.tsx',
   'components/report/DisplayRulesPanel.tsx', 'components/report/ExplainDialog.tsx', 'components/report/InteractionSettings.tsx',
   'components/report/MobileLayoutEditor.tsx', 'components/report/OutlinePane.tsx', 'components/report/PagePropertiesPanel.tsx',

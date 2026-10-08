@@ -355,7 +355,11 @@ export function EvidenceChip({ test, p_text, effect_name, effect_size, effect_la
       style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 10.5, padding: '1px 8px', borderRadius: 99,
         border: `1px solid ${significant && effect_label !== 'negligible' ? 'var(--accent)' : 'var(--border)'}`,
         color: 'var(--muted)', whiteSpace: 'nowrap' }}>
-      {t('bc.canvas.effectChip', { test: testName, p: p_text, label, name: EFFECT_WORD[effect_name] ?? effect_name, size: effect_size })}
+      {/* QA5b S6: each part in its own isolate. As one plain string the Arabic
+          line ran "t", "Welch", "p = 0.8487" and "Cohen's d -0.0119" together
+          into one left-to-right stretch and read out of order. */}
+      <span>{fill(t, 'bc.canvas.effectChip', { test: nameOf(testName), p: num(p_text), label,
+        name: <bdi dir="ltr">{EFFECT_WORD[effect_name] ?? effect_name}</bdi>, size: num(effect_size) })}</span>
     </span>
   )
 }

@@ -11,6 +11,8 @@ const FILES: string[] = [
   'components/report/calcColumns/BuilderModal.tsx',
   'components/report/CustomCategoryPanel.tsx',
   'components/report/HierarchyTree.tsx',
+  'components/report/HierarchyChains.tsx',
+  'components/DatasetSensitivity.tsx',
   'components/report/AccessDialog.tsx',
   'components/report/AccessExplainer.tsx',
   'components/report/SubscribeButton.tsx',

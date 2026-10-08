@@ -110,6 +110,7 @@ export default function VersionHistoryPane({ reportId, currentRevision, onRestor
       body: t('shx.vh.confirmBody') + gap,
       confirmLabel: t('shx.vh.restore'),
       destructive: false,
+      focusCancel: true,
     })) return
     setRestoring(v.id)
     try {

@@ -1,4 +1,5 @@
 import { createElement, Fragment, type ReactNode } from 'react'
+import type { MessageKey, TranslateFn } from '../index'
 
 /**
  * 8-i18n: the dataPages area's words, in English and Arabic. Spread into en.ts /
@@ -668,6 +669,14 @@ export const ar: Record<keyof typeof en, string> = {
   'pg.dataPages.list.dashboardCount': '{n, plural, zero {لا لوحات} one {لوحة واحدة} two {لوحتان} few {# لوحات} many {# لوحة} other {# لوحة}}',
   'pg.dataPages.home.deleteTitle': 'حذف اللوحة «⁨{name}⁩»؟',
   'pg.dataPages.conn.loadError': 'تعذّر تحميل الاتصالات',
+}
+
+/** An action code as words in the reader's language, or the code itself when
+ *  it is unknown (a newer server) -- never a guess. English keeps the code: it
+ *  is what admins search for and what the docs name. Shared by Activity and,
+ *  since QA5b S4, the Admin Audit trail, which writes the same codes. */
+export function activityActionName(t: TranslateFn, code: string): string {
+  return ACTIVITY_CODES.has(code) ? t(`pg.dataPages.act.${code}` as MessageKey) : code
 }
 
 /** Every action code the backend writes to the activity log (`services/audit.py`

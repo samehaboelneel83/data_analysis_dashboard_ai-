@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import { Brain } from 'lucide-react'
 import EmptyState from '../ui/EmptyState'
+import { useConfirm } from '../ui/ConfirmDialog'
 import { useT, type TranslateFn } from '../../i18n'
 import { familyLabel, rich } from '../../i18n/pages/modelsMaps'
 import { isJobActive, jobsApi, predictionModelsApi } from '../../services/api'
@@ -209,6 +210,7 @@ export default function PredictionModelsPanel({ datasetId, columns, mode, datase
   dataset?: DatasetSummaryForCard
 }) {
   const t = useT()
+  const confirm = useConfirm()
   const [models, setModels] = useState<PredictionModelSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [target, setTarget] = useState('')
@@ -318,6 +320,8 @@ export default function PredictionModelsPanel({ datasetId, columns, mode, datase
     || (b.version ?? 1) - (a.version ?? 1))
 
   const remove = async (m: PredictionModelSummary) => {
+    // QA5b S1: this deleted on one click, with no question at all.
+    if (!await confirm({ title: t('bc.dialogs.deleteNamed', { name: m.name }), body: t('bc.dialogs.cannotUndo') })) return
     try {
       await predictionModelsApi.remove(datasetId, m.id)
       await load()

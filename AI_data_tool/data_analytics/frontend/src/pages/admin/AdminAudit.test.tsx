@@ -1,6 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderWithProviders as render, screen, waitFor, fireEvent } from '../../test/renderWithProviders'
 import AdminAudit from './AdminAudit'
+import { ar } from '../../i18n/pages/dataPages'
+import { DirectionProvider } from '../../contexts/DirectionContext'
 
 vi.mock('../../services/api', () => ({
   adminAuditApi: { list: vi.fn() },
@@ -98,5 +100,25 @@ describe('AdminAudit', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
 
     expect(await screen.findByText('dataset:1')).toBeInTheDocument()
+  })
+})
+
+describe('AdminAudit in Arabic (QA5b S4)', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.setItem('datalytics.language', 'ar') })
+  afterEach(() => localStorage.removeItem('datalytics.language'))
+
+  it('names actions with the Activity page\'s words, in the rows and the filter; an unknown code stays as written', async () => {
+    vi.mocked(adminAuditApi.list).mockResolvedValue([...ROWS,
+      { id: 3, actor_email: 'admin@x.com', action: 'share_link.create', target: 'report:16', detail: '1d', created_at: '2026-01-03T00:00:00Z' },
+      { id: 4, actor_email: 'admin@x.com', action: 'brand_new.thing', target: null, detail: null, created_at: '2026-01-04T00:00:00Z' }])
+    render(<DirectionProvider><AdminAudit /></DirectionProvider>)
+    await screen.findByText('report:16')
+    for (const code of ['row_security_rule.create', 'api_key.create', 'share_link.create']) {
+      const word = ar[`pg.dataPages.act.${code}` as keyof typeof ar]
+      expect(screen.getByRole('cell', { name: word }).querySelector(`[title="${code}"]`)).not.toBeNull()
+      expect(screen.getByRole('option', { name: word })).toHaveValue(code)
+      expect(screen.queryByRole('cell', { name: code })).toBeNull()
+    }
+    expect(screen.getByRole('cell', { name: 'brand_new.thing' }).querySelector('bdi[dir="ltr"]')).not.toBeNull()
   })
 })
