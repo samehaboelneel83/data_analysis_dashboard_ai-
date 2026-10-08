@@ -15,7 +15,6 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-datalytics_secret}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     ports:
       - "5433:5432"  # host 5433 — avoid clash with local Postgres on 5432
     healthcheck:
