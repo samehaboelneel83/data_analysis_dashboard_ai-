@@ -8,6 +8,7 @@ import { localDigits } from '../../lib/arabicFormats'
 import { Bell, BellRing } from 'lucide-react'
 import '../../pages/datasetDetail/rules.css'
 import { useConfirm } from '../ui/ConfirmDialog'
+import { formatDate } from '../../lib/dateFormat'
 
 /**
  * Watch a condition on this dataset and email someone when it becomes true.
@@ -328,7 +329,7 @@ function AlertRow({ alert, onDelete }: { alert: DataAlert; onDelete: () => void 
           </div>
         ) : alert.last_checked_at ? (
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-            {t('al.checked', { when: new Date(alert.last_checked_at).toLocaleString() })}
+            {t('al.checked', { when: formatDate(alert.last_checked_at) })}
             {` · ${t(firing ? 'al.firing' : 'al.quiet')}`}
           </div>
         ) : (

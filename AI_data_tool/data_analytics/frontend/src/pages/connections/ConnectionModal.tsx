@@ -9,6 +9,9 @@ import { Check, TriangleAlert, X as XIcon } from 'lucide-react'
 import { useModalDialog } from '../../components/ui/useModalDialog'
 import { blankConfigFor } from './typeMaps'
 import { friendlyMessage } from '../../lib/friendlyError'
+import { useT } from '../../i18n'
+import { useDirection } from '../../contexts/DirectionContext'
+import { connectorFieldLabel } from '../../i18n/pages/adminPlatform'
 
 /* ── Connection Form Modal ─────────────────────────────── */
 export function ConnectionModal({ initial, catalog, onSave, onClose }: {
@@ -17,6 +20,10 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
   onSave: (ds: DataSource) => void
   onClose: () => void
 }) {
+  const tr = useT()
+  const { language } = useDirection()
+  // QA5 L6: the server's field labels, translated by field key.
+  const fieldLabel = (f: ConnectorSpec['config_fields'][number]) => connectorFieldLabel(tr, language, f.name, f.label)
   const dialogRef = useModalDialog<HTMLDivElement>(onClose)
   const isEdit = !!initial
   const specOf = (t: string) => catalog.find(s => s.key === t)
@@ -68,15 +75,16 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
   // a mistyped password used to be creating a broken connection first. The
   // result stays in the dialog, beside the fields it is about.
   /** Required fields (per the connector's own spec) that are still empty. */
+  const NAME_FIELD = tr('pg.dataPages.conn.nameField')
   const missing = (): string[] => {
     const out: string[] = []
-    if (!name.trim()) out.push('Connection name')
+    if (!name.trim()) out.push(NAME_FIELD)
     for (const f of spec?.config_fields ?? []) {
       if (f.show_if && cfg[f.show_if[0]] !== f.show_if[1]) continue
       if (!f.required) continue
       const v = cfg[f.name]
       if (f.kind === 'password' && isEdit && !pwTouched) continue
-      if (v === undefined || v === null || String(v).trim() === '') out.push(f.label)
+      if (v === undefined || v === null || String(v).trim() === '') out.push(fieldLabel(f))
     }
     return out
   }
@@ -84,8 +92,8 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
     showErrors && f.required && (cfg[f.name] === undefined || String(cfg[f.name] ?? '').trim() === '')
 
   const handleTest = async () => {
-    const miss = missing().filter(m => m !== 'Connection name')
-    if (miss.length) { setShowErrors(true); setTestOk(false); setTestMsg(`Fill in ${miss.join(', ')} first.`); setTestRaw(null); return }
+    const miss = missing().filter(m => m !== NAME_FIELD)
+    if (miss.length) { setShowErrors(true); setTestOk(false); setTestMsg(tr('pg.dataPages.conn.fillInFirstDot', { fields: miss.join(tr('pg.dataPages.listSep')) })); setTestRaw(null); return }
     setTesting(true)
     setTestOk(null)
     setTestMsg(null)
@@ -107,19 +115,19 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
         else throw e
       }
       setTestOk(r.ok)
-      setTestMsg(r.ok ? 'Connected. These settings work.' : friendlyMessage(r.error ?? 'Connection failed'))
+      setTestMsg(r.ok ? tr('pg.dataPages.conn.settingsWork') : friendlyMessage(r.error ?? tr('pg.dataPages.conn.connectionFailed')))
       setTestRaw(!r.ok && r.error && friendlyMessage(r.error) !== r.error ? r.error : null)
     } catch (e: any) {
       setTestOk(false)
       const d = e?.response?.data?.detail
-      setTestMsg(typeof d === 'string' ? friendlyMessage(d) : 'The test could not run.')
+      setTestMsg(typeof d === 'string' ? friendlyMessage(d) : tr('pg.dataPages.conn.testCouldNotRun'))
     } finally { setTesting(false) }
   }
 
   const handleSave = async () => {
     if (inFlight.current) return
     const miss = missing()
-    if (miss.length) { setShowErrors(true); toast.error(`Fill in ${miss.join(', ')} first`); return }
+    if (miss.length) { setShowErrors(true); toast.error(tr('pg.dataPages.conn.fillInFirst', { fields: miss.join(tr('pg.dataPages.listSep')) })); return }
     inFlight.current = true
     setSaving(true)
     try {
@@ -136,9 +144,9 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
         ? await dataSourcesApi.update(initial!.id, { name, type: submitType, custom_connector_id: customConnectorId, config: submitCfg, sensitivity: label })
         : await dataSourcesApi.create({ name, type: submitType, custom_connector_id: customConnectorId, config: submitCfg, sensitivity: label || null })
       onSave(result)
-      toast.success(isEdit ? 'Updated' : 'Connection created')
+      toast.success(isEdit ? tr('pg.dataPages.conn.updated') : tr('pg.dataPages.conn.created'))
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail ?? 'Save failed')
+      toast.error(e?.response?.data?.detail ?? tr('pg.dataPages.conn.saveFailed'))
     } finally { setSaving(false); inFlight.current = false }
   }
 
@@ -148,41 +156,42 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', display: 'flex',
       alignItems: 'center', justifyContent: 'center', zIndex: Z_OVERLAY }}>
       <div ref={dialogRef} role="dialog" aria-modal="true"
-        aria-label={isEdit ? "Edit connection" : "New connection"}
+        aria-label={isEdit ? tr('pg.dataPages.conn.editTitle') : tr('pg.dataPages.conn.newTitle')}
         style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12,
         padding: 24, width: 480, maxWidth: '90vw', maxHeight: '90vh', overflowY: 'auto' }}>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>{isEdit ? 'Edit connection' : 'New connection'}</h2>
-          <button type="button" onClick={onClose} aria-label="Close" title="Close" className="dl-wicon"><XIcon size={16} aria-hidden /></button>
+          <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>{isEdit ? tr('pg.dataPages.conn.editTitle') : tr('pg.dataPages.conn.newTitle')}</h2>
+          <button type="button" onClick={onClose} aria-label={tr('pg.dataPages.close')} title={tr('pg.dataPages.close')} className="dl-wicon"><XIcon size={16} aria-hidden /></button>
         </div>
 
         {/* Name */}
         <label style={{ display: 'block', marginBottom: 12 }}>
-          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Connection name *</div>
-          <input value={name} onChange={e => setName(e.target.value)} placeholder="My Database" maxLength={120}
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{tr('pg.dataPages.conn.nameLabel')}</div>
+          <input value={name} onChange={e => setName(e.target.value)} placeholder={tr('pg.dataPages.conn.namePlaceholder')} maxLength={120}
+            id="conn-display-name" name="conn-display-name" autoComplete="off"
             aria-invalid={showErrors && !name.trim() ? true : undefined} {...inp} />
-          {showErrors && !name.trim() && <div className="dl-field__error">Connection name is required</div>}
+          {showErrors && !name.trim() && <div className="dl-field__error">{tr('pg.dataPages.conn.nameRequired')}</div>}
         </label>
 
         {/* Sensitivity: a floor for every dataset read from this connection,
             so an import of the salaries cannot come out Unlabelled. */}
         <label style={{ display: 'block', marginBottom: 12 }}>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>
-            Sensitivity of this data <span style={{ opacity: .8 }}>— every dataset built from it inherits this at least</span>
+            {tr('pg.dataPages.conn.sensLabel')} <span style={{ opacity: .8 }}>{tr('pg.dataPages.conn.sensHint')}</span>
           </div>
-          <select aria-label="Connection sensitivity" value={label} onChange={e => setLabel(e.target.value)} {...inp}>
-            <option value="">Unlabelled</option>
-            <option value="Public">Public</option>
-            <option value="Internal">Internal</option>
-            <option value="Confidential">Confidential</option>
-            <option value="Restricted">Restricted</option>
+          <select aria-label={tr('pg.dataPages.conn.sensAria')} value={label} onChange={e => setLabel(e.target.value)} {...inp}>
+            <option value="">{tr('pg.dataPages.conn.unlabelled')}</option>
+            <option value="Public">{tr('sens.Public')}</option>
+            <option value="Internal">{tr('sens.Internal')}</option>
+            <option value="Confidential">{tr('sens.Confidential')}</option>
+            <option value="Restricted">{tr('sens.Restricted')}</option>
           </select>
         </label>
 
         {/* Type — grouped by category, from the catalog */}
         <label style={{ display: 'block', marginBottom: 16 }}>
-          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Type</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{tr('pg.dataPages.conn.type')}</div>
           <select value={type} onChange={e => changeType(e.target.value)} {...inp}>
             {Object.entries(grouped).map(([cat, specs]) => (
               <optgroup key={cat} label={cat}>
@@ -196,8 +205,7 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
 
         {spec && !spec.driver_installed && (
           <div role="note" style={{ fontSize: 12, color: 'var(--warning)', marginBottom: 10 }}>
-            <TriangleAlert size={12} aria-hidden style={{ verticalAlign: -2 }} /> The driver for {spec.label} is not installed on the server. Install it, then
-            connect with a full SQLAlchemy URL.
+            <TriangleAlert size={12} aria-hidden style={{ verticalAlign: -2 }} /> {tr('pg.dataPages.conn.driverMissing', { name: spec.label })}
           </div>
         )}
 
@@ -207,7 +215,7 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
           .map(f => (
             <label key={f.name} style={{ display: 'block', marginBottom: 8 }}>
               <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 3 }}>
-                {f.label}{f.required ? ' *' : ''}
+                {fieldLabel(f)}{f.required ? ' *' : ''}
               </div>
               {f.kind === 'select' ? (
                 <select value={(cfg[f.name] as string) ?? (f.default as string) ?? ''}
@@ -219,13 +227,13 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
                   type={f.kind === 'password' ? 'password' : f.kind === 'number' ? 'number' : 'text'}
                   value={f.kind === 'password' && isEdit && !pwTouched && cfg[f.name] === '__SECRET_UNCHANGED__' ? '' : (cfg[f.name] as string | number) ?? ''}
                   onChange={e => { if (f.kind === 'password') setPwTouched(true); setField(f.name, f.kind === 'number' ? +e.target.value : e.target.value) }}
-                  placeholder={f.kind === 'password' && isEdit && !pwTouched ? 'Leave blank to keep the stored password' : f.placeholder}
+                  placeholder={f.kind === 'password' && isEdit && !pwTouched ? tr('pg.dataPages.conn.keepPassword') : f.placeholder}
                   aria-invalid={fieldMissing(f) ? true : undefined}
                   autoComplete={f.kind === 'password' ? 'new-password' : 'off'}
-                  name={`conn-${f.name}`}
+                  id={`conn-${f.name}`} name={`conn-${f.name}`}
                   {...inp} />
               )}
-              {fieldMissing(f) && <div className="dl-field__error">{f.label} is required</div>}
+              {fieldMissing(f) && <div className="dl-field__error">{tr('pg.dataPages.conn.fieldRequired', { name: fieldLabel(f) })}</div>}
             </label>
           ))}
 
@@ -236,7 +244,7 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
               {testMsg}
               {testRaw && (
                 <details className="dl-conn-test__raw">
-                  <summary>Technical details</summary>
+                  <summary>{tr('pg.dataPages.conn.technicalDetails')}</summary>
                   <pre>{testRaw}</pre>
                 </details>
               )}
@@ -247,15 +255,15 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
         {/* Buttons */}
         <div style={{ display: 'flex', gap: 8, marginTop: 20 }}>
           <button className="btn btn-primary" onClick={handleSave} disabled={saving} style={{ flex: 1 }}>
-            {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Create connection'}
+            {saving ? tr('pg.dataPages.saving') : isEdit ? tr('pg.dataPages.saveChanges') : tr('pg.dataPages.conn.create')}
           </button>
           <button type="button" className="btn" onClick={handleTest} disabled={testing}>
-            {testing ? 'Testing…'
-            : testOk === true ? <IconLabel icon={Check}>Test connection</IconLabel>
-            : testOk === false ? <IconLabel icon={XIcon}>Test connection</IconLabel>
-            : 'Test connection'}
+            {testing ? tr('connections.testing')
+            : testOk === true ? <IconLabel icon={Check}>{tr('pg.dataPages.conn.testConnection')}</IconLabel>
+            : testOk === false ? <IconLabel icon={XIcon}>{tr('pg.dataPages.conn.testConnection')}</IconLabel>
+            : tr('pg.dataPages.conn.testConnection')}
           </button>
-          <button className="btn btn-ghost" onClick={onClose} style={{ fontSize: 12, padding: '6px 14px' }}>Cancel</button>
+          <button className="btn btn-ghost" onClick={onClose} style={{ fontSize: 12, padding: '6px 14px' }}>{tr('common.cancel')}</button>
         </div>
       </div>
     </div>

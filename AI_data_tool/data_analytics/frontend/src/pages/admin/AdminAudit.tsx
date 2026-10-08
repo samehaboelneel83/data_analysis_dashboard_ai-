@@ -5,6 +5,7 @@ import { adminAuditApi } from '../../services/api'
 import type { AdminAuditRow } from '../../services/api'
 import LoadError from '../../components/ui/LoadError'
 import LoadingState from '../../components/ui/LoadingState'
+import { formatDate } from '../../lib/dateFormat'
 
 /**
  * S5: read-only trail of security-relevant admin mutations -- row/column
@@ -90,7 +91,7 @@ export default function AdminAudit() {
           <tbody>
             {rows.map(r => (
               <tr key={r.id}>
-                <td style={{ whiteSpace: 'nowrap' }}>{new Date(r.created_at).toLocaleString()}</td>
+                <td style={{ whiteSpace: 'nowrap' }}>{formatDate(r.created_at)}</td>
                 <td>{r.actor_email ?? '—'}</td>
                 <td style={{ fontWeight: 600 }}>{r.action}</td>
                 <td>{r.target ?? '—'}</td>

@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { useT } from '../../i18n'
 
 export interface ConfirmOptions {
   /** Short question. Rendered as the dialog's accessible name. */
@@ -36,6 +37,8 @@ export function useConfirm() {
 }
 
 export function ConfirmProvider({ children }: { children: React.ReactNode }) {
+  // QA3 C5: the default buttons in the reader's language (they were always English).
+  const t = useT()
   const [opts, setOpts] = useState<ConfirmOptions | null>(null)
   const resolverRef = useRef<Resolver | null>(null)
   const confirmBtnRef = useRef<HTMLButtonElement>(null)
@@ -132,7 +135,7 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
                   border: '1px solid var(--border)', borderRadius: 6,
                 }}
               >
-                {opts.cancelLabel ?? 'Cancel'}
+                {opts.cancelLabel ?? t('common.cancel')}
               </button>
               <button
                 ref={confirmBtnRef}
@@ -144,7 +147,7 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
                   color: opts.destructive === false ? 'var(--mc-accent-fg, #fff)' : 'var(--mc-danger-fg, #fff)', border: '1px solid transparent', borderRadius: 6,
                 }}
               >
-                {opts.confirmLabel ?? 'Delete'}
+                {opts.confirmLabel ?? t('bc.shell.c.delete')}
               </button>
             </div>
           </div>

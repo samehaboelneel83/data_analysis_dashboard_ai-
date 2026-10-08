@@ -4,6 +4,7 @@ import toast from 'react-hot-toast'
 import { metadataApi, type GlossaryTerm } from '../../services/api'
 import LoadError from '../ui/LoadError'
 import LoadingState from '../ui/LoadingState'
+import { useT } from '../../i18n'
 
 /**
  * What the business calls things.
@@ -40,6 +41,7 @@ const input: React.CSSProperties = {
 }
 
 export default function GlossaryPanel({ sourceId, canEdit, objectNames }: GlossaryPanelProps) {
+  const tr = useT()
   const [terms, setTerms] = useState<GlossaryTerm[] | null>(null)
   const [loadError, setLoadError] = useState<unknown>(null)
   const [adding, setAdding] = useState(false)
@@ -65,7 +67,7 @@ export default function GlossaryPanel({ sourceId, canEdit, objectNames }: Glossa
 
   const save = async () => {
     const term = draft.term.trim()
-    if (!term) { toast.error('A term needs a name'); return }
+    if (!term) { toast.error(tr('pg.dataPages.gl.needsName')); return }
     setBusy(true)
     try {
       await metadataApi.addTerm(sourceId, {
@@ -83,9 +85,9 @@ export default function GlossaryPanel({ sourceId, canEdit, objectNames }: Glossa
       setDraft({ term: '', definition: '', synonyms: '', maps_to_object: '', maps_to_column: '', rule: '', always: false })
       setAdding(false)
       await load()
-      toast.success('Term added')
+      toast.success(tr('pg.dataPages.gl.added'))
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail ?? 'Could not add the term')
+      toast.error(e?.response?.data?.detail ?? tr('pg.dataPages.gl.addFailed'))
     } finally { setBusy(false) }
   }
 
@@ -94,9 +96,9 @@ export default function GlossaryPanel({ sourceId, canEdit, objectNames }: Glossa
     try {
       await metadataApi.updateTerm(sourceId, t.id, { always })
       await load()
-      toast.success(always ? `“${t.term}” now applies to every question` : `“${t.term}” applies only when it is named`)
+      toast.success(always ? tr('pg.dataPages.gl.nowAlways', { name: t.term }) : tr('pg.dataPages.gl.nowNamed', { name: t.term }))
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail ?? 'Could not update the term')
+      toast.error(e?.response?.data?.detail ?? tr('pg.dataPages.gl.updateFailed'))
     } finally { setBusy(false) }
   }
 
@@ -106,9 +108,9 @@ export default function GlossaryPanel({ sourceId, canEdit, objectNames }: Glossa
     try {
       await metadataApi.updateTerm(sourceId, t.id, { rule: rule.trim() || null })
       await load()
-      toast.success('Rule saved')
+      toast.success(tr('pg.dataPages.gl.ruleSaved'))
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail ?? 'Could not save the rule')
+      toast.error(e?.response?.data?.detail ?? tr('pg.dataPages.gl.ruleFailed'))
     } finally { setBusy(false) }
   }
 
@@ -118,21 +120,19 @@ export default function GlossaryPanel({ sourceId, canEdit, objectNames }: Glossa
       await metadataApi.deleteTerm(sourceId, t.id)
       await load()
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail ?? 'Could not delete the term')
+      toast.error(e?.response?.data?.detail ?? tr('pg.dataPages.gl.deleteFailed'))
     } finally { setBusy(false) }
   }
 
-  if (loadError) return <LoadError what="the glossary" error={loadError} onRetry={() => void load()} />
-  if (terms === null) return <LoadingState label="Loading the glossary" />
+  if (loadError) return <LoadError what="the glossary" title={tr('pg.dataPages.gl.loadError')} error={loadError} onRetry={() => void load()} />
+  if (terms === null) return <LoadingState label={tr('pg.dataPages.gl.loading')} />
 
   return (
     <section>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 10 }}>
-        <h3 style={{ margin: 0, fontSize: 14 }}>Business terms</h3>
+        <h3 style={{ margin: 0, fontSize: 14 }}>{tr('pg.dataPages.sr.tabGlossary')}</h3>
         <span style={{ fontSize: 12, color: 'var(--muted)' }}>
-          What your organisation calls things. The agent and the dashboard
-          designer both read these, so a term defined once is understood
-          everywhere.
+          {tr('pg.dataPages.gl.intro')}
         </span>
         <span style={{ flex: 1 }} />
         {canEdit && !adding && (
@@ -140,7 +140,7 @@ export default function GlossaryPanel({ sourceId, canEdit, objectNames }: Glossa
             style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12,
               padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border)',
               background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer' }}>
-            <Plus size={12} /> Add a term
+            <Plus size={12} /> {tr('pg.dataPages.gl.add')}
           </button>
         )}
       </div>
@@ -150,27 +150,27 @@ export default function GlossaryPanel({ sourceId, canEdit, objectNames }: Glossa
           marginBottom: 12, display: 'grid', gap: 8 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 8 }}>
             <label style={{ fontSize: 11, color: 'var(--muted)' }}>
-              Term
+              {tr('pg.dataPages.gl.term')}
               <input style={input} value={draft.term} autoFocus
-                placeholder="GMV"
+                placeholder="GMV" // i18n-ok
                 onChange={e => setDraft({ ...draft, term: e.target.value })} />
             </label>
             <label style={{ fontSize: 11, color: 'var(--muted)' }}>
-              What it means
+              {tr('pg.dataPages.gl.whatItMeans')}
               <input style={input} value={draft.definition}
-                placeholder="Gross merchandise value, before returns."
+                placeholder={tr('pg.dataPages.gl.definitionPlaceholder')}
                 onChange={e => setDraft({ ...draft, definition: e.target.value })} />
             </label>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
             <label style={{ fontSize: 11, color: 'var(--muted)' }}>
-              Also called (comma separated)
+              {tr('pg.dataPages.gl.alsoCalledLabel')}
               <input style={input} value={draft.synonyms}
-                placeholder="إجمالي المبيعات, gross sales"
+                placeholder="إجمالي المبيعات, gross sales" // i18n-ok
                 onChange={e => setDraft({ ...draft, synonyms: e.target.value })} />
             </label>
             <label style={{ fontSize: 11, color: 'var(--muted)' }}>
-              Table (optional)
+              {tr('pg.dataPages.gl.tableOptional')}
               <input style={input} value={draft.maps_to_object} list="glossary-objects"
                 onChange={e => setDraft({ ...draft, maps_to_object: e.target.value })} />
               <datalist id="glossary-objects">
@@ -178,34 +178,34 @@ export default function GlossaryPanel({ sourceId, canEdit, objectNames }: Glossa
               </datalist>
             </label>
             <label style={{ fontSize: 11, color: 'var(--muted)' }}>
-              Column (optional)
+              {tr('pg.dataPages.gl.columnOptional')}
               <input style={input} value={draft.maps_to_column}
                 onChange={e => setDraft({ ...draft, maps_to_column: e.target.value })} />
             </label>
           </div>
           <label style={{ fontSize: 11, color: 'var(--muted)' }}>
-            Rule the AI must follow (optional) — a filter or a one-line instruction
-            <input style={input} value={draft.rule} aria-label="Rule"
-              placeholder="dept_emp.to_date = '9999-01-01'"
+            {tr('pg.dataPages.gl.ruleLabel')}
+            <input style={input} value={draft.rule} aria-label={tr('pg.dataPages.gl.rule')}
+              placeholder="dept_emp.to_date = '9999-01-01'" // i18n-ok
               onChange={e => setDraft({ ...draft, rule: e.target.value })} />
           </label>
           <label style={{ fontSize: 11, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <input type="checkbox" checked={draft.always} aria-label="Apply to every question"
+            <input type="checkbox" checked={draft.always} aria-label={tr('pg.dataPages.gl.alwaysAria')}
               onChange={e => setDraft({ ...draft, always: e.target.checked })} />
-            Apply to every question, even when the term is not named
-            <span style={{ opacity: .8 }}>(“employees per department” means current employees)</span>
+            {tr('pg.dataPages.gl.alwaysLabel')}
+            <span style={{ opacity: .8 }}>{tr('pg.dataPages.gl.alwaysExample')}</span>
           </label>
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={() => void save()} disabled={busy}
               style={{ fontSize: 12, padding: '5px 12px', borderRadius: 6, border: 'none',
                 background: 'var(--accent)', color: 'var(--mc-accent-fg)', cursor: 'pointer' }}>
-              {busy ? 'Saving…' : 'Save'}
+              {busy ? tr('pg.dataPages.saving') : tr('pg.dataPages.rev.save')}
             </button>
             <button onClick={() => setAdding(false)} disabled={busy}
               style={{ fontSize: 12, padding: '5px 12px', borderRadius: 6,
                 border: '1px solid var(--border)', background: 'var(--surface)',
                 color: 'var(--text)', cursor: 'pointer' }}>
-              Cancel
+              {tr('common.cancel')}
             </button>
           </div>
         </div>
@@ -213,20 +213,18 @@ export default function GlossaryPanel({ sourceId, canEdit, objectNames }: Glossa
 
       {terms.length === 0 ? (
         <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0 }}>
-          No terms yet. {canEdit
-            ? 'Add the words your team uses that this database does not spell out — an alias in another language counts.'
-            : 'An administrator can add the words your team uses for this data.'}
+          {canEdit ? tr('pg.dataPages.gl.emptyEditor') : tr('pg.dataPages.gl.emptyViewer')}
         </p>
       ) : (
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
             <tr style={{ textAlign: 'start', color: 'var(--muted)' }}>
-              <th style={{ textAlign: 'start', padding: '4px 8px' }}>Term</th>
-              <th style={{ textAlign: 'start', padding: '4px 8px' }}>Means</th>
-              <th style={{ textAlign: 'start', padding: '4px 8px' }}>Also called</th>
-              <th style={{ textAlign: 'start', padding: '4px 8px' }}>Maps to</th>
-              <th style={{ textAlign: 'start', padding: '4px 8px' }}>Rule for the AI</th>
-              <th style={{ textAlign: 'start', padding: '4px 8px' }} title="Applied to every question, even when the term is not named">Always</th>
+              <th style={{ textAlign: 'start', padding: '4px 8px' }}>{tr('pg.dataPages.gl.term')}</th>
+              <th style={{ textAlign: 'start', padding: '4px 8px' }}>{tr('pg.dataPages.gl.thMeans')}</th>
+              <th style={{ textAlign: 'start', padding: '4px 8px' }}>{tr('pg.dataPages.gl.thAlsoCalled')}</th>
+              <th style={{ textAlign: 'start', padding: '4px 8px' }}>{tr('pg.dataPages.gl.thMapsTo')}</th>
+              <th style={{ textAlign: 'start', padding: '4px 8px' }}>{tr('pg.dataPages.gl.thRule')}</th>
+              <th style={{ textAlign: 'start', padding: '4px 8px' }} title={tr('pg.dataPages.gl.thAlwaysTitle')}>{tr('pg.dataPages.gl.thAlways')}</th>
               <th />
             </tr>
           </thead>
@@ -238,22 +236,24 @@ export default function GlossaryPanel({ sourceId, canEdit, objectNames }: Glossa
                   {t.data_source_id === null && (
                     <span style={{ marginInlineStart: 6, fontSize: 11, fontWeight: 400,
                       color: 'var(--muted)' }}>
-                      organisation-wide
+                      {tr('pg.dataPages.gl.orgWide')}
                     </span>
                   )}
                 </td>
                 <td style={{ padding: '6px 8px', color: 'var(--muted)' }}>{t.definition || '—'}</td>
                 <td style={{ padding: '6px 8px', color: 'var(--muted)' }}>
-                  {(t.synonyms ?? []).join(', ') || '—'}
+                  {(t.synonyms ?? []).join(tr('pg.dataPages.listSep')) || '—'}
                 </td>
                 <td style={{ padding: '6px 8px', color: 'var(--muted)' }}>
-                  {t.maps_to_column
-                    ? `${t.maps_to_object ? `${t.maps_to_object}.` : ''}${t.maps_to_column}`
-                    : (t.maps_to_object || '—')}
+                  {t.maps_to_column || t.maps_to_object
+                    ? <bdi dir="ltr">{t.maps_to_column
+                        ? `${t.maps_to_object ? `${t.maps_to_object}.` : ''}${t.maps_to_column}`
+                        : t.maps_to_object}</bdi>
+                    : '—'}
                 </td>
                 <td style={{ padding: '6px 8px', color: 'var(--muted)', minWidth: 160 }}>
                   {canEdit && t.data_source_id !== null ? (
-                    <input key={`${t.id}:${t.rule ?? ''}`} defaultValue={t.rule ?? ''} aria-label={`Rule for ${t.term}`}
+                    <input key={`${t.id}:${t.rule ?? ''}`} defaultValue={t.rule ?? ''} aria-label={tr('pg.dataPages.gl.ruleFor', { name: t.term })}
                       placeholder="—" disabled={busy}
                       onBlur={e => void editRule(t, e.target.value)}
                       onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
@@ -261,9 +261,9 @@ export default function GlossaryPanel({ sourceId, canEdit, objectNames }: Glossa
                   ) : (t.rule || '—')}
                 </td>
                 <td style={{ padding: '6px 8px' }}>
-                  <input type="checkbox" checked={!!t.always} aria-label={`Always apply ${t.term}`}
+                  <input type="checkbox" checked={!!t.always} aria-label={tr('pg.dataPages.gl.alwaysFor', { name: t.term })}
                     disabled={!canEdit || busy || t.data_source_id === null || !t.rule}
-                    title={!t.rule ? 'Write a rule first' : undefined}
+                    title={!t.rule ? tr('pg.dataPages.gl.writeRuleFirst') : undefined}
                     onChange={e => void setAlways(t, e.target.checked)} />
                 </td>
                 <td style={{ padding: '6px 8px', textAlign: 'end' }}>
@@ -271,7 +271,7 @@ export default function GlossaryPanel({ sourceId, canEdit, objectNames }: Glossa
                       in use on every other source too, and the endpoint refuses
                       it. Offering the button anyway would be a dead control. */}
                   {canEdit && t.data_source_id !== null && (
-                    <button aria-label={`Delete ${t.term}`} disabled={busy}
+                    <button aria-label={tr('pg.dataPages.gl.deleteFor', { name: t.term })} disabled={busy}
                       onClick={() => void remove(t)}
                       style={{ background: 'none', border: 'none', cursor: 'pointer',
                         color: 'var(--muted)', padding: 2 }}>

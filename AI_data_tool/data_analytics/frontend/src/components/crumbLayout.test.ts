@@ -24,6 +24,13 @@ describe('app shell (QA V5)', () => {
   it('the shell clips rather than hides, so nothing can scroll it', () => {
     expect(css).toMatch(/\.dl-shell\s*\{[^}]*overflow:\s*clip/)
   })
+
+  it('QA4 E0: the shell and the page area are containing blocks, so nothing positioned inside them stretches the document', () => {
+    // Home's visually hidden "Actions" header was placed against the document
+    // (y≈1557 in a 1080px window) and the whole window scrolled.
+    expect(css).toMatch(/\.dl-shell\s*\{[^}]*position:\s*relative/)
+    expect(css).toMatch(/\.dl-shell__content\s*\{[^}]*overflow:\s*auto[^}]*position:\s*relative/)
+  })
 })
 
 describe('dark theme natives (QA V10)', () => {
@@ -61,3 +68,18 @@ describe('chart tooltips in dark mode (QA2 Visual 6)', () => {
   })
 })
 
+
+describe('breadcrumb gives way in order, at any zoom (QA3 D1)', () => {
+  const rule = (sel: string) => css.match(new RegExp(sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\{([^}]*)\\}'))?.[1] ?? ''
+  it('the middle link shrinks first, then the section word; both keep a stub', () => {
+    expect(rule('.dl-crumbs__section')).toMatch(/flex:\s*0 400 auto/)
+    expect(rule('.dl-crumbs__section')).toMatch(/text-overflow:\s*ellipsis/)
+    expect(rule('.dl-crumbs > .dl-crumbs__link')).toMatch(/flex-shrink:\s*1000/)
+  })
+  it('the page name gives way last and keeps a readable minimum (Arabic showed "D.")', () => {
+    expect(rule('.dl-crumbs__page')).toMatch(/flex:\s*0 1 auto/)
+    // QA4 V8: no cap and no floor -- either cut a crumb with room to spare
+    expect(rule('.dl-crumbs__page')).not.toMatch(/max-inline-size/)
+    expect(rule('.dl-crumbs__page')).toMatch(/min-inline-size:\s*0/)
+  })
+})

@@ -2,12 +2,16 @@ import { useEffect, useState, type CSSProperties } from 'react'
 import toast from 'react-hot-toast'
 import { reportsApi, pageTemplatesApi } from '../../services/api'
 import { useConfirm } from '../../components/ui/ConfirmDialog'
+import { useT } from '../../i18n'
+import { localDigits } from '../../lib/arabicFormats'
+import { TEMPLATE_NAMES } from '../reports/dialogs'
 
 function ImportPagePicker({ reportId, onAdded, itemStyle }: {
   reportId: number; onAdded: () => void; itemStyle: CSSProperties
 }) {
   const [reports, setReports] = useState<{ id: number; name: string }[]>([])
   const [source, setSource] = useState<{ id: number; pages: { id: number; name: string }[] } | null>(null)
+  const t = useT()
   useEffect(() => {
     reportsApi.list().then(list => setReports(list.filter(r => r.id !== reportId))).catch(() => {})
   }, [reportId])
@@ -16,22 +20,22 @@ function ImportPagePicker({ reportId, onAdded, itemStyle }: {
   return (
     <div style={{ borderTop: '1px solid var(--border)', marginTop: 4, paddingTop: 4 }}>
       <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', padding: '4px 10px' }}>
-        Import a page from…
+        {t('bc.rules.tpl.importFrom')}
       </div>
-      <select aria-label="Source report" value={source?.id ?? ''} style={{ margin: '0 10px 6px', fontSize: 11, width: 'calc(100% - 20px)' }}
+      <select aria-label={t('bc.rules.tpl.sourceAria')} value={source?.id ?? ''} style={{ margin: '0 10px 6px', fontSize: 11, width: 'calc(100% - 20px)' }}
         onChange={e => {
           const id = Number(e.target.value)
           if (!id) { setSource(null); return }
           reportsApi.get(id).then(r => setSource({ id, pages: r.pages.map(p => ({ id: p.id, name: p.name })) })).catch(() => {})
         }}>
-        <option value="">— choose a report —</option>
+        <option value="">{t('bc.rules.tpl.chooseReport')}</option>
         {reports.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
       </select>
       {source?.pages.map(p => (
         <button key={p.id} role="menuitem" style={itemStyle}
           onClick={() => pageTemplatesApi.addFrom(reportId, { source_report_id: source.id, source_page_id: p.id })
-            .then(onAdded).catch(() => toast.error('Could not import the page'))}>
-          {p.name}
+            .then(onAdded).catch(() => toast.error(t('bc.rules.tpl.importFailed')))}>
+          <bdi>{p.name}</bdi>
         </button>
       ))}
     </div>
@@ -49,6 +53,8 @@ export function PageTemplateMenu({ reportId, activePageId, onClose, onAdded }: {
   //: which tells the next author nothing.
   const [naming, setNaming] = useState<string | null>(null)
   const confirm = useConfirm()
+  const t = useT()
+  const count = (n: number) => t('bc.rules.tpl.count', { n: localDigits(String(n)) })
   useEffect(() => {
     pageTemplatesApi.builtins().then(setBuiltins).catch(() => {})
     // A swallowed failure here read as "No saved templates yet", inviting the
@@ -62,37 +68,37 @@ export function PageTemplateMenu({ reportId, activePageId, onClose, onAdded }: {
     color: 'var(--text)', cursor: 'pointer', whiteSpace: 'nowrap' }
 
   return (
-    <div role="menu" aria-label="Page templates" style={{ position: 'absolute', top: '100%', insetInlineStart: 0, zIndex: 50,
+    <div role="menu" aria-label={t('bc.rules.tpl.menuAria')} style={{ position: 'absolute', top: '100%', insetInlineStart: 0, zIndex: 50,
       background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8,
       boxShadow: '0 8px 24px rgba(0,0,0,.2)', padding: 4, minWidth: 200 }}>
-      <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', padding: '4px 10px' }}>Built-in layouts</div>
-      {builtins.map(t => (
-        <button key={t.key} role="menuitem" style={item}
-          onClick={() => pageTemplatesApi.addFrom(reportId, { builtin: t.key })
-            .then(onAdded).catch(() => toast.error('Could not add the page'))}>
-          {t.name} <span style={{ color: 'var(--muted)' }}>({t.widgets} widgets)</span>
+      <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', padding: '4px 10px' }}>{t('bc.rules.tpl.builtins')}</div>
+      {builtins.map(b => (
+        <button key={b.key} role="menuitem" style={item}
+          onClick={() => pageTemplatesApi.addFrom(reportId, { builtin: b.key })
+            .then(onAdded).catch(() => toast.error(t('bd.tpl.addFailed')))}>
+          {TEMPLATE_NAMES[b.key] ? t(TEMPLATE_NAMES[b.key]) : b.name} <span style={{ color: 'var(--muted)' }}>{count(b.widgets)}</span>
         </button>
       ))}
       {saved.length > 0 && (
-        <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', padding: '4px 10px', borderTop: '1px solid var(--border)', marginTop: 4 }}>Your templates</div>
+        <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', padding: '4px 10px', borderTop: '1px solid var(--border)', marginTop: 4 }}>{t('bc.rules.tpl.yours')}</div>
       )}
-      {saved.map(t => (
-        <div key={t.id} style={{ display: 'flex', alignItems: 'center' }}>
+      {saved.map(s => (
+        <div key={s.id} style={{ display: 'flex', alignItems: 'center' }}>
           <button role="menuitem" style={{ ...item, flex: 1 }}
-            onClick={() => pageTemplatesApi.addFrom(reportId, { template_id: t.id })
-              .then(onAdded).catch(() => toast.error('Could not add the page'))}>
-            {t.name} <span style={{ color: 'var(--muted)' }}>({t.widgets} widgets)</span>
+            onClick={() => pageTemplatesApi.addFrom(reportId, { template_id: s.id })
+              .then(onAdded).catch(() => toast.error(t('bd.tpl.addFailed')))}>
+            <bdi>{s.name}</bdi> <span style={{ color: 'var(--muted)' }}>{count(s.widgets)}</span>
           </button>
-          <button aria-label={`Delete template ${t.name}`} title={`Delete template ${t.name}`}
+          <button aria-label={t('bc.rules.tpl.deleteAria', { name: s.name })} title={t('bc.rules.tpl.deleteAria', { name: s.name })}
             style={{ background: 'none', border: 'none', cursor: 'pointer',
               color: 'var(--muted)', fontSize: 12, padding: '0 8px' }}
             onClick={async () => {
-              if (!await confirm({ title: `Delete template "${t.name}"?`,
-                body: 'This cannot be undone. Pages already built from it are not affected.' })) return
+              if (!await confirm({ title: t('bc.rules.tpl.deleteTitle', { name: s.name }),
+                body: t('bd.tpl.deleteBody'), confirmLabel: t('bc.rules.delete'), cancelLabel: t('bc.rules.cancel') })) return
               try {
-                await pageTemplatesApi.delete(t.id)
-                setSaved(list => list.filter(x => x.id !== t.id))
-              } catch { toast.error('Could not delete the template') }
+                await pageTemplatesApi.delete(s.id)
+                setSaved(list => list.filter(x => x.id !== s.id))
+              } catch { toast.error(t('bd.tpl.deleteFailed')) }
             }}>×</button>
         </div>
       ))}
@@ -100,27 +106,27 @@ export function PageTemplateMenu({ reportId, activePageId, onClose, onAdded }: {
       {activePageId != null && naming === null && (
         <button role="menuitem" style={{ ...item, borderTop: '1px solid var(--border)', marginTop: 4 }}
           onClick={() => setNaming('')}>
-          Save current page as a template
+          {t('bc.rules.tpl.saveCurrent')}
         </button>
       )}
       {activePageId != null && naming !== null && (
         <div style={{ display: 'flex', gap: 4, padding: '6px 10px', borderTop: '1px solid var(--border)', marginTop: 4 }}>
-          <input aria-label="New template name" autoFocus value={naming}
-            placeholder="e.g. Quarterly layout"
+          <input aria-label={t('bc.rules.tpl.nameAria')} autoFocus value={naming} dir="auto"
+            placeholder={t('bd.tpl.namePh')}
             onChange={e => setNaming(e.target.value)}
             onKeyDown={e => { if (e.key === 'Escape') setNaming(null) }}
             style={{ fontSize: 11, width: 150 }} />
           <button className="btn btn-primary btn-sm" style={{ fontSize: 11 }}
-            aria-label="Save page template"
+            aria-label={t('bc.rules.tpl.saveAria')}
             onClick={() => {
               const name = naming.trim()
               // No silent fallback name: an empty box means the author has not
               // decided yet, and `Template 9/11/2026` is what this used to do.
               if (!name) return
               pageTemplatesApi.saveFrom(reportId, activePageId, name)
-                .then(() => { toast.success(`Saved "${name}"`); onClose() })
-                .catch(() => toast.error('Could not save the template'))
-            }}>Save</button>
+                .then(() => { toast.success(t('bc.rules.tpl.saved', { name })); onClose() })
+                .catch(() => toast.error(t('bd.tpl.saveFailed')))
+            }}>{t('bd.tpl.saveBtn')}</button>
         </div>
       )}
     </div>

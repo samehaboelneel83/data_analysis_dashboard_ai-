@@ -4,13 +4,13 @@ import { LayoutGrid } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useDirection } from '../../contexts/DirectionContext'
 import { useT, type MessageKey } from '../../i18n'
+import { dtypeShort } from '../../lib/dtypeName'
 import { localDigits } from '../../lib/arabicFormats'
 import { isCertified } from '../../lib/cleanDatasets'
 import { formatCell } from '../../lib/displayNumber'
 import { dataPreviewApi, reportsApi, sensitivityApi, type DatasetSummary, type LineageGraph } from '../../services/api'
 import { dashboardsOf, sourceKind } from './classify'
 
-const TYPE_TAG: Record<string, string> = { numeric: 'NUM', datetime: 'DATE', categorical: 'TXT', boolean: 'BOOL', text: 'TXT' }
 const MAX_CHIPS = 8
 const PREVIEW_ROWS = 4
 const PREVIEW_COLS = 3
@@ -100,7 +100,7 @@ export default function DatasetPreview({ ds, graph, meId, fmtBytes }: {
           <div className="dl-dsl__chips">
             {cols.slice(0, MAX_CHIPS).map(c => (
               <span key={c.name} className="dl-dsl__chip" dir="ltr">
-                <span className="dl-dsl__chip-tag">{TYPE_TAG[c.dtype] ?? c.dtype.slice(0, 4).toUpperCase()}</span>{c.name}
+                <span className="dl-dsl__chip-tag">{dtypeShort(t, c.dtype)}</span>{c.name}
               </span>
             ))}
             {cols.length > MAX_CHIPS && <span className="dl-dsl__chip">+{localDigits(String(cols.length - MAX_CHIPS))}</span>}

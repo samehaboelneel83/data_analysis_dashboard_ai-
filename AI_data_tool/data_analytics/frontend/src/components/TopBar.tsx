@@ -110,7 +110,8 @@ export default function TopBar({ onOpenNav, theme, onToggleTheme }: {
         style={{ flex: compact ? '1 1 0' : undefined }}>
         {section && !compact && (
           <>
-            <span className="dl-crumbs__section">{t(SECTION_MESSAGE[section] ?? 'nav.home')}</span>
+            {/* QA4 V8: a crumb cut short keeps its full name as a tooltip */}
+            <span className="dl-crumbs__section" title={t(SECTION_MESSAGE[section] ?? 'nav.home')}>{t(SECTION_MESSAGE[section] ?? 'nav.home')}</span>
             <span aria-hidden className="dl-crumbs__sep"><ChevronRight size={14} /></span>
           </>
         )}
@@ -118,14 +119,14 @@ export default function TopBar({ onOpenNav, theme, onToggleTheme }: {
           <>
             {!compact && (
               <>
-                <Link to={parentPath} className="dl-crumbs__section dl-crumbs__link">{t(messageForPath(pathname))}</Link>
+                <Link to={parentPath} className="dl-crumbs__section dl-crumbs__link" title={t(messageForPath(pathname))}>{t(messageForPath(pathname))}</Link>
                 <span aria-hidden className="dl-crumbs__sep"><ChevronRight size={14} /></span>
               </>
             )}
             <span className="dl-crumbs__page" aria-current="page" title={leafTitle}>{leafTitle}</span>
           </>
         ) : (
-          <span className="dl-crumbs__page" aria-current="page">{t(messageForPath(pathname))}</span>
+          <span className="dl-crumbs__page" aria-current="page" title={t(messageForPath(pathname))}>{t(messageForPath(pathname))}</span>
         )}
       </nav>
 

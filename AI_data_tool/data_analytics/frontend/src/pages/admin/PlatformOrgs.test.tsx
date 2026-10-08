@@ -1,6 +1,7 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import PlatformOrgs from './PlatformOrgs'
+import { DirectionProvider } from '../../contexts/DirectionContext'
 
 vi.mock('../../services/api', () => {
   const noQuota = { max_queries_per_day: null, max_agent_asks_per_day: null, max_storage_mb: null, max_concurrent_asks: null,
@@ -142,5 +143,21 @@ describe('PlatformOrgs loading, empty, and error states', () => {
 
     await waitFor(() => expect(screen.getByText(/no organizations yet/i)).toBeInTheDocument())
     expect(screen.queryByRole('alert')).toBeNull()
+  })
+})
+
+describe('PlatformOrgs in Arabic (8-i18n)', () => {
+  afterEach(() => localStorage.removeItem('datalytics.language'))
+
+  it('reads in Arabic: plural users, quotas, names isolated', async () => {
+    localStorage.setItem('datalytics.language', 'ar')
+    render(<DirectionProvider><PlatformOrgs /></DirectionProvider>)
+    expect(await screen.findByText(/^3 مستخدمين · الأم:/)).toBeInTheDocument()
+    expect(screen.getByText(/^مستخدم واحد · الأم:/)).toBeInTheDocument()
+    expect(screen.getByText('Parent Co', { selector: '.dl-rows__title bdi' })).toBeInTheDocument()
+    expect(screen.getAllByText('استعلامات اليوم: 4 / بلا حد').length).toBe(1)
+    expect(screen.getByRole('button', { name: 'إنشاء المؤسسة' })).toBeInTheDocument()
+    expect(screen.getByLabelText('المؤسسة الأم لـ «⁨Child Co⁩»')).toBeInTheDocument()
+    expect(screen.queryByText(/Queries today/)).toBeNull()
   })
 })

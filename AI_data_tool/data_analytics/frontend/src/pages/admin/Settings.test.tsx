@@ -1,8 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import Settings from './Settings'
 import { AuthContext } from '../../contexts/AuthContext'
+import { DirectionProvider } from '../../contexts/DirectionContext'
 import { platformSettingsApi, mapSettingsApi, type PlatformSetting } from '../../services/api'
 import toast from 'react-hot-toast'
 
@@ -135,5 +136,65 @@ describe('Admin -> Settings', () => {
     fireEvent.change(await screen.findByLabelText('Find a setting'), { target: { value: 'connect' } })
     expect(screen.getByTestId('setting-source_connect_timeout_s')).toBeInTheDocument()
     expect(screen.queryByTestId('setting-llm_model')).toBeNull()
+  })
+})
+
+describe('Admin -> Settings in Arabic (8-i18n)', () => {
+  const AR_PAYLOAD = {
+    categories: [
+      { id: 'ai', label: 'AI model (LLM)', settings: [
+        setting({ key: 'llm_base_url', label: 'LLM endpoint (single)',
+          help: 'An OpenAI-compatible base URL, ending in /v1. Used only while no list is saved under LLM endpoints.',
+          value: 'http://llm:8000/v1' }),
+        setting({ key: 'llm_endpoints', label: 'Built-in endpoint list (LLM_ENDPOINTS)', editable: false,
+          value: '[{"id":"qwen","base_url":"http://llm:8000/v1","model":"qwen3.5"}]' }),
+        setting({ key: 'brand_new_setting', label: 'A setting this client does not know', help: 'Server help.' }),
+      ] },
+      { id: 'new_category', label: 'Server-only category', settings: [
+        setting({ key: 'llm_timeout_s', label: 'Request timeout (seconds)', type: 'float', value: 180 }),
+      ] },
+    ],
+  }
+  function showAr() {
+    localStorage.setItem('datalytics.language', 'ar')
+    const value = { user: { is_super_admin: true, role: { is_org_admin: false } } } as never
+    return render(<MemoryRouter><DirectionProvider><AuthContext.Provider value={value}>
+      <Settings scope="platform" /></AuthContext.Provider></DirectionProvider></MemoryRouter>)
+  }
+  afterEach(() => localStorage.removeItem('datalytics.language'))
+
+  it('translates catalog labels, help and categories by key, and keeps unknown keys in the server words', async () => {
+    ;(platformSettingsApi.get as any).mockResolvedValue(AR_PAYLOAD)
+    showAr()
+    expect(await screen.findByLabelText('نقطة نهاية LLM (مفردة)')).toHaveValue('http://llm:8000/v1')
+    expect(screen.getByText(/عنوان URL أساسي متوافق مع OpenAI/)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'نموذج الذكاء الاصطناعي (LLM)' })).toBeInTheDocument()
+    expect(screen.queryByText('LLM endpoint (single)')).toBeNull()
+    // Unknown to this client: the server's English stays.
+    expect(screen.getByLabelText('A setting this client does not know')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Server-only category' })).toBeInTheDocument()
+    // A known setting in an unknown category is still translated.
+    expect(screen.getByLabelText('مهلة الطلب (بالثواني)')).toBeInTheDocument()
+  })
+
+  it('shows URL and JSON values left to right, isolated', async () => {
+    ;(platformSettingsApi.get as any).mockResolvedValue(AR_PAYLOAD)
+    showAr()
+    const url = await screen.findByLabelText('نقطة نهاية LLM (مفردة)')
+    expect(url).toHaveAttribute('dir', 'ltr')
+    const list = within(screen.getByTestId('setting-llm_endpoints')).getByText(/"base_url"/)
+    expect(list).toHaveAttribute('dir', 'ltr')
+    expect(list).toHaveStyle({ unicodeBidi: 'isolate', textAlign: 'left' })
+  })
+
+  it('finds a setting by its Arabic name or its English one', async () => {
+    ;(platformSettingsApi.get as any).mockResolvedValue(AR_PAYLOAD)
+    showAr()
+    const search = await screen.findByRole('searchbox')
+    fireEvent.change(search, { target: { value: 'مهلة' } })
+    expect(screen.getByTestId('setting-llm_timeout_s')).toBeInTheDocument()
+    expect(screen.queryByTestId('setting-llm_base_url')).toBeNull()
+    fireEvent.change(search, { target: { value: 'endpoint (single)' } })
+    expect(screen.getByTestId('setting-llm_base_url')).toBeInTheDocument()
   })
 })

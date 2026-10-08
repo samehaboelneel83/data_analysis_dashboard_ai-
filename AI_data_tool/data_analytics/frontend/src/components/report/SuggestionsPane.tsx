@@ -3,7 +3,7 @@ import { suggestApi, widgetDataApi } from '../../services/api'
 import type { ColumnMeta, DatasetColumn, WidgetSuggestion } from '../../services/api'
 import { defaultSummary, isIdentifier, nonAdditiveKind } from '../../lib/semanticGuard'
 import type { Widget } from '../../types/report'
-import { useT, type MessageKey } from '../../i18n'
+import { translate, useT, type MessageKey, type TranslateFn } from '../../i18n'
 import { formattingCapabilities } from './widgetCapabilities'
 import WidgetRenderer from './WidgetRenderer'
 import { CrossFilterProvider } from './CrossFilterContext'
@@ -35,6 +35,8 @@ export function suggestWidgets(
   } | null,
   seed = 0,
   meta: Record<string, ColumnMeta | undefined> = {},
+  /** Titles and reasons in the reader's language; English when not given. */
+  tr: TranslateFn = (key, vars) => translate('en', key, vars),
 ): Suggestion[] {
   if (!columns.some(c => c.dtype === 'numeric')) return []
   const roleOf = (c: DatasetColumn) => meta[c.name]?.role
@@ -72,18 +74,21 @@ export function suggestWidgets(
   const countCfg = (dimension: string): Record<string, unknown> => idCol
     ? { dimension, measure: idCol.name, aggregation: 'countd' }
     : { dimension, measure: dimension, aggregation: 'count' }
-  const countWord = idCol ? `Count of ${idCol.name}` : 'Number of rows'
+  const countBy = (cat: string) => idCol
+    ? tr('pg.panelsA.sw.countBy', { id: idCol.name, cat }) : tr('pg.panelsA.sw.rowsBy', { cat })
+  const countOver = (d: string) => idCol
+    ? tr('pg.panelsA.sw.countOver', { id: idCol.name, d }) : tr('pg.panelsA.sw.rowsOver', { d })
 
   // Head-counts first: the first question about any table of things.
   for (const cat of cats.slice(0, 3)) {
     const n = card(cat)
     const low = Number.isFinite(n) && n <= 6
-    out.push({ widget_type: low ? 'pie' : 'bar', title: `${countWord} by ${cat.name}`,
-      reason: `how many in each ${cat.name}`, config: countCfg(cat.name) })
+    out.push({ widget_type: low ? 'pie' : 'bar', title: countBy(cat.name),
+      reason: tr('pg.panelsA.sw.howManyEach', { cat: cat.name }), config: countCfg(cat.name) })
   }
   for (const d of dates.slice(0, 1)) {
-    out.push({ widget_type: 'line', title: `${countWord} over ${d.name}`,
-      reason: `${d.name} is a date — how many per period`,
+    out.push({ widget_type: 'line', title: countOver(d.name),
+      reason: tr('pg.panelsA.sw.perPeriod', { d: d.name }),
       config: { ...countCfg(d.name), dimension_granularity: 'month' } })
   }
   for (const cat of cats) {
@@ -94,19 +99,19 @@ export function suggestWidgets(
       // A pie is parts of a whole: an AVERAGE has no whole to be part of.
       const low = Number.isFinite(n) && n <= 6 && !avg
       out.push(low
-        ? { widget_type: 'pie', title: `${m.name} by ${cat.name}`,
-            reason: `${cat.name} has few values — parts of a whole read well`,
+        ? { widget_type: 'pie', title: tr('pg.panelsA.sw.mBy', { m: m.name, cat: cat.name }),
+            reason: tr('pg.panelsA.sw.fewValues', { cat: cat.name }),
             config: { dimension: cat.name, measure: m.name, aggregation: agg } }
-        : { widget_type: 'bar', title: `${avg ? 'Average ' : ''}${m.name} by ${cat.name}`,
-            reason: `compare ${avg ? 'average ' : ''}${m.name} across ${cat.name}`,
+        : { widget_type: 'bar', title: tr(avg ? 'pg.panelsA.sw.avgBy' : 'pg.panelsA.sw.mBy', { m: m.name, cat: cat.name }),
+            reason: tr(avg ? 'pg.panelsA.sw.compareAvg' : 'pg.panelsA.sw.compare', { m: m.name, cat: cat.name }),
             config: { dimension: cat.name, measure: m.name, aggregation: agg } })
     }
   }
   for (const d of dates.slice(0, 1)) {
     for (const m of numeric.slice(0, 2)) {
       const agg = defaultSummary(m.name, meta)
-      out.push({ widget_type: 'line', title: `${agg === 'avg' ? 'Average ' : ''}${m.name} over ${d.name}`,
-        reason: `${d.name} is a date — show the trend`,
+      out.push({ widget_type: 'line', title: tr(agg === 'avg' ? 'pg.panelsA.sw.avgOver' : 'pg.panelsA.sw.mOver', { m: m.name, d: d.name }),
+        reason: tr('pg.panelsA.sw.trend', { d: d.name }),
         // By month: a trend read at a glance, the same grain whether it is
         // previewed or added (an automatic grain drew ~100 weekly points and an
         // overview slider into a 300px preview).
@@ -125,14 +130,14 @@ export function suggestWidgets(
     }
     pairs.sort((x, y) => Math.abs(y.r) - Math.abs(x.r))
     for (const p of pairs.slice(0, 3)) {
-      out.push({ widget_type: 'scatter', title: `${p.a} vs ${p.b}`,
-        reason: `correlated (r = ${p.r.toFixed(2)})`,
+      out.push({ widget_type: 'scatter', title: tr('pg.panelsA.sw.vs', { a: p.a, b: p.b }),
+        reason: tr('pg.panelsA.sw.correlated', { r: p.r.toFixed(2) }),
         config: { x_column: p.a, y_column: p.b } })
     }
   }
   for (const m of numeric.slice(0, 2)) {
-    out.push({ widget_type: 'histogram', title: `Distribution of ${m.name}`,
-      reason: `see the shape of ${m.name}`, config: { measure: m.name, bins: 20 } })
+    out.push({ widget_type: 'histogram', title: tr('pg.panelsA.sw.dist', { m: m.name }),
+      reason: tr('pg.panelsA.sw.shape', { m: m.name }), config: { measure: m.name, bins: 20 } })
   }
 
   // "Refresh" rotates the window so the pane shows different candidates rather
@@ -271,7 +276,7 @@ export default function SuggestionsPane({ columns, analysis, onAdd, reportId, da
 }) {
   const [seed, setSeed] = useState(0)
   const tr = useT()
-  const heuristics = useMemo(() => suggestWidgets(columns, analysis, seed, columnMeta ?? {}), [columns, analysis, seed, columnMeta])
+  const heuristics = useMemo(() => suggestWidgets(columns, analysis, seed, columnMeta ?? {}, tr), [columns, analysis, seed, columnMeta, tr])
   const [insightSugs, setInsightSugs] = useState<WidgetSuggestion[] | null>(null)
   useEffect(() => {
     if (!reportId) return

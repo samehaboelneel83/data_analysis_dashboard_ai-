@@ -174,14 +174,15 @@ describe('DisplayRulesPanel — Colour map and Bands authoring', () => {
     const onChange = vi.fn()
     const saved = addRuleOfKind('value_map', onChange)
     // A colour map compares stringified values, so any column is legitimate here.
-    expect(saved.column).toBe('region')
+    // (QA4 E1: a new rule starts on the first NUMERIC column, which it keeps.)
+    expect(saved.column).toBe('value')
 
     const select = screen.getByLabelText(/^column$/i) as HTMLSelectElement
     expect(Array.from(select.options).map(o => o.value)).toEqual(COLUMNS)
 
-    fireEvent.change(select, { target: { value: 'value' } })
+    fireEvent.change(select, { target: { value: 'region' } })
     const calls = onChange.mock.calls
-    expect(calls[calls.length - 1][0][0].column).toBe('value')
+    expect(calls[calls.length - 1][0][0].column).toBe('region')
   })
 
   it('drops the expression fields when switching to a colour map, keeping the rule evaluable', () => {
@@ -293,5 +294,42 @@ describe('DisplayRulesPanel — Data bar authoring', () => {
     const saved = onChange.mock.calls[onChange.mock.calls.length - 1][0][0]
     expect(saved.condition).toBeUndefined()
     expect(saved.expression).toBeUndefined()
+  })
+})
+
+describe('a new rule the server can evaluate (QA4 E1)', () => {
+  it('starts on the first numeric column, not the first column (date > 0 was a Python error)', () => {
+    const onChange = vi.fn()
+    render(<DisplayRulesPanel rules={[]} columns={['date', 'region', 'revenue']} numericColumns={['revenue']} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: /add rule/i }))
+    const rule = onChange.mock.calls.at(-1)![0][0]
+    expect(rule).toMatchObject({ kind: 'expression', column: 'revenue', condition: { op: 'gt', value: 0 } })
+  })
+
+  it('with no numeric column, starts as a colour per value', () => {
+    const onChange = vi.fn()
+    render(<DisplayRulesPanel rules={[]} columns={['date', 'region']} numericColumns={[]} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: /add rule/i }))
+    expect(onChange.mock.calls.at(-1)![0][0]).toMatchObject({ kind: 'value_map', column: 'date', mappings: [] })
+  })
+
+  it('a text column offers no comparisons, and switching to one drops a comparison', () => {
+    const onChange = vi.fn()
+    render(<DisplayRulesPanel rules={[{ id: 'r1', kind: 'expression', target: 'mark', column: 'revenue', condition: { op: 'gt', value: 0 }, expression: 'revenue > 0', style: {} }]}
+      columns={['region', 'revenue']} numericColumns={['revenue']} onChange={onChange} />)
+    fireEvent.change(screen.getByLabelText(/^column$/i), { target: { value: 'region' } })
+    const rule = onChange.mock.calls.at(-1)![0][0]
+    expect(rule.condition.op).toBe('eq')
+    const ops = Array.from((screen.getByLabelText(/^operator$/i) as HTMLSelectElement).options).map(o => o.value)
+    expect(ops).not.toContain('gt'); expect(ops).not.toContain('between'); expect(ops).toContain('in')
+  })
+
+  it("the server's error is a short message, its own text only as left-to-right detail", () => {
+    render(<DisplayRulesPanel rules={[{ id: 'r1', kind: 'expression', target: 'mark', column: 'revenue', condition: { op: 'gt', value: 0 }, expression: 'revenue > 0', style: {} }]}
+      columns={['revenue']} numericColumns={['revenue']} onChange={vi.fn()}
+      errors={[{ id: 'r1', message: "'>' not supported between instances of 'str' and 'int'" }]} />)
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent("This rule can't be applied to this column's values.")
+    expect(alert.querySelector('code[dir="ltr"]')).toHaveTextContent("'>' not supported")
   })
 })

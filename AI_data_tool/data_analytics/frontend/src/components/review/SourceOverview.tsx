@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import type { ReviewQueue, ReviewSource } from '../../services/api'
+import { useT } from '../../i18n'
+import { withNode } from '../../i18n/pages/dataPages'
 
 /**
  * What this database is, in plain language.
@@ -32,6 +34,7 @@ export default function SourceOverview({
   source, datasets, onToggleLlm, onSaveDescription, onRetrySample,
   onToggleCanonical, busy,
 }: SourceOverviewProps) {
+  const tr = useT()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(source.description ?? '')
 
@@ -65,7 +68,7 @@ export default function SourceOverview({
             disabled={busy}
             onChange={e => onToggleLlm(e.target.checked)}
           />
-          Let the model describe this source
+          {tr('pg.dataPages.ov.allowLlm')}
         </label>
       </div>
 
@@ -79,10 +82,10 @@ export default function SourceOverview({
           />
           <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
             <button onClick={() => { onSaveDescription(draft); setEditing(false) }}>
-              Save
+              {tr('pg.dataPages.rev.save')}
             </button>
             <button onClick={() => { setDraft(source.description ?? ''); setEditing(false) }}>
-              Cancel
+              {tr('common.cancel')}
             </button>
           </div>
         </div>
@@ -93,45 +96,45 @@ export default function SourceOverview({
           </p>
           <div style={{ fontSize: 12, color: '#64748b' }}>
             {source.description_source === 'confirmed'
-              ? 'Confirmed by a person — no sync will overwrite it.'
-              : 'Written by the model from this database’s structure. Not yet confirmed.'}
+              ? tr('pg.dataPages.ov.confirmedByPerson')
+              : tr('pg.dataPages.ov.writtenByModel')}
             {' · '}
             <button
               onClick={() => { setDraft(source.description ?? ''); setEditing(true) }}
               style={{ background: 'none', border: 'none', padding: 0,
                        color: '#2d5ba8', cursor: 'pointer', fontSize: 12 }}
             >
-              Edit
+              {tr('pg.dataPages.ov.edit')}
             </button>
           </div>
         </>
       ) : (
         <p style={{ margin: 0, fontSize: 13, color: '#64748b' }}>
           {source.allow_llm_sampling
-            ? 'No description yet — run a sync and the model will write one from this database’s tables and relationships.'
-            : 'No description yet. Descriptions are written by your self-hosted model, which is switched off for this source. Tick the box above, then run a sync.'}
+            ? tr('pg.dataPages.ov.noDescModelOn')
+            : tr('pg.dataPages.ov.noDescModelOff')}
           {' '}
           <button
             onClick={() => { setDraft(''); setEditing(true) }}
             style={{ background: 'none', border: 'none', padding: 0,
                      color: '#2d5ba8', cursor: 'pointer', fontSize: 13 }}
           >
-            Or write one yourself
+            {tr('pg.dataPages.ov.writeYourself')}
           </button>
         </p>
       )}
 
       <div style={{ display: 'flex', gap: 18, marginTop: 12, fontSize: 12,
                     color: '#64748b', flexWrap: 'wrap' }}>
-        <span><strong style={{ color: '#101822' }}>{tables}</strong> tables</span>
-        <span><strong style={{ color: '#101822' }}>{views}</strong> views</span>
-        <span><strong style={{ color: '#101822' }}>{described.length}</strong> described</span>
+        <span>{withNode(tr('pg.dataPages.ov.statTables', { n: tables, b: '\u0001' }), <strong style={{ color: '#101822' }}>{tables}</strong>)}</span>
+        <span>{withNode(tr('pg.dataPages.ov.statViews', { n: views, b: '\u0001' }), <strong style={{ color: '#101822' }}>{views}</strong>)}</span>
+        <span>{withNode(tr('pg.dataPages.ov.statDescribed', { n: described.length, b: '\u0001' }), <strong style={{ color: '#101822' }}>{described.length}</strong>)}</span>
         {deprecated > 0 && (
-          <span><strong style={{ color: '#a86c15' }}>{deprecated}</strong> look abandoned</span>
+          <span>{withNode(tr('pg.dataPages.ov.statAbandoned', { n: deprecated, b: '\u0001' }), <strong style={{ color: '#a86c15' }}>{deprecated}</strong>)}</span>
         )}
         {unsampled > 0 && (
-          <span title="Empty, or too expensive to sample within the time budget">
-            <strong style={{ color: '#a86c15' }}>{unsampled}</strong> not profiled
+          <span title={tr('pg.dataPages.ov.notProfiledTitle')}>
+            {withNode(tr('pg.dataPages.ov.statNotProfiled', { n: unsampled, b: '\u0001' }), <strong style={{ color: '#a86c15' }}>{unsampled}</strong>)}
           </span>
         )}
       </div>
@@ -142,9 +145,9 @@ export default function SourceOverview({
           leaves a reader unable to tell which is which without checking each
           name, and on this source there are more views than tables. */}
       <DescribedGroup
-        title="Tables"
+        title={tr('pg.dataPages.ov.tables')}
         items={describedTables}
-        empty="No table descriptions yet."
+        empty={tr('pg.dataPages.ov.noTableDescs')}
         onToggleCanonical={onToggleCanonical}
         busy={busy}
       />
@@ -160,12 +163,7 @@ export default function SourceOverview({
         <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 6,
                       background: '#fdf6e7', border: '1px solid #f0dfae' }}>
           <p style={{ margin: 0, fontSize: 13, color: '#7a5a12' }}>
-            <strong>{skipped.length}</strong>{' '}
-            {skipped.length === 1 ? 'object takes' : 'objects take'} too long to
-            sample, so {skipped.length === 1 ? 'it is' : 'they are'} left out of
-            syncs. Everything already known about{' '}
-            {skipped.length === 1 ? 'it' : 'them'} is kept — only the sample
-            stops being refreshed.
+            {withNode(tr('pg.dataPages.ov.skipped', { n: skipped.length, b: '\u0001' }), <strong>{skipped.length}</strong>)}
           </p>
           <ul style={{ margin: '8px 0 0', paddingInlineStart: 18, fontSize: 13,
                        lineHeight: 1.8, maxHeight: 180, overflowY: 'auto' }}>
@@ -179,7 +177,7 @@ export default function SourceOverview({
                            color: '#2d5ba8', cursor: busy ? 'default' : 'pointer',
                            fontSize: 13 }}
                 >
-                  Try again on the next sync
+                  {tr('pg.dataPages.ov.retrySample')}
                 </button>
               </li>
             ))}
@@ -188,10 +186,10 @@ export default function SourceOverview({
       )}
 
       <DescribedGroup
-        title="Views"
+        title={tr('pg.dataPages.ov.views')}
         items={describedViews}
-        empty="No view descriptions yet."
-        note="A view is a saved query. Its columns come from the tables underneath it."
+        empty={tr('pg.dataPages.ov.noViewDescs')}
+        note={tr('pg.dataPages.ov.viewNote')}
         onToggleCanonical={onToggleCanonical}
         busy={busy}
       />
@@ -208,11 +206,12 @@ function DescribedGroup({ title, items, empty, note, onToggleCanonical, busy }: 
   onToggleCanonical: (objectId: number, canonical: boolean) => void
   busy?: boolean
 }) {
+  const tr = useT()
   if (!items.length) return null
   return (
     <details style={{ marginTop: 10 }}>
       <summary style={{ fontSize: 13, cursor: 'pointer' }}>
-        {title} — what each one holds ({items.length})
+        {tr('pg.dataPages.ov.groupSummary', { title, n: items.length })}
       </summary>
       {note && (
         <p style={{ fontSize: 12, color: '#64748b', margin: '6px 0 0' }}>{note}</p>
@@ -225,7 +224,7 @@ function DescribedGroup({ title, items, empty, note, onToggleCanonical, busy }: 
           <li key={d.id} style={{ marginBottom: 4 }}>
             <strong>{d.name}</strong>
             {d.description_source === 'schema' && (
-              <span style={{ color: '#16785a', fontWeight: 400 }}> (from the schema)</span>
+              <span style={{ color: '#16785a', fontWeight: 400 }}> {tr('pg.dataPages.ov.fromSchema')}</span>
             )}
             {' '}— {d.description}
             {' '}
@@ -241,7 +240,7 @@ function DescribedGroup({ title, items, empty, note, onToggleCanonical, busy }: 
                 onChange={e => onToggleCanonical(d.id, e.target.checked)}
                 style={{ marginInlineStart: 6, marginInlineEnd: 4, verticalAlign: 'middle' }}
               />
-              canonical
+              {tr('pg.dataPages.ov.canonical')}
             </label>
           </li>
         ))}

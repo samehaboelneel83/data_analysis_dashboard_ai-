@@ -1,9 +1,19 @@
 import { useModalDialog } from '../ui/useModalDialog'
 import type { AuthzDecision } from '../../services/api'
+import type { ReactNode } from 'react'
+import { useT, type MessageKey } from '../../i18n'
 
-const ACTION_WORDS: Record<string, string> = {
-  view: 'Open this report', edit: 'Change this report', data: 'Change its data model',
-  share_link: 'Share it by guest link', download: 'Download it (PDF, package, CSV)',
+const ACTION_WORDS: Record<string, MessageKey> = {
+  view: 'pg.panelsA.ax.action.view', edit: 'pg.panelsA.ax.action.edit', data: 'pg.panelsA.ax.action.data',
+  share_link: 'pg.panelsA.ax.action.share_link', download: 'pg.panelsA.ax.action.download',
+}
+
+/** A translated sentence with its `{slot}`s filled by elements. */
+function slots(text: string, parts: Record<string, ReactNode>): ReactNode[] {
+  return text.split(/(\{\w+\})/).map((s, i) => {
+    const m = /^\{(\w+)\}$/.exec(s)
+    return m && m[1] in parts ? <span key={i}>{parts[m[1]]}</span> : s
+  })
 }
 
 /** "What can I do here, and why?" -- every decision with the rule behind it,
@@ -12,25 +22,26 @@ export default function AccessExplainer({ decisions, sensitivity, onClose }: {
   decisions: AuthzDecision[]; sensitivity?: { effective?: string | null; reasons?: string[] } | null; onClose: () => void
 }) {
   const ref = useModalDialog<HTMLDivElement>(onClose)
+  const t = useT()
   const dataRules = decisions.find(d => d.action === 'data_rules')
   const actions = decisions.filter(d => d.action !== 'data_rules')
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.45)',
       display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div ref={ref} role="dialog" aria-modal="true" aria-label="Your access" onClick={e => e.stopPropagation()}
+      <div ref={ref} role="dialog" aria-modal="true" aria-label={t('pg.panelsA.ax.aria')} onClick={e => e.stopPropagation()}
         style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)',
           padding: 18, width: 'min(520px, calc(100vw - 32px))', display: 'flex', flexDirection: 'column', gap: 10, fontSize: 13 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <b>Your access, and why</b>
-          <button type="button" className="btn btn-sm" aria-label="Close" onClick={onClose}>×</button>
+          <b>{t('shx.why')}</b>
+          <button type="button" className="btn btn-sm" aria-label={t('pg.panelsA.close')} onClick={onClose}>×</button>
         </div>
         <ul data-testid="access-decisions" style={{ margin: 0, paddingInlineStart: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 8 }}>
           {actions.map(d => (
             <li key={d.action} style={{ display: 'flex', gap: 8 }}>
-              <span aria-label={d.allowed ? 'allowed' : 'not allowed'} style={{ color: d.allowed ? 'var(--success)' : 'var(--danger)', fontWeight: 700 }}>
+              <span aria-label={d.allowed ? t('pg.panelsA.ax.allowed') : t('pg.panelsA.ax.notAllowed')} style={{ color: d.allowed ? 'var(--success)' : 'var(--danger)', fontWeight: 700 }}>
                 {d.allowed ? '✓' : '✕'}
               </span>
-              <span><b>{ACTION_WORDS[d.action] ?? d.action}</b><br />
+              <span><b>{ACTION_WORDS[d.action] ? t(ACTION_WORDS[d.action]) : d.action}</b><br />
                 <span style={{ fontSize: 12, color: 'var(--muted)' }}>{d.reason}</span></span>
             </li>
           ))}
@@ -38,32 +49,34 @@ export default function AccessExplainer({ decisions, sensitivity, onClose }: {
         {dataRules && dataRules.allowed && (
           <div data-testid="access-data-rules" style={{ fontSize: 12, borderTop: '1px solid var(--border)', paddingTop: 8,
             display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <b style={{ fontSize: 13 }}>What data you see</b>
+            <b style={{ fontSize: 13 }}>{t('pg.panelsA.ax.whatData')}</b>
             <span style={{ color: 'var(--muted)' }}>{dataRules.reason}</span>
             {(dataRules.rules ?? []).map(r => (
               <div key={r.dataset_id} style={{ border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px' }}>
-                <div style={{ fontWeight: 600 }}>{r.dataset_name}</div>
+                <div style={{ fontWeight: 600 }}><bdi>{r.dataset_name}</bdi></div>
                 {r.row_rule ? (
-                  <div>Rows: only where <code dir="ltr">{r.row_rule_for_you ?? r.row_rule}</code>
+                  <div>{slots(t('pg.panelsA.ax.rowsWhere'), { rule: <code dir="ltr">{r.row_rule_for_you ?? r.row_rule}</code> })}
                     {r.row_rule_for_you && r.row_rule_for_you !== r.row_rule && (
-                      <span style={{ color: 'var(--muted)' }}> (rule: <code dir="ltr">{r.row_rule}</code>)</span>
+                      <span style={{ color: 'var(--muted)' }}>{slots(t('pg.panelsA.ax.ruleNote'), { rule: <code dir="ltr">{r.row_rule}</code> })}</span>
                     )}
                   </div>
-                ) : <div>Rows: all</div>}
-                <div>Columns: {r.hidden_columns.length
-                  ? <>hidden from you — <b>{r.hidden_columns.join(', ')}</b></>
-                  : 'all'}</div>
+                ) : <div>{t('pg.panelsA.ax.rowsAll')}</div>}
+                <div>{r.hidden_columns.length
+                  ? slots(t('pg.panelsA.ax.colsHidden'), { cols: <b><bdi>{r.hidden_columns.join(', ')}</bdi></b> })
+                  : t('pg.panelsA.ax.colsAll')}</div>
               </div>
             ))}
           </div>
         )}
         {sensitivity?.effective && (
           <div data-testid="access-sensitivity" style={{ fontSize: 12, borderTop: '1px solid var(--border)', paddingTop: 8 }}>
-            Sensitivity in force: <b>{sensitivity.effective}</b>{sensitivity.reasons?.[0] ? ` — ${sensitivity.reasons[0]}` : ''}.
+            {sensitivity.reasons?.[0]
+              ? slots(t('pg.panelsA.ax.sensWhy'), { level: <b><bdi>{sensitivity.effective}</bdi></b>, reason: <bdi>{sensitivity.reasons[0]}</bdi> })
+              : slots(t('pg.panelsA.ax.sens'), { level: <b><bdi>{sensitivity.effective}</bdi></b> })}
             {' '}{sensitivity.effective === 'Restricted'
-              ? 'No guest links or embeds; downloads need data-level access.'
+              ? t('pg.panelsA.ax.restricted')
               : sensitivity.effective === 'Confidential'
-                ? 'Guest links need a signed-in member; personal-data columns are redacted from links, embeds and files.'
+                ? t('pg.panelsA.ax.confidential')
                 : ''}
           </div>
         )}

@@ -395,6 +395,93 @@ export const PANEL_AR: Record<string, string> = {
   'Describes this widget for screen readers': 'يصف هذا العنصر لقارئات الشاشة',
   'Drillthrough page': 'صفحة التعمق',
   'Tooltip page': 'صفحة التلميح',
+
+  // QA3 Batch C: the rest of the panel's words
+  "the organisation's month ({month})": 'شهر المؤسسة ({month})',
+  "the organisation's month": 'شهر المؤسسة',
+  '{n} value': 'القيم: {n}',
+  '{n} values': 'القيم: {n}',
+  'A series split and several measures cannot be drawn together. Keep one measure to split it by a series.': 'لا يمكن رسم التقسيم إلى سلاسل مع عدة مقاييس معًا. أبقِ مقياسًا واحدًا لتقسيمه إلى سلاسل.',
+  '{name} (hierarchy)': '{name} (تسلسل هرمي)',
+  '{name} (current)': '{name} (الحالي)',
+  'pre-aggregated': 'مجمّعة مسبقًا',
+  'Checking {column} against the map…': 'جارٍ مطابقة «{column}» مع الخريطة…',
+  'This role is full: remove a field to add another': 'هذا الدور ممتلئ: أزل حقلًا لإضافة آخر',
+  'Level {name}': 'المستوى {name}',
+  'of {measure}': 'لـ«{measure}»',
+  'Filter {n} column': 'عمود التصفية {n}',
+  'Filter {n} operator': 'عامل المقارنة للتصفية {n}',
+  'Filter {n}': 'التصفية {n}',
+  'Filter {n} value': 'قيمة التصفية {n}',
+  'Remove filter {n}': 'إزالة التصفية {n}',
+  'Sort key {n} column': 'عمود مفتاح الفرز {n}',
+  'Sort key {n} direction': 'اتجاه مفتاح الفرز {n}',
+  'Remove sort key {n}': 'إزالة مفتاح الفرز {n}',
+  'Choose a condition first': 'اختر شرطًا أولًا',
+  'Set a minimum group size above first': 'حدد أولًا أدنى حجم للمجموعة أعلاه',
+  'Choose Top or Bottom first': 'اختر «أعلى» أو «أدنى» أولًا',
+  // emptyPickerReason (WidgetPlaceholder.tsx), shown in the Add field dialog
+  'No dataset is attached to this report yet.': 'لم تُرفق أي مجموعة بيانات بهذا التقرير بعد.',
+  'This dataset has no numeric columns to measure.': 'لا تحوي مجموعة البيانات هذه أعمدة رقمية للقياس.',
+  "This dataset has no date columns. Set a column's type to date in the Data tab, or use a chart that takes a category.": 'لا تحوي مجموعة البيانات هذه أعمدة تاريخ. اجعل نوع أحد الأعمدة تاريخًا من تبويب البيانات، أو استخدم مخططًا يقبل فئة.',
+  'No columns of the right kind for this field.': 'لا توجد أعمدة من النوع المناسب لهذا الحقل.',
+}
+
+/**
+ * Data-role names (types/report.ts ROLE_SPECS) in Arabic, piece by piece.
+ * A role label is "Heading (hint)"; the two halves are looked up apart, so the
+ * short name a placeholder shows ("Dimension") and the full label the pane's
+ * tooltip shows ("Dimension (Group / X-axis)") share one entry. Also the
+ * option-like needs from missingWidgetOptions and the field groups of the
+ * Add dialog.
+ */
+export const ROLE_AR: Record<string, string> = {
+  // Headings
+  'Animate by': 'التحريك حسب', 'Bars': 'الأعمدة', 'Break down by': 'التفصيل حسب', 'Bubble size': 'حجم الفقاعة',
+  'Category': 'الفئة', 'Cell value': 'قيمة الخلية', 'Color': 'اللون', 'Columns': 'الأعمدة', 'Country': 'الدولة',
+  'Date': 'التاريخ', 'Date column': 'عمود التاريخ', 'Delta': 'الفرق', 'Destination latitude': 'خط عرض الوجهة',
+  'Destination longitude': 'خط طول الوجهة', 'Dimension': 'البُعد', 'Direction': 'الاتجاه', 'End date': 'تاريخ النهاية',
+  'Field to filter by': 'حقل التصفية', 'Fields': 'الحقول', 'Group': 'المجموعة', 'Label': 'التسمية',
+  'Latitude': 'خط العرض', 'Left side': 'الجانب الأيسر', 'Line': 'الخط', 'Line weight': 'سُمك الخط',
+  'Link weight': 'وزن الرابط', 'Longitude': 'خط الطول', 'Magnitude': 'المقدار', 'Measure': 'المقياس',
+  'Measures': 'المقاييس', 'Number to explain': 'الرقم المراد تفسيره', 'Origin latitude': 'خط عرض المنشأ',
+  'Origin longitude': 'خط طول المنشأ', 'Partition': 'التقسيم', 'Point size': 'حجم النقطة', 'Predictors': 'المتنبئات',
+  'Region measure': 'مقياس المنطقة', 'Response': 'الاستجابة', 'Right side': 'الجانب الأيمن', 'Rows': 'الصفوف',
+  'Series': 'السلسلة', 'Series A': 'السلسلة A', 'Series B': 'السلسلة B', 'Size': 'الحجم', 'Size weight': 'وزن الحجم',
+  'Slice by': 'التقطيع حسب', 'Source': 'المصدر', 'Source latitude': 'خط عرض المصدر', 'Source longitude': 'خط طول المصدر',
+  'Source name': 'اسم المصدر', 'Stage': 'المرحلة', 'Start date': 'تاريخ البداية', 'Target': 'الهدف',
+  'Target latitude': 'خط عرض الهدف', 'Target longitude': 'خط طول الهدف', 'Target name': 'اسم الهدف', 'Task': 'المهمة',
+  'Value': 'القيمة', 'Values': 'القيم', 'Variables': 'المتغيرات', 'Weight': 'الوزن', 'Word text': 'نص الكلمة',
+  'X axis': 'المحور السيني', 'Y axis': 'المحور الصادي', 'Conclusions about': 'استنتاجات حول',
+  // Hints (the part in brackets)
+  'Group / X-axis': 'المجموعة / المحور السيني', 'X-axis': 'المحور السيني', 'Y-axis': 'المحور الصادي',
+  'Training / Validation': 'تدريب / تحقق', 'at least two': 'اثنان على الأقل',
+  'blank = every other column': 'الفراغ = كل الأعمدة الأخرى', 'color, optional': 'اللون، اختياري',
+  'column, optional': 'عمود، اختياري', 'degrees, 0=east, CCW': 'بالدرجات، 0 = الشرق، عكس عقارب الساعة',
+  'for stacking': 'للتكديس', 'left axis': 'المحور الأيسر', 'right axis': 'المحور الأيمن',
+  'legend, optional': 'وسيلة الإيضاح، اختياري', 'numeric': 'رقمي', 'numeric column': 'عمود رقمي',
+  'numeric columns': 'أعمدة رقمية', 'numeric, optional': 'رقمي، اختياري', 'one box per group': 'صندوق لكل مجموعة',
+  'one bubble per group': 'فقاعة لكل مجموعة', 'optional': 'اختياري', 'ordered': 'مرتبة',
+  'per-bar attainment': 'الإنجاز لكل عمود', 'point layer': 'طبقة النقاط', 'region layer': 'طبقة المناطق',
+  'running order': 'ترتيب التتابع', 'summed per cell': 'مجموع لكل خلية', 'summed per cluster': 'مجموع لكل تجمع',
+  'text columns compare levels': 'الأعمدة النصية تقارن المستويات', 'yes/no outcome': 'نتيجة نعم/لا',
+  'blank = every text column; numbers become bands': 'الفراغ = كل عمود نصي؛ والأرقام تصبح نطاقات',
+  // What missingWidgetOptions asks for
+  'Hierarchy levels': 'مستويات التسلسل الهرمي', 'Country or Latitude/Longitude': 'الدولة أو خط العرض/خط الطول',
+  'Saved model': 'نموذج محفوظ', 'Models to compare': 'نماذج للمقارنة',
+  // Field groups in the Add dialog and the column pickers
+  'Categories': 'الفئات', 'Dates': 'التواريخ', 'Numbers': 'الأرقام', 'Calculated': 'محسوبة', 'Hierarchies': 'التسلسلات الهرمية',
+}
+
+/** A data-role label (or one half of it) in the current language: "Dimension
+ *  (Group / X-axis)" -> "البُعد (المجموعة / المحور السيني)". Unknown text is
+ *  shown as written. */
+export function roleLabel(language: string, text: string): string {
+  if (language !== 'ar') return text
+  if (ROLE_AR[text]) return ROLE_AR[text]
+  const m = /^(.*?)\s*\((.*)\)\s*$/.exec(text)
+  if (!m) return text
+  return `${ROLE_AR[m[1]] ?? m[1]} (${ROLE_AR[m[2]] ?? m[2]})`
 }
 
 function fill(text: string, vars?: Record<string, string | number>): string {
@@ -411,4 +498,10 @@ export function usePanelLabel() {
   const { language } = useDirection()
   return useCallback((text: string, vars?: Record<string, string | number>) => panelLabel(language, text, vars),
     [language])
+}
+
+/** roleLabel() bound to the reader's language. */
+export function useRoleLabel() {
+  const { language } = useDirection()
+  return useCallback((text: string) => roleLabel(language, text), [language])
 }

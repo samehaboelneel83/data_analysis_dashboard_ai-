@@ -5,9 +5,11 @@ import { useModalDialog } from '../ui/useModalDialog'
 import IconLabel from '../ui/IconLabel'
 import { Bell, BellRing } from 'lucide-react'
 import { useT } from '../../i18n'
+import { formatDate } from '../../lib/dateFormat'
 
 const CADENCES = ['daily', 'weekly', 'monthly'] as const
-const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+/** Monday first: the index is the weekday the server stores (0 = Monday). */
+const DAYS = [0, 1, 2, 3, 4, 5, 6] as const
 
 /**
  * Subscribe yourself to a recurring copy of this report.
@@ -63,12 +65,12 @@ export default function SubscribeButton({ reportId }: { reportId: number }) {
         // The browser's zone, so "08:00" means 08:00 where the reader is.
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
       })
-      toast.success('Subscribed — the first copy arrives on schedule')
+      toast.success(t('pg.panelsA.sb.subscribedToast'))
       setOpen(false)
       load()
     } catch (e: unknown) {
       toast.error((e as { response?: { data?: { detail?: string } } })
-        ?.response?.data?.detail ?? 'Could not subscribe')
+        ?.response?.data?.detail ?? t('pg.panelsA.sb.failed'))
     } finally {
       setBusy(false)
     }
@@ -78,11 +80,11 @@ export default function SubscribeButton({ reportId }: { reportId: number }) {
     setBusy(true)
     try {
       await subscriptionApi.unsubscribe(reportId)
-      toast.success('Unsubscribed')
+      toast.success(t('pg.panelsA.sb.unsubscribed'))
       setOpen(false)
       load()
     } catch {
-      toast.error('Could not unsubscribe')
+      toast.error(t('pg.panelsA.sb.unsubFailed'))
     } finally {
       setBusy(false)
     }
@@ -93,7 +95,7 @@ export default function SubscribeButton({ reportId }: { reportId: number }) {
   return (
     <>
       <button className="btn btn-ghost btn-sm"
-        title={subscribed ? 'You are subscribed to this report' : 'Get a recurring copy by email'}
+        title={subscribed ? t('pg.panelsA.sb.titleOn') : t('pg.panelsA.sb.titleOff')}
         aria-pressed={subscribed}
         onClick={() => setOpen(true)}>
         <IconLabel icon={subscribed ? BellRing : Bell}>{subscribed ? t('subscribe.subscribed') : t('subscribe.subscribe')}</IconLabel>
@@ -106,41 +108,40 @@ export default function SubscribeButton({ reportId }: { reportId: number }) {
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
           <div ref={dialogRef} role="dialog" aria-modal="true"
-            aria-label="Subscribe to this report" style={{
+            aria-label={t('pg.panelsA.sb.aria')} style={{
             background: 'var(--surface)', border: '1px solid var(--border)',
             borderRadius: 8, padding: 20, minWidth: 340, maxWidth: 420,
           }}>
-            <h2 style={{ margin: '0 0 4px', fontSize: 16 }}>Email me this report</h2>
+            <h2 style={{ margin: '0 0 4px', fontSize: 16 }}>{t('pg.panelsA.sb.heading')}</h2>
             <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 0 }}>
-              Sent to your own address, containing the rows you can see — not
-              anyone else’s.
+              {t('pg.panelsA.sb.note')}
             </p>
 
             <label style={{ display: 'block', fontSize: 12, marginTop: 10 }}>
-              How often
-              <select aria-label="How often" value={cadence}
+              {t('pg.panelsA.sb.howOften')}
+              <select aria-label={t('pg.panelsA.sb.howOften')} value={cadence}
                 onChange={e => setCadence(e.target.value as typeof cadence)}
                 className="input" style={{ width: '100%', marginTop: 3 }}>
-                {CADENCES.map(c => <option key={c} value={c}>{c}</option>)}
+                {CADENCES.map(c => <option key={c} value={c}>{t(`pg.panelsA.sb.cad.${c}`)}</option>)}
               </select>
             </label>
 
             {cadence === 'weekly' && (
               <label style={{ display: 'block', fontSize: 12, marginTop: 8 }}>
-                On
-                <select aria-label="Day of week" value={weekday}
+                {t('pg.panelsA.sb.on')}
+                <select aria-label={t('pg.panelsA.sb.dayOfWeek')} value={weekday}
                   onChange={e => setWeekday(Number(e.target.value))}
                   className="input" style={{ width: '100%', marginTop: 3 }}>
-                  {DAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}
+                  {DAYS.map(d => <option key={d} value={d}>{t(`pg.panelsA.sb.day${d}`)}</option>)}
                 </select>
               </label>
             )}
 
             {cadence === 'monthly' && (
               <label style={{ display: 'block', fontSize: 12, marginTop: 8 }}>
-                Day of month
+                {t('pg.panelsA.sb.dayOfMonth')}
                 {/* Capped at 28: the only day every month actually has. */}
-                <select aria-label="Day of month" value={monthday}
+                <select aria-label={t('pg.panelsA.sb.dayOfMonth')} value={monthday}
                   onChange={e => setMonthday(Number(e.target.value))}
                   className="input" style={{ width: '100%', marginTop: 3 }}>
                   {Array.from({ length: 28 }, (_, i) => i + 1).map(d =>
@@ -150,8 +151,8 @@ export default function SubscribeButton({ reportId }: { reportId: number }) {
             )}
 
             <label style={{ display: 'block', fontSize: 12, marginTop: 8 }}>
-              At
-              <select aria-label="Hour" value={hour}
+              {t('pg.panelsA.sb.at')}
+              <select aria-label={t('pg.panelsA.sb.hour')} value={hour}
                 onChange={e => setHour(Number(e.target.value))}
                 className="input" style={{ width: '100%', marginTop: 3 }}>
                 {Array.from({ length: 24 }, (_, h) => h).map(h => (
@@ -161,18 +162,20 @@ export default function SubscribeButton({ reportId }: { reportId: number }) {
             </label>
 
             <label style={{ display: 'block', fontSize: 12, marginTop: 8 }}>
-              Format
-              <select aria-label="Format" value={format}
+              {t('pg.panelsA.sb.format')}
+              <select aria-label={t('pg.panelsA.sb.format')} value={format}
                 onChange={e => setFormat(e.target.value as 'xlsx' | 'pdf')}
                 className="input" style={{ width: '100%', marginTop: 3 }}>
-                <option value="xlsx">Excel (.xlsx)</option>
+                <option value="xlsx">{ // i18n-ok: a product name and a file type
+                  'Excel (.xlsx)'
+                }</option>
                 <option value="pdf">PDF</option>
               </select>
             </label>
 
             {subscribed && sub?.last_run_at && (
               <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>
-                Last sent {new Date(sub.last_run_at).toLocaleString()}
+                {t('pg.panelsA.sb.lastSent', { date: formatDate(sub.last_run_at) })}
                 {sub.last_status ? ` · ${sub.last_status}` : ''}
               </p>
             )}
@@ -180,14 +183,14 @@ export default function SubscribeButton({ reportId }: { reportId: number }) {
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
               {subscribed && (
                 <button className="btn btn-ghost btn-sm" disabled={busy}
-                  onClick={() => void cancel()}>Unsubscribe</button>
+                  onClick={() => void cancel()}>{t('pg.panelsA.sb.unsubscribe')}</button>
               )}
               <button className="btn btn-ghost btn-sm" onClick={() => setOpen(false)}>
-                Cancel
+                {t('pg.panelsA.sb.cancel')}
               </button>
               <button className="btn btn-primary btn-sm" disabled={busy}
                 onClick={() => void save()}>
-                {busy ? 'Saving…' : subscribed ? 'Update' : 'Subscribe'}
+                {busy ? t('pg.panelsA.sb.saving') : subscribed ? t('pg.panelsA.sb.update') : t('subscribe.subscribe')}
               </button>
             </div>
           </div>

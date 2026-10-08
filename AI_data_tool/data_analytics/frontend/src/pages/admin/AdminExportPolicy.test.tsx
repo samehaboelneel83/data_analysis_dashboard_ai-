@@ -52,3 +52,15 @@ describe('AdminExportPolicy loading, empty, and error states', () => {
     expect(datasetsApi.list).toHaveBeenCalledTimes(2)
   })
 })
+
+describe('the "All off" tooltip says what the screen does', () => {
+  it('with every export off, the disabled format boxes explain how to choose', async () => {
+    vi.mocked(datasetsApi.list).mockResolvedValue([{ id: 1, name: 'Sales' } as any])
+    vi.mocked(exportPolicyApi.get).mockResolvedValue({ export_policy: true, has_security_rules: false })   // true = every export off
+    render(<AdminExportPolicy />)
+    await waitFor(() => expect(screen.getByText('Sales')).toBeInTheDocument())
+    const tips = screen.getAllByTitle('All exports are off: untick "All off" to choose')
+    expect(tips.length).toBeGreaterThan(0)
+    expect(screen.queryByTitle(/Everything is allowed/)).toBeNull()
+  })
+})

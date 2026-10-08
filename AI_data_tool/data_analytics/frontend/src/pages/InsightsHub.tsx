@@ -11,6 +11,7 @@ import { Database } from 'lucide-react'
 import { useT } from '../i18n'
 import DatasetListFilter, { useCleanDatasets } from '../components/dataset/DatasetListFilter'
 import { isCertified } from '../lib/cleanDatasets'
+import { isolateNumbers } from '../lib/isolateNumbers'
 
 /**
  * Pick a dataset, see what stands out in it.
@@ -194,15 +195,16 @@ export default function InsightsHub() {
                   about the same outlying row. Two or more, and it is the only
                   thing saying how they relate. */}
               {scan.narrative && strong.length !== 1 && (
-                <p style={{ fontSize: 13, marginBottom: strong.length ? 8 : 0 }}>{scan.narrative}</p>
+                // QA3 D5: the server's sentence takes its own direction; numbers and ranges keep their order.
+                <p dir="auto" style={{ fontSize: 13, marginBottom: strong.length ? 8 : 0 }}>{isolateNumbers(scan.narrative)}</p>
               )}
               {strong.length > 0 && (
                 <ul style={{ margin: 0, paddingInlineStart: 18, display: 'flex', flexDirection: 'column', gap: 4 }}>
                   {/* Top 3 -- the backend already returns findings sorted by score. */}
                   {strong.slice(0, 3).map((f, i) => (
-                    <li key={i} style={{ fontSize: 12 }}>
-                      <strong>{f.title}</strong>
-                      {f.detail && <span style={{ color: 'var(--muted)' }}> — {f.detail}</span>}
+                    <li key={i} dir="auto" style={{ fontSize: 12 }}>
+                      <strong>{isolateNumbers(f.title)}</strong>
+                      {f.detail && <span style={{ color: 'var(--muted)' }}> — {isolateNumbers(f.detail)}</span>}
                       {current && (
                         <FindingChart datasetId={current.id} finding={f}
                           columnTypes={Object.fromEntries(current.columns.map(c => [c.name, c.dtype ?? '']))} />

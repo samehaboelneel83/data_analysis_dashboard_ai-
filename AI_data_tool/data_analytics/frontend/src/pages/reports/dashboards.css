@@ -175,7 +175,9 @@
   .dsh-tbl .c-st > * { display: none; }
   .dsh-tbl .c-ds { width: 124px; }
   .dsh-tbl .c-mod { width: 96px; }
-  .dsh-tbl .c-act { width: 88px; }
+  /* Narrow: the hover shortcuts go (Open and Share are in ⋯), so the ⋯ is never cut. */
+  .dsh-tbl th.c-act, .dsh-tbl td.c-act { width: 60px; }   /* beats the base rule below it */
+  .dsh-ra .q { display: none; }
   .dsh-nmc .sti { display: inline-flex; margin-inline-start: 6px; }
   .dsh-nmc .sti:empty { display: none; }
 }
@@ -193,7 +195,9 @@
   .dsh-nmc .fdi svg { flex: none; }
   .dsh-mth { display: none; }
 }
-.dsh-tbl .c-act { width: 112px; text-align: end; }
+/* QA3 D3: room for all three (open, share, ⋯ = 94px) plus the cell padding;
+   at 112px a shareable row cut the ⋯ at the end edge. */
+.dsh-tbl .c-act { width: 124px; text-align: end; }
 .dsh-ra { display: inline-flex; align-items: center; gap: 2px; justify-content: flex-end; }
 .dsh-ra .dsh-ibx { box-shadow: none; background: none; }
 .dsh-ra .q { opacity: 0; transition: opacity var(--dl-dur); }

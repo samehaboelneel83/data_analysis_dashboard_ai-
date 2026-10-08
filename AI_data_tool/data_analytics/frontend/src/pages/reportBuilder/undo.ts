@@ -1,3 +1,5 @@
+import type { TranslateFn } from '../../i18n'
+import { panelLabel, roleLabel } from '../../components/report/panelLabels'
 /**
  * Builder undo/redo -- a command log, not state snapshots.
  *
@@ -85,10 +87,38 @@ export class IdAliases {
 
 const MAX_VALUE = 28
 
-function show(v: unknown): string {
-  if (v === undefined || v === null || v === '') return 'none'
-  const s = typeof v === 'string' ? v : JSON.stringify(v)
+/** A setting's value in a sentence. QA4 T4: never an object or a list --
+ *  "from [{"id":…}] to none" showed in an undo tooltip. A list is its count
+ *  ("3 rules"), an object is just "set", nothing is "none"; in the reader's
+ *  language when `t` is given. */
+function show(v: unknown, key = '', t?: TranslateFn): string {
+  if (v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0)) return t ? t('bc.shell.undo.none') : 'none'
+  if (Array.isArray(v)) {
+    const n = v.length
+    if (t) return t(key === 'display_rules' ? 'bc.shell.undo.rules' : 'bc.shell.undo.items', { n })
+    return key === 'display_rules' ? `${n} rule${n === 1 ? '' : 's'}` : `${n} item${n === 1 ? '' : 's'}`
+  }
+  if (typeof v === 'object') return t ? t('bc.shell.undo.set') : 'set'
+  const s = String(v)
   return s.length > MAX_VALUE ? `${s.slice(0, MAX_VALUE - 1)}…` : s
+}
+
+/** QA4 T4: the settings people change most, by the name the settings panel
+ *  shows (translated through PANEL_AR / role names in Arabic). */
+const SETTING_LABEL: Record<string, string> = {
+  dimension: 'Dimension', dimension2: 'Series', measure: 'Measure', aggregation: 'Aggregation',
+  display_rules: 'Display rules', filters: 'Filters', title: 'Title',
+  widget_background: 'Background', widget_border_color: 'Border colour', widget_border_width: 'Border width',
+  widget_radius: 'Corner radius', widget_padding: 'Padding', widget_skin: 'Skin',
+}
+
+/** The setting's name in the reader's language: the panel's own label when
+ *  there is one (PANEL_AR), else the key made readable. */
+function localSetting(key: string, t: TranslateFn): string {
+  const label = SETTING_LABEL[key]
+  if (!label || document.documentElement.lang !== 'ar') return settingName(key)
+  const ar = roleLabel('ar', label)
+  return ar !== label ? ar : panelLabel('ar', label)
 }
 
 /** `measure_col` -> "measure col"; the config key is the only name we have. */
@@ -107,16 +137,22 @@ export function describeConfigChange(
   widgetName: string,
   before: Record<string, unknown>, after: Record<string, unknown>,
   beforeTitle: string, afterTitle: string,
+  /** QA3 C6: the reader's language ("Undo: …" in Arabic); English without it. */
+  t?: TranslateFn,
 ): string {
   const keys = changedKeys(before, after)
   const renamed = beforeTitle !== afterTitle
-  if (renamed && keys.length === 0) return `Rename "${beforeTitle}" to "${afterTitle}"`
+  if (renamed && keys.length === 0) return t
+    ? t('bc.shell.undo.rename', { from: beforeTitle, to: afterTitle })
+    : `Rename "${beforeTitle}" to "${afterTitle}"`
   if (keys.length === 1 && !renamed) {
     const k = keys[0]
-    return `Change ${settingName(k)} of "${widgetName}" from ${show(before[k])} to ${show(after[k])}`
+    return t
+      ? t('bc.shell.undo.change1', { setting: localSetting(k, t), name: widgetName, from: show(before[k], k, t), to: show(after[k], k, t) })
+      : `Change ${settingName(k)} of "${widgetName}" from ${show(before[k], k)} to ${show(after[k], k)}`
   }
   const n = keys.length + (renamed ? 1 : 0)
-  return `Change ${n} settings of "${widgetName}"`
+  return t ? t(n === 2 ? 'bc.shell.undo.changeN_two' : 'bc.shell.undo.changeN', { n, name: widgetName }) : `Change ${n} settings of "${widgetName}"`
 }
 
 // ── React binding ────────────────────────────────────────────────────────────

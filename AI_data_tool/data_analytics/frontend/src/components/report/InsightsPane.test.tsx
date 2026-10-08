@@ -5,6 +5,12 @@ import InsightsPane from './InsightsPane'
 import { DirectionProvider } from '../../contexts/DirectionContext'
 import { insightsApi, suggestApi } from '../../services/api'
 
+/** QA3 D5: numbers sit in their own <bdi>, so a sentence with a number spans
+ *  elements; match the element whose whole text it is. */
+const whole = (s: string) => (_: string, el: Element | null) =>
+  !!el && el.textContent === s && ![...el.children].some(c => c.textContent === s)
+
+
 vi.mock('../../services/api', () => ({
   findingKey: () => 'k', pinsApi: { create: vi.fn() },
   insightsApi: { run: vi.fn() },
@@ -196,8 +202,8 @@ describe('InsightsPane: QA2 N1 and Translation 12', () => {
       expect(await screen.findByRole('button', { name: 'بناء تقرير من هذه' })).toBeInTheDocument()
       expect(screen.getByRole('button', { name: /إعادة الفحص/ })).toBeInTheDocument()
       expect(screen.getAllByRole('button', { name: '+ ارسمه' }).length).toBeGreaterThan(0)
-      expect(screen.getByText('A carries 60% of revenue')).toHaveAttribute('dir', 'auto')
-      expect(screen.getByText('Across 2,000 rows: things.')).toHaveAttribute('dir', 'auto')
+      expect(screen.getByText(whole('A carries 60% of revenue'))).toHaveAttribute('dir', 'auto')
+      expect(screen.getByText(whole('Across 2,000 rows: things.'))).toHaveAttribute('dir', 'auto')
       expect(screen.queryByText(/Generate|Re-scan|Chart it|Add as text/)).toBeNull()
     } finally { localStorage.removeItem('datalytics.language') }
   })

@@ -1,3 +1,4 @@
+import { useT } from '../../i18n'
 import type { Widget } from '../../types/report'
 import { useDirection } from '../../contexts/DirectionContext'
 import { tabOrder } from '../../lib/readingOrder'
@@ -9,6 +10,7 @@ export default function TabOrderPane({ widgets, onUpdate }: {
   // QA3 A8: reading order unless the author set one (widgets carry the layout
   // the canvas draws, so the order follows moves).
   const { rtl } = useDirection()
+  const t = useT()
   const ordered = tabOrder(widgets, rtl)
 
   const move = (idx: number, dir: -1 | 1) => {
@@ -22,10 +24,10 @@ export default function TabOrderPane({ widgets, onUpdate }: {
   return (
     <div style={{ padding: '14px 14px 0' }}>
       <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
-        Tab order
+        {t('builder.pane.taborder')}
       </div>
       <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>
-        Controls keyboard-Tab order through widgets in View mode.
+        {t('bc.panes.tabOrder.help')}
       </p>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         {ordered.map((w, idx) => (
@@ -36,7 +38,7 @@ export default function TabOrderPane({ widgets, onUpdate }: {
             <button onClick={() => move(idx, 1)} disabled={idx === ordered.length - 1} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, cursor: idx === ordered.length - 1 ? 'default' : 'pointer', fontSize: 11, padding: '1px 6px' }}>↓</button>
           </div>
         ))}
-        {ordered.length === 0 && <span style={{ fontSize: 12, color: 'var(--muted)' }}>No widgets on this page.</span>}
+        {ordered.length === 0 && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{t('bc.panes.noWidgets')}</span>}
       </div>
     </div>
   )

@@ -207,10 +207,10 @@ export default function Dashboard() {
   const confirm = useConfirm()
 
   const handleDelete = async (id: number, name: string) => {
-    if (!await confirm({ title: `Delete "${name}"?`, body: 'This cannot be undone.' })) return
+    if (!await confirm({ title: t('bc.dialogs.deleteNamed', { name }), body: t('bc.dialogs.cannotUndo') })) return
     await datasetsApi.delete(id)
     setDatasets(d => d.filter(x => x.id !== id))
-    toast.success('Dataset deleted')
+    toast.success(t('bc.dialogs.datasetDeleted'))
   }
 
   // Several at once: clearing out a batch of test uploads used to be one
@@ -513,7 +513,7 @@ export default function Dashboard() {
                                 to a sliver at the card's edge -- only the sparkle
                                 of "Suggest dashboards" showed, then nothing. */}
                             <ActionMenu portal align="end"
-                              label={`More actions for dataset ${ds.name}`}
+                              label={t('bc.dialogs.datasetMenu', { name: ds.name })}
                               items={[
                                 { key: 'suggest', label: t('datasets.suggest'), icon: <Sparkles size={16} />, onSelect: () => setSuggestFor({ id: ds.id, name: ds.name }) },
                                 { key: 'delete', label: t('datasets.delete'), danger: true, icon: <Trash2 size={16} />, onSelect: () => handleDelete(ds.id, ds.name) },

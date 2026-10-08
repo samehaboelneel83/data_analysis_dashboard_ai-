@@ -9,6 +9,7 @@ import {
   resizeFree,
   resizePacked,
   RECIPES,
+  shownLayouts,
 } from './dashboardLayout'
 import type { LayoutItem } from './dashboardLayout'
 
@@ -208,5 +209,21 @@ describe('recipes', () => {
         expect(l.h).toBeGreaterThanOrEqual(minSize(type).h)
       }
     }
+  })
+})
+
+describe('shownLayouts (QA3 N3): drawn, not saved', () => {
+  const w = (id: number, x: number, y: number, ww = 6, h = 5, t = 'bar') => ({ id, widget_type: t, layout: { x, y, w: ww, h } })
+  it('a page with no layout mode is shown in the automatic layout', () => {
+    const shown = shownLayouts({ layout_mode: null, widgets: [w(1, 0, 0, 12), w(2, 0, 5, 12)] })
+    expect(Object.keys(shown)).toHaveLength(2)
+  })
+  it('a packed page whose widgets overlap is shown compacted, without overlaps', () => {
+    const shown = shownLayouts({ layout_mode: 'packed', widgets: [w(1, 0, 0), w(2, 3, 2)] })
+    expect(overlaps(shown[1], shown[2])).toBe(false)
+  })
+  it('a page laid out cleanly is drawn as stored', () => {
+    expect(shownLayouts({ layout_mode: 'packed', widgets: [w(1, 0, 0), w(2, 6, 0)] })).toEqual({})
+    expect(shownLayouts({ layout_mode: 'free', widgets: [w(1, 0, 0), w(2, 3, 2)] })).toEqual({})
   })
 })

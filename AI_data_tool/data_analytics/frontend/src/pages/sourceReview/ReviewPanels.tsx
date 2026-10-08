@@ -5,6 +5,9 @@ import {
   type DriftVersion, type ReviewEntity, type ReviewQueue, type ReviewRelationship,
 } from '../../services/api'
 import { useState } from 'react'
+import { useT } from '../../i18n'
+import { dtypeName } from '../../lib/dtypeName'
+import { withNode } from '../../i18n/pages/dataPages'
 
 export function RelationshipRow({ rel, checked, onToggle, onReject }: {
   rel: ReviewRelationship
@@ -12,6 +15,7 @@ export function RelationshipRow({ rel, checked, onToggle, onReject }: {
   onToggle: () => void
   onReject: () => void
 }) {
+  const tr = useT()
   return (
     <div style={{
       display: 'flex', gap: 12, alignItems: 'flex-start',
@@ -22,13 +26,13 @@ export function RelationshipRow({ rel, checked, onToggle, onReject }: {
         <div style={{ fontSize: 14, fontWeight: 600 }}>
           {rel.from_dataset}.{rel.from_column} → {rel.to_dataset}.{rel.to_column}
           <span style={{ marginInlineStart: 8, fontWeight: 400, color: '#64748b' }}>
-            {Math.round(rel.confidence * 100)}% · {rel.cardinality ?? 'unknown cardinality'}
+            {Math.round(rel.confidence * 100)}% · {rel.cardinality ?? tr('pg.dataPages.rev.unknownCardinality')}
           </span>
         </div>
         <EvidenceSummary evidence={rel.evidence} />
       </div>
-      <button onClick={onReject} title="Reject — this will not be proposed again">
-        Reject
+      <button onClick={onReject} title={tr('pg.dataPages.rev.rejectTitle')}>
+        {tr('pg.dataPages.rev.reject')}
       </button>
     </div>
   )
@@ -40,17 +44,17 @@ export function ColumnReview({ grouped, total, onSave, onSaveLabels }: {
   onSave: (id: number, description: string) => void
   onSaveLabels: (id: number, labels: Record<string, string>) => void
 }) {
+  const tr = useT()
   const [drafts, setDrafts] = useState<Record<number, string>>({})
 
   if (!total) {
-    return <p style={{ fontSize: 13, color: '#64748b' }}>No columns match.</p>
+    return <p style={{ fontSize: 13, color: '#64748b' }}>{tr('pg.dataPages.rev.noColumnsMatch')}</p>
   }
 
   return (
     <div>
       <p style={{ fontSize: 12, color: '#64748b', margin: '0 0 10px' }}>
-        {total} columns across {grouped.size} tables. Open a table to read or
-        edit its column descriptions.
+        {tr('pg.dataPages.rev.columnsIntro', { n: total, tables: grouped.size })}
       </p>
       {[...grouped.entries()].map(([table, columns]) => (
         <details key={table} style={{ marginBottom: 6, border: '1px solid #e2e8f0',
@@ -58,7 +62,7 @@ export function ColumnReview({ grouped, total, onSave, onSaveLabels }: {
           <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
             {table}{' '}
             <span style={{ fontWeight: 400, color: '#64748b' }}>
-              ({columns.length} {columns.length === 1 ? 'column' : 'columns'})
+              ({tr('pg.dataPages.rev.columnCount', { n: columns.length })})
             </span>
           </summary>
           <table style={{ width: '100%', borderCollapse: 'collapse',
@@ -70,33 +74,33 @@ export function ColumnReview({ grouped, total, onSave, onSaveLabels }: {
                   <tr key={col.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                     <td style={{ padding: 6, fontWeight: 600, width: 200 }}>{col.name}</td>
                     <td style={{ padding: 6, color: '#64748b', width: 110 }}>
-                      {col.semantic_type ?? col.dtype}
+                      {col.semantic_type ?? dtypeName(tr, col.dtype)}
                     </td>
                     <td style={{ padding: 6 }}>
                       <input
                         value={value}
                         onChange={e => setDrafts(d => ({ ...d, [col.id]: e.target.value }))}
-                        placeholder="No description"
+                        placeholder={tr('pg.dataPages.rev.noDescription')}
                         style={{ width: '100%', padding: 4 }}
                       />
                       {col.description_source === 'schema' && (
                         <span style={{ fontSize: 11, color: '#16785a' }}>
-                          From the database schema
+                          {tr('pg.dataPages.rev.fromSchema')}
                         </span>
                       )}
                       {col.needs_review && (
                         <span style={{ fontSize: 11, color: '#a86c15' }}>
-                          Generated — not yet confirmed
+                          {tr('pg.dataPages.rev.generated')}
                         </span>
                       )}
                       <EnumLabels col={col} onSave={onSaveLabels} />
                     </td>
                     <td style={{ padding: 6, width: 70 }}>
                       <button
-                        disabled={value === (col.description ?? '')} title={value === (col.description ?? '') ? 'Nothing changed yet' : undefined}
+                        disabled={value === (col.description ?? '')} title={value === (col.description ?? '') ? tr('pg.dataPages.rev.nothingChanged') : undefined}
                         onClick={() => onSave(col.id, value)}
                       >
-                        Save
+                        {tr('pg.dataPages.rev.save')}
                       </button>
                     </td>
                   </tr>
@@ -117,6 +121,7 @@ export function EnumLabels({ col, onSave }: {
   col: ReviewQueue['columns'][number]
   onSave: (id: number, labels: Record<string, string>) => void
 }) {
+  const tr = useT()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<Record<string, string>>(col.enum_labels ?? {})
 
@@ -125,11 +130,11 @@ export function EnumLabels({ col, onSave }: {
   if (!editing) {
     return (
       <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>
-        <span>{Object.entries(col.enum_labels).map(([v, l]) => `${v} = ${l}`).join(', ')}</span>
+        <span>{Object.entries(col.enum_labels).map(([v, l]) => `${v} = ${l}`).join(tr('pg.dataPages.listSep'))}</span>
         {col.enum_labels_source === 'confirmed' ? (
-          <span style={{ color: '#16785a' }}> · Confirmed</span>
+          <span style={{ color: '#16785a' }}> · {tr('pg.dataPages.rev.confirmed')}</span>
         ) : (
-          <span style={{ color: '#a86c15' }}> · Not yet confirmed</span>
+          <span style={{ color: '#a86c15' }}> · {tr('pg.dataPages.rev.notConfirmed')}</span>
         )}
         {' · '}
         <button
@@ -137,7 +142,7 @@ export function EnumLabels({ col, onSave }: {
           style={{ background: 'none', border: 'none', padding: 0,
                    color: '#2d5ba8', cursor: 'pointer', fontSize: 11 }}
         >
-          Edit labels
+          {tr('pg.dataPages.rev.editLabels')}
         </button>
       </div>
     )
@@ -157,10 +162,10 @@ export function EnumLabels({ col, onSave }: {
       ))}
       <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
         <button onClick={() => { onSave(col.id, draft); setEditing(false) }} style={{ fontSize: 11 }}>
-          Save
+          {tr('pg.dataPages.rev.save')}
         </button>
         <button onClick={() => setEditing(false)} style={{ fontSize: 11 }}>
-          Cancel
+          {tr('common.cancel')}
         </button>
       </div>
     </div>
@@ -177,11 +182,11 @@ export function EntityReview({ entities, onSave, onConfirm }: {
   onSave: (id: number, fields: { business_name?: string; grain?: string; description?: string }) => void
   onConfirm: (id: number) => void
 }) {
+  const tr = useT()
   if (!entities.length) {
     return (
       <p style={{ fontSize: 13, color: '#64748b' }}>
-        No entities yet — run a sync with model descriptions enabled to draft some,
-        or add them here once drafted.
+        {tr('pg.dataPages.rev.noEntities')}
       </p>
     )
   }
@@ -189,8 +194,7 @@ export function EntityReview({ entities, onSave, onConfirm }: {
   return (
     <div>
       <p style={{ fontSize: 12, color: '#64748b', margin: '0 0 10px' }}>
-        {entities.length} {entities.length === 1 ? 'entity' : 'entities'} — the named
-        business objects this source models, and what one row of each represents.
+        {tr('pg.dataPages.rev.entitiesIntro', { n: entities.length })}
       </p>
       {entities.map(entity => (
         <EntityRow key={entity.id} entity={entity} onSave={onSave} onConfirm={onConfirm} />
@@ -204,6 +208,7 @@ export function EntityRow({ entity, onSave, onConfirm }: {
   onSave: (id: number, fields: { business_name?: string; grain?: string; description?: string }) => void
   onConfirm: (id: number) => void
 }) {
+  const tr = useT()
   const [businessName, setBusinessName] = useState(entity.business_name ?? '')
   const [grain, setGrain] = useState(entity.grain ?? '')
   const [description, setDescription] = useState(entity.description ?? '')
@@ -220,37 +225,37 @@ export function EntityRow({ entity, onSave, onConfirm }: {
           <span style={{ fontSize: 11, color: '#64748b' }}>[{entity.primary_object}]</span>
         )}
         {entity.source === 'confirmed' ? (
-          <span style={{ fontSize: 11, color: '#16785a' }}>Confirmed</span>
+          <span style={{ fontSize: 11, color: '#16785a' }}>{tr('pg.dataPages.rev.confirmed')}</span>
         ) : (
-          <span style={{ fontSize: 11, color: '#a86c15' }}>Not yet confirmed</span>
+          <span style={{ fontSize: 11, color: '#a86c15' }}>{tr('pg.dataPages.rev.notConfirmed')}</span>
         )}
       </div>
       <label style={{ display: 'block', fontSize: 11, color: '#64748b', marginBottom: 4 }}>
-        Business name
+        {tr('pg.dataPages.rev.businessName')}
         <input value={businessName} onChange={e => setBusinessName(e.target.value)}
-               placeholder="No business name" style={{ width: '100%', padding: 4, marginTop: 2 }} />
+               placeholder={tr('pg.dataPages.rev.noBusinessName')} style={{ width: '100%', padding: 4, marginTop: 2 }} />
       </label>
       <label style={{ display: 'block', fontSize: 11, color: '#64748b', marginBottom: 4 }}>
-        Grain (one row per…)
+        {tr('pg.dataPages.rev.grain')}
         <input value={grain} onChange={e => setGrain(e.target.value)}
-               placeholder="One row per…" style={{ width: '100%', padding: 4, marginTop: 2 }} />
+               placeholder={tr('pg.dataPages.rev.grainPlaceholder')} style={{ width: '100%', padding: 4, marginTop: 2 }} />
       </label>
       <label style={{ display: 'block', fontSize: 11, color: '#64748b', marginBottom: 6 }}>
-        Description
+        {tr('pg.dataPages.rev.description')}
         <input value={description} onChange={e => setDescription(e.target.value)}
-               placeholder="No description" style={{ width: '100%', padding: 4, marginTop: 2 }} />
+               placeholder={tr('pg.dataPages.rev.noDescription')} style={{ width: '100%', padding: 4, marginTop: 2 }} />
       </label>
       <div style={{ display: 'flex', gap: 6 }}>
         <button
-          disabled={!dirty} title={!dirty ? 'Nothing changed yet' : undefined}
+          disabled={!dirty} title={!dirty ? tr('pg.dataPages.rev.nothingChanged') : undefined}
           onClick={() => onSave(entity.id, {
             business_name: businessName, grain, description,
           })}
         >
-          Save
+          {tr('pg.dataPages.rev.save')}
         </button>
-        <button disabled={entity.source === 'confirmed'} title={entity.source === 'confirmed' ? 'Already confirmed' : undefined} onClick={() => onConfirm(entity.id)}>
-          Confirm
+        <button disabled={entity.source === 'confirmed'} title={entity.source === 'confirmed' ? tr('pg.dataPages.rev.alreadyConfirmed') : undefined} onClick={() => onConfirm(entity.id)}>
+          {tr('pg.dataPages.rev.confirm')}
         </button>
       </div>
     </div>
@@ -263,28 +268,27 @@ export function EntityRow({ entity, onSave, onConfirm }: {
  *  running a sync and re-reviewing, both of which live above. */
 export function DriftPanel({ drift, error }: { drift: DriftVersion[] | null; error: string | null }) {
   const { language } = useDirection()
+  const tr = useT()
   if (error) return <p role="alert" style={{ fontSize: 13, color: '#b3261e' }}>{error}</p>
-  if (drift === null) return <p style={{ fontSize: 13, color: '#64748b' }}>Loading drift history…</p>
+  if (drift === null) return <p style={{ fontSize: 13, color: '#64748b' }}>{tr('pg.dataPages.rev.loadingDrift')}</p>
   if (drift.length === 0) {
     return (
       <p style={{ fontSize: 13, color: '#64748b' }}>
-        No schema versions recorded yet — run a sync to capture the first baseline.
+        {tr('pg.dataPages.rev.noDrift')}
       </p>
     )
   }
   const changeList = (label: string, color: string, rows: { table: string; name: string }[]) =>
     rows.length > 0 && (
       <div style={{ fontSize: 12, marginTop: 4 }}>
-        <span style={{ color, fontWeight: 600 }}>{label}:</span>{' '}
-        {rows.map(r => `${r.table}.${r.name}`).join(', ')}
+        <span style={{ color, fontWeight: 600 }}>{tr('pg.dataPages.rev.changeLabel', { label })}</span>{' '}
+        <bdi dir="ltr">{rows.map(r => `${r.table}.${r.name}`).join(', ')}</bdi>
       </div>
     )
   return (
     <div>
       <p style={{ fontSize: 12, color: '#64748b', margin: '0 0 10px' }}>
-        Every time a sync sees a different schema than the last one, the difference lands
-        here — columns that appeared, vanished or changed type, and any confirmed
-        descriptions those changes orphaned.
+        {tr('pg.dataPages.rev.driftIntro')}
       </p>
       {drift.map(v => (
         <div key={v.id} style={{ border: '1px solid #e2e8f0', borderRadius: 6, padding: '10px 12px', marginBottom: 8 }}>
@@ -293,18 +297,18 @@ export function DriftPanel({ drift, error }: { drift: DriftVersion[] | null; err
             {v.is_baseline && (
               <span style={{ fontSize: 11, fontWeight: 700, color: '#2d5ba8', background: '#e5edfb',
                 borderRadius: 99, padding: '2px 8px', textTransform: 'uppercase', letterSpacing: '.04em' }}>
-                baseline
+                {tr('pg.dataPages.rev.baseline')}
               </span>
             )}
             <span style={{ color: '#94a3b8', fontFamily: 'monospace', fontSize: 11 }}>{v.fingerprint.slice(0, 12)}</span>
           </div>
           {!v.is_baseline && v.added.length === 0 && v.removed.length === 0 && v.changed.length === 0 && (
-            <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>No column-level differences recorded.</div>
+            <div style={{ fontSize: 12, color: '#64748b', marginTop: 4 }}>{tr('pg.dataPages.rev.noDifferences')}</div>
           )}
-          {changeList('Added', '#16785a', v.added)}
-          {changeList('Removed', '#b3261e', v.removed)}
-          {changeList('Changed', '#a86c15', v.changed)}
-          {changeList('Orphaned annotations', '#a86c15', v.orphaned_annotations)}
+          {changeList(tr('pg.dataPages.rev.added'), '#16785a', v.added)}
+          {changeList(tr('pg.dataPages.rev.removed'), '#b3261e', v.removed)}
+          {changeList(tr('pg.dataPages.rev.changed'), '#a86c15', v.changed)}
+          {changeList(tr('pg.dataPages.rev.orphaned'), '#a86c15', v.orphaned_annotations)}
         </div>
       ))}
     </div>
@@ -320,52 +324,51 @@ export function DriftPanel({ drift, error }: { drift: DriftVersion[] | null; err
  *  grouped column changed nothing, because a full aggregation scans either way.
  *  A panel that said "index what you group by" would be confidently wrong. */
 export function SourceHealthPanel({ advice, error }: { advice: IndexAdvice | null; error: string | null }) {
+  const tr = useT()
   if (error) return <p style={{ color: '#b91c1c', fontSize: 13 }}>{error}</p>
-  if (!advice) return <p style={{ fontSize: 13, color: '#64748b' }}>Reading query history…</p>
+  if (!advice) return <p style={{ fontSize: 13, color: '#64748b' }}>{tr('pg.dataPages.rev.readingHistory')}</p>
   const muted: React.CSSProperties = { fontSize: 12, color: '#64748b' }
   return (
     <div>
       <p style={muted}>
-        {advice.runs_considered} DirectQuery runs in the last {advice.observed_days} days.
-        {' '}Only columns filtered in at least {advice.min_runs} runs are listed; grouped columns are not,
-        because an index on a grouped column does not speed up a full aggregation.
+        {tr('pg.dataPages.rev.adviceIntro', { runs: advice.runs_considered, days: advice.observed_days, min: advice.min_runs })}
         {advice.index_check === 'unavailable' && (
-          <> <strong>The source's indexes could not be checked</strong> — every listed column is shown as if unindexed.</>
+          <> {withNode(tr('pg.dataPages.rev.idxUnavailable', { b: '\u0001' }), <strong>{tr('pg.dataPages.rev.idxUnavailableBold')}</strong>)}</>
         )}
         {advice.index_check === 'unsupported' && (
-          <> <strong>Index checks are Postgres-only</strong> — for this source the columns are listed by how hot they are, with no statement to paste.</>
+          <> {withNode(tr('pg.dataPages.rev.idxUnsupported', { b: '\u0001' }), <strong>{tr('pg.dataPages.rev.idxUnsupportedBold')}</strong>)}</>
         )}
       </p>
       {advice.tables.length === 0 ? (
         <p style={{ fontSize: 13 }}>
-          No DirectQuery runs with filters yet — advice appears once dashboards on this source have been used.
+          {tr('pg.dataPages.rev.noAdvice')}
         </p>
       ) : advice.tables.map(t => (
         <div key={t.table} style={{ marginTop: 16 }}>
           <h3 style={{ fontSize: 14, margin: '0 0 6px' }}><code>{t.table}</code></h3>
           <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
             <thead><tr style={{ textAlign: 'left', color: '#64748b' }}>
-              <th style={{ padding: '4px 8px' }}>Filtered column</th>
-              <th style={{ padding: '4px 8px' }}>Runs</th>
-              <th style={{ padding: '4px 8px' }}>Avg</th>
-              <th style={{ padding: '4px 8px' }}>Index</th>
+              <th style={{ padding: '4px 8px' }}>{tr('pg.dataPages.rev.thColumn')}</th>
+              <th style={{ padding: '4px 8px' }}>{tr('pg.dataPages.rev.thRuns')}</th>
+              <th style={{ padding: '4px 8px' }}>{tr('pg.dataPages.rev.thAvg')}</th>
+              <th style={{ padding: '4px 8px' }}>{tr('pg.dataPages.rev.thIndex')}</th>
             </tr></thead>
             <tbody>
               {t.columns.map(c => (
                 <tr key={c.column} style={{ borderTop: '1px solid #e2e8f0' }}>
                   <td style={{ padding: '6px 8px' }}><code>{c.column}</code></td>
-                  <td style={{ padding: '6px 8px' }}>{c.runs} runs</td>
-                  <td style={{ padding: '6px 8px' }}>{c.avg_ms} ms</td>
+                  <td style={{ padding: '6px 8px' }}>{tr('pg.dataPages.rev.runsCell', { n: c.runs })}</td>
+                  <td style={{ padding: '6px 8px' }}>{tr('pg.dataPages.rev.msCell', { n: c.avg_ms })}</td>
                   <td style={{ padding: '6px 8px' }}>
                     {c.indexed === null ? (
-                      <span style={{ color: '#b45309' }}>hot; not checked</span>
+                      <span style={{ color: '#b45309' }}>{tr('pg.dataPages.rev.hotUnchecked')}</span>
                     ) : c.indexed ? (
-                      <span style={{ color: '#15803d' }}>already indexed</span>
+                      <span style={{ color: '#15803d' }}>{tr('pg.dataPages.rev.alreadyIndexed')}</span>
                     ) : (
                       <>
-                        <span style={{ color: '#b45309' }}>recommended</span>
+                        <span style={{ color: '#b45309' }}>{tr('pg.dataPages.rev.recommended')}</span>
                         {c.statement && (
-                          <div><code style={{ fontSize: 12, userSelect: 'all' }}>{c.statement}</code></div>
+                          <div><code dir="ltr" style={{ fontSize: 12, userSelect: 'all' }}>{c.statement}</code></div>
                         )}
                       </>
                     )}

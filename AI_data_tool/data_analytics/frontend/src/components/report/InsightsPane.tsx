@@ -6,6 +6,7 @@ import { RefreshCw, Sparkles, Pin } from 'lucide-react'
 import type { Suggestion } from './SuggestionsPane'
 import { useT, type MessageKey } from '../../i18n'
 import { localDigits } from '../../lib/arabicFormats'
+import { isolateNumbers } from '../../lib/isolateNumbers'
 
 interface Finding {
   kind: string; score: number; title: string; detail: string; columns: string[]
@@ -107,7 +108,7 @@ export default function InsightsPane({ datasetId, columnTypes, onAdd, reportId, 
         <>
           {/* The engine writes in English; dir="auto" keeps an English
               sentence in order inside the Arabic panel (QA2 T12). */}
-          <p dir="auto" style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>{result.narrative}</p>
+          <p dir="auto" style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>{isolateNumbers(result.narrative)}</p>
           {reportId != null && result.findings.length > 0 && (
             <button className="btn btn-primary" disabled={composing}
               onClick={() => void compose()}
@@ -136,8 +137,8 @@ export default function InsightsPane({ datasetId, columnTypes, onAdd, reportId, 
                       </span>
                     )}
                   </div>
-                  <div dir="auto" style={{ fontSize: 12, fontWeight: 600 }}>{f.title}</div>
-                  <div dir="auto" style={{ fontSize: 11, color: 'var(--muted)', margin: '2px 0 6px' }}>{f.detail}</div>
+                  <div dir="auto" style={{ fontSize: 12, fontWeight: 600 }}>{isolateNumbers(f.title)}</div>
+                  <div dir="auto" style={{ fontSize: 11, color: 'var(--muted)', margin: '2px 0 6px' }}>{isolateNumbers(f.detail)}</div>
                   {f.evidence && f.p_value != null && (
                     // The evidence chip: a tested claim carries its test, population
                     // and effect -- and the adjusted p when several were run.

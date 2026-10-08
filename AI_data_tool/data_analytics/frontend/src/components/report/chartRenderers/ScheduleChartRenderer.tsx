@@ -2,6 +2,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell, ResponsiveCo
 import { COLORS, TT } from '../chartUtils'
 import type { ChartRendererProps } from './types'
 import { axisTitles, xAxisProps, yAxisProps, gridProps } from './axisOptions'
+import { formatDate } from '../../../lib/dateFormat'
 
 function toMs(v: unknown): number {
   if (typeof v === 'number') return v
@@ -58,7 +59,7 @@ export default function ScheduleChartRenderer({ data, cfg, rtl, ruleStyles, plot
           { title: timeTitle })}
           tick={{ fontSize: cfg.axis_tick_size ?? 11, ...(cfg.axis_tick_color ? { fill: cfg.axis_tick_color } : {}) }}
           axisLine={cfg.axis_line ?? true} tickLine={cfg.tick_line ?? true}
-          tickFormatter={v => new Date(minStart + v).toLocaleDateString()} />
+          tickFormatter={v => formatDate(minStart + v, 'date')} />
         {/* scale/domain/allowDecimals forced back to Recharts' own defaults after the
             spread: yAxisProps wires cfg.y_scale/y_min/y_max onto whatever <YAxis> it is
             spread onto, including this category axis. Recharts' parseScale
@@ -79,7 +80,7 @@ export default function ScheduleChartRenderer({ data, cfg, rtl, ruleStyles, plot
           tick={{ fontSize: cfg.axis_tick_size ?? 11, ...(cfg.axis_tick_color ? { fill: cfg.axis_tick_color } : {}) }}
           axisLine={cfg.axis_line ?? true} tickLine={cfg.tick_line ?? true} />
         <Tooltip contentStyle={TT} formatter={(_v: any, _n: string, props: any) =>
-          [`${new Date(minStart + props.payload.offset).toLocaleDateString()} → ${new Date(minStart + props.payload.offset + props.payload.span).toLocaleDateString()}`, props.payload.name]
+          [`${formatDate(minStart + props.payload.offset, 'date')} → ${formatDate(minStart + props.payload.offset + props.payload.span, 'date')}`, props.payload.name]
         } />
         <Bar dataKey="offset" stackId="gantt" fill="transparent" isAnimationActive={false} />
         <Bar dataKey="span" stackId="gantt" isAnimationActive={false} radius={3}>

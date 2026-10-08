@@ -1,3 +1,4 @@
+import { useT } from '../../i18n'
 import type { Widget } from '../../types/report'
 import { Eye, EyeOff } from 'lucide-react'
 import { useDirection } from '../../contexts/DirectionContext'
@@ -9,16 +10,17 @@ export default function SelectionPane({ widgets, onUpdate }: {
 }) {
   // QA3 A8: listed as a reader scans the page.
   const { rtl } = useDirection()
+  const t = useT()
   return (
     <div style={{ padding: '14px 14px 0' }}>
       <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
-        Selection
+        {t('builder.pane.selection')}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         {readingOrder(widgets, rtl).map(w => {
           const hidden = !!(w.config as any).hidden
           return (
-            <button key={w.id} aria-label={`Toggle visibility: ${w.title}`}
+            <button key={w.id} aria-label={t('bc.panes.selection.toggle', { name: w.title })}
               onClick={() => onUpdate(w.id, { ...w.config, hidden: !hidden })}
               style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 7px',
                 background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6,
@@ -28,7 +30,7 @@ export default function SelectionPane({ widgets, onUpdate }: {
             </button>
           )
         })}
-        {widgets.length === 0 && <span style={{ fontSize: 12, color: 'var(--muted)' }}>No widgets on this page.</span>}
+        {widgets.length === 0 && <span style={{ fontSize: 12, color: 'var(--muted)' }}>{t('bc.panes.noWidgets')}</span>}
       </div>
     </div>
   )

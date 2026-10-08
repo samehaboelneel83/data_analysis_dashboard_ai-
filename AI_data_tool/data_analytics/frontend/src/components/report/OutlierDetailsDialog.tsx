@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react'
+import { formatCell } from '../../lib/displayNumber'
 import { outlierApi } from '../../services/api'
 import { useModalDialog } from '../ui/useModalDialog'
+import { useT, type MessageKey } from '../../i18n'
+import { richT } from '../../i18n/builder/panes'
+import { tNodes } from './prepPipeline/tNodes'
 
 interface Details {
   column: string
@@ -10,10 +14,10 @@ interface Details {
   impact: { share_of_sum: number | null; mean_with: number | null; mean_without: number | null }
 }
 
-const DETECTOR_OPTIONS = [
-  { value: 'iqr',     label: '1.5×IQR fences' },
-  { value: 'iforest', label: 'Isolation Forest' },
-  { value: 'ecod',    label: 'ECOD' },
+const DETECTOR_OPTIONS: { value: string; label: MessageKey }[] = [
+  { value: 'iqr',     label: 'pg.panelsB.out.iqr' },
+  { value: 'iforest', label: 'pg.panelsB.out.iforest' },
+  { value: 'ecod',    label: 'pg.panelsB.out.ecod' },
 ]
 
 const fmt = (v: number | null | undefined) =>
@@ -30,6 +34,7 @@ export default function OutlierDetailsDialog({ datasetId, column, onClose }: {
   column: string
   onClose: () => void
 }) {
+  const t = useT()
   const dialogRef = useModalDialog<HTMLDivElement>(onClose)
   const [details, setDetails] = useState<Details | null>(null)
   const [error, setError] = useState('')
@@ -38,7 +43,7 @@ export default function OutlierDetailsDialog({ datasetId, column, onClose }: {
   useEffect(() => {
     setError('')
     outlierApi.details(datasetId, column, detector).then(setDetails)
-      .catch(e => setError(e?.response?.data?.detail || 'Could not load outlier details'))
+      .catch(e => setError(e?.response?.data?.detail || t('pg.panelsB.out.loadFailed')))
   }, [datasetId, column, detector])
 
   const s = details?.stats
@@ -47,36 +52,38 @@ export default function OutlierDetailsDialog({ datasetId, column, onClose }: {
   const pct = (v: number) => `${(((v - (s?.min ?? 0)) / span) * 100).toFixed(1)}%`
 
   return (
-    <div aria-label={`Outliers in ${column}`} onClick={onClose}
+    <div aria-label={t('pg.panelsB.out.title', { column })} onClick={onClose}
       style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 1000,
         display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={`Outliers in ${column}`}
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={t('pg.panelsB.out.title', { column })}
           onClick={e => e.stopPropagation()}
         style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10,
           padding: 18, width: 560, maxWidth: '92vw', maxHeight: '84vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-          <strong style={{ fontSize: 13 }}>Outliers in {column}</strong>
-          <button onClick={onClose} aria-label="Close"
+          <strong style={{ fontSize: 13 }}>{richT(t, 'pg.panelsB.out.title', { column })}</strong>
+          <button onClick={onClose} aria-label={t('pg.panelsB.out.close')}
             style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 14, color: 'var(--muted)' }}>✕</button>
         </div>
 
         <div style={{ marginBottom: 10 }}>
           <label htmlFor="anomaly-detector-select" style={{ fontSize: 11, color: 'var(--muted)', marginInlineEnd: 6 }}>
-            Detector
+            {t('pg.panelsB.out.detector')}
           </label>
           <select id="anomaly-detector-select" value={detector} onChange={e => setDetector(e.target.value)}>
-            {DETECTOR_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            {DETECTOR_OPTIONS.map(o => <option key={o.value} value={o.value}>{t(o.label)}</option>)}
           </select>
         </div>
 
         {error && <p role="alert" style={{ fontSize: 12, color: 'var(--danger)' }}>{error}</p>}
-        {!details && !error && <p style={{ fontSize: 12, color: 'var(--muted)' }}>Loading…</p>}
+        {!details && !error && <p style={{ fontSize: 12, color: 'var(--muted)' }}>{t('common.loading')}</p>}
 
         {details && s && (
           <>
             <p style={{ fontSize: 12, marginBottom: 10 }}>
-              <strong>{details.outliers.count}</strong> of {details.outliers.total_rows.toLocaleString()} rows
-              fall beyond 1.5×IQR ({fmt(s.fence_low)} – {fmt(s.fence_high)}).
+              {tNodes(t, 'pg.panelsB.out.count', { total: details.outliers.total_rows.toLocaleString() }, {
+                count: <strong>{details.outliers.count}</strong>,
+                lo: <bdi dir="ltr">{fmt(s.fence_low)}</bdi>, hi: <bdi dir="ltr">{fmt(s.fence_high)}</bdi>,
+              })}
             </p>
 
             {/* CSS box plot: whiskers min→max, box q1→q3, line at median */}
@@ -87,31 +94,40 @@ export default function OutlierDetailsDialog({ datasetId, column, onClose }: {
               <div style={{ position: 'absolute', top: 2, bottom: 2, left: pct(s.median), width: 2, background: 'var(--accent)' }} />
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--muted)', marginBottom: 12 }}>
-              <span>min {fmt(s.min)}</span><span>q1 {fmt(s.q1)}</span><span>median {fmt(s.median)}</span>
-              <span>q3 {fmt(s.q3)}</span><span>max {fmt(s.max)}</span>
+              {/* QA5 R2: each number isolated whole, so a minus or a range stays
+                  on its side in Arabic ("12,012-"). */}
+              {(['min', 'q1', 'median', 'q3', 'max'] as const).map(k => (
+                <span key={k}>{tNodes(t, `pg.panelsB.out.${k}`, {}, { v: <bdi dir="ltr">{fmt(s[k])}</bdi> })}</span>
+              ))}
             </div>
 
             <div style={{ fontSize: 12, borderTop: '1px solid var(--border)', paddingTop: 10, marginBottom: 12 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>
-                Impact
+                {t('pg.panelsB.out.impact')}
               </div>
               {details.impact.share_of_sum != null && (
-                <p>The outlier rows carry <strong>{(details.impact.share_of_sum * 100).toFixed(1)}%</strong> of the column's total.</p>
+                <p>{tNodes(t, 'pg.panelsB.out.share', {}, { pct: <strong>{(details.impact.share_of_sum * 100).toFixed(1)}%</strong> })}</p>
               )}
-              <p>Mean with outliers: <strong>{fmt(details.impact.mean_with)}</strong>
-                {details.impact.mean_without != null && <> — without them: <strong>{fmt(details.impact.mean_without)}</strong></>}</p>
+              <p>{details.impact.mean_without != null
+                ? tNodes(t, 'pg.panelsB.out.meanWithout', {}, { with: <strong>{fmt(details.impact.mean_with)}</strong>,
+                    without: <strong>{fmt(details.impact.mean_without)}</strong> })
+                : tNodes(t, 'pg.panelsB.out.mean', {}, { with: <strong>{fmt(details.impact.mean_with)}</strong> })}</p>
             </div>
 
             {details.outliers.rows.length > 0 && (
               <div style={{ overflowX: 'auto' }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>
-                  Outlier rows{details.outliers.count > details.outliers.rows.length ? ` (first ${details.outliers.rows.length})` : ''}
+                  {details.outliers.count > details.outliers.rows.length
+                    ? t('pg.panelsB.out.rowsFirst', { n: details.outliers.rows.length }) : t('pg.panelsB.out.rows')}
                 </div>
                 <table style={{ fontSize: 11 }}>
                   <thead><tr>{details.outliers.columns.map(c => <th key={c}>{c}</th>)}</tr></thead>
                   <tbody>
                     {details.outliers.rows.map((row, i) => (
-                      <tr key={i}>{row.map((v, j) => <td key={j}>{v == null ? '—' : String(v)}</td>)}</tr>
+                      <tr key={i}>{row.map((v, j) => <td key={j}>{v == null ? '—'
+                        // QA5 F3: the app's cell format ("-6208.69", not "-6208.6900000000005"), whole and LTR
+                        : typeof v === 'number' || (typeof v === 'string' && /^[-+]?\d+(\.\d+)?$/.test(v.trim()))
+                          ? <bdi dir="ltr">{formatCell(v as string | number)}</bdi> : String(v)}</td>)}</tr>
                     ))}
                   </tbody>
                 </table>

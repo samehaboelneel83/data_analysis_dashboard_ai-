@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { useDirection } from '../../contexts/DirectionContext'
-import { useT } from '../../i18n'
+import { useT, type TranslateFn } from '../../i18n'
+import { dtypeShort } from '../../lib/dtypeName'
 import { localDigits } from '../../lib/arabicFormats'
 import { nonAdditiveKind } from '../../lib/semanticGuard'
 import { fmtStr } from '../../components/report/chartUtils'
@@ -20,8 +21,8 @@ export type Analysis = {
   overview?: { missing_pct?: number }
 } | null
 
-const TYPE_TAG: Record<string, string> = { numeric: 'NUM', datetime: 'DATE', categorical: 'TXT', boolean: 'BOOL', text: 'TXT' }
-export const typeTag = (dtype: string) => TYPE_TAG[dtype] ?? dtype.slice(0, 4).toUpperCase()
+/** The column's type badge (NUM / DATE…), in the UI language (QA5 L3). */
+export const typeTag = (t: TranslateFn, dtype: string) => dtypeShort(t, dtype)
 
 /** Range bar for numbers, monthly bars for dates, top values for text. */
 export function useColumnProfile(ds: Dataset, name: string, analysis: Analysis): { dist: ReactNode; sum: string } {

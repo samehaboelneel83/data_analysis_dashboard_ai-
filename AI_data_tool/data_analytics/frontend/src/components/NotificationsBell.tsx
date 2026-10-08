@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { notificationsApi, type AppNotification } from '../services/api'
 import { Bell, Clock, MessageSquare, RefreshCw, Zap } from 'lucide-react'
 import { formatTimeAgo, useT } from '../i18n'
+import { formatDate } from '../lib/dateFormat'
 
 const KIND_ICON: Record<string, React.ReactNode> = {
   alert: <Zap size={13} />, schedule: <Clock size={13} />,
@@ -96,8 +97,8 @@ export default function NotificationsBell() {
                 <span aria-hidden className="dl-bell__icon">{KIND_ICON[n.kind] ?? <Bell size={13} />}</span>
                 <span className="dl-bell__body">
                   {n.text}
-                  <span className="dl-bell__time" title={new Date(n.created_at).toLocaleString()}>
-                    {formatTimeAgo(n.created_at, t) ?? new Date(n.created_at).toLocaleString()}
+                  <span className="dl-bell__time" title={formatDate(n.created_at)}>
+                    {formatTimeAgo(n.created_at, t) ?? formatDate(n.created_at)}
                   </span>
                 </span>
                 {!n.read && <span className="dl-bell__dot" aria-label="new" />}

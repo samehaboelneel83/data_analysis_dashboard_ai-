@@ -5,9 +5,11 @@ import type { PrepStep, DatasetColumn, Dataset, Relationship } from '../../servi
 import toast from 'react-hot-toast'
 
 import {
-  type EditStep, KIND_LABELS, KIND_ICONS, ADD_MENU_KINDS,
-  withKey, newStep,
+  type EditStep, KIND_ICONS, ADD_MENU_KINDS,
+  withKey, newStep, kindLabel, optLabel,
 } from './prepPipeline/model'
+import { useT, type TranslateFn } from '../../i18n'
+import { tNodes } from './prepPipeline/tNodes'
 import { StepEditor } from './prepPipeline/StepEditor'
 import { joinPairs, suggestJoinKeys } from './prepPipeline/join'
 export { joinPairs, writeJoinPairs, suggestJoinKeys } from './prepPipeline/join'
@@ -32,59 +34,76 @@ interface Props {
   readOnly?: boolean
 }
 
-function summaryOf(s: PrepStep): string {
+function summaryOf(s: PrepStep, t: TranslateFn): string {
+  const sep = t('pg.panelsB.listSep')
+  const list = (v: unknown) => ((v as string[]) || []).join(sep)
+  const arrow = (from: unknown, to: unknown) => t('pg.panelsB.sum.arrow', { from: String(from), to: String(to) })
   switch (s.kind) {
-    case 'filter_rows':    return (s.expression as string) || '(no expression)'
+    case 'filter_rows':    return (s.expression as string) || t('pg.panelsB.sum.noExpression')
     case 'sort': {
       const cols = (s.columns as { column: string; dir?: string }[]) || []
-      return cols.length ? cols.map(c => `${c.column} ${c.dir === 'desc' ? '↓' : '↑'}`).join(', ') : '(no columns)'
+      return cols.length ? cols.map(c => `${c.column} ${c.dir === 'desc' ? '↓' : '↑'}`).join(sep) : t('pg.panelsB.sum.noColumns')
     }
     case 'dedupe':
     case 'drop_duplicates': {
       const subset = (s.subset as string[]) || []
-      return subset.length ? `by ${subset.join(', ')}` : 'across all columns'
+      return subset.length ? t('pg.panelsB.sum.by', { cols: list(subset) }) : t('pg.panelsB.sum.allColumns')
     }
     case 'aggregate': {
       const gb = (s.group_by as string[]) || []
       const aggs = (s.aggregations as { column: string; agg: string; as?: string }[]) || []
-      return `group by ${gb.join(', ') || '—'}; ${aggs.length} aggregation${aggs.length === 1 ? '' : 's'}`
+      return t('pg.panelsB.sum.aggregate', { cols: list(gb) || '—', n: aggs.length })
     }
-    case 'rename':         return `${s.column || '?'} → ${s.to || '?'}`
-    case 'retype':         return `${s.column || '?'} → ${s.to}`
-    case 'split':          return `${s.column || '?'} on "${s.delimiter || ''}" → ${((s.into as string[]) || []).join(', ') || '?'}`
-    case 'trim':           return ((s.columns as string[]) || []).length ? (s.columns as string[]).join(', ') : 'all text columns'
-    case 'case':           return `${s.column || '?'} → ${s.to}`
-    case 'replace':        return `${s.column || '?'}: "${s.find ?? ''}" → "${s.replace ?? ''}"`
-    case 'remove_columns': return ((s.columns as string[]) || []).join(', ') || '(none selected)'
-    case 'drop_nulls':     return ((s.columns as string[]) || []).length ? (s.columns as string[]).join(', ') : 'any column'
-    case 'fill_nulls':     return `${s.column || '?'} with ${s.method}`
-    case 'partition':      return `${s.name || '?'}: ${s.train_pct ?? '?'}% training${s.test_pct ? `, ${s.test_pct}% test` : ''}${s.stratify ? `, stratified by ${s.stratify}` : ''}${s.key ? `, whole ${s.key} per side` : ''} (seed ${s.seed ?? 42})`
+    case 'rename':         return arrow(s.column || '?', s.to || '?')
+    case 'retype':         return arrow(s.column || '?', optLabel(t, 'type', s.to))
+    case 'split':          return t('pg.panelsB.sum.split', { col: String(s.column || '?'), delim: String(s.delimiter || ''), into: list(s.into) || '?' })
+    case 'trim':           return ((s.columns as string[]) || []).length ? list(s.columns) : t('pg.panelsB.sum.allText')
+    case 'case':           return arrow(s.column || '?', optLabel(t, 'case', s.to))
+    case 'replace':        return t('pg.panelsB.sum.replace', { col: String(s.column || '?'), find: String(s.find ?? ''), replace: String(s.replace ?? '') })
+    case 'remove_columns': return list(s.columns) || t('pg.panelsB.sum.noneSelected')
+    case 'drop_nulls':     return ((s.columns as string[]) || []).length ? list(s.columns) : t('pg.panelsB.sum.anyColumn')
+    case 'fill_nulls':     return t('pg.panelsB.sum.fill', { col: String(s.column || '?'), method: optLabel(t, 'fill', s.method) })
+    case 'partition': {
+      const extra = (s.test_pct ? t('pg.panelsB.sum.partitionTest', { pct: String(s.test_pct) }) : '')
+        + (s.stratify ? t('pg.panelsB.sum.partitionStrat', { col: String(s.stratify) }) : '')
+        + (s.key ? t('pg.panelsB.sum.partitionKey', { col: String(s.key) }) : '')
+      return t('pg.panelsB.sum.partition', { name: String(s.name || '?'), train: String(s.train_pct ?? '?'), extra, seed: String(s.seed ?? 42) })
+    }
     case 'edit_cells': {
       const edits = (s.edits as { key: string }[]) || []
-      return `${edits.length} correction${edits.length === 1 ? '' : 's'} to ${s.column || '?'}, by ${s.key_column || '?'}`
+      return t('pg.panelsB.sum.editCells', { n: edits.length, col: String(s.column || '?'), key: String(s.key_column || '?') })
     }
     case 'join': {
       // Reads both shapes, so a composite key shows every pair rather than
       // silently reporting only the first.
-      const keys = joinPairs(s).map(p => `${p.left || '?'} = ${p.right || '?'}`).join(' and ')
-      return `dataset #${s.dataset_id ?? '?'} (${s.how}) on ${keys}`
+      const keys = joinPairs(s).map(p => `${p.left || '?'} = ${p.right || '?'}`).join(t('pg.panelsB.andSep'))
+      return t('pg.panelsB.sum.join', { id: String(s.dataset_id ?? '?'), how: optLabel(t, 'how', s.how), keys })
     }
-    case 'append':         return `rows of dataset #${s.dataset_id ?? '?'}${s.source_column ? `, labelled in ${s.source_column}` : ''}`
+    case 'append':         return s.source_column
+      ? t('pg.panelsB.sum.appendLabelled', { id: String(s.dataset_id ?? '?'), col: String(s.source_column) })
+      : t('pg.panelsB.sum.append', { id: String(s.dataset_id ?? '?') })
     case 'outliers': {
-      const cols = ((s.columns as string[]) || []).join(', ') || '?'
-      const act = { flag: `flag in ${s.name || '_Outlier_'}`, remove: 'remove rows', cap: 'cap' }[(s.action as string) || 'flag']
-      return `${cols}: ${s.method === 'zscore' ? `z > ${s.k ?? 3}` : `IQR × ${s.k ?? 1.5}`}, ${act}`
+      const cols = list(s.columns) || '?'
+      const act = (s.action as string) || 'flag'
+      const actText = act === 'flag' ? t('pg.panelsB.sum.outFlag', { name: String(s.name || '_Outlier_') })
+        : act === 'remove' ? t('pg.panelsB.sum.outRemove') : act === 'cap' ? t('pg.panelsB.sum.outCap') : 'undefined'
+      const rule = s.method === 'zscore' ? `z > ${s.k ?? 3}` : `IQR × ${s.k ?? 1.5}`
+      return t('pg.panelsB.sum.outliers', { cols, rule, act: actText })
     }
-    case 'normalize':      return `${((s.columns as string[]) || []).join(', ') || '?'} → ${s.method}${s.suffix ? ` into *${s.suffix}` : ''}`
+    case 'normalize':      return s.suffix
+      ? t('pg.panelsB.sum.normalizeInto', { cols: list(s.columns) || '?', method: String(s.method), suffix: String(s.suffix) })
+      : arrow(list(s.columns) || '?', s.method)
     case 'encode':         return s.method === 'label'
-      ? `${s.column || '?'} → ${s.column || '?'}_code`
-      : `${s.column || '?'} → ${((s.categories as string[]) || []).length} one-hot column${((s.categories as string[]) || []).length === 1 ? '' : 's'}`
-    case 'date_parts':     return `${s.column || '?'} → ${((s.parts as string[]) || []).join(', ') || '?'}`
-    case 'feature_select': return [s.max_missing_pct != null && `empty > ${s.max_missing_pct}%`,
-      s.min_variance != null && `variance ≤ ${s.min_variance}`, s.max_correlation != null && `|r| > ${s.max_correlation}`]
-      .filter(Boolean).join(', ') || '(no rule)'
-    case 'pca':            return `${((s.columns as string[]) || []).length} columns → ${s.n ?? 2} components (${s.prefix || 'PC'}1…)`
-    case 'balance':        return `${s.column || '?'}: ${s.method}${s.only_column ? `, only ${s.only_column} = ${s.only_value}` : ''}`
+      ? arrow(s.column || '?', `${s.column || '?'}_code`)
+      : t('pg.panelsB.sum.oneHot', { col: String(s.column || '?'), n: ((s.categories as string[]) || []).length })
+    case 'date_parts':     return arrow(s.column || '?', ((s.parts as string[]) || []).map(p => optLabel(t, 'part', p)).join(sep) || '?')
+    case 'feature_select': return [s.max_missing_pct != null && t('pg.panelsB.sum.fsEmpty', { v: String(s.max_missing_pct) }),
+      s.min_variance != null && t('pg.panelsB.sum.fsVariance', { v: String(s.min_variance) }), s.max_correlation != null && `|r| > ${s.max_correlation}`]
+      .filter(Boolean).join(sep) || t('pg.panelsB.sum.noRule')
+    case 'pca':            return t('pg.panelsB.sum.pca', { n: ((s.columns as string[]) || []).length, k: String(s.n ?? 2), prefix: String(s.prefix || 'PC') })
+    case 'balance':        return s.only_column
+      ? t('pg.panelsB.sum.balanceOnly', { col: String(s.column || '?'), method: optLabel(t, 'balance', s.method), oc: String(s.only_column), ov: String(s.only_value) })
+      : t('pg.panelsB.sum.balance', { col: String(s.column || '?'), method: optLabel(t, 'balance', s.method) })
     default:                return ''
   }
 }
@@ -98,6 +117,7 @@ function summaryOf(s: PrepStep): string {
  *  keys still carries, so it is read as a one-pair list rather than migrated.
  */
 export default function PrepPipelinePanel({ datasetId, columns, datasetName, initialSteps, onSave, saveLabel, readOnly }: Props) {
+  const t = useT()
   const controlled = onSave !== undefined
   const [steps, setSteps]     = useState<EditStep[]>([])
   const [loading, setLoading] = useState(true)
@@ -175,7 +195,7 @@ export default function PrepPipelinePanel({ datasetId, columns, datasetName, ini
     debounceRef.current = setTimeout(() => {
       prepApi.preview(datasetId, toSend)
         .then(r => { setPreview(r); setPreviewErr(null) })
-        .catch(e => setPreviewErr(e?.response?.data?.detail || 'Preview failed'))
+        .catch(e => setPreviewErr(e?.response?.data?.detail || t('pg.panelsB.pipe.previewFailed')))
     }, 350)
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -189,10 +209,10 @@ export default function PrepPipelinePanel({ datasetId, columns, datasetName, ini
     }
     try {
       await prepApi.set(datasetId, apiSteps())
-      toast.success('View saved')
+      toast.success(t('pg.panelsB.pipe.viewSaved'))
       setViewSaved(true)
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail || 'Save failed')
+      toast.error(e?.response?.data?.detail || t('pg.panelsB.pipe.saveFailed'))
     } finally {
       setSaving(false)
     }
@@ -209,11 +229,11 @@ export default function PrepPipelinePanel({ datasetId, columns, datasetName, ini
       })
       setSaved(ds)
       setSaveOpen(false)
-      toast.success(`Created "${ds.name}"`)
+      toast.success(t('pg.panelsB.pipe.createdToast', { name: ds.name }))
     } catch (e: any) {
       // The refusals (governed data, exports disabled) are written to be read
       // by a person -- show the server's own words rather than a generic one.
-      setSaveErr(e?.response?.data?.detail || 'Could not create the dataset')
+      setSaveErr(e?.response?.data?.detail || t('pg.panelsB.pipe.createFailed'))
     } finally {
       setSavingAs(false)
     }
@@ -255,18 +275,18 @@ export default function PrepPipelinePanel({ datasetId, columns, datasetName, ini
     setSteps(s => s.map((st, i) => i === idx ? { ...st, disabled: !st.disabled } : st))
   }
 
-  if (loading) return <p style={{ fontSize: 11, color: 'var(--muted)' }}>Loading pipeline…</p>
+  if (loading) return <p style={{ fontSize: 11, color: 'var(--muted)' }}>{t('pg.panelsB.pipe.loading')}</p>
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, position: 'relative' }}>
         <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
-          Pipeline
+          {t('pg.panelsB.pipe.title')}
         </span>
         <div style={{ position: 'relative' }}>
           <button className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '2px 7px' }}
             hidden={readOnly} onClick={() => setAddMenuOpen(o => !o)}>
-            + Add step
+            {t('pg.panelsB.pipe.addStep')}
           </button>
           {addMenuOpen && (
             <div style={{ position: 'absolute', insetInlineEnd: 0, top: '100%', zIndex: 20, marginTop: 2,
@@ -277,7 +297,7 @@ export default function PrepPipelinePanel({ datasetId, columns, datasetName, ini
                   style={{ fontSize: 11, padding: '6px 10px', cursor: 'pointer', display: 'flex', gap: 6, alignItems: 'center' }}
                   onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface2)')}
                   onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                  <span>{KIND_ICONS[k]}</span>{KIND_LABELS[k]}
+                  <span>{KIND_ICONS[k]}</span>{kindLabel(t, k)}
                 </div>
               ))}
             </div>
@@ -287,7 +307,7 @@ export default function PrepPipelinePanel({ datasetId, columns, datasetName, ini
 
       {steps.length === 0 && (
         <p data-testid="prep-empty" style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center', padding: '10px 0' }}>
-          No transform steps yet
+          {t('pg.panelsB.pipe.empty')}
         </p>
       )}
 
@@ -305,32 +325,33 @@ export default function PrepPipelinePanel({ datasetId, columns, datasetName, ini
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ fontSize: 12 }}>{KIND_ICONS[s.kind] ?? '•'}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600 }}>{KIND_LABELS[s.kind] ?? s.kind}</div>
+                  <div style={{ fontSize: 11, fontWeight: 600 }}>{kindLabel(t, s.kind)}</div>
                   <div style={{ fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {summaryOf(s)}
+                    {/* QA5 R1: an expression is code, laid out left-to-right in any language. */}
+                    {s.kind === 'filter_rows' && s.expression ? <bdi dir="ltr">{summaryOf(s, t)}</bdi> : summaryOf(s, t)}
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 2 }} onClick={e => e.stopPropagation()}>
-                  <button aria-label="move up" className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '1px 5px' }}
+                  <button aria-label={t('pg.panelsB.pipe.moveUp')} className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '1px 5px' }}
                     disabled={idx === 0} onClick={() => moveStep(idx, -1)}>↑</button>
-                  <button aria-label="move down" className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '1px 5px' }}
+                  <button aria-label={t('pg.panelsB.pipe.moveDown')} className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '1px 5px' }}
                     disabled={idx === steps.length - 1} onClick={() => moveStep(idx, 1)}>↓</button>
-                  <button aria-label={s.disabled ? 'enable' : 'disable'} className="btn btn-ghost btn-sm"
+                  <button aria-label={s.disabled ? t('pg.panelsB.pipe.enable') : t('pg.panelsB.pipe.disable')} className="btn btn-ghost btn-sm"
                     style={{ fontSize: 11, padding: '1px 5px' }} onClick={() => toggleDisabled(idx)}>
                     {s.disabled ? '○' : '●'}
                   </button>
-                  <button aria-label="delete" className="btn btn-ghost btn-sm"
+                  <button aria-label={t('pg.panelsB.pipe.delete')} className="btn btn-ghost btn-sm"
                     style={{ fontSize: 11, padding: '1px 5px', color: 'var(--danger)' }} onClick={() => removeStep(idx)}>✕</button>
                 </div>
               </div>
 
               {s.disabled ? (
                 <div data-testid="prep-step-skipped" style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic', marginTop: 4 }}>
-                  skipped (paused)
+                  {t('pg.panelsB.pipe.skipped')}
                 </div>
               ) : stepPreview && (
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-                  {stepPreview.rows_in.toLocaleString()} → {stepPreview.rows_out.toLocaleString()} rows
+                  {t('pg.panelsB.pipe.rowsStep', { in: stepPreview.rows_in.toLocaleString(), out: stepPreview.rows_out.toLocaleString() })}
                   {/* A join on a non-unique key multiplies rows instead of
                       adding columns, and it does so silently -- the numbers are
                       simply wrong afterwards. A relationship says how two
@@ -339,7 +360,7 @@ export default function PrepPipelinePanel({ datasetId, columns, datasetName, ini
                       the author gets. */}
                   {s.kind === 'join' && stepPreview.rows_out > stepPreview.rows_in && (
                     <span data-testid="prep-join-fanout" style={{ color: 'var(--warning, #b26b00)' }}>
-                      {' '}· this join multiplied rows (×{(stepPreview.rows_out / Math.max(1, stepPreview.rows_in)).toFixed(2)}) — check the key is unique on the other side
+                      {t('pg.panelsB.pipe.fanout', { x: (stepPreview.rows_out / Math.max(1, stepPreview.rows_in)).toFixed(2) })}
                     </span>
                   )}
                 </div>
@@ -367,19 +388,19 @@ export default function PrepPipelinePanel({ datasetId, columns, datasetName, ini
       {(steps.length > 0 || controlled) && !readOnly && (
         <button className="btn btn-primary btn-sm" style={{ width: '100%', fontSize: 11, marginTop: 10 }}
           onClick={save} disabled={saving}>
-          {saving ? 'Saving…' : (saveLabel ?? 'Save as this dataset’s view')}
+          {saving ? t('pg.panelsB.pipe.saving') : (saveLabel ?? t('pg.panelsB.pipe.saveView'))}
         </button>
       )}
       {viewSaved && (
         <div data-testid="view-saved" role="status"
           style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span>Saved. Every chart, report and export on this dataset now reads these steps, each for its own viewer.</span>
+          <span>{t('pg.panelsB.pipe.savedNote')}</span>
           <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}
             onClick={() => {
               reportsApi.create({ name: datasetName ? `${datasetName} dashboard` : 'New dashboard', dataset_id: datasetId })
                 .then(r => window.location.assign(`/reports/${(r as { id: number }).id}`))
-                .catch(e => toast.error(e?.response?.data?.detail ?? 'Could not create the dashboard'))
-            }}>Build a dashboard on this view</button>
+                .catch(e => toast.error(e?.response?.data?.detail ?? t('pg.panelsB.pipe.dashFailed')))
+            }}>{t('pg.panelsB.pipe.buildOnView')}</button>
         </div>
       )}
 
@@ -391,7 +412,7 @@ export default function PrepPipelinePanel({ datasetId, columns, datasetName, ini
         <div data-testid="prep-final-preview" style={{ marginTop: 10, fontSize: 11 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
             <span style={{ color: 'var(--muted)' }}>
-              {preview.before.rows.toLocaleString()} rows in → {preview.after.rows.toLocaleString()} rows out
+              {t('pg.panelsB.pipe.rowsInOut', { in: preview.before.rows.toLocaleString(), out: preview.after.rows.toLocaleString() })}
             </span>
             {/* Offered here, beside the result it would keep: this is the moment
                 the author knows the output is what they want. */}
@@ -402,52 +423,50 @@ export default function PrepPipelinePanel({ datasetId, columns, datasetName, ini
                 setSaveName(n => n || 'Joined dataset')
                 setSaveOpen(true)
               }}>
-              Save as new dataset…
+              {t('pg.panelsB.pipe.saveAsNewMenu')}
             </button>}
           </div>
 
           {saved && (
             <div style={{ marginBottom: 6, color: 'var(--muted)', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <span>Created <a href={`/datasets/${saved.id}`}>{saved.name}</a>.</span>
+              <span>{tNodes(t, 'pg.panelsB.pipe.created', {}, { name: <a href={`/datasets/${saved.id}`}><bdi>{saved.name}</bdi></a> })}</span>
               {/* E06: the journey's next step, from where it ends -- the new
                   dataset used to be a link and a dead end. */}
               <button type="button" className="btn btn-primary btn-sm"
                 onClick={() => {
                   reportsApi.create({ name: saved.name, dataset_id: saved.id })
                     .then(r => window.location.assign(`/reports/${(r as { id: number }).id}`))
-                    .catch(e => toast.error(e?.response?.data?.detail ?? 'Could not create the dashboard'))
-                }}>Build a dashboard from it</button>
+                    .catch(e => toast.error(e?.response?.data?.detail ?? t('pg.panelsB.pipe.dashFailed')))
+                }}>{t('pg.panelsB.pipe.buildFromIt')}</button>
             </div>
           )}
 
           {saveOpen && (
-            <div role="dialog" aria-label="Save as new dataset"
+            <div role="dialog" aria-label={t('pg.panelsB.pipe.saveAsNew')}
               style={{ border: '1px solid var(--border)', borderRadius: 6, padding: 10, marginBottom: 8 }}>
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>Save as new dataset</div>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>{t('pg.panelsB.pipe.saveAsNew')}</div>
               <input value={saveName} onChange={e => setSaveName(e.target.value)}
-                aria-label="Dataset name" placeholder="Name" style={{ width: '100%', marginBottom: 6 }} />
+                aria-label={t('pg.panelsB.pipe.datasetName')} placeholder={t('pg.panelsB.pipe.name')} style={{ width: '100%', marginBottom: 6 }} />
               <input value={saveDesc} onChange={e => setSaveDesc(e.target.value)}
-                aria-label="Description" placeholder="Description (optional)"
+                aria-label={t('pg.panelsB.pipe.description')} placeholder={t('pg.panelsB.pipe.descriptionOpt')}
                 style={{ width: '100%', marginBottom: 6 }} />
               <div style={{ color: 'var(--muted)', marginBottom: 6 }}>
-                {preview.after.rows.toLocaleString()} rows × {preview.after.columns.length} columns
-                {joinedNames.length > 0 && <> · joined with {joinedNames.join(', ')}</>}
+                {t('pg.panelsB.pipe.shape', { rows: preview.after.rows.toLocaleString(), cols: preview.after.columns.length })}
+                {joinedNames.length > 0 && tNodes(t, 'pg.panelsB.pipe.joinedWith', {}, { names: <bdi>{joinedNames.join(t('pg.panelsB.listSep'))}</bdi> })}
               </div>
               <div style={{ color: 'var(--muted)', marginBottom: 8 }}>
-                This creates a fixed copy of the result above. It will not update
-                when the source datasets change — rebuild it when you want it
-                caught up.
+                {t('pg.panelsB.pipe.fixedCopy')}
               </div>
               {saveErr && (
                 <div style={{ color: 'var(--danger)', marginBottom: 6 }}>{saveErr}</div>
               )}
               <div style={{ display: 'flex', gap: 6 }}>
                 <button className="btn btn-primary" style={{ fontSize: 11, padding: '2px 8px' }}
-                  disabled={savingAs || !saveName.trim()} title={!saveName.trim() ? 'Name the new dataset first' : undefined} onClick={saveAsDataset}>
-                  {savingAs ? 'Creating…' : 'Create'}
+                  disabled={savingAs || !saveName.trim()} title={!saveName.trim() ? t('pg.panelsB.pipe.nameFirst') : undefined} onClick={saveAsDataset}>
+                  {savingAs ? t('pg.panelsB.pipe.creating') : t('pg.panelsB.pipe.create')}
                 </button>
                 <button className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px' }}
-                  disabled={savingAs} onClick={() => setSaveOpen(false)}>Cancel</button>
+                  disabled={savingAs} onClick={() => setSaveOpen(false)}>{t('common.cancel')}</button>
               </div>
             </div>
           )}

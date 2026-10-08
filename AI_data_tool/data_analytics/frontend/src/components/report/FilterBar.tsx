@@ -48,7 +48,7 @@ export default function FilterBar({ keyboard = false, variant = 'strip' }: {
           <span key={`${f.sourceWidgetId}-${f.column}`} className="dl-vw-fc dl-vw-fc--on">
             <span>{f.label}</span>
             <button type="button" onClick={() => clearFilter(f.column, f.sourceWidgetId)}
-              aria-label={`Remove filter ${f.label}`} title={`Remove filter ${f.label}`}>×</button>
+              aria-label={tr('bc.shell.flt.remove', { label: f.label })} title={tr('bc.shell.flt.remove', { label: f.label })}>×</button>
           </span>
         ))}
         {activeFilters.length > 0 && (
@@ -56,12 +56,12 @@ export default function FilterBar({ keyboard = false, variant = 'strip' }: {
         )}
         {(undoLabel || redoLabel) && (
           <span style={{ display: 'inline-flex', gap: 2 }}>
-            <button className="btn btn-ghost btn-sm" aria-label="Undo selection" aria-disabled={!undoLabel}
-              title={undoLabel ? `Back to: ${undoLabel}` : 'No earlier selection'}
+            <button className="btn btn-ghost btn-sm" aria-label={tr('bc.shell.flt.undo')} aria-disabled={!undoLabel}
+              title={undoLabel ? tr('bc.shell.flt.backTo', { label: undoLabel }) : tr('bc.shell.flt.noEarlier')}
               onClick={() => { if (undoLabel) undoSelection() }}
               style={{ padding: '2px 6px', opacity: undoLabel ? 1 : 0.4 }}>↶</button>
-            <button className="btn btn-ghost btn-sm" aria-label="Redo selection" aria-disabled={!redoLabel}
-              title={redoLabel ? `Forward to: ${redoLabel}` : 'Nothing to redo'}
+            <button className="btn btn-ghost btn-sm" aria-label={tr('bc.shell.flt.redo')} aria-disabled={!redoLabel}
+              title={redoLabel ? tr('bc.shell.flt.forwardTo', { label: redoLabel }) : tr('bc.shell.flt.nothingRedo')}
               onClick={() => { if (redoLabel) redoSelection() }}
               style={{ padding: '2px 6px', opacity: redoLabel ? 1 : 0.4 }}>↷</button>
           </span>
@@ -87,7 +87,7 @@ export default function FilterBar({ keyboard = false, variant = 'strip' }: {
               removed without hunting for the widget that set it, and a row of
               unlabelled buttons is unusable by keyboard or screen reader. */}
           <button onClick={() => clearFilter(f.column, f.sourceWidgetId)}
-            aria-label={`Remove filter ${f.label}`} title={`Remove filter ${f.label}`}
+            aria-label={tr('bc.shell.flt.remove', { label: f.label })} title={tr('bc.shell.flt.remove', { label: f.label })}
             style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', padding: 0, fontSize: 13, lineHeight: 1 }}>
             ×
           </button>
@@ -95,19 +95,19 @@ export default function FilterBar({ keyboard = false, variant = 'strip' }: {
       ))}
       {activeFilters.length > 0 && (
         <button onClick={clearAllFilters} className="btn btn-ghost btn-sm" style={{ fontSize: 11, padding: '2px 8px' }}>
-          Clear all
+          {tr('bc.shell.flt.clearAll')}
         </button>
       )}
       {/* The reader's own undo: back through their clicks, never the author's
           design. aria-disabled keeps the tooltip saying why nothing happens. */}
       {(undoLabel || redoLabel) && (
         <span style={{ display: 'inline-flex', gap: 2, marginInlineStart: 'auto' }}>
-          <button className="btn btn-ghost btn-sm" aria-label="Undo selection" aria-disabled={!undoLabel}
-            title={undoLabel ? `Back to: ${undoLabel}` : 'No earlier selection'}
+          <button className="btn btn-ghost btn-sm" aria-label={tr('bc.shell.flt.undo')} aria-disabled={!undoLabel}
+            title={undoLabel ? tr('bc.shell.flt.backTo', { label: undoLabel }) : tr('bc.shell.flt.noEarlier')}
             onClick={() => { if (undoLabel) undoSelection() }}
             style={{ fontSize: 11, padding: '2px 6px', opacity: undoLabel ? 1 : 0.4 }}>↶</button>
-          <button className="btn btn-ghost btn-sm" aria-label="Redo selection" aria-disabled={!redoLabel}
-            title={redoLabel ? `Forward to: ${redoLabel}` : 'Nothing to redo'}
+          <button className="btn btn-ghost btn-sm" aria-label={tr('bc.shell.flt.redo')} aria-disabled={!redoLabel}
+            title={redoLabel ? tr('bc.shell.flt.forwardTo', { label: redoLabel }) : tr('bc.shell.flt.nothingRedo')}
             onClick={() => { if (redoLabel) redoSelection() }}
             style={{ fontSize: 11, padding: '2px 6px', opacity: redoLabel ? 1 : 0.4 }}>↷</button>
         </span>

@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import { useT, type MessageKey } from '../../i18n'
+import { useDirection } from '../../contexts/DirectionContext'
 
 /** Settings-group titles are written in English at every call site (the panel
  *  search matches on them); only the DISPLAYED heading is translated, here,
@@ -76,6 +77,7 @@ interface Props {
 export default function ExpandableGroup({ id, title, defaultOpen = false, children, forceOpen, hidden }: Props) {
   const [open, setOpen] = useState(() => readState()[id] ?? defaultOpen)
   const t = useT()
+  const { rtl } = useDirection()
 
   const toggle = useCallback(() => {
     // While forceOpen is in effect (the panel-search filter), the header click is a
@@ -111,12 +113,15 @@ export default function ExpandableGroup({ id, title, defaultOpen = false, childr
           display: 'flex', alignItems: 'center', gap: 6, width: '100%',
           background: 'none', border: 'none', cursor: 'pointer',
           padding: '9px 2px', color: 'var(--text)', font: 'inherit',
-          fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.05em',
+          // QA3 C2: no letter spacing in Arabic (it pulls joined letters apart and
+          // widened the Interactions heading until it was cut); the title wraps.
+          fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: rtl ? 0 : '.05em',
+          textAlign: 'start',
         }}
       >
         <span aria-hidden style={{ color: 'var(--muted)', fontSize: 10.5, transition: 'transform .12s',
           transform: effectiveOpen ? 'rotate(90deg)' : 'none', display: 'inline-block' }}>&#9654;</span>
-        <span style={{ color: 'var(--muted)' }}>{TITLE_KEY[title] ? t(TITLE_KEY[title]) : title}</span>
+        <span style={{ color: 'var(--muted)', minWidth: 0, overflowWrap: 'anywhere' }}>{TITLE_KEY[title] ? t(TITLE_KEY[title]) : title}</span>
       </button>
       {effectiveOpen && <div style={{ paddingBottom: 10 }}>{children}</div>}
     </div>

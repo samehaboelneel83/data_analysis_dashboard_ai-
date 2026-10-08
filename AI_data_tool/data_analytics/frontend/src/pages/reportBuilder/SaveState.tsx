@@ -26,7 +26,10 @@ export default function SaveState({ saving }: { saving: boolean }) {
   return (
     <span className="dl-bd-save" role="status" data-saving={saving || undefined}>
       {saving ? <Loader2 size={13} className="dl-spin" aria-hidden /> : <Check size={14} aria-hidden />}
-      {saving ? t('status.saving') : ago ? t('bd.savedAgo', { when: ago }) : t('status.saved')}
+      {(() => {
+        const text = saving ? t('status.saving') : ago ? t('bd.savedAgo', { when: ago }) : t('status.saved')
+        return <span className="tx" title={text}>{text}</span>
+      })()}
     </span>
   )
 }

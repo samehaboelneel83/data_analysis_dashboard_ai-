@@ -2828,3 +2828,16 @@ describe('the partial-period note in the reader\'s language (QA2 T14)', () => {
     } finally { localStorage.removeItem('datalytics.language') }
   })
 })
+
+describe('a custom background sets its own text colours (QA4 V1)', () => {
+  it('a light background gets dark text tokens on the widget, whatever the theme', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false } as never)
+    const { container } = render(
+      <CrossFilterProvider>
+        <WidgetRenderer widget={barWidget({ id: 77, config: { dimension: 'region', measure: 'revenue', widget_background: '#fde68a' } })} datasetId={10} />
+      </CrossFilterProvider>)
+    const card = container.querySelector('.dl-widget') as HTMLElement
+    expect(card.style.getPropertyValue('--text')).toBe('#1f2328')
+    expect(card.style.getPropertyValue('--muted')).toBe('#4d5560')
+  })
+})

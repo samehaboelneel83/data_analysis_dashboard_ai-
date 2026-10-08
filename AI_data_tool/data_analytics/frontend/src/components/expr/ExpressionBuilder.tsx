@@ -2,13 +2,55 @@ import { useRef, useState } from 'react'
 import type { DatasetColumn } from '../../services/api'
 import type { SimpleConditionRow, SimpleExprState, SimpleJoiner, SimpleOperator, SimpleValueKind } from '../../lib/simpleExpr'
 import { FUNCTION_ARITY, compileSimple, emptyConditionRow } from '../../lib/simpleExpr'
+import { en, useT, type MessageKey, type TranslateFn } from '../../i18n'
+import { useDirection } from '../../contexts/DirectionContext'
 
-const SIMPLE_OPERATORS: { value: SimpleOperator; label: string }[] = [
-  { value: 'eq', label: '=' }, { value: 'ne', label: '≠' },
-  { value: 'gt', label: '>' }, { value: 'gte', label: '≥' },
-  { value: 'lt', label: '<' }, { value: 'lte', label: '≤' },
-  { value: 'isnull', label: 'is blank' }, { value: 'notnull', label: 'is not blank' },
+/** QA5 R1: an operator or any code-like token (`>=`, `!=`, `(`, an expression)
+ *  shown inside right-to-left text has its neutral characters reordered and its
+ *  mirrored glyphs flipped -- ">=" reads "=<", "(" reads ")". Everything code
+ *  goes through this isolate, which lays it out left-to-right whatever the page. */
+const LTR_ISOLATE: React.CSSProperties = { unicodeBidi: 'isolate', direction: 'ltr' }
+export function Code({ children }: { children: React.ReactNode }) {
+  return <bdi dir="ltr" style={LTR_ISOLATE}>{children}</bdi>
+}
+/** The same isolate for text that cannot hold markup (an <option>): LRI … PDI. */
+const ltrText = (s: string) => `\u2066${s}\u2069`
+
+// Symbols are code and shown as typed (isolated); the two word operators are translated.
+const SIMPLE_OPERATORS: { value: SimpleOperator; symbol?: string; key?: MessageKey }[] = [
+  { value: 'eq', symbol: '=' }, { value: 'ne', symbol: '≠' },
+  { value: 'gt', symbol: '>' }, { value: 'gte', symbol: '≥' },
+  { value: 'lt', symbol: '<' }, { value: 'lte', symbol: '≤' },
+  { value: 'isnull', key: 'pg.panelsB.expr.op.isnull' }, { value: 'notnull', key: 'pg.panelsB.expr.op.notnull' },
 ]
+
+/** Group names the builder knows, translated where they are shown. A caller's
+ *  own (already translated) group label passes through unchanged. */
+const GROUP_KEY: Record<string, MessageKey> = {
+  Arithmetic: 'pg.panelsB.expr.grp.arithmetic',
+  Comparison: 'pg.panelsB.expr.grp.comparison',
+  Logical: 'pg.panelsB.expr.grp.logical',
+  System: 'pg.panelsB.expr.grp.system',
+}
+const SYSTEM_HINT_KEY: Record<string, MessageKey> = {
+  'USEREMAIL()': 'pg.panelsB.expr.sys.useremail',
+  'USERID()': 'pg.panelsB.expr.sys.userid',
+  'ORGID()': 'pg.panelsB.expr.sys.orgid',
+  'ORGNAME()': 'pg.panelsB.expr.sys.orgname',
+}
+
+/** A column's type tag as a word in the reader's language; an unknown type
+ *  shows as its code. */
+export function dtypeLabel(t: TranslateFn, dtype: string): string {
+  const key = `pg.panelsB.expr.dtype.${dtype}`
+  return key in en ? t(key as MessageKey) : dtype
+}
+/** A Simple-mode function argument's name (from FUNCTION_ARITY), translated. */
+const argLabel = (t: TranslateFn, name: string): string => {
+  const key = `pg.panelsB.expr.arg.${name}`
+  return key in en ? t(key as MessageKey) : name
+}
+const ANY_ARGS = 'any'
 
 /**
  * Shared codeless expression-authoring widget: a textarea plus click-to-insert-at-
@@ -29,30 +71,31 @@ export interface PaletteGroup { label: string; color?: string; items: PaletteIte
 export interface AttributeExtra { name: string; icon?: string }
 
 // System parameters — always available, expand server-side via apply_user_context.
+// The group name and hints are translated where shown (GROUP_KEY, SYSTEM_HINT_KEY).
 export const SYSTEM_GROUP: PaletteGroup = {
-  label: 'System', color: '#94a3b8',
+  label: 'System', color: '#94a3b8', // i18n-ok: a group key, translated through GROUP_KEY
   items: [
-    { label: 'USEREMAIL()', snippet: 'USEREMAIL()', back: 0, hint: 'Current user email' },
-    { label: 'USERID()',    snippet: 'USERID()',    back: 0, hint: 'Current user id' },
-    { label: 'ORGID()',     snippet: 'ORGID()',     back: 0, hint: 'Current organization id' },
-    { label: 'ORGNAME()',   snippet: 'ORGNAME()',   back: 0, hint: 'Current organization name' },
+    { label: 'USEREMAIL()', snippet: 'USEREMAIL()', back: 0 }, // i18n-ok: a function, code
+    { label: 'USERID()',    snippet: 'USERID()',    back: 0 }, // i18n-ok: a function, code
+    { label: 'ORGID()',     snippet: 'ORGID()',     back: 0 }, // i18n-ok: a function, code
+    { label: 'ORGNAME()',   snippet: 'ORGNAME()',   back: 0 }, // i18n-ok: a function, code
   ],
 }
 
 const DEFAULT_OP_GROUPS: { label: string; items: PaletteItem[] }[] = [
-  { label: 'Arithmetic', items: [
+  { label: 'Arithmetic', items: [ // i18n-ok: a group key, translated through GROUP_KEY
     { label: '+', snippet: ' + ' }, { label: '-', snippet: ' - ' },
     { label: '*', snippet: ' * ' }, { label: '/', snippet: ' / ' },
     { label: '**', snippet: ' ** ' }, { label: '%', snippet: ' % ' },
   ]},
-  { label: 'Comparison', items: [
+  { label: 'Comparison', items: [ // i18n-ok: a group key, translated through GROUP_KEY
     { label: '==', snippet: ' == ' }, { label: '!=', snippet: ' != ' },
     { label: '>', snippet: ' > ' }, { label: '<', snippet: ' < ' },
     { label: '>=', snippet: ' >= ' }, { label: '<=', snippet: ' <= ' },
   ]},
-  { label: 'Logical', items: [
-    { label: 'and', snippet: ' and ' }, { label: 'or', snippet: ' or ' },
-    { label: 'not', snippet: ' not ' }, { label: '(', snippet: '(' }, { label: ')', snippet: ')' },
+  { label: 'Logical', items: [ // i18n-ok: a group key, translated through GROUP_KEY
+    { label: 'and', snippet: ' and ' }, { label: 'or', snippet: ' or ' }, // i18n-ok: operators, code
+    { label: 'not', snippet: ' not ' }, { label: '(', snippet: '(' }, { label: ')', snippet: ')' }, // i18n-ok: an operator, code
   ]},
 ]
 
@@ -94,9 +137,12 @@ const SYSTEM_VALUE_ITEMS = SYSTEM_GROUP.items // USEREMAIL()/USERID()/ORGID()/OR
 export default function ExpressionBuilder({
   columns, functionsCatalog, value, onChange, onTest, renderTestResult,
   extraPaletteGroups = [], attributeExtras = [], opGroups = DEFAULT_OP_GROUPS,
-  layout = 'panels', textareaId, rows = 3, placeholder, testLabel = 'Test',
+  layout = 'panels', textareaId, rows = 3, placeholder, testLabel,
   defaultMode = 'advanced',
 }: ExpressionBuilderProps) {
+  const t = useT()
+  const { rtl } = useDirection()
+  const groupLabel = (label: string) => (GROUP_KEY[label] ? t(GROUP_KEY[label]) : label)
   const [openCats, setOpenCats] = useState<Record<string, boolean>>({})
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<unknown>(null)
@@ -128,7 +174,11 @@ export default function ExpressionBuilder({
     commitSimple(next)
   }
 
-  const allFuncCats = [...functionsCatalog, ...extraPaletteGroups, SYSTEM_GROUP]
+  const systemGroup: PaletteGroup = {
+    ...SYSTEM_GROUP,
+    items: SYSTEM_GROUP.items.map(it => ({ ...it, hint: SYSTEM_HINT_KEY[it.snippet] ? t(SYSTEM_HINT_KEY[it.snippet]) : it.hint })),
+  }
+  const allFuncCats = [...functionsCatalog, ...extraPaletteGroups, systemGroup]
   const isOpen = (label: string) => openCats[label] ?? true
   const toggleCat = (label: string) => setOpenCats(p => ({ ...p, [label]: !isOpen(label) }))
 
@@ -177,17 +227,25 @@ export default function ExpressionBuilder({
   const attributeButtons = (
     <>
       {columns.map(col => (
-        <button key={col.name} style={layout === 'flat' ? flatChip : chip} title={`${col.name} (${col.dtype})`}
+        // QA5 L1: the name and its type tag are separate, spaced elements (they
+        // ran together as "datedatetime"); the tag is a word in the reader's
+        // language and the raw dtype code stays on `data-dtype` and in the title.
+        <button key={col.name} style={layout === 'flat' ? flatChip : { ...chip, display: 'flex', alignItems: 'baseline', gap: 6 }}
+          title={t('pg.panelsB.expr.colTitle', { name: col.name, dtype: col.dtype })}
           onClick={() => insertCol(col.name)}>
-          <span>{col.name}</span>
-          {layout === 'panels' && <span style={{ color: 'var(--muted)', fontSize: 10.5, marginInlineStart: 5 }}>{col.dtype}</span>}
+          <bdi>{col.name}</bdi>
+          {layout === 'panels' && (
+            <span data-dtype={col.dtype} style={{ color: 'var(--muted)', fontSize: 10.5 }}>
+              {dtypeLabel(t, col.dtype)}
+            </span>
+          )}
         </button>
       ))}
       {attributeExtras.map(extra => (
         <button key={extra.name} style={layout === 'flat' ? flatChip : chip} title={`ƒx ${extra.name}`}
           onClick={() => insertCol(extra.name)}>
           <span style={{ color: 'var(--accent)', marginInlineEnd: 4 }}>{extra.icon ?? 'ƒx'}</span>
-          <span>{extra.name}</span>
+          <bdi>{extra.name}</bdi>
         </button>
       ))}
     </>
@@ -201,19 +259,19 @@ export default function ExpressionBuilder({
             background: 'none', border: 'none', cursor: 'pointer', padding: '3px 0',
             fontSize: 11, fontWeight: 700, color: cat.color ?? 'var(--muted)',
             textTransform: 'uppercase', letterSpacing: '.06em' }}>
-          <span style={{ fontSize: 10.5 }}>{isOpen(cat.label) ? '▼' : '▶'}</span>
-          {cat.label}
+          <span style={{ fontSize: 10.5 }}>{isOpen(cat.label) ? '▼' : rtl ? '◀' : '▶'}</span>
+          {groupLabel(cat.label)}
         </button>
       ) : (
         <div style={{ fontSize: 8.5, fontWeight: 700, color: cat.color ?? 'var(--muted)',
-          textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 3 }}>{cat.label}</div>
+          textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 3 }}>{groupLabel(cat.label)}</div>
       )}
       {(layout === 'flat' || isOpen(cat.label)) && (
         <div style={layout === 'flat' ? { display: 'flex', flexWrap: 'wrap', gap: 3 } : undefined}>
           {cat.items.map(fn => (
             <button key={fn.label} style={layout === 'flat' ? { ...flatChip, border: `1px solid ${cat.color ?? 'var(--border)'}55` } : chip}
               title={fn.hint} onClick={() => insert(fn.snippet, fn.back ?? 0)}>
-              {fn.label}
+              <Code>{fn.label}</Code>
             </button>
           ))}
         </div>
@@ -226,21 +284,21 @@ export default function ExpressionBuilder({
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
         {opGroups.flatMap(g => g.items).map(op => (
           <button key={op.label} onClick={() => insert(op.snippet, op.back ?? 0)}
-            style={{ ...flatChip, fontFamily: 'var(--mono)' }}>{op.label}</button>
+            style={{ ...flatChip, fontFamily: 'var(--mono)' }}><Code>{op.label}</Code></button>
         ))}
       </div>
     )
     : opGroups.map(grp => (
       <div key={grp.label} style={{ marginBottom: 10 }}>
         <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)',
-          textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 5 }}>{grp.label}</div>
+          textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 5 }}>{groupLabel(grp.label)}</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
           {grp.items.map(op => (
             <button key={op.label} onClick={() => insert(op.snippet, op.back ?? 0)} title={op.hint}
               style={{ padding: '4px 9px', border: '1px solid var(--border)', borderRadius: 5,
                 cursor: 'pointer', fontSize: 12, fontFamily: 'var(--mono)', fontWeight: 600,
                 background: 'var(--surface)', color: 'var(--text)' }}>
-              {op.label}
+              <Code>{op.label}</Code>
             </button>
           ))}
         </div>
@@ -257,7 +315,7 @@ export default function ExpressionBuilder({
     commitSimple({ ...simpleState, rows: nextRows })
   }
   const setFnKind = (i: number, fn: string) => {
-    const argSlots = FUNCTION_ARITY[fn] ?? ['arguments (comma-separated)']
+    const argSlots = FUNCTION_ARITY[fn] ?? [ANY_ARGS]
     const nextRows = simpleState.rows.map((r, j) =>
       j === i && r.type === 'function' ? { type: 'function' as const, fn, args: new Array(argSlots.length).fill('') } : r)
     commitSimple({ ...simpleState, rows: nextRows })
@@ -279,42 +337,44 @@ export default function ExpressionBuilder({
         <div key={i} style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center',
           background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, padding: 6, marginBottom: 5 }}>
           {i > 0 && (
-            <select aria-label="Join with" value={simpleState.joiner} onChange={e => setJoiner(e.target.value as SimpleJoiner)}
+            <select aria-label={t('pg.panelsB.expr.joinWith')} value={simpleState.joiner} onChange={e => setJoiner(e.target.value as SimpleJoiner)}
               style={{ ...rowInp, fontWeight: 700, width: 62 }}>
-              <option value="and">AND</option>
-              <option value="or">OR</option>
+              <option value="and">{t('pg.panelsB.expr.join.and')}</option>
+              <option value="or">{t('pg.panelsB.expr.join.or')}</option>
             </select>
           )}
           {row.type === 'condition' ? (
             <>
-              <select aria-label="Column" value={row.column} onChange={e => updateRow(i, { column: e.target.value })} style={rowInp}>
+              <select aria-label={t('pg.panelsB.expr.column')} value={row.column} onChange={e => updateRow(i, { column: e.target.value })} style={rowInp}>
                 {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
               </select>
-              <select aria-label="Operator" value={row.op} onChange={e => updateRow(i, { op: e.target.value as SimpleOperator })} style={rowInp}>
-                {SIMPLE_OPERATORS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              <select aria-label={t('pg.panelsB.expr.operator')} value={row.op} onChange={e => updateRow(i, { op: e.target.value as SimpleOperator })} style={rowInp}>
+                {SIMPLE_OPERATORS.map(o => (
+                  <option key={o.value} value={o.value}>{o.key ? t(o.key) : rtl ? ltrText(o.symbol ?? '') : o.symbol}</option>
+                ))}
               </select>
               {row.op !== 'isnull' && row.op !== 'notnull' && (
                 <>
-                  <select aria-label="Value type" value={row.valueKind}
+                  <select aria-label={t('pg.panelsB.expr.valueType')} value={row.valueKind}
                     onChange={e => updateRow(i, { valueKind: e.target.value as SimpleValueKind, value: '' })} style={rowInp}>
-                    <option value="literal">Value</option>
-                    <option value="column">Column</option>
-                    <option value="system">Parameter</option>
+                    <option value="literal">{t('pg.panelsB.expr.kind.literal')}</option>
+                    <option value="column">{t('pg.panelsB.expr.kind.column')}</option>
+                    <option value="system">{t('pg.panelsB.expr.kind.system')}</option>
                   </select>
                   {row.valueKind === 'literal' && (
-                    <input aria-label="Value" value={row.value} onChange={e => updateRow(i, { value: e.target.value })}
+                    <input aria-label={t('pg.panelsB.expr.value')} value={row.value} onChange={e => updateRow(i, { value: e.target.value })}
                       style={{ ...rowInp, flex: 1, minWidth: 80 }} />
                   )}
                   {row.valueKind === 'column' && (
-                    <select aria-label="Value" value={row.value} onChange={e => updateRow(i, { value: e.target.value })} style={rowInp}>
-                      <option value="">Select column…</option>
+                    <select aria-label={t('pg.panelsB.expr.value')} value={row.value} onChange={e => updateRow(i, { value: e.target.value })} style={rowInp}>
+                      <option value="">{t('pg.panelsB.expr.selectColumn')}</option>
                       {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
                     </select>
                   )}
                   {row.valueKind === 'system' && (
-                    <select aria-label="Value" value={row.value} onChange={e => updateRow(i, { value: e.target.value })} style={rowInp}>
-                      <option value="">Select parameter…</option>
-                      {SYSTEM_VALUE_ITEMS.map(it => <option key={it.snippet} value={it.snippet}>{it.hint}</option>)}
+                    <select aria-label={t('pg.panelsB.expr.value')} value={row.value} onChange={e => updateRow(i, { value: e.target.value })} style={rowInp}>
+                      <option value="">{t('pg.panelsB.expr.selectParameter')}</option>
+                      {SYSTEM_VALUE_ITEMS.map(it => <option key={it.snippet} value={it.snippet}>{t(SYSTEM_HINT_KEY[it.snippet])}</option>)}
                     </select>
                   )}
                 </>
@@ -322,27 +382,27 @@ export default function ExpressionBuilder({
             </>
           ) : (
             <>
-              <select aria-label="Function" value={row.fn} onChange={e => setFnKind(i, e.target.value)} style={rowInp}>
+              <select aria-label={t('pg.panelsB.expr.function')} value={row.fn} onChange={e => setFnKind(i, e.target.value)} style={rowInp}>
                 {Object.keys(FUNCTION_ARITY).map(fn => <option key={fn} value={fn}>{fn}</option>)}
               </select>
-              {(FUNCTION_ARITY[row.fn] ?? ['arguments (comma-separated)']).map((label, ai) => (
-                <input key={ai} aria-label={label} placeholder={label} value={row.args[ai] ?? ''}
+              {(FUNCTION_ARITY[row.fn] ?? [ANY_ARGS]).map((name, ai) => (
+                <input key={ai} aria-label={argLabel(t, name)} placeholder={argLabel(t, name)} value={row.args[ai] ?? ''} dir="ltr"
                   onChange={e => { const args = [...row.args]; args[ai] = e.target.value; updateFnArgs(i, args) }}
                   style={{ ...rowInp, width: 90 }} />
               ))}
             </>
           )}
-          <button aria-label="Remove row" onClick={() => removeRow(i)}
+          <button aria-label={t('pg.panelsB.expr.removeRow')} onClick={() => removeRow(i)}
             style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 14, marginInlineStart: 'auto' }}>×</button>
         </div>
       ))}
       <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-        <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }} onClick={addConditionRow}>+ Condition</button>
-        <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }} onClick={addFunctionRow}>+ Function</button>
+        <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }} onClick={addConditionRow}>{t('pg.panelsB.expr.addCondition')}</button>
+        <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }} onClick={addFunctionRow}>{t('pg.panelsB.expr.addFunction')}</button>
       </div>
       <div style={{ fontFamily: 'var(--mono)', fontSize: 11, padding: '6px 8px', background: 'var(--surface2)',
         border: '1px solid var(--border)', borderRadius: 5, color: 'var(--muted)', marginBottom: 6, minHeight: 16 }}>
-        {value || <span style={{ opacity: .6 }}>(empty expression)</span>}
+        {value ? <Code>{value}</Code> : <span style={{ opacity: .6 }}>{t('pg.panelsB.expr.empty')}</span>}
       </div>
     </div>
   )
@@ -352,8 +412,8 @@ export default function ExpressionBuilder({
     : (
       <div style={{ fontSize: 11, color: 'var(--muted)', padding: '10px 8px', background: 'var(--surface2)',
         border: '1px solid var(--border)', borderRadius: 6, marginBottom: 8 }}>
-        <div style={{ marginBottom: 8 }}>hand-written expression — switching to Simple starts over</div>
-        <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }} onClick={startOver}>Start over</button>
+        <div style={{ marginBottom: 8 }}>{t('pg.panelsB.expr.handWritten')}</div>
+        <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }} onClick={startOver}>{t('pg.panelsB.expr.startOver')}</button>
       </div>
     )
 
@@ -361,15 +421,15 @@ export default function ExpressionBuilder({
     <div>
       <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
         <button className={mode === 'simple' ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm'}
-          style={{ fontSize: 11 }} aria-pressed={mode === 'simple'} onClick={() => setMode('simple')}>Simple</button>
+          style={{ fontSize: 11 }} aria-pressed={mode === 'simple'} onClick={() => setMode('simple')}>{t('pg.panelsB.expr.simple')}</button>
         <button className={mode === 'advanced' ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm'}
-          style={{ fontSize: 11 }} aria-pressed={mode === 'advanced'} onClick={() => setMode('advanced')}>Advanced</button>
+          style={{ fontSize: 11 }} aria-pressed={mode === 'advanced'} onClick={() => setMode('advanced')}>{t('pg.panelsB.expr.advanced')}</button>
       </div>
 
       {mode === 'simple' && simplePane}
 
       {mode === 'advanced' && (
-      <textarea ref={taRef} id={textareaId} value={value} rows={rows}
+      <textarea ref={taRef} id={textareaId} value={value} rows={rows} dir="ltr"
         placeholder={placeholder}
         onChange={e => { onChange(e.target.value); setTestResult(null) }}
         style={{ width: '100%', fontFamily: 'var(--mono)', fontSize: layout === 'flat' ? 11.5 : 12,
@@ -381,17 +441,17 @@ export default function ExpressionBuilder({
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 8, minHeight: 220 }}>
           <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 7,
             padding: 10, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            <div style={panelHd}>Attributes</div>
+            <div style={panelHd}>{t('pg.panelsB.expr.attributes')}</div>
             <div style={{ flex: 1, overflowY: 'auto' }}>{attributeButtons}</div>
           </div>
           <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 7,
             padding: 10, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            <div style={panelHd}>Functions</div>
+            <div style={panelHd}>{t('pg.panelsB.expr.functions')}</div>
             <div style={{ flex: 1, overflowY: 'auto' }}>{functionGroups}</div>
           </div>
           <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 7,
             padding: 10, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            <div style={panelHd}>Operators</div>
+            <div style={panelHd}>{t('pg.panelsB.expr.operators')}</div>
             <div style={{ flex: 1, overflowY: 'auto' }}>{operatorButtons}</div>
           </div>
         </div>
@@ -405,8 +465,8 @@ export default function ExpressionBuilder({
 
       {onTest && (
         <div style={{ marginTop: 8 }}>
-          <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }} disabled={testing || !value.trim()} title={!value.trim() ? 'Write an expression first' : undefined} onClick={runTest}>
-            {testing ? 'Testing…' : testLabel}
+          <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }} disabled={testing || !value.trim()} title={!value.trim() ? t('pg.panelsB.expr.writeFirst') : undefined} onClick={runTest}>
+            {testing ? t('pg.panelsB.expr.testing') : (testLabel ?? t('pg.panelsB.expr.test'))}
           </button>
           {testResult != null && (
             <div style={{ marginTop: 6 }}>

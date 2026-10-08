@@ -3,6 +3,8 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import AdminColumnSecurityRules from './AdminColumnSecurityRules'
 import { ConfirmProvider } from '../../components/ui/ConfirmDialog'
 import type { Dataset } from '../../services/api'
+import { DirectionProvider } from '../../contexts/DirectionContext'
+import { ar } from '../../i18n'
 
 const { dataset } = vi.hoisted(() => ({
   dataset: {
@@ -115,5 +117,21 @@ describe('AdminColumnSecurityRules', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
 
     expect(await screen.findByText(/hides: salary/)).toBeInTheDocument()
+  })
+})
+
+describe('the column list in Arabic (QA5 L3)', () => {
+  it('names each column type in Arabic, never the raw code', async () => {
+    localStorage.setItem('datalytics.language', 'ar')
+    try {
+      render(<DirectionProvider><ConfirmProvider><AdminColumnSecurityRules /></ConfirmProvider></DirectionProvider>)
+      await waitFor(() => expect(screen.getByRole('button', { name: ar['admin.newRule'] })).not.toBeDisabled())
+      fireEvent.click(screen.getByRole('button', { name: ar['admin.newRule'] }))
+      const dialog = await screen.findByRole('dialog')
+      const salary = screen.getByRole('checkbox', { name: /salary/ }).closest('label')!
+      expect(salary.textContent).toContain('رقم')
+      expect(within(dialog).getAllByText('نص')).toHaveLength(2)
+      expect(dialog.textContent).not.toMatch(/\b(numeric|text)\b/)
+    } finally { localStorage.removeItem('datalytics.language') }
   })
 })

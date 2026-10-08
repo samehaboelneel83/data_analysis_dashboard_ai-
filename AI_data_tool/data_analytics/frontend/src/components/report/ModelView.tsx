@@ -2,8 +2,11 @@ import { useEffect, useState } from 'react'
 import type { Report } from '../../types/report'
 import type { Dataset, Relationship } from '../../services/api'
 import { relationshipsApi, type MappingCheck } from '../../services/api'
+import { useT } from '../../i18n'
+import { rich } from '../../i18n/pages/modelsMaps'
 
 export default function ModelView({ report, datasets }: { report: Report; datasets: Record<number, Dataset> }) {
+  const t = useT()
   const datasetIds = [report.dataset_id, ...(report.additional_dataset_ids ?? [])].filter((id): id is number => id != null)
   const [relationships, setRelationships] = useState<Relationship[]>([])
   const [showForm, setShowForm] = useState(false)
@@ -18,9 +21,7 @@ export default function ModelView({ report, datasets }: { report: Report; datase
   if (datasetIds.length < 2) {
     return (
       <div data-testid="model-view" style={{ padding: 16 }}>
-        <p style={{ color: 'var(--muted)', fontSize: 13 }}>
-          Add a second dataset to this report to define relationships between them.
-        </p>
+        <p style={{ color: 'var(--muted)', fontSize: 13 }}>{t('pg.modelsMaps.mv.needSecond')}</p>
       </div>
     )
   }
@@ -30,7 +31,7 @@ export default function ModelView({ report, datasets }: { report: Report; datase
       <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginBottom: 20 }}>
         {datasetIds.map(id => (
           <div key={id} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 10, minWidth: 160, background: 'var(--surface)' }}>
-            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>{datasets[id]?.name ?? `Dataset ${id}`}</div>
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>{datasets[id]?.name ?? t('pg.modelsMaps.mv.dataset', { id })}</div>
             {(datasets[id]?.columns ?? []).map(c => (
               <div key={c.name} style={{ fontSize: 11, color: 'var(--muted)' }}>{c.name}</div>
             ))}
@@ -46,7 +47,7 @@ export default function ModelView({ report, datasets }: { report: Report; datase
         ))}
       </div>
 
-      <button className="btn btn-primary btn-sm" onClick={() => setShowForm(true)}>+ Add relationship</button>
+      <button className="btn btn-primary btn-sm" onClick={() => setShowForm(true)}>{t('pg.modelsMaps.mv.add')}</button>
 
       {showForm && (
         <RelationshipForm
@@ -66,6 +67,7 @@ function RelationshipForm({ datasetIds, datasets, onCreated, onCancel }: {
   onCreated: (r: Relationship) => void
   onCancel: () => void
 }) {
+  const tr = useT()
   const [fromDs, setFromDs] = useState(datasetIds[0])
   const [fromCol, setFromCol] = useState('')
   const [toDs, setToDs] = useState(datasetIds[1] ?? datasetIds[0])
@@ -82,18 +84,18 @@ function RelationshipForm({ datasetIds, datasets, onCreated, onCancel }: {
     const t = setTimeout(() => {
       relationshipsApi.check({ from_dataset_id: fromDs, from_column: fromCol, to_dataset_id: toDs, to_column: toCol })
         .then(r => { if (live) setCheck(r) })
-        .catch(e => { if (live) setCheckErr(e?.response?.data?.detail ?? 'Could not check this mapping') })
+        .catch(e => { if (live) setCheckErr(e?.response?.data?.detail ?? tr('pg.modelsMaps.mv.checkFailed')) })
     }, 350)
     return () => { live = false; clearTimeout(t) }
   }, [fromDs, fromCol, toDs, toCol])
 
   const submit = async () => {
-    if (!fromCol || !toCol) { setError('Choose a column on both sides'); return }
+    if (!fromCol || !toCol) { setError(tr('pg.modelsMaps.mv.bothSides')); return }
     try {
       const rel = await relationshipsApi.create({ from_dataset_id: fromDs, from_column: fromCol, to_dataset_id: toDs, to_column: toCol })
       onCreated(rel)
     } catch (e: any) {
-      setError(e?.response?.data?.detail ?? 'Failed to create relationship')
+      setError(e?.response?.data?.detail ?? tr('pg.modelsMaps.mv.createFailed'))
     }
   }
 
@@ -104,7 +106,7 @@ function RelationshipForm({ datasetIds, datasets, onCreated, onCancel }: {
           {datasetIds.map(id => <option key={id} value={id}>{datasets[id]?.name}</option>)}
         </select>
         <select value={fromCol} onChange={e => setFromCol(e.target.value)}>
-          <option value="">Column…</option>
+          <option value="">{tr('pg.modelsMaps.mv.column')}</option>
           {(datasets[fromDs]?.columns ?? []).map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
         </select>
       </div>
@@ -113,7 +115,7 @@ function RelationshipForm({ datasetIds, datasets, onCreated, onCancel }: {
           {datasetIds.map(id => <option key={id} value={id}>{datasets[id]?.name}</option>)}
         </select>
         <select value={toCol} onChange={e => setToCol(e.target.value)}>
-          <option value="">Column…</option>
+          <option value="">{tr('pg.modelsMaps.mv.column')}</option>
           {(datasets[toDs]?.columns ?? []).map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
         </select>
       </div>
@@ -121,8 +123,8 @@ function RelationshipForm({ datasetIds, datasets, onCreated, onCancel }: {
       {check && <MappingMatch check={check} fromCol={fromCol} toCol={toCol} />}
       {error && <p style={{ color: 'var(--danger)', fontSize: 12 }}>{error}</p>}
       <div style={{ display: 'flex', gap: 8 }}>
-        <button className="btn btn-primary btn-sm" onClick={submit}>Create</button>
-        <button className="btn btn-ghost btn-sm" onClick={onCancel}>Cancel</button>
+        <button className="btn btn-primary btn-sm" onClick={submit}>{tr('pg.modelsMaps.mv.create')}</button>
+        <button className="btn btn-ghost btn-sm" onClick={onCancel}>{tr('pg.modelsMaps.cancel')}</button>
       </div>
     </div>
   )
@@ -130,24 +132,34 @@ function RelationshipForm({ datasetIds, datasets, onCreated, onCancel }: {
 
 /** What a mapping will do to a click, before it exists. */
 export function MappingMatch({ check, fromCol, toCol }: { check: MappingCheck; fromCol: string; toCol: string }) {
+  const t = useT()
   const good = check.pct_values === 100 && !check.type_mismatch
   return (
     <div data-testid="mapping-match" role="status" style={{ fontSize: 11, margin: '4px 0 8px', padding: '6px 8px', borderRadius: 6,
       border: `1px solid ${good ? 'var(--border)' : 'var(--warning, #d68910)'}` }}>
-      <div><b style={{ fontSize: 13 }}>{check.pct_values}%</b> of {fromCol}’s values exist in {toCol}
-        {' '}({check.matched_values.toLocaleString()} of {check.source_values.toLocaleString()}) — clicking one of those filters the other dataset; the rest filter it to nothing.</div>
+      <div>{rich(t, 'pg.modelsMaps.mv.match', {
+        pct: <b style={{ fontSize: 13 }}>{check.pct_values}%</b>, from: <bdi>{fromCol}</bdi>, to: <bdi>{toCol}</bdi>,
+        matched: check.matched_values.toLocaleString(), total: check.source_values.toLocaleString(),
+      })}</div>
       {check.unmatched_count > 0 && (
         <div style={{ color: 'var(--muted)' }} dir="auto">
-          Not found: {check.unmatched.slice(0, 5).map(u => u.value).join(', ')}{check.unmatched_count > 5 ? ` and ${check.unmatched_count - 5} more` : ''}
+          {rich(t, check.unmatched_count > 5 ? 'pg.modelsMaps.mv.notFoundMore' : 'pg.modelsMaps.mv.notFound', {
+            list: <bdi>{check.unmatched.slice(0, 5).map(u => u.value).join(', ')}</bdi>, n: (check.unmatched_count - 5).toLocaleString(),
+          })}
         </div>
       )}
       {check.near_matches.length > 0 && (
         <div style={{ color: 'var(--danger)' }} dir="auto">
-          ⚠ {check.near_matches.length} differ only in case or spacing ({check.near_matches.slice(0, 3).map(n => `“${n.source}” vs “${n.target}”`).join(', ')}) — a filter compares them exactly, so tidy one side (Prep → trim / change case) first.
+          {t('pg.modelsMaps.mv.near', {
+            n: check.near_matches.length,
+            examples: check.near_matches.slice(0, 3).map(n => t('pg.modelsMaps.mv.vs', { a: n.source, b: n.target })).join(', '),
+          })}
         </div>
       )}
-      {check.type_mismatch && <div style={{ color: 'var(--danger)' }}>⚠ {check.type_mismatch}: values that look equal will not match.</div>}
-      <div style={{ color: 'var(--muted)' }}>{toCol} has {check.target_values.toLocaleString()} values; {check.pct_target_covered}% of them appear in {fromCol}.</div>
+      {check.type_mismatch && <div style={{ color: 'var(--danger)' }}>{t('pg.modelsMaps.mv.typeMismatch', { what: check.type_mismatch })}</div>}
+      <div style={{ color: 'var(--muted)' }}>{rich(t, 'pg.modelsMaps.mv.coverage', {
+        to: <bdi>{toCol}</bdi>, n: check.target_values.toLocaleString(), pct: check.pct_target_covered, from: <bdi>{fromCol}</bdi>,
+      })}</div>
     </div>
   )
 }

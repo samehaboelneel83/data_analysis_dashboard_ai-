@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { useT } from '../../i18n'
+import { useT, type MessageKey } from '../../i18n'
+import { ACTIVITY_CODES } from '../../i18n/pages/dataPages'
 import { Activity as ActivityIcon } from 'lucide-react'
 import { monitoringApi } from '../../services/api'
 import type { ActivityRow } from '../../services/api'
@@ -7,6 +8,7 @@ import { useListFilter } from '../../components/ui/ListFilter'
 import EmptyState from '../../components/ui/EmptyState'
 import LoadError from '../../components/ui/LoadError'
 import LoadingState from '../../components/ui/LoadingState'
+import { formatDate } from '../../lib/dateFormat'
 
 /**
  * The org's general activity log -- logins, uploads, report edits, deletes.
@@ -31,8 +33,14 @@ export default function MonitoringActivity() {
 
   useEffect(() => { load() }, [])
 
+  // A known action code reads as words in the reader's language; English keeps
+  // the code itself (it is what admins search for and what the docs name). An
+  // unknown code — a newer server — is shown raw rather than guessed at.
+  const actionName = (code: string): string =>
+    ACTIVITY_CODES.has(code) ? t(`pg.dataPages.act.${code}` as MessageKey) : code
+
   const { filtered, input, noMatches } = useListFilter(
-    rows, r => [r.user_email, r.action, r.entity, r.detail], t('search.activity'))
+    rows, r => [r.user_email, r.action, actionName(r.action), r.entity, r.detail], t('search.activity'))
 
   return (
     <div style={{ maxWidth: 1200 }}>
@@ -47,7 +55,7 @@ export default function MonitoringActivity() {
       {loading && <LoadingState />}
 
       {!loading && loadError != null && (
-        <LoadError what="activity" error={loadError} onRetry={load} />
+        <LoadError what="activity" title={t('pg.dataPages.act.loadError')} error={loadError} onRetry={load} />
       )}
 
       {!loading && loadError == null && rows.length === 0 && (
@@ -69,11 +77,15 @@ export default function MonitoringActivity() {
           <tbody>
             {filtered.map(r => (
               <tr key={r.id}>
-                <td style={{ whiteSpace: 'nowrap' }}>{new Date(r.created_at).toLocaleString()}</td>
-                <td>{r.user_email ?? '—'}</td>
-                <td style={{ fontWeight: 600 }}>{r.action}</td>
+                <td style={{ whiteSpace: 'nowrap' }}>{formatDate(r.created_at)}</td>
+                <td>{r.user_email ? <bdi dir="ltr">{r.user_email}</bdi> : '—'}</td>
+                <td style={{ fontWeight: 600 }}>
+                  {actionName(r.action) === r.action
+                    ? <bdi dir="ltr">{r.action}</bdi>
+                    : <span title={r.action}>{actionName(r.action)}</span>}
+                </td>
                 <td>
-                  {r.entity ? `${r.entity}${r.entity_id != null ? ` #${r.entity_id}` : ''}` : '—'}
+                  {r.entity ? <bdi dir="ltr">{`${r.entity}${r.entity_id != null ? ` #${r.entity_id}` : ''}`}</bdi> : '—'}
                 </td>
                 <td style={{ color: 'var(--muted)' }}>{r.detail ?? '—'}</td>
               </tr>

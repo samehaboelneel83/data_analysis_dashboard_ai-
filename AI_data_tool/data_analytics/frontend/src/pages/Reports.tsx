@@ -188,7 +188,7 @@ export default function Reports() {
   }
   const removeFolder = async (f: FlatFolder) => {
     // Says what actually happens: a folder's contents move up a level.
-    if (!await confirm({ title: t('dsh.folderDeleteTitle', { name: f.name }), body: t('dsh.folderDeleteBody'), confirmLabel: t('folders.delete') })) return
+    if (!await confirm({ title: t('bc.dialogs.deleteFolder', { name: f.name }), body: t('dsh.folderDeleteBody'), confirmLabel: t('folders.delete') })) return
     try {
       await workspaceApi.delete(f.id)
       if (view === `f:${f.id}`) setView('all')
@@ -229,7 +229,7 @@ export default function Reports() {
     // A drop is the easiest gesture to make by accident, and a move can widen
     // who sees the dashboard, so it is confirmed and the confirmation says so.
     const ok = await confirm({
-      title: t('dsh.move.confirmTitle', { name: r.name, to: targetName ?? t('dsh.notInFolder') }),
+      title: t('bc.dialogs.moveDashboard', { name: r.name, to: targetName ?? t('dsh.notInFolder') }),
       body: t('dsh.move.note'), confirmLabel: t('dsh.move.go'), destructive: false,
     })
     endDrag()
@@ -258,7 +258,7 @@ export default function Reports() {
     } catch (e) { toast.error(detail(e, t('dsh.toast.renameFailed'))) }
   }
   const remove = async (r: ReportSummary) => {
-    if (!await confirm({ title: t('dsh.deleteTitle', { name: r.name }), body: t('dsh.deleteBody'), confirmLabel: t('dsh.delete') })) return
+    if (!await confirm({ title: t('bc.dialogs.deleteDashboard', { name: r.name }), body: t('dsh.deleteBody'), confirmLabel: t('dsh.delete') })) return
     try {
       await reportsApi.delete(r.id)
       setReports(prev => prev.filter(x => x.id !== r.id))

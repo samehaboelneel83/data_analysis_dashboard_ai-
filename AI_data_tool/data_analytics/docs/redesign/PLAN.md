@@ -108,11 +108,30 @@ Nothing is pushed.
 - [ ] 7-QA3 Fixes from the third QA report `/media/saeed/New Volume1/projects/redesign-captures/qa-3/QA_REPORT_3.md` (owner): Batch A builder behaviour (A1–A10); Batch B builder visuals (B1–B6); Batch C builder Arabic (ar.ts) with a check against hard-coded English in Builder components; Batch D round-2 leftovers (D1 breadcrumb at 125%, D2 dark tooltip label, D3 list ⋯ column, D4 one locale-driven date formatter, D5 Insights number isolation).
   - [x] Batch A
   - >> GATE A: stop, captures EN + AR before/after
-  - [ ] Batches B–D
+  - [x] Batches B–D
   - >> GATE B–D: stop, captures EN/AR × light/dark
-- [ ] 8-i18n The QA report's T1 strings on pages the redesign has not reached (Glossary, Organizations, Platform settings, Admin settings Basemap, Org units, Row/column security, API keys, Custom connectors, SSO, Maps, Models "random forest", Activity codes, Connections "Combine databases"). QA3 adds: Glossary "Business terms"; Admin Settings Basemap; Platform settings, including the endpoint list scrambled in RTL; SSO "Issuer URL", "Client ID" and the redirect line.
+- [x] 7-QA3-N3 Stop the save burst at its source (frontend only, owner-approved after GATE A).
+  - Evaluated: no backend change is needed.
+  - Today `persistWidgetLayouts` fires `updatePage` and one `updateWidget` per widget with `Promise.all`. Two effects call it just by opening a page in Edit: the automatic Executive packing of a page with no layout mode, and the compaction of a packed page whose widgets overlap.
+  - The fix:
+    - both become render-only (the `packedPreview` the canvas already draws);
+    - the first real layout edit (drag, resize, nudge, align, distribute, recipe) persists the drawn positions with `layout_mode`;
+    - every layout persist writes sequentially, not in parallel.
+  - Test: opening an old dashboard (no layout mode, overlapping widgets) in Edit makes zero `updateWidget` / `updatePage` calls, so zero versions.
+  - One real edit still writes one version per moved widget. Batching that into one version is the backend row.
+- [x] 7-QA4 Fixes from the fourth QA report `/media/saeed/New Volume1/projects/redesign-captures/qa-4/QA_REPORT_4.md`: Broken E1 (new display rule's raw server error), E2 (a dropped field filling a second role); Visual V1–V9; Arabic T1–T6. One GATE at the end; then straight on to 8-i18n, and QA5 over both.
+  - >> GATE QA4
+- [x] 8-i18n The QA report's T1 strings on pages the redesign has not reached (Glossary, Organizations, Platform settings, Admin settings Basemap, Org units, Row/column security, API keys, Custom connectors, SSO, Maps, Models "random forest", Activity codes, Connections "Combine databases"). QA3 adds: Glossary "Business terms"; Admin Settings Basemap; Platform settings, including the endpoint list scrambled in RTL; SSO "Issuer URL", "Client ID" and the redirect line. QA4 adds:
+  - Activity action codes (report.create, …);
+  - the admin pages' confirm dialogs (ApiKeys, AdminUsers, AdminRoles, AdminOrgUnits, AdminSso, AdminCustomConnectors, row/column security rules);
+  - the Connections toasts ("— connected", "Connection failed", "Test failed") and SourceReview toasts;
+  - the dashboards-list group label (`listParts.tsx` "{n} dashboard(s)");
+  - the Home dashboards delete title (`hm.dash.deleteTitle`, unisolated name);
+  - the report panels outside the Builder's own surface that are still English: Measures, Column formats, Prep pipeline and steps, Model settings and view, Map layers, Map pins, Graph layers, Hierarchy tree, Custom categories, Custom functions, Calc columns, Access dialog, Subscribe, Outlier details, Data view(s), Boundary set picker, Relative date editor, Geo match check, Suggestions pane.
+  - These are counted by the same scanner (`src/test/hardcodedStrings.ts`); add each file to `BUILDER_FILES` once translated.
+- [x] 7-QA5 Fixes from the fifth QA report `/media/saeed/New Volume1/projects/redesign-captures/qa-5/QA_REPORT_5.md`: F1–F4, R1–R4, L1–L9. One GATE; then push and a short QA6 on these items only.
 - [ ] Then: Upload, Connections, Lineage, the AI button
-- [ ] FINAL Full regression: all tests, build, capture every screen, compare against all designs, final summary, fix the flaky `Lineage.test.tsx` (and watch `geoRenderers.test.tsx`), and a clean-up list (test datasets 7 and 8, chat threads, the uncommitted init.sql edit). QA3 adds: dashboard "QA3-Builder" #16 (made 00:01; share link made and revoked 00:02–00:03; not made by the QA3 run, so the owner decides), and the cached insights QA3 may have saved on "Demo — Sales" and in the Builder AI panel.
+- [ ] FINAL Full regression: all tests, build, capture every screen, compare against all designs, final summary, fix the flaky `Lineage.test.tsx` (and watch `geoRenderers.test.tsx` and ReportBuilder's "report-level display rules" under load), and a clean-up list (test datasets 7 and 8, chat threads, the uncommitted init.sql edit). QA3 adds: dashboard "QA3-Builder" #16 (made 00:01; share link made and revoked 00:02–00:03; not made by the QA3 run, so the owner decides), and the cached insights QA3 may have saved on "Demo — Sales" and in the Builder AI panel. QA3 adds: stop the port-3002 Vite server ("before" captures) and remove its worktree (`git worktree remove` on the scratchpad `before` folder).
   - >> GATE F: stop, final report
 
 ## Backend follow-ups (found during the frontend steps)
@@ -158,7 +177,13 @@ Not part of the frontend steps (1–7); candidates for the handoff's section 7 p
 | 7-QA2 B3 | Clarifications name columns the dataset doesn't have ("sales by department"), so no column chips can be offered | The model must name real columns (AN1: ground the clarification on the dataset's columns). |
 | 7-QA2 B4 / 13 / 16 | Answers (and clarifications) come back in a language other than the UI's: an Arabic follow-up answered in English, the AI panel in English in the Arabic UI, an Arabic clarification in the English UI | The answer language must follow the UI language (AP3), sent with each question. |
 | 7-QA2 B6 | "average by" took about 3.5 minutes; an Arabic follow-up spun for over 2.5 minutes with no cancel | A server-side timeout and a Stop / cancel endpoint (AN2). |
-| 7-QA3 N3 (top priority) | Re-checked in QA3: still open at the root. QA2 only grouped the burst in the history ("39 changes"). Opening a page with no layout mode in Edit still runs the automatic packing, which sends one `updateWidget` per widget in parallel (`persistWidgetLayouts`), so the server snapshots a version per widget. `VERSIONS_KEPT = 50` (`routers/reports.py`), so one such open can push most of the older history out. | One version per user action: a batch layout endpoint (or coalescing saves seconds apart), an atomic revision increment, and retention that counts actions rather than rows. |
+| 7-QA3 N3 (client half fixed in 7-QA3-N3, confirmed by QA4: opening Demo — Sales Overview in Edit left revision 39 unchanged) | Re-checked in QA3: still open at the root. QA2 only grouped the burst in the history ("39 changes"). Opening a page with no layout mode in Edit still runs the automatic packing, which sends one `updateWidget` per widget in parallel (`persistWidgetLayouts`), so the server snapshots a version per widget. `VERSIONS_KEPT = 50` (`routers/reports.py`), so one such open can push most of the older history out. | One version per user action: a batch layout endpoint (or coalescing saves seconds apart), an atomic revision increment, and retention that counts actions rather than rows. |
+| 7-QA4 E1 | A display rule whose operator does not fit its column ("date > 0") fails on the server with Python's own message, `'>' not supported between instances of 'str' and 'int'` | The client now picks a fitting default, offers only operators that fit the column's type, and shows a short translated message (server text as detail). The server should validate rule types when a rule is saved and answer with a code, not a Python exception. |
+| 7-QA4 T5 (with T12) | "Is this difference real?" sends English prose | Shown as sent, `dir="auto"`: `summary`, `tests[].business.sentence`, error `detail`s. Composed by the client in Arabic from the numbers: `tests[].sentence`. Matched by pattern (breaks quietly if the wording changes): the three `caveats[]`. Should be codes: `tests[].question`, `tests[].effect_label`, `tests[].test`. Source: `app/services/analysis/inferential.py`. |
+| 8-i18n | The platform settings catalog (GET /platform/settings), the connector catalog's labels, boundary-pack descriptions/source/licence, the Activity `entity` text ("report #386") and model notes/warnings are English prose from the server | The client now translates the settings catalog BY KEY (12 categories, 75 labels, 23 help texts) and the 101 audit action codes, falling back to the server's English for anything unknown; a reworded server label keeps the old translation. The server should send stable codes/keys and parameters, not prose. |
+| 7-QA5 L6/L7 | Custom-connector field labels (from `services/connectors.py`), select option values (TLS modes, auth, method), connector type names and categories, and the boundary-pack manifest (names, descriptions, licences, source citations) are English from the server | The client translates known connector field keys and the 5 manifest packs by id (with the server's English as fallback; a pack description/licence only while the server's English is unchanged). The server should send keys or Arabic text. |
+| 7-QA5 (AI) | Every model endpoint timed out during QA5 (ConnectTimeout) | Not a frontend item: from this machine (now on 10.140.x) the three model servers 10.125.18.37:8014/8015 and 10.125.18.189:8000 do not answer even from inside the backend container -- a network/VPN reachability issue. Related to B6/AN2 (no timeout or Stop in Ask AI). |
+| 7-QA3-N3 (after the client fix) | Opening no longer writes. A layout edit still costs one version per widget it stores: the first edit of an old 4-widget page added 5 (the page + 4 widgets), its undo 5 more. | Still needed: a batch layout endpoint (one version per action), an atomic revision, and a way to clear `layout_mode` (PATCH drops a null, so undo writes `''`). The 50-version cap stays. |
 | 7-QA2 N3 | One automatic layout pass (Executive packing when a page is first edited) left 39 versions in half a second, with repeated revision numbers; the burst can also push older versions past the retention window | Every widget save snapshots a version and the revision is read-then-bumped without a lock. Needs one version per user action (a batch layout endpoint, or coalescing saves seconds apart) and an atomic revision increment. The history now shows such a burst as one entry. |
 | 7-QA2 T12 (seen again in QA3) | Insights narrative, finding titles and details are English in the Arabic UI | The insights endpoint takes no language; the engine writes English. Needs the UI language on the request (AP3). The pane's own words are translated. |
 | 7-QA B6 | Ask AI is slow (about 70 s for a simple answer, about 4 min before a clarification), with no timeout or cancel | Needs a server-side timeout and a cancel endpoint (AN2: stream progress + cancel). |
@@ -729,7 +754,7 @@ The QA3 report and screenshots were not on this machine. `qa-3/QA_REPORT_3.md` i
   - When the multi-set is in use, it holds every selected widget, including the one first selected by a plain click. That one used to be outlined but not counted.
   - The last widget added is the primary, so Properties follows the latest click.
   - Shift+click on a selected widget removes it, and one left becomes a single selection. Escape and the ✕ clear both.
-- **A2 / A3** A field drop finds its widget by the pointer against the drawn tile boxes (`widgetIdAtPoint`), not by `e.target.closest(...)`. An overlay drawn over a tile but outside it lost the drop.
+- **A2 / A3 — unconfirmed fix: first item in QA4, with a real pointer.** A field drop finds its widget by the pointer against the drawn tile boxes (`widgetIdAtPoint`), not by `e.target.closest(...)`. An overlay drawn over a tile but outside it lost the drop.
   - Not reproduced headless: Playwright drops worked in EN and AR before the change.
   - Fixed by the likely cause; pinned by a unit test (overlay on top, RTL) and a builder test (a drop event on the canvas itself fills the KPI's measure).
 - **A4** The quick toolbar's Filters sends the Assign data event with `tab: 'Filters'` and `open: false`. The panel opens Data › Filters, with no dialog.
@@ -770,3 +795,295 @@ The QA3 report and screenshots were not on this machine. `qa-3/QA_REPORT_3.md` i
 - N3 re-checked: still open at the root, top backend item.
 - 8-i18n and FINAL additions.
 - N7: re-test in QA4.
+
+### 7-QA3 Batches B–D (builder visuals, builder Arabic, round-2 leftovers), the commit that adds this entry
+
+**B — Builder visuals:**
+- **B1 — deviation from the brief's default.** The floating button is NOT hidden.
+  - In Edit it is the page copilot, the dashboard's editor (CLAUDE.md). The rail's AI panel (Ask, Insights, Suggestions) asks about data and edits nothing, so hiding the button would leave the editor reachable only by Ctrl+/.
+  - The brief's alternative is applied: the button floats inside the canvas column, measured from `[data-canvas-scroll]`. It never covers the right panel, the pinned Properties, the rail, or the fields panel on the start side, in either direction.
+  - v1 measured only the settings panel.
+- **B2** The col · row tag sits in the gutter under the widget (16px, so it reaches only the next widget's empty top padding).
+  - At the canvas bottom it goes above the widget instead.
+  - It shows during drag and resize, and gives a row range ("row 1–5").
+  - Both ranges are in `<bdi dir="ltr">`, so Arabic no longer reads "3-1".
+- **B3** The save state has a fixed 104px width, ellipsized, with the full text on hover. It sits in one unbreakable group with undo/redo, so they never move.
+  - The sensitivity select has a fixed 124px width and is no longer capped in a narrow header.
+  - In a narrow header (below 1180px) the report name gives way instead: 120px, ellipsized, full name on hover.
+  - The header stays one row (52px) at 1440, EN and AR.
+- **B4** The widget header controls:
+  - paint on the widget's own colour (`--dl-wbg`), solid under the icons;
+  - join the header row when the widget is selected or focused (no overlap; the fixed 84px reserve is gone);
+  - leave the title a minimum of `min(8em, 45%)`, while the status chips shrink and clip;
+  - while a widget is selected, drop the → ← markers (the Interactions tab says the same thing), and on a widget narrower than 260px also drop the delete icon (it stays in ⋮ and on the Delete key). A 3-column KPI now reads "Revenue o…", not "Reven…".
+- **B5** A canvas column narrower than the canvas minimum (600px) scales the page to fit (`fitScale`). Drag and resize use the same scale. Pinned at 1440, the column is 428px and nothing overflows.
+- **B6** Toasts sit at `--dl-toast-bottom`, raised to 44px while a status bar is on the page.
+- **Found in capture:**
+  - "Assign data" on a placeholder of a widget that was not selected opened no dialog: its settings panel mounted after the event.
+  - The builder now repeats the event once (`relayed`). A test fails without that.
+
+**C — Builder Arabic:**
+- The builder's strings are in `i18n/builder/{canvas,panes,rules,shell}.ts`, spread into `en.ts`/`ar.ts`. That is about 680 keys.
+- The settings panel keeps its English-as-key `PANEL_AR` (+28 entries). Role names are translated at display (`roleLabel`); `ROLE_SPECS` is untouched.
+- The English output is byte-identical: the tests query it.
+- All the items the QA listed are covered:
+  1. placeholders;
+  2. data roles, Custom page size, background image, and the Interactions section (the heading was clipped by letter-spacing on joined Arabic letters: no spacing in RTL now, and it wraps);
+  3. the Assign data dialog;
+  4. every rail pane's content (Review quotes are «» around a `<bdi>`);
+  5. the delete-page dialog: the name is isolated (FSI…PDI), and the shared confirm's default buttons are now translated;
+  6. the direction-aware empty page ("from the right panel" in RTL);
+  7. toasts as full templates, including Undone/Redone, settings-change and Convert-to labels;
+  8. "primary", "+ Add Dataset", and the "Click" key;
+  9. the ⋮ pop-ups (Why, What moves, Is this difference real; ؟ at the sentence end), with the aggregation in words in Arabic.
+- Also: the rules pane's sub-editors (ValueMap, Interval, DataBar).
+- **Guard:**
+  - `src/test/hardcodedStrings.ts` + `builderStrings.test.ts` parse the 33 Builder files with the TypeScript compiler and fail on English in:
+    - JSX text;
+    - seen attributes (title, aria-label, placeholder, alt, label);
+    - toast and confirm messages;
+    - UI-named object properties (`label:`, `title:`, `hint:` …).
+  - Message keys are not prose.
+  - `// i18n-ok` marks the rare non-prose literal (code samples, URL placeholders, "PDF").
+- **Left as is, recorded:**
+  - text from the server or the AI (`dir="auto"`, backend T12/AP3);
+  - column names, operator codes, widget-type ids;
+  - palette names ("Graphite"), which the guard does not reach (they are data);
+  - the StatusBar zoom buttons have no label (adding one changes the English accessible name).
+  - A copy's title "{name} (copy)" is now written in the author's language and saved as such.
+- **For a native-speaker check:** Review badges (ربط / إتاحة / خطأ / تحذير / معلومة), "Operator" → الشرط, "ms" → ملّي ثانية.
+- The translation was done by four parallel agents on disjoint files, then reviewed in Arabic captures.
+
+**D — Round-2 leftovers:**
+- **D1** The breadcrumb gives way by flex weights, not breakpoints, so it holds at a real or a CSS-scaled 125%:
+  - the middle link shrinks first, then the section word, both keeping a stub;
+  - the page name does not shrink (up to 60% of the trail).
+  - Before, at a CSS-scaled 125%, the Arabic name was 19px ("D."); now it is whole.
+- **D2** The dark tooltip's series name ("sum(revenue)") uses the text token.
+- **D3** The cause: a shareable row has three 30px buttons, 118px with padding, in a 112px column. The ⋯ was cut by 6px.
+  - The column is now 124px.
+  - Narrow (below 720) the hover shortcuts go (they are in ⋯), and the narrow width now actually applies (the base rule after it used to win).
+- **D4** `lib/dateFormat.ts` `formatDate(value, style)` is driven by the UI language:
+  - English: en-GB, 24h;
+  - Arabic: Arabic months with Latin digits, then the reader's digit choice.
+  - It replaces 23 browser-locale calls (Activity, Audit, Jobs, Deliveries, notifications, the dataset panels, comments, schedule…) and `formatTimeAgo`'s fallback.
+  - A test fails on any new `new Date(…).toLocaleString()` without a locale.
+- **D5** `lib/isolateNumbers.tsx` puts every number, %, money value and range in `<bdi dir="ltr">`, with `dir="auto"` on each insight paragraph: Insights hub, dataset Insights tab, builder Insights pane. Five test queries were re-pinned to whole-text matches.
+
+**Tests:**
+- New:
+  - B (8)
+  - CSS rules B3/B4/B6 (4)
+  - C: guard (33 files), canvasArabic (10), panes (4), rules (3), shellArabic (5)
+  - D: dateFormat (4), isolateNumbers (3), crumb (2), list (2)
+  - Assign-data relay (1)
+- Re-pinned:
+  - the coord-tag text now gives a row range;
+  - the shell delete test expects the isolated name;
+  - five Insights queries use whole-text matches.
+- `e2e/capture/redesign/cap_qa3_bd.mjs` captures before (:3002) and after (:3001) into `qa-3-fixes/{before,after}/B*,C*,D*`, in EN/AR × light/dark (C in Arabic only: the English is unchanged by design).
+- Full suite: 305 files / 3941 tests pass. Under full load "ReportBuilder report-level display rules > persists …" once timed out (4.6s); it passes 3/3 alone and passed in the run before. Added to FINAL's flaky-test watch list. Type-check and build pass.
+
+### 7-QA3-N3 Stop the save burst at its source — the commit that adds this entry
+
+**Change (frontend only):**
+- `shownLayouts(page)` (lib/dashboardLayout) is what the canvas draws:
+  - the automatic layout for a page with no layout mode;
+  - a packed page with overlapping widgets compacted;
+  - otherwise the stored layout.
+- The two effects that SAVED those on opening in Edit are gone (v1: one parallel `updateWidget` per widget, plus a page update).
+- `persistWidgetLayouts`, the path every user layout change takes (drag, resize, nudge, align, distribute, recipe):
+  - merges the shown positions into the change;
+  - on a page with no layout mode, sets `layout_mode: 'packed'` and the template in the same step;
+  - writes page-then-widgets one request at a time (was `Promise.all`).
+- Undo writes the pre-edit layouts back, one at a time, and puts a first edit's page back to "no layout mode" (`''`: PATCH drops a null, and the client reads `''` as no mode).
+
+**Version counts (real API):**
+- Measured by `e2e/journeys/n3_versions_journey.mjs` on a scratch dashboard with two pages: "Old" (no layout mode, 4 widgets) and "Overlap" (packed, 2 overlapping widgets).
+
+| Step | Before (HEAD, :3002) | After (:3001) |
+|---|---|---|
+| Open in Edit and visit both pages | 8 → 14 (+6), and both pages' stored layouts rewritten | 8 → 8 (+0), stored layouts unchanged |
+| Re-open the reset page | +5 | +0 (18 → 18) |
+| First real edit (drag one widget on "Old") | +1, but only because opening had already stored everything | +5 = 5 sequential PATCHes (page, then 4 widgets), 0 in flight together. Stored = shown: after a reload, the 3 other widgets are drawn where they were |
+| Undo of that edit | +1; layouts NOT restored (packed values); mode stays "packed"; 4 writes overlapping | +5; stored layouts restored exactly; mode back to "no layout mode"; 0 overlapping |
+
+**Tests:**
+- New:
+  - `shownLayouts` (3);
+  - builder: zero writes on opening, for no layout mode and for packed-with-overlaps (2);
+  - first edit page-first, sequential (max 1 in flight), every shown widget stored; undo restores layouts and mode (1);
+  - the real-API journey (12 checks).
+- Full suite: 305 files / 3947 tests pass. Type-check and build pass.
+- The journey's first in-flight counter waited for Playwright's `requestfinished`, which fires late. It now ends a request at its response; the request log confirms strict order.
+
+**Still open (backend row):** one version per stored widget (+5 for one drag on an old 4-widget page).
+
+### 7-QA4 Fixes from the fourth QA report — the commit that adds this entry
+
+QA4 confirmed N3 (opening Demo — Sales Overview in Edit left revision 39 unchanged) and almost all of 7-QA3. N3 is fixed on the client; the batch layout endpoint and the 50-version cap remain backend items. The report and screenshots are in `redesign-captures/qa-4/`.
+
+**Broken:**
+- **E0 (the owner's, after QA4)** The whole document scrolled on Home: the shell slid up over an empty strip.
+  - Cause: Home's visually hidden "Actions" table header (`.dl-sr-only`, `position: absolute`, added in 7a `3ed767f`) had no positioned ancestor, so it was placed against the document at its static position, y≈1557 in a 1080px window. The clipping shell and the page scroller do not clip an absolute element whose containing block is above them.
+  - Confirmed: `before-redesign` is clean (1080 on every page); `da76a61` and HEAD before the fix had Home at 1557, and a wheel over the sidebar scrolled the window 477px.
+  - Fix: `.dl-shell` and `.dl-shell__content` are `position: relative`, so every absolutely positioned element in the app is contained and clipped by the shell. The QA V5 rule (the shell clips) is kept.
+  - Check: `e2e/journeys/document_scroll_journey.mjs`, Home, Dashboards, Datasets and the Builder, EN and AR, dark, 1920×1080: `scrollHeight === innerHeight`, and after a long wheel over the content and over the sidebar the window has not scrolled and the shell's top is 0. 8/8 pass; the old build fails Home in both languages (1557, scrolled 477). Pinned by a CSS rule test.
+- **E1** A new display rule starts on what the server can evaluate:
+  - "> 0" on the first numeric column;
+  - with none, a colour per value (`value_map`), which fits a text column.
+  - Operators follow the column's type: no > ≥ < ≤ "between" on a text or date column, and switching to one drops the comparison to "=".
+  - A server rule error is a short translated message, with the server's text as an LTR detail (`<details>`).
+  - Server-side validation is in Backend follow-ups.
+- **E2** `lib/fieldPlacement.roleForField` is the one rule for drop and click:
+  - a column already on the widget, in any role, is never placed again;
+  - a text field never goes into Measure, Target or Size (Target was not recognised as numeric);
+  - with no fitting role, the "became a new chart" path runs.
+  - A builder test had relied on the old behaviour (its fixture served the saved config from the second load on, so "sales" was already on the widget when clicked, and the old planner put it into Dimension); the fixture now serves the empty config until the first save.
+
+**Visual:**
+- **V1** `lib/contrastTokens`: a widget with a plain-colour custom background sets `--text`, `--muted`, `--border`, `--surface2` and `--dl-table-rule` on itself from the background's luminance. Title, header icons, axis ticks, data labels, legend and grid all read those, in both themes.
+- **V2** Below 1020px of header, what gives first:
+  - the dataset chip shows only its icon (the name stays its accessible name and tooltip), after the source chip, which was already hidden there;
+  - the title part keeps 360px, and the actions wrap to their own row instead of sliding over the chip.
+  - At 900px with "Opened reports (5)": no overlaps, EN and AR (3 header rows).
+- **V3** Panel headers (`.dl-bd-ph`, every right-rail panel) are sticky. Before, the Properties header scrolled 344px away and left the collapse "<" over the fields; now it stays.
+- **V4** The col · row tag measures itself and the canvas after drawing: one that would cross the canvas's bottom or end edge goes above the widget, or into its corner.
+- **V5** The per-widget quick toolbars are hidden during a multi-selection; the group bar acts on all of them.
+- **V6** The real cause: a bar picked in View kept its cross-filter ("1 filter" on every widget) and its highlight in Edit, where a click no longer filters (QA3 A6), so nothing could clear it. Entering Edit clears the cross-filters (`ClearSelectionOnEdit`, inside the provider) and the widget selection. The test fails without it.
+- **V7** In the Performance pane the number is mono and "ملّي ثانية" is in the text font. The coord tag's words are in the text font, only its ranges mono. Arabic is never letter-spaced: one `:root[dir="rtl"]` rule overrides the inline `letterSpacing` of the uppercase headings.
+- **V8** Every crumb has its full text as a tooltip. QA3's 60% cap on the page name is gone (it cut "لوحات المعلو…"); so is a floor, since a floor wider than a short name ("Datasets") overflowed the trail and cut the crumb in front. At 100% and at 1152px nothing is cut, EN and AR. Under a CSS-scaled 125% (the QA's method; the breakpoints do not fire) the page name loses ~1px, with its tooltip.
+- **V9** (agent) The Ask AI answer chart used the Builder's renderers without their measured width, so the axis planner assumed 560px and kept four region names upright. It is now wrapped in the Builder's `MeasuredChart`: tilt, thin, then clip, mirrored in RTL.
+
+**Arabic:**
+- **T1** Role names go through `roleLabel` in Review and in the drop toast and undo label.
+- **T2** `lib/chartName` gives the gallery names (Arabic) / gallery labels (English) in the Performance pane and Convert to.
+- **T3** `CollapsibleSide`'s resize/collapse/expand labels are full templates. The canvas filter bar and floating filter window are translated, and all three are now in the guard.
+- **T4** `describeConfigChange`:
+  - lists become counts with plurals ("3 rules" / "3 قواعد"), objects "set", nothing "none" / "لا شيء";
+  - in Arabic, settings are named by their panel labels ("قواعد العرض").
+- **T5** (agent) The "Is this difference real?" body: frontend-owned labels, the composed verdicts, the effect words and the three footnotes are translated; the server's sentences stay as sent (`dir="auto"`). Also: the subtitle's aggregation in words, and isolated numbers never wrap ("p =) 0.8487)").
+- **T6** (agent) The dataset delete (Datasets, Connections) and the Dashboards delete/move/folder titles are full templates with the name isolated (FSI…PDI); the row menu label too.
+
+**Out of scope, recorded:**
+- Activity action codes and the other English report panels → 8-i18n list.
+- Insight sentences → T12.
+- Dates on Jobs, Deliveries, notifications and Schedule → re-check in QA5 if data exists.
+- "What moves revenue" → QA5.
+- A2/A3 → the owner's real-mouse check.
+
+**Tests:**
+- New:
+  - fieldPlacement (5); E1 (4); contrastTokens (4) + widget (1); V4 (1); V6 (1); V5 assertion; undo T4 (2); chartName (1); QA4 CSS rules (3);
+  - (agents) difference Arabic (3), delete dialogs (4), answer chart axis (4).
+- Re-pinned:
+  - the field-click fixture (above);
+  - the colour-map test (a new rule now starts on the first numeric column);
+  - the crumb rule test.
+- `e2e/capture/redesign/cap_qa4.mjs`: before (:3002 at `da76a61`) and after (:3001) into `qa-4-fixes/{before,after}`, EN/AR × light/dark. V9 has no capture (it needs a live LLM answer); its unit test covers it.
+- Full suite: 311 files / 3984 tests pass (run with 4 workers), after E0. With the default worker count, while the capture servers were busy, three slow tests timed out (the map click 24s, geo time-play 11s, report-level display rules 7.8s); each passes alone. Type-check and build pass.
+- Seen while capturing (not in the QA report): on the Datasets page, the first click on a non-selected row's ⋯ sometimes opens and at once closes its menu in Playwright; a second click opens it. The QA opened it normally with a real browser. Watch in QA5.
+
+### 8-i18n Pages outside the Builder in Arabic — the commit that adds this entry
+
+**Approach (as in the Builder):**
+- One message module per area in `src/i18n/pages/` (`adminSecurity`, `adminPlatform`, `dataPages`, `panelsA`, `panelsB`, `modelsMaps`), spread into `en.ts`/`ar.ts`: about 1,900 keys.
+- Full templates with placeholders and ICU plurals (Arabic dual and few/many forms).
+- Names isolated: `<bdi>` in JSX, «\u2068…\u2069» in plain strings.
+- Codes and values sent to the server unchanged.
+- English byte-identical: the 20 English captures are pixel-identical before/after (SSO differs only by the server port in its callback URL).
+- Six agents worked in parallel on disjoint files, plus one for the leftovers, then the result was reviewed in Arabic captures.
+
+**Covered** (each file in its area's guard, `src/test/strings.<area>.test.ts`):
+- **Admin security:** row and column security rules, connection rules, roles, users (incl. bulk import), export policy.
+- **Admin and platform:**
+  - Organizations, Org units, SSO, API keys, Custom connectors, Maps, Admin settings with Basemap.
+  - Platform settings: the server's catalog is translated by key, with the server's English as fallback. Non-secret string values (the LLM_ENDPOINTS JSON, URLs, ids) are LTR-isolated, which fixes the endpoint list scrambled in RTL.
+- **Data pages:**
+  - Connections (toasts, the connection dialog, Combine databases), Source review, Glossary ("Business terms").
+  - Activity: the 101 audit action codes, in words in Arabic. English keeps the raw code, which a test pins; an unknown code shows raw, LTR.
+  - Jobs, Deliveries, the dashboards-list group label, and the Home dashboards delete confirm (name isolated).
+- **Report panels:**
+  - Measures, Column formats, Custom functions, Calc columns (with the function catalog's 10 categories and 84 hints), Custom categories, Hierarchy tree, Access dialog and explainer, Subscribe, Suggestions, Pack terms.
+  - The prep pipeline (panel, steps, step editor, join note), Outlier details, Data views, Relative dates.
+  - Models tab ("random forest" → الغابة العشوائية), model settings and view, map/pin/graph layers, boundary sets, geo match.
+- **Shared:** `LoadError`'s default heading, body and buttons. In Arabic the heading is generic, because callers pass `what` in English.
+
+**Left in English, and why:**
+- Server prose: settings help without a key, connector catalog labels, model notes and warnings, the Activity entity text, error `detail`s. These are in the backend row.
+- Formulas, function signatures, snippets, SQL and expression samples, product and protocol names (OpenID Connect, SAML 2.0, PostgreSQL), and metric abbreviations (AUC, R², RMSE). These are marked `// i18n-ok`.
+- Data values a step writes (Training/Validation/Test, the catch-all "Other"), and saved defaults the user can edit ("Joined dataset", "Boundaries").
+- Not on this step's list, still English: DatasetDetail's own text, CommandPalette, WorkspaceTree, QueryBuilderDialog/QueryCanvas, ExpressionBuilder, analysisResults, the dataset side panels (Alerts, Aggregates, Data quality, Column meaning), FolderShare/DatasetShare dialogs, Upload, SharedReport, `lib/friendlyError`. The scanner counts them. They are the next i18n list, under "Then: Upload, Connections, Lineage, the AI button".
+
+**Export-policy tooltip:** its English "Everything is allowed: untick "All" to choose" showed when every export is OFF. Fixed after the gate (owner's call): "All exports are off: untick "All off" to choose", the same meaning as the Arabic, pinned by a test.
+
+**Tests:**
+- New: six area guards (59 files); Arabic render tests per area (adminSecurity 6, adminPlatform 6, dataPages 5, panelsA 8 + 3, panelsB 9, modelsMaps 7).
+- Re-pinned: the palette-wiring allow-list (the model card's arrow now mirrors in RTL).
+- Full suite: 323 files / 4091 tests pass (4 workers). Type-check and build pass.
+- Captures: `e2e/capture/redesign/cap_8i18n.mjs`, 20 pages × EN light / AR light / AR dark, before (:3002 at `4bd4025`) and after, in `redesign-captures/8-i18n/{before,after}/`.
+
+### 7-QA5 Fixes from the fifth QA report — the commit that adds this entry
+
+QA5 confirmed E0, E1, E2, V2–V6 and V8 from 7-QA4, and the 8-i18n pages (mostly Arabic). The report is in `redesign-captures/qa-5/QA_REPORT_5.md` (copied from `qa5-report.md`), with its screenshots.
+
+**Broken / visual:**
+- **F1** A widget with a light custom background now also sets `--surface` (white under dark text, dark under light text), so every chart tooltip, which draws with `--surface`/`--text`, has one consistent pair in both themes. With `data-contrast`, legend labels take the widget's text colour and swatches get a thin outline (Recharts legends, every chart type).
+- **F2** The Σ (quick calculations) and ⌖ (classify) pop-ups are a shared `components/ui/AnchoredMenu`:
+  - portalled to `<body>`, fixed under the button;
+  - flipped above when there is no room, and shifted inside the window;
+  - aligned to the right edge in RTL.
+  - The quick-calc items are translated by key.
+- **F3** The outlier rows table uses the data views' `formatCell` ("-6208.69"), each number LTR-isolated.
+- **F4** (agent) Every admin credential field that is not the user's own login has `autoComplete="off"` / `"new-password"` and a distinct `name`/`id`:
+  - custom connectors (`connector-<field>`), connections (`conn-<field>`);
+  - SSO (`sso-client-id`/`-secret`), API keys;
+  - basemap, the new-user and new-org forms.
+  - Pinned by a test that no field is named username/password/email.
+
+**Right-to-left:**
+- **R1** (agent) Every operator and code-like token in the expression builder is LTR-isolated: operator buttons incl. `(` `)`, function chips, the Simple preview; the Advanced textarea and argument inputs are `dir="ltr"`, and `<option>` symbols use LRI…PDI in RTL. Also the prep filter summary and its input.
+- **R2**
+  - Arabic table cells are `unicode-bidi: plaintext`: a cell with no letters reads LTR, so the minus or currency stays in place.
+  - Recharts tooltip values are LTR-isolated.
+  - The outlier summary's numbers are isolated.
+  - The field-format samples ("$1,234") are LRI…PDI-isolated in the Arabic option text.
+- **R3** The 404 page's path is LRI…PDI-isolated in Arabic ("/activity").
+- **R4** Map tooltips (choropleth, pie layer) take the place name's direction (`dir="auto"`) with the value isolated.
+
+**Arabic:**
+- **L1/L2** (agent) The expression builder (headings, Simple/Advanced, groups, system hints, type tags as separate translated words) and the step editor ("+ Condition" → «إضافة شرط», "is blank", value types, screen-reader labels) are translated; ExpressionBuilder is in the guard.
+- **L3** (agent) `lib/dtypeName` (`dtypeName`, `dtypeShort`) for 11 type codes, used everywhere a type is shown (column security, column formats, custom categories, page properties, source review, dataset badges, the settings panel). **English now shows words** ("Number", "Text") instead of codes; no test pinned the codes. Badges keep NUM/DATE/TXT/BOOL, but integer/float/geometry badges became INT/DEC/GEO.
+- **L4** The field Properties aggregation list uses the panel's own Arabic names.
+- **L5** Report-filter operators are words in both languages ("equals (=)" / «يساوي (=)»), in the select and the saved-filter chips; codes are saved unchanged. One builder test re-pinned.
+- **L6/L7** (agent) Connector field labels by key; starter packs by id; server prose `dir="auto"`, isolated, on its own lines; the SSO product list isolated LTR. Server-owned text is in the backend row.
+- **L8 (verified, was broken)** The arrow-nudge and drag/resize undo labels were English ("Move "KPI 1""). Now templates: «نقل «KPI 1»».
+- **L9 (verified, already fixed by 7-QA4)** Checked live in Arabic on the build QA5 tested:
+  - panel labels «تغيير حجم «الإعدادات»» / «طيّ …»;
+  - Review roles («المقياس»);
+  - a rule-change undo reads «من قاعدة واحدة إلى لا شيء», with no JSON.
+
+**Seen in QA5, not in this step's list (for QA6 / later):**
+- E2's automatic chart title "Count by product" is English.
+- A cross-filter click in View shows an empty tooltip box (V6).
+- The T5 headline and gap sentences are server text (T12); the Welch line is garbled in RTL.
+- The red Delete button has default focus in delete dialogs (Enter deletes).
+- The Admin Audit trail shows action codes and "1d".
+- Hierarchy rows' screen-reader labels ("Move Region up") and the dataset sensitivity tooltip are English.
+- E1: a date column offers only equality conditions (no before/after).
+- The expression builder's Arabic placeholder mixed with a code sample reads oddly in its LTR box.
+- Datasets: a long blank area beside the preview.
+- Word-check notes (Part 4): «تلقائي عند الخصوصية», «إيقاف الكل», «م.ب» -- for the native-speaker pass. (Fixed here: the share dialog's "7 يومًا" is a proper plural now, «7 أيام», pinned by a test.)
+
+**Out of scope, recorded:**
+- AI timeouts (backend row above).
+- Dates on Jobs/Deliveries/notifications/Schedule, still with no data (date-format guard; check in FINAL).
+- The next i18n step's pages.
+- QA5 created and deleted dataflow #1, QA5-flow; dataflows are added to the allowed QA items for future rounds.
+**Tests:**
+- New: AnchoredMenu (3), contrast tokens (1), outliers F3/R2 (1), NotFound (2), CSS rules (R2), Arabic days plural (4).
+- (agents) ExpressionBuilder Arabic (6), dtypeName and column security (2 files), admin forms autocomplete and labels (8).
+- Re-pinned: the report-filter chip ("region equals (=) North").
+- Full suite: 329 files / 4156 tests pass (4 workers). Type-check and build pass.
+- Captures: `e2e/capture/redesign/cap_qa5.mjs` (41 scenes per side), before (:3002 at `c235968`) and after, in `redesign-captures/qa-5-fixes/{before,after}/`, plus the L8/L9 check (`L9-review-ar-light.png`).
+
