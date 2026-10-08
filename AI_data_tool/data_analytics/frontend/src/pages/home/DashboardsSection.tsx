@@ -86,7 +86,7 @@ export default function DashboardsSection({ reports, isAdmin, loading, onRename,
     } catch (e) { toast.error(errText(e, t('hm.dash.renameFailed'))) }
   }
   const remove = async (r: Report) => {
-    if (!await confirm({ title: t('hm.dash.deleteTitle', { name: r.name }), body: t('hm.dash.deleteBody'),
+    if (!await confirm({ title: t('pg.dataPages.home.deleteTitle', { name: r.name }), body: t('hm.dash.deleteBody'),
       confirmLabel: t('hm.dash.delete') })) return
     try {
       await reportsApi.delete(r.id)

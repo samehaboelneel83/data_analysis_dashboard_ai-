@@ -4,6 +4,7 @@ import { dataPreviewApi } from '../../services/api'
 import DataViewsBar from './DataViewsBar'
 import { AuthContext } from '../../contexts/AuthContext'
 import PrepStepsPanel from './PrepStepsPanel'
+import { useT } from '../../i18n'
 
 const PAGE_SIZE = 100
 
@@ -13,6 +14,7 @@ const PAGE_SIZE = 100
  * data-preview endpoint always supported and this grid never used.
  */
 export default function DataView({ datasetId, mode }: { datasetId: number; mode?: 'import' | 'directquery' }) {
+  const t = useT()
   const arrows = navArrows(useDirection().rtl)
   // Only an admin may choose the data view applied to every new dataset. The
   // bar hides that control without this, so passing it is what makes the
@@ -47,7 +49,7 @@ export default function DataView({ datasetId, mode }: { datasetId: number; mode?
 
   const submitSearch = () => { setOffset(0); setSearch(searchDraft.trim()) }
 
-  if (!data) return <p style={{ color: 'var(--muted)', padding: 16 }}>Loading…</p>
+  if (!data) return <p style={{ color: 'var(--muted)', padding: 16 }}>{t('common.loading')}</p>
 
   const page = Math.floor(offset / PAGE_SIZE) + 1
   const pages = Math.max(1, Math.ceil(data.total / PAGE_SIZE))
@@ -60,13 +62,13 @@ export default function DataView({ datasetId, mode }: { datasetId: number; mode?
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px 0' }}>
           <input value={searchDraft} onChange={e => setSearchDraft(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') submitSearch() }}
-            placeholder="Search values…" aria-label="Search rows"
+            placeholder={t('pg.panelsB.dv.searchPh')} aria-label={t('pg.panelsB.dv.searchRows')}
             style={{ fontSize: 12, width: 200 }} />
-          <button className="btn" style={{ fontSize: 11 }} onClick={submitSearch}>Search</button>
+          <button className="btn" style={{ fontSize: 11 }} onClick={submitSearch}>{t('pg.panelsB.dv.search')}</button>
           {search && (
             <button className="btn" style={{ fontSize: 11 }}
               onClick={() => { setSearchDraft(''); setSearch(''); setOffset(0) }}>
-              ✕ Clear
+              {t('pg.panelsB.dv.clear')}
             </button>
           )}
         </div>
@@ -78,7 +80,7 @@ export default function DataView({ datasetId, mode }: { datasetId: number; mode?
                   <th key={c} onClick={() => toggleSort(c)} role="columnheader"
                     aria-sort={sortBy === c ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
                     style={{ cursor: 'pointer', whiteSpace: 'nowrap', userSelect: 'none' }}>
-                    {c}{sortBy === c ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''}
+                    <bdi>{c}</bdi>{sortBy === c ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''}
                   </th>
                 ))}
               </tr>
@@ -92,12 +94,12 @@ export default function DataView({ datasetId, mode }: { datasetId: number; mode?
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 12px', borderTop: '1px solid var(--border)' }}>
           <button className="btn" style={{ fontSize: 11 }} disabled={offset === 0}
-            onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>{arrows.backChevron} Prev</button>
+            onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>{arrows.backChevron} {t('pg.panelsB.dv.prev')}</button>
           <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-            Page {page} of {pages} · {data.total.toLocaleString()} rows{search ? ' (filtered)' : ''}
+            {t(search ? 'pg.panelsB.dv.pageFiltered' : 'pg.panelsB.dv.page', { page, pages, total: data.total.toLocaleString() })}
           </span>
           <button className="btn" style={{ fontSize: 11 }} disabled={offset + PAGE_SIZE >= data.total}
-            onClick={() => setOffset(offset + PAGE_SIZE)}>Next {arrows.forwardChevron}</button>
+            onClick={() => setOffset(offset + PAGE_SIZE)}>{t('pg.panelsB.dv.next')} {arrows.forwardChevron}</button>
         </div>
       </div>
       {/* Prep steps shape the frame this grid shows; DirectQuery data is shaped in

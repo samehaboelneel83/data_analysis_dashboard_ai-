@@ -1,4 +1,6 @@
 import type { PrepStep } from '../../../services/api'
+import { en } from '../../../i18n/pages/panelsB'
+import type { MessageKey, TranslateFn } from '../../../i18n'
 
 // `disabled` is a first-class, PERSISTED step field (engine-recognised in
 // prep.py): a paused step round-trips through save/GET and is skipped at
@@ -6,45 +8,33 @@ import type { PrepStep } from '../../../services/api'
 // `_key` is the only client-only field, used purely as a React list key.
 export type EditStep = PrepStep & { disabled?: boolean; _key: number }
 
-export const FILTER_FUNC_CATS = [
-  {
-    label: 'Conditional', color: '#c084fc',
-    items: [
-      { label: 'isnull(col)',         snippet: 'isnull()',        back: 1, hint: 'True if value is missing / null' },
-      { label: 'CONTAINS(col,"t")',   snippet: 'CONTAINS(, "")',  back: 4, hint: 'True if the text appears' },
-      { label: 'STARTSWITH(col,"t")', snippet: 'STARTSWITH(, "")', back: 4, hint: 'True if it begins with the text' },
-      { label: 'ENDSWITH(col,"t")',   snippet: 'ENDSWITH(, "")',  back: 4, hint: 'True if it ends with the text' },
-    ],
-  },
-]
+/** The filter step's function palette. Function names are code; the group
+ *  name and the hints are what a reader sees, so they come from the catalog. */
+export function filterFuncCats(t: TranslateFn) {
+  return [
+    {
+      label: t('pg.panelsB.fn.conditional'), color: '#c084fc',
+      items: [
+        { label: 'isnull(col)',         snippet: 'isnull()',        back: 1, hint: t('pg.panelsB.fn.isnull') }, // i18n-ok
+        { label: 'CONTAINS(col,"t")',   snippet: 'CONTAINS(, "")',  back: 4, hint: t('pg.panelsB.fn.contains') }, // i18n-ok
+        { label: 'STARTSWITH(col,"t")', snippet: 'STARTSWITH(, "")', back: 4, hint: t('pg.panelsB.fn.startswith') }, // i18n-ok
+        { label: 'ENDSWITH(col,"t")',   snippet: 'ENDSWITH(, "")',  back: 4, hint: t('pg.panelsB.fn.endswith') }, // i18n-ok
+      ],
+    },
+  ]
+}
 
-export const KIND_LABELS: Record<string, string> = {
-  filter_rows: 'Filter rows',
-  sort: 'Sort',
-  dedupe: 'Remove duplicates',
-  drop_duplicates: 'Remove duplicates (legacy)',
-  aggregate: 'Aggregate',
-  rename: 'Rename column',
-  retype: 'Change type',
-  split: 'Split column',
-  trim: 'Trim whitespace',
-  case: 'Change case',
-  replace: 'Find & replace',
-  remove_columns: 'Remove columns',
-  drop_nulls: 'Drop empty rows',
-  fill_nulls: 'Fill empty values',
-  join: 'Join dataset',
-  partition: 'Partition (train / validation / test)',
-  append: 'Append rows (another dataset)',
-  outliers: 'Outliers',
-  normalize: 'Normalize',
-  encode: 'Encode categories',
-  date_parts: 'Date parts',
-  feature_select: 'Select features',
-  pca: 'PCA components',
-  balance: 'Balance classes',
-  // Written by the data grid's cell editor, never added from the menu here.
-  edit_cells: 'Edit cells',
+/** A step kind's display name; an unknown kind shows as its id. */
+export function kindLabel(t: TranslateFn, kind: string): string {
+  const key = `pg.panelsB.kind.${kind}`
+  return key in en ? t(key as MessageKey) : kind
+}
+
+/** The display label of an option whose value is a code (`opt.<group>.<v>`);
+ *  a value with no label shows as itself. English labels are the codes. */
+export function optLabel(t: TranslateFn, group: string, value: unknown): string {
+  const key = `pg.panelsB.opt.${group}.${String(value)}`
+  return key in en ? t(key as MessageKey) : String(value)
 }
 
 export const KIND_ICONS: Record<string, string> = {

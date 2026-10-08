@@ -1,3 +1,5 @@
+import { formatDate } from '../../lib/dateFormat'
+import { contrastTokens } from '../../lib/contrastTokens'
 import { lazy, memo, Suspense, useContext, useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import type { PartialPeriod, RelativeNote } from '../../lib/relativeDates'
 import { partialPeriodEnd } from '../../lib/relativeDates'
@@ -8,7 +10,8 @@ import { createPortal } from 'react-dom'
 import { Copy, Trash2, MoreVertical, Link as LinkIcon } from 'lucide-react'
 import { widgetDataApi } from '../../services/api'
 import { isCanceledRequest } from '../../lib/canceledRequest'
-import { useT, type MessageKey } from '../../i18n'
+import { useT, type MessageKey, type TranslateFn } from '../../i18n'
+import { usePanelLabel } from './panelLabels'
 import { useDirection } from '../../contexts/DirectionContext'
 import ConvertToMenu from './ConvertToMenu'
 import { pickChartSvg, svgToPng } from '../../lib/widgetImage'
@@ -203,16 +206,40 @@ const GRAIN_WORD: Record<string, string> = {
   hour: 'hour', day: 'day', week: 'week', month: 'month', quarter: 'quarter', year: 'year',
 }
 
-export function binningLabel(b: Binning | undefined | null): string {
-  if (!b?.grouped) return ''
-  if (b.kind === 'date' && b.grain) return `by ${GRAIN_WORD[b.grain] ?? b.grain}`
-  if (b.kind === 'number' && b.width) return `ranges of ${b.width.toLocaleString('en-US')}`
-  if (b.kind === 'text' && b.top_n) return `top ${b.top_n} + other`
-  return 'grouped'
+const GRAIN_KEY: Record<string, MessageKey> = {
+  hour: 'bc.canvas.grain.hour', day: 'bc.canvas.grain.day', week: 'bc.canvas.grain.week',
+  month: 'bc.canvas.grain.month', quarter: 'bc.canvas.grain.quarter', year: 'bc.canvas.grain.year',
+}
+/** A grain in the reader's words when a translator is given. */
+function grainWord(grain: string | null | undefined, t?: TranslateFn): string {
+  const g = grain ?? ''
+  return t && GRAIN_KEY[g] ? t(GRAIN_KEY[g]) : GRAIN_WORD[g] ?? String(grain)
 }
 
-export function binningTitle(b: Binning | undefined | null): string {
+/** The binning chip's words; in the reader's language when given `t`. */
+export function binningLabel(b: Binning | undefined | null, t?: TranslateFn): string {
   if (!b?.grouped) return ''
+  if (b.kind === 'date' && b.grain) {
+    return t ? t('bc.canvas.bin.by', { grain: grainWord(b.grain, t) }) : `by ${GRAIN_WORD[b.grain] ?? b.grain}`
+  }
+  if (b.kind === 'number' && b.width) {
+    const w = b.width.toLocaleString('en-US')
+    return t ? t('bc.canvas.bin.ranges', { width: w }) : `ranges of ${w}`
+  }
+  if (b.kind === 'text' && b.top_n) return t ? t('bc.canvas.bin.topN', { n: b.top_n }) : `top ${b.top_n} + other`
+  return t ? t('bc.canvas.bin.grouped') : 'grouped'
+}
+
+export function binningTitle(b: Binning | undefined | null, t?: TranslateFn): string {
+  if (!b?.grouped) return ''
+  if (t) {
+    const distinct = (b.distinct ?? 0).toLocaleString('en-US')
+    const column = String(b.column ?? '')
+    if (b.kind === 'text') return t('bc.canvas.bin.titleText', { distinct, column, n: b.top_n ?? '' })
+    return b.kind === 'date'
+      ? t('bc.canvas.bin.titleDate', { distinct, column, grain: grainWord(b.grain, t), buckets: b.buckets ?? '?' })
+      : t('bc.canvas.bin.titleRanges', { distinct, column, width: (b.width ?? 0).toLocaleString('en-US'), buckets: b.buckets ?? '?' })
+  }
   if (b.kind === 'text') {
     return `${(b.distinct ?? 0).toLocaleString('en-US')} different ${b.column} values are too many to draw, so the chart shows the top ${b.top_n} and puts the rest together as "All Other". `
       + 'Every row is still counted. Pick 10, 20 or 50 to see more or fewer.'
@@ -421,41 +448,54 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
     const report = reportFilters ?? []
     const measureName = typeof cfg0.measure === 'string' ? cfg0.measure : null
     const agg = String(cfg0.aggregation ?? (measureName ? 'sum' : 'count'))
-    const t = (data as { truncation?: { applied?: boolean; shown?: number; of?: number; reason?: string } } | null)?.truncation
+    const trunc = (data as { truncation?: { applied?: boolean; shown?: number; of?: number; reason?: string } } | null)?.truncation
+    const notApply = (f: FilterLikeLocal) => applies(f.column) ? describeFilter(f, t) : t('bc.canvas.why.notApply', { filter: describeFilter(f, t) })
+    const shownN = brushRange ? brushRange.endIndex - brushRange.startIndex + 1 : 0
     const rank = cfg0.rank as { mode?: string; n?: number; percent?: boolean; other?: boolean } | undefined
+    const rankN = rank?.n ? `${rank.n}${rank.percent ? '%' : ''}` : ''
     const rules = [...(reportDisplayRules ?? []), ...((cfg0.display_rules as unknown[] | undefined) ?? [])]
     return [
-      { title: 'What is measured', empty: '', items: [
-        measureName ? `${agg} of ${measureName}` : 'number of rows',
-        ...(typeof cfg0.dimension === 'string' ? [`for each ${cfg0.dimension}`] : []),
-        ...(widgetDatasetId != null && datasets?.[widgetDatasetId]?.name ? [`from ${datasets[widgetDatasetId].name}`] : []),
+      { title: t('bc.canvas.why.measured'), empty: '', items: [
+        // QA3 C8: the aggregation in words in Arabic ("avg" glued to an Arabic
+        // sentence read garbled); English keeps the code as before.
+        measureName ? t('bc.canvas.why.aggOf', { agg: (() => {
+          if (document.documentElement.lang !== 'ar') return agg
+          const k = `rb.agg.${agg}` as MessageKey; const v = t(k); return v !== k ? v : agg })(), measure: measureName })
+          : t('bc.canvas.why.rowCount'),
+        ...(typeof cfg0.dimension === 'string' ? [t('bc.canvas.why.forEach', { dimension: cfg0.dimension })] : []),
+        ...(widgetDatasetId != null && datasets?.[widgetDatasetId]?.name ? [t('bc.canvas.why.from', { dataset: datasets[widgetDatasetId].name })] : []),
       ] },
-      { title: 'Set by the author (this widget)', empty: 'No filters.', items: own.map(describeFilter) },
-      { title: 'Set by the author (whole report)', empty: 'No report filters.',
-        items: report.map(f => `${describeFilter(f)}${applies(f.column) ? '' : ' — does not apply: this widget’s data has no such column'}`) },
-      { title: 'Your page filters', empty: 'None — add one with + Filter above the page.',
-        items: (pageFilters ?? []).map(f => `${describeFilter(f as FilterLikeLocal)}${applies(f.column) ? '' : ' — does not apply: this widget’s data has no such column'}`) },
-      { title: 'Your selections', empty: 'None — click a mark on another widget to filter this one.',
+      { title: t('bc.canvas.why.ownTitle'), empty: t('bc.canvas.why.ownEmpty'), items: own.map(f => describeFilter(f, t)) },
+      { title: t('bc.canvas.why.reportTitle'), empty: t('bc.canvas.why.reportEmpty'),
+        items: report.map(f => notApply(f)) },
+      { title: t('bc.canvas.why.pageTitle'), empty: t('bc.canvas.why.pageEmpty'),
+        items: (pageFilters ?? []).map(f => notApply(f as FilterLikeLocal)) },
+      { title: t('bc.canvas.why.selTitle'), empty: t('bc.canvas.why.selEmpty'),
         items: [
-          ...translatedCrossFilters.map(f => describeFilter(f as FilterLikeLocal)),
-          ...(promptFilter?.column && promptFilter?.value ? [`page prompt: ${promptFilter.column} is ${promptFilter.value}`] : []),
-          ...drillPath.map(s => `drilled into ${s.column} = ${s.value}`),
+          ...translatedCrossFilters.map(f => describeFilter(f as FilterLikeLocal, t)),
+          ...(promptFilter?.column && promptFilter?.value ? [t('bc.canvas.why.prompt', { column: promptFilter.column, value: String(promptFilter.value) })] : []),
+          ...drillPath.map(s => t('bc.canvas.why.drilled', { column: s.column, value: String(s.value) })),
         ] },
-      ...(relNotes.length || partial ? [{ title: 'Date windows', empty: '', items: [
-        ...relNotes.map(n => n.error ? `${n.column}: ${n.error} — nothing matches` : `${n.column}: ${n.text ?? n.label}`),
+      ...(relNotes.length || partial ? [{ title: t('bc.canvas.why.datesTitle'), empty: '', items: [
+        ...relNotes.map(n => n.error ? t('bc.canvas.why.dateError', { column: n.column, error: n.error }) : `${n.column}: ${n.text ?? n.label}`),
         ...(partial ? [partial.text] : []),
       ] }] : []),
-      ...(brushRange || (data as { type?: string } | null)?.type === 'animated' ? [{ title: 'Your view of this chart', empty: '', items: [
-        ...(brushRange ? [brushRange.auto
-          ? `Showing ${brushRange.start} – ${brushRange.end} (${brushRange.endIndex - brushRange.startIndex + 1} of ${brushRange.of} points): too many to read at this size, so the chart opened on a window. Drag the slider under the chart to see the rest; nothing is filtered out of any total`
-          : `Zoomed with the overview axis to ${brushRange.start} – ${brushRange.end} (${brushRange.endIndex - brushRange.startIndex + 1} of ${brushRange.of} points); the rest is hidden, not filtered out of any total`] : []),
-        ...((data as { type?: string } | null)?.type === 'animated' && animFrame ? [`Showing the frame ${String((data as { animate_by?: string }).animate_by)} = ${animFrame} of an animation`] : []),
+      ...(brushRange || (data as { type?: string } | null)?.type === 'animated' ? [{ title: t('bc.canvas.why.viewTitle'), empty: '', items: [
+        ...(brushRange ? [t(brushRange.auto ? 'bc.canvas.why.brushAuto' : 'bc.canvas.why.brushZoom',
+          { start: String(brushRange.start), end: String(brushRange.end), n: shownN, of: brushRange.of })] : []),
+        ...((data as { type?: string } | null)?.type === 'animated' && animFrame
+          ? [t('bc.canvas.why.animFrame', { field: String((data as { animate_by?: string }).animate_by), frame: String(animFrame) })] : []),
       ] }] : []),
-      { title: 'Ranking and limits', empty: 'Every group is shown.', items: [
-        ...(rank?.n ? [`${rank.mode === 'bottom' ? 'Bottom' : 'Top'} ${rank.n}${rank.percent ? '%' : ''}${rank.other ? ', the rest as “All other”' : ''}`] : []),
-        ...(t?.applied ? [`Showing ${t.shown} of ${t.of} groups (${t.reason === 'limit' ? 'row limit' : t.reason})`] : []),
+      { title: t('bc.canvas.why.rankTitle'), empty: t('bc.canvas.why.rankEmpty'), items: [
+        ...(rank?.n ? [t(rank.mode === 'bottom'
+          ? (rank.other ? 'bc.canvas.why.rankBottomOther' : 'bc.canvas.why.rankBottom')
+          : (rank.other ? 'bc.canvas.why.rankTopOther' : 'bc.canvas.why.rankTop'), { n: rankN })] : []),
+        ...(trunc?.applied ? [trunc.reason === 'limit'
+          ? t('bc.canvas.why.truncLimit', { shown: String(trunc.shown), of: String(trunc.of) })
+          : t('bc.canvas.why.truncReason', { shown: String(trunc.shown), of: String(trunc.of), reason: String(trunc.reason) })] : []),
       ] },
-      { title: 'Display rules', empty: 'None.', items: rules.length ? [`${rules.length} rule${rules.length === 1 ? '' : 's'} colour or hide values here`] : [] },
+      { title: t('bc.canvas.why.rulesTitle'), empty: t('bc.canvas.why.rulesEmpty'),
+        items: rules.length ? [t(rules.length === 1 ? 'bc.canvas.why.rulesOne' : 'bc.canvas.why.rulesMany', { n: rules.length })] : [] },
     ]
   }
 
@@ -869,6 +909,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
   const [showContextMenu, setShowContextMenu] = useState(false)
   const [reconcileOpen, setReconcileOpen] = useState(false)
   const t = useT()
+  const L = usePanelLabel()
   const { language } = useDirection()
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 })
   useEffect(() => {
@@ -891,7 +932,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
     try {
       await widgetDataApi.export(widgetDatasetId, mergedConfig, wt, format, effectiveCalcCols)
     } catch {
-      toast.error('Could not export this widget')
+      toast.error(t('bc.canvas.exportFailed'))
     }
   }
 
@@ -900,7 +941,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
   const handleExportImage = async () => {
     setShowContextMenu(false)
     const svg = pickChartSvg(widgetRootRef.current)
-    if (!svg) { toast.error('This widget has no chart to export'); return }
+    if (!svg) { toast.error(t('bc.canvas.noChartToExport')); return }
     try {
       const { dataUrl, dropped } = await svgToPng(svg, 2)
       const a = document.createElement('a')
@@ -908,10 +949,10 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
       a.download = `${(widget.title || wt).replace(/[^A-Za-z0-9 _-]/g, '').slice(0, 60) || 'widget'}.png`
       a.click()
       if (dropped > 0) {
-        toast('The map was saved without its background tiles: the tile server does not allow them to be copied.')
+        toast(t('bc.canvas.mapTilesDropped'))
       }
     } catch {
-      toast.error('Could not export this widget as an image')
+      toast.error(t('bc.canvas.exportImageFailed'))
     }
   }
 
@@ -1101,7 +1142,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
               <div style={{ position: 'absolute', inset: 0, display: 'flex',
                 alignItems: 'center', justifyContent: 'center',
                 color: 'var(--muted)', fontSize: 11 }}>
-                Empty container — assign widgets to it from their settings
+                {t('bc.canvas.containerEmpty')}
               </div>
             )}
             {sorted.map(w => {
@@ -1126,7 +1167,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
             {sorted.length === 0 && (
               <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
                 justifyContent: 'center', color: 'var(--muted)', fontSize: 11 }}>
-                Empty container — assign widgets to it from their settings
+                {t('bc.canvas.containerEmpty')}
               </div>
             )}
             {sorted.map(w => {
@@ -1152,6 +1193,8 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
     <div
       ref={widgetRootRef}
       className={`dl-widget${selected ? ' dl-widget--selected' : ''}`}
+      // QA5 F1: legends follow the widget's own text colour (index.css)
+      data-contrast={Object.keys(contrastTokens(ruleStyles?.widget?.background ?? cfg.widget_background)).length ? '' : undefined}
       role="figure"
       aria-label={(cfg.alt_text as string) || widget.title || wt}
       tabIndex={isPreview ? undefined : 0}
@@ -1178,6 +1221,13 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
         // the entire point of phase 1's `background` target.
         background: ruleStyles?.widget?.background ?? cfg.widget_background
           ?? (cfg.transparent === true ? 'transparent' : 'var(--surface)'),
+        // QA3 B4: the header controls paint on the widget's own colour, not a
+        // white (surface) box over a custom one. Transparent tiles keep surface.
+        ['--dl-wbg' as string]: (() => { const bg = ruleStyles?.widget?.background ?? cfg.widget_background
+          return bg && bg !== 'transparent' ? bg : 'var(--surface)' })(),
+        // QA4 V1: text, icons, ticks and labels follow a custom background's
+        // contrast, not the theme (white on #fde68a in the dark theme).
+        ...contrastTokens(ruleStyles?.widget?.background ?? cfg.widget_background),
         overflow: 'hidden', cursor: 'default',
         boxShadow: isDragging ? '0 8px 24px rgba(0,0,0,.25)' : selected ? '0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent)' : skinShadow(cfg.widget_skin),
         outline: isMultiSelected ? '2px solid var(--success)' : undefined,
@@ -1223,7 +1273,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
             tooltip. Uppercase with tracking made "Revenue, cost and units"
             wrap to four lines in a quarter-width tile and pushed the chart
             below the fold of its own card. */}
-        <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        <span className="dl-whead__title" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
           <span role="heading" aria-level={3} title={title} dir="auto"
             style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.3, color: 'var(--text)', minWidth: 0,
               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span>
@@ -1239,7 +1289,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
         {(data as { data_health?: { state: string; last_refreshed_at: string | null } } | null)?.data_health && (() => {
           const h = (data as { data_health: { state: string; last_refreshed_at: string | null } }).data_health
           const failing = h.state === 'failing'
-          const since = h.last_refreshed_at ? new Date(h.last_refreshed_at).toLocaleString() : null
+          const since = h.last_refreshed_at ? formatDate(h.last_refreshed_at) : null
           return (
             <span data-testid="data-health-chip" role="status"
               title={t(failing ? 'health.tip.failing' : 'health.tip.stale')
@@ -1252,36 +1302,35 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
           )
         })()}
         {data?.sampled && (
-          <span title={`Showing a sample of ${data.sample_size} out of ${data.total_rows} rows`}
+          <span title={t('bc.canvas.sampleTitle', { n: String(data.sample_size), total: String(data.total_rows) })}
             style={{ fontSize: 9, background: 'rgba(230,160,60,.18)', color: '#e6a03c', padding: '1px 5px', borderRadius: 99 }}>
-            sampled
+            {t('bc.canvas.sampled')}
           </span>
         )}
         {binning?.grouped && (
-          <span data-testid="binning-chip" title={binningTitle(zoom?.data?.binning ?? binning)}
+          <span data-testid="binning-chip" title={binningTitle(zoom?.data?.binning ?? binning, t)}
             style={{ fontSize: 9, padding: '1px 5px', borderRadius: 99, whiteSpace: 'nowrap',
               background: 'color-mix(in srgb, var(--accent) 14%, transparent)', color: 'var(--accent)' }}>
             {binning.kind === 'text' && binning.top_n_choices?.length ? (
-              <select aria-label="How many values to show" data-testid="top-n-select"
+              <select aria-label={t('bc.canvas.topNAria')} data-testid="top-n-select"
                 value={binning.top_n ?? ''} onClick={e => e.stopPropagation()}
                 onChange={e => setTopN(Number(e.target.value))}
                 style={{ font: 'inherit', color: 'inherit', background: 'transparent', border: 0, padding: 0, cursor: 'pointer' }}>
-                {binning.top_n_choices.map(n => <option key={n} value={n}>top {n} + other</option>)}
+                {binning.top_n_choices.map(n => <option key={n} value={n}>{t('bc.canvas.bin.topN', { n })}</option>)}
               </select>
-            ) : binningLabel(zoom?.data?.binning ?? binning)}
+            ) : binningLabel(zoom?.data?.binning ?? binning, t)}
           </span>
         )}
         {brushRange && (
-          <span data-testid="brush-chip" title={brushRange.auto
-            ? `Showing ${brushRange.start} – ${brushRange.end} of ${brushRange.of} points. Drag the slider under the chart to see the rest.`
-            : `Zoomed with the overview axis: ${brushRange.start} – ${brushRange.end} of ${brushRange.of} points`}
+          <span data-testid="brush-chip" title={t(brushRange.auto ? 'bc.canvas.brushTitleAuto' : 'bc.canvas.brushTitleZoom',
+              { start: String(brushRange.start), end: String(brushRange.end), of: brushRange.of })}
             style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 9, padding: '1px 4px 1px 5px', borderRadius: 99,
               background: 'color-mix(in srgb, var(--accent) 14%, transparent)', color: 'var(--accent)', whiteSpace: 'nowrap' }}>
-            {brushRange.auto ? 'showing' : 'zoomed'} {brushRange.endIndex - brushRange.startIndex + 1}/{brushRange.of}
+            {t(brushRange.auto ? 'bc.canvas.chipShowing' : 'bc.canvas.chipZoomed')} <bdi dir="ltr">{brushRange.endIndex - brushRange.startIndex + 1}/{brushRange.of}</bdi>
             {/* An automatic window has nothing to reset: the slider is the
                 control. A dragged one goes back to how the chart opened. */}
             {!brushRange.auto && (
-            <button aria-label="Reset the overview zoom" title="Back to how the chart opened"
+            <button aria-label={t('bc.canvas.resetZoom')} title={t('bc.canvas.resetZoomTitle')}
               onClick={e => { e.stopPropagation(); setBrushRange(null); setBrushNonce(n => n + 1) }}
               style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', font: 'inherit', lineHeight: 1, padding: 0 }}>×</button>
             )}
@@ -1293,15 +1342,15 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
             style={{ fontSize: 9, padding: '1px 5px', borderRadius: 99, whiteSpace: 'nowrap',
               background: relNotes.some(n => n.error || n.incomplete) ? 'rgba(230,160,60,.18)' : 'color-mix(in srgb, var(--accent) 14%, transparent)',
               color: relNotes.some(n => n.error || n.incomplete) ? '#b7791f' : 'var(--accent)' }}>
-            {relNotes[0].error ? 'date filter error' : relNotes[0].label}
-            {relNotes.some(n => n.incomplete) ? ' · partial' : ''}
+            {relNotes[0].error ? t('bc.canvas.dateFilterError') : relNotes[0].label}
+            {relNotes.some(n => n.incomplete) ? ' · ' + t('bc.canvas.partial') : ''}
           </span>
         )}
         {incomingFilters.length > 0 && (
-          <span title={`Filtered by: ${incomingFilters.map(f => f.label).join(', ')}`}
+          <span title={t('bc.canvas.filteredBy', { list: incomingFilters.map(f => f.label).join(', ') })}
             style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 9, background: 'color-mix(in srgb, var(--accent) 20%, transparent)', color: 'var(--accent)', padding: '1px 4px 1px 5px', borderRadius: 99 }}>
-            {incomingFilters.length} filter{incomingFilters.length > 1 ? 's' : ''}
-            <button aria-label="Clear this filter" title="Clear this filter"
+            {t(incomingFilters.length > 1 ? 'bc.canvas.chipFiltersN' : 'bc.canvas.chipFilters1', { n: incomingFilters.length })}
+            <button aria-label={t('bc.canvas.clearFilter')} title={t('bc.canvas.clearFilter')}
               style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', font: 'inherit', lineHeight: 1, padding: 0 }}
               onClick={e => {
                 e.stopPropagation()
@@ -1312,10 +1361,10 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
           </span>
         )}
         {!isPreview && drillthroughPageId != null && localSelected != null && (
-          <button title="Drill through with the selected value"
+          <button title={t('bc.canvas.drillThroughTitle')}
             style={{ fontSize: 9, background: 'color-mix(in srgb, var(--accent) 15%, transparent)', color: 'var(--accent)', border: 'none', borderRadius: 99, padding: '2px 7px', cursor: 'pointer' }}
             onClick={e => { e.stopPropagation(); handleDrillthrough() }}>
-            ⤷ Drill through
+            ⤷ {t('bc.canvas.drillThrough')}
           </button>
         )}
         {/* Pinning used to send a widget to a personal dashboard rendered on
@@ -1328,8 +1377,8 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
             width tile "Total revenue" printed as "Tot…"; now the title owns the
             row at rest. Touch screens get them outright (index.css). */}
         <span className="dl-whead__ctl">
-        {broadcasts && <span title="Emits cross-filters" style={{ fontSize: 9, color: 'var(--accent)', opacity: .7 }}>→</span>}
-        {receives && <span title="Receives cross-filters" style={{ fontSize: 9, color: 'var(--accent)', opacity: .7 }}>←</span>}
+        {broadcasts && <span className="dl-wmark" title={t('bc.canvas.emits')} style={{ fontSize: 9, color: 'var(--accent)', opacity: .7 }}>→</span>}
+        {receives && <span className="dl-wmark" title={t('bc.canvas.receives')} style={{ fontSize: 9, color: 'var(--accent)', opacity: .7 }}>←</span>}
         {!editMode && !isPreview && widgetDatasetId != null && !['text', 'button', 'image', 'shape', 'web_content', 'container', 'slicer'].includes(widget.widget_type) && (() => {
           const cfgAny = mergedConfig as Record<string, unknown>
           const cols = datasets?.[widgetDatasetId]?.columns ?? []
@@ -1373,21 +1422,21 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
         })()}
         {editMode && onDelete && (
           <>
-            <button className="dl-wicon" aria-label={`Delete widget ${title}`} title="Delete"
+            <button className="dl-wicon dl-wdel" aria-label={t('bc.canvas.deleteWidgetAria', { title })} title={t('bc.canvas.delete')}
               onClick={e => { e.stopPropagation(); onDelete() }}><Trash2 size={15} aria-hidden /></button>
             <span onMouseDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
               <ActionMenu portal
                 trigger={<MoreVertical size={15} aria-hidden />} triggerClassName="dl-wicon"
-                label={`More actions for widget ${title}`}
+                label={t('bc.canvas.moreActions', { title })}
                 items={[
                   // Offered only when the caller can act on it: every existing
                   // caller passes onDelete alone, and a menu item wired to
                   // nothing is worse than an absent one.
                   ...(onDuplicate
-                    ? [{ key: 'duplicate', label: 'Duplicate widget',
+                    ? [{ key: 'duplicate', label: t('bc.canvas.duplicateWidget'),
                          icon: <Copy size={12} />, onSelect: () => onDuplicate() }]
                     : []),
-                  { key: 'delete', label: 'Delete widget', danger: true, icon: <Trash2 size={12} />, onSelect: () => onDelete() },
+                  { key: 'delete', label: t('bc.canvas.deleteWidget'), danger: true, icon: <Trash2 size={12} />, onSelect: () => onDelete() },
                 ]}
               />
             </span>
@@ -1396,14 +1445,14 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
         </span>
         {hierarchyNodeId != null && expandLevels.length > 1 && (
           <span style={{ display: 'flex', gap: 2 }}>
-            <button aria-label="Expand hierarchy one level"
-              title="Show the next level alongside this one (Power BI's expand)"
+            <button aria-label={t('bc.canvas.expandLevel')}
+              title={t('bc.canvas.expandLevelTitle')}
               disabled={expandDepth >= expandLevels.length - 1}
               onClick={e => { e.stopPropagation(); setDrillPath([]); setExpandDepth(d => Math.min(d + 1, expandLevels.length - 1)) }}
               style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11,
                 color: expandDepth >= expandLevels.length - 1 ? 'var(--border)' : 'var(--accent)', padding: '0 2px' }}>⊞</button>
             {expandDepth > 0 && (
-              <button aria-label="Collapse hierarchy one level"
+              <button aria-label={t('bc.canvas.collapseLevel')}
                 onClick={e => { e.stopPropagation(); setExpandDepth(d => Math.max(0, d - 1)) }}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: 'var(--accent)', padding: '0 2px' }}>⊟</button>
             )}
@@ -1411,7 +1460,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
         )}
         {drillPath.length > 0 && (
           <div style={{ display:'flex', gap:4, alignItems:'center', fontSize:10, color:'var(--muted)' }}>
-            <button onClick={() => setDrillPath([])} style={{ background:'none', border:'none', color:'var(--accent)', cursor:'pointer', fontSize:10, padding:0 }}>All</button>
+            <button onClick={() => setDrillPath([])} style={{ background:'none', border:'none', color:'var(--accent)', cursor:'pointer', fontSize:10, padding:0 }}>{t('bc.canvas.drillAll')}</button>
             {drillPath.map((step, i) => (
               <span key={i} style={{ display:'flex', alignItems:'center', gap:4 }}>
                 <span>▸</span>
@@ -1439,7 +1488,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
         {loading && <EmptyState msg={t('common.loading')} />}
         {!loading && hiddenByRule && editMode && (
           <div data-testid="widget-hidden-by-rule" style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12, textAlign: 'center', padding: 8 }}>
-            Hidden by a display rule
+            {t('bc.canvas.hiddenByRule')}
           </div>
         )}
         {!loading && !hiddenByRule && smartZoom && (
@@ -1455,7 +1504,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
                 onBrushChange={undefined} brushNonce={brushNonce} onAnimationFrame={setAnimFrame} />
               {zoomLoading && (
                 <span data-testid="zoom-loading" role="status" style={{ position: 'absolute', top: 2, insetInlineEnd: 4, fontSize: 10, color: 'var(--muted)' }}>
-                  Loading more detail…
+                  {t('bc.canvas.loadingMore')}
                 </span>
               )}
             </div>
@@ -1503,7 +1552,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
         </Suspense>, document.body)}
       {kitDialog === 'why' && createPortal(
         <WhyDialog title={title} sections={whySections()} onClose={() => setKitDialog(null)}
-          footnote="Row-level security may also narrow the rows you can see; it is applied before everything above and is not shown here." />,
+          footnote={t('bc.canvas.why.footnote')} />,
         document.body)}
       {kitDialog === 'scenario' && widgetDatasetId != null && createPortal(
         <ScenarioDialog datasetId={widgetDatasetId}
@@ -1518,7 +1567,10 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
       {!loading && !hiddenByRule && data?.truncation?.applied && missingRequiredRoles(widget).length === 0 && (
         <TruncationNote t={data.truncation} dimension={data.dimension ?? data.category}
           onShowMore={editMode ? (limit: number) => window.dispatchEvent(new CustomEvent(PATCH_WIDGET_EVENT, {
-            detail: { widgetId: widget.id, patch: { limit }, label: `Show ${limit === data.truncation.of ? 'all ' : ''}${limit} ${(data.dimension ?? data.category) ? `${data.dimension ?? data.category} values` : 'groups'} in "${widget.title || widget.widget_type}"` },
+            detail: { widgetId: widget.id, patch: { limit }, label: t((data.dimension ?? data.category)
+              ? (limit === data.truncation.of ? 'bc.canvas.undo.showAllValues' : 'bc.canvas.undo.showValues')
+              : (limit === data.truncation.of ? 'bc.canvas.undo.showAllGroups' : 'bc.canvas.undo.showGroups'),
+              { n: limit, dim: String(data.dimension ?? data.category ?? ''), title: widget.title || widget.widget_type }) },
           })) : undefined} />
       )}
 
@@ -1623,7 +1675,9 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
             <button role="menuitem"
               onClick={e => { e.stopPropagation(); handleDrillthrough(); setShowContextMenu(false) }}
               style={menuItemStyle}>
-              ⤷ Drill through to {drillthroughTargetName ?? 'page'}
+              {drillthroughTargetName != null
+                ? t('bc.canvas.drillToPage', { page: drillthroughTargetName })
+                : t('bc.canvas.drillToAnyPage')}
             </button>
           )}
           {/* Data actions (SAS's mark menu): act on the selected mark, re-sort,
@@ -1632,7 +1686,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
           {editMode && (() => {
             const c = widget.config as Record<string, any>
             const dim = typeof c.dimension === 'string' ? c.dimension : ''
-            const name = `"${widget.title || widget.widget_type}"`
+            const name = widget.title || widget.widget_type
             const patch = (p: Record<string, unknown>, label: string) => {
               window.dispatchEvent(new CustomEvent(PATCH_WIDGET_EVENT, { detail: { widgetId: widget.id, patch: p, label } }))
               setShowContextMenu(false)
@@ -1646,50 +1700,50 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
                 <button key="keep" role="menuitem" style={menuItemStyle}
                   onClick={e => { e.stopPropagation(); setLocalSelected(null)
                     patch({ filters: [...filters.filter((f: any) => f?.column !== dim), { column: dim, op: 'eq', value: sel }] },
-                      `Keep only ${dim} = ${selText} in ${name}`) }}>
-                  ✓ Keep only “{selText}”
+                      t('bc.canvas.undo.keep', { dim, value: selText, title: name })) }}>
+                  {t('bc.canvas.keepOnly', { value: selText })}
                 </button>,
                 <button key="exclude" role="menuitem" style={menuItemStyle}
                   onClick={e => { e.stopPropagation(); setLocalSelected(null)
                     patch({ filters: [...filters, { column: dim, op: 'neq', value: sel }] },
-                      `Exclude ${dim} = ${selText} from ${name}`) }}>
-                  ✕ Exclude “{selText}”
+                      t('bc.canvas.undo.exclude', { dim, value: selText, title: name })) }}>
+                  {t('bc.canvas.exclude', { value: selText })}
                 </button>,
               )
             }
             if (filters.length) {
               items.push(
                 <button key="clearf" role="menuitem" style={menuItemStyle}
-                  onClick={e => { e.stopPropagation(); patch({ filters: [] }, `Remove ${filters.length} filter${filters.length === 1 ? '' : 's'} from ${name}`) }}>
-                  ⊘ Remove this widget’s filters ({filters.length})
+                  onClick={e => { e.stopPropagation(); patch({ filters: [] }, t(filters.length === 1 ? 'bc.canvas.undo.removeFilter1' : 'bc.canvas.undo.removeFiltersN', { n: filters.length, title: name })) }}>
+                  {t('bc.canvas.removeWidgetFilters', { n: filters.length })}
                 </button>,
               )
             }
             if (dim) {
               items.push(
                 <button key="sortv" role="menuitem" style={menuItemStyle}
-                  onClick={e => { e.stopPropagation(); patch({ sort_by: 'value', sort: 'desc' }, `Sort ${name} by value, high to low`) }}>
-                  ↓ Sort by value (high → low)
+                  onClick={e => { e.stopPropagation(); patch({ sort_by: 'value', sort: 'desc' }, t('bc.canvas.undo.sortValue', { title: name })) }}>
+                  {t('bc.canvas.sortByValue')}
                 </button>,
                 <button key="sortn" role="menuitem" style={menuItemStyle}
-                  onClick={e => { e.stopPropagation(); patch({ sort_by: 'name', sort: 'asc' }, `Sort ${name} by ${dim}, A to Z`) }}>
-                  ↑ Sort by {dim} (A → Z)
+                  onClick={e => { e.stopPropagation(); patch({ sort_by: 'name', sort: 'asc' }, t('bc.canvas.undo.sortName', { title: name, dim })) }}>
+                  {t('bc.canvas.sortByName', { dim })}
                 </button>,
               )
             }
             if (dim && typeof c.measure === 'string' && c.measure) {
               const aggs: [string, string][] = [['sum', 'Sum'], ['avg', 'Average'], ['min', 'Min'], ['max', 'Max'], ['count', 'Count']]
               items.push(
-                <div key="agg" role="group" aria-label="Aggregation" style={{ display: 'flex', gap: 2, flexWrap: 'wrap', padding: '4px 8px', fontSize: 11, color: 'var(--muted)', alignItems: 'center' }}>
+                <div key="agg" role="group" aria-label={t('bc.canvas.aggregation')} style={{ display: 'flex', gap: 2, flexWrap: 'wrap', padding: '4px 8px', fontSize: 11, color: 'var(--muted)', alignItems: 'center' }}>
                   <span style={{ marginInlineEnd: 4 }}>Σ</span>
                   {aggs.map(([v, l]) => (
                     <button key={v} role="menuitemradio" aria-checked={(c.aggregation ?? 'sum') === v} type="button"
-                      onClick={e => { e.stopPropagation(); if ((c.aggregation ?? 'sum') !== v) patch({ aggregation: v }, `Change aggregation of ${name} from ${c.aggregation ?? 'sum'} to ${v}`) }}
+                      onClick={e => { e.stopPropagation(); if ((c.aggregation ?? 'sum') !== v) patch({ aggregation: v }, t('bc.canvas.undo.aggregation', { title: name, from: String(c.aggregation ?? 'sum'), to: v })) }}
                       style={{ fontSize: 11, padding: '1px 6px', borderRadius: 4, cursor: 'pointer',
                         border: '1px solid ' + ((c.aggregation ?? 'sum') === v ? 'var(--accent)' : 'var(--border)'),
                         background: (c.aggregation ?? 'sum') === v ? 'var(--accent)' : 'transparent',
                         color: (c.aggregation ?? 'sum') === v ? 'var(--mc-accent-fg)' : 'var(--text)' }}>
-                      {l}
+                      {L(l)}
                     </button>
                   ))}
                 </div>,
@@ -1711,12 +1765,12 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
               url.searchParams.set('page', String(widget.page_id))
               url.searchParams.set('widget', String(widget.id))
               navigator.clipboard.writeText(url.toString())
-                .then(() => toast.success('Link to this visual copied'))
-                .catch(() => toast.error('Could not copy the link'))
+                .then(() => toast.success(t('bc.canvas.linkCopied')))
+                .catch(() => toast.error(t('bc.canvas.linkCopyFailed')))
               setShowContextMenu(false)
             }}
             style={menuItemStyle}>
-            <LinkIcon size={12} aria-hidden style={{ marginInlineEnd: 6, verticalAlign: '-2px' }} />Copy link to this visual
+            <LinkIcon size={12} aria-hidden style={{ marginInlineEnd: 6, verticalAlign: '-2px' }} />{t('bc.canvas.copyLink')}
           </button>
           {/* Export is offered on every widget with a dataset behind it, drill-through
               or not -- the previous menu rendered only when a drill-through target
@@ -1727,17 +1781,17 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
               <button role="menuitem"
                 onClick={e => { e.stopPropagation(); handleExport('csv') }}
                 style={menuItemStyle}>
-                ⤓ Export data as CSV
+                ⤓ {t('bc.canvas.exportCsv')}
               </button>
               <button role="menuitem"
                 onClick={e => { e.stopPropagation(); handleExport('xlsx') }}
                 style={menuItemStyle}>
-                ⤓ Export data as Excel
+                ⤓ {t('bc.canvas.exportXlsx')}
               </button>
               <button role="menuitem"
                 onClick={e => { e.stopPropagation(); handleExportImage() }}
                 style={menuItemStyle}>
-                ⤓ Export as image
+                ⤓ {t('bc.canvas.exportImage')}
               </button>
               {/* E17: the migration check -- beside the exports, because the
                   file it compares with is the old report's export. */}

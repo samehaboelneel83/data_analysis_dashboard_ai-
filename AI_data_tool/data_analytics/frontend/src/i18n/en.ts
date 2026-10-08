@@ -1,5 +1,23 @@
+import { en as bcCanvas } from './builder/canvas'
+import { en as bcPanes } from './builder/panes'
+import { en as bcRules } from './builder/rules'
+import { en as bcShell } from './builder/shell'
+import { en as bcStats } from './builder/stats'
+import { en as bcDialogs } from './builder/dialogs'
+import { en as pgAdminSecurity } from './pages/adminSecurity'
+import { en as pgAdminPlatform } from './pages/adminPlatform'
+import { en as pgDataPages } from './pages/dataPages'
+import { en as pgPanelsA } from './pages/panelsA'
+import { en as pgPanelsB } from './pages/panelsB'
+import { en as pgModelsMaps } from './pages/modelsMaps'
+import { en as pgTypes } from './pages/types'
+
 /** English UI strings. Arabic lives in `ar.ts`; keep the two key sets identical. */
 export const en = {
+  // QA3 Batch C: the builder's strings, one module per area (i18n/builder/).
+  ...bcCanvas, ...bcPanes, ...bcRules, ...bcShell, ...bcStats, ...bcDialogs,
+  // 8-i18n: the pages outside the Builder, one module per area (i18n/pages/).
+  ...pgAdminSecurity, ...pgAdminPlatform, ...pgDataPages, ...pgPanelsA, ...pgPanelsB, ...pgModelsMaps, ...pgTypes,
   'nav.home': 'Home',
   'nav.askAi': 'Ask AI',
   'nav.datasets': 'Datasets',
@@ -916,7 +934,8 @@ export const en = {
   'bd.keys.ask': 'Ask AI',
   'bd.keys.jump': 'Jump to a report, dataset or page',
   'bd.keys.sheet': 'This cheat sheet',
-  'bd.guide.where': 'col {from}–{to} · row {row}',
+  'bd.guide.col': 'col',
+  'bd.guide.row': 'row',
   'bd.guide.aligned': 'aligned ×{n}',
   'bd.group.aria': 'Selected widgets',
   'bd.group.n': '{n} selected',
@@ -2456,6 +2475,7 @@ export const en = {
   'audit.byTargetPh': 'Filter by target…',
   'audit.apply': 'Apply',
   'audit.none': 'No audit entries match.',
+  'audit.loadWhat': 'the audit trail',
   'col.actor': 'Actor',
   'col.target': 'Target',
 
@@ -2736,6 +2756,17 @@ export const en = {
 
   'misc.useInPython': 'Use in Python',
   'misc.useInPythonTitle': 'Read this dataset from a notebook, under your own security',
+  // QA5b S5: the dataset sensitivity control's words.
+  'sens.title': 'Sensitivity label',
+  'sens.aria': 'Dataset sensitivity',
+  'sens.inForceWhy': 'In force: {label} — {reason}',
+  'sens.enforceRestricted': 'No guest links or embeds; downloads need data-level access; not e-mailed.',
+  'sens.enforceConfidential': 'Guest links need a signed-in member.',
+  'sens.enforceRedacted': 'Guest links need a signed-in member; {cols} redacted from links, embeds and files.',
+  'sens.listSep': ', ',
+  'sens.labelled': 'Labelled {label}',
+  'sens.cleared': 'Label cleared',
+  'sens.failed': 'Could not label this dataset',
   'sens.none': '— Unlabelled —',
   'sens.Public': 'Public',
   'sens.Internal': 'Internal',

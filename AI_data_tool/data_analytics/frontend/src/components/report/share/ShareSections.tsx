@@ -4,6 +4,7 @@ import { shareLinksApi, embedConfigsApi } from '../../../services/api'
 import { useConfirm } from '../../ui/ConfirmDialog'
 import { useT } from '../../../i18n'
 import { localDigits } from '../../../lib/arabicFormats'
+import { formatDate } from '../../../lib/dateFormat'
 
 /**
  * The two link-based ways in, from v1's Guest links dialog, inside the Share
@@ -16,7 +17,7 @@ import { localDigits } from '../../../lib/arabicFormats'
  */
 
 const EXPIRY = ['1', '7', '30', '90'] as const
-const date = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString() : '')
+const date = (iso: string | null) => (iso ? formatDate(iso, 'date') : '')
 
 export function GuestLinks({ reportId, blockedReason }: { reportId: number; blockedReason?: string | null }) {
   const t = useT()

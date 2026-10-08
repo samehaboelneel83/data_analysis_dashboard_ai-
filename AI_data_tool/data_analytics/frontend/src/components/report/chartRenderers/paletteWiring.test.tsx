@@ -24,7 +24,7 @@ const ALLOWED: RegExp[] = [
   /isIncrease/,                                           // waterfall: up is green, down is red -- meaning
   />= target|value >= target/,                            // gauge: target met is green -- meaning
   /var\(--(danger|warning|success)/,                      // status colours are meaning
-  /<b style=\{\{ color: 'var\(--accent\)' \}\}>|color: 'var\(--accent\)' \}\}>→/, // model card text emphasis
+  /<b style=\{\{ color: 'var\(--accent\)' \}\}>|color: 'var\(--accent\)' \}\}>(→|\{navArrows\(rtl\)\.forward\})/, // model card text emphasis (the arrow mirrors in RTL, 8-i18n)
   /color: '#f59e0b'/,                                     // custom graph: a warning notice, not a mark
   /THEMES\./,
   /stroke: '#fff'/,                                       // a white ring round a hovered point

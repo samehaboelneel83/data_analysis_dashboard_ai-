@@ -35,7 +35,9 @@ try {
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <App />
-    <Toaster position="bottom-right" toastOptions={{ style: {
+    {/* QA3 B6: above the builder's status bar, never over its Shortcuts link
+        (index.css raises --dl-toast-bottom while one is on the page). */}
+    <Toaster position="bottom-right" containerStyle={{ bottom: 'var(--dl-toast-bottom, 16px)' }} toastOptions={{ style: {
       background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border)',
       borderRadius: 'var(--dl-radius-card)', boxShadow: 'var(--dl-shadow-overlay)',
       fontSize: 'var(--dl-text-data)', padding: '10px 14px' } }} />

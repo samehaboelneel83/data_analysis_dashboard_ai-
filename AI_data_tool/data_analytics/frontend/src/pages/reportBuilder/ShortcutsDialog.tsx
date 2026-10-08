@@ -24,6 +24,10 @@ const GROUPS: [MessageKey, [MessageKey, string[]][]][] = [
   ]],
 ]
 
+/** Key caps that are words rather than key names: a mouse "Click" is said in
+ *  the reader's language (Shift, Ctrl and Esc are printed on the keys). */
+const KEY_WORDS: Record<string, MessageKey> = { Click: 'bc.shell.keyClick' }
+
 export default function ShortcutsDialog({ onClose }: { onClose: () => void }) {
   const t = useT()
   const ref = useModalDialog<HTMLDivElement>(onClose)
@@ -41,7 +45,7 @@ export default function ShortcutsDialog({ onClose }: { onClose: () => void }) {
               {rows.map(([label, keys]) => (
                 <div key={label}>
                   <dt>{t(label)}</dt>
-                  <dd dir="ltr">{keys.map(k => <kbd key={k}>{k}</kbd>)}</dd>
+                  <dd dir="ltr">{keys.map(k => <kbd key={k}>{KEY_WORDS[k] ? t(KEY_WORDS[k]) : k}</kbd>)}</dd>
                 </div>
               ))}
             </dl>

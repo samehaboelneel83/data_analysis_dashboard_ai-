@@ -88,10 +88,10 @@ export function GeoPiesRenderer({ data, measureFmt, broadcasts, localSelected,
             border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px', lineHeight: 1.6 }}>
             <strong>{p.name}</strong> — {fmtStr(p.total, measureFmt)}
             {p.slices.map((s, i) => (
-              <div key={s.label}>
+              <div key={s.label} dir="auto">
                 <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2,
-                  background: COLORS[i % COLORS.length], marginRight: 5 }} />
-                {s.label}: {fmtStr(s.value, measureFmt)}
+                  background: COLORS[i % COLORS.length], marginInlineEnd: 5 }} />
+                <bdi>{s.label}</bdi>: <bdi dir="ltr">{fmtStr(s.value, measureFmt)}</bdi>
               </div>
             ))}
           </div>

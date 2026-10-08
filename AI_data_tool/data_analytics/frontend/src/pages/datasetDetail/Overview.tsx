@@ -374,10 +374,11 @@ function ColumnsGlance({ ds, analysis, empty, profiling, profileError, onProfile
 function GlanceRow({ ds, name, dtype, missing, analysis, flagged }: {
   ds: Dataset; name: string; dtype: string; missing: number; analysis: NonNullable<Analysis>; flagged: boolean
 }) {
+  const t = useT()
   const { dist, sum } = useColumnProfile(ds, name, analysis)
   return (
     <tr data-flagged={flagged || undefined}>
-      <td><span className="dl-ov__colname" dir="auto">{name}</span><span className="dl-ov__tag">{typeTag(dtype)}</span></td>
+      <td><span className="dl-ov__colname" dir="auto">{name}</span><span className="dl-ov__tag">{typeTag(t, dtype)}</span></td>
       <td>{dist}</td>
       <td className="dl-ov__num">{localDigits(`${Math.round(missing)}%`)}</td>
       <td className="dl-ov__sum">{sum}</td>

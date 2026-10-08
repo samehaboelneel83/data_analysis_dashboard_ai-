@@ -6,6 +6,7 @@ import { datasetsApi, type CheckResult, type DataCheck, type DataCheckInput, typ
          type DatasetRefreshRun } from '../../services/api'
 import { useT, type MessageKey } from '../../i18n'
 import EmptyState from '../ui/EmptyState'
+import { formatDate } from '../../lib/dateFormat'
 
 /**
  * Pipeline plan, phase 3, on the dataset page: the checks every refresh runs
@@ -258,7 +259,7 @@ export default function ChecksPanel({ datasetId, columns, canEdit, children }: {
           <tbody>
             {runs.map(r => (
               <tr key={r.id}>
-                <td style={{ whiteSpace: 'nowrap', verticalAlign: 'top' }}>{r.started_at ? new Date(r.started_at).toLocaleString() : '—'}</td>
+                <td style={{ whiteSpace: 'nowrap', verticalAlign: 'top' }}>{r.started_at ? formatDate(r.started_at) : '—'}</td>
                 <td style={{ verticalAlign: 'top' }}>{t(r.trigger === 'manual' ? 'jobs.history.manual' : 'jobs.history.schedule')}</td>
                 <td style={{ color: r.status === 'ok' ? GOOD : r.status === 'blocked' || r.status === 'failed' ? BAD : 'var(--muted)' }}>
                   {statusText(r.status)}

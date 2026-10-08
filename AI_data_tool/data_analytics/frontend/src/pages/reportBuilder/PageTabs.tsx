@@ -51,7 +51,7 @@ export default function PageTabs({ pages, activeId, renamingId, renameValue, onR
                 onKeyDown={e => { if (e.key === 'Enter') onSaveName(p) }} />
             ) : (
               <button type="button" aria-current={on ? 'page' : undefined} className="dl-bd-pg__b"
-                aria-label={kind ? `${label(p.name)} (${kind})` : undefined}
+                aria-label={kind ? t('bc.shell.pageKind', { name: label(p.name), kind }) : undefined}
                 onClick={() => onSelect(p)} onDoubleClick={() => onStartRename(p)}>
                 {kind && <EyeOff size={12} aria-hidden className="dl-bd-pg__k" />}
                 <bdi>{label(p.name)}</bdi>

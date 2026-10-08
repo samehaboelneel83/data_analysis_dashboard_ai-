@@ -6,6 +6,7 @@ import { formatCell, readingValue } from '../../lib/displayNumber'
 import BarChartRenderer from '../report/chartRenderers/BarChartRenderer'
 import LineChartRenderer from '../report/chartRenderers/LineChartRenderer'
 import PieChartRenderer from '../report/chartRenderers/PieChartRenderer'
+import { MeasuredChart } from '../report/MeasuredChart'
 import type { AgentPresentation, AgentResult, EvidenceClaim } from '../../services/api'
 import './answerEvidence.css'
 
@@ -260,14 +261,26 @@ function ResultChart({ result, format, x, y }: {
           axes outright with the two columns it is actually drawing. The rows
           are `{name, value}` by then -- without this the axes would read
           "name" and "value", which say nothing about this data. */}
-      <Renderer rows={rows} data={data} rtl={rtl} broadcasts={false}
-        cfg={{ x_axis_label: axes.x, y_axis_label: axes.y,
-          // 5.13: long category names ("Assistant Engineer", department
-          // names) clip with "…" like the Suggestions preview, instead of
-          // tilting into the chart; the full name is in the tooltip.
-          axis_tick_max_chars: 14, labels_compact: true,
-          ...(grouped ? { bar_mode: 'clustered', legend_title: grouped.series } : {}), ...(narrow ? { data_labels: false } : {}) }}
-        localSelected={null} onClickPoint={() => {}} />
+      {/* QA4-V9: measured like a Builder tile. Without the measured width the
+          shared axis planner (axisOptions.xAxisPlan) assumed a nominal 560px
+          plot, so in the narrower chat column four Arabic region names were
+          judged to fit upright and drew on top of each other. With it the
+          same ladder as the Builder applies -- tilt, then thin, then clip
+          with "…" (full name in the tooltip) -- and the declutter pass
+          hides any tick that still collides. Not mirrored in RTL: the
+          renderers reverse the axis themselves. */}
+      <MeasuredChart>
+        {(plotW, plotH) => (
+          <Renderer rows={rows} data={data} rtl={rtl} broadcasts={false}
+            cfg={{ x_axis_label: axes.x, y_axis_label: axes.y,
+              // 5.13: long category names ("Assistant Engineer", department
+              // names) clip with "…" like the Suggestions preview, instead of
+              // tilting into the chart; the full name is in the tooltip.
+              axis_tick_max_chars: 14, labels_compact: true,
+              ...(grouped ? { bar_mode: 'clustered', legend_title: grouped.series } : {}), ...(narrow ? { data_labels: false } : {}) }}
+            localSelected={null} onClickPoint={() => {}} plotW={plotW} plotH={plotH} />
+        )}
+      </MeasuredChart>
     </div>
   )
 }

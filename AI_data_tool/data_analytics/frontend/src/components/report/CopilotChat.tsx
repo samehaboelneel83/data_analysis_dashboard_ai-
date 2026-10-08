@@ -297,10 +297,8 @@ export default function CopilotChat({
     saveCorner(f(corner))
   }
 
-  // Float over the CANVAS, not over the settings panel: pinned to the window
-  // corner, the button covered that panel's own bottom controls (its Send and
-  // Apply buttons). The panel is resizable and collapsible, so follow its width.
-  const endOffset = useEndPanelWidth('builder-right')
+  // Float over the CANVAS, never over the panels beside it (QA3 B1).
+  const inset = useCanvasInsets()
 
   if (presenting) return null
 
@@ -309,7 +307,7 @@ export default function CopilotChat({
     ? { left: drag.x - 28, top: drag.y - 28 }
     : {
         [vert]: vert === 'bottom' ? 'var(--dl-askai-bottom)' : 'var(--dl-askai-top)',
-        [horiz === 'end' ? 'insetInlineEnd' : 'insetInlineStart']: horiz === 'end' ? 24 + endOffset : 24,
+        [horiz === 'end' ? 'insetInlineEnd' : 'insetInlineStart']: (horiz === 'end' ? inset.end : inset.start) + 24,
       }
 
   const n = widgetCount ?? 0
@@ -523,16 +521,26 @@ function appliedVerb(op: string, t: ReturnType<typeof useT>): string {
   }
 }
 
-function useEndPanelWidth(sideId: string): number {
-  const [w, setW] = useState(0)
+/** QA3 B1: how far the canvas column's edges sit from the window's edges, so the button floats inside the canvas whatever is beside it: the
+ *  settings panel, the pinned Properties next to it, and the icon rail (v1
+ *  measured only the settings panel, so the button sat on its section
+ *  headers, the Comments box and "Add schedule"). Follows resizes and RTL. */
+function useCanvasInsets(): { start: number; end: number } {
+  const [w, setW] = useState({ start: 0, end: 0 })
   useEffect(() => {
-    const el = document.querySelector<HTMLElement>(`[data-side="${sideId}"]`)
-    if (!el || typeof ResizeObserver === 'undefined') return
-    const measure = () => setW(Math.round(el.getBoundingClientRect().width))
+    const el = document.querySelector<HTMLElement>('[data-canvas-scroll]')
+    if (!el) return
+    const measure = () => {
+      const r = el.getBoundingClientRect()
+      const rtl = getComputedStyle(document.documentElement).direction === 'rtl'
+      const left = Math.max(0, Math.round(r.left)), right = Math.max(0, Math.round(window.innerWidth - r.right))
+      setW(rtl ? { start: right, end: left } : { start: left, end: right })
+    }
     measure()
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [sideId])
+    window.addEventListener('resize', measure)
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    ro?.observe(el)
+    return () => { window.removeEventListener('resize', measure); ro?.disconnect() }
+  }, [])
   return w
 }

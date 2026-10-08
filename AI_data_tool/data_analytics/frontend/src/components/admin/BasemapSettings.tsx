@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
+import { useT } from '../../i18n'
 import { mapSettingsApi, type MapSettings } from '../../services/api'
 import { setTileSettings } from '../report/geo/tiles'
 import LoadError from '../ui/LoadError'
@@ -14,6 +15,7 @@ import LoadingState from '../ui/LoadingState'
  * maps points this at its own XYZ tile server.
  */
 export default function BasemapSettings({ headingLevel = 2 }: { headingLevel?: 2 | 3 }) {
+  const t = useT()
   const [form, setForm] = useState<MapSettings>({ tile_url: '', attribution: '', contrast_tile_url: '' })
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<unknown>(null)
@@ -34,44 +36,46 @@ export default function BasemapSettings({ headingLevel = 2 }: { headingLevel?: 2
       const saved = await mapSettingsApi.set(next)
       setForm({ tile_url: saved.tile_url ?? '', attribution: saved.attribution ?? '', contrast_tile_url: saved.contrast_tile_url ?? '' })
       setTileSettings(saved)
-      toast.success(saved.tile_url ? 'Basemap saved' : 'Basemap turned off')
+      toast.success(saved.tile_url ? t('pg.adminPlatform.basemap.saved') : t('pg.adminPlatform.basemap.off'))
     } catch (e) {
-      toast.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Could not save')
+      toast.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? t('pg.adminPlatform.basemap.saveFailed'))
     } finally { setSaving(false) }
   }
 
   const Heading = headingLevel === 3 ? 'h3' : 'h2'
-  const field = (key: keyof MapSettings, label: string, placeholder: string, hint: string) => (
+  const field = (key: keyof MapSettings, label: string, placeholder: string, hint: string, ltr = true) => (
     <label style={{ display: 'block', marginBottom: 12, fontSize: 13 }}>
       <span style={{ display: 'block', fontWeight: 600, marginBottom: 4 }}>{label}</span>
-      <input value={form[key] ?? ''} placeholder={placeholder} style={{ width: '100%', maxWidth: 560 }}
+      <input value={form[key] ?? ''} placeholder={placeholder} style={{ width: '100%', maxWidth: 560 }} dir={ltr ? 'ltr' : undefined}
+        id={`basemap-${key}`} name={`basemap-${key}`} autoComplete="off"
         onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))} />
       <span style={{ display: 'block', fontSize: 11.5, color: 'var(--muted)', marginTop: 3 }}>{hint}</span>
     </label>
   )
   return (
     <section className="card" style={{ padding: 16, marginTop: 16 }}>
-      <Heading style={{ fontSize: 15, marginTop: 0 }}>Basemap</Heading>
-      {loading ? <LoadingState /> : loadError ? <LoadError what="the map settings" error={loadError} onRetry={load} /> : (
+      <Heading style={{ fontSize: 15, marginTop: 0 }}>{t('pg.adminPlatform.basemap.title')}</Heading>
+      {loading ? <LoadingState /> : loadError ? <LoadError what={t('pg.adminPlatform.maps.loadWhat')}
+        title={t('pg.adminPlatform.loadErr', { what: t('pg.adminPlatform.maps.loadWhat') })} retryLabel={t('pg.adminPlatform.retry')}
+        error={loadError} onRetry={load} /> : (
         <>
           <p style={{ fontSize: 12.5, color: 'var(--muted)' }}>
-            Off by default: maps draw country outlines only. Point this at your own XYZ tile server to draw
-            streets and terrain under every map; maps then use the tiles' Web Mercator projection.
+            {t('pg.adminPlatform.basemap.intro')}
           </p>
-          {field('tile_url', 'Tile address', 'https://tiles.example.local/{z}/{x}/{y}.png',
-            'Must contain {z}, {x} and {y}. {s} rotates a/b/c subdomains. Tiles are fetched by each viewer’s browser. '
-            + 'Image tiles (.png/.jpg) or vector tiles (.pbf/.mvt, e.g. TileServer GL’s /data/<name>/{z}/{x}/{y}.pbf).')}
-          {field('attribution', 'Attribution', '© OpenStreetMap contributors',
-            'Shown in the corner of every map with tiles. Required by almost every tile licence.')}
-          {field('contrast_tile_url', 'High-contrast tile address (optional)', 'https://tiles.example.local/contrast/{z}/{x}/{y}.png',
-            'Used instead for viewers whose system asks for more contrast.')}
+          {/* The hints show {z}/{x}/{y} literally: no vars are passed, so t() leaves them. */}
+          {field('tile_url', t('pg.adminPlatform.basemap.tileUrl'), 'https://tiles.example.local/{z}/{x}/{y}.png',
+            t('pg.adminPlatform.basemap.tileHint'))}
+          {field('attribution', t('pg.adminPlatform.basemap.attribution'), '© OpenStreetMap contributors',
+            t('pg.adminPlatform.basemap.attributionHint'), false)}
+          {field('contrast_tile_url', t('pg.adminPlatform.basemap.contrastUrl'), 'https://tiles.example.local/contrast/{z}/{x}/{y}.png',
+            t('pg.adminPlatform.basemap.contrastHint'))}
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn btn-primary btn-sm" disabled={saving} onClick={() => void save(form)}>
-              {saving ? 'Saving…' : 'Save'}
+              {saving ? t('pg.adminPlatform.saving') : t('pg.adminPlatform.save')}
             </button>
             {form.tile_url && (
               <button className="btn btn-sm" disabled={saving}
-                onClick={() => void save({ tile_url: '', attribution: '', contrast_tile_url: '' })}>Turn basemap off</button>
+                onClick={() => void save({ tile_url: '', attribution: '', contrast_tile_url: '' })}>{t('pg.adminPlatform.basemap.turnOff')}</button>
             )}
           </div>
         </>

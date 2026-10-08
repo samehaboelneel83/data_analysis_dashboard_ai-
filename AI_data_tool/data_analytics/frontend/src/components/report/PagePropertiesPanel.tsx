@@ -1,4 +1,6 @@
-import { useT, type MessageKey } from '../../i18n'
+import { useT, type MessageKey, type TranslateFn } from '../../i18n'
+import { dtypeName } from '../../lib/dtypeName'
+import { richT } from '../../i18n/builder/panes'
 import React, { useState, useEffect, useRef } from 'react'
 import { Check } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -29,37 +31,54 @@ interface Props {
   onPalette?: (key: string) => void
 }
 
-const PAGE_TYPES: { value: PageType; label: string; desc: string }[] = [
-  { value: 'normal',      label: 'Normal',      desc: 'Standard visible tab' },
-  { value: 'hidden',      label: 'Hidden',       desc: 'Tab hidden in view mode' },
-  { value: 'popup',       label: 'Popup',        desc: 'Rendered as floating overlay' },
-  { value: 'tooltip',     label: 'Tooltip',      desc: 'Shown as a hover tooltip on another visual' },
-  { value: 'drillthrough',label: 'Drillthrough', desc: 'Reached by drilling through from another page' },
+const PAGE_TYPES: { value: PageType; label: MessageKey; desc: MessageKey }[] = [
+  { value: 'normal',       label: 'bc.panes.page.type.normal',       desc: 'bc.panes.page.type.normal.desc' },
+  { value: 'hidden',       label: 'bc.panes.page.type.hidden',       desc: 'bc.panes.page.type.hidden.desc' },
+  { value: 'popup',        label: 'bc.panes.page.type.popup',        desc: 'bc.panes.page.type.popup.desc' },
+  { value: 'tooltip',      label: 'bc.panes.page.type.tooltip',      desc: 'bc.panes.page.type.tooltip.desc' },
+  { value: 'drillthrough', label: 'bc.panes.page.type.drillthrough', desc: 'bc.panes.page.type.drillthrough.desc' },
 ]
 
+/** The settings groups' English titles. They are ids as much as words:
+ *  ExpandableGroup translates the heading it shows, and the search below
+ *  matches the English and the translated title alike. */
+const GROUP = {
+  identity: 'Identity', layout: 'Layout', appearance: 'Appearance', behaviour: 'Behaviour',
+  prompt: 'Prompt', actions: 'Actions on this page', visibility: 'Visibility',
+} as const
+
+/** The key each group's displayed heading is translated by. */
+const GROUP_KEY: Record<string, MessageKey> = {
+  'Identity': 'group.identity', 'Layout': 'group.layout', 'Appearance': 'group.appearance',
+  'Behaviour': 'group.behaviour', 'Prompt': 'group.prompt',
+  'Actions on this page': 'group.actions_on_this_page', 'Visibility': 'group.visibility',
+}
+
 // One-line summary of a button's action, e.g. "Button 'Go' → navigate: Page 2".
-// Mirrors the action kinds WidgetConfigPanel's Actions group can write.
-function actionSummary(w: Widget, pages: ReportPage[], bookmarks: Bookmark[]): string {
+// Mirrors the action kinds WidgetConfigPanel's Actions group can write. The
+// names are the author's, each kept in its own <bdi> by richT.
+function actionSummary(tr: TranslateFn, w: Widget, pages: ReportPage[], bookmarks: Bookmark[]): React.ReactNode {
   const cfg = w.config as Record<string, unknown>
-  const label = w.title || 'Button'
+  const label = w.title || tr('bc.panes.page.action.button')
   const action = cfg.action as string
   switch (action) {
     case 'navigate': {
       const target = pages.find(p => p.id === cfg.actionPageId)
-      return `Button '${label}' → navigate: ${target?.name ?? '—'}`
+      return richT(tr, 'bc.panes.page.action.navigate', { label, target: target?.name ?? '—' })
     }
     case 'bookmark': {
       const bm = bookmarks.find(b => b.id === cfg.actionBookmarkId)
-      return `Button '${label}' → apply bookmark: ${bm?.name ?? '—'}`
+      return richT(tr, 'bc.panes.page.action.bookmark', { label, target: bm?.name ?? '—' })
     }
     case 'url':
-      return `Button '${label}' → open URL: ${(cfg.actionUrl as string) ?? '—'}`
+      return richT(tr, 'bc.panes.page.action.url', { label, target: (cfg.actionUrl as string) ?? '—' })
     case 'report':
-      return `Button '${label}' → go to report #${cfg.actionReportId ?? '—'}`
+      return richT(tr, 'bc.panes.page.action.report', { label, target: String(cfg.actionReportId ?? '—') })
     case 'set_param':
-      return `Button '${label}' → set ${(cfg.actionParamName as string) ?? '?'} = ${(cfg.actionParamValue as string) ?? ''}`
+      return richT(tr, 'bc.panes.page.action.setParam', { label,
+        param: (cfg.actionParamName as string) ?? '?', value: (cfg.actionParamValue as string) ?? '' })
     default:
-      return `Button '${label}' → ${action}`
+      return richT(tr, 'bc.panes.page.action.other', { label, action: String(action) })
   }
 }
 
@@ -75,7 +94,7 @@ export default function PagePropertiesPanel({ reportId, page, columns, onUpdate,
   useEffect(() => {
     if (!reportId) return
     pageVisibilityApi.roles().then(setOrgRoles)
-      .catch(() => toast.error('Could not load roles'))
+      .catch(() => toast.error(tr('bc.panes.page.rolesLoadFailed')))
     pageVisibilityApi.get(reportId, page.id).then(v => setVisibleRoleIds(v.role_ids)).catch(() => {})
   }, [reportId, page.id])
 
@@ -92,7 +111,7 @@ export default function PagePropertiesPanel({ reportId, page, columns, onUpdate,
     setVisibleRoleIds(next)
     pageVisibilityApi.set(reportId, page.id, next).catch(() => {
       setVisibleRoleIds(previous)
-      toast.error('Could not save page visibility — the page is unchanged')
+      toast.error(tr('bc.panes.page.visibilitySaveFailed'))
     })
   }
   const [name,          setName]          = useState(page.name)
@@ -188,8 +207,10 @@ export default function PagePropertiesPanel({ reportId, page, columns, onUpdate,
   const actionWidgets = (page.widgets ?? []).filter(w => (w.config as Record<string, unknown>)?.action)
 
   const filterNeedle = filterText.trim().toLowerCase()
+  const groupMatches = (title: string) => title.toLowerCase().includes(filterNeedle)
+    || (GROUP_KEY[title] != null && tr(GROUP_KEY[title]).toLowerCase().includes(filterNeedle))
   const groupFilter = (title: string) => filterNeedle
-    ? { hidden: !title.toLowerCase().includes(filterNeedle), forceOpen: title.toLowerCase().includes(filterNeedle) }
+    ? { hidden: !groupMatches(title), forceOpen: groupMatches(title) }
     : {}
 
   return (
@@ -212,17 +233,17 @@ export default function PagePropertiesPanel({ reportId, page, columns, onUpdate,
       {(() => {
         const needle = filterText.trim().toLowerCase()
         if (!needle) return null
-        const GROUPS = ['identity', 'layout', 'appearance', 'behaviour', 'prompt']
-        return GROUPS.some(g => g.includes(needle)) ? null : (
+        const GROUPS = [GROUP.identity, GROUP.layout, GROUP.appearance, GROUP.behaviour, GROUP.prompt]
+        return GROUPS.some(groupMatches) ? null : (
           <p style={{ fontSize: 11, color: 'var(--muted)' }}>
-            No setting matches “{filterText}”.
+            {richT(tr, 'settings.noMatch', { q: filterText })}
           </p>
         )
       })()}
 
-      <ExpandableGroup id="page-identity" title="Identity" defaultOpen {...groupFilter("Identity")}>
+      <ExpandableGroup id="page-identity" title={GROUP.identity} defaultOpen {...groupFilter(GROUP.identity)}>
         {fld('Tab name', (
-          <input value={name} onChange={e => setName(e.target.value)} style={{ width: '100%' }} placeholder="Page name" />
+          <input value={name} onChange={e => setName(e.target.value)} style={{ width: '100%' }} placeholder={tr('bc.panes.page.namePh')} />
         ))}
 
         {fld('Display title', (
@@ -230,14 +251,14 @@ export default function PagePropertiesPanel({ reportId, page, columns, onUpdate,
         ))}
       </ExpandableGroup>
 
-      <ExpandableGroup id="page-layout" title="Layout" defaultOpen {...groupFilter("Layout")}>
+      <ExpandableGroup id="page-layout" title={GROUP.layout} defaultOpen {...groupFilter(GROUP.layout)}>
         {fld('Page size', (
           <div className="dl-seg" style={{ display: 'flex' }}>
             {(['16:9', '4:3', 'custom'] as const).map(size => (
               <button key={size} type="button" onClick={() => setPageSize(size)} aria-pressed={pageSize === size}
-                aria-label={size} className={`dl-seg__btn${pageSize === size ? ' dl-seg__btn--on' : ''}`}
+                aria-label={size === 'custom' ? tr('bc.panes.page.size.customAria') : size} className={`dl-seg__btn${pageSize === size ? ' dl-seg__btn--on' : ''}`}
                 style={{ flex: 1, justifyContent: 'center' }}>
-                {size === 'custom' ? 'Custom' : size}
+                {size === 'custom' ? tr('bc.panes.page.size.custom') : size}
               </button>
             ))}
           </div>
@@ -246,16 +267,15 @@ export default function PagePropertiesPanel({ reportId, page, columns, onUpdate,
             cloning it with an id, and a fragment swallows that silently. */}
         {fld('Background image', (
           <input value={backgroundUrl} onChange={e => setBackgroundUrl(e.target.value)}
-            placeholder="https://… or /uploads/…" style={{ width: '100%' }} />
+            placeholder={tr('bc.panes.page.backgroundPh')} style={{ width: '100%' }} />
         ))}
         <div style={{ fontSize: 10.5, color: 'var(--muted)', margin: '-6px 0 10px' }}>
-          Objects with a transparent background let it show through. Only http(s)
-          URLs and paths on this server are accepted.
+          {tr('bc.panes.page.backgroundHelp')}
         </div>
       </ExpandableGroup>
 
       {palettes && palettes.length > 0 && onPalette && (
-        <ExpandableGroup id="page-appearance" title="Appearance" defaultOpen {...groupFilter("Appearance")}>
+        <ExpandableGroup id="page-appearance" title={GROUP.appearance} defaultOpen {...groupFilter(GROUP.appearance)}>
           <div className="dl-field__label" style={{ marginBottom: 6 }}>{tr('page.palette')}</div>
           {/* A list rather than a row of dots: each palette shows its first
               four colours AND its name, so the choice is made by what the
@@ -278,18 +298,18 @@ export default function PagePropertiesPanel({ reportId, page, columns, onUpdate,
         </ExpandableGroup>
       )}
 
-      <ExpandableGroup id="page-behaviour" title="Behaviour" defaultOpen {...groupFilter("Behaviour")}>
+      <ExpandableGroup id="page-behaviour" title={GROUP.behaviour} defaultOpen {...groupFilter(GROUP.behaviour)}>
         {fld('Interactions', (
           <>
-            <select aria-label="Page interaction mode" value={interactionMode}
+            <select aria-label={tr('bc.panes.page.interactionMode')} value={interactionMode}
               onChange={e => setInteractionMode(e.target.value as 'manual' | 'linked' | 'oneway' | 'twoway')} style={{ width: '100%' }}>
-              <option value="manual">Manual (per-widget settings)</option>
-              <option value="linked">Linked selection (highlight everywhere)</option>
-              <option value="oneway">One-way filter (single source)</option>
-              <option value="twoway">Two-way filter (filters accumulate)</option>
+              <option value="manual">{tr('bc.panes.page.mode.manual')}</option>
+              <option value="linked">{tr('bc.panes.page.mode.linked')}</option>
+              <option value="oneway">{tr('bc.panes.page.mode.oneway')}</option>
+              <option value="twoway">{tr('bc.panes.page.mode.twoway')}</option>
             </select>
             <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-              An automatic mode overrides every widget's own interaction settings on this page.
+              {tr('bc.panes.page.modeHelp')}
             </span>
           </>
         ))}
@@ -302,13 +322,13 @@ export default function PagePropertiesPanel({ reportId, page, columns, onUpdate,
               const lastVisible = pt.value !== 'normal' && (page.page_type ?? 'normal') === 'normal'
                 && (pages ?? []).filter(p => (p.page_type ?? 'normal') === 'normal').length <= 1
               return (
-              <label key={pt.value} title={lastVisible ? 'This is the only visible page. Readers need one page to open on — make another page Normal first.' : undefined}
+              <label key={pt.value} title={lastVisible ? tr('bc.panes.page.lastVisibleTitle') : undefined}
                 style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: lastVisible ? 'not-allowed' : 'pointer', opacity: lastVisible ? 0.55 : 1, padding: '7px 8px', borderRadius: 6, background: pageType === pt.value ? 'color-mix(in srgb, var(--accent) 12%, transparent)' : 'transparent', border: `1px solid ${pageType === pt.value ? 'var(--accent)' : 'var(--border)'}`, transition: 'all .15s' }}>
-                <input type="radio" name="page_type" value={pt.value} checked={pageType === pt.value} disabled={lastVisible} title={lastVisible ? 'At least one page must stay visible' : undefined}
+                <input type="radio" name="page_type" value={pt.value} checked={pageType === pt.value} disabled={lastVisible} title={lastVisible ? tr('bc.panes.page.lastVisibleRadio') : undefined}
                   onChange={() => setPageType(pt.value)} style={{ marginTop: 2, accentColor: 'var(--accent)' }} />
                 <div>
-                  <div style={{ fontWeight: 600, fontSize: 12, color: pageType === pt.value ? 'var(--accent)' : 'var(--text)' }}>{pt.label}</div>
-                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>{lastVisible ? 'Not available: this is the only visible page' : pt.desc}</div>
+                  <div style={{ fontWeight: 600, fontSize: 12, color: pageType === pt.value ? 'var(--accent)' : 'var(--text)' }}>{tr(pt.label)}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>{lastVisible ? tr('bc.panes.page.lastVisibleDesc') : tr(pt.desc)}</div>
                 </div>
               </label>
               )
@@ -317,31 +337,31 @@ export default function PagePropertiesPanel({ reportId, page, columns, onUpdate,
         ))}
       </ExpandableGroup>
 
-      <ExpandableGroup id="page-prompt" title="Prompt" defaultOpen {...groupFilter("Prompt")}>
+      <ExpandableGroup id="page-prompt" title={GROUP.prompt} defaultOpen {...groupFilter(GROUP.prompt)}>
         <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 12, lineHeight: 1.5 }}>
-          A prompt lets viewers filter all widgets by entering a value. Select the column to filter on.
+          {tr('bc.panes.page.promptIntro')}
         </p>
 
         {fld('Filter column', (
           <select value={promptColumn} onChange={e => setPromptColumn(e.target.value)} style={{ width: '100%' }}>
-            <option value="">— no prompt —</option>
-            {columns.map(c => <option key={c.name} value={c.name}>{c.name} ({c.dtype})</option>)}
+            <option value="">{tr('bc.panes.page.noPrompt')}</option>
+            {columns.map(c => <option key={c.name} value={c.name}>{c.name} ({dtypeName(tr, c.dtype)})</option>)}
           </select>
         ))}
 
         {promptColumn && fld('Prompt label', (
-          <input value={promptLabel} onChange={e => setPromptLabel(e.target.value)} style={{ width: '100%' }} placeholder={`Filter by ${promptColumn}`} />
+          <input value={promptLabel} onChange={e => setPromptLabel(e.target.value)} style={{ width: '100%' }} placeholder={tr('bc.panes.page.promptLabelPh', { column: promptColumn })} />
         ))}
       </ExpandableGroup>
 
       {actionWidgets.length > 0 && pages && onSelectWidget && (
-        <ExpandableGroup id="page-actions" title="Actions on this page" defaultOpen {...groupFilter("Actions on this page")}>
+        <ExpandableGroup id="page-actions" title={GROUP.actions} defaultOpen {...groupFilter(GROUP.actions)}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {actionWidgets.map(w => (
               <button key={w.id} type="button" onClick={() => onSelectWidget(w)}
                 style={{ textAlign: 'start', fontSize: 11, padding: '7px 8px', border: '1px solid var(--border)',
                   borderRadius: 6, background: 'var(--surface2)', color: 'var(--text)', cursor: 'pointer' }}>
-                {actionSummary(w, pages, bookmarks ?? [])}
+                {actionSummary(tr, w, pages, bookmarks ?? [])}
               </button>
             ))}
           </div>
@@ -349,13 +369,11 @@ export default function PagePropertiesPanel({ reportId, page, columns, onUpdate,
       )}
 
       {reportId != null && orgRoles.length > 0 && (
-        <ExpandableGroup id="page-visibility" title="Visibility" defaultOpen {...groupFilter("Visibility")}>
+        <ExpandableGroup id="page-visibility" title={GROUP.visibility} defaultOpen {...groupFilter(GROUP.visibility)}>
           <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8, lineHeight: 1.5 }}>
-            Restrict this page to specific roles. No selection means everyone sees it;
-            org admins always do. Enforced on the server — a restricted page is never
-            sent to an excluded viewer at all.
+            {tr('bc.panes.page.visibilityIntro')}
           </p>
-          <div role="group" aria-label="Visible to roles" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div role="group" aria-label={tr('bc.panes.page.visibleToRoles')} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {orgRoles.map(r => (
               <label key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
                 <input type="checkbox" checked={visibleRoleIds.includes(r.id)}

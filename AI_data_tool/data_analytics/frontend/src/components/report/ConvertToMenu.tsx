@@ -4,6 +4,8 @@ import type { Widget } from '../../types/report'
 import { conversionsFor } from '../../lib/convertWidget'
 import { chartGroup, chartIcon, chartLabel, CHART_GROUP_ORDER } from './ChartGallery'
 import { useT } from '../../i18n'
+import { useDirection } from '../../contexts/DirectionContext'
+import { chartName } from '../../lib/chartName'
 
 /** The builder converts on this event: `{ widgetId, widget_type, config, label }`,
  *  saved as one undoable step. */
@@ -21,6 +23,10 @@ export default function ConvertToMenu({ widget, itemStyle, onDone }: {
   onDone: () => void
 }) {
   const t = useT()
+  const { language } = useDirection()
+  // QA3 C6: chart names in the reader's language (the gallery's own names);
+  // English keeps chartLabel exactly, as the menu always read.
+  const name = (type: string) => language === 'ar' ? chartName(type, t, language) : chartLabel(type)
   const [open, setOpen] = useState(false)
   const [group, setGroup] = useState<string | null>(null)
   const options = useMemo(() => conversionsFor(widget.widget_type, (widget.config ?? {}) as Record<string, unknown>),
@@ -39,7 +45,7 @@ export default function ConvertToMenu({ widget, itemStyle, onDone }: {
   const convert = (type: string, config: Record<string, unknown>) => {
     window.dispatchEvent(new CustomEvent(CONVERT_WIDGET_EVENT, { detail: {
       widgetId: widget.id, widget_type: type, config,
-      label: `Convert "${widget.title || chartLabel(widget.widget_type)}" to ${chartLabel(type)}`,
+      label: t('bc.shell.undo.convert', { name: widget.title || name(widget.widget_type), to: name(type) }),
     } }))
     onDone()
   }
@@ -70,7 +76,7 @@ export default function ConvertToMenu({ widget, itemStyle, onDone }: {
                     return (
                       <button key={o.type} type="button" role="menuitem" style={sub}
                         onClick={e => { e.stopPropagation(); convert(o.type, o.config) }}>
-                        <Icon size={13} aria-hidden /> {chartLabel(o.type)}
+                        <Icon size={13} aria-hidden /> {name(o.type)}
                       </button>
                     )
                   })}

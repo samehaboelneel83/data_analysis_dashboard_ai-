@@ -18,6 +18,12 @@ vi.mock('../services/api', () => ({
 
 import { datasetsApi, insightsApi, widgetDataApi } from '../services/api'
 
+/** QA3 D5: numbers sit in their own <bdi>, so a sentence with a number spans
+ *  elements; match the element whose whole text it is. */
+const whole = (s: string) => (_: string, el: Element | null) =>
+  !!el && el.textContent === s && ![...el.children].some(c => c.textContent === s)
+
+
 // IMPORT_DS is the NEWER of the two -- existing tests below assume it is the
 // auto-selected default, which is now recency-driven rather than list order.
 const IMPORT_DS = { id: 5, name: 'Orders', mode: 'import', created_at: '2026-02-01T00:00:00Z', columns: [] } as any
@@ -82,7 +88,7 @@ describe('InsightsHub inline top-insights preview', () => {
 
     expect(await screen.findByText('Revenue is trending up across most regions.')).toBeInTheDocument()
     expect(insightsApi.runShared).toHaveBeenCalledWith(5)
-    expect(screen.getByText('Revenue up 12%')).toBeInTheDocument()
+    expect(screen.getByText(whole('Revenue up 12%'))).toBeInTheDocument()
     expect(screen.getByText('One region lags')).toBeInTheDocument()
     expect(screen.getByText('Missing cost data')).toBeInTheDocument()
     // Only the top 3 by score -- the backend already returns them sorted.
@@ -200,8 +206,8 @@ describe('the narrative earns its place or is not shown', () => {
     } as any)
     await renderHub(5)
 
-    expect(await screen.findByText('Finding 1')).toBeInTheDocument()
-    expect(screen.queryByText('1 outlying rows carry 43% of symbol_code.')).toBeNull()
+    expect(await screen.findByText(whole('Finding 1'))).toBeInTheDocument()
+    expect(screen.queryByText(whole('1 outlying rows carry 43% of symbol_code.'))).toBeNull()
   })
 
   it('still shows the panel and its link with one finding', async () => {
@@ -212,7 +218,7 @@ describe('the narrative earns its place or is not shown', () => {
     } as any)
     await renderHub(5)
 
-    expect(await screen.findByText('Finding 1')).toBeInTheDocument()
+    expect(await screen.findByText(whole('Finding 1'))).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /view full scan/i })).toBeInTheDocument()
   })
 
@@ -226,7 +232,7 @@ describe('the narrative earns its place or is not shown', () => {
     expect(await screen.findByText(
       'Revenue is up while costs drift, and one region lags both.')).toBeInTheDocument()
     for (const n of [1, 2, 3]) {
-      expect(screen.getByText(`Finding ${n}`)).toBeInTheDocument()
+      expect(screen.getByText(whole(`Finding ${n}`))).toBeInTheDocument()
     }
   })
 

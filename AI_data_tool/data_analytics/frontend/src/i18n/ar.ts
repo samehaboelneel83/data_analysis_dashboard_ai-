@@ -1,7 +1,23 @@
 import type { MessageKey } from './en'
+import { ar as bcCanvas } from './builder/canvas'
+import { ar as bcPanes } from './builder/panes'
+import { ar as bcRules } from './builder/rules'
+import { ar as bcShell } from './builder/shell'
+import { ar as bcStats } from './builder/stats'
+import { ar as bcDialogs } from './builder/dialogs'
+import { ar as pgAdminSecurity } from './pages/adminSecurity'
+import { ar as pgAdminPlatform } from './pages/adminPlatform'
+import { ar as pgDataPages } from './pages/dataPages'
+import { ar as pgPanelsA } from './pages/panelsA'
+import { ar as pgPanelsB } from './pages/panelsB'
+import { ar as pgModelsMaps } from './pages/modelsMaps'
+import { ar as pgTypes } from './pages/types'
 
 /** Arabic UI strings. Keys must match `en.ts` exactly. */
 export const ar: Record<MessageKey, string> = {
+  ...bcCanvas, ...bcPanes, ...bcRules, ...bcShell, ...bcStats, ...bcDialogs,
+  // 8-i18n: the pages outside the Builder, one module per area (i18n/pages/).
+  ...pgAdminSecurity, ...pgAdminPlatform, ...pgDataPages, ...pgPanelsA, ...pgPanelsB, ...pgModelsMaps, ...pgTypes,
   'nav.home': 'الرئيسية',
   'nav.askAi': 'اسأل الذكاء الاصطناعي',
   'nav.datasets': 'مجموعات البيانات',
@@ -918,7 +934,8 @@ export const ar: Record<MessageKey, string> = {
   'bd.keys.ask': 'اسأل الذكاء الاصطناعي',
   'bd.keys.jump': 'الانتقال إلى تقرير أو مجموعة بيانات أو صفحة',
   'bd.keys.sheet': 'ورقة الاختصارات هذه',
-  'bd.guide.where': 'عمود {from}–{to} · صف {row}',
+  'bd.guide.col': 'عمود',
+  'bd.guide.row': 'صف',
   'bd.guide.aligned': 'محاذاة ×{n}',
   'bd.group.aria': 'العناصر المحددة',
   'bd.group.n': 'المحدد: {n}',
@@ -1129,7 +1146,7 @@ export const ar: Record<MessageKey, string> = {
   'shx.gl.warning': 'يرى الضيوف هذه اللوحة للقراءة فقط بصلاحيات بياناتك أنت. ويراها زميل مسجّل الدخول بصلاحياته هو. يمكنك إلغاء أي رابط من هنا في أي وقت.',
   'shx.gl.expires': 'انتهاء الرابط',
   'shx.gl.day': 'يوم واحد',
-  'shx.gl.days': '{n} يومًا',
+  'shx.gl.days': '{n, plural, one {يوم واحد} two {يومان} few {# أيام} many {# يومًا} other {# يوم}}',
   'shx.gl.pin': 'تثبيت التخطيط الحالي',
   'shx.gl.pinWhy': '(تبقى الصفحات والعناصر كما هي الآن، وتبقى البيانات محدّثة)',
   'shx.gl.create': 'إنشاء رابط ضيف',
@@ -2458,6 +2475,7 @@ export const ar: Record<MessageKey, string> = {
   'audit.byTargetPh': 'تصفية حسب الهدف…',
   'audit.apply': 'تطبيق',
   'audit.none': 'لا توجد سجلات تدقيق مطابقة.',
+  'audit.loadWhat': 'سجل التدقيق',
   'col.actor': 'المنفّذ',
   'col.target': 'الهدف',
 
@@ -2738,6 +2756,16 @@ export const ar: Record<MessageKey, string> = {
 
   'misc.useInPython': 'استخدام في Python',
   'misc.useInPythonTitle': 'اقرأ هذه البيانات من دفتر ملاحظات، بصلاحياتك أنت',
+  'sens.title': 'تصنيف الحساسية',
+  'sens.aria': 'حساسية مجموعة البيانات',
+  'sens.inForceWhy': 'المطبّق: {label} — ⁨{reason}⁩',
+  'sens.enforceRestricted': 'لا روابط ضيوف ولا تضمين؛ التنزيل يتطلب صلاحية على مستوى البيانات؛ ولا يُرسل بالبريد.',
+  'sens.enforceConfidential': 'روابط الضيوف تتطلب عضوًا مسجّل الدخول.',
+  'sens.enforceRedacted': 'روابط الضيوف تتطلب عضوًا مسجّل الدخول؛ وتُحجب ⁨{cols}⁩ من الروابط والتضمينات والملفات.',
+  'sens.listSep': '، ',
+  'sens.labelled': 'صُنّفت: {label}',
+  'sens.cleared': 'أُزيل التصنيف',
+  'sens.failed': 'تعذّر تصنيف مجموعة البيانات هذه',
   'sens.none': '— بدون تصنيف —',
   'sens.Public': 'عام',
   'sens.Internal': 'داخلي',

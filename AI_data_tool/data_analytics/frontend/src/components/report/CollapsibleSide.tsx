@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { useT } from '../../i18n'
 
 const STORAGE_KEY = 'datalytics.builderPanels'
 const WIDTH_KEY = 'datalytics.builderPanelWidths'
@@ -81,6 +82,7 @@ interface Props {
  * half-typed field survives a collapse.
  */
 export default function CollapsibleSide({ id, side, width, title, style, children, scrollResetKey, openSignal, minWidth, onOpenChange }: Props) {
+  const t = useT()
   const [open, setOpen] = useState(() => readMap<boolean>(STORAGE_KEY)[id] ?? true)
   useEffect(() => { if (openSignal) setOpen(true) }, [openSignal])
   useEffect(() => { onOpenChange?.(open) }, [open, onOpenChange])
@@ -177,7 +179,7 @@ export default function CollapsibleSide({ id, side, width, title, style, childre
         <div
           role="separator"
           aria-orientation="vertical"
-          aria-label={`Resize ${title}`}
+          aria-label={t('bc.shell.side.resize', { title })}
           aria-valuenow={panelW}
           aria-valuemin={MIN_PANEL_W}
           aria-valuemax={MAX_PANEL_W}
@@ -196,8 +198,8 @@ export default function CollapsibleSide({ id, side, width, title, style, childre
         type="button"
         onClick={toggle}
         aria-expanded={open}
-        aria-label={open ? `Collapse ${title}` : `Expand ${title}`}
-        title={open ? `Collapse ${title}` : `Expand ${title}`}
+        aria-label={t(open ? 'bc.shell.side.collapse' : 'bc.shell.side.expand', { title })}
+        title={t(open ? 'bc.shell.side.collapse' : 'bc.shell.side.expand', { title })}
         style={{
           display: 'flex', alignItems: 'center', justifyContent: side === 'right' && open ? 'flex-start' : 'center',
           gap: 4, flexShrink: 0, width: '100%', padding: '5px 4px',

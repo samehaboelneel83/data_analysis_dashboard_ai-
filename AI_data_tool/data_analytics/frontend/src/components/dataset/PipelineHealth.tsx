@@ -4,6 +4,7 @@ import toast from 'react-hot-toast'
 import { datasetsApi, type PipelineHealth } from '../../services/api'
 import { useT } from '../../i18n'
 import { AuthContext } from '../../contexts/AuthContext'
+import { formatDate } from '../../lib/dateFormat'
 
 /**
  * Pipeline plan, phase 2, on the dataset page: whether its refresh is working,
@@ -43,7 +44,7 @@ export function PipelineHealthLine({ health }: { health: PipelineHealth | null }
         <span style={{ color: 'var(--muted)' }}> · {health.last_run.error.split('\n')[0].slice(0, 160)}</span>
       )}
       {failing && health.next_retry_at && (
-        <span style={{ color: 'var(--muted)' }}> · {t('health.nextTry', { when: new Date(health.next_retry_at).toLocaleString() })}</span>
+        <span style={{ color: 'var(--muted)' }}> · {t('health.nextTry', { when: formatDate(health.next_retry_at) })}</span>
       )}
     </div>
   )

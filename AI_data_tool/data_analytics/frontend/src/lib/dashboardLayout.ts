@@ -432,3 +432,20 @@ export function layoutChanged(a: GridLayout, b: GridLayout): boolean {
 export function isPackedMode(mode: string | null | undefined): boolean {
   return mode !== 'free'
 }
+
+/**
+ * QA3 N3: what the canvas draws for a page, without writing anything.
+ * A page with no layout mode (v1's dashboards) is shown in the default
+ * automatic layout; a packed page whose stored widgets overlap is shown
+ * compacted. Either used to be SAVED the moment the page opened in Edit, one
+ * request per widget -- a burst of versions for opening a dashboard. Now it
+ * is only drawn, and stored on the first real layout edit. Empty: the stored
+ * layouts are what is drawn.
+ */
+export function shownLayouts(page: { layout_mode?: string | null; widgets: { id: number; widget_type: string; layout: GridLayout }[] }): Record<number, GridLayout> {
+  if (!page.widgets.length) return {}
+  const items = toLayoutItems(page.widgets)
+  if (needsAutoPack(page.layout_mode)) return applyRecipe(items, DEFAULT_RECIPE)
+  if (isPackedMode(page.layout_mode) && itemsOverlap(items)) return compact(items)
+  return {}
+}

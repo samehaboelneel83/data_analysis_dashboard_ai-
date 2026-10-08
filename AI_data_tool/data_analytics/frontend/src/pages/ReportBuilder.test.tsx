@@ -323,6 +323,8 @@ describe('ReportBuilder multi-select and Align/Distribute toolbar', () => {
     fireEvent.click(await screen.findByText('Second Widget'), { shiftKey: true })
     expect(await screen.findByText('2 selected')).toBeInTheDocument()
     expect(screen.getAllByText('2 widgets selected').length).toBeGreaterThan(0)
+    // QA4 V5: no per-widget quick toolbar under the group bar
+    expect(screen.queryByRole('toolbar', { name: /^Quick actions for/ })).toBeNull()
     fireEvent.keyDown(document.body, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByText('2 selected')).toBeNull())
   })
@@ -482,10 +484,14 @@ describe('ReportBuilder Fields pane', () => {
     // from the pre-save config and sent {dimension} alone, wiping the measure.
     const first = reportWithWidget(); (first.pages[0].widgets[0] as any).config = {}
     const second = reportWithWidget(); (second.pages[0].widgets[0] as any).config = { measure: 'sales' }
-    vi.mocked(reportsApi.get).mockResolvedValueOnce(first as any).mockResolvedValue(second as any)
+    // The server's copy: empty until the first save lands (QA4 E2: a fixture
+    // that served `second` from the second load on had "sales" on the widget
+    // before it was clicked, and the old planner put it in a second role).
+    let saved = false
+    vi.mocked(reportsApi.get).mockImplementation(async () => (saved ? second : first) as any)
     vi.mocked(datasetsApi.get).mockResolvedValue(datasetWithColumns() as any)
     vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
-    vi.mocked(reportsApi.updateWidget).mockResolvedValue({} as any)
+    vi.mocked(reportsApi.updateWidget).mockReset().mockImplementation(async () => { saved = true; return {} as any })
     renderBuilder()
     await screen.findByTestId('view-strip')
     fireEvent.click(await screen.findByText('Sales by Region', {}, { timeout: 3000 }))
@@ -1198,6 +1204,132 @@ describe('ReportBuilder zoom-aware drag math', () => {
   })
 })
 
+describe('opening an old dashboard writes nothing (QA3 N3)', () => {
+  const oldPage = (layout_mode: string | null, widgets: any[]) => {
+    const r = baseReport()
+    ;(r.pages[0] as any).layout_mode = layout_mode
+    r.pages[0].widgets = widgets as any
+    return r
+  }
+  const kpi = (id: number, x: number, y: number, w = 12, h = 5) =>
+    ({ id, page_id: 100, widget_type: 'kpi', title: `KPI ${id}`, config: { measure: 'revenue' }, layout: { x, y, w, h }, created_at: '2026-01-01' })
+
+  it.each([
+    ['no layout mode', null, [kpi(1, 0, 0), kpi(2, 0, 5)]],
+    ['packed, overlapping', 'packed', [kpi(1, 0, 0, 6, 4), kpi(2, 3, 2, 6, 4)]],
+  ])('%s: zero widget or page writes on opening in Edit', async (_, mode, widgets) => {
+    vi.mocked(reportsApi.get).mockResolvedValue(oldPage(mode as any, widgets) as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    vi.mocked(reportsApi.updateWidget).mockClear()
+    vi.mocked(reportsApi.updatePage).mockClear()
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    await screen.findByText('KPI 1')
+    await new Promise(r => setTimeout(r, 300))
+    expect(reportsApi.updateWidget).not.toHaveBeenCalled()
+    expect(reportsApi.updatePage).not.toHaveBeenCalled()
+  })
+
+  it('the first real edit stores what was shown, page first, one write at a time; undo restores it all', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue(oldPage(null, [kpi(1, 0, 0), kpi(2, 0, 5), kpi(3, 0, 10)]) as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    const order: string[] = []; let inFlight = 0, maxInFlight = 0
+    const slow = (what: string) => async () => {
+      order.push(what); inFlight++; maxInFlight = Math.max(maxInFlight, inFlight)
+      await new Promise(r => setTimeout(r, 5)); inFlight--; return {} as any
+    }
+    vi.mocked(reportsApi.updateWidget).mockReset().mockImplementation(((_r: number, _p: number, id: number) => slow(`widget ${id}`)()) as any)
+    vi.mocked(reportsApi.updatePage).mockReset().mockImplementation(((_r: number, _p: number, d: any) => slow(`page ${d.layout_mode === '' ? 'restore' : d.layout_mode}`)()) as any)
+    const realRect = Element.prototype.getBoundingClientRect
+    Element.prototype.getBoundingClientRect = vi.fn(() => ({ left: 0, top: 0, right: 900, bottom: 600, width: 900, height: 600, x: 0, y: 0, toJSON: () => {} })) as any
+    try {
+      renderBuilder()
+      await screen.findByTestId('view-strip')
+      const grip = (await screen.findAllByText('⠿'))[0].closest('div') as HTMLElement
+      fireEvent.mouseDown(grip, { clientX: 0, clientY: 0 })
+      fireEvent.mouseMove(window, { clientX: 0, clientY: 20 * 66 })
+      fireEvent.mouseUp(window)
+      await waitFor(() => expect(order.filter(o => o.startsWith('widget')).length).toBeGreaterThanOrEqual(2))
+      await new Promise(r => setTimeout(r, 100))
+      expect(order[0]).toBe('page packed')
+      expect(maxInFlight).toBe(1)
+      // every widget the automatic layout moved is stored where it was shown
+      const stored = vi.mocked(reportsApi.updateWidget).mock.calls.map(c => c[2])
+      expect(new Set(stored)).toEqual(new Set([1, 2, 3]))
+
+      order.length = 0
+      fireEvent.click(await screen.findByRole('button', { name: 'Undo' }))
+      await waitFor(() => expect(order).toContain('page restore'))
+      expect(maxInFlight).toBe(1)
+      const undone = vi.mocked(reportsApi.updateWidget).mock.calls.slice(-3).map(c => [c[2], (c[3] as any).layout])
+      expect(Object.fromEntries(undone)).toEqual({ 1: { x: 0, y: 0, w: 12, h: 5 }, 2: { x: 0, y: 5, w: 12, h: 5 }, 3: { x: 0, y: 10, w: 12, h: 5 } })
+    } finally {
+      Element.prototype.getBoundingClientRect = realRect
+    }
+  })
+})
+
+describe('View → Edit starts with nothing selected (QA4 V6)', () => {
+  it('a value a reader picked (and its cross-filter) does not follow them into Edit', async () => {
+    const report = baseReport()
+    report.pages[0].widgets = [
+      { id: 5, page_id: 100, widget_type: 'list', title: 'Regions', config: { dimension: 'region' }, layout: { x: 0, y: 0, w: 6, h: 5 }, created_at: '2026-01-01' },
+      { id: 6, page_id: 100, widget_type: 'bar', title: 'Other', config: { dimension: 'region', measure: 'revenue' }, layout: { x: 6, y: 0, w: 6, h: 5 }, created_at: '2026-01-01' },
+    ] as any
+    vi.mocked(reportsApi.get).mockResolvedValue(report as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'North', value: 5 }], sampled: false })
+    renderBuilder('/reports/1')
+    fireEvent.click(await screen.findByText('North'))
+    expect(await screen.findAllByText(/region = North/)).not.toHaveLength(0)
+    fireEvent.click(screen.getByTestId('mode-toggle'))
+    await screen.findByTestId('view-strip')
+    await waitFor(() => expect(screen.queryByText(/region = North/)).toBeNull())
+  })
+})
+
+describe('Assign data on a widget that is not selected (QA3)', () => {
+  it('selects it and opens the Assign data dialog', async () => {
+    const r = baseReport()
+    r.pages[0].widgets = [
+      { id: 7, page_id: 100, widget_type: 'kpi', title: 'Empty KPI', config: {}, layout: { x: 0, y: 0, w: 3, h: 2 }, created_at: '2026-01-01' },
+      { id: 8, page_id: 100, widget_type: 'kpi', title: 'Other', config: { measure: 'revenue' }, layout: { x: 3, y: 0, w: 3, h: 2 }, created_at: '2026-01-01' },
+    ] as any
+    vi.mocked(reportsApi.get).mockResolvedValue(r as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    renderBuilder()
+    await screen.findByTestId('view-strip')
+    fireEvent.click(await screen.findByText('Other'))
+    const tile = document.querySelector('[data-widget-id="7"]') as HTMLElement
+    fireEvent.click(within(tile).getByRole('button', { name: 'Assign data' }))
+    expect(await screen.findByRole('dialog', { name: /^Assign data/ })).toBeInTheDocument()
+  })
+})
+
+describe('a canvas column narrower than the page (QA3 B5)', () => {
+  it('scales the page down to fit instead of cutting widgets off', async () => {
+    vi.mocked(reportsApi.get).mockResolvedValue(reportWithWidget() as any)
+    vi.mocked(datasetsApi.get).mockResolvedValue({ id: 10, name: 'Sales Data', columns: [] } as any)
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [], sampled: false })
+    // every box 400 wide: the column Properties-pinned-beside-a-panel leaves
+    const real = Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth')!
+    Object.defineProperty(Element.prototype, 'clientWidth', { configurable: true, get: () => 400 })
+    try {
+      renderBuilder()
+      await screen.findByTestId('view-strip')
+      const canvas = document.querySelector('[data-canvas]') as HTMLElement
+      await waitFor(() => expect(canvas.style.transform).toMatch(/scale\(0\.66/))
+      expect(canvas.style.width).toBe('600px')
+      expect((canvas.parentElement as HTMLElement).style.minWidth).toBe('400px')
+    } finally {
+      Object.defineProperty(Element.prototype, 'clientWidth', real)
+    }
+  })
+})
+
 describe('ReportBuilder zoom (in the second row since 7e1)', () => {
   it('zooms the canvas in and updates the displayed percentage', async () => {
     vi.mocked(reportsApi.get).mockResolvedValue(baseReport() as any)
@@ -1436,7 +1568,8 @@ describe('ReportBuilder report-level common filters', () => {
 
     await waitFor(() => expect(reportsApi.addCommonFilter).toHaveBeenCalledWith(1, { column: 'region', op: 'eq', value: 'North' }))
     // the active filter chip is shown
-    await waitFor(() => expect(screen.getByText(/region eq North/)).toBeInTheDocument())
+    // QA5 L5: the operator as a word, the code underneath
+    await waitFor(() => expect(screen.getByText((_, el) => el?.tagName === 'SPAN' && !!el.textContent?.replace(/\s+/g, ' ').trim().startsWith('region equals (=) North'))).toBeInTheDocument())
   })
 
   it('parses a comma list into an array for the in operator', async () => {
@@ -2786,7 +2919,7 @@ describe('canvas overlays (redesign 7e4)', () => {
     renderBuilder()
     await screen.findByTestId('view-strip')
     fireEvent.click(await screen.findByText('Sales by Region'))
-    expect(await screen.findByTestId('selection-guides')).toHaveTextContent('col 1–6 · row 1')
+    expect(await screen.findByTestId('selection-guides')).toHaveTextContent('col 1–6 · row 1–5')
     // QA3 A1: the plain click already selected it; Shift+click adds the second.
     fireEvent.click(await screen.findByText('Second Widget'), { shiftKey: true })
     expect(screen.getByTestId('group-box')).toHaveTextContent('2 selected')

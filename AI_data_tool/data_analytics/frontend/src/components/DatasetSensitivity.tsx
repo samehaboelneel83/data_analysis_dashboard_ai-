@@ -21,20 +21,22 @@ export default function DatasetSensitivity({ datasetId }: { datasetId: number })
   if (!s) return null
   const inherited = s.effective && s.effective !== s.label
   const enforce = s.effective === 'Restricted'
-    ? 'No guest links or embeds; downloads need data-level access; not e-mailed.'
+    ? t('sens.enforceRestricted')
     : s.effective === 'Confidential'
-      ? `Guest links need a signed-in member${s.redacted_on_share.length ? `; ${s.redacted_on_share.join(', ')} redacted from links, embeds and files` : ''}.`
+      ? (s.redacted_on_share.length
+        ? t('sens.enforceRedacted', { cols: s.redacted_on_share.join(t('sens.listSep')) })
+        : t('sens.enforceConfidential'))
       : null
   return (
     <span data-testid="dataset-sensitivity" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11 }}
-      title={[inherited ? `In force: ${s.effective} — ${s.reasons[0] ?? ''}` : '', enforce ?? ''].filter(Boolean).join(' · ') || 'Sensitivity label'}>
-      <select aria-label="Dataset sensitivity" value={s.label ?? ''} style={{ fontSize: 11, padding: '2px 4px' }}
+      title={[inherited ? t('sens.inForceWhy', { label: label(s.effective ?? ''), reason: s.reasons[0] ?? '' }) : '', enforce ?? ''].filter(Boolean).join(' · ') || t('sens.title')}>
+      <select aria-label={t('sens.aria')} value={s.label ?? ''} style={{ fontSize: 11, padding: '2px 4px' }}
         onChange={async e => {
           try {
             setS(await sensitivityApi.set(datasetId, e.target.value))
-            toast.success(e.target.value ? `Labelled ${e.target.value}` : 'Label cleared')
+            toast.success(e.target.value ? t('sens.labelled', { label: label(e.target.value) }) : t('sens.cleared'))
           } catch (err) {
-            toast.error((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Could not label this dataset')
+            toast.error((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? t('sens.failed'))
           }
         }}>
         <option value="">{t('sens.none')}</option>

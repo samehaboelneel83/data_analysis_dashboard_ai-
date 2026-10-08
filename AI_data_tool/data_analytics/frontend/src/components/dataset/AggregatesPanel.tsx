@@ -4,6 +4,7 @@ import { aggregatesApi } from '../../services/api'
 import { useT } from '../../i18n'
 import '../../pages/datasetDetail/aggregates.css'
 import type { AggregateListItem, AggregatePreflight } from '../../services/api'
+import { formatDate } from '../../lib/dateFormat'
 
 const AGGS = ['sum', 'count', 'min', 'max'] as const
 
@@ -168,7 +169,7 @@ export default function AggregatesPanel({ datasetId, mode }: { datasetId: number
                       {it.last_error
                         ? <span className="dl-aggs__status dl-aggs__status--bad">{t('agg3.failed', { why: it.last_error })}</span>
                         : <span className="dl-aggs__status">{it.dataset.last_refreshed_at
-                            ? t('agg3.refreshed', { when: new Date(it.dataset.last_refreshed_at).toLocaleString() }) : t('agg3.notRefreshed')}</span>}
+                            ? t('agg3.refreshed', { when: formatDate(it.dataset.last_refreshed_at) }) : t('agg3.notRefreshed')}</span>}
                     </td>
                     <td className="dl-aggs__row-actions">
                       <button type="button" className="btn btn-sm" onClick={() => editItem(it)} disabled={busy}>Edit</button>

@@ -60,6 +60,7 @@ import { isMissingLabel } from '../lib/missingLabel'
 import { type Tab, OPS, FILTER_FUNC_CATS, PAGE_SIZE, tabFromKey } from './datasetDetail/constants'
 import './datasetDetail/overview.css'
 import { certificationOf, isCertified } from '../lib/cleanDatasets'
+import { isolateNumbers } from '../lib/isolateNumbers'
 
 /** 5.5: a server error in an analysis panel reads as "run analysis first",
  *  never as a bare "Internal server error" on a dataset someone just made. */
@@ -1278,9 +1279,9 @@ export default function DatasetDetail() {
                     </div>
                     {insights && (
                       <>
-                        <p data-testid="insights-narrative" style={{ fontSize: 13, background: 'var(--surface)', border: '1px solid var(--border)',
+                        <p data-testid="insights-narrative" dir="auto" style={{ fontSize: 13, background: 'var(--surface)', border: '1px solid var(--border)',
                           borderRadius: 'var(--radius)', padding: '10px 14px', marginBottom: 10 }}>
-                          {insights.narrative}
+                          {isolateNumbers(insights.narrative)}
                         </p>
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 10 }}>
                           {insights.findings.map((f, i) => (
@@ -1309,8 +1310,9 @@ export default function DatasetDetail() {
                                     fontSize: 11, padding: 0, marginInlineStart: 'auto' }}><Pin size={12} /></button>
                                 <span style={{ fontSize: 10.5, color: 'var(--muted)', marginInlineStart: 'auto' }}>{Math.round(f.score * 100)}</span>
                               </div>
-                              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 3 }}>{f.title}</div>
-                              <div style={{ fontSize: 11, color: 'var(--muted)' }}>{f.detail}</div>
+                              {/* QA3 D5: own direction; numbers and ranges keep their order */}
+                              <div dir="auto" style={{ fontSize: 13, fontWeight: 600, marginBottom: 3 }}>{isolateNumbers(f.title)}</div>
+                              <div dir="auto" style={{ fontSize: 11, color: 'var(--muted)' }}>{isolateNumbers(f.detail)}</div>
                               <FindingChart datasetId={ds.id} finding={f}
                                 columnTypes={Object.fromEntries(ds.columns.map(c => [c.name, c.dtype ?? '']))} />
                             </div>
@@ -1752,7 +1754,7 @@ export default function DatasetDetail() {
                                   color: 'inherit', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}>
                               {calcColNames.has(c)
                                 ? <span className="dl-data3__type dl-data3__type--fx">ƒx</span>
-                                : <span className="dl-data3__type">{typeTag(colTypes[c] ?? '')}</span>}
+                                : <span className="dl-data3__type">{typeTag(tr, colTypes[c] ?? '')}</span>}
                               {c}
                               <span aria-hidden="true" style={{ marginInlineStart: 4, color: isSorted ? 'var(--accent)' : 'var(--border)', fontSize: 11 }}>
                                 {isSorted ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}
