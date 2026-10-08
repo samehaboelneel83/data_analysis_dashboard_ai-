@@ -8,6 +8,7 @@ const FILES: string[] = [
   'pages/admin/AdminColumnSecurityRules.tsx',
   'pages/admin/ConnectionRowPolicies.tsx',
   'pages/admin/AdminRoles.tsx',
+  'pages/admin/AdminAudit.tsx',
   'pages/admin/AdminUsers.tsx',
   'pages/admin/AdminExportPolicy.tsx',
 ]

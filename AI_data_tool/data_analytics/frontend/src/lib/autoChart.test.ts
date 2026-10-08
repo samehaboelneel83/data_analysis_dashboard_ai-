@@ -17,6 +17,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { chartForFields, type AutoField } from './autoChart'
+import { translate, type MessageKey, type TranslateFn } from '../i18n'
 
 const cat = (name: string): AutoField => ({ name, dtype: 'categorical', numeric: false })
 const num = (name: string): AutoField => ({ name, dtype: 'numeric', numeric: true })
@@ -189,5 +190,28 @@ describe('a geography column', () => {
     const out = chartForFields([geo('governorate'),
       { name: 'ordered_at', dtype: 'datetime', numeric: false }])
     expect(out?.suggestion.widget_type).not.toBe('map_choropleth')
+  })
+})
+
+describe('the title is in the reader\'s language (QA5b S3)', () => {
+  const tAr = ((key: string, vars?: Record<string, string | number>) => translate('ar', key as MessageKey, vars)) as TranslateFn
+  const tEn = ((key: string, vars?: Record<string, string | number>) => translate('en', key as MessageKey, vars)) as TranslateFn
+  const product: AutoField = { name: 'product', dtype: 'categorical', numeric: false }
+  const region: AutoField = { name: 'region', dtype: 'categorical', numeric: false }
+  const revenue: AutoField = { name: 'revenue', dtype: 'numeric', numeric: true }
+  const units: AutoField = { name: 'units', dtype: 'numeric', numeric: true }
+  const date: AutoField = { name: 'date', dtype: 'datetime', numeric: false }
+  const sets: AutoField[][] = [[product], [date], [revenue], [region, revenue], [region, revenue, units],
+    [date, region, revenue], [region, product, revenue], [region, product], [revenue, units]]
+
+  it('"Count by product" is Arabic, with the field name isolated', () => {
+    expect(chartForFields([product], tAr)!.suggestion.title).toBe('العدد حسب ⁨product⁩')
+  })
+
+  it('every rule has an Arabic title and the English through the catalog is unchanged', () => {
+    for (const s of sets) {
+      expect(chartForFields(s, tEn)!.suggestion.title).toBe(chartForFields(s)!.suggestion.title)
+      expect(chartForFields(s, tAr)!.suggestion.title).not.toMatch(/\b(by|and|against|Count|Trend|Distribution)\b/)
+    }
   })
 })

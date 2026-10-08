@@ -20,6 +20,12 @@ import PredictionModelsPanel from './PredictionModelsPanel'
 import { jobsApi, predictionModelsApi } from '../../services/api'
 import { MemoryRouter } from 'react-router-dom'
 
+// QA5b S1: deleting a model now asks first; the answer is set per test.
+const confirmAnswer = vi.hoisted(() => ({ ok: true, asked: [] as string[] }))
+vi.mock('../ui/ConfirmDialog', () => ({
+  useConfirm: () => (o: { title: string }) => { confirmAnswer.asked.push(o.title); return Promise.resolve(confirmAnswer.ok) },
+}))
+
 vi.mock('../../services/api', async (orig) => ({
   ...(await orig<Record<string, unknown>>()),
   predictionModelsApi: {
@@ -52,6 +58,19 @@ beforeEach(() => {
 const panel = () => render(<PredictionModelsPanel datasetId={1} columns={columns} />)
 
 describe('PredictionModelsPanel', () => {
+  it('asks before deleting a model, and a "no" deletes nothing (QA5b S1)', async () => {
+    vi.mocked(predictionModelsApi.list).mockResolvedValue([model()])
+    panel()
+    const del = await screen.findByRole('button', { name: 'Delete Churn model' })
+    confirmAnswer.ok = false; confirmAnswer.asked = []
+    fireEvent.click(del)
+    await waitFor(() => expect(confirmAnswer.asked).toEqual(['Delete "Churn model"?']))
+    expect(predictionModelsApi.remove).not.toHaveBeenCalled()
+    confirmAnswer.ok = true
+    fireEvent.click(del)
+    await waitFor(() => expect(predictionModelsApi.remove).toHaveBeenCalledWith(1, expect.anything()))
+  })
+
   it('says what a saved model is for when there are none', async () => {
     panel()
     expect(await screen.findByText(/no saved models/i)).toBeInTheDocument()

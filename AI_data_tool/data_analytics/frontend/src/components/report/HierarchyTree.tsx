@@ -43,6 +43,7 @@ export default function HierarchyTree({ nodes, datasetId, onRefresh }: Props) {
       body: t('pg.panelsA.hr.removeBody'),
       confirmLabel: t('pg.panelsA.hr.removeLevel'),
       destructive: false,
+      focusCancel: true,
     })) return
     await hierarchyApi.delete(datasetId, node.id)
     onRefresh()

@@ -47,6 +47,19 @@ describe('the difference check body in Arabic (QA4 T5)', () => {
     expect(keys.every(k => k.startsWith('bc.stats.'))).toBe(true)
   })
 
+  it('keeps each part of the evidence line in its own isolate, so right-to-left cannot reorder it (QA5b S6)', async () => {
+    open()
+    const chip = await screen.findByTestId('evidence-chip')
+    const isolates = [...chip.querySelectorAll('bdi')].map(b => [b.getAttribute('dir'), b.textContent])
+    expect(isolates).toEqual([
+      [null, 'اختبار ذي الحدين الدقيق (تقسيم متساوٍ)'],
+      ['ltr', 'p < 0.001'],
+      ['ltr', "Cohen's h"],
+      ['ltr', '0.07'],
+    ])
+    expect(chip.textContent).toBe("اختبار ذي الحدين الدقيق (تقسيم متساوٍ) · p < 0.001 · أثر ضئيل (Cohen's h 0.07)")
+  })
+
   it('translates the labels, the verdict and the footnotes; the server sentences keep dir="auto"', async () => {
     open()
     const result = await screen.findByTestId('difference-result')

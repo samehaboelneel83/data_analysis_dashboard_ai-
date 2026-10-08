@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { useT, type MessageKey } from '../../i18n'
-import { ACTIVITY_CODES } from '../../i18n/pages/dataPages'
+import { useT } from '../../i18n'
+import { activityActionName } from '../../i18n/pages/dataPages'
 import { Activity as ActivityIcon } from 'lucide-react'
 import { monitoringApi } from '../../services/api'
 import type { ActivityRow } from '../../services/api'
@@ -36,8 +36,7 @@ export default function MonitoringActivity() {
   // A known action code reads as words in the reader's language; English keeps
   // the code itself (it is what admins search for and what the docs name). An
   // unknown code — a newer server — is shown raw rather than guessed at.
-  const actionName = (code: string): string =>
-    ACTIVITY_CODES.has(code) ? t(`pg.dataPages.act.${code}` as MessageKey) : code
+  const actionName = (code: string): string => activityActionName(t, code)
 
   const { filtered, input, noMatches } = useListFilter(
     rows, r => [r.user_email, r.action, actionName(r.action), r.entity, r.detail], t('search.activity'))

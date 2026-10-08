@@ -147,6 +147,13 @@ export const en = {
   'bc.panes.review.perf.where': '{page}, {rows} marks',
   'bc.panes.review.perf.history': 'its dataset, last 7 days: {runs} queries, median {median} ms, p95 {p95} ms',
   'bc.panes.review.perf.cache': ', {pct}% from cache',
+  // QA5b S5: the Data pane's hierarchy chains (HierarchyChains).
+  'bc.panes.hc.dragHint': 'Drag onto the canvas to chart the first level',
+  'bc.panes.hc.levels': '{chain} levels',
+  'bc.panes.hc.select': 'Select {chain} {level}',
+  'bc.panes.hc.pick': 'Use {level} on the selected widget',
+  'bc.panes.hc.up': 'Move {level} up',
+  'bc.panes.hc.down': 'Move {level} down',
 } as const
 
 export const ar: Record<keyof typeof en, string> = {
@@ -272,6 +279,12 @@ export const ar: Record<keyof typeof en, string> = {
   'bc.panes.review.perf.where': '{page}، العلامات: {rows}',
   'bc.panes.review.perf.history': 'مجموعة بياناته، آخر 7 أيام: عدد الاستعلامات {runs}، الوسيط {median} ملّي ث، p95 {p95} ملّي ث',
   'bc.panes.review.perf.cache': '، {pct}% من الذاكرة المؤقتة',
+  'bc.panes.hc.dragHint': 'اسحب إلى اللوحة لرسم المستوى الأول',
+  'bc.panes.hc.levels': 'مستويات «⁨{chain}⁩»',
+  'bc.panes.hc.select': 'تحديد «⁨{level}⁩» من «⁨{chain}⁩»',
+  'bc.panes.hc.pick': 'استخدام «⁨{level}⁩» في العنصر المحدد',
+  'bc.panes.hc.up': 'نقل «⁨{level}⁩» لأعلى',
+  'bc.panes.hc.down': 'نقل «⁨{level}⁩» لأسفل',
 }
 
 /** `t(key, vars)` as React nodes, each string value bidi-isolated so a name

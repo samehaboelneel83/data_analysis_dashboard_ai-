@@ -10,6 +10,7 @@ import GraphLayersEditor from './GraphLayersEditor'
 import { en, ar } from '../../i18n/pages/modelsMaps'
 import { predictionModelsApi } from '../../services/api'
 
+import { ConfirmProvider } from '../ui/ConfirmDialog'
 vi.mock('../../services/api', async (orig) => ({
   ...(await orig<Record<string, unknown>>()),
   predictionModelsApi: {
@@ -20,7 +21,7 @@ vi.mock('../../services/api', async (orig) => ({
 }))
 
 /** 8-i18n: the Models tab and the map / graph editors in Arabic. */
-const inArabic = (ui: ReactNode) => render(<DirectionProvider><MemoryRouter>{ui}</MemoryRouter></DirectionProvider>)
+const inArabic = (ui: ReactNode) => render(<DirectionProvider><ConfirmProvider><MemoryRouter>{ui}</MemoryRouter></ConfirmProvider></DirectionProvider>)
 
 const columns = [
   { id: 1, name: 'region', dtype: 'categorical', missing_pct: 0, stats: {} },
