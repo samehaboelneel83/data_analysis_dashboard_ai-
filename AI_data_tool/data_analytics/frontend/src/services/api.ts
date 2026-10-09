@@ -123,6 +123,20 @@ function announceLlmUsed(headers: unknown) {
 }
 api.interceptors.response.use(r => { announceLlmUsed(r.headers); return r })
 
+/** A calculated column's Test result: sample values, plus (2026-10-10) a
+ *  summary of the whole column and, for a broken formula, a problem code the
+ *  builder words in plain language (backend services/expr_explain.py). */
+export interface CalcPreview {
+  ok: boolean
+  dtype?: string
+  sample?: unknown[]
+  error?: string
+  problem?: { code: string; [detail: string]: unknown }
+  summary?:
+    | { kind: 'labels'; rows: number; empty: number; distinct: number; top: [string, number][] }
+    | { kind: 'number'; rows: number; empty: number; infinite: number; min: number | null; mean: number | null; max: number | null }
+}
+
 export interface DatasetColumn {
   id: number
   name: string
@@ -1547,7 +1561,7 @@ export const calcColumnsApi = {
   save:    (dsId: number, col: CalcColumn)           => api.put<CalcColumn[]>(`/datasets/${dsId}/calculated-columns`, col).then(r => r.data),
   // `force`: delete even though something names it (the server answers 409 otherwise).
   delete:  (dsId: number, name: string, force?: boolean) => api.delete<CalcColumn[]>(`/datasets/${dsId}/calculated-columns/${encodeURIComponent(name)}`, force ? { params: { force: true } } : undefined).then(r => r.data),
-  preview: (dsId: number, expression: string)        => api.post<{ok:boolean;dtype?:string;sample?:unknown[];error?:string}>(`/datasets/${dsId}/calculated-columns/preview`, { expression }).then(r => r.data),
+  preview: (dsId: number, expression: string)        => api.post<CalcPreview>(`/datasets/${dsId}/calculated-columns/preview`, { expression }).then(r => r.data),
 }
 
 export const customFunctionsApi = {
@@ -2017,6 +2031,8 @@ export interface MeasurePreviewResult {
   dtype?: string | null
   sample?: { group: string | null; value: unknown }[]
   error?: string | null
+  /** A broken formula's problem, worded by the builder (backend expr_explain). */
+  problem?: { code: string; [detail: string]: unknown }
 }
 
 export const measuresApi = {

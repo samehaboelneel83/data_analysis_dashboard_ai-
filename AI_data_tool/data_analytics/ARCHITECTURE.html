@@ -680,6 +680,7 @@ STAT_FAMILIES       = {"postgresql"}</code></pre>
 
   <h3>2 · SQL construction</h3>
   <p><code>services/query_builder.py</code> builds dialect-correct SQL from a model definition: <code>build_sql(model, dialect, known, …)</code>, with <code>_quote()</code> handling per-dialect identifier quoting and <code>introspect_tables()</code> validating that referenced tables and columns actually exist before emission.</p>
+  <p>Conditions nest: a filter may be a <code>{group: and|or, filters: [...]}</code> box, compiled by the same code as any other condition. <code>services/sql_safety.py</code> holds the injection rules every path shares: values become per-dialect literals (<code>encode_literal</code>; backslashes doubled where the database treats them as an escape &mdash; MySQL, MariaDB, ClickHouse), names are quoted with the quote character doubled (<code>quote_ident</code>), and hand-written SQL (the SQL tab, custom-SQL imports, previews) must be exactly one read (<code>ensure_read_only</code>) before <code>services/connections.py</code> runs it.</p>
   <p><code>sql_expr.py</code> and <code>measure_eval.py</code> evaluate user-authored expressions and calculated measures. <code>parameters.py</code> binds report parameters.</p>
 
   <h3>3 · Governance</h3>
@@ -1161,8 +1162,8 @@ llm_reserved_interactive = 2</code></pre>
     <table>
       <thead><tr><th>Suite</th><th>Scope</th><th>Count</th></tr></thead>
       <tbody>
-        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~6,670 tests · 471 modules</td></tr>
-        <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~3,410 tests · 338 files</td></tr>
+        <tr><th>Backend</th><td><code>backend/tests/</code></td><td class="num">~6,670 tests · 474 modules</td></tr>
+        <tr><th>Frontend</th><td>colocated <code>*.test.ts(x)</code></td><td class="num">~3,410 tests · 341 files</td></tr>
         <tr><th>Evals</th><td><code>backend/evals/</code></td><td>Agent quality gates (<code>run_eval_gate.ps1</code>)</td></tr>
         <tr><th>Conformance</th><td><code>tests/test_layer_conformance.py</code></td><td>Enforces the layer boundaries above</td></tr>
         <tr><th>Doc audit</th><td><code>tests/test_architecture_doc.py</code></td><td>Enforces the <em>counts</em> in this document</td></tr>

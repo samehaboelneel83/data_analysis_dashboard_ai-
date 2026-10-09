@@ -1569,7 +1569,7 @@ describe('ReportBuilder report-level common filters', () => {
     await waitFor(() => expect(reportsApi.addCommonFilter).toHaveBeenCalledWith(1, { column: 'region', op: 'eq', value: 'North' }))
     // the active filter chip is shown
     // QA5 L5: the operator as a word, the code underneath
-    await waitFor(() => expect(screen.getByText((_, el) => el?.tagName === 'SPAN' && !!el.textContent?.replace(/\s+/g, ' ').trim().startsWith('region equals (=) North'))).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText((_, el) => el?.tagName === 'SPAN' && !el.closest('[data-report-filter]') && !!el.textContent?.replace(/\s+/g, ' ').trim().startsWith('region equals (=) North'))).toBeInTheDocument())
   })
 
   it('parses a comma list into an array for the in operator', async () => {
@@ -1606,7 +1606,8 @@ describe('ReportBuilder report-level common filters', () => {
     fireEvent.click(screen.getByRole('button', { name: '+ Add report filter' }))
 
     await waitFor(() => expect(reportsApi.addCommonFilter).toHaveBeenCalledWith(1, { column: 'order_date', op: 'relative', value: spec }))
-    expect(await screen.findByText('order_date: Year to date · from latest data')).toBeInTheDocument()
+    // Listed in the Fields panel and (F7) on the canvas filter bar.
+    expect(await screen.findAllByText('order_date: Year to date · from latest data')).toHaveLength(2)
     await waitFor(() => expect(vi.mocked(reportsApi.getRevision).mock.calls.length).toBeGreaterThan(callsBefore))
     // our own write is not somebody else's edit
     await new Promise(r => setTimeout(r, 50))
@@ -2233,17 +2234,29 @@ describe('classifying a field as geography', () => {
 
   it('offers the classification on a category field', async () => {
     await builder()
-    expect(await screen.findByRole('button', { name: 'Classify governorate' }))
+    expect(await screen.findByRole('button', { name: 'Map geography for governorate (is it a place on a map?)' }))
       .toBeInTheDocument()
+  })
+
+  it('a year column is a category everywhere, not only in its group (Fields plan F1)', async () => {
+    // It was listed under Dimensions but drew a histogram and got the measure buttons.
+    cols.push({ id: 3, name: 'model_year', dtype: 'numeric', missing_pct: 0, stats: {} })
+    try {
+      await builder()
+      const group = (await screen.findAllByText('model_year')).map(e => e.closest('[data-field-group]')).find(Boolean)
+      expect(group?.getAttribute('data-field-group')).toBe('Dimensions')
+      expect(screen.getByRole('button', { name: 'Reclassify model_year as measure' })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Reclassify model_year as category' })).not.toBeInTheDocument()
+    } finally { cols.pop() }
   })
 
   it('does not offer it on a measure', async () => {
     // There is no map of a number: geography is a property of a category.
     await builder()
-    await screen.findByRole('button', { name: 'Classify governorate' })
+    await screen.findByRole('button', { name: 'Map geography for governorate (is it a place on a map?)' })
     // Exact: there is already a "Reclassify sales as category" control beside
     // every field, and a loose pattern matches that instead.
-    expect(screen.queryByRole('button', { name: 'Classify sales' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Map geography for sales/ })).not.toBeInTheDocument()
   })
 
   it('saves the classification and the boundary set together', async () => {
@@ -2253,7 +2266,7 @@ describe('classifying a field as geography', () => {
     const { boundarySetsApi } = await import('../services/api')
     vi.mocked(boundarySetsApi.get).mockResolvedValue({ id: 7, name: 'Egypt governorates', key_properties: ['name'],
       geometry: { type: 'FeatureCollection', features: [] } } as never)
-    fireEvent.click(await screen.findByRole('button', { name: 'Classify governorate' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Map geography for governorate (is it a place on a map?)' }))
     fireEvent.click(await screen.findByRole('menuitem', { name: /Egypt governorates/ }))
     // The validation panel comes first: the match is shown before it is saved.
     expect(await screen.findByRole('dialog', { name: /Check governorate against Egypt governorates/ })).toBeInTheDocument()
@@ -2267,7 +2280,7 @@ describe('classifying a field as geography', () => {
 
   it('can be turned back into an ordinary category', async () => {
     const api = await builder({ governorate: { role: 'geography', boundary_set_id: 7 } })
-    fireEvent.click(await screen.findByRole('button', { name: 'Classify governorate' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Map geography for governorate (is it a place on a map?)' }))
     fireEvent.click(await screen.findByRole('menuitem', { name: /not geography/i }))
 
     await waitFor(() => {

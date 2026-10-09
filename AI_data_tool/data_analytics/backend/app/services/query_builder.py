@@ -72,6 +72,9 @@ MAX_LIMIT = 100_000  # kept for importers; the live ceiling is max_limit()
 #: a model is client-supplied: without a ceiling, a deeply self-nested payload
 #: is a stack-overflow request rather than a query.
 _MAX_SUBQUERY_DEPTH = 3
+#: How deep "Match all / Match any" condition groups may nest (client-supplied,
+#: compiled recursively -- bounded for the same reason as subqueries).
+_MAX_GROUP_DEPTH = 5
 
 # ── Self-referencing hierarchies ─────────────────────────────────────────────
 # Any table shaped (id, parent_id) -- an org chart, a category tree, a bill of
@@ -189,11 +192,10 @@ _FUNC_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,80}$")
 
 
 def _quote(dialect: str, name: str) -> str:
-    if dialect == "mysql":
-        return f"`{name}`"
-    if dialect == "sqlserver":
-        return f"[{name}]"
-    return f'"{name}"'
+    # The quote character is doubled inside the name (sql_safety.quote_ident):
+    # names are catalogue members, and this keeps even a real `a"b` one name.
+    from .sql_safety import quote_ident
+    return quote_ident(dialect, name)
 
 
 def _require(d: dict, key: str, what: str) -> str:
@@ -211,15 +213,12 @@ def _require(d: dict, key: str, what: str) -> str:
     return v
 
 
-def _encode_value(v) -> str:
-    if v is None:
-        return "NULL"
-    if isinstance(v, bool):
-        return "1" if v else "0"
-    if isinstance(v, (int, float)):
-        return repr(float(v)) if isinstance(v, float) else repr(int(v))
-    # single-quote doubling: the one escape SQL string literals define
-    return "'" + str(v).replace("'", "''") + "'"
+def _encode_value(v, dialect: str | None = None) -> str:
+    # Per dialect (sql_safety.encode_literal): quote doubling alone let a value
+    # end its string early on MySQL/MariaDB/ClickHouse, where a backslash is an
+    # escape too. A dialect-less call gets the strictest (backslash) encoding.
+    from .sql_safety import encode_literal
+    return encode_literal(v, dialect)
 
 
 def _build_hierarchy_cte(spec: dict, dialect: str, known: dict[str, set[str]],
@@ -281,7 +280,7 @@ def _build_hierarchy_cte(spec: dict, dialect: str, known: dict[str, set[str]],
     if root_value is None:
         anchor_where = f"{qid_null_check(qparent)}"
     else:
-        anchor_where = f"{qid} = {_encode_value(root_value)}"
+        anchor_where = f"{qid} = {_encode_value(root_value, dialect)}"
 
     # Both terms of a UNION must select the same columns in the same order, so
     # the base table's columns are listed EXPLICITLY rather than with `*`:
@@ -446,14 +445,17 @@ def build_sql(model: dict, dialect: str, known: dict[str, set[str]],
             # being read and ignored.
             sql_from += f" {how} {qtable(jt)}"
 
-    # WHERE -- D3: a single joiner (AND/OR) ties every filter row together,
-    # the same "one joiner for the whole row set" shape as the codeless
-    # ExpressionBuilder's Simple mode (lib/simpleExpr.ts), not per-pair logic.
+    # WHERE -- D3: a single joiner (AND/OR) ties the top-level rows together.
+    # A row may also be a GROUP -- {"group": "and"|"or", "filters": [...]} --
+    # with its own joiner, nested up to _MAX_GROUP_DEPTH: the box editor's
+    # "Match all / Match any", so `condition = Used AND (make = Kia OR make =
+    # Hyundai)` no longer needs the SQL tab. A group compiles through this same
+    # code, so every condition inside it is validated exactly as strictly.
     joiner = model.get("filters_joiner", "and")
     if joiner not in ("and", "or"):
         raise ValueError(f"unknown filters joiner '{joiner}'")
-    wheres = []
-    for f in model.get("filters") or []:
+
+    def one(f: dict) -> str:
         op = f.get("op", "eq")
 
         # Nested subquery: `col IN (SELECT …)`, or a correlated-free EXISTS.
@@ -479,33 +481,57 @@ def build_sql(model: dict, dialect: str, known: dict[str, set[str]],
             inner_sql = build_sql(inner_model, dialect, known, schema,
                                   known_functions, depth=depth + 1)
             if op in ("exists", "not_exists"):
-                wheres.append(f"{_SUBQUERY_OPS[op]} ({inner_sql})")
+                return f"{_SUBQUERY_OPS[op]} ({inner_sql})"
             else:
                 inner_cols = inner_model.get("columns") or []
                 if len(inner_cols) != 1:
                     raise ValueError(
                         f"an '{op}' subquery must select exactly one column")
                 col = qcol(f.get("table"), _require(f, "column", "a filter"))
-                wheres.append(f"{col} {_SUBQUERY_OPS[op]} ({inner_sql})")
-            continue
+                return f"{col} {_SUBQUERY_OPS[op]} ({inner_sql})"
 
         col = qcol(f.get("table"), _require(f, "column", "a filter"))
         if op in _OPS:
-            wheres.append(f"{col} {_OPS[op]} {_encode_value(f.get('value'))}")
+            return f"{col} {_OPS[op]} {_encode_value(f.get('value'), dialect)}"
         elif op == "contains":
-            v = str(f.get("value", "")).replace("'", "''")
-            wheres.append(f"{col} LIKE '%{v}%'")
+            # Encoded like every other value, and % / _ in the text match
+            # themselves (sql_safety.like_pattern).
+            from .sql_safety import like_pattern
+            return f"{col} LIKE {like_pattern(f.get('value', ''), dialect)}"
         elif op == "in":
             vals = f.get("value") or []
             if not isinstance(vals, list) or not vals:
                 raise ValueError("'in' filter needs a non-empty list value")
-            wheres.append(f"{col} IN ({', '.join(_encode_value(v) for v in vals)})")
+            return f"{col} IN ({', '.join(_encode_value(v, dialect) for v in vals)})"
         elif op == "is_null":
-            wheres.append(f"{col} IS NULL")
+            return f"{col} IS NULL"
         elif op == "not_null":
-            wheres.append(f"{col} IS NOT NULL")
+            return f"{col} IS NOT NULL"
         else:
             raise ValueError(f"unknown filter op '{op}'")
+
+    def conditions(items, level: int) -> list[str]:
+        """Each item compiled; a group becomes one parenthesised part."""
+        parts = []
+        for f in items or []:
+            if not isinstance(f, dict):
+                raise ValueError("a filter must be an object")
+            if "group" in f:
+                g = f.get("group")
+                if g not in ("and", "or"):
+                    raise ValueError(f"unknown group joiner '{g}'")
+                if level >= _MAX_GROUP_DEPTH:
+                    raise ValueError(f"condition groups nest at most {_MAX_GROUP_DEPTH} deep")
+                inner = conditions(f.get("filters"), level + 1)
+                if not inner:
+                    continue            # an empty group says nothing: no "()"
+                parts.append(inner[0] if len(inner) == 1
+                             else "(" + f" {g.upper()} ".join(inner) + ")")
+            else:
+                parts.append(one(f))
+        return parts
+
+    wheres = conditions(model.get("filters"), 0)
 
     # HAVING -- filters on the AGGREGATE, which WHERE cannot express: WHERE is
     # applied before grouping, so "regions whose total exceeds 1000" has to be
@@ -524,7 +550,7 @@ def build_sql(model: dict, dialect: str, known: dict[str, set[str]],
         op = h.get("op", "gt")
         if op not in _OPS:
             raise ValueError(f"unknown having op '{op}'")
-        havings.append(f"{expr} {_OPS[op]} {_encode_value(h.get('value'))}")
+        havings.append(f"{expr} {_OPS[op]} {_encode_value(h.get('value'), dialect)}")
 
     # ORDER BY: a selected alias, or a (validated) column
     orders = []
@@ -601,10 +627,24 @@ def referenced_functions(model: dict) -> list[str]:
     """Same recursion as `referenced_tables`: a function used only inside a
     subquery must still be looked up, or the compile rejects it as unknown."""
     out = [c["function"] for c in (model.get("columns") or []) if c.get("function")]
-    for f in model.get("filters") or []:
+    for f in _all_conditions(model.get("filters")):
         sub = f.get("subquery")
         if isinstance(sub, dict):
             out.extend(referenced_functions(sub))
+    return out
+
+
+def _all_conditions(items, level: int = 0) -> list[dict]:
+    """Every condition in a filter list, groups opened (bounded like the compile)."""
+    out = []
+    for f in items or []:
+        if not isinstance(f, dict):
+            continue
+        if "group" in f:
+            if level < _MAX_GROUP_DEPTH:
+                out.extend(_all_conditions(f.get("filters"), level + 1))
+        else:
+            out.append(f)
     return out
 
 
@@ -627,7 +667,7 @@ def referenced_tables(model: dict) -> list[str]:
             tables = [t for t in tables if t != "hierarchy"]
     for j in model.get("joins") or []:
         tables.append(j.get("table"))
-    for f in model.get("filters") or []:
+    for f in _all_conditions(model.get("filters")):
         sub = f.get("subquery")
         if isinstance(sub, dict):
             tables.extend(referenced_tables(sub))

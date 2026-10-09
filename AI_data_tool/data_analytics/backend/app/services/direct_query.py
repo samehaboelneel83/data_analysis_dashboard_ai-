@@ -368,6 +368,14 @@ def _limit_clause(dialect: str, limit: int) -> str:
 
 def _base_query_sql(dataset, rls_where: str = "") -> str:
     inner = dataset.source_query.strip().rstrip(";") if dataset.source_query else f"SELECT * FROM {_quote(dataset.source_table)}"
+    # A saved live query is checked in full when it is saved (sql_safety.
+    # ensure_read_only); here, on every widget read, the one thing a subquery
+    # wrapper cannot neutralise is refused: a second statement after a ';'.
+    if dataset.source_query:
+        from .sql_safety import UnsafeQuery, has_second_statement
+        if has_second_statement(inner):
+            raise UnsafeQuery("This live dataset's query holds more than one statement; "
+                              "edit it to a single SELECT.")
     if not rls_where:
         return inner
     # The RLS predicate gets its own subquery boundary, applied before anything

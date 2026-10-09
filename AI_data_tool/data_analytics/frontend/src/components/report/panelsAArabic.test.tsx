@@ -65,6 +65,10 @@ describe('panelsA in Arabic (8-i18n)', () => {
     inArabic(<MeasuresPanel datasetId={1} columns={columns} onChanged={vi.fn()} />)
     expect(await screen.findByText('لا توجد مقاييس بعد')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '+ إضافة مقياس' }))
+    // A new measure starts from the Arabic "What do you want to measure?" forms.
+    expect(screen.getByText('ماذا تريد أن تقيس؟')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /الحصة من الإجمالي/ })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'سأكتب الصيغة بنفسي' }))
     expect(screen.getByPlaceholderText('اسم المقياس (مثلًا: نسبة المبيعات من الإجمالي)')).toBeInTheDocument()
     expect(screen.getByLabelText('التجميع حسب')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'حفظ' })).toBeInTheDocument()

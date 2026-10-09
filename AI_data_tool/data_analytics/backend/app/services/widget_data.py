@@ -4073,14 +4073,16 @@ def _validate_expr_safety(expr: str) -> None:
 def _build_safe_ns(df: pd.DataFrame) -> tuple[dict, dict]:
     """Return (safe_globals, local_ns) for evaluating expressions against df."""
     def IF(cond, true_val, false_val):  # noqa: N802
-        return np.where(cond, true_val, false_val)
+        # An unknown condition (a comparison on an empty value) is "no", not an
+        # error: whole-number columns carry real gaps (pd.NA), not NaN.
+        return np.where(_as_mask(cond), true_val, false_val)
 
     def SWITCH(col, *args):  # noqa: N802
         """SWITCH(col, val1, res1, val2, res2, ..., default)"""
         conditions, choices = [], []
         i = 0
         while i + 1 < len(args):
-            conditions.append(col == args[i])
+            conditions.append(_as_mask(col == args[i]))
             choices.append(args[i + 1])
             i += 2
         default = args[i] if i < len(args) else None
@@ -4124,7 +4126,15 @@ def _build_safe_ns(df: pd.DataFrame) -> tuple[dict, dict]:
     def SUBSTRING(s, start, length):  # noqa: N802
         begin = max(int(start) - 1, 0)
         return _txt(s).str[begin:begin + int(length)]
-    def CONCAT(a, b):  return _txt(a) + _txt(b)                        # noqa: E704,N802
+    def CONCAT(*parts):  # noqa: N802
+        """Any number of values joined as text: CONCAT(region, ' - ', product).
+        It took exactly two, so a label with a separator needed CONCAT inside CONCAT."""
+        if not parts:
+            raise ValueError("CONCAT needs at least one value")
+        out = _txt(parts[0])
+        for p in parts[1:]:
+            out = out + _txt(p)
+        return out
     def REPLACE(s, find, repl):  # noqa: N802
         return _txt(s).str.replace(str(find), str(repl), regex=False)
     def FIND(s, sub):  # noqa: N802
@@ -4177,17 +4187,23 @@ def _build_safe_ns(df: pd.DataFrame) -> tuple[dict, dict]:
             return s
         return pd.to_datetime(s, errors='coerce')
 
-    def YEAR(s):     return _as_datetime(s).dt.year        # noqa: N802
-    def QUARTER(s):  return _as_datetime(s).dt.quarter      # noqa: N802
-    def MONTH(s):    return _as_datetime(s).dt.month        # noqa: N802
-    def DAY(s):      return _as_datetime(s).dt.day          # noqa: N802
+    # Whole numbers, empty where the date is: as plain floats a year read
+    # "2024.0" in every table, legend and export (the same nullable integer
+    # WEEK already used).
+    def _whole(v):
+        return v.astype("Int64") if isinstance(v, pd.Series) else v
 
-    def WEEKDAY(s):  return _as_datetime(s).dt.dayofweek + 1   # noqa: N802  1 = Monday, matching SAS
+    def YEAR(s):     return _whole(_as_datetime(s).dt.year)        # noqa: N802
+    def QUARTER(s):  return _whole(_as_datetime(s).dt.quarter)      # noqa: N802
+    def MONTH(s):    return _whole(_as_datetime(s).dt.month)        # noqa: N802
+    def DAY(s):      return _whole(_as_datetime(s).dt.day)          # noqa: N802
+
+    def WEEKDAY(s):  return _whole(_as_datetime(s).dt.dayofweek + 1)   # noqa: N802  1 = Monday, matching SAS
     def WEEK(s):     return _as_datetime(s).dt.isocalendar().week.astype("Int64")  # noqa: N802
-    def HOUR(s):     return _as_datetime(s).dt.hour        # noqa: N802
-    def MINUTE(s):   return _as_datetime(s).dt.minute      # noqa: N802
-    def SECOND(s):   return _as_datetime(s).dt.second      # noqa: N802
-    def DAYOFYEAR(s): return _as_datetime(s).dt.dayofyear  # noqa: N802
+    def HOUR(s):     return _whole(_as_datetime(s).dt.hour)        # noqa: N802
+    def MINUTE(s):   return _whole(_as_datetime(s).dt.minute)      # noqa: N802
+    def SECOND(s):   return _whole(_as_datetime(s).dt.second)      # noqa: N802
+    def DAYOFYEAR(s): return _whole(_as_datetime(s).dt.dayofyear)  # noqa: N802
     def MONTHNAME(s): return _as_datetime(s).dt.month_name()   # noqa: N802
     def DAYNAME(s):   return _as_datetime(s).dt.day_name()     # noqa: N802
 
@@ -4219,12 +4235,12 @@ def _build_safe_ns(df: pd.DataFrame) -> tuple[dict, dict]:
         d1, d2 = _as_datetime(a), _as_datetime(b)
         unit = str(unit).lower().rstrip("s")
         if unit == "year":
-            return d2.dt.year - d1.dt.year
+            return _whole(d2.dt.year - d1.dt.year)
         if unit == "month":
-            return (d2.dt.year - d1.dt.year) * 12 + (d2.dt.month - d1.dt.month)
+            return _whole((d2.dt.year - d1.dt.year) * 12 + (d2.dt.month - d1.dt.month))
         delta = d2 - d1
-        if unit == "day":    return delta.dt.days
-        if unit == "week":   return delta.dt.days // 7
+        if unit == "day":    return _whole(delta.dt.days)
+        if unit == "week":   return _whole(delta.dt.days // 7)
         if unit == "hour":   return (delta.dt.total_seconds() // 3600).astype("Int64")
         if unit == "minute": return (delta.dt.total_seconds() // 60).astype("Int64")
         if unit == "second": return delta.dt.total_seconds().astype("Int64")
@@ -4378,6 +4394,9 @@ def _build_safe_ns(df: pd.DataFrame) -> tuple[dict, dict]:
         'floor': _math.floor, 'ceil': _math.ceil,
         # conditional
         'IF': IF, 'SWITCH': SWITCH, 'isnull': pd.isnull,
+        # `and` / `or` / `not` rewritten to these by _eval_expr (_ElementwiseLogic);
+        # the leading underscore keeps them out of reach of a typed expression.
+        **_LOGIC_NS,
         'SENTIMENT': SENTIMENT, 'SENTIMENT_LABEL': SENTIMENT_LABEL,
         'UPPER': UPPER, 'LOWER': LOWER, 'TRIM': TRIM, 'LEN': LEN, 'REVERSE': REVERSE,
         'LEFT': LEFT, 'RIGHT': RIGHT, 'SUBSTRING': SUBSTRING, 'CONCAT': CONCAT,
@@ -4417,6 +4436,10 @@ def _build_safe_ns(df: pd.DataFrame) -> tuple[dict, dict]:
     return safe_globals, local_ns
 
 
+# `and` / `or` / `not` row by row: shared with measure_eval (services/expr_logic.py).
+from .expr_logic import ElementwiseLogic as _ElementwiseLogic, LOGIC_NAMESPACE as _LOGIC_NS, as_mask as _as_mask  # noqa: E402
+
+
 def _eval_expr(expr: str, df: pd.DataFrame):
     """Try df.eval() first, then fall back to Python eval with safe builtins.
     Backtick-quoted column names (e.g. `col name`) are handled in both paths."""
@@ -4443,7 +4466,9 @@ def _eval_expr(expr: str, df: pd.DataFrame):
         return key
     processed = _re.sub(r'`([^`]+)`', _replace, processed)
     local_ns.update(extra)
-    return eval(processed, safe_globals, local_ns)  # noqa: S307
+    tree = _ElementwiseLogic().visit(_ast.parse(processed, mode='eval'))
+    code = compile(_ast.fix_missing_locations(tree), '<expression>', 'eval')
+    return eval(code, safe_globals, local_ns)  # noqa: S307
 
 
 def apply_filter_expr(df: pd.DataFrame, expr: str, silent: bool = False) -> pd.DataFrame:
@@ -4546,7 +4571,15 @@ def preview_expression(file_path: str, expression: str, n: int = 8, rls_filter_e
             expression = expand_custom_functions(expression, custom_functions)
         result = _eval_expr(expression, df)
     except Exception as e:
-        return {'ok': False, 'error': str(e)}
+        # Plain words first (expr_explain.explain, worded by the frontend);
+        # the raw text stays in `error` for "Show details".
+        from .expr_explain import explain
+        return {'ok': False, 'error': str(e), 'problem': explain(str(e), expression, [str(c) for c in df.columns])}
+    try:
+        from .expr_explain import summarize
+        summary = summarize(result)
+    except Exception:                                               # noqa: BLE001
+        summary = None
     try:
         if hasattr(result, 'head'):          # pandas Series
             sample = result.head(n).tolist()
@@ -4558,7 +4591,12 @@ def preview_expression(file_path: str, expression: str, n: int = 8, rls_filter_e
             dtype = 'numeric' if pd.api.types.is_numeric_dtype(result) else 'text'
         except Exception:
             dtype = 'text'
-        return {'ok': True, 'dtype': dtype, 'sample': [_safe(v) for v in sample]}
+        out = {'ok': True, 'dtype': dtype, 'sample': [_safe(v) for v in sample]}
+        if summary:
+            out['summary'] = summary
+            if summary['kind'] == 'number':
+                out['dtype'] = 'numeric'
+        return out
     except Exception as e:
         return {'ok': False, 'error': str(e)}
 

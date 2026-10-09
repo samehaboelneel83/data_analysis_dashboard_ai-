@@ -67,3 +67,10 @@ describe('an inferred role does not override the veto', () => {
     expect(defaultSummary('hire_year', { hire_year: { role: 'measure' } })).toBe('sum')
   })
 })
+
+describe('defaultSummary: readings (Fields panel re-test)', () => {
+  it('averages a mileage, which summed per group is no one\'s mileage', () => {
+    expect(defaultSummary('mileage_km')).toBe('avg')
+    expect(defaultSummary('odometer')).toBe('avg')
+  })
+})

@@ -149,3 +149,25 @@ describe('carry my selections (follow-up)', () => {
     expect(screen.getByTestId('target').textContent).toBe('region is Asia')
   })
 })
+
+describe('report filters (Fields plan F7)', () => {
+  it('shows a report filter, so "No selections" never hides a filtered report', () => {
+    render(<CrossFilterProvider><FilterBar reportFilters={[{ id: 7, label: 'condition = Used' }]} /></CrossFilterProvider>)
+    expect(screen.getByText('condition = Used')).toBeInTheDocument()
+    expect(screen.queryByText(/no selections/i)).not.toBeInTheDocument()
+  })
+
+  it('can be removed from the bar when the builder allows it', () => {
+    const remove = vi.fn()
+    render(<CrossFilterProvider>
+      <FilterBar reportFilters={[{ id: 7, label: 'condition = Used' }]} onRemoveReportFilter={remove} />
+    </CrossFilterProvider>)
+    fireEvent.click(screen.getByRole('button', { name: /condition = Used/ }))
+    expect(remove).toHaveBeenCalledWith(7)
+  })
+
+  it('shows in the Modern chips row too', () => {
+    render(<CrossFilterProvider><FilterBar variant="chips" reportFilters={[{ id: 7, label: 'condition = Used' }]} /></CrossFilterProvider>)
+    expect(screen.getByText('condition = Used')).toBeInTheDocument()
+  })
+})

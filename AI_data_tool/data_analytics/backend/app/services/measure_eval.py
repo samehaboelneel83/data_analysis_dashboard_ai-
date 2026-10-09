@@ -217,6 +217,8 @@ def _agg_namespace(df: pd.DataFrame, group_cols: list[str]) -> dict:
         def COUNTD(s):   return _grouped(s, "nunique")    # noqa: E704,N802
         def STDEV(s):    return _grouped(s, "std")        # noqa: E704,N802
         def VARIANCE(s): return _grouped(s, "var")        # noqa: E704,N802
+        def MIN(s):      return _grouped(s, "min")        # noqa: E704,N802
+        def MAX(s):      return _grouped(s, "max")        # noqa: E704,N802
     else:
         def SUM(s):      return s.sum()                   # noqa: E704,N802
         def AVG(s):      return s.mean()                  # noqa: E704,N802
@@ -225,6 +227,9 @@ def _agg_namespace(df: pd.DataFrame, group_cols: list[str]) -> dict:
         def COUNTD(s):   return s.nunique()               # noqa: E704,N802
         def STDEV(s):    return s.std()                   # noqa: E704,N802
         def VARIANCE(s): return s.var()                   # noqa: E704,N802
+        # Lowest / highest per group: there was no way to say "highest price".
+        def MIN(s):      return s.min()                   # noqa: E704,N802
+        def MAX(s):      return s.max()                   # noqa: E704,N802
 
     def IF(cond, true_val, false_val):  # noqa: N802
         if isinstance(cond, pd.Series):
@@ -253,7 +258,7 @@ def _agg_namespace(df: pd.DataFrame, group_cols: list[str]) -> dict:
 
     return {
         "SUM": SUM, "AVG": AVG, "MEDIAN": MEDIAN, "COUNT": COUNT,
-        "COUNTD": COUNTD, "STDEV": STDEV, "VARIANCE": VARIANCE,
+        "COUNTD": COUNTD, "STDEV": STDEV, "VARIANCE": VARIANCE, "MIN": MIN, "MAX": MAX,
         "IF": IF, "SWITCH": SWITCH, "isnull": isnull,
         "abs": abs, "round": round, "min": min, "max": max,
         "int": int, "float": float, "str": str, "len": len, "pow": pow,
@@ -270,7 +275,10 @@ def _eval(expr: str, df: pd.DataFrame, group_cols: list[str], extra: dict | None
     # a collision would already have been rejected by the name-validation on save.
     local_ns = {str(c): df[c] for c in df.columns}
     try:
-        return eval(expr, {"__builtins__": {}, **ns}, local_ns)  # noqa: S307
+        # and/or/not row by row on columns (expr_logic): IF(a == 'x' and b > 1, ...)
+        # failed with "the truth value of a Series is ambiguous".
+        from .expr_logic import LOGIC_NAMESPACE, compile_logic
+        return eval(compile_logic(expr), {"__builtins__": {}, **ns, **LOGIC_NAMESPACE}, local_ns)  # noqa: S307
     except ValueError:
         raise
     except NameError as e:
@@ -495,7 +503,10 @@ def preview_measure(expr: str, df: pd.DataFrame, group_by: str | None = None, li
         group_cols = [group_by] if group_by else []
         result = evaluate_measure(expr, df, group_cols)
     except Exception as e:
-        return {"ok": False, "error": str(e), "dtype": None, "sample": []}
+        # Plain words first, worded by the builder (expr_explain); raw text for "Show details".
+        from .expr_explain import explain
+        return {"ok": False, "error": str(e), "dtype": None, "sample": [],
+                "problem": explain(str(e), expr, [str(c) for c in df.columns])}
 
     if isinstance(result, pd.Series):
         head = result.head(limit)

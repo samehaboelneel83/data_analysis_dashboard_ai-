@@ -215,3 +215,31 @@ describe('the title is in the reader\'s language (QA5b S3)', () => {
     }
   })
 })
+
+describe('Fields plan F3/F4 — sensible summaries, and lists for links', () => {
+  it('a measure starts on its default summary, never a blind sum', () => {
+    const price: AutoField = { ...num('price_egp'), summary: 'avg' }
+    const r = chartForFields([cat('make'), price])!
+    expect(r.suggestion.config.aggregation).toBe('avg')
+    // ...and the title says so: "price_egp by make" read as a total.
+    expect(r.suggestion.title).toBe('Average price_egp by make')
+  })
+
+  it('without a summary it still sums', () => {
+    expect(chartForFields([cat('region'), num('revenue')])!.suggestion.config.aggregation).toBe('sum')
+  })
+
+  it('a link becomes a list, not thousands of bars of height 1', () => {
+    const link: AutoField = { ...cat('item_url'), listOnly: true }
+    const r = chartForFields([link])!
+    expect(r.suggestion.widget_type).toBe('table')
+    expect(r.suggestion.config.columns).toEqual(['item_url'])
+  })
+
+  it('a link with other fields lists them, the link last', () => {
+    const link: AutoField = { ...cat('item_url'), listOnly: true }
+    const r = chartForFields([link, cat('make'), num('price_egp')])!
+    expect(r.suggestion.widget_type).toBe('table')
+    expect((r.suggestion.config.columns as string[]).at(-1)).toBe('item_url')
+  })
+})

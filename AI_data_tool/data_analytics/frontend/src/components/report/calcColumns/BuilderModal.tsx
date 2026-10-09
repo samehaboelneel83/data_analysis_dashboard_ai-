@@ -1,11 +1,14 @@
-import { useState, type CSSProperties } from 'react'
+import { useMemo, useState, type CSSProperties } from 'react'
 import { calcColumnsApi } from '../../../services/api'
-import type { CalcColumn, CalcColumnFormat, DatasetColumn } from '../../../services/api'
+import type { CalcColumn, CalcColumnFormat, CalcPreview, DatasetColumn } from '../../../services/api'
 import { Z_MODAL_TOP } from '../../../lib/zIndex'
 import ExpressionBuilder from '../../expr/ExpressionBuilder'
 import { useModalDialog } from '../../ui/useModalDialog'
 import { OP_GROUPS, type FuncCat } from './catalog'
 import { useT } from '../../../i18n'
+import TemplatePicker from './TemplatePicker'
+import TestResult from './TestResult'
+import type { TemplateKey } from '../../../lib/calcTemplates'
 
 interface BuilderProps {
   initial:   { name: string; expression: string; format?: CalcColumnFormat }
@@ -22,7 +25,16 @@ export function BuilderModal({ initial, datasetId, columns, calcCols, functionsC
   const t = useT()
   const [name,       setName]       = useState(initial.name)
   const [expression, setExpression] = useState(initial.expression)
-  const [preview,    setPreview]    = useState<{ ok:boolean; dtype?:string; sample?:unknown[]; error?:string } | null>(null)
+  const [preview,    setPreview]    = useState<CalcPreview | null>(null)
+  // A NEW column starts from "What do you want to make?" (TemplatePicker); an
+  // existing one opens as its formula. `nameTouched`: a name the person typed
+  // is never replaced by a template's suggestion.
+  const [mode, setMode] = useState<'pick' | 'formula'>(initial.expression ? 'formula' : 'pick')
+  const [template, setTemplate] = useState<TemplateKey | null>(null)
+  const [nameTouched, setNameTouched] = useState(!!initial.name)
+  // Stable, so a form's "formula changed" effect does not fire on every render
+  // (it did, and wiped the Test result the moment it arrived).
+  const realColumns = useMemo(() => columns.filter(c => c.dtype !== 'calculated'), [columns])
   const [testing,    setTesting]    = useState(false)
   const [format, setFormat] = useState<CalcColumnFormat>(initial.format ?? { type: 'none' })
   const setFmt = <K extends keyof CalcColumnFormat>(k: K, v: CalcColumnFormat[K]) =>
@@ -80,16 +92,52 @@ export function BuilderModal({ initial, datasetId, columns, calcCols, functionsC
           {/* ── Column name ── */}
           <div>
             <label style={{ ...panelHd, borderBottom:'none', marginBottom:4 }}>{t('pg.panelsA.bm.colName')}</label>
-            <input value={name} onChange={e => setName(e.target.value)}
+            <input value={name} onChange={e => { setName(e.target.value); setNameTouched(true) }}
+              aria-label={t('pg.panelsA.bm.colName')}
               placeholder={t('pg.panelsA.bm.colNamePh')}
               style={{ width:'100%', fontSize:13, padding:'7px 10px' }} />
           </div>
 
-          {/* ── Expression ── */}
+          {/* ── Expression: a template form, or the formula itself ── */}
+          {mode === 'pick' ? (
+            <div>
+              <TemplatePicker columns={realColumns}
+                template={template} onTemplate={setTemplate}
+                onWriteFormula={() => setMode('formula')}
+                onBuilt={b => {
+                  const next = b?.expression ?? ''
+                  if (next === expression) return
+                  setExpression(next)
+                  setPreview(null)
+                  if (b && !nameTouched) setName(b.name)
+                }} />
+              {template && (
+                <div style={{ marginTop: 10, fontSize: 12 }}>
+                  <div style={{ color: 'var(--muted)', marginBottom: 3 }}>{t('pg.panelsA.tpl.written')}</div>
+                  <code data-testid="calc-written-formula" dir={expression ? 'ltr' : undefined} style={{ display: 'block', padding: '6px 8px',
+                    background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, wordBreak: 'break-word' }}>
+                    {expression || t('pg.panelsA.tpl.notYet')}
+                  </code>
+                  {expression && (
+                    <button type="button" onClick={() => setMode('formula')}
+                      style={{ border: 'none', background: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: 11, padding: 0, marginTop: 4 }}>
+                      {t('pg.panelsA.tpl.editFormula')}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
           <div>
             <label style={{ ...panelHd, borderBottom:'none', marginBottom:4 }}>
               {t('pg.panelsA.bm.expression')}
             </label>
+            {!initial.expression && (
+              <button type="button" onClick={() => { setMode('pick'); setTemplate(null) }}
+                style={{ border: 'none', background: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: 11, padding: 0, marginBottom: 6 }}>
+                {t('pg.panelsA.tpl.backToChoices')}
+              </button>
+            )}
             <ExpressionBuilder
               layout="panels"
               columns={columns.filter(c => c.dtype !== 'calculated')}
@@ -101,6 +149,7 @@ export function BuilderModal({ initial, datasetId, columns, calcCols, functionsC
               placeholder={t('pg.panelsA.bm.exprPh')}
             />
           </div>
+          )}
 
           {/* ── Display Format ── */}
           <div style={{ background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:7, padding:10 }}>
@@ -203,17 +252,8 @@ export function BuilderModal({ initial, datasetId, columns, calcCols, functionsC
             </div>
           </div>
 
-          {/* ── Preview result ── */}
-          {preview && (
-            <div style={{ padding:'8px 12px', borderRadius:6, fontSize:12,
-              background: preview.ok ? 'rgba(52,211,153,.08)' : 'rgba(248,113,113,.08)',
-              border: `1px solid ${preview.ok ? '#34d399' : '#f87171'}` }}>
-              {preview.ok
-                ? <><span style={{ color:'#34d399', fontWeight:700 }}>✓ {preview.dtype}</span>
-                    {' — '}<bdi dir="ltr">{preview.sample?.slice(0, 6).map(String).join(', ')}</bdi></>
-                : <span style={{ color:'#f87171' }}>✗ {preview.error}</span>}
-            </div>
-          )}
+          {/* ── Test result: the whole column, or the problem in plain words ── */}
+          {preview && <TestResult preview={preview} />}
         </div>
 
         {/* ── Footer ── */}

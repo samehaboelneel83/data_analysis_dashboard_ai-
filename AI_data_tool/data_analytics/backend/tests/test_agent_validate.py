@@ -72,6 +72,16 @@ class TestV1Parse:
             assert failure is not None and failure.rung == "V1", sql
 
 
+    def test_a_select_that_writes_is_refused(self):
+        """A SELECT at the top can still change the database: a data-modifying
+        CTE deletes on PostgreSQL, SELECT ... INTO creates a table. Both passed
+        V1 because only the top of the tree was looked at."""
+        for sql in ("WITH d AS (DELETE FROM orders RETURNING *) SELECT * FROM d",
+                    "SELECT * INTO copy FROM orders"):
+            failure = validate_sql(sql, ctx())
+            assert failure is not None and failure.rung == "V1", sql
+        assert validate_sql("WITH t AS (SELECT id FROM orders) SELECT id FROM t", ctx()) is None
+
 class TestV2Schema:
     def test_a_hallucinated_table_fails_at_v2(self):
         failure = validate_sql("SELECT * FROM shipments", ctx())

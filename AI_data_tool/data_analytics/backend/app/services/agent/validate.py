@@ -23,7 +23,10 @@ class ValidationFailure:
 
 
 _DIALECTS = {"postgresql": "postgres", "mysql": "mysql", "mssql": "tsql",
-             "oracle": "oracle", "sqlite": "sqlite", "duckdb": "duckdb"}
+             "oracle": "oracle", "sqlite": "sqlite", "duckdb": "duckdb",
+             # connectors.sql_family_of says "sqlserver" (and "clickhouse"):
+             # without these a SQL Server query was parsed as PostgreSQL.
+             "sqlserver": "tsql", "mariadb": "mysql", "clickhouse": "clickhouse"}
 
 
 def _dialect(family: str) -> str:
@@ -40,6 +43,15 @@ def validate_sql(sql: str, context: SchemaContext) -> ValidationFailure | None:
     if tree is None or not isinstance(tree, (exp.Select, exp.Union)):
         return ValidationFailure(
             "V1", "only SELECT statements are allowed; the agent reads, never writes")
+    # A SELECT at the top can still write: `WITH d AS (DELETE ... RETURNING *)
+    # SELECT ...` deletes on PostgreSQL, and `SELECT ... INTO t` creates a
+    # table. The model's SQL can be steered by text in the data itself, so the
+    # whole tree is checked, with the same gate as hand-written SQL.
+    from ..sql_safety import UnsafeQuery, ensure_read_only
+    try:
+        ensure_read_only(sql, context.family)
+    except UnsafeQuery as exc:
+        return ValidationFailure("V1", f"{exc} The agent reads, never writes.")
 
     # Still V1, and for the same reason: an answer about the data has to come
     # FROM the data. A query that references no table returns whatever the

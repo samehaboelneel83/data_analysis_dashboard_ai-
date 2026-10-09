@@ -136,6 +136,8 @@ _INTENSIVE_WORDS = (
     "avg", "average", "mean", "median", "age", "score", "grade", "rating",
     "temperature", "temp", "speed", "margin", "probability", "prob", "index",
     "level", "gpa", "bmi", "tenure_years",
+    # A car's mileage is a reading, like an age: its total over a group is no one's.
+    "mileage", "odometer",
 )
 _INTENSIVE_INFIX = re.compile(r"(^|_)per(_|$)", re.I)
 #: A distinct count already taken per row -- a DAILY count of unique customers

@@ -2,6 +2,9 @@ import { useState, useEffect } from 'react'
 import { measuresApi } from '../../services/api'
 import type { DatasetColumn, MeasureDef, MeasurePreviewResult } from '../../services/api'
 import ExpressionBuilder from '../expr/ExpressionBuilder'
+import MeasureTemplatePicker from './MeasureTemplatePicker'
+import { problemText } from './calcColumns/TestResult'
+import type { MeasureTemplateKey } from '../../lib/measureTemplates'
 import { useConfirm } from '../ui/ConfirmDialog'
 import { useT, type TranslateFn } from '../../i18n'
 
@@ -90,6 +93,12 @@ export default function MeasuresPanel({ datasetId, columns, onChanged }: Props) 
   const [editing, setEditing] = useState<MeasureDef | null>(null)
   const [groupBy, setGroupBy] = useState('')
   const [preview, setPreview] = useState<MeasurePreviewResult | null>(null)
+  // A NEW measure starts from "What do you want to measure?"; one being edited
+  // opens as its formula. A name the person typed is never replaced.
+  const [mode, setMode] = useState<'pick' | 'formula'>('formula')
+  const [template, setTemplate] = useState<MeasureTemplateKey | null>(null)
+  const [nameTouched, setNameTouched] = useState(false)
+  const [showDetails, setShowDetails] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   /** Which measure's earlier formulas are open (E05 metric versions). */
@@ -186,7 +195,7 @@ export default function MeasuresPanel({ datasetId, columns, onChanged }: Props) 
           {t('pg.panelsA.ms.title')}
         </div>
         <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}
-          onClick={() => { setEditing({ ...BLANK }); setPreview(null); setError(null) }}>
+          onClick={() => { setEditing({ ...BLANK }); setPreview(null); setError(null); setMode('pick'); setTemplate(null); setNameTouched(false) }}>
           {t('pg.panelsA.ms.add')}
         </button>
       </div>
@@ -226,7 +235,7 @@ export default function MeasuresPanel({ datasetId, columns, onChanged }: Props) 
             </div>
           </div>
           <button title={t('pg.panelsA.editNamed', { name: m.name })} aria-label={t('pg.panelsA.editNamed', { name: m.name })}
-            onClick={() => { setEditing({ ...m }); setPreview(null); setError(null) }}
+            onClick={() => { setEditing({ ...m }); setPreview(null); setError(null); setMode('formula'); setNameTouched(true) }}
             style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 11 }}>✎</button>
           <button title={t('pg.panelsA.deleteNamed', { name: m.name })} aria-label={t('pg.panelsA.deleteNamed', { name: m.name })}
             onClick={() => remove(m.name)}
@@ -254,9 +263,38 @@ export default function MeasuresPanel({ datasetId, columns, onChanged }: Props) 
       {editing && (
         <div style={{ marginTop: 8, border: '1px solid var(--border)', borderRadius: 6, padding: 10 }}>
           <input value={editing.name} placeholder={t('pg.panelsA.ms.namePh')}
-            onChange={e => setEditing({ ...editing, name: e.target.value })}
+            onChange={e => { setEditing({ ...editing, name: e.target.value }); setNameTouched(true) }}
+            aria-label={t('pg.panelsA.mt.name')}
             style={{ width: '100%', marginBottom: 6, fontSize: 12 }} />
 
+          {mode === 'pick' ? (
+            <div style={{ marginBottom: 8 }}>
+              <MeasureTemplatePicker columns={columns} template={template} onTemplate={setTemplate}
+                onWriteFormula={() => setMode('formula')}
+                onBuilt={built => {
+                  const next = built?.expression ?? ''
+                  if (next === editing.expression) return
+                  setEditing(e => e ? { ...e, expression: next, ...(built && !nameTouched ? { name: built.name } : {}) } : e)
+                  setPreview(null)
+                }} />
+              {template && (
+                <div style={{ marginTop: 8, fontSize: 11 }}>
+                  <div style={{ color: 'var(--muted)', marginBottom: 2 }}>{t('pg.panelsA.tpl.written')}</div>
+                  <code data-testid="measure-written-formula" dir={editing.expression ? 'ltr' : undefined}
+                    style={{ display: 'block', padding: '5px 7px', background: 'var(--surface2)', border: '1px solid var(--border)',
+                      borderRadius: 5, wordBreak: 'break-word' }}>
+                    {editing.expression || t('pg.panelsA.tpl.notYet')}
+                  </code>
+                  {editing.expression && (
+                    <button type="button" onClick={() => setMode('formula')}
+                      style={{ border: 'none', background: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: 11, padding: 0, marginTop: 3 }}>
+                      {t('pg.panelsA.tpl.editFormula')}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
           <div style={{ marginBottom: 6 }}>
             <ExpressionBuilder
               layout="flat"
@@ -268,6 +306,7 @@ export default function MeasuresPanel({ datasetId, columns, onChanged }: Props) 
               rows={3}
             />
           </div>
+          )}
 
           {/* Preview grain + default aggregation */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
@@ -302,7 +341,17 @@ export default function MeasuresPanel({ datasetId, columns, onChanged }: Props) 
                     </div>
                   ))}
                 </>
-              ) : preview.error}
+              ) : (<>
+                {/* Plain words first; the raw error behind "Show details". */}
+                <div>{problemText(t, { ok: false, error: preview.error ?? undefined, problem: preview.problem })}</div>
+                {preview.error && preview.problem && preview.problem.code !== 'other' && (<>
+                  <button type="button" onClick={() => setShowDetails(d => !d)}
+                    style={{ border: 'none', background: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 10.5, padding: 0, textDecoration: 'underline' }}>
+                    {showDetails ? t('pg.panelsA.res.hideDetails') : t('pg.panelsA.res.showDetails')}
+                  </button>
+                  {showDetails && <pre dir="ltr" style={{ margin: '3px 0 0', whiteSpace: 'pre-wrap', color: 'var(--muted)' }}>{preview.error}</pre>}
+                </>)}
+              </>)}
             </div>
           )}
 
