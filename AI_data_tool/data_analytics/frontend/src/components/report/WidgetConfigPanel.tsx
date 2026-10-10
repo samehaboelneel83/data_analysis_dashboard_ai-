@@ -97,6 +97,8 @@ function stringList(v: unknown): string[] {
 /** Where a role's second and later fields are saved. A crosstab or matrix
  *  takes several on Rows, Columns and Measures (a nested pivot); a bar, line
  *  or area several measures (one series each), never beside a series split. */
+/** Grids whose Columns can be a hierarchy. */
+const GRID_WIDGETS = ['crosstab', 'matrix']
 const EXTRA_KEY_OF: Record<string, string> = { category: 'rows_extra', category2: 'columns_extra', measure: 'extra_measures' }
 function extraKeyFor(wt: string, role: string, roleValues: Record<string, string>): string | undefined {
   if (PIVOT_WIDGETS.includes(wt)) return EXTRA_KEY_OF[role]
@@ -288,6 +290,8 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
   const [drillthroughPageId, setDrillthroughPageId] = useState<string>(cfg.drillthroughPageId != null ? String(cfg.drillthroughPageId) : '')
   const [tooltipPageId, setTooltipPageId] = useState<string>(cfg.tooltipPageId != null ? String(cfg.tooltipPageId) : '')
   const [hierarchyNodeId, setHierarchyNodeId] = useState<string>(cfg.hierarchyNodeId != null ? String(cfg.hierarchyNodeId) : '')
+  // A crosstab's Columns hierarchy (hierarchy plan, step 3).
+  const [hierarchyNodeId2, setHierarchyNodeId2] = useState<string>(cfg.hierarchyNodeId2 != null ? String(cfg.hierarchyNodeId2) : '')
   const [dimensionGranularity, setDimensionGranularity] = useState<string>((cfg.dimension_granularity as string) ?? '')
   // E10: a fiscal grouping follows the org's fiscal year ('') unless the
   // widget names its own first month.
@@ -496,6 +500,7 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
     setDrillthroughPageId(cfg.drillthroughPageId != null ? String(cfg.drillthroughPageId) : '')
     setTooltipPageId(cfg.tooltipPageId != null ? String(cfg.tooltipPageId) : '')
     setHierarchyNodeId(cfg.hierarchyNodeId != null ? String(cfg.hierarchyNodeId) : '')
+    setHierarchyNodeId2(cfg.hierarchyNodeId2 != null ? String(cfg.hierarchyNodeId2) : '')
     setDimensionGranularity((cfg.dimension_granularity as string) ?? '')
     setFiscalStart(cfg.fiscal_start_month != null ? String(cfg.fiscal_start_month) : '')
     setAction((cfg.action as string) ?? '')
@@ -727,6 +732,7 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
     if (drillthroughPageId) config.drillthroughPageId = Number(drillthroughPageId)
     if (tooltipPageId) config.tooltipPageId = Number(tooltipPageId)
     if (hierarchyNodeId) config.hierarchyNodeId = Number(hierarchyNodeId)
+    if (hierarchyNodeId2 && GRID_WIDGETS.includes(wt)) config.hierarchyNodeId2 = Number(hierarchyNodeId2)
     if (dimensionGranularity) config.dimension_granularity = dimensionGranularity
     if (dimensionGranularity.startsWith('fiscal') && fiscalStart) config.fiscal_start_month = Number(fiscalStart)
     if (agg2) config.aggregation2 = agg2
@@ -873,7 +879,7 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
     const timer = setTimeout(() => { onUpdate(config, title); clearPending(pendingId) }, 600)
     return () => clearTimeout(timer)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [title, datasetId, JSON.stringify(roleValues), JSON.stringify(multiRoleValues), JSON.stringify(modelOpts), agg, limit, sort, sortBy, sortCol, sortCustom, agg2, JSON.stringify(extraFields), havingOp, havingValue, JSON.stringify(objFilters), rankMode, rankN, rankPercent, rankOther, quickCalc, suppressBelow, suppressComplement, running, content, label, rtl, tableCols.join(','), JSON.stringify(sortKeys), bins, baseline, fitLine, targetValue, gaugeShape, animPos, animOrder, animSize, animStyle, animOpacity, animBox, autoReload, drillthroughPageId, tooltipPageId, hierarchyNodeId, dimensionGranularity, fiscalStart, action, actionPageId, carryFilters, actionBookmarkId, actionUrl, actionReportId, actionParamName, actionParamValue, barMode, forecastMethod, imageUrl, imageAlt, imageFit, webUrl, customUrl, shapeKind, shapeFill, shapeStroke, showAverageLine, referenceValue, referenceLabel, referenceColor, JSON.stringify(displayRules), xAxisLabel, yAxisLabel, axisTickSize, axisTickColor, axisLine, tickLine, xAxisAngle, yAxisAngle, yScale, yMin, yMax, showGrid, gridStyle, gridColor, wallColor, showAsTable, overviewAxis, latticeRows, latticeCols, animateBy, animateGran, slicerMode, containerMode, containerId, showLegend, legendPosition, dataLabels, seriesPatterns, showTotals, showSubtotals, totalsPosition, totalsScope, tableRowNumbers, tableRowLines, tableBanding, tableCondensed, tableSparkline, widgetBackground, widgetBorderColor, widgetBorderWidth, widgetRadius, widgetPadding, widgetSkin, altText, subtitle, boundarySetId, forecastTarget, centralityMetric,
+  }, [title, datasetId, JSON.stringify(roleValues), JSON.stringify(multiRoleValues), JSON.stringify(modelOpts), agg, limit, sort, sortBy, sortCol, sortCustom, agg2, JSON.stringify(extraFields), havingOp, havingValue, JSON.stringify(objFilters), rankMode, rankN, rankPercent, rankOther, quickCalc, suppressBelow, suppressComplement, running, content, label, rtl, tableCols.join(','), JSON.stringify(sortKeys), bins, baseline, fitLine, targetValue, gaugeShape, animPos, animOrder, animSize, animStyle, animOpacity, animBox, autoReload, drillthroughPageId, tooltipPageId, hierarchyNodeId, hierarchyNodeId2, dimensionGranularity, fiscalStart, action, actionPageId, carryFilters, actionBookmarkId, actionUrl, actionReportId, actionParamName, actionParamValue, barMode, forecastMethod, imageUrl, imageAlt, imageFit, webUrl, customUrl, shapeKind, shapeFill, shapeStroke, showAverageLine, referenceValue, referenceLabel, referenceColor, JSON.stringify(displayRules), xAxisLabel, yAxisLabel, axisTickSize, axisTickColor, axisLine, tickLine, xAxisAngle, yAxisAngle, yScale, yMin, yMax, showGrid, gridStyle, gridColor, wallColor, showAsTable, overviewAxis, latticeRows, latticeCols, animateBy, animateGran, slicerMode, containerMode, containerId, showLegend, legendPosition, dataLabels, seriesPatterns, showTotals, showSubtotals, totalsPosition, totalsScope, tableRowNumbers, tableRowLines, tableBanding, tableCondensed, tableSparkline, widgetBackground, widgetBorderColor, widgetBorderWidth, widgetRadius, widgetPadding, widgetSkin, altText, subtitle, boundarySetId, forecastTarget, centralityMetric,
       containerBackground, layer, scriptCode, transparent, legendTitle,
       y2AxisLabel, donutTotal, donutTotalLabel,
     // Hierarchy / faceting / forecast state. Omitting these would let the
@@ -1178,12 +1184,14 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
     if (extendable(rf.role)) {
       const key = extraKeyFor(wt, rf.role, roleValues)!
       if (rf.role === 'category') pickCategory(values[0] ?? '')
+      else if (rf.role === 'category2') pickColumns(values[0] ?? '')
       else setRole(rf.role, values[0] ?? '')
       setExtraFields(prev => ({ ...prev, [key]: values.slice(1) }))
       return
     }
     if (rf.multi) { setMultiRoleValues(prev => ({ ...prev, [rf.role]: values })); return }
     if (rf.role === 'category') { pickCategory(values[0] ?? ''); return }
+    if (rf.role === 'category2') { pickColumns(values[0] ?? ''); return }
     setRole(rf.role, values[0] ?? '')
   }
   const assignedFields: Record<string, string[]> = Object.fromEntries(roleSpecs.map(rf => [rf.role, fieldsOf(rf)]))
@@ -1202,6 +1210,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
     if (rf.multi) { setFields(rf, fieldsOf(rf).filter(v => v !== f)); return }
     setRole(role, '')
     if (role === 'category') { setHierarchyNodeId(''); setDimensionGranularity('') }
+    if (role === 'category2') setHierarchyNodeId2('')
   }
   // A series split and several measures cannot both be drawn: each role says
   // why it is closed while the other is in use.
@@ -1209,7 +1218,8 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
     role === 'category2' && MULTI_MEASURE_WIDGETS.includes(wt) && extraMeasures.length > 0
       ? L('A series split and several measures cannot be drawn together. Keep one measure to split it by a series.')
       : null
-  const displayName = (role: string, f: string) => role === 'category' && hierarchyNodeId ? L('{name} (hierarchy)', { name: f }) : f
+  const displayName = (role: string, f: string) =>
+    (role === 'category' && hierarchyNodeId) || (role === 'category2' && hierarchyNodeId2) ? L('{name} (hierarchy)', { name: f }) : f
   const detailLabel = { display:'block', fontSize: 12, color:'var(--muted)', marginBottom:3 } as const
   const nameField = (id: string, value: string, set: (v: string) => void, placeholder: string) => (
     <div style={{ marginBottom: 8 }}>
@@ -1322,6 +1332,13 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
       setHierarchyNodeId('')
       setDimensionGranularity('')
     }
+  }
+  /** A crosstab's Columns, from a column or (`h:<id>`) a hierarchy: the grid
+   *  then opens it level by level across the top. */
+  const pickColumns = (v: string) => {
+    const picked = v.startsWith('h:') ? hierarchyOptions.find(o => `h:${o.id}` === v) : undefined
+    setRole('category2', picked ? picked.column_name : v)
+    setHierarchyNodeId2(picked ? String(picked.id) : '')
   }
 
   return (
@@ -2919,9 +2936,11 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
         const rf = roleSpecs.find(r => r.role === addRole)
         if (!rf) return null
         const heading = (rf.label ?? rf.role).replace(/\s*\(.*\)\s*$/, '')
-        const withHierarchy = rf.role === 'category' && hierarchyOptions.length > 0
+        const withHierarchy = hierarchyOptions.length > 0
+          && (rf.role === 'category' || (rf.role === 'category2' && GRID_WIDGETS.includes(wt)))
         const current = fieldsOf(rf)
-        const selected = withHierarchy && hierarchyNodeId ? [`h:${hierarchyNodeId}`] : current
+        const chosenNode = rf.role === 'category2' ? hierarchyNodeId2 : hierarchyNodeId
+        const selected = withHierarchy && chosenNode ? [`h:${chosenNode}`, ...current.slice(1)] : current
         const choices = [...roleChoices(rf, current),
           ...(withHierarchy ? hierarchyOptions.map(o => ({ value: `h:${o.id}`, label: o.label, group: 'Hierarchies' })) : [])]
         return (

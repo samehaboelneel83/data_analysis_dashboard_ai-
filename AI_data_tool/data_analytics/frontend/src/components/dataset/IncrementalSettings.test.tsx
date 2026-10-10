@@ -28,7 +28,7 @@ describe('IncrementalSettingsForm (pipeline phase 4)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save loading' }))
     await waitFor(() => expect(datasetsApi.setIncremental).toHaveBeenCalledWith(3, {
       strategy: 'incremental', cursor_column: 'updated_at', key_column: 'order_id',
-      lookback_hours: 24, full_reload_days: 7 }))
+      lookback_hours: 24, full_reload_days: 7, reconcile_deletes: false }))
   })
 
   it('without a key it says changed rows are not updated, and offers no look-back', async () => {
@@ -37,5 +37,19 @@ describe('IncrementalSettingsForm (pipeline phase 4)', () => {
     expect(screen.getByText(/are not updated/)).toBeInTheDocument()
     expect(screen.queryByLabelText(/re-read the last/)).toBeNull()
     expect(screen.getByRole('button', { name: 'Save loading' })).toBeDisabled()     // no cursor yet
+  })
+
+  it('can also remove rows deleted at the source, which needs a key', async () => {
+    vi.mocked(datasetsApi.setIncremental).mockImplementation(async (_id, body) => ({ ...full, ...body }))
+    render(<IncrementalSettingsForm datasetId={3} columns={['order_id', 'updated_at']} />)
+    fireEvent.change(await screen.findByLabelText('How'), { target: { value: 'incremental' } })
+    fireEvent.change(screen.getByLabelText(/grows with new rows/), { target: { value: 'updated_at' } })
+    expect(screen.queryByLabelText(/Remove rows deleted at the source/)).toBeNull()    // no key yet
+    fireEvent.change(screen.getByLabelText(/identifies a row/), { target: { value: 'order_id' } })
+    fireEvent.click(screen.getByLabelText(/Remove rows deleted at the source/))
+    expect(screen.getByText(/If the source returns none, nothing is removed/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Save loading' }))
+    await waitFor(() => expect(datasetsApi.setIncremental).toHaveBeenCalledWith(3,
+      expect.objectContaining({ key_column: 'order_id', reconcile_deletes: true })))
   })
 })

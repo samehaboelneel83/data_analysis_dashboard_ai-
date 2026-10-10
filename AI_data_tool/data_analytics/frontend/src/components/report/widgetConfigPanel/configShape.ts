@@ -42,7 +42,7 @@ export const PANEL_KEYS: ReadonlySet<string> = new Set([
   'target_value', 'gauge_shape', 'anim_label_position', 'anim_order', 'anim_label_size',
   'anim_label_style', 'anim_label_opacity', 'anim_label_box',
   // every type
-  'dataset_id', 'drillthroughPageId', 'tooltipPageId', 'hierarchyNodeId',
+  'dataset_id', 'drillthroughPageId', 'tooltipPageId', 'hierarchyNodeId', 'hierarchyNodeId2',
   'dimension_granularity', 'fiscal_start_month', 'aggregation2', 'bar_mode', 'centrality_metric', 'method',
   'event_value', 'max_depth', 'compare', 'prediction_model_id', 'model_follows', 'forecast_target',
   'display_rules', 'analytics', 'container_mode', 'background_url', 'container_id', 'z',

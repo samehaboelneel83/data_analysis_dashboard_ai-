@@ -279,6 +279,8 @@ export interface Dataset {
   // Aggregate datasets: set when this dataset IS a saved GROUP BY of another.
   aggregate_of_dataset_id?:  number | null
   aggregate_spec?:           AggregateSpec | null
+  /** Public / Internal / Confidential / Restricted, or null when unlabelled (dataset list). */
+  sensitivity_label?: string | null
 }
 
 export interface DemoSeedResult { datasets: number; reports: number; widgets: number }
@@ -517,6 +519,9 @@ export const datasetsApi = {
   liveCount: (id: number, force = false) =>
     api.post<LiveCount>(`/datasets/${id}/live-count`, null, { params: force ? { force: true } : {} }).then(r => r.data),
   list:    ()         => api.get<Dataset[]>('/datasets').then(r => r.data),
+  /** One column's lineage: where it comes from and what uses it (2026-10-10). */
+  columnLineage: (id: number, name: string) =>
+    api.get<ColumnLineage>(`/datasets/${id}/column-lineage`, { params: { name } }).then(r => r.data),
   /** Ask the model what dashboards would suit this dataset and this person.
    *  `goal` is their own description of their job, free text. Slow by nature —
    *  it profiles the data, asks a model, then runs every widget it proposes. */
@@ -1669,6 +1674,8 @@ export interface IncrementalSettingsInput {
   key_column?: string | null
   lookback_hours?: number | null
   full_reload_days?: number | null
+  /** With a key: also remove rows the source no longer has (2026-10-10). */
+  reconcile_deletes?: boolean
 }
 
 export interface IncrementalSettings extends IncrementalSettingsInput {
@@ -1680,11 +1687,17 @@ export interface IncrementalSettings extends IncrementalSettingsInput {
 }
 
 export type DataCheckKind = 'not_null' | 'unique' | 'accepted_values' | 'row_count' | 'row_drop' | 'rule'
+  // 2026-10-10: referential integrity, and schema drift that can block
+  | 'references' | 'same_columns'
 
 export interface DataCheckInput {
   kind: DataCheckKind
   column?: string | null
-  params?: { values?: string[]; min?: number | null; max?: number | null; max_drop_pct?: number; expression?: string }
+  params?: { values?: string[]; min?: number | null; max?: number | null; max_drop_pct?: number; expression?: string
+    /** references: the dataset and column every value must exist in. */
+    dataset_id?: number; column?: string
+    /** same_columns: whether a NEW column is fine (missing / retyped never is). */
+    allow_new?: boolean }
   severity: 'warn' | 'block'
   enabled?: boolean
 }
@@ -1706,6 +1719,36 @@ export interface CheckResult {
   detail: string | null
 }
 
+export interface ColumnLineage {
+  name: string
+  origin:
+    | { kind: 'source'; source: string; source_id: number; table: string; column: string; native_type: string | null }
+    | { kind: 'calculated' | 'measure'; expression: string; inputs: string[] }
+    | { kind: 'upload' | 'query' | 'unknown' }
+  /** The whole journey, in order: source, load, transformation steps,
+   *  formula, checks (then `used_by`). */
+  process: LineageStage[]
+  used_by: { kind: string; id: number | null; label: string; where: string; report_id?: number | null }[]
+  dataset: { id: number; name: string; last_refreshed_at: string | null }
+}
+
+type LineageOrigin =
+  | { kind: 'source'; source: string; source_id: number; table: string; column: string; native_type: string | null }
+  | { kind: 'calculated' | 'measure'; expression: string; inputs: string[] }
+  | { kind: 'upload' | 'query' | 'unknown' }
+  | { kind: 'derived'; datasets: { id: number; name: string }[] }
+  | { kind: 'inputs'; inputs: ({ name: string } & LineageOrigin)[] }
+
+export type LineageStage =
+  | ({ stage: 'source'; arrives_as?: string } & LineageOrigin)
+  | { stage: 'load'; mode: string; strategy: string; cursor_column: string | null; key_column: string | null
+      reconcile_deletes: boolean; has_query: boolean; query?: string; last_refreshed_at: string | null
+      last_run: { status: string; started_at: string | null; rows: number | null; duration_ms: number | null; error: string | null } | null }
+  | { stage: 'steps'; total_steps: number
+      steps: { index: number; kind: string; dataset: string | null; role: 'makes' | 'changes' | 'rows'; detail: Record<string, unknown> }[] }
+  | ({ stage: 'formula' } & { kind: 'calculated' | 'measure'; expression: string; inputs: string[] })
+  | { stage: 'checks'; checks: { kind: string; severity: string; enabled: boolean; column: string | null }[] }
+
 export interface DatasetRefreshRun {
   id: number
   trigger: 'schedule' | 'manual'
@@ -1716,6 +1759,8 @@ export interface DatasetRefreshRun {
   error: string | null
   error_code: string | null
   checks: CheckResult[]
+  /** 2026-10-10: speed and size; `slow` when far slower than this dataset's usual. */
+  metrics?: { rows_per_sec?: number; file_mb?: number; slow?: { median_ms: number; times: number } } | null
 }
 
 export interface PipelineHealth {

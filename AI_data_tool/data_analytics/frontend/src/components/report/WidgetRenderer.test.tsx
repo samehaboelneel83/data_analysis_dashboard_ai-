@@ -2841,3 +2841,182 @@ describe('a custom background sets its own text colours (QA4 V1)', () => {
     expect(card.style.getPropertyValue('--muted')).toBe('#4d5560')
   })
 })
+
+describe('hierarchy plan, step 1: one drill model (2026-10-10)', () => {
+  const geo: HierarchyNode[] = [
+    hNode({ id: 10, name: 'Geo', node_type: 'folder' }),
+    hNode({ id: 11, name: 'Region', node_type: 'dimension', parent_id: 10, column_name: 'region' }),
+    hNode({ id: 12, name: 'Country', node_type: 'dimension', parent_id: 11, column_name: 'country' }),
+  ]
+  function Probe() {
+    const { activeFilters, drillStates } = useCrossFilter()
+    return <pre data-testid="probe">{JSON.stringify({ f: activeFilters.map(f => [f.column, f.value]), d: drillStates })}</pre>
+  }
+
+  it('clicking an expanded row filters each level on its own value, not on "EU › France"', async () => {
+    vi.mocked(widgetDataApi.query).mockReset()
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'EU', value: 3 }], sampled: false })
+    render(
+      <CrossFilterProvider>
+        <WidgetRenderer widget={barWidget({ widget_type: 'list', config: { dimension: 'region', hierarchyNodeId: 11 } })}
+          datasetId={10} hierarchy={geo} />
+        <Probe />
+      </CrossFilterProvider>)
+    fireEvent.click(await screen.findByLabelText('Expand hierarchy one level'))
+    vi.mocked(widgetDataApi.query).mockResolvedValue({ rows: [{ name: 'EU › France', value: 2 }], sampled: false })
+    fireEvent.click(await screen.findByText('EU › France'))
+    const probe = JSON.parse(screen.getByTestId('probe').textContent ?? '{}')
+    expect(probe.f).toEqual([['region', 'EU'], ['country', 'France']])
+  })
+
+  it('the drill position lives in the page state, where a bookmark can save it', async () => {
+    vi.mocked(widgetDataApi.query).mockReset()
+    vi.mocked(widgetDataApi.query)
+      .mockResolvedValueOnce({ rows: [{ name: 'EU', value: 3 }], sampled: false })
+      .mockResolvedValue({ rows: [{ name: 'France', value: 2 }], sampled: false })
+    render(
+      <CrossFilterProvider>
+        <WidgetRenderer widget={barWidget({ id: 77, widget_type: 'list', config: { dimension: 'region', hierarchyNodeId: 11 } })}
+          datasetId={10} hierarchy={geo} />
+        <Probe />
+      </CrossFilterProvider>)
+    fireEvent.click(await screen.findByText('EU'))
+    await screen.findByText('France')
+    const probe = JSON.parse(screen.getByTestId('probe').textContent ?? '{}')
+    expect(probe.d['77']).toEqual({ path: [{ column: 'region', value: 'EU', label: 'EU' }], expand: 0 })
+  })
+})
+
+describe('hierarchy plan, step 2: the hierarchy slicer (2026-10-10)', () => {
+  const geo: HierarchyNode[] = [
+    hNode({ id: 20, name: 'Geo', node_type: 'folder' }),
+    hNode({ id: 21, name: 'Country', node_type: 'dimension', parent_id: 20, column_name: 'country' }),
+    hNode({ id: 22, name: 'City', node_type: 'dimension', parent_id: 21, column_name: 'city' }),
+  ]
+  const tree = { type: 'slicer_tree', levels: [{ column: 'country' }, { column: 'city' }], total: 5, rows: [],
+    nodes: [
+      { value: 'Egypt', count: 3, children: [{ value: 'Alexandria', count: 1, children: [] }, { value: 'Cairo', count: 2, children: [] }] },
+      { value: 'US', count: 2, children: [{ value: 'Alexandria', count: 1, children: [] }, { value: 'Boston', count: 1, children: [] }] },
+    ] }
+  function Probe() {
+    const { activeFilters } = useCrossFilter()
+    return <pre data-testid="probe">{JSON.stringify(activeFilters.map(f => [f.column, f.value, f.label]))}</pre>
+  }
+
+  it('asks for the whole chain, and a tick sends one exact "paths" filter', async () => {
+    vi.mocked(widgetDataApi.query).mockReset()
+    vi.mocked(widgetDataApi.query).mockResolvedValue(tree as never)
+    render(
+      <CrossFilterProvider>
+        <WidgetRenderer widget={barWidget({ id: 31, widget_type: 'slicer', config: { dimension: 'country', hierarchyNodeId: 21 } })}
+          datasetId={10} hierarchy={geo} />
+        <Probe />
+      </CrossFilterProvider>)
+    await screen.findByTestId('slicer-tree')
+    const [, cfg] = vi.mocked(widgetDataApi.query).mock.calls[0]
+    expect((cfg as any).slicer_levels).toEqual([{ column: 'country', granularity: null }, { column: 'city', granularity: null }])
+    fireEvent.click(screen.getByRole('button', { name: 'Open US' }))
+    fireEvent.click(screen.getByLabelText('US › Boston'))
+    fireEvent.click(screen.getByLabelText('Egypt'))
+    const f = JSON.parse(screen.getByTestId('probe').textContent ?? '[]')
+    expect(f).toEqual([['country', { paths: [['Egypt'], ['US', 'Boston']], columns: ['country', 'city'],
+      granularities: [null, null] }, 'Egypt, US › Boston']])
+    expect((screen.getByLabelText('US') as HTMLInputElement).indeterminate).toBe(true)
+  })
+
+  it('a receiving widget gets the selection as op "paths"', async () => {
+    vi.mocked(widgetDataApi.query).mockReset()
+    vi.mocked(widgetDataApi.query).mockImplementation(async (_ds, cfg) =>
+      ((cfg as any).slicer_levels ? tree : { rows: [{ name: 'x', value: 1 }], sampled: false }) as never)
+    render(
+      <CrossFilterProvider>
+        <WidgetRenderer widget={barWidget({ id: 31, widget_type: 'slicer', config: { dimension: 'country', hierarchyNodeId: 21 } })}
+          datasetId={10} hierarchy={geo} />
+        <WidgetRenderer widget={barWidget({ id: 32, config: { dimension: 'city', measure: 'v' } })} datasetId={10} />
+      </CrossFilterProvider>)
+    await screen.findByTestId('slicer-tree')
+    fireEvent.click(screen.getByLabelText('Egypt'))
+    await waitFor(() => {
+      const last = vi.mocked(widgetDataApi.query).mock.calls.filter(c => !(c[1] as any).slicer_levels).at(-1)!
+      expect((last[1] as any).filters).toContainEqual({ column: 'country', op: 'paths',
+        value: { paths: [['Egypt']], columns: ['country', 'city'], granularities: [null, null] } })
+    })
+  })
+})
+
+describe('hierarchy plan, step 3: the hierarchical crosstab (2026-10-10)', () => {
+  const geo: HierarchyNode[] = [
+    hNode({ id: 20, name: 'Geo', node_type: 'folder' }),
+    hNode({ id: 21, name: 'Country', node_type: 'dimension', parent_id: 20, column_name: 'country' }),
+    hNode({ id: 22, name: 'City', node_type: 'dimension', parent_id: 21, column_name: 'city' }),
+  ]
+  const grid = { type: 'hier_pivot', row_levels: [{ column: 'country' }, { column: 'city' }],
+    column_levels: [{ column: 'year' }], measure: 'v', aggregation: 'avg', rows: [], total: 5,
+    row_tree: [{ value: 'Egypt', children: [{ value: 'Cairo', children: [] }, { value: 'Giza', children: [] }] },
+               { value: 'US', children: [{ value: 'Boston', children: [] }] }],
+    column_tree: [{ value: '2024', children: [] }, { value: '2025', children: [] }],
+    cells: [[[], [], 30], [['Egypt'], [], 20], [['US'], [], 50], [['Egypt', 'Cairo'], [], 10], [['Egypt', 'Giza'], [], 25],
+      [['US', 'Boston'], [], 50], [['Egypt'], ['2024'], 15], [['Egypt', 'Cairo'], ['2024'], 10], [[], ['2024'], 15]] }
+  function Probe() {
+    const { activeFilters } = useCrossFilter()
+    return <pre data-testid="probe">{JSON.stringify(activeFilters.map(f => [f.column, f.value]))}</pre>
+  }
+  const crosstab = () => barWidget({ id: 41, widget_type: 'crosstab',
+    config: { dimension: 'country', dimension2: 'year', measure: 'v', aggregation: 'avg', hierarchyNodeId: 21 } })
+
+  it('asks for both axes, opens a branch with its own total under it', async () => {
+    vi.mocked(widgetDataApi.query).mockReset()
+    vi.mocked(widgetDataApi.query).mockResolvedValue(grid as never)
+    render(<CrossFilterProvider><WidgetRenderer widget={crosstab()} datasetId={10} hierarchy={geo} /></CrossFilterProvider>)
+    await screen.findByTestId('hier-pivot')
+    const [, cfg] = vi.mocked(widgetDataApi.query).mock.calls[0]
+    expect((cfg as any).hierarchy_rows).toEqual([{ column: 'country', granularity: null }, { column: 'city', granularity: null }])
+    expect((cfg as any).hierarchy_columns).toEqual([{ column: 'year', granularity: null }])
+    expect(screen.queryByText('Cairo')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Open Egypt' }))
+    const rows = screen.getAllByRole('row').map(r => r.textContent)
+    const at = (txt: string) => rows.findIndex(r => r?.startsWith(txt))
+    expect(at('Cairo')).toBeGreaterThan(at('▾Egypt'))
+    expect(at('Total Egypt')).toBeGreaterThan(at('Giza'))
+    expect(rows[at('Total Egypt')]).toContain('20')
+    expect(rows.at(-1)).toMatch(/^Grand total/)
+    fireEvent.click(screen.getByRole('button', { name: 'Close Egypt' }))
+    expect(screen.queryByText('Cairo')).toBeNull()
+  })
+
+  it('clicking a number filters the page to that row and column exactly', async () => {
+    vi.mocked(widgetDataApi.query).mockReset()
+    vi.mocked(widgetDataApi.query).mockResolvedValue(grid as never)
+    render(<CrossFilterProvider><WidgetRenderer widget={crosstab()} datasetId={10} hierarchy={geo} /><Probe /></CrossFilterProvider>)
+    await screen.findByTestId('hier-pivot')
+    fireEvent.click(screen.getByRole('button', { name: 'Open Egypt' }))
+    fireEvent.click(screen.getAllByText('10')[0])
+    const f = JSON.parse(screen.getByTestId('probe').textContent ?? '[]')
+    expect(f).toContainEqual(['country', { paths: [['Egypt', 'Cairo']], columns: ['country', 'city'], granularities: [null, null] }])
+    expect(f).toContainEqual(['year', { paths: [['2024']], columns: ['year'], granularities: [null] }])
+  })
+})
+
+describe('hierarchy plan, step 4: a tree widget filters the page (2026-10-10)', () => {
+  it('ticking a branch emits one exact "paths" filter over the level columns', async () => {
+    const leaf = (name: string) => ({ name, value: 1, depth: 1, children: [] })
+    const shaped = { type: 'tree', mode: 'levels', levels: ['country', 'city'], rows: [], total: 4,
+      root: { name: '', value: 4, depth: 0, children: [
+        { name: 'Egypt', value: 2, depth: 0, children: [leaf('Cairo'), leaf('Giza')] },
+        { name: 'US', value: 2, depth: 0, children: [leaf('Boston'), leaf('Austin')] }] } }
+    vi.mocked(widgetDataApi.query).mockReset()
+    vi.mocked(widgetDataApi.query).mockResolvedValue(shaped as never)
+    function Probe() {
+      const { activeFilters } = useCrossFilter()
+      return <pre data-testid="probe">{JSON.stringify(activeFilters.map(f => [f.column, f.value]))}</pre>
+    }
+    render(
+      <CrossFilterProvider>
+        <WidgetRenderer widget={barWidget({ id: 51, widget_type: 'tree', config: { levels: ['country', 'city'], measure: 'v' } })} datasetId={10} />
+        <Probe />
+      </CrossFilterProvider>)
+    fireEvent.click(await screen.findByLabelText('Egypt › Giza'))
+    expect(JSON.parse(screen.getByTestId('probe').textContent ?? '[]')).toEqual([['country',
+      { paths: [['Egypt', 'Giza']], columns: ['country', 'city'], granularities: [null, null] }]])
+  })
+})

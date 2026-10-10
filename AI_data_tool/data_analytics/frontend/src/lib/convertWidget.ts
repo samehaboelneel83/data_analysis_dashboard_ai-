@@ -74,6 +74,10 @@ export function convertConfig(from: string, cfg: Cfg, to: string): Cfg | null {
       if (cfg[k] != null && cfg[k] !== '') out[k] = cfg[k]
     }
   }
+  // A grid's Columns hierarchy, when the new type is a grid with the same Columns.
+  if (['crosstab', 'matrix'].includes(to) && out.dimension2 && out.dimension2 === cfg.dimension2 && cfg.hierarchyNodeId2 != null) {
+    out.hierarchyNodeId2 = cfg.hierarchyNodeId2
+  }
   if (Array.isArray(cfg.filters) && cfg.filters.length) out.filters = cfg.filters
   const agg = str(cfg.aggregation)
   if (agg && aggregationOffered(to, agg)) out.aggregation = agg

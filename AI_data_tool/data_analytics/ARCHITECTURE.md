@@ -1166,7 +1166,7 @@ SQLAlchemy, grouped by concern:
 | Platform | `saml_authn_requests`, `org_mcp_access`, `eval_runs` |
 | Ops | `sync_runs`, `schema_versions`, `column_stats`, `materializations`, `quotas`, `query_runs`, `ai_usage`, `migration_items` |
 
-Schema changes go through **Alembic** (`backend/alembic/`, 59 revisions).
+Schema changes go through **Alembic** (`backend/alembic/`, 60 revisions).
 Every timestamp column is `TIMESTAMPTZ` and the app writes naive UTC; `core/database.py` marks each bound naive datetime as UTC (asyncpg would read it as the process's local time) and pins the session time zone to UTC, so stored times are right on a server whose clock is not UTC.
 `postgres/init.sql` provides the initial schema and indexes.
 
@@ -2357,8 +2357,8 @@ Agent pane (7)
 
 | Suite | Scope | Count |
 |-------|-------|-------|
-| Backend | `backend/tests/` | ~6,670 tests across 474 modules |
-| Frontend | colocated `*.test.ts(x)` | ~3,410 tests across 341 files |
+| Backend | `backend/tests/` | ~6,670 tests across 477 modules |
+| Frontend | colocated `*.test.ts(x)` | ~3,410 tests across 343 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |
 | Doc audit | `tests/test_architecture_doc.py` | Enforces the *counts* in this document |

@@ -7,6 +7,7 @@ import { localDigits } from '../../lib/arabicFormats'
 import { typeTag, useColumnProfile, type Analysis } from '../../pages/datasetDetail/columnProfile'
 import '../../pages/datasetDetail/columns.css'
 import { useT, type MessageKey } from '../../i18n'
+import ColumnLineage from './ColumnLineage'
 
 /**
  * What a column IS, for every engine that reads it.
@@ -337,6 +338,8 @@ function ColumnRow(p: {
                     e.target.checked ? t('cols3.hiddenNow', { col: c.name }) : t('cols3.shownNow', { col: c.name }))} />
                 {t('cols3.hide')}
               </label>
+              {/* Where it comes from and what uses it (docs/pipeline/PLAN.md, P5). */}
+              <ColumnLineage datasetId={p.dataset.id} name={c.name} />
             </div>
           </td>
         </tr>

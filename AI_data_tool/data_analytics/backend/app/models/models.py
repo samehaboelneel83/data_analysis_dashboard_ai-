@@ -1444,6 +1444,9 @@ class Watermark(Base):
     # when the last full load ran.
     key_column       = Column(String(255), nullable=True)
     lookback_hours   = Column(Integer, nullable=True)
+    #: 2026-10-10: with a key, also drop rows whose key the source no longer
+    #: has -- an incremental merge otherwise keeps deleted rows forever.
+    reconcile_deletes = Column(Boolean, nullable=False, default=False, server_default=text("false"))
     full_reload_days = Column(Integer, nullable=True)
     last_full_at     = Column(DateTime(timezone=True), nullable=True)
 
@@ -2083,6 +2086,9 @@ class RefreshRun(Base):
     #: Phase 3: each saved check's result on the data this run fetched, and
     #: schema notes -- [{id, kind, column, severity, passed, detail}, ...].
     checks     = Column(JSON, nullable=True)
+    #: 2026-10-10: {rows_per_sec, file_mb, slow: {median_ms, times}} -- how
+    #: fast the run went and whether it was far slower than this item's usual.
+    metrics    = Column(JSON, nullable=True)
 
 
 class DataCheck(Base):

@@ -33,7 +33,7 @@ from dataclasses import asdict, dataclass
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models.models import (CommonFilter, DataAlert, Dataset, HierarchyNode, Report,
+from ..models.models import (CommonFilter, DataAlert, Dataset, DatasetColumn, HierarchyNode, Report,
                              ReportPage, ReportWidget)
 
 #: Widget-config keys whose STRING value is a column or measure name.
@@ -163,6 +163,215 @@ async def find_dependents_of(db: AsyncSession, dataset: Dataset,
                 out[name].append(Dependent("aggregate", agg.id, agg.name, ", ".join(where)))
 
     return {n: [asdict(d) for d in deps] for n, deps in out.items()}
+
+
+async def column_origin(db: AsyncSession, dataset: Dataset, name: str) -> dict:
+    """Where a column comes from (2026-10-10, docs/pipeline/PLAN.md): the
+    upstream half of column lineage -- `find_dependents` is the downstream.
+
+    {"kind": "calculated" | "measure", "expression", "inputs"}: built from
+    other columns of this dataset; {"kind": "source", "source", "table",
+    "column", "native_type"}: read from that table of that connection;
+    {"kind": "upload"}: from the uploaded file; {"kind": "query"}: produced by
+    the dataset's own query (no single source column); {"kind": "unknown"}."""
+    from ..models.models import DataSource, SourceColumn, SourceObject
+    cols = (await db.execute(select(DatasetColumn).where(DatasetColumn.dataset_id == dataset.id))).scalars().all()
+    calc = {c.get("name"): c for c in (dataset.calculated_columns or []) if isinstance(c, dict)}
+    measures = {m.get("name"): m for m in (dataset.measures or []) if isinstance(m, dict)}
+    # Columns the prep steps make (a rename, date parts...) are inputs too.
+    # Collected step by step, never by validating the whole pipeline: one step
+    # that no longer validates must not hide the others' columns here.
+    from .prep import prep_steps_of
+    made = [n for st in prep_steps_of(dataset) if isinstance(st, dict) for n in _made_names(st)]
+    known = [c.name for c in cols] + made + list(calc)
+
+    def inputs(expr: str | None) -> list[str]:
+        return [n for n in known if n != name and _identifier_in(expr, n)]
+
+    if name in calc:
+        expr = calc[name].get("expression") or ""
+        return {"kind": "calculated", "expression": expr, "inputs": inputs(expr)}
+    if name in measures:
+        expr = measures[name].get("expression") or ""
+        return {"kind": "measure", "expression": expr, "inputs": inputs(expr)}
+    col = next((c for c in cols if c.name == name), None)
+    if col is None:
+        return {"kind": "unknown"}
+    if col.source_column_id:
+        row = (await db.execute(
+            select(SourceColumn, SourceObject, DataSource)
+            .join(SourceObject, SourceObject.id == SourceColumn.source_object_id)
+            .join(DataSource, DataSource.id == SourceObject.data_source_id)
+            .where(SourceColumn.id == col.source_column_id))).first()
+        if row is not None:
+            sc, obj, src = row
+            if src.org_id == dataset.org_id:
+                table = f"{obj.schema_name}.{obj.name}" if obj.schema_name else obj.name
+                return {"kind": "source", "source": src.name, "source_id": src.id, "table": table,
+                        "column": sc.name, "native_type": sc.native_type}
+    if dataset.data_source_id is None:
+        return {"kind": "upload"}
+    return {"kind": "query"}
+
+
+def _strings(v) -> list[str]:
+    """Every string inside a prep step's value (str, list, dict), for "does
+    this step touch that column?" without knowing each step's field names."""
+    if isinstance(v, str):
+        return [v]
+    if isinstance(v, (list, tuple)):
+        return [x for i in v for x in _strings(i)]
+    if isinstance(v, dict):
+        return [x for i in v.values() for x in _strings(i)]
+    return []
+
+
+#: Prep steps that MAKE new columns, and the names they make (see
+#: prep.prep_added_columns): a column made by one of them comes from the step.
+def _made_by(step: dict, name: str) -> str | None:
+    """The input column a prep step made `name` from, or None."""
+    k, col = step.get("kind"), step.get("column")
+    if k == "rename" and step.get("to") == name:
+        return col
+    if k == "date_parts" and any(f"{col}_{p}" == name for p in step.get("parts") or []):
+        return col
+    if k == "encode" and isinstance(col, str) and name.startswith(f"{col}_"):
+        return col
+    if k == "normalize" and step.get("suffix"):
+        for c in step.get("columns") or []:
+            if f"{c}{step['suffix']}" == name:
+                return c
+    if k == "aggregate":
+        for a in step.get("aggregations") or []:
+            if isinstance(a, dict) and (a.get("as") or a.get("column")) == name:
+                return a.get("column")
+    return None
+
+
+def _made_names(step: dict) -> list[str]:
+    """The column names a prep step creates (mirrors _made_by)."""
+    k, col = step.get("kind"), step.get("column")
+    if k == "rename" and step.get("to"):
+        return [step["to"]]
+    if k == "date_parts" and col:
+        return [f"{col}_{p}" for p in step.get("parts") or []]
+    if k == "normalize" and step.get("suffix"):
+        return [f"{c}{step['suffix']}" for c in step.get("columns") or []]
+    if k == "aggregate":
+        return [a.get("as") or a.get("column") for a in step.get("aggregations") or []
+                if isinstance(a, dict) and (a.get("as") or a.get("column"))]
+    return []
+
+
+def _trace_back(steps: list[dict], name: str) -> str:
+    """The name a column arrived with, following renames and made-by steps back."""
+    for i in range(len(steps) - 1, -1, -1):
+        src = _made_by(steps[i], name)
+        if src:
+            name = src
+    return name
+
+
+async def column_process(db: AsyncSession, dataset: Dataset, name: str, *, editor: bool) -> list[dict]:
+    """A column's whole journey, in order (2026-10-10, docs/pipeline/PLAN.md P5):
+    source -> how the dataset loads (and how the last load went) -> the
+    transformation steps that touch it -> the formula that makes it -> the
+    checks run on it. `find_dependents` is the rest (what uses it).
+    `editor`: the dataset's SQL and the last error are shown to editors only."""
+    from sqlalchemy import select as _select
+    from ..models.models import DataCheck, RefreshRun, Watermark
+    from .prep import derived_from_of, prep_steps_of
+    stages: list[dict] = []
+    steps = [s for s in prep_steps_of(dataset) if isinstance(s, dict)]
+
+    # Follow renames / made-by steps back to the name the data arrived with.
+    original, made_by_step = name, None
+    for i in range(len(steps) - 1, -1, -1):
+        src = _made_by(steps[i], original)
+        if src:
+            if made_by_step is None and steps[i].get("kind") != "rename":
+                made_by_step = i
+            original = src
+
+    calc = next((c for c in dataset.calculated_columns or [] if isinstance(c, dict) and c.get("name") == name), None)
+    meas = next((m for m in dataset.measures or [] if isinstance(m, dict) and m.get("name") == name), None)
+    formula = await column_origin(db, dataset, name) if (calc or meas) else None
+
+    # 1. Source -- for a formula, where each of its inputs comes from.
+    origin = await column_origin(db, dataset, original)
+    if formula:
+        inputs = []
+        for i in formula["inputs"]:
+            first = _trace_back(steps, i)
+            entry = {"name": i, **(await column_origin(db, dataset, first))}
+            if first != i:
+                entry["arrives_as"] = first
+            inputs.append(entry)
+        origin = {"kind": "inputs", "inputs": inputs}
+    derived = derived_from_of(dataset)
+    if derived and not formula:
+        names = []
+        from .prep import derived_source_ids
+        for did in derived_source_ids(derived):
+            d = await db.get(Dataset, did)
+            if d is not None and d.org_id == dataset.org_id:
+                names.append({"id": d.id, "name": d.name})
+        origin = {"kind": "derived", "datasets": names}
+    stage = {"stage": "source", **origin}
+    if original != name:
+        stage["arrives_as"] = original
+    stages.append(stage)
+
+    # 2. Load
+    wm = (await db.execute(_select(Watermark).where(Watermark.dataset_id == dataset.id))).scalar_one_or_none()
+    last = (await db.execute(_select(RefreshRun).where(
+        RefreshRun.kind == "dataset", RefreshRun.item_id == dataset.id).order_by(RefreshRun.id.desc()).limit(1))
+    ).scalar_one_or_none()
+    load = {"stage": "load", "mode": dataset.mode or "import",
+            "strategy": (wm.strategy if wm else None) or "full",
+            "cursor_column": wm.cursor_column if wm else None, "key_column": wm.key_column if wm else None,
+            "reconcile_deletes": bool(wm.reconcile_deletes) if wm else False,
+            "has_query": bool(dataset.source_query), "last_refreshed_at": dataset.last_refreshed_at,
+            "last_run": None}
+    if editor and dataset.source_query:
+        load["query"] = dataset.source_query[:2000]
+    if last is not None:
+        load["last_run"] = {"status": last.status, "started_at": last.started_at, "rows": last.rows,
+                            "duration_ms": last.duration_ms,
+                            "error": (last.error or "").splitlines()[0][:300] if (editor and last.error) else None}
+    stages.append(load)
+
+    # 3. Transformation steps that touch it (or the name it arrived with)
+    touched = []
+    names_seen = {name, original} | set((formula or {}).get("inputs") or [])
+    for i, st in enumerate(steps):
+        values = set(_strings({k: v for k, v in st.items() if k != "kind"}))
+        made = _made_by(st, name) is not None
+        if made or (values & names_seen) or st.get("kind") in ("join", "append", "filter_rows", "dedupe",
+                                                              "drop_duplicates", "sort", "balance"):
+            other = None
+            if st.get("kind") in ("join", "append") and st.get("dataset_id"):
+                d = await db.get(Dataset, st["dataset_id"])
+                other = d.name if d is not None and d.org_id == dataset.org_id else None
+            touched.append({"index": i + 1, "kind": st.get("kind"), "dataset": other,
+                            "role": "makes" if (made_by_step == i or made) else
+                                    ("rows" if not (values & names_seen) else "changes"),
+                            "detail": {k: v for k, v in st.items() if k in (
+                                "column", "columns", "to", "how", "dataset_id", "expression", "parts", "value")}})
+    if touched:
+        stages.append({"stage": "steps", "steps": touched, "total_steps": len(steps)})
+
+    # 4. Formula (a calculated column or a measure)
+    if formula:
+        stages.append({"stage": "formula", **formula})
+
+    # 5. Checks on it (and the dataset-wide ones that guard every column)
+    checks = (await db.execute(_select(DataCheck).where(DataCheck.dataset_id == dataset.id))).scalars().all()
+    mine = [{"kind": c.kind, "severity": c.severity, "enabled": bool(c.enabled), "column": c.column}
+            for c in checks if c.column == name or c.column is None]
+    if mine:
+        stages.append({"stage": "checks", "checks": mine})
+    return stages
 
 
 def _rewrite_identifier(text: str | None, old: str, new: str) -> str | None:

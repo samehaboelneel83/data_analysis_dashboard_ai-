@@ -15,6 +15,15 @@ from datetime import datetime
 
 log = logging.getLogger(__name__)
 
+#: A run is "slower than usual" when it takes this many times the median of
+#: the item's recent successful runs AND at least SLOW_MIN_MS: a 2-second
+#: refresh taking 7 is noise, a 10-minute one taking 35 is news.
+SLOW_FACTOR = 3.0
+SLOW_MIN_MS = 30_000
+#: Successful runs the median is taken over, and the fewest it needs.
+SLOW_WINDOW = 10
+SLOW_MIN_HISTORY = 3
+
 #: How many runs are kept per item. Older ones are trimmed on each finish, so
 #: a dataset refreshed every 5 minutes does not grow the table without bound.
 KEEP_PER_ITEM = 200
@@ -66,6 +75,9 @@ async def finish_run(session, run_id: int | None, status: str, *, rows: int | No
                 from datetime import timezone
                 started = started.astimezone(timezone.utc).replace(tzinfo=None)
             run.duration_ms = max(0, int((now - started).total_seconds() * 1000))
+        slow_news = False
+        if status == "ok":
+            run.metrics, slow_news = await _metrics(session, run)
         # Trim this item's history to the newest KEEP_PER_ITEM runs.
         keep = select(RefreshRun.id).where(
             RefreshRun.kind == run.kind, RefreshRun.item_id == run.item_id
@@ -86,8 +98,10 @@ async def finish_run(session, run_id: int | None, status: str, *, rows: int | No
         return
     # Phase 2: a run that changes the item's state -- first failure, or the
     # success that ends a failure -- is announced. Never raises.
-    from .pipeline_alerts import on_run_finished
+    from .pipeline_alerts import on_run_finished, on_slow_run
     await on_run_finished(session, kind, item_id, status, error)
+    if slow_news:
+        await on_slow_run(session, kind, item_id, run_id)
     if status == "ok":
         # Phase 4: whatever is set to run after this data now has new input.
         from .pipeline_deps import flow_outputs, mark_dependents
@@ -98,6 +112,35 @@ async def finish_run(session, run_id: int | None, status: str, *, rows: int | No
             flow = await session.get(Dataflow, item_id)
             for out in (await flow_outputs(session, item_id, flow.org_id) if flow else []):
                 await mark_dependents(session, out)
+
+
+async def _metrics(session, run) -> tuple[dict | None, bool]:
+    """How fast this successful run went, and whether it was far slower than
+    this item's usual (2026-10-10, docs/pipeline/PLAN.md). Returns
+    (metrics, announce): announce only the FIRST slow run of a streak."""
+    from statistics import median
+    from sqlalchemy import select
+    from ..models.models import Dataset, RefreshRun
+    out: dict = {}
+    ms = run.duration_ms or 0
+    if run.rows is not None and ms > 0:
+        out["rows_per_sec"] = round(run.rows / (ms / 1000))
+    if run.kind == "dataset":
+        ds = await session.get(Dataset, run.item_id)
+        if ds is not None and ds.file_size:
+            out["file_mb"] = round(ds.file_size / 1_000_000, 2)
+    prev = (await session.execute(
+        select(RefreshRun).where(RefreshRun.kind == run.kind, RefreshRun.item_id == run.item_id,
+                                 RefreshRun.status == "ok", RefreshRun.id < run.id,
+                                 RefreshRun.duration_ms.is_not(None))
+        .order_by(RefreshRun.id.desc()).limit(SLOW_WINDOW))).scalars().all()
+    announce = False
+    if len(prev) >= SLOW_MIN_HISTORY:
+        usual = median(r.duration_ms for r in prev)
+        if usual > 0 and ms >= SLOW_MIN_MS and ms > SLOW_FACTOR * usual:
+            out["slow"] = {"median_ms": int(usual), "times": round(ms / usual, 1)}
+            announce = not ((prev[0].metrics or {}).get("slow"))
+    return (out or None), announce
 
 
 def _json_safe(value):

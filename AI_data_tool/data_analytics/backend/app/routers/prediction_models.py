@@ -39,6 +39,24 @@ from ..services.analytics import load_file
 from ..services.prep import apply_prep_steps, prep_steps_of, resolve_join_frames
 from ..services.widget_data import apply_calculated_columns, apply_rls_filter
 
+def _computed_from(calculated: list, target: str) -> set[str]:
+    """Calculated columns whose formula uses `target`, directly or through
+    another calculated column."""
+    from ..services.dependencies import _identifier_in
+    exprs = {c.get("name"): c.get("expression") or "" for c in calculated or [] if isinstance(c, dict)}
+    out: set[str] = set()
+    grew = True
+    while grew:
+        grew = False
+        for name, expr in exprs.items():
+            if name in out or name == target:
+                continue
+            if any(_identifier_in(expr, t) for t in {target, *out}):
+                out.add(name)
+                grew = True
+    return out
+
+
 router = APIRouter(prefix="/datasets", tags=["prediction-models"])
 
 
@@ -174,6 +192,10 @@ async def train_model(
         df = apply_prep_steps(df, _steps, _aux)
         if ds.calculated_columns:
             df = apply_calculated_columns(df, ds.calculated_columns, ds.custom_functions)
+            # A calculated column built FROM the outcome (a copy, price bands,
+            # price / 1000) gives the answer away: never an input.
+            leaked = _computed_from(ds.calculated_columns, req.target)
+            df = df.drop(columns=[c for c in leaked if c in df.columns and c != req.target])
         if req.partition:
             if req.partition not in df.columns:
                 raise ModelStoreError(f"Partition column '{req.partition}' is not in this dataset.")

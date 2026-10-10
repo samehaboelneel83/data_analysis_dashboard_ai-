@@ -38,6 +38,10 @@ async def list_roles(db: AsyncSession = Depends(get_db), current_user: User = De
 async def create_role(body: RoleCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_org_admin)):
     role = Role(org_id=current_user.org_id, name=body.name, is_org_admin=body.is_org_admin)
     db.add(role)
+    # Who can do what is the first thing an audit is asked (governance tour,
+    # 2026-10-10): role and user changes were not recorded at all.
+    await admin_audit.record(db, current_user, "role.create", f"role:{body.name}",
+                             "org admin" if body.is_org_admin else None)
     await db.commit()
     await db.refresh(role)
     return role
@@ -47,10 +51,15 @@ async def create_role(body: RoleCreate, db: AsyncSession = Depends(get_db), curr
 async def update_role(role_id: int, body: RoleUpdate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_org_admin)):
     role = await db.get(Role, role_id)
     check_org(role, current_user, "Role not found")
-    if body.name is not None:
+    changes = []
+    if body.name is not None and body.name != role.name:
+        changes.append(f"renamed from {role.name}")
         role.name = body.name
-    if body.is_org_admin is not None:
+    if body.is_org_admin is not None and bool(body.is_org_admin) != bool(role.is_org_admin):
+        changes.append("now org admin" if body.is_org_admin else "no longer org admin")
         role.is_org_admin = body.is_org_admin
+    if changes:
+        await admin_audit.record(db, current_user, "role.update", f"role:{role.name}", "; ".join(changes))
     await db.commit()
     await db.refresh(role)
     return role
@@ -63,6 +72,7 @@ async def delete_role(role_id: int, db: AsyncSession = Depends(get_db), current_
     result = await db.execute(select(User).where(User.role_id == role_id).limit(1))
     if result.scalars().first() is not None:
         raise HTTPException(400, "Cannot delete a role that still has users assigned")
+    await admin_audit.record(db, current_user, "role.delete", f"role:{role.name}", None)
     await db.delete(role)
     await db.commit()
 
@@ -97,6 +107,7 @@ async def create_user(body: UserCreate, db: AsyncSession = Depends(get_db), curr
         email=body.email, password_hash=hash_password(body.password),
     )
     db.add(user)
+    await admin_audit.record(db, current_user, "user.create", f"user:{body.email}", f"role:{role.name}")
     await db.commit()
     return await _load_user_out(db, user.id)
 
@@ -145,6 +156,8 @@ async def bulk_create_users(body: BulkUserCreate, db: AsyncSession = Depends(get
     for email, role_id, pw_hash in hashed:
         db.add(User(org_id=current_user.org_id, role_id=role_id, email=email, password_hash=pw_hash))
     if hashed:
+        await admin_audit.record(db, current_user, "user.bulk_create", f"{len(hashed)} users",
+                                 ", ".join(e for e, _, _ in hashed)[:400])
         await db.commit()
     return {"created_count": len(hashed), "created": [e for e, _, _ in hashed], "errors": errors}
 
@@ -153,12 +166,17 @@ async def bulk_create_users(body: BulkUserCreate, db: AsyncSession = Depends(get
 async def update_user(user_id: int, body: UserUpdate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_org_admin)):
     user = await db.get(User, user_id)
     check_org(user, current_user, "User not found")
+    changes: list[str] = []
+    was_email = user.email
     if body.email is not None:
         existing = await db.execute(select(User).where(User.email == body.email, User.id != user_id))
         if existing.scalar_one_or_none() is not None:
             raise HTTPException(400, "Email already in use")
+        if body.email != user.email:
+            changes.append(f"email from {user.email}")
         user.email = body.email
     if body.password is not None:
+        changes.append("password reset")
         user.password_hash = hash_password(body.password)
         # A reset is the moment a revocation is certainly wanted (a leaked or
         # shared password): every login token issued before now stops working.
@@ -167,9 +185,16 @@ async def update_user(user_id: int, body: UserUpdate, db: AsyncSession = Depends
     if body.role_id is not None:
         role = await db.get(Role, body.role_id)
         check_org(role, current_user, "Role not found")
+        if body.role_id != user.role_id:
+            changes.append(f"role to {role.name}" + (" (org admin)" if role.is_org_admin else ""))
         user.role_id = body.role_id
     if body.is_active is not None:
+        if bool(body.is_active) != bool(user.is_active):
+            changes.append("activated" if body.is_active else "deactivated")
         user.is_active = body.is_active
+    if changes:
+        # Never the password itself: only that it was reset.
+        await admin_audit.record(db, current_user, "user.update", f"user:{was_email}", "; ".join(changes))
     await db.commit()
     return await _load_user_out(db, user.id)
 
@@ -180,6 +205,7 @@ async def delete_user(user_id: int, db: AsyncSession = Depends(get_db), current_
     check_org(user, current_user, "User not found")
     if user.id == current_user.id:
         raise HTTPException(400, "Cannot delete your own account")
+    await admin_audit.record(db, current_user, "user.delete", f"user:{user.email}", None)
     await db.delete(user)
     await db.commit()
 

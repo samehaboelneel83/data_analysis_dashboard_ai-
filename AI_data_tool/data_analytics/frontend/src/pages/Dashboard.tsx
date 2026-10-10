@@ -167,6 +167,8 @@ export default function Dashboard() {
   const [status, setStatus] = useState<Status | 'all'>('all')
   const [mineOnly, setMineOnly] = useState(false)
   const [certifiedOnly, setCertifiedOnly] = useState(false)
+  // Governance tour (2026-10-10): find the Confidential ones, and the unlabelled.
+  const [label, setLabel] = useState<string>('all')
   const [sort, setSort] = useState<Sort>('updated')
   const [selectedId, setSelectedId] = useState<number | null>(null)
 
@@ -227,12 +229,13 @@ export default function Dashboard() {
     for (const d of graph?.datasets ?? []) m.set(d.id, d)
     return m
   }, [graph])
-  const facetsOn = source !== 'all' || status !== 'all' || mineOnly || certifiedOnly
+  const facetsOn = source !== 'all' || status !== 'all' || mineOnly || certifiedOnly || label !== 'all'
   const matchesFacets = (d: DatasetSummary) =>
     (source === 'all' || sourceKind(d) === source)
     && (status === 'all' || statusOf(d, lineageOf.get(d.id)) === status)
     && (!mineOnly || (meId != null && d.created_by === meId))
     && (!certifiedOnly || isCertified(d))
+    && (label === 'all' || (label === 'none' ? !d.sensitivity_label : d.sensitivity_label === label))
   const byUpdated = (d: DatasetSummary) => Date.parse(d.last_refreshed_at ?? d.updated_at ?? d.created_at) || 0
   const compare = (a: DatasetSummary, b: DatasetSummary) =>
     sort === 'name' ? a.name.localeCompare(b.name)
@@ -250,7 +253,7 @@ export default function Dashboard() {
   const visible = rows.slice(start, start + pageSize)
   // Deliberately NOT in the URL: this route documents no query parameters and
   // the deep links into it (from Home, from the rail) depend on that.
-  useEffect(() => { setPage(1) }, [dsFilter.query, source, status, mineOnly, certifiedOnly, sort])
+  useEffect(() => { setPage(1) }, [dsFilter.query, source, status, mineOnly, certifiedOnly, label, sort])
 
   const pageNumbers = useMemo(
     () => Array.from({ length: pageCount }, (_, i) => i + 1),
@@ -360,6 +363,15 @@ export default function Dashboard() {
                 <option key={k} value={k}>{t(`dsl.st.${k}` as MessageKey)}</option>)}
             </select>
           </label>
+          <label className="dl-dsl__facet">
+            {t('sens.title')}:
+            <select value={label} onChange={e => setLabel(e.target.value)} aria-label={t('sens.title')}>
+              <option value="all">{t('dsl.f.all')}</option>
+              <option value="none">{t('dsl.f.unlabelled')}</option>
+              {['Public', 'Internal', 'Confidential', 'Restricted'].map(k =>
+                <option key={k} value={k}>{t(`sens.${k}` as MessageKey)}</option>)}
+            </select>
+          </label>
           <button type="button" className="dl-dsl__toggle" aria-pressed={mineOnly} disabled={meId == null}
             onClick={() => setMineOnly(v => !v)}><User size={14} aria-hidden /> {t('dsl.f.mine')}</button>
           <button type="button" className="dl-dsl__toggle" aria-pressed={certifiedOnly}
@@ -465,6 +477,14 @@ export default function Dashboard() {
                                 <span className="dl-chip dl-chip--certified" style={{ color: 'var(--success, #15803d)' }}
                                   title={t('dsf.certifiedBy', { who: certificationOf(ds)?.by_email ?? '' })}>
                                   ✓ {t('dsf.badge')}
+                                </span>
+                              )}
+                              {ds.sensitivity_label && ds.sensitivity_label !== 'Public' && (
+                                <span className="dl-chip" data-testid="ds-label"
+                                  style={{ color: ds.sensitivity_label === 'Restricted' || ds.sensitivity_label === 'Confidential'
+                                    ? 'var(--danger)' : 'var(--muted)' }}
+                                  title={t('sens.title')}>
+                                  {t(`sens.${ds.sensitivity_label}` as MessageKey)}
                                 </span>
                               )}
                               {ds.shared && (

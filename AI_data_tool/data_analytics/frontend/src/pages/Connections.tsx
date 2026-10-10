@@ -65,6 +65,9 @@ export default function Connections() {
   const [queueKey, setQueueKey] = useState(0)
   const [testing,  setTesting]  = useState<number | null>(null)
   const [testResults, setTestResults] = useState<Record<number, boolean | null>>({})
+  // Why a test failed stays on the row: the toast that said so vanished in
+  // seconds and the badge alone read only "Failed" (role tour, 2026-10-10).
+  const [testErrors, setTestErrors] = useState<Record<number, string>>({})
 
   useEffect(() => {
     // Without the catch, a server error cleared `loading` and fell through to
@@ -123,9 +126,14 @@ export default function Connections() {
     try {
       const r = await dataSourcesApi.test(ds.id)
       setTestResults(p => ({ ...p, [ds.id]: r.ok }))
+      setTestErrors(p => ({ ...p, [ds.id]: r.ok ? '' : (r.error ?? t('pg.dataPages.conn.connectionFailed')) }))
       if (r.ok) toast.success(t('pg.dataPages.conn.connectedToast', { name: ds.name }))
       else toast.error(r.error ?? t('pg.dataPages.conn.connectionFailed'))
-    } catch { toast.error(t('pg.dataPages.conn.testFailed')) }
+    } catch {
+      setTestResults(p => ({ ...p, [ds.id]: false }))
+      setTestErrors(p => ({ ...p, [ds.id]: t('pg.dataPages.conn.testFailed') }))
+      toast.error(t('pg.dataPages.conn.testFailed'))
+    }
     finally { setTesting(null) }
   }
 
@@ -204,6 +212,12 @@ export default function Connections() {
                   {ds.config.database ? `/${ds.config.database}` : ''}
                   {ds.config.url ? ` · ${String(ds.config.url).slice(0, 50)}` : ''}
                 </div>
+                {testRes === false && testErrors[ds.id] && (
+                  <div className="dl-conn__meta" role="status" data-testid="conn-test-error"
+                    style={{ color: 'var(--danger)', whiteSpace: 'normal' }}>
+                    {testErrors[ds.id].split('\n')[0].replace(/\s*\(Background on this error.*$/, '').slice(0, 240)}
+                  </div>
+                )}
               </div>
 
               {testRes === true && (
@@ -212,7 +226,7 @@ export default function Connections() {
                 </span>
               )}
               {testRes === false && (
-                <span className="dl-conn__status dl-conn__status--fail">
+                <span className="dl-conn__status dl-conn__status--fail" title={testErrors[ds.id] || undefined}>
                   <IconLabel icon={XIcon} size={12}>{t('connections.failed')}</IconLabel>
                 </span>
               )}

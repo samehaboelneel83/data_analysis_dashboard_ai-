@@ -14,15 +14,18 @@ import { formatDate } from '../../lib/dateFormat'
  * dataset holds, and what past refreshes found.
  */
 
-const KINDS: DataCheckKind[] = ['not_null', 'unique', 'accepted_values', 'row_count', 'row_drop', 'rule']
-const COLUMN_KINDS: DataCheckKind[] = ['not_null', 'unique', 'accepted_values']
+const KINDS: DataCheckKind[] = ['not_null', 'unique', 'accepted_values', 'row_count', 'row_drop', 'rule',
+  'references', 'same_columns']
+const COLUMN_KINDS: DataCheckKind[] = ['not_null', 'unique', 'accepted_values', 'references']
 
 const GOOD = 'color-mix(in oklab, var(--positive, #4caf82) 65%, var(--text))'
 const BAD = 'color-mix(in oklab, var(--negative, #e2606c) 75%, var(--text))'
 const WARN = 'color-mix(in oklab, #d9a441 60%, var(--text))'
 
 /** A check in words ("margin_pct ≤ 100"); the Overview's trust card names a failing one with it. */
-export function summary(c: DataCheckInput, t: ReturnType<typeof useT>): string {
+export function summary(c: DataCheckInput, t: ReturnType<typeof useT>,
+  /** Dataset names by id, for a `references` check; "#id" without it. */
+  names?: Record<number, string>): string {
   const p = c.params ?? {}
   switch (c.kind) {
     case 'not_null': return t('checks.sum.not_null', { col: c.column ?? '' })
@@ -34,6 +37,9 @@ export function summary(c: DataCheckInput, t: ReturnType<typeof useT>): string {
           : t('checks.sum.row_max', { max: (p.max ?? 0).toLocaleString() })
     case 'row_drop': return t('checks.sum.row_drop', { pct: p.max_drop_pct ?? 0 })
     case 'rule': return t('checks.sum.rule', { expr: p.expression ?? '' })
+    case 'references': return t('checks.sum.references', { col: c.column ?? '',
+      ds: (p.dataset_id != null && names?.[p.dataset_id]) || `#${p.dataset_id ?? '?'}`, ref: p.column ?? '' })
+    case 'same_columns': return t(p.allow_new === false ? 'checks.sum.same_columns_strict' : 'checks.sum.same_columns')
   }
 }
 
@@ -71,6 +77,18 @@ export default function ChecksPanel({ datasetId, columns, canEdit, children }: {
   const [pct, setPct] = useState('50')
   const [expr, setExpr] = useState('')
   const [severity, setSeverity] = useState<'warn' | 'block'>('block')
+  // 2026-10-10: the dataset a `references` check compares against, and whether
+  // a `same_columns` check lets a new column through.
+  const [others, setOthers] = useState<{ id: number; name: string; columns: string[] }[] | null>(null)
+  const [refDs, setRefDs] = useState('')
+  const [refCol, setRefCol] = useState('')
+  const [allowNew, setAllowNew] = useState(true)
+  const names = Object.fromEntries((others ?? []).map(o => [o.id, o.name]))
+  useEffect(() => {
+    if (others || !(kind === 'references' || checks.some(c => c.kind === 'references'))) return
+    datasetsApi.list().then(list => setOthers(list.filter(d => d.id !== datasetId)
+      .map(d => ({ id: d.id, name: d.name, columns: (d.columns ?? []).map(c => c.name) })))).catch(() => setOthers([]))
+  }, [kind, checks, others, datasetId])
   // The add form opens from "+ Rule" (redesign 3c), and on its own while there is nothing to list.
   const [adding, setAdding] = useState(false)
 
@@ -89,6 +107,8 @@ export default function ChecksPanel({ datasetId, columns, canEdit, children }: {
     if (kind === 'row_count') body.params = { min: min === '' ? null : Number(min), max: max === '' ? null : Number(max) }
     if (kind === 'row_drop') body.params = { max_drop_pct: Number(pct) }
     if (kind === 'rule') body.params = { expression: expr }
+    if (kind === 'references') body.params = { dataset_id: Number(refDs), column: refCol }
+    if (kind === 'same_columns') body.params = { allow_new: allowNew }
     setBusy(true)
     try {
       await datasetsApi.addCheck(datasetId, body)
@@ -162,7 +182,7 @@ export default function ChecksPanel({ datasetId, columns, canEdit, children }: {
                     {state === 'ok' ? <Check size={12} /> : state === 'none' ? <Minus size={12} /> : '!'}
                   </span>
                   <div className="dl-rules__what">
-                    <strong>{summary(c, t)}</strong>
+                    <strong>{summary(c, t, names)}</strong>
                     <span>{t(`checks.kind.${c.kind}` as MessageKey)}</span>
                   </div>
                   <span className="dl-rules__result" style={{ color: state === 'bad' ? BAD : state === 'warn' ? WARN : undefined }}>
@@ -228,6 +248,28 @@ export default function ChecksPanel({ datasetId, columns, canEdit, children }: {
                   <input className="input" type="number" min={1} max={100} value={pct} onChange={e => setPct(e.target.value)} style={{ fontSize: 12, width: 90 }} />
                 </label>
               )}
+              {kind === 'references' && (<>
+                <label>{t('checks.refDataset')}<br />
+                  <select className="input" aria-label={t('checks.refDataset')} value={refDs}
+                    onChange={e => { setRefDs(e.target.value); setRefCol('') }} style={{ fontSize: 12 }}>
+                    <option value="">—</option>
+                    {(others ?? []).map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                  </select>
+                </label>
+                <label>{t('checks.refColumn')}<br />
+                  <select className="input" aria-label={t('checks.refColumn')} value={refCol}
+                    onChange={e => setRefCol(e.target.value)} style={{ fontSize: 12 }}>
+                    <option value="">—</option>
+                    {(others ?? []).find(o => String(o.id) === refDs)?.columns.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </label>
+              </>)}
+              {kind === 'same_columns' && (
+                <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12 }}>
+                  <input type="checkbox" checked={allowNew} onChange={e => setAllowNew(e.target.checked)} />
+                  {t('checks.allowNew')}
+                </label>
+              )}
               {kind === 'rule' && (
                 <label style={{ flex: 1, minWidth: 220 }}>{t('checks.rule')}<br />
                   <input className="input" dir="ltr" value={expr} onChange={e => setExpr(e.target.value)}
@@ -240,7 +282,8 @@ export default function ChecksPanel({ datasetId, columns, canEdit, children }: {
                   <option value="warn">{t('checks.warn')}</option>
                 </select>
               </label>
-              <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => void add()}>{t('checks.addButton')}</button>
+              <button type="button" className="btn btn-primary btn-sm"
+                disabled={busy || (kind === 'references' && (!refDs || !refCol))} onClick={() => void add()}>{t('checks.addButton')}</button>
             </div>
           </div>
         )}
@@ -255,6 +298,7 @@ export default function ChecksPanel({ datasetId, columns, canEdit, children }: {
             <th>{t('jobs.history.trigger')}</th>
             <th>{t('col.status')}</th>
             <th style={{ textAlign: 'end' }}>{t('jobs.history.rows')}</th>
+            <th style={{ textAlign: 'end' }}>{t('checks.speed')}</th>
           </tr></thead>
           <tbody>
             {runs.map(r => (
@@ -270,6 +314,18 @@ export default function ChecksPanel({ datasetId, columns, canEdit, children }: {
                 </td>
                 <td style={{ textAlign: 'end', verticalAlign: 'top', fontVariantNumeric: 'tabular-nums' }}>
                   {r.rows != null ? r.rows.toLocaleString() : '—'}
+                </td>
+                {/* How fast it went, and (2026-10-10) a run far slower than usual. */}
+                <td style={{ textAlign: 'end', verticalAlign: 'top', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                  {r.duration_ms != null ? `${(r.duration_ms / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 })} s` : '—'}
+                  {r.metrics?.rows_per_sec != null && (
+                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>{t('checks.rowsPerSec', { n: r.metrics.rows_per_sec.toLocaleString() })}</div>
+                  )}
+                  {r.metrics?.slow && (
+                    <div style={{ fontSize: 11, color: WARN }} title={t('checks.slowHint', { usual: Math.round(r.metrics.slow.median_ms / 1000) })}>
+                      {t('checks.slow', { times: r.metrics.slow.times })}
+                    </div>
+                  )}
                 </td>
               </tr>
             ))}

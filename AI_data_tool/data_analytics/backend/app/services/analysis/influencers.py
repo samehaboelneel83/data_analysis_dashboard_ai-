@@ -147,6 +147,29 @@ def _grouped(series: pd.Series) -> tuple[pd.Series, str]:
     return series.astype("object"), "value"
 
 
+def _num(v: float) -> str:
+    """12,500 / 2.35 / 2019: a bin edge as a person writes it. No thousands
+    separator under 10,000, so a year reads 2019, not 2,019."""
+    v = float(v)
+    sep = "," if abs(v) >= 10_000 else ""
+    if v.is_integer():
+        return f"{int(v):{sep}}"
+    return f"{v:{sep}.2f}".rstrip("0").rstrip(".")
+
+
+def _bin_label(value, series: pd.Series, groups: pd.Series) -> str:
+    """A quantile bin named by the lowest and highest values really in it:
+    "2015 – 2019", not pandas' "(2014.999, 2019.0]" (data-scientist tour,
+    2026-10-10). Anything else is its own text."""
+    if not isinstance(value, pd.Interval):
+        return str(value)
+    inside = series[groups == value]
+    if inside.empty:
+        return f"{_num(value.left)} – {_num(value.right)}"
+    lo, hi = inside.min(), inside.max()
+    return _num(lo) if lo == hi else f"{_num(lo)} – {_num(hi)}"
+
+
 def key_influencers(
     df: pd.DataFrame, target: str, target_value=None,
     factors: list[str] | None = None, column_meta: dict | None = None,
@@ -214,7 +237,7 @@ def key_influencers(
                 continue
             found.append({
                 "factor": col,
-                "group": str(value),
+                "group": _bin_label(value, df[col], groups),
                 "grouped_by": how,
                 measure: round(rate, 6),
                 "baseline": round(baseline, 6),

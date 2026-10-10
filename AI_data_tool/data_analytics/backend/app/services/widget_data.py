@@ -539,6 +539,39 @@ def infer_date_filter_grains(filters: list | None, date_columns: set[str]) -> li
     return out
 
 
+def _apply_paths_filter(df: pd.DataFrame, spec: dict) -> pd.DataFrame:
+    """A hierarchy slicer's selection (hierarchy plan, step 2, 2026-10-10): rows
+    on ANY of the given paths, each path an AND of its levels -- a path shorter
+    than the levels is a whole branch ("Egypt" = every city in Egypt).
+
+    Exact, unlike one "in" filter per column: Egypt › Alexandria plus
+    US › Boston must not let in a US "Alexandria". A receiving widget whose data
+    lacks a deeper level is filtered on the levels it has; one lacking the top
+    level is not filtered at all (the selection says nothing about its rows)."""
+    cols = list(spec.get("columns") or [])
+    grains = list(spec.get("granularities") or [None] * len(cols))
+    usable = 0
+    while usable < len(cols) and cols[usable] in df.columns:
+        usable += 1
+    if usable == 0:
+        return df
+    labels = []
+    for i in range(usable):
+        g = grains[i] if i < len(grains) else None
+        s = _dimension_granularity_label(df[cols[i]], g) if g else df[cols[i]]
+        labels.append(s.astype(str))
+    mask = pd.Series(False, index=df.index)
+    for path in spec.get("paths") or []:
+        path = list(path)[:usable]
+        if not path:
+            continue
+        m = pd.Series(True, index=df.index)
+        for i, v in enumerate(path):
+            m &= labels[i] == str(v)
+        mask |= m
+    return df[mask]
+
+
 def _apply_filters(df: pd.DataFrame, filters: list[dict]) -> pd.DataFrame:
     # Relative date filters ("last 30 days") resolve against the frame as it
     # arrives -- before any other filter narrows it -- so a data_max anchor is
@@ -551,6 +584,9 @@ def _apply_filters(df: pd.DataFrame, filters: list[dict]) -> pd.DataFrame:
         col, op, val = f.get("column"), f.get("op"), f.get("value")
         if op == "date_range":
             df = apply_date_range(df, f)
+            continue
+        if op == "paths":
+            df = _apply_paths_filter(df, val or {})
             continue
         if not col or col not in df.columns:
             continue
@@ -1419,6 +1455,8 @@ def shape_slicer(df: pd.DataFrame, config: dict) -> dict:
     be shown them, and a control that silently stopped listing would read as
     broken rather than deliberate.
     """
+    if config.get("slicer_levels"):
+        return _slicer_tree(df, config)
     mode = str(config.get("slicer_mode") or "").lower()
     if mode == "text":
         roles = resolve_roles(config)
@@ -1429,6 +1467,69 @@ def shape_slicer(df: pd.DataFrame, config: dict) -> dict:
         if ranged is not None:
             return ranged
     return shape_series(df, config)
+
+
+#: The most leaf paths a slicer tree lists; past it the tree says it is cut.
+SLICER_TREE_MAX_PATHS = 5000
+
+
+def _levels_of(spec) -> list[dict]:
+    """[{column, granularity}] from a config list of names or objects."""
+    out = []
+    for lv in spec or []:
+        if isinstance(lv, str):
+            out.append({"column": lv, "granularity": None})
+        elif isinstance(lv, dict) and lv.get("column"):
+            out.append({"column": lv["column"], "granularity": lv.get("granularity") or None})
+    return out
+
+
+def _level_labels(df: pd.DataFrame, levels: list[dict]) -> pd.DataFrame:
+    """One text column per level -- the date bucket label when the level has a
+    granularity -- so a path reads, and filters, the same everywhere."""
+    out = {}
+    for i, lv in enumerate(levels):
+        s = df[lv["column"]]
+        if lv.get("granularity"):
+            s = _dimension_granularity_label(s, lv["granularity"])
+        out[f"l{i}"] = s.astype(str).where(s.notna())
+    return pd.DataFrame(out, index=df.index)
+
+
+def _slicer_tree(df: pd.DataFrame, config: dict) -> dict:
+    """A hierarchy slicer's values as a tree (hierarchy plan, step 2,
+    2026-10-10): Egypt ▸ Cairo ▸ Nasr City, each with its row count, after the
+    filters coming from other widgets. Rows missing a level are left out of the
+    tree (there is no path to tick for them). Past SLICER_TREE_MAX_PATHS leaf
+    paths the tree is cut and says so."""
+    levels = _levels_of(config.get("slicer_levels"))
+    missing = [lv["column"] for lv in levels if lv["column"] not in df.columns]
+    if not levels or missing:
+        return {"type": "error", "message": f"the slicer's levels are not columns of this data: {', '.join(missing) or '-'}",
+                "rows": [], "total": 0}
+    df = _apply_filters(df, config.get("filters") or [])
+    lab = _level_labels(df, levels).dropna()
+    keys = list(lab.columns)
+    counts = lab.groupby(keys, sort=True).size() if len(lab) else pd.Series(dtype=int)
+    truncated = len(counts) > SLICER_TREE_MAX_PATHS
+    if truncated:
+        counts = counts.iloc[:SLICER_TREE_MAX_PATHS]
+    root: list[dict] = []
+    index: dict = {}
+    for path, n in counts.items():
+        path = path if isinstance(path, tuple) else (path,)
+        siblings, prefix = root, ()
+        for v in path:
+            prefix = prefix + (v,)
+            node = index.get(prefix)
+            if node is None:
+                node = {"value": v, "count": 0, "children": []}
+                index[prefix] = node
+                siblings.append(node)
+            node["count"] += int(n)
+            siblings = node["children"]
+    return {"type": "slicer_tree", "levels": levels, "nodes": root, "rows": [],
+            "total": int(len(lab)), "truncated": truncated}
 
 
 #: On `auto`, a number column with more distinct values than this is offered
@@ -3899,7 +4000,11 @@ def get_widget_data_from_df(
     # A crosstab with more than one field on Rows, Columns or Measures is the
     # nested pivot (services/pivot.py); one field each way keeps _shape_grid.
     from .pivot import is_multilevel, shape_pivot
-    if is_multilevel(widget_type, config):
+    if widget_type in ("crosstab", "matrix") and config.get("hierarchy_rows"):
+        # Hierarchies on rows/columns, opened level by level (services/hier_pivot.py).
+        from .hier_pivot import shape_hier_pivot
+        shaper = shape_hier_pivot
+    elif is_multilevel(widget_type, config):
         shaper = shape_pivot
     try:
         result = shaper(df, config)
