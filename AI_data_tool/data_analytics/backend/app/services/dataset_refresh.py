@@ -105,7 +105,8 @@ def rewrite_dataset_file(
 
 def build_incremental_query(table: str | None, query: str | None,
                              cursor_column: str, cursor_value,
-                             valid_columns: set[str] | None = None) -> str:
+                             valid_columns: set[str] | None = None,
+                             family: str | None = None) -> str:
     """The incremental fetch: everything past the watermark. `:cursor_val` is a
     SQLAlchemy bind parameter, never string-interpolated, so the cursor value
     (whatever type or content it carries) can never reshape the query.
@@ -125,11 +126,43 @@ def build_incremental_query(table: str | None, query: str | None,
     or trailing semicolon) stays intact and simply gets filtered further."""
     if valid_columns is not None and cursor_column not in valid_columns:
         raise ValueError(f"Unknown cursor column: {cursor_column!r}")
-    quoted_col = '"{}"'.format(cursor_column.replace('"', '""'))
+    # Quoted for the source's dialect (2026-10-10): MySQL reads "col" as a
+    # TEXT value, so `"updated_at" > :cursor_val` compared a constant string.
+    from .sql_safety import quote_ident
+    quoted_col = quote_ident(family or "postgresql", cursor_column)
+    return f"SELECT * FROM {_base_source(table, query, family)} WHERE {quoted_col} > :cursor_val"
+
+
+def _base_source(table: str | None, query: str | None, family: str | None) -> str:
+    from .sql_safety import quote_ident
     if query:
-        base = query.strip().rstrip(";")
-        return f"SELECT * FROM ({base}) AS _base WHERE {quoted_col} > :cursor_val"
-    return f'SELECT * FROM "{table}" WHERE {quoted_col} > :cursor_val'
+        return f"({query.strip().rstrip(';')}) AS _base"
+    return quote_ident(family or "postgresql", table or "")
+
+
+def build_key_query(table: str | None, query: str | None, key_column: str,
+                    valid_columns: set[str] | None = None, family: str | None = None) -> str:
+    """Every key the source holds NOW (one column), to find rows deleted there.
+    The key is checked against the dataset's columns like the cursor is."""
+    if valid_columns is not None and key_column not in valid_columns:
+        raise ValueError(f"Unknown key column: {key_column!r}")
+    from .sql_safety import quote_ident
+    return f"SELECT {quote_ident(family or 'postgresql', key_column)} FROM {_base_source(table, query, family)}"
+
+
+def drop_deleted(df: pd.DataFrame, key_column: str, source_keys: pd.Series) -> tuple[pd.DataFrame, int, str | None]:
+    """Rows whose key the source no longer has, removed: (frame, removed, warning).
+
+    An EMPTY key list while the dataset holds rows is far more likely a broken
+    or filtered source than "everything was deleted": nothing is removed and
+    the run says so, rather than emptying every dashboard."""
+    if len(df) and not len(source_keys):
+        return df, 0, "The source returned no keys, so no rows were removed as deleted."
+    from .data_checks import key_text
+    alive = set(key_text(source_keys))
+    # A row with no key cannot be matched, so it is never treated as deleted.
+    keep = df[key_column].isna() | key_text(df[key_column], keep_empty=True).isin(alive)
+    return df[keep].reset_index(drop=True), int((~keep).sum()), None
 
 
 def _max_cursor(df: pd.DataFrame, cursor_column: str | None, previous,
@@ -174,8 +207,12 @@ def refresh_dataset(
     validate=None,
     key_column: str | None = None,
     lookback_hours: int | None = None,
+    reconcile_deletes: bool = False,
 ) -> dict:
     """Full or incremental refresh of one source-backed dataset's cached file.
+
+    2026-10-10: `reconcile_deletes` (with a key) also removes rows whose key
+    the source no longer holds -- a merge otherwise keeps deleted rows forever.
 
     Phase 4: `key_column` makes an incremental load a MERGE -- an incoming
     row whose key the file already holds replaces it, so an updated order
@@ -221,7 +258,7 @@ def refresh_dataset(
         result = _refresh_dataset_body(
             source_cfg, filename, source_table, source_query, mode,
             cursor_column, cursor_value, valid_columns, required_columns, column_map,
-            write, validate, key_column, lookback_hours,
+            write, validate, key_column, lookback_hours, reconcile_deletes,
         )
         span.set_attribute("status", "ok")
         span.set_attribute("effective_mode", result["mode"])
@@ -245,10 +282,13 @@ def _refresh_dataset_body(
     validate=None,
     key_column: str | None = None,
     lookback_hours: int | None = None,
+    reconcile_deletes: bool = False,
 ) -> dict:
     from .ingest import detect_types
     from .timezones import normalize_instants
     from .connections import import_to_dataframe
+    from . import connectors
+    family = connectors.sql_family_of(source_cfg) if source_cfg else None
 
     warning = None
     effective_mode = "incremental" if mode == "incremental" else "full"
@@ -281,7 +321,7 @@ def _refresh_dataset_body(
             key_column = None
         fetch_from = lookback_cursor(cursor_value, lookback_hours) if key_column else cursor_value
         try:
-            incr_sql = build_incremental_query(source_table, source_query, cursor_column, cursor_value, cols)
+            incr_sql = build_incremental_query(source_table, source_query, cursor_column, cursor_value, cols, family)
             new_rows = import_to_dataframe(source_cfg, None, incr_sql, params={"cursor_val": fetch_from})
             if column_map:
                 new_rows = new_rows.rename(columns={n: o for n, o in column_map.items() if n in new_rows.columns})
@@ -289,19 +329,43 @@ def _refresh_dataset_body(
             effective_mode = "full"
             warning = f"Incremental query failed ({e}) — ran a full refresh instead."
         else:
+            if existing_df is not None and new_rows.empty:
+                # Nothing new -- the commonest incremental run. The empty fetch
+                # has UNTYPED columns; concatenated onto the file it turned whole
+                # numbers into objects, which the instant normaliser then read as
+                # nanoseconds: every id became 1970-01-01 00:00:00.000000001.
+                new_rows = existing_df.iloc[0:0]
             rows_updated = 0
             if key_column and existing_df is not None and len(existing_df) and key_column in new_rows.columns:
                 # Merge: the incoming row wins. Keys are compared as text so
                 # 7 and "7" (a CSV round trip) are one key.
-                held = set(existing_df[key_column].astype(str))
-                incoming = new_rows[key_column].astype(str)
-                rows_updated = int(incoming.isin(held).sum())
-                kept = existing_df[~existing_df[key_column].astype(str).isin(set(incoming))]
+                # Keys compared as text (data_checks.key_text): 7, "7" and 7.0
+                # are one key -- a CSV round trip or a key column with a gap
+                # stores 7 as 7.0, and the update was appended as a duplicate.
+                from .data_checks import key_text
+                held_txt = key_text(existing_df[key_column], keep_empty=True)
+                incoming = key_text(new_rows[key_column], keep_empty=True)
+                rows_updated = int(incoming.isin(set(held_txt.dropna())).sum())
+                kept = existing_df[~held_txt.isin(set(incoming.dropna()))]
                 df = pd.concat([kept, new_rows], ignore_index=True)
-                df = df.drop_duplicates(subset=[key_column], keep="last").reset_index(drop=True)
+                dedup = key_text(df[key_column], keep_empty=True)
+                df = df[~(dedup.notna() & dedup.duplicated(keep="last"))].reset_index(drop=True)
             else:
                 df = (pd.concat([existing_df, new_rows], ignore_index=True)
                       if existing_df is not None and len(existing_df) else new_rows)
+            rows_deleted = 0
+            if reconcile_deletes and key_column and key_column in df.columns:
+                try:
+                    keys = import_to_dataframe(source_cfg, None, build_key_query(
+                        source_table, source_query, key_column, cols, family))
+                    if column_map:
+                        keys = keys.rename(columns={n: o for n, o in column_map.items() if n in keys.columns})
+                    df, rows_deleted, note = drop_deleted(df, key_column, keys[key_column] if key_column in keys.columns
+                                                          else keys.iloc[:, 0])
+                    if note:
+                        warning = note
+                except Exception as e:  # noqa: BLE001 -- the merge stands; deletes wait for next run
+                    warning = f"Could not check for deleted rows ({e}); none were removed this time."
             # The cap is on what the dataset HOLDS: appending past it refuses
             # like a full load over it would, rather than growing unchecked.
             from .connections import _checked, _import_cap
@@ -319,7 +383,7 @@ def _refresh_dataset_body(
                 "df": df, "type_map": detect_types(df), "mode": "incremental",
                 "cursor_value": _max_cursor(df, cursor_column, cursor_value, converted),
                 "warning": warning, "rows_added": len(new_rows) - rows_updated,
-                "rows_updated": rows_updated,
+                "rows_updated": rows_updated, "rows_deleted": rows_deleted,
             }
 
     # Full load: explicitly requested, the first incremental run (no baseline

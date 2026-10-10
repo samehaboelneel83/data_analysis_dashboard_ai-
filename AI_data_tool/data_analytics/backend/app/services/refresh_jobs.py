@@ -234,6 +234,7 @@ async def _refresh_now(
             # Phase 4: the merge key and look-back saved on the watermark.
             (watermark.key_column if watermark else None),
             (watermark.lookback_hours if watermark else None),
+            bool(watermark.reconcile_deletes) if watermark else False,
         )
     except ChecksBlocked as e:
         failed = blocking_failures(e.results)

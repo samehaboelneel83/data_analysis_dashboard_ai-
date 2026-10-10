@@ -539,6 +539,39 @@ def infer_date_filter_grains(filters: list | None, date_columns: set[str]) -> li
     return out
 
 
+def _apply_paths_filter(df: pd.DataFrame, spec: dict) -> pd.DataFrame:
+    """A hierarchy slicer's selection (hierarchy plan, step 2, 2026-10-10): rows
+    on ANY of the given paths, each path an AND of its levels -- a path shorter
+    than the levels is a whole branch ("Egypt" = every city in Egypt).
+
+    Exact, unlike one "in" filter per column: Egypt › Alexandria plus
+    US › Boston must not let in a US "Alexandria". A receiving widget whose data
+    lacks a deeper level is filtered on the levels it has; one lacking the top
+    level is not filtered at all (the selection says nothing about its rows)."""
+    cols = list(spec.get("columns") or [])
+    grains = list(spec.get("granularities") or [None] * len(cols))
+    usable = 0
+    while usable < len(cols) and cols[usable] in df.columns:
+        usable += 1
+    if usable == 0:
+        return df
+    labels = []
+    for i in range(usable):
+        g = grains[i] if i < len(grains) else None
+        s = _dimension_granularity_label(df[cols[i]], g) if g else df[cols[i]]
+        labels.append(s.astype(str))
+    mask = pd.Series(False, index=df.index)
+    for path in spec.get("paths") or []:
+        path = list(path)[:usable]
+        if not path:
+            continue
+        m = pd.Series(True, index=df.index)
+        for i, v in enumerate(path):
+            m &= labels[i] == str(v)
+        mask |= m
+    return df[mask]
+
+
 def _apply_filters(df: pd.DataFrame, filters: list[dict]) -> pd.DataFrame:
     # Relative date filters ("last 30 days") resolve against the frame as it
     # arrives -- before any other filter narrows it -- so a data_max anchor is
@@ -551,6 +584,9 @@ def _apply_filters(df: pd.DataFrame, filters: list[dict]) -> pd.DataFrame:
         col, op, val = f.get("column"), f.get("op"), f.get("value")
         if op == "date_range":
             df = apply_date_range(df, f)
+            continue
+        if op == "paths":
+            df = _apply_paths_filter(df, val or {})
             continue
         if not col or col not in df.columns:
             continue
@@ -1419,6 +1455,8 @@ def shape_slicer(df: pd.DataFrame, config: dict) -> dict:
     be shown them, and a control that silently stopped listing would read as
     broken rather than deliberate.
     """
+    if config.get("slicer_levels"):
+        return _slicer_tree(df, config)
     mode = str(config.get("slicer_mode") or "").lower()
     if mode == "text":
         roles = resolve_roles(config)
@@ -1429,6 +1467,69 @@ def shape_slicer(df: pd.DataFrame, config: dict) -> dict:
         if ranged is not None:
             return ranged
     return shape_series(df, config)
+
+
+#: The most leaf paths a slicer tree lists; past it the tree says it is cut.
+SLICER_TREE_MAX_PATHS = 5000
+
+
+def _levels_of(spec) -> list[dict]:
+    """[{column, granularity}] from a config list of names or objects."""
+    out = []
+    for lv in spec or []:
+        if isinstance(lv, str):
+            out.append({"column": lv, "granularity": None})
+        elif isinstance(lv, dict) and lv.get("column"):
+            out.append({"column": lv["column"], "granularity": lv.get("granularity") or None})
+    return out
+
+
+def _level_labels(df: pd.DataFrame, levels: list[dict]) -> pd.DataFrame:
+    """One text column per level -- the date bucket label when the level has a
+    granularity -- so a path reads, and filters, the same everywhere."""
+    out = {}
+    for i, lv in enumerate(levels):
+        s = df[lv["column"]]
+        if lv.get("granularity"):
+            s = _dimension_granularity_label(s, lv["granularity"])
+        out[f"l{i}"] = s.astype(str).where(s.notna())
+    return pd.DataFrame(out, index=df.index)
+
+
+def _slicer_tree(df: pd.DataFrame, config: dict) -> dict:
+    """A hierarchy slicer's values as a tree (hierarchy plan, step 2,
+    2026-10-10): Egypt ▸ Cairo ▸ Nasr City, each with its row count, after the
+    filters coming from other widgets. Rows missing a level are left out of the
+    tree (there is no path to tick for them). Past SLICER_TREE_MAX_PATHS leaf
+    paths the tree is cut and says so."""
+    levels = _levels_of(config.get("slicer_levels"))
+    missing = [lv["column"] for lv in levels if lv["column"] not in df.columns]
+    if not levels or missing:
+        return {"type": "error", "message": f"the slicer's levels are not columns of this data: {', '.join(missing) or '-'}",
+                "rows": [], "total": 0}
+    df = _apply_filters(df, config.get("filters") or [])
+    lab = _level_labels(df, levels).dropna()
+    keys = list(lab.columns)
+    counts = lab.groupby(keys, sort=True).size() if len(lab) else pd.Series(dtype=int)
+    truncated = len(counts) > SLICER_TREE_MAX_PATHS
+    if truncated:
+        counts = counts.iloc[:SLICER_TREE_MAX_PATHS]
+    root: list[dict] = []
+    index: dict = {}
+    for path, n in counts.items():
+        path = path if isinstance(path, tuple) else (path,)
+        siblings, prefix = root, ()
+        for v in path:
+            prefix = prefix + (v,)
+            node = index.get(prefix)
+            if node is None:
+                node = {"value": v, "count": 0, "children": []}
+                index[prefix] = node
+                siblings.append(node)
+            node["count"] += int(n)
+            siblings = node["children"]
+    return {"type": "slicer_tree", "levels": levels, "nodes": root, "rows": [],
+            "total": int(len(lab)), "truncated": truncated}
 
 
 #: On `auto`, a number column with more distinct values than this is offered
@@ -3899,7 +4000,11 @@ def get_widget_data_from_df(
     # A crosstab with more than one field on Rows, Columns or Measures is the
     # nested pivot (services/pivot.py); one field each way keeps _shape_grid.
     from .pivot import is_multilevel, shape_pivot
-    if is_multilevel(widget_type, config):
+    if widget_type in ("crosstab", "matrix") and config.get("hierarchy_rows"):
+        # Hierarchies on rows/columns, opened level by level (services/hier_pivot.py).
+        from .hier_pivot import shape_hier_pivot
+        shaper = shape_hier_pivot
+    elif is_multilevel(widget_type, config):
         shaper = shape_pivot
     try:
         result = shaper(df, config)
@@ -4073,14 +4178,16 @@ def _validate_expr_safety(expr: str) -> None:
 def _build_safe_ns(df: pd.DataFrame) -> tuple[dict, dict]:
     """Return (safe_globals, local_ns) for evaluating expressions against df."""
     def IF(cond, true_val, false_val):  # noqa: N802
-        return np.where(cond, true_val, false_val)
+        # An unknown condition (a comparison on an empty value) is "no", not an
+        # error: whole-number columns carry real gaps (pd.NA), not NaN.
+        return np.where(_as_mask(cond), true_val, false_val)
 
     def SWITCH(col, *args):  # noqa: N802
         """SWITCH(col, val1, res1, val2, res2, ..., default)"""
         conditions, choices = [], []
         i = 0
         while i + 1 < len(args):
-            conditions.append(col == args[i])
+            conditions.append(_as_mask(col == args[i]))
             choices.append(args[i + 1])
             i += 2
         default = args[i] if i < len(args) else None
@@ -4124,7 +4231,15 @@ def _build_safe_ns(df: pd.DataFrame) -> tuple[dict, dict]:
     def SUBSTRING(s, start, length):  # noqa: N802
         begin = max(int(start) - 1, 0)
         return _txt(s).str[begin:begin + int(length)]
-    def CONCAT(a, b):  return _txt(a) + _txt(b)                        # noqa: E704,N802
+    def CONCAT(*parts):  # noqa: N802
+        """Any number of values joined as text: CONCAT(region, ' - ', product).
+        It took exactly two, so a label with a separator needed CONCAT inside CONCAT."""
+        if not parts:
+            raise ValueError("CONCAT needs at least one value")
+        out = _txt(parts[0])
+        for p in parts[1:]:
+            out = out + _txt(p)
+        return out
     def REPLACE(s, find, repl):  # noqa: N802
         return _txt(s).str.replace(str(find), str(repl), regex=False)
     def FIND(s, sub):  # noqa: N802
@@ -4177,17 +4292,23 @@ def _build_safe_ns(df: pd.DataFrame) -> tuple[dict, dict]:
             return s
         return pd.to_datetime(s, errors='coerce')
 
-    def YEAR(s):     return _as_datetime(s).dt.year        # noqa: N802
-    def QUARTER(s):  return _as_datetime(s).dt.quarter      # noqa: N802
-    def MONTH(s):    return _as_datetime(s).dt.month        # noqa: N802
-    def DAY(s):      return _as_datetime(s).dt.day          # noqa: N802
+    # Whole numbers, empty where the date is: as plain floats a year read
+    # "2024.0" in every table, legend and export (the same nullable integer
+    # WEEK already used).
+    def _whole(v):
+        return v.astype("Int64") if isinstance(v, pd.Series) else v
 
-    def WEEKDAY(s):  return _as_datetime(s).dt.dayofweek + 1   # noqa: N802  1 = Monday, matching SAS
+    def YEAR(s):     return _whole(_as_datetime(s).dt.year)        # noqa: N802
+    def QUARTER(s):  return _whole(_as_datetime(s).dt.quarter)      # noqa: N802
+    def MONTH(s):    return _whole(_as_datetime(s).dt.month)        # noqa: N802
+    def DAY(s):      return _whole(_as_datetime(s).dt.day)          # noqa: N802
+
+    def WEEKDAY(s):  return _whole(_as_datetime(s).dt.dayofweek + 1)   # noqa: N802  1 = Monday, matching SAS
     def WEEK(s):     return _as_datetime(s).dt.isocalendar().week.astype("Int64")  # noqa: N802
-    def HOUR(s):     return _as_datetime(s).dt.hour        # noqa: N802
-    def MINUTE(s):   return _as_datetime(s).dt.minute      # noqa: N802
-    def SECOND(s):   return _as_datetime(s).dt.second      # noqa: N802
-    def DAYOFYEAR(s): return _as_datetime(s).dt.dayofyear  # noqa: N802
+    def HOUR(s):     return _whole(_as_datetime(s).dt.hour)        # noqa: N802
+    def MINUTE(s):   return _whole(_as_datetime(s).dt.minute)      # noqa: N802
+    def SECOND(s):   return _whole(_as_datetime(s).dt.second)      # noqa: N802
+    def DAYOFYEAR(s): return _whole(_as_datetime(s).dt.dayofyear)  # noqa: N802
     def MONTHNAME(s): return _as_datetime(s).dt.month_name()   # noqa: N802
     def DAYNAME(s):   return _as_datetime(s).dt.day_name()     # noqa: N802
 
@@ -4219,12 +4340,12 @@ def _build_safe_ns(df: pd.DataFrame) -> tuple[dict, dict]:
         d1, d2 = _as_datetime(a), _as_datetime(b)
         unit = str(unit).lower().rstrip("s")
         if unit == "year":
-            return d2.dt.year - d1.dt.year
+            return _whole(d2.dt.year - d1.dt.year)
         if unit == "month":
-            return (d2.dt.year - d1.dt.year) * 12 + (d2.dt.month - d1.dt.month)
+            return _whole((d2.dt.year - d1.dt.year) * 12 + (d2.dt.month - d1.dt.month))
         delta = d2 - d1
-        if unit == "day":    return delta.dt.days
-        if unit == "week":   return delta.dt.days // 7
+        if unit == "day":    return _whole(delta.dt.days)
+        if unit == "week":   return _whole(delta.dt.days // 7)
         if unit == "hour":   return (delta.dt.total_seconds() // 3600).astype("Int64")
         if unit == "minute": return (delta.dt.total_seconds() // 60).astype("Int64")
         if unit == "second": return delta.dt.total_seconds().astype("Int64")
@@ -4378,6 +4499,9 @@ def _build_safe_ns(df: pd.DataFrame) -> tuple[dict, dict]:
         'floor': _math.floor, 'ceil': _math.ceil,
         # conditional
         'IF': IF, 'SWITCH': SWITCH, 'isnull': pd.isnull,
+        # `and` / `or` / `not` rewritten to these by _eval_expr (_ElementwiseLogic);
+        # the leading underscore keeps them out of reach of a typed expression.
+        **_LOGIC_NS,
         'SENTIMENT': SENTIMENT, 'SENTIMENT_LABEL': SENTIMENT_LABEL,
         'UPPER': UPPER, 'LOWER': LOWER, 'TRIM': TRIM, 'LEN': LEN, 'REVERSE': REVERSE,
         'LEFT': LEFT, 'RIGHT': RIGHT, 'SUBSTRING': SUBSTRING, 'CONCAT': CONCAT,
@@ -4417,6 +4541,10 @@ def _build_safe_ns(df: pd.DataFrame) -> tuple[dict, dict]:
     return safe_globals, local_ns
 
 
+# `and` / `or` / `not` row by row: shared with measure_eval (services/expr_logic.py).
+from .expr_logic import ElementwiseLogic as _ElementwiseLogic, LOGIC_NAMESPACE as _LOGIC_NS, as_mask as _as_mask  # noqa: E402
+
+
 def _eval_expr(expr: str, df: pd.DataFrame):
     """Try df.eval() first, then fall back to Python eval with safe builtins.
     Backtick-quoted column names (e.g. `col name`) are handled in both paths."""
@@ -4443,7 +4571,9 @@ def _eval_expr(expr: str, df: pd.DataFrame):
         return key
     processed = _re.sub(r'`([^`]+)`', _replace, processed)
     local_ns.update(extra)
-    return eval(processed, safe_globals, local_ns)  # noqa: S307
+    tree = _ElementwiseLogic().visit(_ast.parse(processed, mode='eval'))
+    code = compile(_ast.fix_missing_locations(tree), '<expression>', 'eval')
+    return eval(code, safe_globals, local_ns)  # noqa: S307
 
 
 def apply_filter_expr(df: pd.DataFrame, expr: str, silent: bool = False) -> pd.DataFrame:
@@ -4546,7 +4676,15 @@ def preview_expression(file_path: str, expression: str, n: int = 8, rls_filter_e
             expression = expand_custom_functions(expression, custom_functions)
         result = _eval_expr(expression, df)
     except Exception as e:
-        return {'ok': False, 'error': str(e)}
+        # Plain words first (expr_explain.explain, worded by the frontend);
+        # the raw text stays in `error` for "Show details".
+        from .expr_explain import explain
+        return {'ok': False, 'error': str(e), 'problem': explain(str(e), expression, [str(c) for c in df.columns])}
+    try:
+        from .expr_explain import summarize
+        summary = summarize(result)
+    except Exception:                                               # noqa: BLE001
+        summary = None
     try:
         if hasattr(result, 'head'):          # pandas Series
             sample = result.head(n).tolist()
@@ -4558,7 +4696,12 @@ def preview_expression(file_path: str, expression: str, n: int = 8, rls_filter_e
             dtype = 'numeric' if pd.api.types.is_numeric_dtype(result) else 'text'
         except Exception:
             dtype = 'text'
-        return {'ok': True, 'dtype': dtype, 'sample': [_safe(v) for v in sample]}
+        out = {'ok': True, 'dtype': dtype, 'sample': [_safe(v) for v in sample]}
+        if summary:
+            out['summary'] = summary
+            if summary['kind'] == 'number':
+                out['dtype'] = 'numeric'
+        return out
     except Exception as e:
         return {'ok': False, 'error': str(e)}
 

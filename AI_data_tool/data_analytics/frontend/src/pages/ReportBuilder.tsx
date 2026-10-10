@@ -82,7 +82,7 @@ import { useUndoStack, IdAliases, describeConfigChange, changedKeys } from './re
 import { ASSIGN_DATA_EVENT, ADD_DATASET_EVENT, missingRequiredRoles } from '../components/report/WidgetPlaceholder'
 import { PATCH_WIDGET_EVENT } from '../components/report/TruncationNote'
 import { CONVERT_WIDGET_EVENT } from '../components/report/ConvertToMenu'
-import { nonAdditiveKind, SAFE_AGGREGATION } from '../lib/semanticGuard'
+import { defaultSummary, nonAdditiveKind, SAFE_AGGREGATION } from '../lib/semanticGuard'
 import { readPending, clearPending, type PendingEdit } from '../lib/pendingEdits'
 import DatasetPickerDialog from '../components/dataset/DatasetPickerDialog'
 import toast from 'react-hot-toast'
@@ -1180,6 +1180,13 @@ export default function ReportBuilder() {
   const [paletteQuery, setPaletteQuery] = useState('')
 
   const [geoField, setGeoField] = useState<string | null>(null)
+  // Fields plan F6: the geography menu closes with Escape (it did not).
+  useEffect(() => {
+    if (!geoField) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setGeoField(null) }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [geoField])
   /** The validation panel for a pending geography classification: the author
    *  sees the match rate and the unmatched values BEFORE it is saved. */
   const [geoCheck, setGeoCheck] = useState<{ column: string; setId: number; setName: string } | null>(null)
@@ -1287,7 +1294,7 @@ export default function ReportBuilder() {
     const col = columns.find(c => c.name === columnName)
     if (!col) return
     const choice = quickCalcsFor(
-      { name: col.name, dtype: col.dtype, numeric: isNumericField(col) })
+      { name: col.name, dtype: col.dtype, numeric: isNumericField(col), additive: defaultSummary(col.name, columnMeta) === 'sum' })
       .find(c => c.key === key)
     setQuickCalcField(null)
     if (!choice) return
@@ -1315,14 +1322,13 @@ export default function ReportBuilder() {
   const fieldGroupOf = (c: DatasetColumn): 'Dimensions' | 'Measures' | 'Dates' | 'Geography' => {
     if (geography[c.name] != null || columnMeta[c.name]?.role === 'geography') return 'Geography'
     if (c.dtype === 'datetime') return 'Dates'
-    if (!isNumericField(c)) return 'Dimensions'
-    // Stored as a number is not the same as being a quantity. Unless the author
-    // said "measure", an identifier or a year groups with the dimensions and a
-    // coordinate with geography -- IMEI and A_NUMBER sat under Measures with a
-    // Sum beside them (live QA 2026-09-28).
-    if (columnMeta[c.name]?.role === 'measure') return 'Measures'
-    const kind = nonAdditiveKind(c.name)
-    return kind === 'coordinate' ? 'Geography' : kind ? 'Dimensions' : 'Measures'
+    // A stored number the author did not mark is placed by what it IS: an
+    // identifier or a year groups with the dimensions and a coordinate with
+    // geography -- IMEI and A_NUMBER sat under Measures with a Sum beside them
+    // (live QA 2026-09-28). `isNumericField` applies the same rule, so the
+    // group, the icon, the buttons and a click always agree (Fields plan F1).
+    if (!columnMeta[c.name]?.role && c.dtype === 'numeric' && nonAdditiveKind(c.name) === 'coordinate') return 'Geography'
+    return isNumericField(c) ? 'Measures' : 'Dimensions'
   }
 
   const toAutoField = (name: string): AutoField | null => {
@@ -1335,10 +1341,26 @@ export default function ReportBuilder() {
     // `geography` comes from the same classification the renderers read, so a
     // column an author marked as geography drops as a map instead of a bar --
     // which is the point of assigning the role at all.
-    return col ? {
-      name: col.name, dtype: col.dtype, numeric: isNumericField(col),
+    if (!col) return null
+    const numeric = isNumericField(col)
+    return {
+      name: col.name, dtype: col.dtype, numeric,
       geography: geography[col.name] != null,
-    } : null
+      // Fields plan F3/F4: how a measure rolls up, and whether a column is
+      // only worth LISTING (a link, or text whose every value differs).
+      summary: numeric ? defaultSummary(col.name, columnMeta) : undefined,
+      listOnly: !numeric && isListOnly(col),
+    }
+  }
+
+  /** A link (by its detected meaning or its name), or text whose values are
+   *  almost all different -- grouping by it groups nothing. */
+  const isListOnly = (col: DatasetColumn): boolean => {
+    if (col.dtype === 'datetime' || geography[col.name] != null) return false
+    if (col.semantic_type === 'url' || /(^|_)(url|link|href|website|uri)(_|$)/i.test(col.name)) return true
+    const distinct = hints[col.name]?.distinct
+    const rows = dataset?.row_count ?? 0
+    return typeof distinct === 'number' && rows >= 50 && distinct >= rows * 0.95
   }
 
   /** One chart from however many fields were dropped. Fields the rule could not
@@ -1625,16 +1647,20 @@ export default function ReportBuilder() {
   // chart): an ordinary config edit, so it is undoable like any other.
   useEffect(() => {
     const onPatch = async (e: Event) => {
-      const d = (e as CustomEvent<{ widgetId: number; patch: Record<string, unknown>; label: string }>).detail
+      const d = (e as CustomEvent<{ widgetId: number; patch: Record<string, unknown>; label: string; title?: string }>).detail
       const page = report?.pages.find(pg => (pg.widgets ?? []).some(w => w.id === d?.widgetId))
       const w = page?.widgets?.find(x => x.id === d.widgetId)
       if (!page || !w) return
       const before = (w.config ?? {}) as Record<string, unknown>
       const after = { ...before, ...d.patch }
-      const write = (c: Record<string, unknown>) =>
-        reportsApi.updateWidget(reportId, pid(page.id), widgetIds.current.resolve(w.id), { config: c }).then(() => {})
-      await write(after)
-      pushUndo({ label: d.label, undo: () => write(before), redo: () => write(after) })
+      // A field dropped on a chart may retitle it (Fields plan F2): an
+      // automatic "Count by make" that now averages price says so.
+      const titleBefore = w.title, titleAfter = d.title ?? w.title
+      const write = (c: Record<string, unknown>, title: string) =>
+        reportsApi.updateWidget(reportId, pid(page.id), widgetIds.current.resolve(w.id),
+          title !== w.title ? { config: c, title } : { config: c }).then(() => {})
+      await write(after, titleAfter)
+      pushUndo({ label: d.label, undo: () => write(before, titleBefore), redo: () => write(after, titleAfter) })
       await loadReport()
       // QA3 A5: Properties seeds its fields per widget, so a change made from
       // outside it (a field dropped on the widget, a fix offered on it) is
@@ -2213,7 +2239,11 @@ export default function ReportBuilder() {
           <select id={`fp-agg-${c.name}`} value={meta.aggregation ?? ''} style={{ width: '100%', fontSize: 11.5 }}
             onChange={e => void setFieldMeta(c.name, { aggregation: e.target.value || undefined },
               tr('bc.shell.u.aggregate', { col: c.name, agg: e.target.value || tr('bc.shell.u.aggDefault') }))}>
-            <option value="">{tr('bc.shell.fp.defaultSum')}</option>
+            {/* The default named for what it really is (an average for a price), not always "Sum". */}
+            <option value="">{(() => {
+              const d = defaultSummary(c.name, { ...columnMeta, [c.name]: { ...meta, aggregation: undefined } })
+              return tr('bc.shell.fp.defaultIs', { agg: panelLabel(language, AGGREGATIONS.find(a => a.value === d)?.label ?? d) })
+            })()}</option>
             {AGGREGATIONS.filter(a => a.value !== 'none' && a.value !== 'pct').map(a =>
               // QA5 L4: the panel's own aggregation names, in the reader's language
               <option key={a.value} value={a.value}>{panelLabel(language, a.label)}</option>)}
@@ -2227,7 +2257,8 @@ export default function ReportBuilder() {
     if (!report?.dataset_id) return
     const next = isNumericField(c) ? 'category' : 'measure'
     if (next === 'measure' && c.dtype !== 'numeric') return
-    const detectedDefault = c.dtype === 'numeric' ? 'measure' : 'category'
+    // The same rule as isNumericField: a year or an id is a category by default.
+    const detectedDefault = c.dtype === 'numeric' && nonAdditiveKind(c.name) == null ? 'measure' : 'category'
     const meta: Record<string, ColumnMeta> = {}
     for (const [k, v] of Object.entries(columnMeta)) {
       if (!k.startsWith('__')) meta[k] = { ...(v as ColumnMeta) }
@@ -2272,10 +2303,33 @@ export default function ReportBuilder() {
     else if (target.role.startsWith('measure')) {
       const kind = nonAdditiveKind(columnName)
       if (kind) next.aggregation = SAFE_AGGREGATION[kind].value
+      else {
+        // Fields plan F2 (2026-10-09): a chart that was COUNTING rows (no
+        // measure yet) and is given a quantity summarises that quantity the
+        // way it means something -- an average for a price, age or rate, a
+        // total for an amount. "Count by make" + price_egp used to stay a
+        // count of rows with a price in it.
+        const aggKey = target.role === 'measure2' ? 'aggregation2' : 'aggregation'
+        const was = String(cfg[aggKey] ?? '').toLowerCase()
+        const sensible = defaultSummary(columnName, columnMeta)
+        // Written only when it changes the meaning: an unset aggregation
+        // already sums, so an amount on a fresh chart is left as it was.
+        if (!cfg[configKeyFor(target.role)] && (was === 'count' || (was === '' && sensible !== 'sum'))) {
+          next[aggKey] = sensible
+        }
+      }
     }
-    return { config: next, roleLabel: (target.label ?? target.role).replace(/\s*\(.*\)\s*$/, '') }
+    // The automatic title follows the new summary; a title the author typed is kept.
+    let title: string | undefined
+    const dim = typeof cfg.dimension === 'string' ? cfg.dimension : null
+    if (dim && target.role === 'measure' && w.title === tr('bc.canvas.auto.countBy', { a: dim })) {
+      const agg = String(next.aggregation ?? 'sum')
+      const aggName = AGGREGATIONS.find(a => a.value === agg)?.label ?? agg
+      title = tr('bc.canvas.auto.aggBy', { agg: panelLabel(language, aggName), m: columnMeta[columnName]?.label || columnName, a: dim })
+    }
+    return { config: next, title, roleLabel: (target.label ?? target.role).replace(/\s*\(.*\)\s*$/, '') }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [columnMeta])
+  }, [columnMeta, language])
 
   // `selectedW` is a SNAPSHOT taken at selection time; after a save the
   // page reloads but the snapshot keeps the old config. Planning from the
@@ -2293,7 +2347,7 @@ export default function ReportBuilder() {
       return
     }
     // QA3 A5: the open Properties shows the role just filled.
-    void updateWidgetConfig(plan.config, w.title).then(() => setPanelEpoch(n => n + 1))
+    void updateWidgetConfig(plan.config, plan.title ?? w.title).then(() => setPanelEpoch(n => n + 1))
   }, [liveSelected, updateWidgetConfig, planFieldOnWidget])
 
   // A measure always goes to the measure role — it is already an aggregate, so it has
@@ -2412,6 +2466,9 @@ export default function ReportBuilder() {
 
   const autoGenHierarchy = async () => {
     if (!report?.dataset_id) return toast.error(tr('bc.shell.t.attachFirst'))
+    // Auto REPLACES every folder and level (the server deletes them first):
+    // folders someone arranged by hand must not vanish on one click.
+    if (hierarchy.length > 0 && !await confirm({ title: tr('bc.shell.hier.autoTitle'), body: tr('bc.shell.hier.autoBody') })) return
     try {
       const nodes = await hierarchyApi.autoGenerate(report.dataset_id)
       setHierarchy(nodes)
@@ -2628,12 +2685,23 @@ export default function ReportBuilder() {
   // column_meta overrides detected types. `role` decides which Fields group a column
   // lands in — a numeric ZIP code belongs under Dimensions — and `hidden` removes it
   // from the picker without deleting anything.
+  // Fields plan F1 (2026-10-09): ONE answer to "is this a quantity?" for the
+  // Fields groups, the type icon, the per-field buttons, a click, a drop and
+  // the automatic chart. `model_year` used to sit under Dimensions while a
+  // click drew its histogram and offered "what moves model_year?".
   const isNumericField = (c: DatasetColumn) => {
     const role = columnMeta[c.name]?.role
     if (role) return role === 'measure'
-    return c.dtype === 'numeric' || c.dtype === 'calculated'
+    if (c.dtype === 'calculated') return true
+    return c.dtype === 'numeric' && nonAdditiveKind(c.name) == null
   }
   const visibleColumns = columns.filter(c => !columnMeta[c.name]?.hidden)
+  // Fields plan F7: report filters, as the canvas filter bar shows them.
+  const reportFilterChips = (report.common_filters ?? []).map(f => ({
+    id: f.id,
+    label: f.op === 'relative' ? `${f.column}: ${describeSpec(parseSpec(f.value))}`
+      : `${f.column} ${(() => { const k = `bc.shell.rf.op.${f.op}` as MessageKey; const v = tr(k); return v !== k ? v : f.op })()} ${Array.isArray(f.value) ? (f.value as unknown[]).join(', ') : String(f.value)}`,
+  }))
   const hints = fieldHints(analysis)
   const pageWidgets = activePage?.widgets ?? []
   // A report being READ always uses the Modern look (the old "Default"
@@ -2968,6 +3036,9 @@ export default function ReportBuilder() {
                     )
                     if (group === 'Hierarchies') {
                       if (!hierarchy.some(n => n.node_type !== 'folder' && hierarchy.some(c => c.parent_id === n.id))) return null
+                      // The search narrows every group, this one too (Fields plan F5).
+                      if (needle && !hierarchy.some(n => n.node_type !== 'folder'
+                        && `${n.name ?? ''} ${n.column_name ?? ''}`.toLowerCase().includes(needle))) return null
                       return (
                         <div key={group} style={{ marginBottom: 8 }}>
                           {heading}
@@ -3081,7 +3152,10 @@ export default function ReportBuilder() {
                                 map built from it inherits its boundary set. Not
                                 offered on a measure -- there is no map of a
                                 number. */}
-                            {!isNumericField(c) && (
+                            {/* Fields plan F6: a place on a map is text (a governorate,
+                                a country); a number reclassified as a category
+                                (mileage) is never offered a map. */}
+                            {!isNumericField(c) && c.dtype !== 'numeric' && c.dtype !== 'calculated' && c.dtype !== 'datetime' && (
                               <span style={{ position: 'relative' }}>
                                 <button
                                   aria-label={tr('bc.shell.f.classify', { col: c.name })}
@@ -3151,7 +3225,7 @@ export default function ReportBuilder() {
                                 the measure language cannot NAME (a space, a hyphen,
                                 a leading digit) gets no button rather than a menu of
                                 expressions that would fail to evaluate. */}
-                            {quickCalcsFor({ name: c.name, dtype: c.dtype, numeric: isNumericField(c) }).length > 0 && (
+                            {quickCalcsFor({ name: c.name, dtype: c.dtype, numeric: isNumericField(c), additive: defaultSummary(c.name, columnMeta) === 'sum' }).length > 0 && (
                               <span data-quickcalc-menu style={{ position: 'relative' }}>
                                 <button
                                   aria-label={tr('bc.shell.f.calcs', { col: c.name })}
@@ -3166,7 +3240,7 @@ export default function ReportBuilder() {
                                   <AnchoredMenu anchorRef={qcAnchorRef} rtl={rtl} data-quickcalc-menu="" style={{ minWidth: 150, padding: 4,
                                     background: 'var(--surface)', border: '1px solid var(--border)',
                                     borderRadius: 6, boxShadow: '0 6px 20px rgba(0,0,0,.25)' }}>
-                                    {quickCalcsFor({ name: c.name, dtype: c.dtype, numeric: isNumericField(c) }).map(qc => (
+                                    {quickCalcsFor({ name: c.name, dtype: c.dtype, numeric: isNumericField(c), additive: defaultSummary(c.name, columnMeta) === 'sum' }).map(qc => (
                                       <button key={qc.key} role="menuitem"
                                         onClick={() => void runQuickCalc(c.name, qc.key)}
                                         style={{ display: 'block', width: '100%', textAlign: 'start',
@@ -3187,28 +3261,25 @@ export default function ReportBuilder() {
                                 parent swallows every child click -- the first drive
                                 of this dialog found exactly that. */}
                             {c.dtype === 'numeric' && (
-                              <span role="button" tabIndex={0}
+                              <button type="button"
                                 aria-label={tr(isNumericField(c) ? 'bc.shell.f.reclassCat' : 'bc.shell.f.reclassMeasure', { col: c.name })}
                                 title={isNumericField(c)
                                   ? tr('bc.shell.f.treatCat', { col: c.name })
                                   : tr('bc.shell.f.treatMeasure', { col: c.name })}
                                 onClick={e => { e.stopPropagation(); void flipFieldRole(c) }}
-                                onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); void flipFieldRole(c) } }}
-                                style={{ color: 'var(--muted)', fontSize: 11, cursor: 'pointer' }}>⇄</span>
+                                style={{ color: 'var(--muted)', fontSize: 11, cursor: 'pointer', background: 'none', border: 'none', padding: '0 2px' }}>⇄</button>
                             )}
                             {isNumericField(c) && (
-                              <span role="button" tabIndex={0} aria-label={tr('bc.shell.f.explain', { col: c.name })}
+                              <button type="button" aria-label={tr('bc.shell.f.explain', { col: c.name })}
                                 title={tr('bc.shell.f.explainTitle', { col: c.name })}
                                 onClick={e => { e.stopPropagation(); setExplainColumn(c.name) }}
-                                onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); setExplainColumn(c.name) } }}
-                                style={{ color: 'var(--accent)', fontSize: 11, cursor: 'pointer' }}>?</span>
+                                style={{ color: 'var(--accent)', fontSize: 11, cursor: 'pointer', background: 'none', border: 'none', padding: '0 2px' }}>?</button>
                             )}
                             {hints[c.name]?.outliers && (
-                              <span role="button" tabIndex={0} aria-label={tr('bc.shell.f.outliers', { col: c.name })}
+                              <button type="button" aria-label={tr('bc.shell.f.outliers', { col: c.name })}
                                 title={tr('bc.shell.f.outliersTitle', { hint: hintTitle(hints[c.name]) })}
                                 onClick={e => { e.stopPropagation(); setOutlierColumn(c.name) }}
-                                onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); setOutlierColumn(c.name) } }}
-                                style={{ color: '#e6a03c', fontSize: 11, cursor: 'pointer' }}>⚠</span>
+                                style={{ color: '#e6a03c', fontSize: 11, cursor: 'pointer', background: 'none', border: 'none', padding: '0 2px' }}>⚠</button>
                             )}
                             {/* The field's properties, as SAS's data pane opens them. */}
                             <button type="button" aria-expanded={fieldProps === c.name}
@@ -3315,17 +3386,26 @@ export default function ReportBuilder() {
                 </div>
               </div>
 
-              <div className="dl-bd-hier" style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
-                <span className="dl-bd-gh" style={{ margin: 0 }}>{tr('builder.hierarchy')}</span>
-                {dataset && (
-                  <button className="btn btn-ghost btn-sm" onClick={autoGenHierarchy} style={{ fontSize: 11, padding:'2px 6px' }}>
-                    {tr('bc.shell.ds.auto')}
-                  </button>
-                )}
-              </div>
+              {/* Fields plan F5 (2026-10-09): the folder tree listed every field a
+                  second time, saved apart from the field list, so the two
+                  disagreed (a year a measure here, a dimension there; new columns
+                  missing). The list above is THE list of fields; the folders
+                  are an arrangement tool, folded away until asked for. */}
               {!dataset
                 ? <p style={{ fontSize:12, color:'var(--muted)', textAlign:'center', marginTop:20 }}>{tr('bc.shell.ds.attachToBrowse')}</p>
-                : <HierarchyTree nodes={hierarchy} datasetId={dataset.id} onRefresh={refreshHierarchy} />
+                : (
+                  <details className="dl-bd-hier" data-testid="hierarchy-folders">
+                    <summary className="dl-bd-gh" style={{ cursor: 'pointer' }}>{tr('bc.shell.hier.organize')}</summary>
+                    <p style={{ fontSize: 11, color: 'var(--muted)', margin: '4px 0 6px' }}>{tr('bc.shell.hier.organizeHint')}</p>
+                    <div style={{ display:'flex', justifyContent:'flex-end', marginBottom: 6 }}>
+                      <button className="btn btn-ghost btn-sm" onClick={autoGenHierarchy} style={{ fontSize: 11, padding:'2px 6px' }}
+                        title={tr('bc.shell.hier.autoHint')}>
+                        {tr('bc.shell.ds.auto')}
+                      </button>
+                    </div>
+                    <HierarchyTree nodes={hierarchy} datasetId={dataset.id} onRefresh={refreshHierarchy} />
+                  </details>
+                )
               }
 
               {dataset && (
@@ -3819,7 +3899,7 @@ export default function ReportBuilder() {
               ))}
             </div>
             {pageFilterBar}
-            <FilterBar variant="chips" />
+            <FilterBar variant="chips" reportFilters={reportFilterChips} />
           </div>
         )}
         <div className={kiosk ? 'dl-pr-stage' : undefined} style={{ display:'flex', flex:1, gap:10, padding:'10px 16px', overflow:'hidden', minHeight:0, position:'relative' }}>
@@ -3848,7 +3928,10 @@ export default function ReportBuilder() {
             )}
             {/* 5.9: with page filters in use, the old "Filters: No selections"
                 line beside them read as "no filters apply" -- the opposite. */}
-            {!modern && !kiosk && !(pageFilters?.length > 0) && <FilterBar />}
+            {!modern && !kiosk && !(pageFilters?.length > 0) && (
+              <FilterBar reportFilters={reportFilterChips}
+                onRemoveReportFilter={editMode ? id => void removeReportFilter(id) : undefined} />
+            )}
             {/* The same filters, reachable after scrolling: the strip above is
                 at the top of the canvas and a tall dashboard scrolls it away. */}
             <FloatingFilterWindow />
@@ -3952,7 +4035,7 @@ export default function ReportBuilder() {
                     const col = columns.find(c => c.name === field)
                     const plan = target && col ? planFieldOnWidget(target, field, isNumericField(col)) : null
                     if (target && plan) {
-                      window.dispatchEvent(new CustomEvent(PATCH_WIDGET_EVENT, { detail: { widgetId: target.id, patch: plan.config,
+                      window.dispatchEvent(new CustomEvent(PATCH_WIDGET_EVENT, { detail: { widgetId: target.id, patch: plan.config, title: plan.title,
                         label: tr('bc.shell.u.setRole', { role: roleLabel(language, plan.roleLabel), widget: target.title || target.widget_type, field }) } }))
                       // QA4 T1: the role in the reader's language ("في Measure").
                       toast.success(tr('bc.shell.t.roleSet', { field, role: roleLabel(language, plan.roleLabel), widget: target.title || target.widget_type }))

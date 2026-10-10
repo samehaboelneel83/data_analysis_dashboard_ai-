@@ -19,6 +19,8 @@ import { seriesName } from './chartRenderers/axisOptions'
 import { WidgetPlaceholder, missingRequiredRoles, missingWidgetOptions, familyOf } from './WidgetPlaceholder'
 import { MeasuredChart } from './MeasuredChart'
 import SlicerRange, { type RangeValue } from './SlicerRange'
+import SlicerTree from './SlicerTree'
+import HierPivot from './HierPivot'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // WidgetBody — pure rendering, receives onClick callback
@@ -111,11 +113,17 @@ function FetchErrorState({ err, onRetry }: { err: { detail: string; code?: strin
   return <EmptyState msg={msg} action={retry ? { label: t('widget.err.retry'), onClick: onRetry! } : undefined} />
 }
 
-export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, onClickPoint, broadcasts, allFormats, checked, onToggleSlicerValue, onButtonClick, ruleStyles, parameters, geography, textFilter, onSubmitTextFilter, rangeFilter, onSubmitRangeFilter, onAssignData, onBrushChange, brushNonce, onAnimationFrame, onApplyFix, onLoadMore, loadingMore }:
+export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, onClickPoint, broadcasts, allFormats, checked, onToggleSlicerValue, onButtonClick, ruleStyles, parameters, geography, textFilter, onSubmitTextFilter, rangeFilter, onSubmitRangeFilter, treePaths, onTreeChange, gridOpen, onToggleGridBranch, onGridClick, onAssignData, onBrushChange, brushNonce, onAnimationFrame, onApplyFix, onLoadMore, loadingMore }:
   { widget: Widget; data: any; fetchError?: { detail: string; code?: string } | null; onRetry?: () => void; localSelected: unknown; onClickPoint: (v: unknown) => void; broadcasts: boolean; allFormats?: Record<string, CalcColumnFormat | undefined>; checked?: Set<unknown>; onToggleSlicerValue?: (v: unknown) => void; onButtonClick?: () => void; ruleStyles?: RuleStyles; parameters?: Record<string, unknown>; geography?: Record<string, number>;
     textFilter?: string; onSubmitTextFilter?: (value: string, column: string) => void
     /** A range slicer's current bounds, and how it applies new ones. */
     rangeFilter?: RangeValue | null; onSubmitRangeFilter?: (range: RangeValue | null, column: string) => void
+    /** A hierarchy slicer (hierarchy plan, step 2): the ticked paths, and where changes go. */
+    treePaths?: string[][] | null; onTreeChange?: (paths: string[][] | null) => void
+    /** A hierarchical crosstab (step 3): open branches, toggling them, a value clicked. */
+    gridOpen?: { rows: string[]; cols: string[] }
+    onToggleGridBranch?: (axis: 'rows' | 'cols', key: string) => void
+    onGridClick?: (rowPath: string[], colPath: string[]) => void
     /** Edit mode only: select this widget and open its Data roles. */
     onAssignData?: () => void
     /** Overview-axis zoom reports; bumping brushNonce remounts the chart to reset it. */
@@ -340,6 +348,11 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
   // the chart renderer got empty rows and drew nothing -- the message lost.
   if (data?.type === 'error') return <EmptyState msg={String(data.message || 'This widget could not be computed')} />
 
+  if (data?.type === 'hier_pivot') {
+    return <HierPivot data={data} open={gridOpen ?? { rows: [], cols: [] }} rtl={rtl}
+      onToggle={onToggleGridBranch} onCellClick={onGridClick} />
+  }
+
   // Slicer
   if (wt === 'slicer') {
     const rows: any[] = data.rows ?? []
@@ -358,6 +371,9 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
     // broken rather than deliberate. Text is always a deliberate choice.
     // A range comes from the server: chosen, or picked by `auto` for a number
     // column with many values. It carries bounds, not a value list.
+    if (data?.type === 'slicer_tree') {
+      return <SlicerTree data={data} paths={treePaths ?? null} rtl={rtl} onChange={onTreeChange} />
+    }
     if (data?.type === 'slicer_range') {
       return <SlicerRange data={data} value={rangeFilter ?? null} rtl={rtl} onApply={onSubmitRangeFilter} />
     }
@@ -570,7 +586,8 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
               rows={rows} data={data} cfg={cfg} rtl={rtl} broadcasts={broadcasts}
               localSelected={localSelected} onClickPoint={onClickPoint}
               measureFmt={measureFmt} measure2Fmt={measure2Fmt} allFormats={allFormats}
-              ruleStyles={ruleStyles} geography={geography} plotW={plotW} plotH={plotH} />
+              ruleStyles={ruleStyles} geography={geography} plotW={plotW} plotH={plotH}
+              treePaths={treePaths} onTreeChange={onTreeChange} />
           )}
         </MeasuredChart>
       </Suspense>

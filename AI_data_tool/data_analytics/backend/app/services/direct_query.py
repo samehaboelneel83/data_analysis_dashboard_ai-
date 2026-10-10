@@ -78,7 +78,28 @@ AGGREGATE_STRATEGY_WIDGET_TYPES = {
     "dot_plot", "crosstab", "needle", "word_cloud",
 }
 
-_SUPPORTED_FILTER_OPS = {"eq", "neq", "gt", "lt", "gte", "lte", "in", "like"}
+_SUPPORTED_FILTER_OPS = {"eq", "neq", "gt", "lt", "gte", "lte", "in", "like", "paths"}
+
+
+def _is_bucket_filter(f) -> bool:
+    """A filter on a date BUCKET label pandas computes ("2024-02" at month
+    grain), which SQL on the stored value cannot match: a drill filter with a
+    granularity, or a hierarchy-slicer path filter with one on any level."""
+    if not isinstance(f, dict):
+        return False
+    if f.get("granularity"):
+        return True
+    if f.get("op") == "paths":
+        return any(g for g in ((f.get("value") or {}).get("granularities") or []))
+    return False
+
+
+def _filter_columns(f: dict) -> list:
+    """Every column a filter names: a "paths" filter names one per level."""
+    cols = [f.get("column")]
+    if f.get("op") == "paths":
+        cols += list((f.get("value") or {}).get("columns") or [])
+    return cols
 
 
 def like_pattern(value) -> str:
@@ -314,6 +335,23 @@ def _build_where(filters: list[dict]) -> tuple[str, dict]:
         if not col:
             continue
         col_sql = _quote(col)
+        if op == "paths":
+            # A hierarchy slicer's selection: any of these whole paths, each an
+            # AND of its levels ("Egypt" alone = that whole branch). Columns
+            # were allow-listed by _validate_*; values are bound, never spliced.
+            spec = val or {}
+            cols = list(spec.get("columns") or [])
+            ors = []
+            for pi, path in enumerate(spec.get("paths") or []):
+                ands = []
+                for li, v in enumerate(list(path)[:len(cols)]):
+                    key = f"f{i}_{pi}_{li}"
+                    params[key] = v
+                    ands.append(f"{_quote(cols[li])} = :{key}")
+                if ands:
+                    ors.append("(" + " AND ".join(ands) + ")")
+            clauses.append("(" + " OR ".join(ors) + ")" if ors else "1 = 0")
+            continue
         if op == "in":
             vals = val if isinstance(val, list) else [val]
             keys = [f"f{i}_{j}" for j in range(len(vals))]
@@ -368,6 +406,14 @@ def _limit_clause(dialect: str, limit: int) -> str:
 
 def _base_query_sql(dataset, rls_where: str = "") -> str:
     inner = dataset.source_query.strip().rstrip(";") if dataset.source_query else f"SELECT * FROM {_quote(dataset.source_table)}"
+    # A saved live query is checked in full when it is saved (sql_safety.
+    # ensure_read_only); here, on every widget read, the one thing a subquery
+    # wrapper cannot neutralise is refused: a second statement after a ';'.
+    if dataset.source_query:
+        from .sql_safety import UnsafeQuery, has_second_statement
+        if has_second_statement(inner):
+            raise UnsafeQuery("This live dataset's query holds more than one statement; "
+                              "edit it to a single SELECT.")
     if not rls_where:
         return inner
     # The RLS predicate gets its own subquery boundary, applied before anything
@@ -753,7 +799,7 @@ def _validate_columns(dataset, plan: QueryPlan) -> None:
     that isn't real can never reach the database at all."""
     known = {c.name for c in dataset.columns}
     meas_refs = set(plan.meas_cols) if plan.meas_sql else {plan.meas}
-    referenced = {plan.dim, *meas_refs, *(f.get("column") for f in plan.filters)}
+    referenced = {plan.dim, *meas_refs, *(c for f in plan.filters for c in _filter_columns(f))}
     for col in referenced:
         if col and col not in known:
             raise DirectQueryUnsupported(f"unknown column '{col}'")
@@ -764,7 +810,7 @@ def _validate_known_columns(dataset, columns: list[str], filters: list[dict]) ->
     strategies (histogram/correlation_matrix), which reference a plain column
     list rather than a QueryPlan's dim/meas shape."""
     known = {c.name for c in dataset.columns}
-    referenced = {*columns, *(f.get("column") for f in filters)}
+    referenced = {*columns, *(c for f in filters for c in _filter_columns(f))}
     for col in referenced:
         if col and col not in known:
             raise DirectQueryUnsupported(f"unknown column '{col}'")
@@ -1147,14 +1193,17 @@ _ROW_LEVEL_KEYS = ("having", "suppress_below", "quick_calc", "sort_custom",
                    "dimension2",
                    # The nested crosstab (services/pivot.py) is the import
                    # shaper's too, over the fetched rows.
-                   "rows_extra", "columns_extra", "extra_measures")
+                   "rows_extra", "columns_extra", "extra_measures",
+                   # Hierarchy plan (2026-10-10): the slicer tree and the
+                   # hierarchical crosstab are built by the import shaper.
+                   "slicer_levels", "hierarchy_rows", "hierarchy_columns")
 
 
 def _needs_rows(config: dict) -> bool:
     """True when the grouped SQL pushdown cannot give the import engine's answer."""
     if any(config.get(k) not in (None, "", [], {}) for k in _ROW_LEVEL_KEYS):
         return True
-    return any(isinstance(f, dict) and f.get("granularity") for f in (config.get("filters") or []))
+    return any(_is_bucket_filter(f) for f in (config.get("filters") or []))
 
 
 def _measure_refs(config: dict, measures: list[dict] | None, known: set[str]) -> dict[str, dict]:
@@ -1290,7 +1339,7 @@ def _run_table_page(source_cfg: dict, dataset, config: dict, rls_filter_expr: st
     dialect = connectors.sql_family_of(source_cfg)
     if dialect not in SUPPORTED_FAMILIES:
         raise DirectQueryUnsupported(f"DirectQuery does not yet support '{dialect}' sources")
-    if any(isinstance(f, dict) and (f.get("granularity") or f.get("op") == "date_range")
+    if any(isinstance(f, dict) and (_is_bucket_filter(f) or f.get("op") == "date_range")
            for f in (config.get("filters") or [])):
         return None
     offset, size = table_page(config)
@@ -1500,7 +1549,7 @@ def _run_row_capped(
     # a label pandas computes, not the stored value: it stays out of the SQL
     # and the shaper applies it to the fetched rows with every other filter.
     sql_config = {**config, "filters": [f for f in (config.get("filters") or [])
-                                        if not (isinstance(f, dict) and f.get("granularity"))]}
+                                        if not _is_bucket_filter(f)]}
     plan = plan_row_fetch(sql_config, widget_type, allow_any_widget=allow_any_widget)
     # The filters' column names are spliced into the WHERE clause as
     # identifiers (values are bound; names cannot be). Every other path checks
@@ -1642,7 +1691,7 @@ def _remeasure_scalar(conn, dataset, plan, dialect: str, result: dict,
         # Years since a date: SQL AVG of a date is not that number (and is an
         # error on PostgreSQL). The value stays the fetched rows' own.
         return False
-    if any(isinstance(f, dict) and f.get("granularity") for f in (plan.filters or [])):
+    if any(_is_bucket_filter(f) for f in (plan.filters or [])):
         return False
     _validate_known_columns(dataset, [meas], plan.filters)
     base = _base_query_sql(dataset, rls_where)

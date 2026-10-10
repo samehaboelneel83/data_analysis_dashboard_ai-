@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import { dataSourcesApi, queryBuilderApi, type DataSource } from '../services/api'
 import QueryCanvas, { JOIN_TYPES } from './QueryCanvas'
-import { compileWhere, type SqlConditionRow } from '../lib/sqlWhere'
+import ConditionBoxes from './ConditionBoxes'
+import { countConditions, dropTable, fromModel, previewWhere, toModel, type CondNode } from '../lib/conditionTree'
 import { useConfirm } from './ui/ConfirmDialog'
 import { useModalDialog } from './ui/useModalDialog'
 import { useT } from '../i18n'
@@ -15,12 +16,10 @@ const CANVAS_AGG_CYCLE = ['', 'sum', 'avg', 'count', 'min', 'max']
 
 interface JoinRow { left_table: string; table: string; left_column: string; right_column: string; how: string }
 interface ColRow { table: string; column: string; aggregation: string; alias: string; func: string }
-interface FilterRow { table: string; column: string; op: string; value: string }
 /** A filter on the AGGREGATE -- what WHERE cannot express, because WHERE runs
  *  before grouping. */
 interface HavingRow { table: string; column: string; aggregation: string; op: string; value: string }
 
-const OPS = ['eq', 'ne', 'gt', 'gte', 'lt', 'lte', 'contains', 'in', 'is_null', 'not_null']
 const AGGS = ['', 'sum', 'avg', 'min', 'max', 'count', 'count_distinct']
 
 const label = { display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--muted)',
@@ -63,7 +62,9 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
   const [base, setBase] = useState('')
   const [joins, setJoins] = useState<JoinRow[]>([])
   const [cols, setCols] = useState<ColRow[]>([])
-  const [filters, setFilters] = useState<FilterRow[]>([])
+  // Conditions are a tree of boxes (ConditionBoxes): rows and nested
+  // "Match all / any" groups; the root joiner is filters_joiner.
+  const [conds, setConds] = useState<CondNode[]>([])
   const [filtersJoiner, setFiltersJoiner] = useState<'and' | 'or'>('and')
   const [having, setHaving] = useState<HavingRow[]>([])
   // 4.1: per table, the end-date column whose open rows are "current".
@@ -121,7 +122,7 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
       table?: string
       joins?: { left_table?: string; table: string; left_column: string; right_column: string; how?: string }[]
       columns?: { table?: string; column: string; aggregation?: string; alias?: string; function?: string }[]
-      filters?: { table?: string; column: string; op: string; value?: unknown }[]
+      filters?: unknown[]
       filters_joiner?: 'and' | 'or'
       having?: { table?: string; column: string; aggregation: string; op: string; value?: unknown }[]
       current_only?: { table: string; column: string }[]
@@ -140,10 +141,9 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
       table: c.table || m.table || '', column: c.column,
       aggregation: c.aggregation || '', alias: c.alias || '', func: c.function || '',
     })))
-    setFilters((m.filters ?? []).map(f => ({
-      table: f.table || m.table || '', column: f.column, op: f.op,
-      value: Array.isArray(f.value) ? f.value.join(', ') : f.value == null ? '' : String(f.value),
-    })))
+    // Groups and sub-query conditions come back too: a saved sub-query used
+    // to vanish here, and the next save dropped it from the dataset.
+    setConds(fromModel(m.filters, m.table || ''))
     if (m.filters_joiner) setFiltersJoiner(m.filters_joiner)
     setHaving((m.having ?? []).map(h => ({
       table: h.table || m.table || '', column: h.column,
@@ -197,11 +197,8 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
       ...(c.alias ? { alias: c.alias } : {}),
       ...(c.func ? { function: c.func } : {}),
     })),
-    filters: filters.filter(f => f.column && (f.op === 'is_null' || f.op === 'not_null' || f.value !== ''))
-      .map(f => ({ table: f.table || base, column: f.column, op: f.op,
-        value: f.op === 'in' ? f.value.split(',').map(x => x.trim()).filter(Boolean)
-          : isNaN(Number(f.value)) || f.value === '' ? f.value : Number(f.value) })),
-    ...(filters.length > 1 ? { filters_joiner: filtersJoiner } : {}),
+    filters: toModel(conds, base),
+    ...(toModel(conds, base).length > 1 ? { filters_joiner: filtersJoiner } : {}),
     ...(having.filter(h => h.column && h.value !== '').length ? {
       having: having.filter(h => h.column && h.value !== '').map(h => ({
         table: h.table || base, column: h.column, aggregation: h.aggregation,
@@ -214,7 +211,7 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
       .filter(([t]) => t === base || joins.some(j => j.table === t))
       .map(([table, column]) => ({ table, column })) } : {}),
     limit: Number(limit) || 10000,
-  }), [base, joins, cols, filters, filtersJoiner, having, sortAlias, sortDir, limit, currentOnly,
+  }), [base, joins, cols, conds, filtersJoiner, having, sortAlias, sortDir, limit, currentOnly,
       hierOn, hierTable, hierId, hierParent])
 
   // live SQL: recompile 500ms after any edit — the statement is the truth of
@@ -387,7 +384,7 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
               // compile to a query selecting from a table it no longer joins.
               setJoins(p => p.filter(j => j.table !== t && j.left_table !== t))
               setCols(p => p.filter(c => (c.table || base) !== t))
-              setFilters(p => p.filter(f => (f.table || base) !== t))
+              setConds(p => dropTable(p, t, base))
             }}
             selectedColumns={selectedColumns}
             aggByColumn={aggByColumn}
@@ -525,46 +522,16 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
             <button className="btn" style={{ fontSize: 11 }} disabled={!base} title={!base ? tr('qb.chooseBase') : undefined}
               onClick={() => setCols(p => [...p, { table: base, column: '', aggregation: '', alias: '', func: '' }])}>+ Add column</button>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12 }}>
-              <label style={{ ...label, marginBottom: 0 }}>{tr('qb.filters')}</label>
-              {filters.length > 1 && (
-                <select aria-label={tr('qb.match')} value={filtersJoiner}
-                  onChange={e => setFiltersJoiner(e.target.value as 'and' | 'or')} style={{ fontSize: 11 }}>
-                  <option value="and">{tr('qb.all')}</option>
-                  <option value="or">{tr('qb.any')}</option>
-                </select>
+            <div style={{ marginTop: 12 }}>
+              <label style={label}>{tr('qb.filters')}</label>
+              <ConditionBoxes nodes={conds} joiner={filtersJoiner} onChange={setConds} onJoiner={setFiltersJoiner}
+                tables={activeTables} base={base} columnsOf={t => effectiveColumns[t] ?? []} />
+              {countConditions(conds) > 0 && (
+                <div data-testid="qb-where-preview" dir="ltr" style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                  WHERE {previewWhere(conds, filtersJoiner)}
+                </div>
               )}
             </div>
-            {filters.map((f, i) => (
-              <div key={i} style={{ display: 'flex', gap: 4, marginBottom: 4, flexWrap: 'wrap' }}>
-                <select aria-label={`Filter table ${i + 1}`} value={f.table || base}
-                  onChange={e => setFilters(p => p.map((x, k) => k === i ? { ...x, table: e.target.value, column: '' } : x))} style={{ fontSize: 11 }}>
-                  {activeTables.map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
-                {colSelect(f.table || base, f.column, v => setFilters(p => p.map((x, k) => k === i ? { ...x, column: v } : x)), `Filter column ${i + 1}`)}
-                <select aria-label={`Filter op ${i + 1}`} value={f.op}
-                  onChange={e => setFilters(p => p.map((x, k) => k === i ? { ...x, op: e.target.value } : x))} style={{ fontSize: 11 }}>
-                  {OPS.map(o => <option key={o} value={o}>{o}</option>)}
-                </select>
-                {f.op !== 'is_null' && f.op !== 'not_null' && (
-                  <input aria-label={`Filter value ${i + 1}`} value={f.value}
-                    placeholder={f.op === 'in' ? 'a, b, c' : 'value'}
-                    onChange={e => setFilters(p => p.map((x, k) => k === i ? { ...x, value: e.target.value } : x))}
-                    style={{ fontSize: 11, width: 100 }} />
-                )}
-                <button aria-label={`Remove filter ${i + 1}`} onClick={() => setFilters(p => p.filter((_, k) => k !== i))}
-                  style={{ border: 'none', background: 'none', color: 'var(--danger)', cursor: 'pointer' }}>✕</button>
-              </div>
-            ))}
-            <button className="btn" style={{ fontSize: 11 }} disabled={!base} title={!base ? tr('qb.chooseBase') : undefined}
-              onClick={() => setFilters(p => [...p, { table: base, column: '', op: 'eq', value: '' }])}>+ Add filter</button>
-            {filters.some(f => f.column) && (
-              <div data-testid="qb-where-preview" style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-                WHERE {compileWhere(
-                  filters.map((f): SqlConditionRow => ({ table: f.table, column: f.column, op: f.op as SqlConditionRow['op'], value: f.value })),
-                  filtersJoiner)}
-              </div>
-            )}
 
             {/* HAVING: only offered once something groups. WHERE runs BEFORE
                 grouping, so "regions whose total exceeds 1000" cannot be said

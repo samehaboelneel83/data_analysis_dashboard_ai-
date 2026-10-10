@@ -69,8 +69,61 @@ class DecisionTreeError(ValueError):
     """Not something a readable tree can be fitted to, with the reason."""
 
 
+def _copies_target(series: pd.Series, target: pd.Series) -> bool:
+    """True when a column IS the outcome under another name: equal on every
+    row, or (numbers) an exact straight-line rescaling of it (price / 1000).
+    Used as an input it predicts the answer from the answer -- the data-
+    scientist tour found a model "predicting price_egp from price_egp (copy)"
+    with a score that meant nothing (2026-10-10)."""
+    both = pd.DataFrame({"x": series, "y": target}).dropna()
+    if len(both) < 10:
+        return False
+    if (both["x"].astype(str) == both["y"].astype(str)).all():
+        return True
+    if pd.api.types.is_numeric_dtype(both["x"]) and pd.api.types.is_numeric_dtype(both["y"]):
+        if both["x"].nunique() < 3 or both["y"].nunique() < 3:
+            return False
+        corr = both["x"].corr(both["y"])
+        return bool(corr is not None and abs(corr) >= 0.9999)
+    return False
+
+
+#: Rarer values of a many-valued category, grouped (prediction models only).
+OTHER = "(other)"
+#: A category with more values than MAX_PREDICTOR_CARDINALITY but at most this
+#: many -- and fewer than half the rows, so not an identifier -- keeps its most
+#: common values and groups the rest, instead of being left out (2026-10-10).
+MAX_GROUPABLE_VALUES = 1000
+
+
+def groupable(series: pd.Series) -> bool:
+    """A category worth keeping by grouping its rarer values: a car's make
+    (104 brands) predicts its price; an id (one value per row) predicts nothing."""
+    distinct = series.nunique(dropna=True)
+    rows = int(series.notna().sum())
+    return MAX_PREDICTOR_CARDINALITY < distinct <= MAX_GROUPABLE_VALUES and distinct < rows / 2
+
+
+def group_rare(df: pd.DataFrame, columns: list[str]) -> tuple[pd.DataFrame, dict[str, list[str]]]:
+    """Keep each groupable category's most common values and map the rest to
+    OTHER. Returns the new frame and {column: kept values + OTHER}, which is
+    exactly the category list a saved model scores with."""
+    out = df.copy()
+    kept: dict[str, list[str]] = {}
+    for c in columns:
+        s = out[c]
+        if pd.api.types.is_numeric_dtype(s) or pd.api.types.is_datetime64_any_dtype(s) or not groupable(s):
+            continue
+        top = [str(v) for v in s.dropna().astype(str).value_counts().index[:MAX_PREDICTOR_CARDINALITY - 1]]
+        text = s.astype(str).where(s.notna())
+        out[c] = text.where(text.isin(top) | text.isna(), OTHER)
+        kept[c] = sorted(top) + [OTHER]
+    return out, kept
+
+
 def _usable_predictors(df: pd.DataFrame, target: str,
-                       requested: list[str] | None) -> tuple[list[str], list[dict]]:
+                       requested: list[str] | None,
+                       allow_grouping: bool = False) -> tuple[list[str], list[dict]]:
     """Which columns can be split on, and why the others cannot.
 
     Named rather than silently dropped: a reader who is not told a column was
@@ -85,6 +138,10 @@ def _usable_predictors(df: pd.DataFrame, target: str,
             skipped.append({"column": column, "reason": "not in this dataset"})
             continue
         series = df[column]
+        if target in df.columns and _copies_target(series, df[target]):
+            skipped.append({"column": column,
+                            "reason": "a copy of the outcome -- it would predict the answer from the answer"})
+            continue
         if pd.api.types.is_numeric_dtype(series):
             if series.notna().sum() == 0:
                 skipped.append({"column": column, "reason": "no values"})
@@ -99,6 +156,8 @@ def _usable_predictors(df: pd.DataFrame, target: str,
         distinct = series.nunique(dropna=True)
         if distinct < 2:
             skipped.append({"column": column, "reason": "only one value"})
+        elif distinct > MAX_PREDICTOR_CARDINALITY and allow_grouping and groupable(series):
+            used.append(column)      # its rarer values are grouped (group_rare)
         elif distinct > MAX_PREDICTOR_CARDINALITY:
             skipped.append({
                 "column": column,

@@ -153,3 +153,15 @@ describe('combining tables from several databases', () => {
     }))
   })
 })
+
+describe('Connections: a failed test says why, and keeps saying it (role tour, 2026-10-10)', () => {
+  it('shows the reason on the row, not only in a toast that vanishes', async () => {
+    vi.mocked(dataSourcesApi.test).mockResolvedValue({ ok: false,
+      error: 'could not translate host name "qa-db.invalid" to address' } as never)
+    renderAs(true)
+    await screen.findByText('Moodle LMS (Egyptian University)')
+    fireEvent.click(screen.getByRole('button', { name: 'Test' }))
+    expect(await screen.findByTestId('conn-test-error'))
+      .toHaveTextContent('could not translate host name "qa-db.invalid"')
+  })
+})

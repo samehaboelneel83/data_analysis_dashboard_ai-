@@ -19,7 +19,11 @@ import toast from 'react-hot-toast'
 import ActionMenu from '../ActionMenu'
 import { DifferenceDialog, ExplainDialog, ScenarioDialog, WhyDialog, describeFilter, useViewAs, viewAsOptions, type WhySection } from './ViewerKit'
 import type { CalcColumn, CalcColumnFormat, Dataset } from '../../services/api'
-import { useCrossFilter, CrossFilterProvider } from './CrossFilterContext'
+import { useCrossFilter, CrossFilterProvider, type DrillStep } from './CrossFilterContext'
+import { describePaths } from '../../lib/slicerTree'
+/** How the server joins expanded hierarchy levels into one label
+ *  (widget_data.shape_series, `dimension_levels`). */
+const PATH_SEP = ' › '
 import { EmptyState } from './chartUtils'
 import type { Widget, ReportPage, HierarchyNode, Bookmark } from '../../types/report'
 import type { DisplayRule, RuleStyles } from '../../lib/displayRules'
@@ -252,7 +256,7 @@ export function binningTitle(b: Binning | undefined | null, t?: TranslateFn): st
 }
 
 function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, geography, datasets, selected, isMultiSelected, onSelect, onDelete, onDuplicate, editMode, promptFilter, onDragStart, onResizeStart, isDragging, onFetchComplete, pages, reportDisplayRules, reportFilters, pageFilters, onDrillthrough, isPreview, hierarchy, bookmarks, onNavigateToPage, onApplyBookmark, reportId, parameters, onSetParameter, dataOverride, relationships, eagerFetch, allowExport = true, refreshNonce }: Props) {
-  const { emitFilter, emitMultiFilter, getFiltersFor, canBroadcast, canReceive, activeFilters, clearAllFilters, clearFilter, interactions, getReceiveMode, carryFiltersTo } = useCrossFilter()
+  const { emitFilter, emitMultiFilter, getFiltersFor, canBroadcast, canReceive, activeFilters, clearAllFilters, clearFilter, interactions, getReceiveMode, carryFiltersTo, drillOf, setDrill } = useCrossFilter()
   const [data,    setData]    = useState<any>(null)
   const [loading, setLoading] = useState(
     () => widgetFetchesData(widget.widget_type, widget.config, dataOverride))
@@ -278,20 +282,26 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
 
   const [containerTab, setContainerTab] = useState(0)
   const [containerOpen, setContainerOpen] = useState(true)
-  const [drillPath, setDrillPath] = useState<{ column: string; granularity?: string; value: unknown; label: string }[]>([])
+  // The drill position lives in the page's shared state (CrossFilterContext),
+  // so a bookmark can save and restore it (hierarchy plan, step 1).
+  const drill = drillOf(widget.id)
+  const drillPath = drill.path
+  const expandDepth = drill.expand
+  const setDrillPath = (next: DrillStep[] | ((p: DrillStep[]) => DrillStep[])) =>
+    setDrill(widget.id, { path: typeof next === 'function' ? next(drill.path) : next, expand: 0 })
+  const setExpandDepth = (next: number | ((d: number) => number)) =>
+    setDrill(widget.id, { path: [], expand: typeof next === 'function' ? next(drill.expand) : next })
   // Decomposition drilling. Held here rather than in the widget's saved config
   // for the same reason hierarchy drilling is: a reader exploring a dashboard
   // is not editing it, and their path must not be written back to a report
   // other people are looking at.
   const [decompPath, setDecompPath] = useState<{ field: string; value: string }[]>([])
   const [decompSplit, setDecompSplit] = useState<string | null>(null)
-  useEffect(() => { setDrillPath([]) }, [widget.id])
 
   const hierarchyNodeId = (widget.config as any).hierarchyNodeId as number | undefined
   // Power BI's expand: 0 = one level (drill mode), N = the bound level plus N
   // deeper levels shown together as a path label. Expanding and drilling are
   // exclusive -- each clears the other, matching how PBI's toolbar behaves.
-  const [expandDepth, setExpandDepth] = useState(0)
   const currentNodeId = hierarchyNodeId != null && hierarchy ? walkToDepth(hierarchy, hierarchyNodeId, drillPath.length) : undefined
   const currentNode = currentNodeId != null ? hierarchy?.find(n => n.id === currentNodeId) : undefined
   // the chain of DISTINCT column levels reachable from the bound node -- expand
@@ -310,6 +320,41 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
     }
     return cols
   })()
+
+  // A slicer bound to a hierarchy lists the whole chain as a tree (hierarchy
+  // plan, step 2): every level from the bound node down, date grains included
+  // (Year ▸ Quarter ▸ Month on one date column).
+  const isTreeSlicer = widget.widget_type === 'slicer' && hierarchyNodeId != null && !!hierarchy
+  /** Every level from a bound node down: {column, granularity}. */
+  const chainFrom = (start: number | undefined) => {
+    const out: { column: string; granularity: string | null }[] = []
+    if (start == null || !hierarchy) return out
+    let id: number | undefined = start
+    while (id != null) {
+      const node = hierarchy.find(n => n.id === id)
+      if (!node?.column_name) break
+      out.push({ column: node.column_name, granularity: node.format ?? null })
+      id = getChildNode(hierarchy, id)?.id
+    }
+    return out
+  }
+  const chainLevels = isTreeSlicer ? chainFrom(hierarchyNodeId) : []
+  // A tree widget built from level columns ticks branches the same way
+  // (hierarchy plan, step 4); a parent-child tree has no columns to filter by.
+  const treeWidgetLevels: { column: string; granularity: string | null }[] =
+    widget.widget_type === 'tree' && Array.isArray(widget.config.levels) && !widget.config.id_col
+      ? (widget.config.levels as string[]).map(c => ({ column: c, granularity: null })) : []
+  const tickLevels = isTreeSlicer ? chainLevels : treeWidgetLevels
+  // A crosstab bound to hierarchies opens them level by level in the grid
+  // (hierarchy plan, step 3): rows from `hierarchyNodeId`, columns from
+  // `hierarchyNodeId2`. It does not drill: every level is in one answer.
+  // A plain column on the other axis is a one-level chain.
+  const hierarchyNodeId2 = (widget.config as any).hierarchyNodeId2 as number | undefined
+  const isHierGrid = (widget.widget_type === 'crosstab' || widget.widget_type === 'matrix')
+    && (hierarchyNodeId != null || hierarchyNodeId2 != null) && !!hierarchy
+  const plainLevel = (col: unknown) => col ? [{ column: String(col), granularity: null }] : []
+  const gridRows = !isHierGrid ? [] : hierarchyNodeId != null ? chainFrom(hierarchyNodeId) : plainLevel(widget.config.dimension)
+  const gridCols = !isHierGrid ? [] : hierarchyNodeId2 != null ? chainFrom(hierarchyNodeId2) : plainLevel(widget.config.dimension2)
 
   // Cross-filters coming from OTHER widgets
   const incomingFilters = getFiltersFor(widget.id, widget.page_id)
@@ -338,6 +383,14 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
       return column
     }
     const crossFilters = incomingFilters.flatMap(f => {
+      // A hierarchy slicer's selection: whole paths, applied exactly by the
+      // server (filter op "paths"); each level's column is mapped across a
+      // modelled relationship like any other filter.
+      const tree = f.value as { paths?: string[][]; columns?: string[]; granularities?: (string | null)[] } | null
+      if (tree && Array.isArray(tree.paths) && Array.isArray(tree.columns)) {
+        return [{ column: translate(f.column), op: 'paths',
+          value: { paths: tree.paths, columns: tree.columns.map(translate), granularities: tree.granularities ?? [] } }]
+      }
       const between = (f.value as { between?: [number | null, number | null] } | null)?.between
       // A map area arrives as a range on each coordinate axis.
       if (Array.isArray(between) && between.length === 2) {
@@ -360,7 +413,14 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
       .map(f => ({ column: translate(f.column), op: f.op, value: f.value }))
       .filter(f => !myCols || myCols.size === 0 || myCols.has(f.column))
     cfg.filters = [...existing, ...reportWide, ...pageWide, ...crossFilters, ...pagePrompt]
-    if (hierarchyNodeId != null && expandDepth > 0 && expandLevels.length > 1) {
+    if (isHierGrid && gridRows.length > 0) {
+      cfg.hierarchy_rows = gridRows
+      if (gridCols.length) cfg.hierarchy_columns = gridCols
+      else delete cfg.hierarchy_columns
+    } else if (isTreeSlicer && chainLevels.length > 0) {
+      cfg.slicer_levels = chainLevels
+      cfg.dimension = chainLevels[0].column
+    } else if (hierarchyNodeId != null && expandDepth > 0 && expandLevels.length > 1) {
       cfg.dimension_levels = expandLevels.slice(0, expandDepth + 1)
       cfg.dimension = expandLevels[0]
       delete cfg.dimension_granularity
@@ -389,7 +449,7 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
     // rebuild this exact config WITHOUT them for its unfiltered baseline.
     return { config: cfg, crossFilters }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(widget.config), JSON.stringify(incomingFilters), promptFilter?.column, promptFilter?.value, hierarchyNodeId, currentNode?.column_name, currentNode?.format, JSON.stringify(drillPath), JSON.stringify(decompPath), decompSplit, widget.widget_type, expandDepth, expandLevels.join(','), JSON.stringify(relationships ?? []), JSON.stringify(reportDisplayRules), JSON.stringify(reportFilters), JSON.stringify(pageFilters)])
+  }, [JSON.stringify(widget.config), JSON.stringify(incomingFilters), promptFilter?.column, promptFilter?.value, hierarchyNodeId, currentNode?.column_name, currentNode?.format, JSON.stringify(drillPath), JSON.stringify(decompPath), decompSplit, widget.widget_type, expandDepth, expandLevels.join(','), JSON.stringify(chainLevels), JSON.stringify(gridRows), JSON.stringify(gridCols), JSON.stringify(relationships ?? []), JSON.stringify(reportDisplayRules), JSON.stringify(reportFilters), JSON.stringify(pageFilters)])
   const mergedConfig = mergedPair.config
   const translatedCrossFilters = mergedPair.crossFilters
 
@@ -592,8 +652,10 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
         // Count whatever the shape actually carries: matrix results (heatmap,
         // ribbon), waterfall bars, sankey links and forecasts have no `rows` key,
         // and counting only rows reported healthy widgets as empty -- the Review
-        // pane's first-ever finding was exactly that false positive.
+        // pane's first-ever finding was exactly that false positive. Trees (the
+        // slicer tree, tree/sunburst/icicle) carry nodes, not rows.
         rowCount: result?.rows?.length
+          || result?.nodes?.length || result?.root?.children?.length
           || result?.matrix?.length || result?.cells?.length || result?.bars?.length
           || result?.links?.length || result?.forecast?.length
           || (result?.value != null ? 1 : 0) || 0,
@@ -751,6 +813,19 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
         return
       }
     }
+    // Expanded levels: the clicked label is the whole path ("North › Cairo"),
+    // built by the server from one value per level. Filtering one column on
+    // that joined text matched no row at all; each level's column is filtered
+    // on its own value instead (hierarchy plan, step 1).
+    if (hierarchyNodeId != null && expandDepth > 0 && expandLevels.length > 1) {
+      const levels = expandLevels.slice(0, expandDepth + 1)
+      const parts = String(name).split(PATH_SEP)
+      if (parts.length === levels.length) {
+        setLocalSelected(localSelected === name ? null : name)
+        levels.forEach((column, i) => emitFilter(widget.id, widget.page_id, column, parts[i], `${column} = ${parts[i]}`))
+        return
+      }
+    }
     // Toggle: clicking the same value clears the filter
     if (localSelected === name) {
       setLocalSelected(null)
@@ -762,11 +837,10 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
     if (hierarchyNodeId != null && hierarchy && currentNodeId != null && currentNode?.column_name) {
       const child = getChildNode(hierarchy, currentNodeId)
       if (child) {
-        setExpandDepth(0)
         setDrillPath(p => [...p, { column: currentNode.column_name!, granularity: currentNode.format, value: name, label: String(name) }])
       }
     }
-  }, [canBroadcast, widget.id, widget.config, localSelected, emitFilter, emitMultiFilter, hierarchyNodeId, hierarchy, currentNodeId, currentNode, binning, baseRows, zoom, editMode])
+  }, [canBroadcast, widget.id, widget.config, localSelected, emitFilter, emitMultiFilter, hierarchyNodeId, hierarchy, currentNodeId, currentNode, binning, baseRows, zoom, editMode, expandDepth, expandLevels.join('|')])
 
   const commitZoom = useCallback((a: number, b: number) => {
     zoomCtl.current?.abort()
@@ -854,6 +928,51 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
     if (!range) { clearFilter(column, widget.id); return }
     emitFilter(widget.id, widget.page_id, column, { between: range }, rangeLabel(column, range))
   }, [widget.id, widget.page_id, emitFilter, clearFilter])
+
+  /** The tree slicer's ticks, read back from the page's filters, so a chip
+   *  cleared elsewhere (or a bookmark) unticks the boxes too. */
+  const treePaths = useMemo((): string[][] | null => {
+    const mine = activeFilters.find(f => f.sourceWidgetId === widget.id
+      && Array.isArray((f.value as { paths?: unknown } | null)?.paths))
+    return mine ? (mine.value as { paths: string[][] }).paths : null
+  }, [activeFilters, widget.id])
+
+  /** A hierarchical crosstab's open branches (in the page state, so bookmarks keep them). */
+  const gridOpen = drill.open ?? { rows: [], cols: [] }
+  const toggleGridBranch = useCallback((axis: 'rows' | 'cols', key: string) => {
+    const cur = drill.open ?? { rows: [], cols: [] }
+    const list = cur[axis].includes(key) ? cur[axis].filter(k => k !== key) : [...cur[axis], key]
+    setDrill(widget.id, { path: [], expand: 0, open: { ...cur, [axis]: list } })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [widget.id, JSON.stringify(drill.open ?? null), setDrill])
+  /** A value clicked in the hierarchical crosstab filters the page to its
+   *  exact row path and column path (op "paths"); a grand total filters nothing. */
+  const handleGridClick = useCallback((rowPath: string[], colPath: string[]) => {
+    if (editMode || !canBroadcast(widget.id)) return
+    const send = (levels: { column: string; granularity: string | null }[], path: string[]) => {
+      if (!levels.length) return
+      const column = levels[0].column
+      if (!path.length) { clearFilter(column, widget.id); return }
+      emitFilter(widget.id, widget.page_id, column,
+        { paths: [path], columns: levels.map(l => l.column), granularities: levels.map(l => l.granularity) },
+        describePaths([path]))
+    }
+    send(gridRows, rowPath)
+    send(gridCols, colPath)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editMode, canBroadcast, widget.id, widget.page_id, emitFilter, clearFilter, JSON.stringify(gridRows), JSON.stringify(gridCols)])
+
+  /** Ticks become ONE "paths" filter; nothing ticked, or everything, is no filter. */
+  const handleTreeChange = useCallback((paths: string[][] | null) => {
+    const levels = tickLevels
+    if (!levels.length) return
+    const column = levels[0].column
+    if (!paths || paths.length === 0) { clearFilter(column, widget.id); return }
+    const words = describePaths(paths)
+    emitFilter(widget.id, widget.page_id, column,
+      { paths, columns: levels.map(l => l.column), granularities: levels.map(l => l.granularity) }, words)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [widget.id, widget.page_id, emitFilter, clearFilter, JSON.stringify(tickLevels)])
 
   // Slicer: toggling a checkbox re-emits the full checked set as a multi-value filter.
   const handleToggleSlicerValue = useCallback((value: unknown) => {
@@ -1448,7 +1567,7 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
             <button aria-label={t('bc.canvas.expandLevel')}
               title={t('bc.canvas.expandLevelTitle')}
               disabled={expandDepth >= expandLevels.length - 1}
-              onClick={e => { e.stopPropagation(); setDrillPath([]); setExpandDepth(d => Math.min(d + 1, expandLevels.length - 1)) }}
+              onClick={e => { e.stopPropagation(); setExpandDepth(d => Math.min(d + 1, expandLevels.length - 1)) }}
               style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11,
                 color: expandDepth >= expandLevels.length - 1 ? 'var(--border)' : 'var(--accent)', padding: '0 2px' }}>⊞</button>
             {expandDepth > 0 && (
@@ -1501,6 +1620,8 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
                 fetchError={fetchError} onRetry={() => { void fetchData(true) }} localSelected={localSelected} onClickPoint={handleClick} broadcasts={broadcasts} allFormats={allFormats} checked={checked} onToggleSlicerValue={handleToggleSlicerValue} onButtonClick={handleButtonClick} ruleStyles={ruleStyles} parameters={parameters} geography={geography}
                 textFilter={textFilter} onSubmitTextFilter={handleSubmitTextFilter}
             rangeFilter={rangeFilter} onSubmitRangeFilter={handleSubmitRangeFilter}
+            treePaths={treePaths} onTreeChange={tickLevels.length ? handleTreeChange : undefined}
+            gridOpen={gridOpen} onToggleGridBranch={toggleGridBranch} onGridClick={handleGridClick}
                 onBrushChange={undefined} brushNonce={brushNonce} onAnimationFrame={setAnimFrame} />
               {zoomLoading && (
                 <span data-testid="zoom-loading" role="status" style={{ position: 'absolute', top: 2, insetInlineEnd: 4, fontSize: 10, color: 'var(--muted)' }}>
@@ -1516,6 +1637,8 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
           <WidgetBody onLoadMore={loadMore} loadingMore={loadingMore} widget={viewAs && !editMode ? { ...widget, widget_type: viewAs as Widget['widget_type'] } : widget} data={data} fetchError={fetchError} onRetry={() => { void fetchData(true) }} localSelected={localSelected} onClickPoint={handleClick} broadcasts={broadcasts} allFormats={allFormats} checked={checked} onToggleSlicerValue={handleToggleSlicerValue} onButtonClick={handleButtonClick} ruleStyles={ruleStyles} parameters={parameters} geography={geography}
             textFilter={textFilter} onSubmitTextFilter={handleSubmitTextFilter}
             rangeFilter={rangeFilter} onSubmitRangeFilter={handleSubmitRangeFilter}
+            treePaths={treePaths} onTreeChange={tickLevels.length ? handleTreeChange : undefined}
+            gridOpen={gridOpen} onToggleGridBranch={toggleGridBranch} onGridClick={handleGridClick}
             onBrushChange={setBrushRange} brushNonce={brushNonce} onAnimationFrame={setAnimFrame}
             onAssignData={editMode ? () => window.dispatchEvent(new CustomEvent(ASSIGN_DATA_EVENT, { detail: { widgetId: widget.id } })) : undefined}
             onApplyFix={editMode ? (patch, label) => window.dispatchEvent(new CustomEvent(PATCH_WIDGET_EVENT, { detail: { widgetId: widget.id, patch, label } })) : undefined} />

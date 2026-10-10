@@ -29,7 +29,8 @@ export default function IncrementalSettingsForm({ datasetId, columns }: { datase
       setS(await datasetsApi.setIncremental(datasetId, {
         strategy: s.strategy, cursor_column: s.cursor_column || null, key_column: s.key_column || null,
         lookback_hours: s.key_column ? (s.lookback_hours || null) : null,
-        full_reload_days: s.full_reload_days || null }))
+        full_reload_days: s.full_reload_days || null,
+        reconcile_deletes: !!(s.key_column && s.reconcile_deletes) }))
       toast.success(t('incr.saved'))
     } catch (e) {
       toast.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? String(e))
@@ -64,6 +65,13 @@ export default function IncrementalSettingsForm({ datasetId, columns }: { datase
           <label style={small} htmlFor="incr-lookback">{t('incr.lookback')}</label>
           <input id="incr-lookback" className="input" type="number" min={1} max={744} style={field}
             value={s.lookback_hours ?? ''} onChange={e => set({ lookback_hours: e.target.value ? Number(e.target.value) : null })} />
+          {/* Without this a row deleted at the source stays on every dashboard. */}
+          <label style={{ display: 'flex', gap: 6, alignItems: 'flex-start', fontSize: 12, marginBottom: 8 }}>
+            <input type="checkbox" checked={!!s.reconcile_deletes}
+              onChange={e => set({ reconcile_deletes: e.target.checked })} />
+            <span>{t('incr.deletes')}<br />
+              <span style={{ fontSize: 11, color: 'var(--muted)' }}>{t('incr.deletesHint', { key: s.key_column })}</span></span>
+          </label>
         </>)}
         <label style={small} htmlFor="incr-full">{t('incr.fullEvery')}</label>
         <select id="incr-full" className="input" style={field} value={s.full_reload_days ?? ''}

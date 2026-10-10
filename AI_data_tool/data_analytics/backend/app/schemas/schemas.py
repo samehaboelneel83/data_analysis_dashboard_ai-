@@ -105,6 +105,8 @@ class IncrementalSettings(BaseModel):
     key_column: Optional[str] = None
     lookback_hours: Optional[int] = None
     full_reload_days: Optional[int] = None
+    #: 2026-10-10: with a key, also remove rows the source no longer has.
+    reconcile_deletes: bool = False
 
 
 class PipelineWatchUpdate(BaseModel):
@@ -240,6 +242,9 @@ class DatasetOut(BaseModel):
     # connection copy, live, derived, aggregate) and how current. See
     # services/catalog.py.
     catalog: dict | None = None
+    #: Public / Internal / Confidential / Restricted, or None when unlabelled:
+    #: the dataset's own label raised to its connection's (dataset list only).
+    sensitivity_label: str | None = None
     # F3: transient — set on the response of a manual refresh when the requested
     # mode fell back (e.g. incremental with no/invalid watermark column). Never
     # persisted; absent on every other read of a dataset.

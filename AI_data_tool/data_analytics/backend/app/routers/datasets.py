@@ -143,8 +143,16 @@ async def _attach_catalog(db: AsyncSession, user: User, datasets: list, readable
     from ..models.models import DataSource
     from ..services.catalog import catalog_entry, origin_ids
     src_ids = {ds.data_source_id for ds in datasets if ds.data_source_id}
-    sources = dict((await db.execute(select(DataSource.id, DataSource.name).where(
-        DataSource.id.in_(src_ids or {-1}), DataSource.org_id == user.org_id))).all()) if src_ids else {}
+    src_rows = (await db.execute(select(DataSource.id, DataSource.name, DataSource.sensitivity).where(
+        DataSource.id.in_(src_ids or {-1}), DataSource.org_id == user.org_id))).all() if src_ids else []
+    sources = {i: n for i, n, _ in src_rows}
+    # Governance tour (2026-10-10): the list showed no sensitivity label, so
+    # "which datasets are Confidential, which are still unlabelled?" had no
+    # answer. The dataset's own label, raised to its connection's floor.
+    from ..services.sensitivity import higher, own_label
+    floors = {i: lab for i, _, lab in src_rows}
+    for ds in datasets:
+        ds.sensitivity_label = higher(own_label(ds), floors.get(ds.data_source_id))
     wanted = {i for ds in datasets for i in origin_ids(ds)}
     names = dict((await db.execute(select(Dataset.id, Dataset.name).where(
         Dataset.id.in_(wanted or {-1}), Dataset.org_id == user.org_id))).all()) if wanted else {}
@@ -1372,6 +1380,30 @@ async def _refuse_if_referenced(db: AsyncSession, ds: Dataset, name: str, force:
     return None
 
 
+@router.get("/{dataset_id}/column-lineage")
+async def column_lineage(dataset_id: int, name: str, db: AsyncSession = Depends(get_db),
+                         current_user: User = Depends(get_current_user)):
+    """One column's lineage (docs/pipeline/PLAN.md, P5): where it comes from
+    (a source table's column, a formula over other columns, an upload, the
+    dataset's query) and everything that uses it. Plus when the data was last
+    loaded, so "which data is this chart showing?" has an answer."""
+    from ..services.dependencies import column_origin, column_process, find_dependents
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
+    try:
+        await require_dataset_write(db, current_user, ds, "edit")
+        editor = True
+    except HTTPException:
+        editor = False          # the SQL and raw errors are for editors
+    used_by = await find_dependents(db, ds, name)
+    # Charts name the report they are on: the last stage of the journey.
+    return {"name": name, "origin": await column_origin(db, ds, name),
+            "process": await column_process(db, ds, name, editor=editor),
+            "used_by": used_by,
+            "dataset": {"id": ds.id, "name": ds.name, "last_refreshed_at": ds.last_refreshed_at}}
+
+
 @router.get("/{dataset_id}/dependents")
 async def dataset_dependents(dataset_id: int, name: str, db: AsyncSession = Depends(get_db),
                              current_user: User = Depends(get_current_user)):
@@ -1884,12 +1916,27 @@ async def list_data_checks(dataset_id: int, db: AsyncSession = Depends(get_db),
     return [_check_out(c) for c in rows]
 
 
+async def _check_reference(db: AsyncSession, user: User, ds: Dataset, kind: str, params: dict) -> None:
+    """A `references` check may only point at a dataset of the same
+    organisation that the editor can read, and at a column it really has."""
+    if kind != "references":
+        return
+    other = await db.get(Dataset, params["dataset_id"])
+    if other is None or other.org_id != ds.org_id:
+        raise HTTPException(400, "That dataset does not exist")
+    await require_dataset_read(db, user, other.id)
+    cols = {c.name for c in (await db.execute(select(DatasetColumn).where(
+        DatasetColumn.dataset_id == other.id))).scalars().all()}
+    if params["column"] not in cols:
+        raise HTTPException(400, f"'{other.name}' has no column '{params['column']}'")
+
+
 @router.post("/{dataset_id}/checks", status_code=201)
 async def create_data_check(dataset_id: int, body: DataCheckIn, db: AsyncSession = Depends(get_db),
                             current_user: User = Depends(get_current_user)):
     from sqlalchemy import func as _func
     from ..models.models import DataCheck
-    from ..services.data_checks import MAX_CHECKS_PER_DATASET, InvalidCheck, validate_check
+    from ..services.data_checks import COLUMN_KINDS, MAX_CHECKS_PER_DATASET, InvalidCheck, validate_check
     ds = await _check_dataset(db, current_user, dataset_id, write=True)
     if ds.mode == "directquery":
         raise HTTPException(400, "A live (DirectQuery) dataset is never refreshed into a file, "
@@ -1902,8 +1949,9 @@ async def create_data_check(dataset_id: int, body: DataCheckIn, db: AsyncSession
         params = validate_check(body.kind, body.column, body.params, body.severity)
     except InvalidCheck as e:
         raise HTTPException(400, str(e))
+    await _check_reference(db, current_user, ds, body.kind, params)
     row = DataCheck(org_id=ds.org_id, dataset_id=ds.id, kind=body.kind,
-                    column=(body.column or None) if body.kind in ("not_null", "unique", "accepted_values") else None,
+                    column=(body.column or None) if body.kind in COLUMN_KINDS else None,
                     params=params, severity=body.severity, enabled=body.enabled,
                     created_by=current_user.id)
     db.add(row)
@@ -1919,7 +1967,7 @@ async def update_data_check(dataset_id: int, check_id: int, body: DataCheckIn,
                             db: AsyncSession = Depends(get_db),
                             current_user: User = Depends(get_current_user)):
     from ..models.models import DataCheck
-    from ..services.data_checks import InvalidCheck, validate_check
+    from ..services.data_checks import COLUMN_KINDS, InvalidCheck, validate_check
     ds = await _check_dataset(db, current_user, dataset_id, write=True)
     row = await db.get(DataCheck, check_id)
     if row is None or row.dataset_id != ds.id:
@@ -1928,8 +1976,9 @@ async def update_data_check(dataset_id: int, check_id: int, body: DataCheckIn,
         params = validate_check(body.kind, body.column, body.params, body.severity)
     except InvalidCheck as e:
         raise HTTPException(400, str(e))
+    await _check_reference(db, current_user, ds, body.kind, params)
     row.kind, row.params, row.severity, row.enabled = body.kind, params, body.severity, body.enabled
-    row.column = (body.column or None) if body.kind in ("not_null", "unique", "accepted_values") else None
+    row.column = (body.column or None) if body.kind in COLUMN_KINDS else None
     await audit(db, current_user, "dataset.check_edit", "dataset", ds.id, f"check {row.id}: {body.severity} {body.kind}")
     await db.commit()
     return _check_out(row)
@@ -1958,7 +2007,9 @@ async def try_data_checks(dataset_id: int, db: AsyncSession = Depends(get_db),
     if not ds.filename:
         raise HTTPException(400, "This dataset has no data file to check")
     df = await asyncio.to_thread(load_file, ds.filename)
-    results = evaluate(df, await load_checks(db, ds.id), previous_rows=None)
+    from ..services.data_checks import known_types
+    results = evaluate(df, await load_checks(db, ds.id), previous_rows=None,
+                       known_types=await known_types(db, ds.id))
     import json as _json
     return {"rows": int(len(df)), "results": _json.loads(_json.dumps(results, default=str))}
 
@@ -1977,7 +2028,7 @@ async def list_dataset_refresh_runs(dataset_id: int, limit: int = 30,
     ).order_by(RefreshRun.id.desc()).limit(limit))).scalars().all()
     return [{"id": r.id, "trigger": r.trigger, "status": r.status, "started_at": r.started_at,
              "rows": r.rows, "duration_ms": r.duration_ms, "error": r.error,
-             "error_code": r.error_code, "checks": r.checks or []} for r in runs]
+             "error_code": r.error_code, "checks": r.checks or [], "metrics": r.metrics or None} for r in runs]
 
 
 def _incremental_out(wm, after_source: bool) -> dict:
@@ -1987,6 +2038,7 @@ def _incremental_out(wm, after_source: bool) -> dict:
             "key_column": wm.key_column if wm else None,
             "lookback_hours": wm.lookback_hours if wm else None,
             "full_reload_days": wm.full_reload_days if wm else None,
+            "reconcile_deletes": bool(wm.reconcile_deletes) if wm else False,
             "last_full_at": wm.last_full_at if wm else None,
             "after_source": after_source}
 
@@ -2040,6 +2092,9 @@ async def set_incremental(dataset_id: int, req: IncrementalSettings,
         if req.lookback_hours and not req.key_column:
             raise HTTPException(400, "A look-back re-reads rows already loaded; it needs a key "
                                      "column to replace them instead of duplicating them")
+        if req.reconcile_deletes and not req.key_column:
+            raise HTTPException(400, "Removing rows deleted at the source needs a key column "
+                                     "to tell which rows are gone")
         if req.full_reload_days is not None and not (1 <= req.full_reload_days <= 365):
             raise HTTPException(400, "full_reload_days must be between 1 and 365")
     wm = (await db.execute(select(Watermark).where(Watermark.dataset_id == ds.id))).scalar_one_or_none()
@@ -2054,8 +2109,10 @@ async def set_incremental(dataset_id: int, req: IncrementalSettings,
     wm.key_column = req.key_column if req.strategy == "incremental" else None
     wm.lookback_hours = req.lookback_hours if req.strategy == "incremental" else None
     wm.full_reload_days = req.full_reload_days if req.strategy == "incremental" else None
+    wm.reconcile_deletes = bool(req.reconcile_deletes and req.key_column and req.strategy == "incremental")
     await audit(db, current_user, "dataset.incremental", "dataset", ds.id,
                 f"{req.strategy}" + (f" on {req.cursor_column}, key {req.key_column or '-'}"
+                                     + (", removing deleted rows" if wm.reconcile_deletes else "")
                                      if req.strategy == "incremental" else ""))
     await db.commit()
     watch = await get_watch(db, "dataset", ds.id)

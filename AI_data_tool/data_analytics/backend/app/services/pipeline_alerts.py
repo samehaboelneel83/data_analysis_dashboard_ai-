@@ -182,6 +182,33 @@ async def on_run_finished(session, kind: str, item_id: int, status: str,
             pass
 
 
+async def on_slow_run(session, kind: str, item_id: int, run_id: int) -> None:
+    """A successful run far slower than usual (refresh_runs._metrics): told
+    once per slow streak. Slowness is often the first sign of a source that
+    grew, lost an index, or is overloaded -- before anything fails."""
+    try:
+        from ..models.models import RefreshRun
+        item = await _item(session, kind, item_id)
+        run = await session.get(RefreshRun, run_id)
+        if item is None or run is None or not (run.metrics or {}).get("slow"):
+            return
+        org_id, name, _link, _creator = item
+        slow = run.metrics["slow"]
+        watch = await get_watch(session, kind, item_id, create=True, org_id=org_id)
+        took, usual = (run.duration_ms or 0) / 1000, slow["median_ms"] / 1000
+        await _announce(
+            session, kind, item_id, watch, f"Refresh slower than usual: {name}",
+            f"“{name}” refreshed fine but took {took:,.0f}s, about {slow['times']}× its usual "
+            f"{usual:,.0f}s. The source may have grown, lost an index, or be busy; "
+            f"nothing is broken yet.")
+    except Exception as e:  # noqa: BLE001 -- an alert must never break a refresh
+        log.warning("Slow-run alert for %s %s failed: %s", kind, item_id, e)
+        try:
+            await session.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def is_stale(last_refreshed_at, freshness_hours: int | None, now: datetime) -> bool:
     if not freshness_hours:
         return False

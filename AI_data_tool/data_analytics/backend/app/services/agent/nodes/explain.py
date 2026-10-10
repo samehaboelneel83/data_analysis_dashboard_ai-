@@ -18,6 +18,23 @@ LANGUAGE_RULE = ("Write in the SAME language as the user's question -- an Arabic
                  "with thousands separators (37,701) in every language. ")
 
 
+def question_language(question: str) -> str:
+    """"Arabic" or "English", decided from the question's own letters (most
+    letters Arabic -> Arabic). Analyst tour, 2026-10-10: an English question
+    got an Arabic answer -- "the same language as the question" was left to
+    the model, and a local model does not always follow it."""
+    import re
+    arabic = len(re.findall(r"[\u0600-\u06FF]", question or ""))
+    latin = len(re.findall(r"[A-Za-z]", question or ""))
+    return "Arabic" if arabic > latin else "English"
+
+
+def language_rule(question: str) -> str:
+    """LANGUAGE_RULE with the language named outright."""
+    lang = question_language(question)
+    return (f"Write the answer in {lang}, because the question is in {lang}. " + LANGUAGE_RULE)
+
+
 def _period_key(v) -> float | None:
     """A sortable number for a period label: 2002, '2002', '2002-08', '2002-Q3'."""
     import re
@@ -263,7 +280,7 @@ async def describe(question: str, results: dict[str, StepResult],
     the result exists, describe what is in it."""
     got = await client.complete(
         [{"role": "system", "content": (
-            LANGUAGE_RULE +
+            language_rule(question) +
             "You are describing a result the person is ALREADY LOOKING AT. It "
             "has been computed and is on their screen, drawn as a table or a "
             "chart. Say what it shows in 2-4 sentences: how many rows and "
@@ -298,7 +315,7 @@ async def explain(question: str, results: dict[str, StepResult],
                   names: dict[str, str] | None = None) -> str | None:
     got = await client.complete(
         [{"role": "system", "content": (
-            LANGUAGE_RULE +
+            language_rule(question) +
             "Answer the user's question in 1-3 sentences from ONLY the "
             "figures given. State numbers exactly; do not invent any. When a "
             "block shows only some of its rows, take every smallest, largest, "

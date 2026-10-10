@@ -65,6 +65,9 @@ export interface BookmarkState {
   activeFilters: { column: string; value: unknown; label: string; sourceWidgetId: number; sourcePageId: number }[]
   promptValues: Record<number, string>
   hiddenWidgetIds: number[]
+  /** Where each widget's hierarchy was drilled (hierarchy plan, step 1).
+   *  Absent in bookmarks saved before it existed: those restore to the top level. */
+  drillStates?: Record<number, { path: { column: string; granularity?: string; value: unknown; label: string }[]; expand: number }>
 }
 
 export interface Bookmark {

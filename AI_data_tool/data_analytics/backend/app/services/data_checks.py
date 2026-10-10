@@ -28,12 +28,36 @@ from typing import Any
 
 import pandas as pd
 
-KINDS = ("not_null", "unique", "accepted_values", "row_count", "row_drop", "rule")
+KINDS = ("not_null", "unique", "accepted_values", "row_count", "row_drop", "rule",
+         # 2026-10-10 (docs/pipeline/PLAN.md): referential integrity, and
+         # schema drift that can block instead of only being noted.
+         "references", "same_columns")
 #: Kinds that look at one column.
-COLUMN_KINDS = ("not_null", "unique", "accepted_values")
+COLUMN_KINDS = ("not_null", "unique", "accepted_values", "references")
 SEVERITIES = ("warn", "block")
 MAX_CHECKS_PER_DATASET = 50
 MAX_ACCEPTED_VALUES = 500
+
+
+def key_text(s: pd.Series, keep_empty: bool = False) -> pd.Series:
+    """Values as comparable text: a whole number reads the same whether it is
+    stored as 7 or 7.0 (a column with a gap is stored as decimals), so an id
+    is not "missing" from another table only because of how it is stored.
+    Empty values are dropped, or kept as None (same index) with keep_empty."""
+    def one(v):
+        if v is None or (not isinstance(v, str) and pd.isna(v)):
+            return None
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and float(v).is_integer():
+            return str(int(v))
+        try:
+            import numpy as _np
+            if isinstance(v, _np.number) and float(v).is_integer():
+                return str(int(v))
+        except (TypeError, ValueError, OverflowError):
+            pass
+        return str(v).strip()
+    out = s.map(one)
+    return out if keep_empty else out.dropna()
 
 
 class ChecksBlocked(Exception):
@@ -81,6 +105,15 @@ def validate_check(kind: str, column: str | None, params: dict | None, severity:
         if not isinstance(pct, (int, float)) or isinstance(pct, bool) or not 0 < pct <= 100:
             raise InvalidCheck("max_drop_pct must be between 1 and 100")
         params = {"max_drop_pct": pct}
+    elif kind == "references":
+        ref_ds, ref_col = params.get("dataset_id"), params.get("column")
+        if not isinstance(ref_ds, int) or isinstance(ref_ds, bool) or ref_ds <= 0:
+            raise InvalidCheck("Choose the dataset the values must exist in")
+        if not isinstance(ref_col, str) or not ref_col.strip():
+            raise InvalidCheck("Choose the column of that dataset")
+        params = {"dataset_id": ref_ds, "column": ref_col.strip()}
+    elif kind == "same_columns":
+        params = {"allow_new": bool(params.get("allow_new", True))}
     elif kind == "rule":
         expr = params.get("expression")
         if not isinstance(expr, str) or not expr.strip():
@@ -96,7 +129,8 @@ def validate_check(kind: str, column: str | None, params: dict | None, severity:
     return params
 
 
-def _one(df: pd.DataFrame, check: dict, previous_rows: int | None) -> dict:
+def _one(df: pd.DataFrame, check: dict, previous_rows: int | None,
+         known: dict[str, str] | None = None) -> dict:
     kind, col, params = check["kind"], check.get("column"), check.get("params") or {}
     res: dict[str, Any] = {"id": check.get("id"), "kind": kind, "column": col,
                            "severity": check.get("severity", "warn"), "passed": True,
@@ -139,6 +173,34 @@ def _one(df: pd.DataFrame, check: dict, previous_rows: int | None) -> dict:
                 res.update(passed=False,
                            detail=f"rows fell {fell:.0f}% ({previous_rows:,} to {len(df):,}); "
                                   f"the limit is {pct:g}%")
+    elif kind == "references":
+        # Every value must exist in the other dataset's column (an order's
+        # customer_id among Customers' ids). Loaded by `load_checks`; counts
+        # only, like every check.
+        values, other = check.get("_ref_values"), check.get("_ref_name") or "the other dataset"
+        if values is None:
+            res.update(passed=False, detail=f"{other} could not be read to compare against")
+            return res
+        s = key_text(df[col])
+        bad = s[~s.isin(values)]
+        if len(bad):
+            res.update(passed=False, failing=int(len(bad)),
+                       detail=f"{len(bad):,} rows have a {col} not found in {other} "
+                              f"({bad.nunique():,} different values)")
+    elif kind == "same_columns":
+        # Schema drift that can BLOCK: schema_notes only ever warn.
+        if known:
+            from .ingest import detect_types
+            types = detect_types(df)
+            gone = [c for c in known if c not in df.columns]
+            retyped = [f"{c} ({known[c]} to {types[c]})" for c in df.columns
+                       if c in known and c in types and known[c] and types[c] != known[c]]
+            new = [] if params.get("allow_new", True) else [c for c in df.columns if c not in known]
+            parts = ([f"missing: {', '.join(gone[:8])}"] if gone else []) + \
+                    ([f"type changed: {', '.join(retyped[:8])}"] if retyped else []) + \
+                    ([f"new: {', '.join(new[:8])}"] if new else [])
+            if parts:
+                res.update(passed=False, failing=len(gone) + len(retyped) + len(new), detail="; ".join(parts))
     elif kind == "rule":
         from .widget_data import apply_filter_expr
         expr = params.get("expression") or ""
@@ -180,7 +242,7 @@ def schema_notes(df: pd.DataFrame, known: dict[str, str]) -> list[dict]:
 def evaluate(df: pd.DataFrame, checks: list[dict], *, previous_rows: int | None = None,
              known_types: dict[str, str] | None = None) -> list[dict]:
     """Every enabled check's result on `df`, then the schema notes."""
-    out = [_one(df, c, previous_rows) for c in checks if c.get("enabled", True)]
+    out = [_one(df, c, previous_rows, known_types) for c in checks if c.get("enabled", True)]
     out += schema_notes(df, known_types or {})
     return out
 
@@ -192,7 +254,8 @@ def blocking_failures(results: list[dict]) -> list[dict]:
 def describe(r: dict) -> str:
     label = {"not_null": "No blanks in", "unique": "Unique", "accepted_values": "Allowed values in",
              "row_count": "Row count", "row_drop": "Row drop", "rule": "Rule",
-             "schema": "Columns"}.get(r.get("kind"), r.get("kind") or "check")
+             "schema": "Columns", "references": "Values exist elsewhere for",
+             "same_columns": "Same columns"}.get(r.get("kind"), r.get("kind") or "check")
     head = f"{label} {r['column']}" if r.get("column") else label
     return f"{head}: {r['detail']}" if r.get("detail") else head
 
@@ -208,7 +271,43 @@ async def load_checks(session, dataset_id: int) -> list[dict]:
     from ..models.models import DataCheck
     rows = (await session.execute(select(DataCheck).where(
         DataCheck.dataset_id == dataset_id).order_by(DataCheck.id))).scalars().all()
-    return check_rows(rows)
+    checks = check_rows(rows)
+    org = rows[0].org_id if rows else None
+    await _attach_references(session, checks, org)
+    return checks
+
+
+#: The most distinct values a referenced column is held in memory with.
+MAX_REFERENCE_VALUES = 2_000_000
+
+
+async def _attach_references(session, checks: list[dict], org_id: int | None) -> None:
+    """Load the values each `references` check compares against, from the
+    other dataset's file. Only a dataset of the SAME organisation is read;
+    anything else leaves the check unable to run (and it says so)."""
+    import asyncio
+    from ..models.models import Dataset
+    from .ingest import load_file
+    cache: dict = {}
+    for c in checks:
+        if c["kind"] != "references" or not c.get("enabled", True):
+            continue
+        p = c.get("params") or {}
+        key = (p.get("dataset_id"), p.get("column"))
+        if key not in cache:
+            values, name = None, None
+            other = await session.get(Dataset, key[0]) if key[0] else None
+            if other is not None and other.org_id == org_id and other.filename:
+                name = f"{other.name}.{key[1]}"
+                try:
+                    frame = await asyncio.to_thread(load_file, other.filename)
+                    if key[1] in frame.columns:
+                        vals = key_text(frame[key[1]]).unique()
+                        values = set(vals[:MAX_REFERENCE_VALUES])
+                except Exception:  # noqa: BLE001 -- reported by the check itself
+                    values = None
+            cache[key] = (values, name)
+        c["_ref_values"], c["_ref_name"] = cache[key]
 
 
 async def known_types(session, dataset_id: int) -> dict[str, str]:

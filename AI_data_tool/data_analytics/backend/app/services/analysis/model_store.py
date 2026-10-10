@@ -37,7 +37,7 @@ import pandas as pd
 
 from .automated_prediction import (MAX_CLASSES, MIN_ROWS, TEST_SIZE,
                                    AutomatedPredictionError)
-from .decision_tree import RANDOM_STATE, _encode, _usable_predictors
+from .decision_tree import OTHER, RANDOM_STATE, _encode, _usable_predictors, group_rare
 
 
 class ModelStoreError(ValueError):
@@ -79,6 +79,7 @@ def _fit_estimator(task: str, family: str, leaf: int) -> Any:
     from sklearn.dummy import DummyClassifier, DummyRegressor
     from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
     from sklearn.linear_model import LinearRegression, LogisticRegression
+    from .automated_prediction import with_gaps_filled
     from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 
     if task == "classification":
@@ -89,8 +90,8 @@ def _fit_estimator(task: str, family: str, leaf: int) -> Any:
             "random forest": lambda: RandomForestClassifier(
                 n_estimators=100, max_depth=8, random_state=RANDOM_STATE,
                 min_samples_leaf=leaf, n_jobs=1),
-            "logistic regression": lambda: LogisticRegression(
-                max_iter=1000, random_state=RANDOM_STATE),
+            "logistic regression": lambda: with_gaps_filled(LogisticRegression(
+                max_iter=1000, random_state=RANDOM_STATE)),
         }
     else:
         table = {
@@ -100,7 +101,7 @@ def _fit_estimator(task: str, family: str, leaf: int) -> Any:
             "random forest": lambda: RandomForestRegressor(
                 n_estimators=100, max_depth=8, random_state=RANDOM_STATE,
                 min_samples_leaf=leaf, n_jobs=1),
-            "linear regression": lambda: LinearRegression(),
+            "linear regression": lambda: with_gaps_filled(LinearRegression()),
         }
     if family not in table:
         raise ModelStoreError(f"Unknown model family '{family}'")
@@ -130,8 +131,11 @@ def fit_and_package(df: pd.DataFrame, target: str,
     if family:
         champion_name = family
 
-    used, _skipped = _usable_predictors(df, target, predictors)
+    used, _skipped = _usable_predictors(df, target, predictors, allow_grouping=True)
     frame = df[[target, *used]].dropna(subset=[target])
+    # The same grouping the comparison used; the kept values become the
+    # model's category list, and scoring maps anything else to "(other)".
+    frame, _grouped = group_rare(frame, used)
     if len(frame) < MIN_ROWS:
         raise ModelStoreError(
             f"Only {len(frame)} usable rows; at least {MIN_ROWS} are needed.")
@@ -315,6 +319,11 @@ def align_frame(pkg: PackagedModel, df: pd.DataFrame) -> tuple[pd.DataFrame, dic
 
     unseen: dict[str, list[str]] = {}
     for column, known in pkg.categories.items():
+        if OTHER in known:
+            # A grouped category: anything but its kept values is "(other)",
+            # exactly as in training -- not an unseen value.
+            frame[column] = frame[column].where(frame[column].isin(known) | frame[column].isna(), OTHER)
+            continue
         present = {str(v) for v in frame[column].dropna().unique()}
         novel = sorted(present - set(known))
         if novel:

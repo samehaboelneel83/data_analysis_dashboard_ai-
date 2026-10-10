@@ -3,6 +3,7 @@ from sqlalchemy import create_engine, inspect, text
 import httpx
 
 from . import connectors
+from .sql_safety import ensure_read_only
 
 
 def _build_url(cfg: dict) -> str:
@@ -140,8 +141,11 @@ def preview_table(cfg: dict, table: str | None, query: str | None, limit: int = 
     url    = _build_url(cfg)
     engine = create_engine(url, connect_args=connectors.connect_args(cfg))
     try:
-        sql = query.strip() if query else _limit_sql(connectors.sql_family_of(cfg) or cfg['type'], table, limit, cfg.get('schema'))
-        df  = pd.read_sql(sql, engine)
+        # Hand-written SQL must be ONE read (sql_safety.ensure_read_only): the
+        # SQL tab and custom-SQL imports went to the database unchecked.
+        sql = (ensure_read_only(query, connectors.sql_family_of(cfg) or cfg['type']) if query and query.strip()
+               else _limit_sql(connectors.sql_family_of(cfg) or cfg['type'], table, limit, cfg.get('schema')))
+        df  = pd.read_sql(_driver_sql(sql, engine), engine)
         df  = df.head(limit)
         return {
             'columns': list(df.columns),
@@ -177,10 +181,27 @@ def _checked(df: pd.DataFrame, cap: int) -> pd.DataFrame:
     return df
 
 
+def _driver_sql(sql: str, engine) -> str:
+    """SQL text as the DB-API driver must receive it. psycopg2 and pymysql use
+    %-placeholders, so a literal % (every LIKE '%x%') has to be written %%:
+    without this, any hand-written query with a LIKE failed on PostgreSQL and
+    MySQL with "immutabledict is not a sequence". Drivers with other
+    placeholder styles (SQLite's ?) take the text as it is."""
+    if getattr(engine.dialect, "paramstyle", "") in ("format", "pyformat"):
+        return sql.replace("%", "%%")
+    return sql
+
+
 def _capped_read(sql: str, engine, params: dict | None, cap: int) -> pd.DataFrame:
     """read_sql, stopping as soon as the cap is passed. Chunked, so a custom
     query over a huge table is refused without first holding all of it in
     memory, and dialect-free: the query itself is never rewritten."""
+    # With parameters (incremental refresh's :cursor_val) the query goes
+    # through SQLAlchemy text(), which binds :name on every driver and escapes
+    # % itself; sent raw, psycopg2 could not bind :cursor_val, the refresh
+    # failed and quietly fell back to a full reload. Without parameters the
+    # text goes to the driver as written, % doubled where the driver needs it.
+    sql = text(sql) if params else _driver_sql(sql, engine)
     if not cap:
         return pd.read_sql(sql, engine, params=params)
     chunks, n = [], 0
@@ -208,8 +229,9 @@ def import_to_dataframe(cfg: dict, table: str | None, query: str | None, params:
     try:
         # A table read asks for ONE row past the cap: enough to know it is over,
         # never the whole table. (cap 0 = no limit, for an operator with disk.)
-        sql = query.strip() if query else _limit_sql(connectors.sql_family_of(cfg) or cfg['type'], table,
-                                                    cap + 1 if cap else 10 ** 12, cfg.get('schema'))
+        sql = (ensure_read_only(query, connectors.sql_family_of(cfg) or cfg['type']) if query and query.strip()
+               else _limit_sql(connectors.sql_family_of(cfg) or cfg['type'], table,
+                               cap + 1 if cap else 10 ** 12, cfg.get('schema')))
         # F3: incremental refresh binds `:cursor_val` -- SQLAlchemy's text()
         # params rather than string formatting, so a cursor value can never
         # break out of its position regardless of type or content.

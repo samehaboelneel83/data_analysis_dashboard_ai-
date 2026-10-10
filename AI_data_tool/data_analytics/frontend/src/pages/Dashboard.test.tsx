@@ -593,3 +593,24 @@ describe('one catalog: what each dataset is and how current (E06)', () => {
     expect(screen.getByTestId('catalog-1').title).toBe('Created: Aug 22, 2026')
   })
 })
+
+
+describe('Dataset list: sensitivity label (governance tour, 2026-10-10)', () => {
+  it('shows a label chip and filters by label, unlabelled included', async () => {
+    vi.mocked(datasetsApi.list).mockResolvedValue([
+      dataset({ id: 1, name: 'salaries', sensitivity_label: 'Confidential' }),
+      dataset({ id: 2, name: 'catalog', sensitivity_label: 'Public' }),
+      dataset({ id: 3, name: 'scratch', sensitivity_label: null }),
+    ] as never)
+    renderDashboard()
+    await waitFor(() => expect(screen.getByText('salaries')).toBeInTheDocument())
+    expect(screen.getAllByTestId('ds-label').map(c => c.textContent)).toEqual(['Confidential'])
+    const pick = screen.getByLabelText('Sensitivity label')
+    fireEvent.change(pick, { target: { value: 'none' } })
+    await waitFor(() => expect(screen.queryByText('salaries')).toBeNull())
+    expect(screen.getByText('scratch')).toBeInTheDocument()
+    fireEvent.change(pick, { target: { value: 'Confidential' } })
+    await waitFor(() => expect(screen.getByText('salaries')).toBeInTheDocument())
+    expect(screen.queryByText('catalog')).toBeNull()
+  })
+})

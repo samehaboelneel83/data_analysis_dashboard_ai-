@@ -68,6 +68,20 @@ def backoff_minutes(attempts: int) -> int:
     return BACKOFF_MINUTES[min(attempts, len(BACKOFF_MINUTES)) - 1]
 
 
+async def _acting_user(session, user_id):
+    """The user a background run acts as, WITH its role loaded. A plain
+    `session.get(User, id)` left `user.role` to load lazily, which async
+    SQLAlchemy cannot do: the row-security lookup (`user.role.is_org_admin`)
+    raised "greenlet_spawn has not been called" and every scheduled dataflow
+    and derived rebuild failed (found on the data-engineer tour, 2026-10-10)."""
+    if not isinstance(user_id, int):
+        return None
+    from sqlalchemy.orm import selectinload
+    from ..models.models import User
+    return (await session.execute(select(User).options(selectinload(User.role))
+                                  .where(User.id == user_id))).scalar_one_or_none()
+
+
 async def _failure_row(session, kind: str, item_id: int):
     from ..models.models import ScheduleFailure
     return (await session.execute(
@@ -423,8 +437,7 @@ async def _rebuild_derived(session, ds) -> bool:
         return await _failed("The dataset this one is built from no longer exists.",
                              "source_gone")
 
-    builder = await session.get(User, prov.get("built_by_user_id")) \
-        if isinstance(prov.get("built_by_user_id"), int) else None
+    builder = await _acting_user(session, prov.get("built_by_user_id"))
     if builder is None:
         log.warning("Scheduled rebuild skipped for dataset %s: builder is gone", ds.id)
         return await _failed("The person who built this dataset no longer exists, so it "
@@ -540,7 +553,6 @@ async def refresh_dataflow(session, flow) -> bool:
     from .refresh_runs import finish_run, start_run
 
     flow_id = flow.id
-    run_id = await start_run(session, "dataflow", flow_id, flow.org_id)
     now = datetime.utcnow()
     outputs = [d for d in (await session.execute(
         select(Dataset).where(Dataset.org_id == flow.org_id))).scalars().all()
@@ -552,14 +564,21 @@ async def refresh_dataflow(session, flow) -> bool:
 
     if not outputs:
         # Nothing to write into yet. Advance the clock so a dataflow nobody has
-        # run stays quiet instead of retrying on every single tick.
+        # run stays quiet instead of retrying on every single tick -- and record
+        # the skip ONCE, not every hour: 411 identical "no outputs yet" rows
+        # buried the real failures in the run history (role tour, 2026-10-10).
+        already = flow.last_run_status == "skipped" and flow.last_run_error == "no outputs yet"
         _finish("skipped", "no outputs yet")
         await session.commit()
-        await finish_run(session, run_id, "skipped", error="No outputs yet: run it once by hand.")
+        if not already:
+            run_id = await start_run(session, "dataflow", flow_id, flow.org_id)
+            await finish_run(session, run_id, "skipped", error="No outputs yet: run it once by hand.")
         return True
 
+    run_id = await start_run(session, "dataflow", flow_id, flow.org_id)
+
     src = await session.get(Dataset, flow.source_dataset_id) if flow.source_dataset_id else None
-    builder = await session.get(User, flow.created_by) if flow.created_by else None
+    builder = await _acting_user(session, flow.created_by)
     if src is None or builder is None or not (
             src.filename or (src.mode == "directquery" and src.data_source_id)):
         _finish("failed", "source dataset or creator is gone")
@@ -803,15 +822,16 @@ async def refresh_one(session, ds: Dataset) -> bool:
             last_full = _as_utc_naive(wm.last_full_at)
             if last_full is None or datetime.utcnow() - last_full >= timedelta(days=wm.full_reload_days):
                 incremental = False
-        wm_cursor = (wm.cursor_column, wm.cursor_value, wm.key_column, wm.lookback_hours) if wm else None
+        wm_cursor = (wm.cursor_column, wm.cursor_value, wm.key_column, wm.lookback_hours,
+                     bool(wm.reconcile_deletes)) if wm else None
         try:
             if wm is not None and wm.cursor_column:
-                cursor_col, cursor_val, key_col, lookback = wm_cursor
+                cursor_col, cursor_val, key_col, lookback, reconcile = wm_cursor
                 result = await asyncio.to_thread(
                     refresh_dataset, cfg, filename, table, query,
                     "incremental" if incremental else "full", cursor_col, cursor_val,
                     set(known), guard.get("required_columns"), None, True, validate,
-                    key_col, lookback)
+                    key_col, lookback, reconcile)
                 df, load_kind = result["df"], result["mode"]
                 wm = await session.get(Watermark, wm.id)
                 wm.cursor_value = result["cursor_value"]

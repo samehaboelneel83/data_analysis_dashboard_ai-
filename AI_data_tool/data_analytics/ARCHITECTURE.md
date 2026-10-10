@@ -1166,7 +1166,7 @@ SQLAlchemy, grouped by concern:
 | Platform | `saml_authn_requests`, `org_mcp_access`, `eval_runs` |
 | Ops | `sync_runs`, `schema_versions`, `column_stats`, `materializations`, `quotas`, `query_runs`, `ai_usage`, `migration_items` |
 
-Schema changes go through **Alembic** (`backend/alembic/`, 59 revisions).
+Schema changes go through **Alembic** (`backend/alembic/`, 60 revisions).
 Every timestamp column is `TIMESTAMPTZ` and the app writes naive UTC; `core/database.py` marks each bound naive datetime as UTC (asyncpg would read it as the process's local time) and pins the session time zone to UTC, so stored times are right on a server whose clock is not UTC.
 `postgres/init.sql` provides the initial schema and indexes.
 
@@ -1231,6 +1231,15 @@ and `running_avg`.
 `build_sql(model, dialect, known, …)`, with `_quote()` handling per-dialect
 identifier quoting and `introspect_tables()` validating that referenced tables and
 columns actually exist before emission.
+Conditions nest: a filter may be a `{group: and|or, filters: [...]}` box,
+compiled by the same code as any other condition.
+
+`services/sql_safety.py` holds the injection rules every path shares: values
+become per-dialect literals (`encode_literal`; backslashes doubled where the
+database treats them as an escape -- MySQL, MariaDB, ClickHouse), names are
+quoted with the quote character doubled (`quote_ident`), and hand-written SQL
+(the SQL tab, custom-SQL imports, previews) must be exactly one read
+(`ensure_read_only`) before `services/connections.py` runs it.
 
 `services/sql_expr.py` and `measure_eval.py` evaluate user-authored expressions
 and calculated measures. `services/parameters.py` binds report parameters.
@@ -2348,8 +2357,8 @@ Agent pane (7)
 
 | Suite | Scope | Count |
 |-------|-------|-------|
-| Backend | `backend/tests/` | ~6,670 tests across 471 modules |
-| Frontend | colocated `*.test.ts(x)` | ~3,410 tests across 338 files |
+| Backend | `backend/tests/` | ~6,670 tests across 477 modules |
+| Frontend | colocated `*.test.ts(x)` | ~3,410 tests across 343 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |
 | Doc audit | `tests/test_architecture_doc.py` | Enforces the *counts* in this document |

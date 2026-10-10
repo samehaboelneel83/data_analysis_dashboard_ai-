@@ -37,7 +37,7 @@ from typing import Any
 import pandas as pd
 
 from .decision_tree import (MAX_TARGET_CLASSES, RANDOM_STATE, _encode,
-                            _usable_predictors)
+                            _usable_predictors, group_rare)
 
 #: A quarter held back, same as the tree.
 TEST_SIZE = 0.25
@@ -56,6 +56,17 @@ MEANINGFUL_LIFT = 0.02
 
 class AutomatedPredictionError(ValueError):
     """Nothing here can be predicted from anything else, with the reason."""
+
+
+def with_gaps_filled(model):
+    """Linear and logistic regression refuse empty values outright, so on any
+    data with gaps (27% of a car's mileage) they always "could not be fitted"
+    (data-scientist tour, 2026-10-10). Each gap is filled with its column's
+    median, learnt on the training rows only; the tree models handle gaps
+    themselves and are left alone."""
+    from sklearn.impute import SimpleImputer
+    from sklearn.pipeline import make_pipeline
+    return make_pipeline(SimpleImputer(strategy="median", keep_empty_features=True), model)
 
 
 def automated_prediction(df: pd.DataFrame, target: str,
@@ -81,7 +92,8 @@ def automated_prediction(df: pd.DataFrame, target: str,
     if partition and partition == target:
         raise AutomatedPredictionError("The partition column cannot also be the outcome")
     used, skipped = _usable_predictors(df, target, [p for p in (predictors or []) if p != partition] or
-                                       ([c for c in df.columns if c not in (target, partition)] if partition else None))
+                                       ([c for c in df.columns if c not in (target, partition)] if partition else None),
+                                       allow_grouping=True)
     used = [c for c in used if c != partition]
     if not used:
         raise AutomatedPredictionError(
@@ -90,6 +102,8 @@ def automated_prediction(df: pd.DataFrame, target: str,
             "identifiers and dates cannot.")
 
     frame = df[[target, *used, *([partition] if partition else [])]].dropna(subset=[target])
+    # A car's make (104 brands): its 19 commonest values, the rest as "(other)".
+    frame, grouped = group_rare(frame, used)
     sampled = len(frame) > FRAME_SAMPLE_THRESHOLD
     if sampled:
         frame = frame.sample(FRAME_SAMPLE_THRESHOLD, random_state=RANDOM_STATE)
@@ -141,8 +155,8 @@ def automated_prediction(df: pd.DataFrame, target: str,
             ("random forest", RandomForestClassifier(
                 n_estimators=100, max_depth=8, random_state=RANDOM_STATE,
                 min_samples_leaf=leaf, n_jobs=1), False),
-            ("logistic regression", LogisticRegression(
-                max_iter=1000, random_state=RANDOM_STATE), False),
+            ("logistic regression", with_gaps_filled(LogisticRegression(
+                max_iter=1000, random_state=RANDOM_STATE)), False),
         ]
         score_name = "accuracy"
     else:
@@ -153,7 +167,7 @@ def automated_prediction(df: pd.DataFrame, target: str,
             ("random forest", RandomForestRegressor(
                 n_estimators=100, max_depth=8, random_state=RANDOM_STATE,
                 min_samples_leaf=leaf, n_jobs=1), False),
-            ("linear regression", LinearRegression(), False),
+            ("linear regression", with_gaps_filled(LinearRegression()), False),
         ]
         score_name = "r2"
 
@@ -163,13 +177,13 @@ def automated_prediction(df: pd.DataFrame, target: str,
             model.fit(X_train, y_train)
             score = round(float(model.score(X_test, y_test)), 4)
             train = round(float(model.score(X_train, y_train)), 4)
-        except Exception:
+        except Exception as e:  # noqa: BLE001
             # A candidate that cannot fit this data is not a failure of the
             # comparison -- it is one fewer option, and the others still answer
-            # the question. Recorded so its absence is not mysterious.
+            # the question. Recorded, with the reason, so its absence is not mysterious.
             results.append({"model": name, "score": None, "train_score": None,
                             "n_test": int(len(X_test)), "is_baseline": is_baseline,
-                            "error": "could not be fitted to this data"})
+                            "error": f"could not be fitted to this data: {str(e).splitlines()[0][:160]}"})
             continue
         results.append({"model": name, "score": score, "train_score": train,
                         "n_test": int(len(X_test)), "is_baseline": is_baseline,
@@ -227,6 +241,7 @@ def automated_prediction(df: pd.DataFrame, target: str,
         "lift_over_baseline": lift,
         "beats_baseline": beats,
         "predictors_used": used,
+        "predictors_grouped": {c: len(v) - 1 for c, v in grouped.items()},
         "predictors_skipped": skipped,
         "n_train": int(len(X_train)),
         "n_test": int(len(X_test)),

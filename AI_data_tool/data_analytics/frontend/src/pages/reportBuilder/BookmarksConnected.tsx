@@ -29,13 +29,14 @@ export function BookmarksPaneConnected({ reportId, report, activePage, pageWidge
   setBookmarks: (fn: (b: Bookmark[]) => Bookmark[]) => void
   loadReport: () => Promise<void>
 }) {
-  const { activeFilters, emitFilter, emitMultiFilter, clearAllFilters } = useCrossFilter()
+  const { activeFilters, emitFilter, emitMultiFilter, clearAllFilters, drillStates, restoreDrills } = useCrossFilter()
 
   const captureState = (): BookmarkState => ({
     pageId: activePage!.id,
     activeFilters,
     promptValues,
     hiddenWidgetIds: pageWidgets.filter(w => !!(w.config as any).hidden).map(w => w.id),
+    drillStates,
   })
 
   const applyBookmark = async (b: Bookmark) => {
@@ -44,6 +45,7 @@ export function BookmarksPaneConnected({ reportId, report, activePage, pageWidge
     setActivePage(target)
     setPromptValues(p => ({ ...p, ...b.state.promptValues }))
     clearAllFilters()
+    restoreDrills(b.state.drillStates ?? {})
     b.state.activeFilters.forEach(f =>
       Array.isArray(f.value)
         ? emitMultiFilter(f.sourceWidgetId, f.sourcePageId, f.column, f.value, f.label)

@@ -235,7 +235,8 @@ def _bin_stats_filters(cfg: dict, column: str, kind: str):
 #: down (direct_query._ROW_LEVEL_KEYS minus the grain itself).
 _GRAIN_PUSHDOWN_BLOCKERS = ("having", "suppress_below", "quick_calc", "sort_custom", "dimension_levels",
                             "running", "dimension2", "rows_extra", "columns_extra", "extra_measures",
-                            "rank", "dimension_bin", "animate_by", "lattice_rows", "lattice_columns")
+                            "rank", "dimension_bin", "animate_by", "lattice_rows", "lattice_columns",
+                            "slicer_levels", "hierarchy_rows", "hierarchy_columns")
 
 
 def _author_grain_plan(dq_ds, req: WidgetDataRequest, source_cfg: dict, denied: list[str]):

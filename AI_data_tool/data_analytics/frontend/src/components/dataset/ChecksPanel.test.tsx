@@ -4,7 +4,7 @@ import ChecksPanel, { ChecksBlockedDialog } from './ChecksPanel'
 
 vi.mock('../../services/api', () => ({
   datasetsApi: { checks: vi.fn(), addCheck: vi.fn(), updateCheck: vi.fn(), deleteCheck: vi.fn(),
-                 tryChecks: vi.fn(), refreshRuns: vi.fn() },
+                 tryChecks: vi.fn(), refreshRuns: vi.fn(), list: vi.fn() },
 }))
 vi.mock('react-hot-toast', () => ({ default: { success: vi.fn(), error: vi.fn() } }))
 
@@ -94,5 +94,52 @@ describe('the Quality rules card (redesign 3c)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add a check' }))
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Add' })).toBeNull())
+  })
+})
+
+
+describe('ChecksPanel: closing the pipeline gaps (2026-10-10)', () => {
+  it('adds a "values exist in another dataset" check', async () => {
+    vi.mocked(datasetsApi.list).mockResolvedValue([
+      { id: 5, name: 'This one', columns: [] }, { id: 8, name: 'Customers', columns: [{ name: 'id' }, { name: 'email' }] },
+    ] as never)
+    vi.mocked(datasetsApi.addCheck).mockResolvedValue({ ...unique, id: 3 })
+    render(<ChecksPanel datasetId={5} columns={['customer_id']} canEdit />)
+    await screen.findByText('id values are unique')
+    fireEvent.click(screen.getByRole('button', { name: 'Add a check' }))
+    fireEvent.change(screen.getByLabelText('Check'), { target: { value: 'references' } })
+    fireEvent.change(screen.getByLabelText(/^Column/), { target: { value: 'customer_id' } })
+    await waitFor(() => expect(screen.getByRole('option', { name: 'Customers' })).toBeInTheDocument())
+    expect(screen.queryByRole('option', { name: 'This one' })).toBeNull()        // not itself
+    fireEvent.change(screen.getByLabelText('Must exist in dataset'), { target: { value: '8' } })
+    fireEvent.change(screen.getByLabelText('Its column'), { target: { value: 'id' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    await waitFor(() => expect(datasetsApi.addCheck).toHaveBeenCalledWith(5, expect.objectContaining({
+      kind: 'references', column: 'customer_id', params: { dataset_id: 8, column: 'id' } })))
+  })
+
+  it('a "columns stay the same" check can block', async () => {
+    vi.mocked(datasetsApi.addCheck).mockResolvedValue({ ...unique, id: 4 })
+    render(<ChecksPanel datasetId={5} columns={['id']} canEdit />)
+    await screen.findByText('id values are unique')
+    fireEvent.click(screen.getByRole('button', { name: 'Add a check' }))
+    fireEvent.change(screen.getByLabelText('Check'), { target: { value: 'same_columns' } })
+    fireEvent.click(screen.getByLabelText('A new column is fine'))
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    await waitFor(() => expect(datasetsApi.addCheck).toHaveBeenCalledWith(5, expect.objectContaining({
+      kind: 'same_columns', column: null, severity: 'block', params: { allow_new: false } })))
+  })
+
+  it('run history shows speed and a run far slower than usual', async () => {
+    vi.mocked(datasetsApi.refreshRuns).mockResolvedValue([
+      { id: 10, trigger: 'schedule', status: 'ok', started_at: '2026-10-10T07:00:00Z', rows: 90000, duration_ms: 45000,
+        error: null, error_code: null, checks: [],
+        metrics: { rows_per_sec: 2000, slow: { median_ms: 12000, times: 3.8 } } },
+    ])
+    render(<ChecksPanel datasetId={5} columns={['id']} canEdit />)
+    const history = await screen.findByTestId('checks-history')
+    expect(history).toHaveTextContent('45 s')
+    expect(history).toHaveTextContent('2,000 rows/s')
+    expect(history).toHaveTextContent('3.8× slower than usual')
   })
 })

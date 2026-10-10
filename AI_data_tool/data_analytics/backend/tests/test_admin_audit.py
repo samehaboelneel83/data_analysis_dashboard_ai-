@@ -133,3 +133,53 @@ async def test_list_and_filter_admin_audit(client, db_session, two_orgs, auth_he
     # Org isolation: org B sees nothing of org A's audit trail.
     log_b = (await client.get("/api/v1/admin/admin-audit", headers=auth_headers["b"])).json()
     assert log_b == []
+
+
+async def test_user_and_role_changes_are_audited(client, db_session, two_orgs, auth_headers):
+    """Governance tour (2026-10-10): granting org-admin rights, changing a
+    user's role, resetting a password and deleting a user left no trace."""
+    h = auth_headers["a"]
+    org = two_orgs["a"]["org"].id
+    role = (await client.post("/api/v1/admin/roles", json={"name": "Auditors", "is_org_admin": False},
+                              headers=h)).json()
+    await client.patch(f"/api/v1/admin/roles/{role['id']}", json={"is_org_admin": True}, headers=h)
+    user = (await client.post("/api/v1/admin/users", json={"email": "new.person@example.com",
+            "password": "Str0ng-pass!", "role_id": role["id"]}, headers=h)).json()
+    await client.patch(f"/api/v1/admin/users/{user['id']}", json={"password": "Another-pass1!",
+                       "role_id": two_orgs["a"]["role"].id}, headers=h)
+    await client.delete(f"/api/v1/admin/users/{user['id']}", headers=h)
+    await client.delete(f"/api/v1/admin/roles/{role['id']}", headers=h)
+
+    rows = (await db_session.execute(select(AdminAudit).where(AdminAudit.org_id == org)
+                                     .order_by(AdminAudit.id))).scalars().all()
+    got = [(r.action, r.target, r.detail) for r in rows]
+    assert ("role.create", "role:Auditors", None) in got
+    assert ("role.update", "role:Auditors", "now org admin") in got
+    assert ("user.create", "user:new.person@example.com", "role:Auditors") in got
+    upd = next(d for a, t, d in got if a == "user.update")
+    assert "password reset" in upd and "role to" in upd
+    assert "Another-pass1!" not in str(got) and "Str0ng-pass!" not in str(got)
+    assert ("user.delete", "user:new.person@example.com", None) in got
+    assert ("role.delete", "role:Auditors", None) in got
+
+
+async def test_the_dataset_list_names_each_sensitivity_label(client, db_session, two_orgs, auth_headers):
+    """Governance tour (2026-10-10): the list could not answer "which datasets are
+    Confidential, which are still unlabelled?". Own label, raised to the connection's."""
+    from app.models.models import DataSource
+    from app.services.sensitivity import META_KEY
+    org = two_orgs["a"]["org"].id
+    conf = DataSource(name="HR db", type="postgresql", config={}, org_id=org, sensitivity="Confidential")
+    db_session.add(conf)
+    await db_session.flush()
+    db_session.add_all([
+        Dataset(name="plain", org_id=org),
+        Dataset(name="internal", org_id=org, column_meta={META_KEY: "Internal"}),
+        Dataset(name="from hr", org_id=org, data_source_id=conf.id, column_meta={META_KEY: "Public"}),
+    ])
+    await db_session.commit()
+    rows = {d["name"]: d.get("sensitivity_label") for d in
+            (await client.get("/api/v1/datasets", headers=auth_headers["a"])).json()}
+    assert rows["plain"] is None
+    assert rows["internal"] == "Internal"
+    assert rows["from hr"] == "Confidential"          # the connection's floor wins over its own Public

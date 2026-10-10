@@ -45,6 +45,7 @@ describe('MeasuresPanel', () => {
     render(<MeasuresPanel datasetId={1} columns={columns} onChanged={onChanged} />)
 
     fireEvent.click(await screen.findByRole('button', { name: /Add measure/i }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Write a formula myself' }))
     fireEvent.change(screen.getByPlaceholderText(/measure name/i), { target: { value: 'Pct' } })
     fireEvent.change(screen.getByPlaceholderText(/SUM\(/i), { target: { value: 'SUM(sales) / TOTAL(SUM(sales)) * 100' } })
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }))
@@ -57,6 +58,7 @@ describe('MeasuresPanel', () => {
   it('offers TOTAL in the function palette, since it is measure-only', async () => {
     render(<MeasuresPanel datasetId={1} columns={columns} onChanged={vi.fn()} />)
     fireEvent.click(await screen.findByRole('button', { name: /Add measure/i }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Write a formula myself' }))
 
     expect(screen.getByRole('button', { name: /TOTAL\(expr\)/i })).toBeInTheDocument()
   })
@@ -74,6 +76,7 @@ describe('MeasuresPanel', () => {
      */
     render(<MeasuresPanel datasetId={1} columns={columns} onChanged={vi.fn()} />)
     fireEvent.click(await screen.findByRole('button', { name: /Add measure/i }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Write a formula myself' }))
 
     expect(screen.getByRole('button', { name: /CALC\(expr/i })).toBeInTheDocument()
   })
@@ -81,6 +84,7 @@ describe('MeasuresPanel', () => {
   it('offers SCOPE and ISINSCOPE, the per-level formula functions (Phase 6.5)', async () => {
     render(<MeasuresPanel datasetId={1} columns={columns} onChanged={vi.fn()} />)
     fireEvent.click(await screen.findByRole('button', { name: /Add measure/i }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Write a formula myself' }))
     expect(screen.getByRole('button', { name: /SCOPE\(default/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /ISINSCOPE/i })).toBeInTheDocument()
   })
@@ -88,6 +92,7 @@ describe('MeasuresPanel', () => {
   it('does not offer row-level window functions, which have no meaning at aggregated grain', async () => {
     render(<MeasuresPanel datasetId={1} columns={columns} onChanged={vi.fn()} />)
     fireEvent.click(await screen.findByRole('button', { name: /Add measure/i }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Write a formula myself' }))
 
     expect(screen.queryByRole('button', { name: /CUMSUM/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /GROUPSUM/i })).not.toBeInTheDocument()
@@ -100,6 +105,7 @@ describe('MeasuresPanel', () => {
     })
     render(<MeasuresPanel datasetId={1} columns={columns} onChanged={vi.fn()} />)
     fireEvent.click(await screen.findByRole('button', { name: /Add measure/i }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Write a formula myself' }))
 
     fireEvent.change(screen.getByPlaceholderText(/SUM\(/i), { target: { value: 'SUM(sales)' } })
     fireEvent.change(screen.getByLabelText(/Group by/i), { target: { value: 'region' } })
@@ -115,6 +121,7 @@ describe('MeasuresPanel', () => {
     vi.mocked(measuresApi.preview).mockResolvedValue({ ok: false, error: 'Unknown column: nope' })
     render(<MeasuresPanel datasetId={1} columns={columns} onChanged={vi.fn()} />)
     fireEvent.click(await screen.findByRole('button', { name: /Add measure/i }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Write a formula myself' }))
 
     fireEvent.change(screen.getByPlaceholderText(/SUM\(/i), { target: { value: 'SUM(nope)' } })
     fireEvent.click(screen.getByRole('button', { name: /Test/i }))
@@ -221,5 +228,45 @@ describe('metric versions (E05)', () => {
     render(<MeasuresPanel datasetId={1} columns={columns} onChanged={vi.fn()} />)
     await screen.findByText('Total')
     expect(screen.queryByRole('button', { name: /Version/ })).toBeNull()
+  })
+})
+
+
+describe('a new measure without writing a formula (2026-10-10)', () => {
+  async function open() {
+    render(<MeasuresPanel datasetId={1} columns={columns} onChanged={vi.fn()} />)
+    fireEvent.click(await screen.findByRole('button', { name: /Add measure/i }))
+    expect(await screen.findByText('What do you want to measure?')).toBeInTheDocument()
+  }
+
+  it('summarise: picks the summary and the column, writes the formula and the name', async () => {
+    await open()
+    fireEvent.click(screen.getByRole('button', { name: /Summarise a column/ }))
+    fireEvent.change(screen.getByLabelText('Summary'), { target: { value: 'MAX' } })
+    fireEvent.change(screen.getByLabelText('Column'), { target: { value: 'sales' } })
+    expect(screen.getByTestId('measure-written-formula')).toHaveTextContent('MAX(sales)')
+    expect(screen.getByLabelText('Measure name')).toHaveValue('Highest sales')
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }))
+    await waitFor(() => expect(measuresApi.save).toHaveBeenCalledWith(1,
+      expect.objectContaining({ name: 'Highest sales', expression: 'MAX(sales)' })))
+  })
+
+  it('only some rows: the condition boxes write the filter', async () => {
+    await open()
+    fireEvent.click(screen.getByRole('button', { name: /Only some rows/ }))
+    fireEvent.change(screen.getByLabelText('Column'), { target: { value: 'sales' } })
+    fireEvent.change(screen.getByLabelText('Column of condition 1'), { target: { value: 'region' } })
+    fireEvent.change(screen.getByLabelText('Value of condition 1'), { target: { value: 'EMEA' } })
+    expect(screen.getByTestId('measure-written-formula')).toHaveTextContent("SUM(IF(region == 'EMEA', sales, 0))")
+  })
+
+  it('a broken measure is explained in plain words', async () => {
+    vi.mocked(measuresApi.preview).mockResolvedValue({ ok: false, error: "name 'sale' is not defined",
+      problem: { code: 'unknown_name', name: 'sale', suggest: 'sales' } })
+    await open()
+    fireEvent.click(screen.getByRole('button', { name: 'Write a formula myself' }))
+    fireEvent.change(screen.getByPlaceholderText(/SUM\(/i), { target: { value: 'SUM(sale)' } })
+    fireEvent.click(screen.getByRole('button', { name: /Test/i }))
+    expect(await screen.findByText('There is no column or function called "sale". Did you mean "sales"?')).toBeInTheDocument()
   })
 })
