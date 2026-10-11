@@ -1,104 +1,76 @@
 /**
- * The Ask AI hero picture: a small, friendly assistant (rounded white body,
- * glowing screen face with a smile) with four floating cards around it -- a
- * bar chart, a donut, a chat bubble and a table -- tied to it by thin dotted
- * lines. Drawn here in SVG, app tokens only, no remote assets.
+ * The Ask AI hero picture (step 10, from the design handoff's `ill()`): a
+ * small assistant -- a light rounded head with a dark glowing screen face,
+ * an antenna and a torso -- with five floating cards around it (a bar chart,
+ * a donut, a chat bubble, a table and a "typing" bubble), tied to it by
+ * dotted lines.
  *
- * The cards drift slowly (6-8 s loops, out of phase). Styles and the
- * prefers-reduced-motion freeze live in pages/ask/ask.css (.dl-askart*).
- * Purely decorative: the headline beside it carries the meaning, so it is
- * aria-hidden.
+ * Built from boxes and two small SVGs, app tokens only (the robot's light
+ * body and dark screen are tokens set in askLayout.css, the same in both
+ * themes). The motion -- cards floating, the robot bobbing and blinking, the
+ * antenna pulsing, the dots flowing, the bars regrowing -- is CSS, transform
+ * and opacity only, and stops under prefers-reduced-motion.
+ *
+ * Purely decorative: the headline under it carries the meaning.
  */
-export default function AskIllustration({ className }: { className?: string }) {
+export default function AskIllustration({ small = false }: { small?: boolean }) {
   return (
-    <svg viewBox="0 0 520 300" className={`dl-askart ${className ?? ''}`} aria-hidden="true" focusable="false">
-      <defs>
-        <radialGradient id="dl-askart-glow">
-          <stop offset="0%" className="dl-askart__glow0" />
-          <stop offset="100%" className="dl-askart__glow1" />
-        </radialGradient>
-        <linearGradient id="dl-askart-body" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#ffffff" />
-          <stop offset="100%" stopColor="#dfe5ee" />
-        </linearGradient>
-        <linearGradient id="dl-askart-screen" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#15212c" />
-          <stop offset="100%" stopColor="#0b1219" />
-        </linearGradient>
-      </defs>
-
-      {/* Dotted links from the assistant to each card. */}
-      <g className="dl-askart__links">
-        <path d="M218 130 C 180 118, 160 100, 142 92" />
-        <path d="M302 128 C 336 112, 360 96, 382 86" />
-        <path d="M222 188 C 190 204, 168 214, 146 222" />
-        <path d="M298 190 C 334 206, 356 214, 380 222" />
-      </g>
-
-      <circle cx="260" cy="160" r="112" fill="url(#dl-askart-glow)" />
-
-      {/* Bar chart card (top start). */}
-      <g className="dl-askart__card dl-askart__card--a">
-        <rect x="40" y="46" width="112" height="84" rx="12" className="dl-askart__panel" />
-        <rect x="54" y="58" width="44" height="6" rx="3" className="dl-askart__ink" />
-        <rect x="56" y="98" width="12" height="20" rx="2" className="dl-askart__bar" />
-        <rect x="74" y="86" width="12" height="32" rx="2" className="dl-askart__bar" />
-        <rect x="92" y="92" width="12" height="26" rx="2" className="dl-askart__bar" />
-        <rect x="110" y="74" width="12" height="44" rx="2" className="dl-askart__accent" />
-        <rect x="128" y="96" width="12" height="22" rx="2" className="dl-askart__bar" />
-      </g>
-
-      {/* Donut card (top end). */}
-      <g className="dl-askart__card dl-askart__card--b">
-        <rect x="372" y="36" width="96" height="92" rx="12" className="dl-askart__panel" />
-        <circle cx="420" cy="82" r="24" className="dl-askart__ring" />
-        <circle cx="420" cy="82" r="24" className="dl-askart__ring-accent" pathLength="100"
-          strokeDasharray="38 100" transform="rotate(-90 420 82)" />
-        <circle cx="420" cy="82" r="24" className="dl-askart__ring-2" pathLength="100"
-          strokeDasharray="22 100" strokeDashoffset="-40" transform="rotate(-90 420 82)" />
-      </g>
-
-      {/* Chat bubble (bottom start). */}
-      <g className="dl-askart__card dl-askart__card--c">
-        <rect x="46" y="200" width="104" height="52" rx="14" className="dl-askart__panel" />
-        <path d="M70 252 l -8 12 l 18 -12 z" className="dl-askart__panel-tail" />
-        <rect x="60" y="214" width="72" height="6" rx="3" className="dl-askart__ink" />
-        <rect x="60" y="228" width="52" height="6" rx="3" className="dl-askart__ink dl-askart__ink--soft" />
-      </g>
-
-      {/* Table card (bottom end). */}
-      <g className="dl-askart__card dl-askart__card--d">
-        <rect x="372" y="196" width="112" height="72" rx="12" className="dl-askart__panel" />
-        {[0, 1, 2, 3].map(i => (
-          <g key={i}>
-            <rect x="384" y={208 + i * 13} width="26" height="5" rx="2.5"
-              className={i === 0 ? 'dl-askart__ink' : 'dl-askart__ink dl-askart__ink--soft'} />
-            <rect x="416" y={208 + i * 13} width="26" height="5" rx="2.5"
-              className={i === 2 ? 'dl-askart__accent' : 'dl-askart__ink dl-askart__ink--soft'} />
-            <rect x="448" y={208 + i * 13} width="24" height="5" rx="2.5" className="dl-askart__ink dl-askart__ink--soft" />
-          </g>
+    <div className={`dl-ill${small ? ' dl-ill--sm' : ''}`} aria-hidden="true">
+      <div className="dl-ill__glow" />
+      <svg className="dl-ill__lines" viewBox="0 0 460 240" fill="none">
+        <g className="dl-ill__dash">
+          <path d="M156 70Q190 84 198 104" /><path d="M326 64Q290 76 262 100" />
+          <path d="M150 186Q176 182 196 164" /><path d="M314 180Q288 176 266 160" />
+        </g>
+        <g className="dl-ill__dots">
+          <circle cx="156" cy="70" r="3" /><circle cx="326" cy="64" r="3" />
+          <circle cx="150" cy="186" r="3" /><circle cx="314" cy="180" r="3" />
+        </g>
+      </svg>
+      <div className="dl-ill__card dl-ill__c1">
+        <div className="dl-ill__ln" style={{ width: '56%' }} />
+        <div className="dl-ill__bars">
+          {[44, 66, 52, 92, 60].map((h, i) => (
+            <i key={i} className={i === 3 ? 'is-accent' : undefined} style={{ height: `${h}%`, ['--b' as string]: i }} />
+          ))}
+        </div>
+      </div>
+      <div className="dl-ill__card dl-ill__c2">
+        <svg viewBox="0 0 64 64" width="70" height="70">
+          <circle cx="32" cy="32" r="24" className="dl-ill__ring" />
+          <circle cx="32" cy="32" r="24" className="dl-ill__ring is-accent" strokeDasharray="57 151" transform="rotate(-90 32 32)" />
+          <circle cx="32" cy="32" r="24" className="dl-ill__ring is-strong" strokeDasharray="40 151" strokeDashoffset="-60" transform="rotate(-90 32 32)" />
+          <circle cx="32" cy="32" r="24" className="dl-ill__ring is-muted" strokeDasharray="28 151" strokeDashoffset="-103" transform="rotate(-90 32 32)" />
+        </svg>
+      </div>
+      <div className="dl-ill__card dl-ill__c3">
+        <div className="dl-ill__ln" style={{ width: '88%', ['--n' as string]: 0 }} />
+        <div className="dl-ill__ln" style={{ width: '62%', ['--n' as string]: 1 }} />
+        <div className="dl-ill__ln is-soft" style={{ width: '74%', ['--n' as string]: 2 }} />
+      </div>
+      <div className="dl-ill__card dl-ill__c4">
+        {[0, 1, 2, 3].map(r => (
+          <div key={r} className={`dl-ill__tr${r === 0 ? ' is-head' : ''}`}>
+            <div className="dl-ill__ln" /><div className={`dl-ill__ln${r === 1 ? ' is-accent' : ''}`} /><div className="dl-ill__ln" />
+          </div>
         ))}
-      </g>
-
-      {/* The assistant. */}
-      <g className="dl-askart__bot">
-        <line x1="260" y1="84" x2="260" y2="100" className="dl-askart__antenna" />
-        <circle cx="260" cy="80" r="6" className="dl-askart__accent dl-askart__beacon" />
-        <ellipse cx="260" cy="266" rx="46" ry="7" className="dl-askart__shadow" />
-        {/* Body */}
-        <rect x="224" y="200" width="72" height="56" rx="26" fill="url(#dl-askart-body)" className="dl-askart__shell" />
-        <rect x="248" y="222" width="24" height="7" rx="3.5" className="dl-askart__accent" />
-        {/* Head */}
-        <rect x="206" y="98" width="108" height="100" rx="40" fill="url(#dl-askart-body)" className="dl-askart__shell" />
-        <rect x="196" y="136" width="12" height="26" rx="6" fill="url(#dl-askart-body)" className="dl-askart__shell" />
-        <rect x="312" y="136" width="12" height="26" rx="6" fill="url(#dl-askart-body)" className="dl-askart__shell" />
-        {/* Screen face */}
-        <rect x="220" y="114" width="80" height="66" rx="24" fill="url(#dl-askart-screen)" />
-        <rect x="220" y="114" width="80" height="66" rx="24" className="dl-askart__screen-glow" />
-        <ellipse cx="244" cy="140" rx="6" ry="8" className="dl-askart__eye" />
-        <ellipse cx="276" cy="140" rx="6" ry="8" className="dl-askart__eye" />
-        <path d="M244 158 Q 260 170 276 158" className="dl-askart__smile" />
-      </g>
-    </svg>
+      </div>
+      <div className="dl-ill__card dl-ill__c5"><i /><i /><i /></div>
+      <div className="dl-ill__bot">
+        <div className="dl-ill__ant" />
+        <div className="dl-ill__head">
+          <span className="dl-ill__ear is-l" /><span className="dl-ill__ear is-r" />
+          <div className="dl-ill__face">
+            <svg viewBox="0 0 100 70">
+              <rect x="29" y="19" width="11" height="16" rx="5.5" />
+              <rect x="60" y="19" width="11" height="16" rx="5.5" />
+              <path d="M36 45Q50 56 64 45" />
+            </svg>
+          </div>
+        </div>
+        <div className="dl-ill__torso" />
+        <div className="dl-ill__shadow" />
+      </div>
+    </div>
   )
 }

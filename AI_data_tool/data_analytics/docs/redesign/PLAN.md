@@ -1,7 +1,7 @@
 # Datalytics redesign — implementation plan
 
 Source of truth: `DATALYTICS_REDESIGN_HANDOFF.md` and `boards/` in this folder (for the
-finished steps; Ask AI follows v1, see below). New sessions: read `HANDOVER.md` first.
+finished steps; Ask AI follows the step 10 design, see below). New sessions: read `HANDOVER.md` first.
 Work happens on branch `said`; the pre-redesign commit is tagged `before-redesign`.
 Nothing is pushed.
 
@@ -30,7 +30,14 @@ Nothing is pushed.
 - [x] 4-revert Ask AI back to the v1 layout with fixes; Datasets menu clipping fixes
   - >> GATE B: stop, report Ask AI — **approved 2026-10-06**
 
-> **Ask AI decision (2026-10-06, owner):** the Ask AI page uses the v1 layout and look
+> **Ask AI decision replaced (2026-10-11, owner):** Ask AI is rebuilt from the new design
+> (step 10, handoff `design-handoff-3/ask-ai/`). This replaces the GATE B decision below
+> to keep Ask AI as v1. The v1 improvements listed there are kept in the new layout.
+> Phase 1 rules still win over the design's own brief: no stubs or fake data (no timed
+> progress steps, no canned suggestions or history), desktop only (≥1180px, usable to
+> 1024px), our icons/fonts/tokens, translations as full templates.
+>
+> **Ask AI decision (2026-10-06, owner, replaced above):** the Ask AI page uses the v1 layout and look
 > (as at `120e0ef`) with fixes. The step 4 boards in `boards/step4-ask-ai-phase1/` are
 > no longer the spec for it. Kept from step 4: translations, Pending without timed
 > stages, the themed delete dialog, offline detection (locks the question box with one
@@ -133,6 +140,13 @@ Nothing is pushed.
 - [x] 7-QA5b Small fixes before QA6 (S1–S6), one commit, no GATE: delete dialogs open on Cancel, the cross-filter tooltip, automatic chart titles, audit-trail action names, hierarchy and sensitivity labels in Arabic, the Welch evidence line in right-to-left.
 - [x] Merge `origin/main` (emad: guided setup, Fields panel fixes, SQL injection hardening, condition boxes, no-code formulas, hierarchies across widgets, pgAdmin) into `said`: a fast-forward to `fa573bd`, no conflicts; `36c3001` adds the new column-lineage route to the security inventory.
 - [x] 7-QA6 Fixes from QA round 6 (`redesign-captures/qa-6/`): A1–A10 (our leftovers) and B1–B4 (merged work). One GATE.
+- [ ] 10 Ask AI redesign (design handoff `design-handoff-3/ask-ai/`). Reference captures: `redesign-captures/10-askai/design/`.
+  - [x] Part 0 Inventory — GATE 0 approved 2026-10-11 with decisions: duration from one `GET /agent/runs/{id}` after each answer (never delays it; nothing shown if it fails); Edit question on answers too (secondary); composer limit stays 2000 (warning from 1800); error chips kept, labelled as column-based suggestions; picker keeps Connections, no "Synced" line, a fixed hint with the last pick; loading shows elapsed time and a skeleton only.
+  - [x] A Layout, hero, picker, step 2 and suggestion cards
+    - >> GATE A
+  - [ ] B Loading and answer cards
+  - [ ] C Error card and composer
+  - [ ] D History rail
 - [ ] Then: Upload, Connections, Lineage, the AI button
 - [ ] FINAL Full regression: all tests, build, capture every screen, compare against all designs, final summary, fix the flaky `Lineage.test.tsx` (and watch `geoRenderers.test.tsx` and ReportBuilder's "report-level display rules" under load), and a clean-up list (test datasets 7 and 8, chat threads, the uncommitted init.sql edit). QA3 adds: dashboard "QA3-Builder" #16 (made 00:01; share link made and revoked 00:02–00:03; not made by the QA3 run, so the owner decides), and the cached insights QA3 may have saved on "Demo — Sales" and in the Builder AI panel. QA3 adds: stop the port-3002 Vite server ("before" captures) and remove its worktree (`git worktree remove` on the scratchpad `before` folder).
   - >> GATE F: stop, final report
@@ -193,6 +207,12 @@ Not part of the frontend steps (1–7); candidates for the handoff's section 7 p
 | 7-QA6 A7 | "Is this difference real?" `summary` and `tests[].business.sentence` are English prose | In Arabic the client now composes the gap from `business.absolute`/`percent` and `tests[].values`, and leaves out the summary. The server should send codes and numbers (with T12). |
 | 7-QA6 A10 | The built-in page templates (`services/page_templates.py`) carry English page and widget names | The client renames the page and the template's widget titles right after adding it in Arabic. The built-ins should carry message keys. |
 | 7-QA6 A6 | Connector select options (TLS modes, auth types) are bare codes | The client names them by `field.code` with the code kept in view. The connector catalog should send labels or keys. |
+| 10 Ask AI (GATE 0) | Progress stages while a question runs (understanding → query → running → chart) | `/ask` is one synchronous call: no streaming, no stage events, no cancel (AN2). The page shows elapsed time and a skeleton only. |
+| 10 Ask AI (GATE 0) | The run's duration on the `/ask` response | Only `GET /agent/runs/{id}` has `ms`; the page makes that extra call after each answer. It should come back with the answer. |
+| 10 Ask AI (GATE 0) | History: last-activity time and a failed flag per thread | `GET /agent/conversations` has `created_at` only; whether a thread's last question failed is visible per message, not on the list, so the rail cannot mark failed questions. |
+| 10 Ask AI (GATE 0) | Error reasons and rephrase suggestions | `error` is one raw string; no reason code and no suggested rephrasings (with AN1/B3). The error card shows a generic message, the raw text under Technical details, and column-based suggestions built by the client. |
+| 10 Ask AI (GATE 0) | A connection's sync status in the picker ("Synced 15 min ago") | `DataSourceOut` has no sync status or time; the picker says only the type. |
+| 10 Ask AI (GATE 0) | Recently used datasets per user | No endpoint (`RecentView` tracks reports only); the picker's Recent is this browser's own picks. |
 | 7-QA B6 | Ask AI is slow (about 70 s for a simple answer, about 4 min before a clarification), with no timeout or cancel | Needs a server-side timeout and a cancel endpoint (AN2: stream progress + cancel). |
 
 ## Log
@@ -1149,4 +1169,38 @@ QA6 (Claude in Chrome, `redesign-captures/qa-6/`) confirmed F2, F4, R1, R3, L1�
 - Re-pinned: the evidence chip isolates and the Arabic gap and summary (`differenceArabic`), and the badge drag (inline start).
 - Full suite: 346 files / 4333 tests pass. Type-check and build pass.
 - Captures: `e2e/capture/redesign/cap_qa6.mjs`, EN light and AR light/dark. Before is :3011 at `36c3001`; after is in `redesign-captures/qa-6-fixes/{before,after}/`, with each run's log.
+
+### 10-A Ask AI: layout, hero, picker, step 2 — the commit that adds this entry
+
+The owner decided to build Ask AI from the new design (handoff `design-handoff-3/ask-ai/`), replacing the GATE B decision (recorded at the top). Reference captures of every prototype state, EN/AR × light/dark at 1440px and some at 1024px: `redesign-captures/10-askai/design/`.
+
+- **Page grid.** The page bleeds to the content edges by cancelling `--dl-shell-pad`. It has:
+  - an 880px chat column that scrolls, with the question box at its foot and the disclaimer under it;
+  - History on the inline end, 288px.
+  - Folding History hides it, and the row's History button brings it back.
+  - Below 1180px History is an overlay from the inline end over a scrim (checked at 1024px).
+- **Hero** (`AskHero`, `AskIllustration`). The design's robot and five cards are rebuilt from boxes and two small SVGs. The robot keeps a light body and a dark screen in both themes through its own tokens, taken from the neutral scale (`--dl-bot-*`); no literal colours.
+  - Motion: the cards float, the robot bobs and blinks, the antenna pulses, the dotted lines flow, the bars regrow, and the hero parts rise in. Transform and opacity only; all off under `prefers-reduced-motion`.
+  - Not done (rule 6): the mouse-follow tilt, the spotlight and the background blobs.
+  - The headline's last word is in the accent.
+- **Empty page.** Step 1 with the large picker: "Choose a dataset or connection", the counts with plurals, and "Try: <the reader's last pick>" (fixed, no cycling). The question box shows locked, with "Choose your data above to start asking". `?q=` from Home and the test-data filter are kept.
+- **Picker** (`DataPicker`):
+  - The list opens in a portal, fixed under the trigger, and flips above when there is no room below.
+  - All / Datasets / Connections tabs (only when there are both kinds).
+  - Recent (this browser's picks, plus datasets made in the last day), then Datasets, then Connections.
+  - Rows show a tile, the name with the typed part marked, "rows · columns" with plurals (a connection: its type), and "Updated <date>" (datasets only; no "Synced" line, a backend row). The selected row has a check.
+  - Footer: key hints and Upload dataset. The keyboard works as before.
+  - In the "Asking about" row it is a compact chip.
+- **Dataset picked.** The "Asking about" row (chip, rows · columns, History button). A new thread opens by default (the design's state). The threads are in History, one click away; before, the newest thread opened.
+  - The empty thread shows "What would you like to know?" and Step 2's suggestion cards: icon, question, and the dataset's own columns in mono, LTR.
+  - The cards come from `datasetSuggestionCards`, the same questions as before, built only from the dataset's real columns and types; the chips list derives from it.
+  - `ChatPane` takes a `startView` for its empty thread.
+- **Strings:** `i18n/pages/askAi.ts` (`ask2.*`), with Arabic from `ask-data.js`, full templates and plural forms. The design's "Synced" («زُومن») is not carried over, since there is no sync line; if one comes with the backend row, it reads «تمت المزامنة». The new guard `test/strings.askAi.test.ts` covers every Part A file and checks the key and placeholder parity.
+- **CSS:** `pages/ask/askLayout.css`. The old hero, illustration, picker, workspace and drawer rules in `ask.css` are gone; History's list styling stays for Part D.
+
+**Tests:**
+- New: `askPartA.test.tsx` (10): cards from real columns, hero, picker counts/tabs/highlight/plurals/Arabic, the start view sending through the pane; the Ask AI guard (6).
+- Re-pinned: 4 AskAI tests (locked box before Step 1; a new chat by default).
+- Full suite: 348 files / 4349 tests pass. The flaky `Lineage.test.tsx` failed once under the capture load and passes alone (15/15). Type-check and build pass.
+- Captures: `e2e/capture/redesign/cap_10a.mjs` (empty, open, search, picked, picked at 1024, History overlay at 1024), EN/AR × light/dark. Before is :3011 at `4a86b44`; after is in `redesign-captures/10-askai/A-{before,after}/`.
 

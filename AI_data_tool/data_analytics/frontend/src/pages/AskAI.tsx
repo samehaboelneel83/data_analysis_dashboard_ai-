@@ -1,27 +1,33 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { BarChart3, Bot, Code2, History, MessageSquareText, Sparkles } from 'lucide-react'
+import { Bot, History } from 'lucide-react'
 import EmptyState from '../components/ui/EmptyState'
 import ChatPane from '../components/chat/ChatPane'
+import Composer from '../components/chat/Composer'
 import { agentApi, datasetsApi, dataSourcesApi } from '../services/api'
 import type { AgentConversation, Dataset, DatasetColumn } from '../services/api'
 import { useT } from '../i18n'
-import AskIllustration from './ask/AskIllustration'
-import DataPicker, { type PickerItem } from './ask/DataPicker'
+import AskHero from './ask/AskHero'
+import SuggestionGrid from './ask/SuggestionGrid'
+import DataPicker, { useItemMeta, type PickerItem } from './ask/DataPicker'
 import HistoryPanel from './ask/HistoryPanel'
 import { useConfirm } from '../components/ui/ConfirmDialog'
-import { connectionSuggestions, datasetSuggestions } from './ask/suggestions'
+import { connectionSuggestionCards, datasetSuggestionCards } from './ask/suggestions'
 import './ask/ask.css'
+import './ask/askLayout.css'
 import DatasetListFilter, { useCleanDatasets } from '../components/dataset/DatasetListFilter'
 import { isCertified } from '../lib/cleanDatasets'
 
 /**
- * The agent's own page. Two states:
+ * The agent's own page (step 10 design). Two states:
  *
- *  - No scope yet: a hero that says what this page does, Step 1 (a searchable
- *    picker of datasets and live connections) and Step 2 (the question box,
- *    shown but locked, so the order of things is obvious at a glance).
- *  - A scope: the threads held about it (History) beside the chat.
+ *  - No scope yet: a centred hero -- the picture, "Ask your data anything",
+ *    Step 1 (a searchable picker of datasets and live connections) -- and the
+ *    question box at the foot, shown but locked, so the order is obvious.
+ *  - A scope: an "Asking about" row, the chat column (880px, centred) and the
+ *    threads held about it (History) on the inline end. A new thread opens on
+ *    "What would you like to know?" and Step 2's suggestion cards, built from
+ *    the dataset's own columns. Below 1180px History is an overlay.
  *
  * The scope is in the URL (`/ask?dataset=32`, `/ask?source=3`) so a question
  * about a specific dataset can be LINKED to -- DatasetDetail's "Ask about
@@ -33,7 +39,8 @@ import { isCertified } from '../lib/cleanDatasets'
  * sent on the person's behalf.
  *
  * The page owns the conversation list. It shows the user's threads for the
- * current scope, newest first, opens the newest by default, and hands the
+ * current scope, newest first, opens a new thread by default (the design's
+ * "dataset picked" state; the threads are one click away), and hands the
  * chosen id to the pane (`conversationId`); "New chat" hands it null and the
  * pane reports back the thread its first question creates.
  */
@@ -144,7 +151,7 @@ export default function AskAI() {
         if (!alive) return
         const mine = all.filter(c => inScope(c, sourceId, datasetId)).sort((a, b) => b.id - a.id)
         setConversations(mine)
-        setSelected(mine.length ? mine[0].id : null)
+        setSelected(null)
       })
       .catch(() => { if (alive) { setConversations([]); setSelected(null) } })
     return () => { alive = false }
@@ -210,58 +217,97 @@ export default function AskAI() {
   const paneOpen = scoped && selected !== undefined
   useEffect(() => { if (paneOpen && pendingQ) setPendingQ('') }, [paneOpen, pendingQ])
   const columns = datasetId != null ? columnsById[datasetId] : undefined
-  const suggestions = useMemo(
-    () => (sourceId != null ? connectionSuggestions(t) : datasetSuggestions(columns, t)),
+  const cards = useMemo(
+    () => (sourceId != null ? connectionSuggestionCards(t) : datasetSuggestionCards(columns, t)),
     [sourceId, columns, t],
   )
+  const suggestions = useMemo(() => cards.map(c => c.text), [cards])
+  const itemMeta = useItemMeta()
+  // "… based on the columns in **Demo — Sales**.": the name bold and isolated
+  // inside the translated sentence (one template per language, not glued).
+  const rich = (key: 'ask2.picked.sub' | 'ask2.picked.subSource', name: string) => {
+    const [before, after = ''] = t(key, { name: '\uE000' }).split('\uE000')
+    return <>{before}<bdi><b>{name}</b></bdi>{after}</>
+  }
+  const scopeItem = items.find(i => i.key === scopeKey)
+  // History beside the chat on a wide screen (unless folded away), an overlay
+  // below 1180px; the "History" button in the context row opens it either way.
+  const showHistory = () => {
+    if (window.matchMedia?.('(max-width: 1179px)').matches) setDrawer(true)
+    else if (folded) toggleFold()
+  }
   const noData = !loading && !error && items.length === 0
 
   if (!scoped) {
     return (
-      <div className="dl-ask dl-ask--hero">
-        {error && <div role="alert" className="dl-ask__error">{error}</div>}
-        {noData ? (
-          <EmptyState icon={Bot} title={t('ask.noData')}
-            action={<Link to="/upload" className="btn btn-primary">{t('ask.uploadDataset')}</Link>} />
-        ) : (
-          // Text and picker on one side, the picture on the other: the
-          // picker's list opens into the empty space under the text column, so
-          // it never lands on the illustration (it used to sit under the
-          // picture and flip up over it).
-          <section className="dl-ask__hero" aria-labelledby="dl-ask-title">
-            <div className="dl-ask__copy">
-              <span className="dl-ask__eyebrow"><Sparkles size={14} aria-hidden /> {t('ask.hero.eyebrow')}</span>
-              <h1 id="dl-ask-title" className="dl-ask__title">{t('ask.hero.title')}</h1>
-              <p className="dl-ask__sub">{t('ask.hero.sub')}</p>
-              {pendingQ && (
-                <p className="dl-ask__pending" data-testid="ask-pending-q">
-                  {t('ask.pendingQ')} <q dir="auto">{pendingQ}</q>
-                </p>
+      <div className="dl-ask dl-ask--v2 dl-ask--empty">
+        <div className="dl-ask__chat">
+          <div className="dl-ask__scroll">
+            <div className="dl-ask__col">
+              {error && <div role="alert" className="dl-ask__error">{error}</div>}
+              {noData ? (
+                <EmptyState icon={Bot} title={t('ask.noData')}
+                  action={<Link to="/upload" className="btn btn-primary">{t('ask.uploadDataset')}</Link>} />
+              ) : (
+                <AskHero id="dl-ask-title" title={t('ask2.hero.title')} sub={t('ask2.hero.sub')}
+                  step={1} stepLabel={t('ask2.step1')}>
+                  {pendingQ && (
+                    <p className="dl-ask__pending" data-testid="ask-pending-q">
+                      {t('ask2.pendingQ')} <q dir="auto">{pendingQ}</q>
+                    </p>
+                  )}
+                  <DataPicker items={items} value="" onChoose={choose} size="hero" loading={loading} />
+                  <div className="dl-ask__filter"><DatasetListFilter state={clean} /></div>
+                </AskHero>
               )}
-              <ul className="dl-ask__points">
-                <li><MessageSquareText size={16} aria-hidden /> {t('ask.hero.point1')}</li>
-                <li><BarChart3 size={16} aria-hidden /> {t('ask.hero.point2')}</li>
-                <li><Code2 size={16} aria-hidden /> {t('ask.hero.point3')}</li>
-              </ul>
-              {/* One step only: the question box appears once data is chosen
-                  (the scoped view below). */}
-              <div className="dl-ask__step">
-                <span className="dl-ask__step-label">{t('ask.step1')}</span>
-                <DataPicker items={items} value="" onChoose={choose} size="hero" loading={loading} />
-                <div style={{ marginTop: 8 }}><DatasetListFilter state={clean} /></div>
+            </div>
+          </div>
+          {!noData && (
+            <div className="dl-ask__foot">
+              <div className="dl-ask__col">
+                <Composer value="" onChange={() => {}} onSend={() => {}} locked lockedHint={t('ask2.composer.chooseFirst')} />
+                <p className="dl-ask__disc">{t('ask2.disclaimer')}</p>
               </div>
             </div>
-            <div className="dl-ask__art-wrap" aria-hidden>
-              <AskIllustration className="dl-ask__art" />
-            </div>
-          </section>
-        )}
+          )}
+        </div>
       </div>
     )
   }
 
+  const histHidden = folded || drawer
   return (
-    <div className="dl-ask dl-ask--work">
+    <div className="dl-ask dl-ask--v2 dl-ask--work">
+      <section className="dl-ask__chat">
+        <div className="dl-ask__ctx">
+          <span className="dl-ask__ctx-label">{t('ask2.ctx.asking')}</span>
+          <DataPicker items={items} value={scopeKey} onChoose={choose} size="compact" loading={loading} />
+          {scopeItem && <span className="dl-ask__ctx-meta">{itemMeta(scopeItem)}</span>}
+          <span className="dl-ask__ctx-grow" />
+          <button type="button" className={`btn btn-ghost btn-sm dl-ask__hist-btn${histHidden ? '' : ' dl-ask__hist-btn--wide-hidden'}`}
+            onClick={showHistory} aria-label={t('ask2.hist.show')} aria-expanded={drawer}>
+            <History size={15} aria-hidden /> {t('ask2.hist.button')}
+          </button>
+        </div>
+        <div className="dl-ask__pane">
+          {selected !== undefined && (() => {
+            const startView = (ask: (q: string) => void, busy: boolean) => (
+              <AskHero id="dl-ask-picked" small title={t('ask2.picked.title')}
+                sub={rich(sourceId != null ? 'ask2.picked.subSource' : 'ask2.picked.sub', scopeItem?.name ?? '')}
+                step={2} stepLabel={t('ask2.step2')}>
+                <SuggestionGrid cards={cards} onAsk={ask} disabled={busy} />
+              </AskHero>
+            )
+            return sourceId != null
+              ? <ChatPane key={scopeKey} dataSourceId={sourceId} conversationId={selected}
+                  onConversationCreated={created} suggestions={suggestions} initialInput={pendingQ} startView={startView} />
+              : <ChatPane key={scopeKey} datasetIds={[datasetId as number]} conversationId={selected}
+                  onConversationCreated={created} suggestions={suggestions}
+                  datasetColumns={columns?.map(c => c.name)} initialInput={pendingQ} startView={startView} />
+          })()}
+        </div>
+      </section>
+
       <HistoryPanel
         conversations={conversations} selected={selected}
         onSelect={id => { setSelected(id); setDrawer(false) }}
@@ -270,26 +316,6 @@ export default function AskAI() {
         onCancelEdit={() => setEditing(null)} onDelete={c => void remove(c)}
         collapsed={folded} onToggleCollapsed={toggleFold}
         mobileOpen={drawer} onCloseMobile={() => setDrawer(false)} />
-
-      <section className="dl-ask__main">
-        <div className="dl-ask__bar">
-          <button type="button" className="dl-ask__hist-btn" onClick={() => setDrawer(true)}
-            aria-label={t('ask.hist.title')} aria-expanded={drawer}>
-            <History size={16} aria-hidden /> <span>{t('ask.hist.title')}</span>
-          </button>
-          <DataPicker items={items} value={scopeKey} onChoose={choose} size="compact" loading={loading} />
-        </div>
-        <div className="dl-ask__pane">
-          {selected !== undefined && (
-            sourceId != null
-              ? <ChatPane key={scopeKey} dataSourceId={sourceId} conversationId={selected}
-                  onConversationCreated={created} suggestions={suggestions} initialInput={pendingQ} />
-              : <ChatPane key={scopeKey} datasetIds={[datasetId as number]} conversationId={selected}
-                  onConversationCreated={created} suggestions={suggestions}
-                  datasetColumns={columns?.map(c => c.name)} initialInput={pendingQ} />
-          )}
-        </div>
-      </section>
     </div>
   )
 }

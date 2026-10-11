@@ -1,0 +1,280 @@
+/* Ask AI, step 10 (design handoff `ask.css` / `ask-motion.css`): the page
+   grid, the hero and its picture, the data picker, the "Asking about" row and
+   the suggestion cards. App tokens only -- every literal colour in the design
+   is mapped to one -- and logical properties, so Arabic mirrors. Motion is
+   transform and opacity only, and stops under prefers-reduced-motion. */
+
+/* ── Page grid ───────────────────────────────────────────────────────────
+   The page bleeds to the content area's edges (it cancels exactly the shell's
+   padding): a chat column, scrolling, with the question box at its foot, and
+   History on the inline end. */
+.dl-ask--v2 {
+  margin: calc(var(--dl-shell-pad, 0px) * -1);
+  height: calc(100% + 2 * var(--dl-shell-pad, 0px));
+  display: flex; min-height: 0; position: relative; max-width: none; gap: 0;
+  /* A dark veil in both themes: ink in light, the deepest canvas in dark. */
+  --dl-ask-scrim: color-mix(in srgb, var(--mc-ink) 45%, transparent);
+}
+[data-theme="dark"] .dl-ask--v2 { --dl-ask-scrim: color-mix(in srgb, var(--mc-canvas-2) 70%, transparent); }
+.dl-ask__chat { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; }
+.dl-ask__scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.dl-ask__col { max-width: 880px; margin: 0 auto; padding: 28px 32px 20px; }
+.dl-ask__foot { flex: none; padding: 0 32px 16px; }
+.dl-ask__foot .dl-ask__col { padding: 0; }
+.dl-ask__disc { margin: 8px 0 0; text-align: center; font-size: 12px; color: var(--muted); }
+.dl-ask__error { margin-bottom: 12px; color: var(--danger); font-size: 13px; }
+.dl-ask__pending { margin: 0 0 12px; font-size: 14px; color: var(--text); }
+.dl-ask__pending q { font-weight: 600; unicode-bidi: isolate; }
+.dl-ask__filter { margin-top: 8px; }
+
+/* The "Asking about" row, then the chat pane, both in the 880px column. */
+.dl-ask__ctx {
+  width: 100%; max-width: 880px; margin: 0 auto; padding: 20px 32px 4px;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.dl-ask__ctx-label, .dl-ask__ctx-meta { font-size: 13px; color: var(--muted); }
+.dl-ask__ctx-grow { flex: 1; }
+.dl-ask__hist-btn { display: inline-flex; align-items: center; gap: 6px; }
+.dl-ask__pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.dl-ask--v2 .dl-chat__scroll > *, .dl-ask--v2 .dl-chat__composer > * {
+  width: 100%; max-width: calc(880px - 64px); margin-inline: auto;
+}
+.dl-ask--v2 .dl-chat__scroll { padding: 16px 32px 20px; }
+.dl-ask--v2 .dl-chat__composer { padding: 0 32px 16px; border-top: 0; background: transparent; }
+
+/* History: beside the chat on a wide screen, 288px, on the inline end. Folded
+   away, it is gone and the row's History button brings it back. */
+.dl-ask--v2 .dl-hist {
+  width: 288px; flex: none; border: 0; border-inline-start: 1px solid var(--border); border-radius: 0;
+  background: var(--surface); padding: 14px 10px 10px;
+}
+.dl-ask--v2 .dl-hist--collapsed { display: none; }
+.dl-ask--v2 .dl-hist__close { display: none; }
+@media (min-width: 1180px) { .dl-ask__hist-btn--wide-hidden { display: none; } }
+
+/* Below 1180px: History is an overlay from the inline end, over a scrim. */
+@media (max-width: 1179px) {
+  .dl-ask--v2 .dl-hist, .dl-ask--v2 .dl-hist--collapsed {
+    display: flex; position: absolute; z-index: 30; inset-block: 0; inset-inline-end: 0;
+    width: min(320px, 88%); box-shadow: var(--dl-shadow-overlay);
+    visibility: hidden; opacity: 0; transform: translateX(16px);
+    transition: transform var(--dl-dur, .2s) var(--dl-ease, ease), opacity var(--dl-dur, .2s), visibility 0s linear var(--dl-dur, .2s);
+  }
+  [dir="rtl"] .dl-ask--v2 .dl-hist { transform: translateX(-16px); }
+  .dl-ask--v2 .dl-hist--open, [dir="rtl"] .dl-ask--v2 .dl-hist--open {
+    visibility: visible; opacity: 1; transform: none;
+    transition: transform var(--dl-dur, .2s) var(--dl-ease, ease), opacity var(--dl-dur, .2s);
+  }
+  .dl-ask--v2 .dl-hist--collapsed .dl-hist__title, .dl-ask--v2 .dl-hist--collapsed .dl-hist__list,
+  .dl-ask--v2 .dl-hist--collapsed .dl-hist__new-text { display: revert; }
+  .dl-ask--v2 .dl-hist--collapsed .dl-hist__new { width: auto; height: auto; }
+  .dl-ask--v2 .dl-hist__fold { display: none; }
+  .dl-ask--v2 .dl-hist__close { display: inline-grid; }
+  .dl-ask--v2 .dl-hist__scrim { display: block; position: absolute; inset: 0; z-index: 25; background: var(--dl-ask-scrim); }
+  .dl-ask__col, .dl-ask__ctx { padding-inline: 24px; }
+}
+
+/* ── Hero ───────────────────────────────────────────────────────────────── */
+.dl-hero { display: flex; flex-direction: column; align-items: center; text-align: center; padding-top: 4px; }
+.dl-hero__title { margin: 0; font-size: 34px; font-weight: 700; letter-spacing: -.02em; line-height: 1.15; text-wrap: balance; }
+.dl-hero__accent { color: var(--mc-accent-ink, var(--accent)); }
+[data-theme="dark"] .dl-hero__accent { color: var(--accent); }
+.dl-hero__sub { margin: 10px auto 0; max-width: 540px; color: var(--muted); font-size: 16px; line-height: 1.5; text-wrap: pretty; }
+.dl-hero__sub b { color: var(--text); font-weight: 600; }
+.dl-hero__step { display: flex; align-items: center; gap: 10px; margin: 28px 0 12px; font-size: 14px; font-weight: 600; }
+.dl-hero__stn { font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: var(--accent); color: var(--mc-accent-fg, var(--surface)); }
+.dl-hero--sm .dl-hero__title { font-size: 28px; }
+.dl-hero--sm .dl-hero__step { margin-top: 22px; }
+/* Entrance: the parts rise in, one after another. */
+.dl-hero > * { animation: dl-hero-in .6s cubic-bezier(.22, 1, .36, 1) both; }
+.dl-hero > :nth-child(2) { animation-delay: 90ms; }
+.dl-hero > :nth-child(3) { animation-delay: 180ms; }
+.dl-hero > :nth-child(4) { animation-delay: 270ms; }
+.dl-hero > :nth-child(n+5) { animation-delay: 360ms; }
+@keyframes dl-hero-in { from { opacity: 0; transform: translateY(16px); } }
+
+/* ── The picture ──────────────────────────────────────────────────────────
+   The robot keeps a light body and a dark screen in both themes: its own
+   tokens, from the app's neutral scale. */
+.dl-ill {
+  --dl-bot-hi: var(--mc-surface); --dl-bot-mid: var(--mc-canvas-2); --dl-bot-lo: var(--mc-border-strong);
+  --dl-bot-screen: var(--mc-ink); --dl-bot-shade: color-mix(in srgb, var(--mc-ink) 22%, transparent);
+  position: relative; width: 460px; height: 240px; margin-bottom: 14px; flex: none; direction: ltr;
+}
+[data-theme="dark"] .dl-ill {
+  --dl-bot-hi: var(--mc-ink); --dl-bot-mid: var(--mc-ink-soft); --dl-bot-lo: var(--mc-faint);
+  --dl-bot-screen: var(--mc-canvas-2); --dl-bot-shade: color-mix(in srgb, var(--mc-canvas-2) 40%, transparent);
+}
+.dl-ill--sm { transform: scale(.56); margin: -53px 0 -47px; }
+.dl-ill__glow {
+  position: absolute; left: 50%; top: 50%; width: 300px; height: 220px; transform: translate(-50%, -50%);
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 20%, transparent), transparent);
+  animation: dl-ill-breath 6s ease-in-out infinite;
+}
+.dl-ill__lines { position: absolute; inset: 0; width: 100%; height: 100%; }
+.dl-ill__dash { stroke: var(--mc-border-strong); stroke-width: 1.6; stroke-dasharray: 1 6; stroke-linecap: round; animation: dl-ill-dash 1.4s linear infinite; }
+.dl-ill__dots { fill: var(--accent); }
+.dl-ill__card {
+  position: absolute; padding: 10px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border);
+  box-shadow: var(--dl-shadow-card); animation: dl-ill-float var(--dur, 6s) ease-in-out var(--fd, 0s) infinite;
+}
+.dl-ill__ln { height: 6px; border-radius: 3px; background: var(--surface2); }
+.dl-ill__ln.is-soft { background: var(--accent-soft); }
+.dl-ill__ln.is-accent { background: var(--accent); }
+.dl-ill__c1 { left: 28px; top: 14px; width: 128px; height: 86px; --dur: 6s; }
+.dl-ill__bars { display: flex; align-items: flex-end; gap: 6px; height: 46px; margin-top: 10px; }
+.dl-ill__bars i {
+  flex: 1; border-radius: 3px 3px 1px 1px; background: var(--mc-border-strong); transform-origin: bottom;
+  animation: dl-ill-regrow 6s cubic-bezier(.22, 1, .36, 1) calc(var(--b, 0) * 70ms) infinite;
+}
+.dl-ill__bars i.is-accent { background: var(--accent); }
+.dl-ill__c2 { right: 34px; top: 6px; width: 100px; height: 100px; display: grid; place-items: center; --dur: 7s; --fd: -2s; }
+.dl-ill__ring { fill: none; stroke: var(--surface2); stroke-width: 10; }
+.dl-ill__ring.is-accent { stroke: var(--accent); }
+.dl-ill__ring.is-strong { stroke: var(--mc-border-strong); }
+.dl-ill__ring.is-muted { stroke: var(--muted); }
+.dl-ill__c3 { left: 10px; top: 156px; width: 140px; padding: 10px 12px; border-radius: 14px 14px 14px 4px; --dur: 5.5s; --fd: -3.5s; }
+.dl-ill__c3 .dl-ill__ln + .dl-ill__ln { margin-top: 7px; }
+.dl-ill__c4 { right: 10px; top: 148px; width: 146px; padding: 8px; --dur: 6.5s; --fd: -1s; }
+.dl-ill__tr { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 5px; padding: 5px 3px; }
+.dl-ill__tr + .dl-ill__tr { border-top: 1px solid var(--border); }
+.dl-ill__tr.is-head .dl-ill__ln { background: var(--mc-border-strong); }
+.dl-ill__c5 { left: 112px; top: 106px; display: flex; gap: 4px; padding: 8px 10px; border-radius: 12px 12px 4px 12px; --dur: 5s; --fd: -2.5s; }
+.dl-ill__c5 i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: dl-ill-typing 1.4s infinite; }
+.dl-ill__c5 i:nth-child(2) { animation-delay: .2s; }
+.dl-ill__c5 i:nth-child(3) { animation-delay: .4s; }
+/* The robot */
+.dl-ill__bot { position: absolute; left: 50%; top: 48px; width: 128px; transform: translateX(-50%); animation: dl-ill-bob 4s ease-in-out infinite; }
+.dl-ill__ant { position: relative; width: 4px; height: 14px; margin: 0 auto; border-radius: 2px; background: var(--dl-bot-lo); }
+.dl-ill__ant::before {
+  content: ""; position: absolute; left: 50%; top: -10px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 12px var(--accent); animation: dl-ill-bulb 2.4s ease-in-out infinite;
+}
+.dl-ill__head {
+  position: relative; width: 128px; height: 98px; border-radius: 38px;
+  background: radial-gradient(120% 120% at 30% 18%, var(--dl-bot-hi) 0%, var(--dl-bot-mid) 45%, var(--dl-bot-lo) 100%);
+  box-shadow: inset -6px -8px 14px var(--dl-bot-shade), 0 20px 30px -14px var(--dl-bot-shade);
+}
+.dl-ill__ear { position: absolute; top: 34px; width: 14px; height: 30px; border-radius: 7px; background: linear-gradient(var(--dl-bot-hi), var(--dl-bot-lo)); }
+.dl-ill__ear.is-l { left: -9px; }
+.dl-ill__ear.is-r { right: -9px; }
+.dl-ill__face {
+  position: absolute; inset: 14px; border-radius: 26px;
+  background: radial-gradient(circle at 50% 38%, color-mix(in srgb, var(--accent) 18%, var(--dl-bot-screen)), var(--dl-bot-screen) 72%);
+  box-shadow: inset 0 0 22px color-mix(in srgb, var(--accent) 45%, transparent), 0 0 16px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.dl-ill__face svg { width: 100%; height: 100%; filter: drop-shadow(0 0 4px var(--accent)); }
+.dl-ill__face rect { fill: var(--accent); transform-box: fill-box; transform-origin: center; animation: dl-ill-blink 4.3s 1.2s infinite; }
+.dl-ill__face path { fill: none; stroke: var(--accent); stroke-width: 4.5; stroke-linecap: round; }
+.dl-ill__torso {
+  position: relative; z-index: -1; width: 88px; height: 48px; margin: -4px auto 0; border-radius: 24px 24px 30px 30px;
+  background: radial-gradient(120% 120% at 30% 10%, var(--dl-bot-hi) 0%, var(--dl-bot-mid) 50%, var(--dl-bot-lo) 100%);
+  box-shadow: inset -5px -6px 12px var(--dl-bot-shade);
+}
+.dl-ill__torso::after {
+  content: ""; position: absolute; left: 50%; top: 20px; width: 18px; height: 6px; margin-left: -9px; border-radius: 3px;
+  background: var(--accent); box-shadow: 0 0 10px var(--accent);
+}
+.dl-ill__shadow { width: 96px; height: 12px; margin: 12px auto 0; border-radius: 50%; background: radial-gradient(closest-side, var(--dl-bot-shade), transparent); }
+
+@keyframes dl-ill-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+@keyframes dl-ill-bob { 0%, 100% { transform: translate(-50%, 0); } 50% { transform: translate(-50%, -6px); } }
+@keyframes dl-ill-blink { 0%, 90%, 94%, 100% { transform: scaleY(1); } 92% { transform: scaleY(.1); } }
+@keyframes dl-ill-bulb { 0%, 100% { opacity: .75; transform: scale(.92); } 50% { opacity: 1; transform: scale(1.08); } }
+@keyframes dl-ill-dash { to { stroke-dashoffset: 7; } }
+@keyframes dl-ill-typing { 0%, 80%, 100% { opacity: .35; } 40% { opacity: 1; } }
+@keyframes dl-ill-breath { 0%, 100% { transform: translate(-50%, -50%) scale(.95); opacity: .85; } 50% { transform: translate(-50%, -50%) scale(1.05); opacity: 1; } }
+/* The bars grow back from the floor every few seconds. */
+@keyframes dl-ill-regrow { 0% { transform: scaleY(.15); } 14%, 100% { transform: scaleY(1); } }
+
+/* ── Data picker ────────────────────────────────────────────────────────── */
+.dl-pick { position: relative; width: min(100%, 600px); }
+.dl-pick--compact { width: auto; flex: none; max-width: 100%; }
+.dl-pick__trigger {
+  width: 100%; display: flex; align-items: center; gap: 14px; height: 68px; padding-block: 0; padding-inline: 14px 18px;
+  border-radius: 16px; border: 1px solid var(--accent); background: var(--surface); color: var(--text);
+  text-align: start; font: inherit; cursor: pointer; box-shadow: 0 0 0 4px var(--accent-soft), var(--dl-shadow-card);
+}
+.dl-pick__trigger:hover { background: color-mix(in srgb, var(--accent) 5%, var(--surface)); }
+.dl-pick__trigger:disabled { opacity: .6; cursor: progress; }
+.dl-pick__ic { width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center; flex: none; background: var(--accent-soft); color: var(--mc-accent-ink, var(--accent)); }
+[data-theme="dark"] .dl-pick__ic { color: var(--accent); }
+.dl-pick__trigger-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.dl-pick__l1 { font-size: 16px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dl-pick__l2 { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dl-pick__chev { color: var(--muted); flex: none; }
+.dl-pick__chip {
+  display: inline-flex; align-items: center; gap: 8px; height: 38px; max-width: 340px; padding-block: 0; padding-inline: 6px 10px;
+  border-radius: 10px; border: 1px solid var(--mc-border-strong); background: var(--surface); color: var(--text);
+  font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.dl-pick__chip:hover, .dl-pick--open .dl-pick__chip { border-color: var(--accent); }
+.dl-pick__chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dl-pick__tile { width: 36px; height: 36px; flex: none; border-radius: 10px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
+.dl-pick__tile--dataset { background: color-mix(in srgb, var(--dl-series-2) 16%, transparent); color: var(--dl-series-2); }
+.dl-pick__tile--source { background: color-mix(in srgb, var(--dl-series-3) 16%, transparent); color: var(--dl-series-3); }
+.dl-pick__tile--xs { width: 24px; height: 24px; border-radius: 7px; }
+.dl-pick__trigger:focus-visible, .dl-pick__chip:focus-visible, .dl-sug__card:focus-visible, .dl-ask__hist-btn:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+
+/* The list, in a portal: fixed to the window under (or over) the trigger. */
+.dl-pick__pop {
+  position: fixed; z-index: 1200; display: flex; flex-direction: column; text-align: start;
+  background: var(--surface); color: var(--text); border: 1px solid var(--mc-border-strong); border-radius: 14px;
+  box-shadow: var(--dl-shadow-overlay); overflow: hidden; font-family: var(--dl-font, inherit);
+  animation: dl-pick-in .16s cubic-bezier(.22, 1, .36, 1);
+}
+.dl-pick__pop--up { animation-name: dl-pick-in-up; }
+@keyframes dl-pick-in { from { opacity: 0; transform: translateY(-4px); } }
+@keyframes dl-pick-in-up { from { opacity: 0; transform: translateY(4px); } }
+.dl-pick__search { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding-block: 8px; padding-inline: 14px 8px; border-bottom: 1px solid var(--border); }
+.dl-pick__search > svg { color: var(--muted); flex: none; }
+.dl-pick__search input { flex: 1; min-width: 160px; height: 34px; border: 0; outline: 0; background: none; color: var(--text); font: inherit; font-size: 15px; }
+.dl-pick__search input::placeholder { color: var(--muted); }
+/* The search box is the popup's own field: the popup's border is its focus. */
+.dl-pick__search input:focus, .dl-pick__search input:focus-visible { outline: none; box-shadow: none; border: 0; }
+.dl-pick__seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 9px; background: var(--surface2); }
+.dl-pick__seg button {
+  height: 26px; padding: 0 10px; border: 0; border-radius: 6px; background: none; color: var(--muted);
+  font: inherit; font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer;
+}
+.dl-pick__seg button[aria-selected="true"] { background: var(--surface); color: var(--text); box-shadow: var(--dl-shadow-card); }
+.dl-pick__list { max-height: var(--dl-pick-list-max, 340px); overflow-y: auto; padding: 4px 6px 6px; }
+.dl-pick__group { padding: 10px 10px 4px; font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+[dir="rtl"] .dl-pick__group { letter-spacing: 0; font-size: 12px; }
+.dl-pick__opt { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 10px; cursor: pointer; }
+.dl-pick__opt:hover { background: var(--surface2); }
+.dl-pick__opt--active { background: var(--surface2); box-shadow: inset 0 0 0 1px var(--mc-border-strong); }
+.dl-pick__opt-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.dl-pick__opt-name { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: match-parent; }
+.dl-pick__opt-name b { color: var(--accent); }
+.dl-pick__opt-meta, .dl-pick__opt-up { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.dl-pick__opt-meta { overflow: hidden; text-overflow: ellipsis; }
+.dl-pick__check { color: var(--accent); flex: none; }
+.dl-pick__none { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 28px 12px; color: var(--muted); font-size: 13px; }
+.dl-pick__foot { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 9px 14px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+.dl-pick__foot > * { white-space: nowrap; }
+.dl-pick__foot kbd { font: 500 11px var(--font-mono, monospace); padding: 1px 5px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 5px; background: var(--bg); color: var(--text); }
+.dl-pick__upload { margin-inline-start: auto; display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--accent); text-decoration: none; }
+.dl-pick__upload:hover { text-decoration: underline; }
+
+/* ── Suggestion cards ───────────────────────────────────────────────────── */
+.dl-sug { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; width: 100%; }
+.dl-sug__card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-height: 104px; padding: 14px;
+  text-align: start; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  font: inherit; cursor: pointer; transition: border-color var(--dl-dur, .15s), background var(--dl-dur, .15s), transform var(--dl-dur, .15s);
+}
+.dl-sug__card:hover:not(:disabled) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 5%, var(--surface)); transform: translateY(-2px); }
+.dl-sug__card:disabled { opacity: .55; cursor: not-allowed; }
+.dl-sug__icon { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
+.dl-sug__card b { font-size: 14px; font-weight: 600; line-height: 1.35; text-align: match-parent; }
+.dl-sug__card small { font: 12px var(--font-mono, monospace); color: var(--muted); }
+@media (max-width: 1023px) { .dl-sug { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* ── Reduced motion: everything still. ─────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .dl-hero > *, .dl-ill *, .dl-ill, .dl-ill__glow, .dl-ill__bars i, .dl-pick__pop, .dl-sug__card,
+  .dl-ask--v2 .dl-hist, .dl-ask--v2 .dl-hist--open { animation: none !important; transition: none !important; }
+}

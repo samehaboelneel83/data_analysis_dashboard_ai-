@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import toast from 'react-hot-toast'
 import { usePrompt } from '../ui/PromptDialog'
 import { AlertTriangle, Code2, Copy, Database, Download, Pencil, RotateCcw, Sparkles, ThumbsDown, ThumbsUp, User } from 'lucide-react'
@@ -65,6 +65,10 @@ export interface ChatPaneProps {
   /** A question to start the box with (Home's question box and its starters
    *  hand one over through `/ask?q=`). Put in the box, never sent for you. */
   initialInput?: string
+  /** Step 10: what an empty thread shows instead of the starter chips -- the
+   *  Ask AI page's "What would you like to know?" hero and its suggestion
+   *  cards. Handed the pane's own send, so a card is sent like a typed question. */
+  startView?: (ask: (question: string) => void, busy: boolean) => ReactNode
 }
 
 type MessageKind = 'answer' | 'clarify' | 'error' | 'limit'
@@ -138,7 +142,7 @@ function isProposals(p: unknown): p is DashboardProposalsPresentation {
 }
 
 export default function ChatPane({ dataSourceId, datasetIds, conversationId, onConversationCreated,
-  suggestions, datasetColumns, onAddToPage, initialInput }: ChatPaneProps) {
+  suggestions, datasetColumns, onAddToPage, initialInput, startView }: ChatPaneProps) {
   const t = useT()
   const { direction } = useDirection()
   // Model and server text: markup rendered, laid out by its majority script.
@@ -426,7 +430,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
         {loading && <p className="dl-chat__note">{t('common.loading')}</p>}
         {loadError && <p role="alert" className="dl-chat__note dl-chat__note--error">{loadError}</p>}
         {!loading && !loadError && messages.length === 0 && (
-          suggestions && suggestions.length > 0 ? (
+          startView ? (pending === null ? startView(q => void send(q), busy) : null) : suggestions && suggestions.length > 0 ? (
             <div className="dl-chat__start">
               <p className="dl-chat__start-title">{t('ask.tryOne')}</p>
               <div className="dl-chips" role="group" aria-label={t('ask.suggested')}>

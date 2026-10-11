@@ -98,14 +98,14 @@ describe('AskAI', () => {
     expect(await screen.findByTestId('chat-pane')).toHaveTextContent('source:3')
   })
 
-  it('before a scope is picked, shows only the data step -- no locked question box', async () => {
-    // The locked composer was a second control nobody could use; the question
-    // box now appears only once data is chosen.
+  it('before a scope is picked, shows Step 1 and the question box locked (step 10 design)', async () => {
+    // The design shows the box at the foot from the start, locked, so the
+    // order of things is obvious; it cannot be typed in until data is chosen.
     renderAt('/ask')
     expect(await screen.findByRole('heading', { name: 'Ask your data anything' })).toBeInTheDocument()
     expect(screen.getByText('Choose your data')).toBeInTheDocument()
-    expect(screen.queryByText(/Step \d/)).not.toBeInTheDocument()
-    expect(screen.queryByRole('textbox', { name: 'Your question' })).not.toBeInTheDocument()
+    expect(screen.getByText('Step 1')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Your question' })).toBeDisabled()
   })
 
   it('a failed dataset list is an error, never "no data yet"', async () => {
@@ -157,14 +157,15 @@ describe('AskAI — the conversation list', () => {
   ]
   beforeEach(() => vi.mocked(agentApi.listConversations).mockResolvedValue(CONVS))
 
-  it('lists only the threads about the current scope and opens the newest', async () => {
+  it('lists only the threads about the current scope, and opens a new chat (step 10)', async () => {
     renderAt('/ask?dataset=32')
     const list = await screen.findByRole('list', { name: /conversations/i })
     expect(list).toHaveTextContent('Orders by city')
     expect(list).toHaveTextContent('Older orders chat')
     expect(list).not.toHaveTextContent('Warehouse chat')
     expect(list).not.toHaveTextContent('Other dataset')
-    expect(screen.getByTestId('chat-pane')).toHaveTextContent('conversation:55')
+    // The design's "dataset picked" state: the threads are one click away.
+    expect(screen.getByTestId('chat-pane')).toHaveTextContent('conversation:null')
   })
 
   it('a source scope lists the source threads', async () => {
@@ -172,7 +173,7 @@ describe('AskAI — the conversation list', () => {
     const list = await screen.findByRole('list', { name: /conversations/i })
     expect(list).toHaveTextContent('Warehouse chat')
     expect(list).not.toHaveTextContent('Orders by city')
-    expect(screen.getByTestId('chat-pane')).toHaveTextContent('conversation:40')
+    expect(screen.getByTestId('chat-pane')).toHaveTextContent('conversation:null')
   })
 
   it('picking another thread hands its id to the pane', async () => {
@@ -196,7 +197,7 @@ describe('AskAI — the conversation list', () => {
 
   it('with no thread for the scope yet, the pane starts empty', async () => {
     renderAt('/ask?dataset=7')
-    expect(await screen.findByTestId('chat-pane')).toHaveTextContent('conversation:12')
+    expect(await screen.findByTestId('chat-pane')).toHaveTextContent('conversation:null')
     vi.mocked(agentApi.listConversations).mockResolvedValue([])
     renderAt('/ask?dataset=8')
     await waitFor(() =>

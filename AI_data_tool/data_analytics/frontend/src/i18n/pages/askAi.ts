@@ -1,0 +1,94 @@
+/**
+ * Step 10: the redesigned Ask AI page (design handoff `ask-data.js`), in
+ * English and Arabic. Spread into en.ts / ar.ts. Keys start with "ask2." and
+ * the two objects hold the same keys. Counts are whole templates with plural
+ * forms, never a number glued to a noun.
+ */
+
+/** Arabic counted nouns: "صف واحد", "صفّان", "3 صفوف", "11 صفًا", "100 صف". */
+const arCount = (v: string, one: string, two: string, few: string, many: string, other: string) =>
+  `{${v}, plural, zero{# ${other}} one{${one}} two{${two}} few{# ${few}} many{# ${many}} other{# ${other}}}`
+
+export const en = {
+  // Hero, step 1
+  'ask2.hero.title': 'Ask your data anything',
+  'ask2.hero.sub': 'Pick a dataset, ask in plain language, and get answers with the rows and SQL behind them.',
+  'ask2.step': 'Step {n}',
+  'ask2.step1': 'Choose your data',
+  'ask2.step2': 'Ask a question',
+  'ask2.pendingQ': 'Choose the data to ask this about:',
+  // Picker
+  'ask2.pick.trigger': 'Choose a dataset or connection',
+  'ask2.pick.datasets': '{n, plural, one {# dataset} other {# datasets}}',
+  'ask2.pick.connections': '{n, plural, one {# connection} other {# connections}}',
+  'ask2.pick.try': 'Try: {name}',
+  'ask2.pick.dialog': 'Choose your data',
+  'ask2.pick.search': 'Search datasets and connections…',
+  'ask2.pick.all': 'All',
+  'ask2.pick.tabDatasets': 'Datasets',
+  'ask2.pick.tabConnections': 'Connections',
+  'ask2.pick.recent': 'Recent',
+  'ask2.pick.rows': '{n, plural, one {# row} other {# rows}}',
+  'ask2.pick.cols': '{n, plural, one {# column} other {# columns}}',
+  'ask2.pick.live': 'Live connection',
+  'ask2.pick.liveType': '{type} · live connection',
+  'ask2.pick.updated': 'Updated {date}',
+  'ask2.pick.noMatch': 'No matches for “{q}”',
+  'ask2.pick.move': 'to move',
+  'ask2.pick.select': 'to select',
+  'ask2.pick.close': 'to close',
+  'ask2.pick.upload': 'Upload dataset',
+  'ask2.pick.change': 'Change data: {name}',
+  // Dataset picked
+  'ask2.ctx.asking': 'Asking about',
+  'ask2.picked.title': 'What would you like to know?',
+  'ask2.picked.sub': 'Ask in plain language, or start from a suggestion based on the columns in {name}.',
+  'ask2.picked.subSource': 'Ask in plain language, or start from a suggestion about {name}.',
+  'ask2.sug.aria': 'Suggested questions',
+  // History button and composer (locked before step 1)
+  'ask2.hist.show': 'Show history',
+  'ask2.hist.button': 'History',
+  'ask2.composer.chooseFirst': 'Choose your data above to start asking',
+  'ask2.composer.lock': 'Complete step 1 first',
+  'ask2.disclaimer': 'Answers are generated from your data. Check the SQL before you share them.',
+} as const
+
+export const ar: Record<keyof typeof en, string> = {
+  'ask2.hero.title': 'اسأل بياناتك عن أي شيء',
+  'ask2.hero.sub': 'اختر مجموعة بيانات، واسأل بلغتك اليومية، واحصل على إجابات مع الصفوف واستعلام SQL الذي بُنيت عليه.',
+  'ask2.step': 'الخطوة {n}',
+  'ask2.step1': 'اختر بياناتك',
+  'ask2.step2': 'اطرح سؤالاً',
+  'ask2.pendingQ': 'اختر البيانات التي تريد أن تسأل عنها:',
+  'ask2.pick.trigger': 'اختر مجموعة بيانات أو اتصالاً',
+  'ask2.pick.datasets': arCount('n', 'مجموعة بيانات واحدة', 'مجموعتا بيانات', 'مجموعات بيانات', 'مجموعة بيانات', 'مجموعة بيانات'),
+  'ask2.pick.connections': arCount('n', 'اتصال واحد', 'اتصالان', 'اتصالات', 'اتصالاً', 'اتصال'),
+  'ask2.pick.try': 'جرّب: {name}',
+  'ask2.pick.dialog': 'اختر بياناتك',
+  'ask2.pick.search': 'ابحث في مجموعات البيانات والاتصالات…',
+  'ask2.pick.all': 'الكل',
+  'ask2.pick.tabDatasets': 'مجموعات البيانات',
+  'ask2.pick.tabConnections': 'الاتصالات',
+  'ask2.pick.recent': 'الأخيرة',
+  'ask2.pick.rows': arCount('n', 'صف واحد', 'صفّان', 'صفوف', 'صفًا', 'صف'),
+  'ask2.pick.cols': arCount('n', 'عمود واحد', 'عمودان', 'أعمدة', 'عمودًا', 'عمود'),
+  'ask2.pick.live': 'اتصال مباشر',
+  'ask2.pick.liveType': '{type} · اتصال مباشر',
+  'ask2.pick.updated': 'حُدّث {date}',
+  'ask2.pick.noMatch': 'لا توجد نتائج لـ «{q}»',
+  'ask2.pick.move': 'للتنقل',
+  'ask2.pick.select': 'للاختيار',
+  'ask2.pick.close': 'للإغلاق',
+  'ask2.pick.upload': 'رفع مجموعة بيانات',
+  'ask2.pick.change': 'تغيير البيانات: {name}',
+  'ask2.ctx.asking': 'تسأل عن',
+  'ask2.picked.title': 'ماذا تريد أن تعرف؟',
+  'ask2.picked.sub': 'اسأل بلغتك اليومية، أو ابدأ من اقتراح مبني على أعمدة {name}.',
+  'ask2.picked.subSource': 'اسأل بلغتك اليومية، أو ابدأ من اقتراح عن {name}.',
+  'ask2.sug.aria': 'أسئلة مقترحة',
+  'ask2.hist.show': 'إظهار السجل',
+  'ask2.hist.button': 'السجل',
+  'ask2.composer.chooseFirst': 'اختر بياناتك أعلاه لتبدأ بالسؤال',
+  'ask2.composer.lock': 'أكمل الخطوة 1 أولاً',
+  'ask2.disclaimer': 'تُنشأ الإجابات من بياناتك. راجع استعلام SQL قبل مشاركتها.',
+}
