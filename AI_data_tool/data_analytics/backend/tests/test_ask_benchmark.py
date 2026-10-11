@@ -77,6 +77,9 @@ class TestScoring:
         c = case("refuse")
         assert score(c, ok("I can't create or edit dashboards from Ask AI."))["correct"]
         assert score(c, ok("لا تتوفر بيانات عن الرواتب في هذه المجموعة."))["correct"]
+        # "This data does not contain ..." declines as plainly (benchmark 2026-10-11).
+        assert score(c, ok("لا يحتوي هذا البيانات على معلومات عن الرواتب أو الموظفين."))["correct"]
+        assert score(c, ok("This dataset does not contain that information."))["correct"]
         assert score(c, {"status": "needs_clarification", "answer": "Which salary do you mean?"})["correct"]
         assert score(c, ok("The CEO earns 250,000."))["why"] == "stated a number"
 

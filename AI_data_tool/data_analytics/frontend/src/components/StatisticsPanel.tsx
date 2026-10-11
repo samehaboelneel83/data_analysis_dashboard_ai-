@@ -71,6 +71,9 @@ const PARAM_LABEL: Record<string, MessageKey> = {
   target: 'stat.param.target', target_value: 'stat.param.targetValue',
   target_y: 'stat.param.targetY', duration_col: 'stat.param.durationCol',
   event_col: 'stat.param.eventCol',
+  entity: 'stat.param.entity', change_pct: 'stat.param.changePct', floor: 'stat.param.floor',
+  date_column: 'stat.param.dateColumn', measure: 'stat.param.measure', factors: 'stat.param.factors',
+  granularity: 'stat.param.granularity', periods: 'stat.param.periods',
 }
 export function paramLabel(key: string, t: (k: MessageKey) => string): string {
   const k = PARAM_LABEL[key]

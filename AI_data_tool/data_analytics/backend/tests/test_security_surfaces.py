@@ -235,6 +235,12 @@ SURFACES: list[Surface] = [
             denied_variant={"body": {"dataset_id": "{ds}", "dimensions": ["salary"]}}),
     Surface("semantic rows", "GET", "/api/v1/semantic/datasets/{ds}/rows"),
     Surface("dependents", "GET", "/api/v1/datasets/{ds}/dependents", params={"name": "headcount"}),
+    # The discovery engine's doors (docs/discovery/PLAN.md): what the data
+    # supports and shows, its column cards, its health, the shape of a decision.
+    Surface("opportunities", "GET", "/api/v1/datasets/{ds}/opportunities", params={"depth": 1, "fresh": "true"}),
+    Surface("column profile cards", "GET", "/api/v1/datasets/{ds}/profile"),
+    Surface("health checks", "GET", "/api/v1/datasets/{ds}/health"),
+    Surface("decision problems", "GET", "/api/v1/datasets/{ds}/decision-problems"),
 ]
 
 #: `/datasets/{dataset_id}/...` routes deliberately NOT walked here, each with
@@ -260,6 +266,11 @@ EXCUSED_ROUTES = {
     ("POST", "/api/v1/datasets/{dataset_id}/checks/try"): "editors only; check results are counts and column names, never values from the data (services/data_checks.py); test_data_checks.py",
     ("GET", "/api/v1/datasets/{dataset_id}/refresh-runs"): "editors only; run status, row totals and count-only check results; test_data_checks.py",
     ("GET", "/api/v1/datasets/{dataset_id}/incremental"): "load settings; the watermark (the newest cursor value loaded) only for editors; test_incremental_merge.py",
+    # Discovery plan:
+    ("POST", "/api/v1/datasets/{dataset_id}/decision-problems/specification"): "returns the problem as the caller described it -- column names, counts and checks, never a row; 403 when a denied column is named; computed over alerts.alert_frame (the caller's row rules and denied columns); test_decision_problem.py",
+    ("GET", "/api/v1/datasets/{dataset_id}/allow-ai"): "the 'Allow AI' setting and who decides it; no row content; test_dataset_allow_ai.py",
+    ("GET", "/api/v1/datasets/{dataset_id}/column-lineage"): "where a column comes from and what uses it -- names and definitions, the SQL only for editors; no row content (docs/pipeline/PLAN.md, P5)",
+    ("POST", "/api/v1/datasets/{dataset_id}/column-meta/classify-again"): "data capability required; re-reads what each number IS (kinds, not values) with denied columns left out of what the model is shown; returns column_meta as the dataset detail does; test_column_classes.py",
 }
 
 

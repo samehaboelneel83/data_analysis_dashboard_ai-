@@ -3483,6 +3483,76 @@ async def dataset_health(dataset_id: int, db: AsyncSession = Depends(get_db),
         raise HTTPException(400, str(exc))
 
 
+class DecisionProblemIn(BaseModel):
+    """What the PERSON says about a decision recognised on a dataset: nothing
+    in it is inferred (services/discovery/decision.py)."""
+    problem: str
+    objective: str
+    direction: str
+    # choosing among options
+    key: str | None = None
+    limited: str | None = None
+    limit: float | None = None
+    at_most: int | None = None
+    # matching two sets
+    from_col: str | None = None
+    to_col: str | None = None
+    each_from: str | None = None
+    each_to_at_most: int | None = None
+
+
+@router.get("/{dataset_id}/decision-problems")
+async def decision_problems(dataset_id: int, db: AsyncSession = Depends(get_db),
+                            current_user: User = Depends(get_current_user)):
+    """The decisions this table has the SHAPE of -- options with amounts that
+    add up; every one of A against every one of B -- read off the stored
+    profile. Empty when it has neither. Nothing is solved here."""
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
+    if not ds.filename and ds.mode != "directquery":
+        raise HTTPException(400, "This dataset has no rows to analyse yet")
+    from ..services import analysis_frame as frames
+    from ..services.discovery import engine as discovery
+    try:
+        return await discovery.decision_problems(db, current_user, ds)
+    except frames.FrameUnavailable as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/{dataset_id}/decision-problems/specification")
+async def decision_problem_specification(dataset_id: int, body: DecisionProblemIn,
+                                         db: AsyncSession = Depends(get_db),
+                                         current_user: User = Depends(get_current_user)):
+    """The decision as the person described it, checked on the rows and
+    returned as a neutral, versioned document a solver elsewhere can read
+    (`schema: datalytics.decision-problem/1`). It is not solved, stored or
+    sent anywhere."""
+    import asyncio
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
+    from ..core.rls import resolve_denied_columns
+    from ..services import alerts
+    from ..services.discovery import decision
+    from ..services.discovery import profile as profile_store
+    try:
+        df = await alerts.alert_frame(db, ds, current_user)
+    except Exception:                                           # noqa: BLE001
+        raise HTTPException(400, "This dataset could not be read")
+    denied = {str(c).casefold() for c in await resolve_denied_columns(db, current_user, dataset_id) or []}
+    named = [c for c in (body.key, body.objective, body.limited, body.from_col, body.to_col) if c]
+    if any(c.casefold() in denied for c in named):
+        raise HTTPException(403, "One of those columns is not available to you")
+    choices = body.model_dump(exclude={"problem"}, exclude_none=True)
+    try:
+        return await asyncio.to_thread(
+            lambda: decision.specify(df, body.problem, dataset={"id": ds.id, "name": ds.name,
+                                                               "version": profile_store.fingerprint(ds)}, **choices))
+    except decision.DecisionProblemError as exc:
+        raise HTTPException(400, str(exc))
+
+
 @router.get("/capabilities/registry")
 async def capability_registry(current_user: User = Depends(get_current_user)):
     """Every widget and analysis with what it needs of the data, what it costs

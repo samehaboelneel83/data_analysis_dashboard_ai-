@@ -82,3 +82,31 @@ settings here" with a typographic apostrophe, which the scorer's refusal pattern
 fixed; the answer was a correct refusal.)
 
 Targets met in English on answers and refusals; Arabic meets the answers target and misses one refusal.
+
+**2026-10-11, later the same day, same model and data — after three changes** (docs/discovery/PLAN.md §AZ):
+the catalogue in the SQL writer's prompt fenced as data; a question that asks "by how much" one figure exceeds
+another routed as an amount instead of a test between groups; and the scorer taught that "this data does not
+contain…" (English and Arabic) is a refusal.
+
+| | English | Arabic |
+|---|---|---|
+| Answers right | 10 of 10 (100 %) | 9 of 10 (90 %) |
+| Ungrounded answers | 0 | 0 |
+| Refusals right | 3 of 3 | 3 of 3 |
+
+* With only the fence added (run in between), the result was identical to the morning's: the same three cases failed.
+* `na-minus-europe.en` now passes: it had been answered with a p-value across all regions and the widest gap of
+  averages. The routing rule is in `nodes/classify.settle_intent`.
+* `refuse-salary.ar` had been a correct refusal all along ("this data does not contain information about…");
+  the scorer did not recognise the phrasing.
+* `avg-margin.ar` still fails, and the cause is now known: the demo dataset has a **defined measure**,
+  "Margin % (on totals)" = (SUM(revenue) − SUM(cost)) / SUM(revenue) × 100, and the SQL writer is told to
+  compute a defined measure exactly when the question names it, "never an average of per-row ratios". The
+  Arabic wording is read as naming that measure (9.98 %); the English wording is read as the `margin_pct`
+  column and averaged (19.01 %), which is what the benchmark expects. So the Arabic answer follows the
+  dataset's own definition and the English one does not. A prompt line telling the model to prefer the stored
+  column was tried and removed: it contradicted the defined-measure rule and changed nothing. Which answer is
+  right is for the owner to say: keep the case as it is, or expect the measure in both languages.
+
+All targets are met in both languages.
+

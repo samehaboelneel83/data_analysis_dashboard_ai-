@@ -106,6 +106,14 @@ class Settings(BaseSettings):
     #   both  -- the model's own proposals join the validated set, and it also
     #            chooses among everything that survived.
     suggest_ai_selection: Literal["cards", "free", "both"] = "cards"
+    # The same choice for the GUIDED SETUP's designer, which answers the
+    # person's own questions. "free" by default, measured (2026-10-11, five
+    # questions about one part of a table): free answered five in 66 s, both
+    # five in 108 s, cards two or three in 25 s -- a question about a PART of
+    # the rows ("among the returned ones") needs a filter no ready-made chart
+    # carries. Every chart is drawn and judged before it is offered in all
+    # three modes.
+    setup_ai_selection: Literal["cards", "free", "both"] = "free"
     # What each numeric column of a dataset IS (an amount to add up, a level to
     # average, a code...) is asked of the model ONCE per dataset and kept in
     # its column settings (services/column_classes.py). That is what lets the
@@ -217,6 +225,14 @@ class Settings(BaseSettings):
     # process that must not do background work (a one-off admin shell, a
     # dedicated web-only replica while another process runs the jobs).
     job_worker_enabled: bool = True
+    # The longest ONE background job may run (an import, a refresh, an analysis,
+    # an automation). Past it the job ends as failed with "took too long", so a
+    # stuck job cannot hold the worker for good. Generous: a large import is
+    # legitimately slow. 0 = no limit.
+    job_time_limit_s: int = Field(default=7200, ge=0)
+    # AI tokens ONE person may use in a day, besides the organisation's own
+    # budget: one heavy user cannot spend everyone's. 0 = no per-person limit.
+    ai_tokens_per_user_per_day: int = Field(default=0, ge=0)
 
     # E07: the zone every offset-carrying timestamp is stored in, as plain
     # wall-clock time (services/timezones.py). An IANA name; UTC unless an

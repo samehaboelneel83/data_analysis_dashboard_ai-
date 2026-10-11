@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from ..context import SchemaContext
+from ...llm import data_block
 from ...analysis.registry import render_prompt_block as render_analyses_block
 from .followup import render_history
 
@@ -122,7 +123,10 @@ async def generate_sql(question: str, context: SchemaContext,
         # Rendered from the SAME registry `GET /analysis/registry` serves
         # (services/analysis/registry.py), so the two can never drift apart.
         f"\n{render_analyses_block()}",
-        f"\n{context.render(question=question)}",
+        # The catalogue (names, descriptions, value labels, glossary) is text
+        # written by whoever built the tables: fenced as data like every
+        # other piece of theirs (llm.DATA_RULE; phase 0 left this one open).
+        "\n" + data_block(context.render(question=question), "the tables, columns, value labels and rules in scope"),
     ]
     if examples:
         shown = "\n".join(f"Q: {e['question']}\nSQL: {e['sql']}"

@@ -665,4 +665,9 @@ class TestAllowAi:
         world["dataset"].allow_ai = False
         await db_session.commit()
         r = await call(client, auth_headers["a"], world, "add a chart")
-        assert r.status_code == 409 and "switched off" in r.json()["detail"]
+        # Not a refusal any more: what the platform can do by itself, and the
+        # page is left as it was (services/copilot_without_model.py).
+        assert r.status_code == 200, r.text
+        got = r.json()
+        assert got["without_ai"] is True and got["applied"] == []
+        assert "switched off" in got["reply"] and "not changed" in got["reply"]

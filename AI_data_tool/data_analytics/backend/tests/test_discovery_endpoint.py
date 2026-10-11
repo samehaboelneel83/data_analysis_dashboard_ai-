@@ -77,7 +77,7 @@ async def test_every_card_keeps_fit_evidence_claim_and_cost_apart(client, two_or
     for card in got["cards"]:
         assert card["claim"] in ("observation", "association", "prediction", "hypothesis")
         assert card["cost"]["tier"] in (0, 1, 2) and card["source"] == "deterministic"
-        assert card["action"]["kind"] in ("add_widget", "run_analysis", "open")
+        assert card["action"]["kind"] in ("add_widget", "run_analysis", "open", "decision_problem")
         assert card["evidence"] is None or card["evidence"]["band"] in ("strong", "moderate", "weak")
     assert all("confidence" not in card for card in got["cards"])                 # no single score
 

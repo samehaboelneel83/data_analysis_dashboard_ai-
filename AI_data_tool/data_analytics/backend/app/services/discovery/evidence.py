@@ -197,6 +197,24 @@ def _two_groups(card: dict, df: pd.DataFrame, meta) -> tuple[str, dict | None, s
            other=m["other"], base=m["baseline"], lift=f"{m['lift_pct']:+.1f}" if m["lift_pct"] is not None else "")
 
 
+def _cohort(card: dict, df: pd.DataFrame, meta) -> tuple[str, dict | None, str]:
+    """Kept when enough of them repeat for "who comes back" to be a question
+    with an answer; what the rows show is the analysis' own headline."""
+    from ..analysis.cohort_retention import CohortRetentionError, cohort_retention
+    p = card["action"]["params"]
+    try:
+        m = cohort_retention(df, p["entity"], p["date_column"], p.get("granularity") or "month").to_dict()["meta"]
+    except CohortRetentionError:
+        return "drop", None, _s("ev.no.cohort", "Too few of them appear more than once to say who comes back.")
+    back = float(m["first_back"] or 0.0)
+    if m["cohorts"] < 3:
+        return "drop", None, _s("ev.no.cohorts", "The dates cover too few periods to follow anyone from one to the next.")
+    return "keep", _ev("strong" if m["entities"] >= 300 else "moderate", min(back / 100, 1.0), "cohort",
+                       first_back=m["first_back"], settled=m["settled"], entities=m["entities"]), \
+        _s("ev.cohort", "{first}% are seen again the month after their first, and {last}% are still seen {k} months on.",
+           first=m["first_back"], last=m["settled"], k=m["settled_period"])
+
+
 def _scenarios(card: dict, df: pd.DataFrame, _meta) -> tuple[str, dict | None, str]:
     from ..analysis.forecast_scenario import ForecastScenarioError, forecast_scenario
     p = card["action"]["params"]
@@ -302,8 +320,10 @@ def _which(card: dict):
         return _pair
     if cap == "compare_two_groups":
         return _two_groups
-    if cap == "compare_scenarios":
+    if cap in ("compare_scenarios", "simulate_scenarios"):
         return _scenarios
+    if cap == "cohort_retention":
+        return _cohort
     if cap == "stage_board":
         return _stages
     if cap == "explain_change":

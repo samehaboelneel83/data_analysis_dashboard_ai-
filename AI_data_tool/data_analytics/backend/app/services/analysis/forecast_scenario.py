@@ -33,6 +33,8 @@ number:
 """
 from __future__ import annotations
 
+from ..readback import _s, as_i18n
+
 import pandas as pd
 
 #: Enough periods that a fit over a trend plus factors is not drawing a line
@@ -153,28 +155,28 @@ def forecast_scenario(df: pd.DataFrame, date_column: str, measure: str,
     scenario_total = round(sum(p["value"] for p in scenario), 4)
 
     caveats = [
-        "This is association, not intervention. The model has only seen these "
-        "columns move together -- moving one inside the model is not the same "
-        "as changing it in the world, and a factor that rises with the measure "
-        "may be an effect of it rather than a cause.",
-        f"Factors you did not adjust are held at their average over the last "
-        f"{RECENT_PERIODS} periods.",
-        f"Fitted over {len(grouped)} periods; the fit explains "
-        f"{round(float(fitted.rsquared), 4)} of the variation.",
+        _s("fs.assoc", "This is association, not intervention. The model has only seen these "
+           "columns move together -- moving one inside the model is not the same "
+           "as changing it in the world, and a factor that rises with the measure "
+           "may be an effect of it rather than a cause."),
+        _s("fs.held", "Factors you did not adjust are held at their average over the last "
+           "{n} periods.", n=RECENT_PERIODS),
+        _s("fs.fitted", "Fitted over {n} periods; the fit explains "
+           "{r2} of the variation.", n=len(grouped), r2=round(float(fitted.rsquared), 4)),
     ]
     weak = [f["column"] for f in per_factor if f["p_value"] > 0.05]
     if weak:
         caveats.append(
-            f"There is no strong evidence that {', '.join(weak)} moves this "
-            f"measure at all (p > 0.05) -- a scenario built on it is a guess "
-            f"wearing a number.")
+            _s("fs.weak", "There is no strong evidence that {cols} moves this "
+               "measure at all (p > 0.05) -- a scenario built on it is a guess "
+               "wearing a number.", cols=', '.join(weak)))
     if stretched:
         ranges = "; ".join(
             f"{f['column']} has only ever been between {f['observed_min']:,} and "
             f"{f['observed_max']:,}" for f in per_factor if f["column"] in stretched)
         caveats.append(
-            f"That scenario goes outside anything observed -- {ranges}. The "
-            f"projection is an extrapolation, not evidence.")
+            _s("fs.outside", "That scenario goes outside anything observed -- {ranges}. The "
+               "projection is an extrapolation, not evidence.", ranges=ranges))
 
     return {
         "kind": "forecast_scenario",
@@ -192,5 +194,6 @@ def forecast_scenario(df: pd.DataFrame, date_column: str, measure: str,
         "periods_fitted": int(len(grouped)),
         "horizon": horizon,
         "extrapolating": extrapolating,
-        "caveats": caveats,
+        "caveats": [str(c) for c in caveats],
+        "caveats_i18n": [as_i18n(c) for c in caveats],
     }

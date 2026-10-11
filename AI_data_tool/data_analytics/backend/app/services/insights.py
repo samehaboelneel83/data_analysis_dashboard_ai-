@@ -152,7 +152,11 @@ def _apply_multiple_comparison_correction(findings: list[dict]) -> None:
     """
     tested = [f for f in findings if f.get("p_value") is not None]
     if len(tested) < 2:
-        return          # nothing to correct against
+        # A family of one: the adjusted value IS the value. Said, so a reader
+        # (and a test) can tell the correction looked at this finding.
+        for f in tested:
+            f["p_adjusted"] = round(float(f["p_value"]), 6)
+        return
     # `.analysis`, not `..analysis`: this module is app.services.insights, so
     # two dots resolve to app.analysis, which does not exist. The first version
     # of this had the wrong depth and the broad `except` below turned that typo

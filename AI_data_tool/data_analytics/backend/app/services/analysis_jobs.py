@@ -59,7 +59,6 @@ async def run_analysis_job(ctx: jobs.JobContext) -> None:
     from ..models.models import Dataset
     from ..routers.analysis import _refuse_denied, _secured_frame, _strings_in
     from .analysis import registry
-    from fastapi import HTTPException
 
     dataset_id, name = int(ctx.inputs["dataset_id"]), str(ctx.inputs["name"])
     params = ctx.inputs.get("params") or {}
@@ -77,7 +76,11 @@ async def run_analysis_job(ctx: jobs.JobContext) -> None:
         try:
             df, denied = await _secured_frame(dataset_id, db, user)
             _refuse_denied(_strings_in(params), denied)
-        except HTTPException as exc:
+        except Exception as exc:                             # noqa: BLE001
+            # The router's own refusal (an HTTP error) becomes the job's, in its
+            # words; told apart by shape so this service imports no web framework.
+            if not (hasattr(exc, "status_code") and hasattr(exc, "detail")):
+                raise
             raise jobs.JobError(str(exc.detail), code="refused")
     await ctx.checkpoint("computing", rows=int(len(df)))
     try:

@@ -23,6 +23,8 @@ a refusal carries its reason in words (constitution rule 1).
 """
 from __future__ import annotations
 
+from .readback import _s, as_i18n
+
 import math
 from typing import Any
 
@@ -382,8 +384,8 @@ def shape_model_tree(df: pd.DataFrame, config: dict) -> dict:
     # always a relabelling of the response (product -> category), not a finding.
     top = max(importance, key=lambda kv: kv[1] or 0, default=None)
     if top and (top[1] or 0) >= 0.98 and (_num(r.get("score")) or 0) >= 0.98:
-        warnings.append(f"'{top[0]}' alone determines {target}. It is probably another name for the "
-                        f"answer rather than a predictor; leave it out to learn something new.")
+        warnings.append(_s("mw.leak", "'{c}' alone determines {target}. It is probably another name for the "
+                           "answer rather than a predictor; leave it out to learn something new.", c=top[0], target=target))
     return {
         "type": "model", "status": "ok", "model": "tree", "target": target,
         "predictors": r.get("predictors_used", []), "result": r,
@@ -392,7 +394,8 @@ def shape_model_tree(df: pd.DataFrame, config: dict) -> dict:
                 "secondary": {"on the rows it trained on": _num(r.get("train_score")),
                               "rows held out for scoring": r.get("n_test"),
                               **_guess_baseline(df, target, r.get("score_name"))}},
-        "warnings": warnings,
+        "warnings": [str(w) for w in warnings],
+        "warnings_i18n": [as_i18n(w) for w in warnings],
         "rows": [{"name": k, "value": v} for k, v in importance],
     }
 
@@ -642,7 +645,8 @@ def shape_model_influencers(df: pd.DataFrame, config: dict) -> dict:
 #: Analyses that can sit on a page as a tile: quick, read from the page's own
 #: rows, and each with a result view of its own. Not the whole catalogue -- a
 #: model that takes a minute to fit is not something a filter click re-runs.
-TILE_ANALYSES = ("explain_change", "explain_variance", "compare_two_groups", "stage_board", "compare_scenarios")
+TILE_ANALYSES = ("explain_change", "explain_variance", "compare_two_groups", "stage_board", "compare_scenarios",
+                 "cohort_retention", "simulate_scenarios")
 
 
 def shape_analysis_result(df: pd.DataFrame, config: dict) -> dict:

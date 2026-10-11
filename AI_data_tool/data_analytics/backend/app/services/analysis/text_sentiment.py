@@ -19,6 +19,8 @@ What it reports beyond the split, because a lexicon is easy to over-trust:
 """
 from __future__ import annotations
 
+from ..readback import _s, as_i18n
+
 from collections import Counter, defaultdict
 
 import pandas as pd
@@ -161,18 +163,19 @@ def text_sentiment(df: pd.DataFrame, column: str, group_by: str | None = None,
     lang_names = [LANGUAGE_NAMES.get(code, code) for code in langs["languages"]]
     uncovered = [n for n in lang_names if n not in ("English", "Arabic")]
     caveats = [
-        "A lexicon estimate: each comment is scored from the words it contains, with "
-        "negation, intensifiers and 'but' handled. It misses sarcasm, and a domain word "
-        "can read the wrong way -- check the words that drove the result.",
-        f"{split['unscored']:,} of {len(texts):,} comments contain no scored word and are "
-        f"left unscored rather than counted as neutral.",
+        _s("ts.lexicon", "A lexicon estimate: each comment is scored from the words it contains, with "
+           "negation, intensifiers and 'but' handled. It misses sarcasm, and a domain word "
+           "can read the wrong way -- check the words that drove the result."),
+        _s("ts.unscored", "{n} of {total} comments contain no scored word and are "
+           "left unscored rather than counted as neutral.", n=f"{split['unscored']:,}", total=f"{len(texts):,}"),
     ]
     if uncovered:
-        caveats.append(f"The lexicon covers English and Arabic; this column also looks "
-                       f"{', '.join(uncovered)}, whose words are not scored.")
+        caveats.append(_s("ts.uncovered", "The lexicon covers English and Arabic; this column also looks "
+                          "{langs}, whose words are not scored.", langs=', '.join(uncovered)))
     if agreement and agreement.get("agreement") is not None:
-        caveats.append(f"Against '{validate_against}', the lexicon agrees on "
-                       f"{agreement['agreement'] * 100:.0f}% of {agreement['compared']:,} comments.")
+        caveats.append(_s("ts.agrees", "Against '{col}', the lexicon agrees on "
+                          "{pct}% of {n} comments.", col=validate_against,
+                          pct=f"{agreement['agreement'] * 100:.0f}", n=f"{agreement['compared']:,}"))
 
     return {
         "kind": "text_sentiment",
@@ -189,5 +192,6 @@ def text_sentiment(df: pd.DataFrame, column: str, group_by: str | None = None,
         "most_negative": most_negative,
         "groups": groups,
         "agreement": agreement,
-        "caveats": caveats,
+        "caveats": [str(c) for c in caveats],
+        "caveats_i18n": [as_i18n(c) for c in caveats],
     }

@@ -1,3 +1,4 @@
+import SaidItems, { saidOf } from '../analysis/SaidItems'
 import { useCallback, useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import { Brain } from 'lucide-react'
@@ -193,7 +194,7 @@ export function ModelCardView({ m, dataset, datasetId }: { m: PredictionModelSum
         list: <bdi>{(c.predictors_used ?? m.features).join(', ') || '—'}</bdi>,
         skipped: <bdi>{skipped.join(', ')}</bdi>,
       })}</div>
-      {(c.caveats?.length ?? 0) > 0 && <ul style={{ margin: 0, paddingInlineStart: 18 }}>{c.caveats!.map(x => <li key={x}>{x}</li>)}</ul>}
+      {(c.caveats?.length ?? 0) > 0 && <ul style={{ margin: 0, paddingInlineStart: 18 }}><SaidItems texts={c.caveats} i18n={saidOf(c)} /></ul>}
       {datasetId != null && <DriftCheck m={m} datasetId={datasetId} />}
     </div>
   )

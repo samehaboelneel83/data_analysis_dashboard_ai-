@@ -24,8 +24,17 @@ def hr_frame(n=3000, seed=1):
 TYPES = {"emp_no": "numeric", "dept_name": "categorical", "title": "categorical", "salary": "numeric"}
 
 
+#: What a pay column IS, as the stored classification says it (a level: read
+#: as an average). Since the platform stopped guessing by one field's nouns
+#: (docs/suggestions/PLAN.md §7, tests/test_domain_neutral.py) the NAME
+#: "salary" alone says nothing: an unclassified number is totalled until
+#: someone -- or the one-time classification -- says what it is.
+META = {"salary": {"number": "level"}}
+
+
 def test_default_summary_by_name_and_meta():
-    assert default_summary("salary") == "avg"
+    assert default_summary("salary", META) == "avg"
+    assert default_summary("salary") == "sum"                   # the name alone decides nothing
     assert default_summary("unit_price") == "avg"
     assert default_summary("amount") == "sum"
     assert default_summary("emp_no") == "countd"
@@ -34,7 +43,7 @@ def test_default_summary_by_name_and_meta():
 
 
 def test_salary_findings_are_about_averages_not_shares():
-    out = generate_insights(hr_frame(), TYPES)
+    out = generate_insights(hr_frame(), TYPES, META)
     titles = [f["title"] for f in out["findings"]]
     assert not any("% of salary" in t for t in titles), titles
     assert any("highest average salary" in t and t.startswith("Sales") for t in titles), titles
@@ -51,9 +60,9 @@ def test_value_glosses_only_apply_to_codes():
 
 
 def test_suggestions_average_salary():
-    out = generate_insights(hr_frame(), TYPES)
+    out = generate_insights(hr_frame(), TYPES, META)
     sugs = suggest_widgets_from_findings(out["findings"], {"dept_name": "categorical", "title": "categorical",
-                                                           "salary": "numeric", "emp_no": "numeric"})
+                                                           "salary": "numeric", "emp_no": "numeric"}, column_meta=META)
     pay = [s for s in sugs if s["config"].get("measure") == "salary"]
     assert pay and all(s["config"]["aggregation"] == "avg" for s in pay)
 

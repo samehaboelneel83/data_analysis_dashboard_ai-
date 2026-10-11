@@ -213,3 +213,34 @@ def test_what_the_new_analyses_warn_and_conclude_reads_the_same_from_the_catalog
     check(pred["importance_note"], pred["importance_note_i18n"])
     assert {"an.where", "an.avgparts", "an.where.diff", "an.oneonly", "an.random", "an.rarest", "an.tg.higher",
             "an.tg.not_clear", "an.now", "an.open", "an.nofinish", "an.nodue", "an.noorder", "an.weakfit", "an.impnote"} <= seen
+
+
+def test_the_footnotes_of_the_older_analyses_have_keys_in_both_catalogues():
+    """Statistical tests, model comparison, what-if, sentiment, clustering and the
+    model widgets: each caveat or warning is a keyed sentence (§AU), so a reader in
+    Arabic does not meet an English footnote under an Arabic result."""
+    from app.services import model_widgets
+    from app.services.analysis import (automated_prediction, compare_scenarios, forecast_scenario, inferential,
+                                       segment, text_sentiment)
+    en, ar = _cat("en"), _cat("ar")
+    keys = _keys_in(automated_prediction, compare_scenarios, forecast_scenario, inferential, segment,
+                    text_sentiment, model_widgets)
+    assert len(keys) > 40
+    wanted = {"rb." + k for k in keys}
+    assert wanted <= set(en), wanted - set(en)
+    assert wanted <= set(ar), wanted - set(ar)
+    for k in wanted:                                   # the same pieces in both languages
+        assert set(re.findall(r"\{(\w+)\}", en[k])) == set(re.findall(r"\{(\w+)\}", ar[k])), k
+
+
+def test_a_statistical_result_carries_its_footnotes_with_keys():
+    from app.services.analysis.inferential import correlation_test
+    rng = np.random.default_rng(3)
+    df = pd.DataFrame({"a": rng.normal(0, 1, 200)})
+    df["b"] = df["a"] * 0.5 + rng.normal(0, 1, 200)
+    out = correlation_test(df, "a", "b")
+    out = out.to_dict() if hasattr(out, "to_dict") else out
+    assert len(out["caveats_i18n"]) == len(out["caveats"]) and all(out["caveats_i18n"])
+    en = _cat("en")
+    for text, said in zip(out["caveats"], out["caveats_i18n"]):
+        _same(en, text, said)

@@ -226,3 +226,49 @@ describe('the new result views in Arabic', () => {
     localStorage.removeItem('datalytics.language')
   })
 })
+
+describe('who comes back', () => {
+  it('shows each cohort against the periods since its first, leaves what is not lived yet empty, and ends with all cohorts', () => {
+    render(<ResultFor kind="cohort_retention" params={{}} result={{
+      meta: { entity: 'member', date_column: 'seen', granularity: 'month', periods: 2, entities: 4, once_only: 1, cohorts: 2,
+        from: '2025-01', to: '2025-03', first_back: 50, settled: 66.7, settled_period: 2,
+        curve: [{ period: 1, retention: 50, cohorts: 2, entities: 4 }, { period: 2, retention: 66.7, cohorts: 1, entities: 3 }],
+        headline: '50% are seen again in the month after their first.' },
+      rows: [{ cohort: '2025-01', size: 3, p1: 33.3, p2: 66.7 }, { cohort: '2025-02', size: 1, p1: 100, p2: null }],
+      warnings: ['The newest cohorts have not lived through the later periods yet: those cells are empty, not zero.'] }} />)
+    expect(screen.getByTestId('cohort-headline').textContent).toContain('50% are seen again')
+    const rows = screen.getAllByTestId('cohort-row')
+    expect(rows.map(r => r.textContent)).toEqual(['2025-01333.3%66.7%', '2025-021100%'])
+    expect(screen.getByTestId('cohort-typical').textContent).toContain('50%')
+    expect(screen.getByText(/empty, not zero/)).toBeTruthy()
+  })
+})
+
+describe('how sure a what-if is', () => {
+  const row = (scenario: string, median: number, extra: Record<string, unknown> = {}) =>
+    ({ scenario, expected: median, p05: median - 100, p25: median - 40, median, p75: median + 40, p95: median + 100, ...extra })
+  it('leads with the range of the best scenario and gives each its chance of ending below doing nothing', () => {
+    render(<ResultFor kind="simulate_scenarios" params={{}} result={{
+      measure: 'revenue', horizon: 6, runs: 2000, r2: 0.9, floor: 5000, series: ['Nothing moved', '+10%', '-10%'], highest: '+10%',
+      baseline: row('Nothing moved', 5500, { chance_below_floor: 0.01 }),
+      table: [row('+10%', 5680, { chance_below_baseline: 0.02, chance_below_floor: 0, extrapolating: true }),
+              row('-10%', 5320, { chance_below_baseline: 0.98, chance_below_floor: 0.04 })],
+      histogram: [], caveats: ['The same draws are used for every scenario: they differ by what was moved, not by chance.'] }} />)
+    expect(screen.getByTestId('sim-headline').textContent).toMatch(/\+10% most likely totals about 5,680.*between 5,580 and 5,780.*2%/)
+    const rows = screen.getAllByTestId('sim-row')
+    expect(rows).toHaveLength(3)
+    expect(rows[0].textContent).toContain('Nothing moved')
+    expect(rows[0].textContent).toContain('—')                       // doing nothing is not set against itself
+    expect(rows[1].textContent).toContain('beyond the data')
+    expect(rows[2].textContent).toContain('98%')
+    expect(rows[2].textContent).toContain('4%')                       // the chance of ending below the floor
+    expect(screen.getByText(/not by chance/)).toBeTruthy()
+  })
+  it('says first when the model behind it knows little', () => {
+    render(<ResultFor kind="simulate_scenarios" params={{}} result={{
+      measure: 'revenue', horizon: 6, runs: 2000, r2: 0.1, weak_fit: true, floor: null, series: [], highest: '+10%',
+      baseline: row('Nothing moved', 100), table: [row('+10%', 110, { chance_below_baseline: 0.4 })], histogram: [],
+      caveats: ['The model behind these ranges explains only 10% of how revenue has moved.'] }} />)
+    expect(screen.getByTestId('sim-weak').textContent).toContain('explains only 10%')
+  })
+})

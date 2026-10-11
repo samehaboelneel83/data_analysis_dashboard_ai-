@@ -263,6 +263,10 @@ def _analysis_cards(fits: list[caps.Capability], kinds: dict, profile: dict, col
             [m, f, dates[0]], {"date_column": dates[0], "measure": m, "factors": [f],
                                "scenarios": [{"name": f"{_h(f)} +10%", "adjustments": {f: 0.1}},
                                              {"name": f"{_h(f)} -10%", "adjustments": {f: -0.1}}]})
+        add("simulate_scenarios", _T("simulate.t", "How sure {m} is if {f} went up or down by a tenth", m=_h(m), f=_h(f)),
+            _T("simulate.s", "Runs the same projection of {m} many times with what the model is unsure of drawn at random: "
+                             "the range each scenario falls in, and the chance it ends below doing nothing.", m=_h(m)),
+            [m, f, dates[0]], {"date_column": dates[0], "measure": m, "factors": [f], "change_pct": 10})
     if target:
         factors = [c for c in (cats + numbers) if c != target][:8]
         add("key_influencers", _T("influencers.t", "What goes with {t}", t=_h(target)),
@@ -306,6 +310,29 @@ def _analysis_cards(fits: list[caps.Capability], kinds: dict, profile: dict, col
         add("text_sentiment", _T("tone.t", "Tone of {c}", c=_h(texts[0])),
             _T("tone.s", "Reads whether each text in {c} is positive or negative.", c=_h(texts[0])), [texts[0]], {"column": texts[0]})
     return cards
+
+
+async def decision_problems(db, user, dataset) -> dict:
+    """The decisions this table has the shape of, for one reader: read off
+    the kept profile (measured once when there is none). A reader under a row
+    rule is told nothing -- "one row per option" is not true of a part."""
+    from ...core.rls import resolve_denied_columns, resolve_rls_expr
+    from . import decision
+    denied = set(await resolve_denied_columns(db, user, dataset.id) or [])
+    rls_expr = await resolve_rls_expr(db, user, dataset.id)
+    if rls_expr:
+        return {"dataset_id": dataset.id, "problems": [], "restricted": True}
+    kept = await profile_store.stored(db, dataset)
+    if kept is not None:
+        profile = profile_store.for_reader(kept, denied, False)
+    else:
+        from .. import suggest_inputs as sug
+        inputs = await sug.prepare(db, user, dataset)
+        profile, _ = await profile_store.ensure(db, dataset, inputs.df, denied=denied, row_rule=False,
+                                                type_map=inputs.type_map)
+    kinds = column_kinds(profile, dataset.column_meta)
+    return {"dataset_id": dataset.id, "problems": decision.recognise(profile, kinds),
+            "restricted": bool(profile.get("restricted"))}
 
 
 async def dataset_health(db, user, dataset) -> dict:
@@ -728,6 +755,82 @@ def _stage_cards(fits: list[caps.Capability], profile: dict, kinds: dict, column
                           _T("lim.stagepick", "Which column is the stage was picked from the table's shape: change it if it reads wrong.")])]
 
 
+#: An identifier that comes back: at least this many different ones, and on
+#: average more than this many rows each.
+COHORT_ENTITIES = 30
+COHORT_REPEATS = 1.5
+
+
+def repeating_key(profile: dict, kinds: dict) -> str | None:
+    """The identifier whose values come back most often while still being many
+    -- read off the stored counts. None when nothing repeats."""
+    st = profile.get("columns") or {}
+    best = None
+    for name, ks in kinds.items():
+        s = st.get(name) or {}
+        # A key -- or, when there are too few of them to read as keys, values
+        # of one fixed shape (a code), not names of things.
+        if "key" not in ks and not ("item" in ks and s.get("pattern")):
+            continue
+        distinct, filled = int(s.get("distinct") or 0), int(s.get("count") or 0) - int(s.get("missing") or 0)
+        if distinct < COHORT_ENTITIES or not filled or filled / distinct < COHORT_REPEATS:
+            continue
+        if best is None or distinct > best[0]:
+            best = (distinct, name)
+    return best[1] if best else None
+
+
+def _cohort_cards(fits: list[caps.Capability], profile: dict, kinds: dict) -> list[dict]:
+    """Who comes back: an identifier that repeats, followed from the period it was first seen."""
+    cap = caps.analysis("cohort_retention")
+    if cap is None or "cohort_retention" not in {c.name for c in fits if c.kind == "analysis"}:
+        return []
+    entity, dates = repeating_key(profile, kinds), _pick(kinds, profile, "date")
+    if not entity or not dates:
+        return []
+    return [_card(cap, _T("cohort.t", "Which {e} come back", e=_h(entity)),
+                  _T("cohort.s", "Groups each {e} by the month it was first seen in {d}, and counts how many of each "
+                                 "group are seen again in each later month.", e=_h(entity), d=_h(dates[0])),
+                  [entity, dates[0]],
+                  {"kind": "run_analysis", "analysis": "cohort_retention",
+                   "params": {"entity": entity, "date_column": dates[0], "granularity": "month"}},
+                  why={"reason": "fit", "detail": _T("why.cohort", "{e} repeats across rows that carry a date; nothing has "
+                                                                   "been computed yet.", e=_h(entity))},
+                  limits=[_T("lim.cohortpick", "Which column is followed was picked from the table's shape: change it if "
+                                               "it reads wrong.")])]
+
+
+def _decision_cards(profile: dict, kinds: dict) -> list[dict]:
+    """The shape of a decision, when the table has one (discovery/decision.py).
+    Offered as something to SET UP: the person says what to make large or
+    small and what is limited; nothing is solved here."""
+    from . import decision
+    cap = caps.profile_capability("decision_problem")
+    if cap is None:
+        return []
+    cards = []
+    for found in decision.recognise(profile, kinds):
+        if found["problem"] == "allocation":
+            title = _T("decide.alloc.t", "A choice among {n} options could be set up", n=f"{found['options']:,}")
+            sentence = _T("decide.alloc.s", "Each row is one {k}, with amounts that add up ({a}). Say which to make as "
+                                            "large or as small as possible and which is limited, and the choice is "
+                                            "written down as a problem a solver can read.",
+                          k=_h(found["key"]), a=", ".join(_h(c) for c in found["amounts"][:3]))
+            fields = [found["key"], *found["amounts"][:3]]
+        else:
+            title = _T("decide.assign.t", "A matching of {a} to {b} could be set up", a=_h(found["from"]), b=_h(found["to"]))
+            sentence = _T("decide.assign.s", "The rows hold nearly every {a} against every {b}, with a number for each "
+                                             "pair. Say which number to make as small or as large as possible, and "
+                                             "the matching is written down as a problem a solver can read.",
+                          a=_h(found["from"]), b=_h(found["to"]))
+            fields = [found["from"], found["to"], *found["numbers"][:2]]
+        cards.append(_card(cap, title, sentence, fields, {"kind": "decision_problem", **found},
+                           why={"reason": "fit", "detail": _T("why.decide", "Recognised from the table's shape; nothing "
+                                                                            "has been computed or decided.")},
+                           limits=[_T("lim.nosolver", "This platform writes the problem down; it does not solve it.")]))
+    return cards
+
+
 #: Two-group readings offered at most, and the fewest rows the smaller group
 #: must hold (the analysis' own minimum).
 TWO_GROUP_CARDS = 2
@@ -928,7 +1031,9 @@ def tier0(profile: dict, column_meta: dict | None, structure: dict | None = None
                      + _calendar_cards(profile, kinds, column_meta)
                      + _pair_cards(yes, profile, kinds, column_meta)
                      + _two_group_cards(yes, profile, kinds, column_meta)
-                     + _stage_cards(yes, profile, kinds, column_meta)}
+                     + _stage_cards(yes, profile, kinds, column_meta)
+                     + _cohort_cards(yes, profile, kinds)
+                     + _decision_cards(profile, kinds)}
 
 
 def cache_key(dataset, version: str, goal: str | None, reader: str, column_meta: dict | None) -> str:

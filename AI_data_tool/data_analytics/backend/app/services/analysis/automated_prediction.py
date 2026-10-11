@@ -32,6 +32,8 @@ analysis here.
 """
 from __future__ import annotations
 
+from ..readback import _s, as_i18n
+
 from typing import Any
 
 import pandas as pd
@@ -252,32 +254,35 @@ def automated_prediction(df: pd.DataFrame, target: str,
     beats = lift is not None and lift >= MEANINGFUL_LIFT
 
     caveats = [
-        ("Every candidate was fitted on the same rows and scored on the same "
-         f"{len(X_test):,} rows held back from all of them.")
-        + (f" The split is the partition column '{partition}' ({len(X_train):,} training, "
-           f"{len(X_test):,} validation) -- the same one saved models use." if partition else ""),
-        "These models describe what predicts the outcome in THIS data. That is "
-        "association, not causation.",
+        (_s("ap.split.partition", "Every candidate was fitted on the same rows and scored on the same "
+            "{test} rows held back from all of them. The split is the partition column '{col}' ({train} training, "
+            "{test} validation) -- the same one saved models use.",
+            test=f"{len(X_test):,}", train=f"{len(X_train):,}", col=partition) if partition else
+         _s("ap.split", "Every candidate was fitted on the same rows and scored on the same "
+            "{test} rows held back from all of them.", test=f"{len(X_test):,}")),
+        _s("ap.assoc", "These models describe what predicts the outcome in THIS data. That is "
+           "association, not causation."),
         # What this call does and does not leave behind. It used to say no
         # model store existed; one does now, so saying otherwise would send
         # a reader away from the thing they are looking for.
-        "This comparison does not keep the winner -- it refits from scratch "
-        "each time. To score new rows, save a model from this dataset and "
-        "apply that instead.",
+        _s("ap.notkept", "This comparison does not keep the winner -- it refits from scratch "
+           "each time. To score new rows, save a model from this dataset and "
+           "apply that instead."),
     ]
     if not beats:
         caveats.append(
-            f"The best model scores {champion['score']} and simply guessing "
-            f"scores {baseline_score}. Nothing here predicts "
-            f"'{target}' meaningfully better than no model at all.")
+            _s("ap.nobetter", "The best model scores {score} and simply guessing "
+               "scores {base}. Nothing here predicts "
+               "'{target}' meaningfully better than no model at all.",
+               score=champion['score'], base=baseline_score, target=target))
     if champion["train_score"] is not None and \
             champion["train_score"] - champion["score"] > 0.15:
         caveats.append(
-            f"The winner scores {champion['train_score']} on the rows it was "
-            f"fitted to and {champion['score']} on rows it never saw -- it has "
-            f"memorised detail that does not generalise.")
+            _s("ap.overfit", "The winner scores {train} on the rows it was "
+               "fitted to and {score} on rows it never saw -- it has "
+               "memorised detail that does not generalise.", train=champion['train_score'], score=champion['score']))
     if sampled:
-        caveats.append(f"Fitted on a random sample of {FRAME_SAMPLE_THRESHOLD:,} rows.")
+        caveats.append(_s("ap.sample", "Fitted on a random sample of {n} rows.", n=f"{FRAME_SAMPLE_THRESHOLD:,}"))
 
     # What the winner leans on. Not for a winner that is the guess (it uses no
     # column), nor one that does not beat it (there is nothing to explain).
@@ -310,5 +315,6 @@ def automated_prediction(df: pd.DataFrame, target: str,
         "n_test": int(len(X_test)),
         "split": ({"kind": "partition", "column": partition} if partition
                   else {"kind": "random", "test_share": TEST_SIZE}),
-        "caveats": caveats,
+        "caveats": [str(c) for c in caveats],
+        "caveats_i18n": [as_i18n(c) for c in caveats],
     }

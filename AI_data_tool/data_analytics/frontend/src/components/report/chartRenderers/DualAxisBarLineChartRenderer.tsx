@@ -1,3 +1,4 @@
+import { useT } from '../../../i18n'
 import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LabelList, Brush } from 'recharts'
 import { TT, fmtStr, seriesDash, seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
@@ -6,6 +7,7 @@ import { axisTitles, xAxisProps, yAxisProps, gridProps, legendProps, labelListPr
 import { seriesName } from './axisOptions'
 
 export default function DualAxisBarLineChartRenderer({ rows, cfg, rtl, measureFmt, measure2Fmt, plotW, plotH, broadcasts, onClickPoint, onBrushChange }: ChartRendererProps) {
+  const t9 = useT()
   // Two measures on two scales: the right axis is titled from the
   // SECOND one, never from the left axis's label.
   const titles = axisTitles(cfg)
@@ -27,7 +29,10 @@ export default function DualAxisBarLineChartRenderer({ rows, cfg, rtl, measureFm
   // The second series is named like the first -- "sum(RATED_AMOUNT)" beside
   // "count(RATED_AMOUNT)", not the bare column.
   // A Pareto's line is the running share of the whole, named by its axis label.
-  const name2 = cfg.pareto ? String(cfg.y2_axis_label ?? 'Cumulative share (%)')
+  // The designer stores the line's English name; a reader in another language reads it in theirs.
+  const y2Label = cfg.pareto && (!cfg.y2_axis_label || cfg.y2_axis_label === 'Cumulative share (%)') // i18n-ok: the stored default
+    ? t9('cr.cumulativeShare') : cfg.y2_axis_label
+  const name2 = cfg.pareto ? String(y2Label)
     : titles.measure2 ?? (cfg.measure2 as string | undefined) ?? 'value2'
   return (
     <ResponsiveContainer width="100%" height="100%">
@@ -42,7 +47,7 @@ export default function DualAxisBarLineChartRenderer({ rows, cfg, rtl, measureFm
             rtl alone for a single axis, but this is one of a left/right pair, so each
             side must reassert its own place after the builder's spread. */}
         <YAxis yAxisId="left" {...yAxisProps(cfg, rtl, measureFmt, rows.map((r: any) => r.value), undefined, { height: plotH })} orientation={rtl ? 'right' : 'left'} tickFormatter={v => fmtStr(v, measureFmt)} />
-        {hasSecond && <YAxis yAxisId="right" {...yAxisProps(cfg, rtl, measure2Fmt, rows.map((r: any) => r.value2), undefined, { height: plotH, title: cfg.y2_axis_label ?? titles.measure2 ?? '' })} orientation={rtl ? 'left' : 'right'} tickFormatter={v => fmtStr(v, measure2Fmt)} />}
+        {hasSecond && <YAxis yAxisId="right" {...yAxisProps(cfg, rtl, measure2Fmt, rows.map((r: any) => r.value2), undefined, { height: plotH, title: y2Label ?? titles.measure2 ?? '' })} orientation={rtl ? 'left' : 'right'} tickFormatter={v => fmtStr(v, measure2Fmt)} />}
         <Tooltip contentStyle={TT} formatter={(v: unknown, name: string) => [fmtStr(v, name === name2 ? measure2Fmt : measureFmt), name]} />
         {legend && <Legend {...legend} wrapperStyle={{ fontSize: 11, ...(rtl ? { direction: 'ltr' as const } : {}) }} />}
         <Bar yAxisId="left" dataKey="value" name={seriesName(cfg)} fill={seriesColor(0)} radius={[3, 3, 0, 0]}>

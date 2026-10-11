@@ -450,7 +450,24 @@ async def execute(session_factory, job_id: int, token: str) -> str | None:
         # off for this data" must not carry over (services/ai_policy.py).
         from . import llm as _llm
         _llm.allow_ai()
-        await handler(ctx)
+        from ..core.config import settings as _settings
+        limit = int(getattr(_settings, "job_time_limit_s", 0) or 0)
+        if limit:
+            try:
+                await asyncio.wait_for(handler(ctx), timeout=limit)
+            except asyncio.TimeoutError:
+                # The handler's coroutine is cancelled; work it handed to a
+                # thread (a model fit, a driver call) finishes on its own, but
+                # the job and the worker are free.
+                log.warning("Job %s (%s) passed its time limit of %ss", job_id, ctx.kind, limit)
+                await _settle(session_factory, job_id, token, state=FAILED, error_code="timeout",
+                              error=f"The job took longer than the limit of {limit // 60 or 1} minutes and was "
+                                    "stopped. Try it on less data, or ask an administrator to raise the limit "
+                                    "(Settings, Longest background job).",
+                              progress={"stage": "failed"})
+                return FAILED
+        else:
+            await handler(ctx)
         if not ctx.completed:
             # A handler with no effects to commit still has to end its job.
             async with session_factory() as s:

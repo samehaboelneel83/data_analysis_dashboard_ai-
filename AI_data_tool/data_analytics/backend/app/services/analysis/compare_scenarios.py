@@ -78,9 +78,14 @@ def compare_scenarios(df: pd.DataFrame, date_column: str, measure: str, factors:
     gap = round(ranked[0]["total"] - ranked[-1]["total"], 4)
     # Caveats said once, in the order met; the ones about one scenario carry its name.
     shared, own = [], []
+    said: dict[str, dict | None] = {}      # the single what-if's own lines, with their keys
     for name, _moves, r in runs:
-        for c in r["caveats"]:
-            if c.startswith("That scenario goes outside"):
+        for c, k in zip(r["caveats"], r.get("caveats_i18n") or [None] * len(r["caveats"])):
+            said.setdefault(str(c), k)
+            if k and k.get("key") == "fs.outside":
+                own.append(_s("an.outside.named", "{name}: goes outside anything observed -- {ranges}. The "
+                              "projection is an extrapolation, not evidence.", cap=False, name=name, ranges=k["vars"]["ranges"]))
+            elif c.startswith("That scenario goes outside"):
                 own.append(f"{name}: " + c[len("That scenario goes outside"):].replace(" anything observed", "goes outside anything observed", 1).lstrip())
             elif c not in shared:
                 shared.append(c)
@@ -96,6 +101,5 @@ def compare_scenarios(df: pd.DataFrame, date_column: str, measure: str, factors:
         "table": table, "chart": chart, "series": ["Nothing moved", *[n for n, _m, _r in runs]],
         "highest": ranked[0]["scenario"], "lowest": ranked[-1]["scenario"], "gap": gap, "gap_pct": pct(gap),
         "caveats": [str(c) for c in shared + own],
-        # Only this analysis' own lines carry keys; the single what-if's warnings are as it wrote them.
-        "caveats_i18n": [as_i18n(c) for c in shared + own],
+        "caveats_i18n": [as_i18n(c) or said.get(str(c)) for c in shared + own],
     }

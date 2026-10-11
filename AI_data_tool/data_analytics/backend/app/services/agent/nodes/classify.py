@@ -236,6 +236,11 @@ _OVER_TIME = re.compile(r"\b(over time|over the (?:period|year|months?|weeks?|da
                         r"by (?:day|week|month|quarter|year)|daily|weekly|monthly)\b", re.I)
 _HIGH_BUT_LOW = re.compile(r"\b(high|many|most|large)\b.*\bbut\b.*\b(low|few|little|small|less)\b|"
                            r"\b(low|few|little|small)\b.*\bbut\b.*\b(high|many|large|more)\b", re.I)
+#: "By how much did A exceed B", "the difference between A and B": one figure
+#: taken from another -- an amount, not a test of whether groups differ.
+_BY_HOW_MUCH = re.compile(r"\bby how much\b|\bhow much (?:more|less|higher|lower|bigger|smaller)\b|"
+                          r"\b(?:what is|what's|what was) the (?:difference|gap) between\b|"
+                          r"بكم|كم يزيد|كم تزيد|كم ينقص|كم تنقص|ما الفرق بين|ما مقدار الفرق", re.I)
 _UNUSUAL = re.compile(r"\b(unusual|anomal\w*|spikes?|outliers?|abnormal|strange|odd)\b", re.I)
 
 
@@ -249,7 +254,9 @@ def settle_intent(question: str, verdict: dict | None) -> dict | None:
     * "high X but low Y" reads two figures side by side -- an aggregate --
       and was sent to the same group test;
     * "find unusual activity" has a sensible default and is never ambiguous
-      (it was answered only with a question back).
+      (it was answered only with a question back);
+    * "by how much did A exceed B" is one figure taken from another -- an
+      aggregate -- and was sent to the group test as well.
     Anything else is returned exactly as the model gave it."""
     if not verdict:
         return verdict
@@ -259,6 +266,11 @@ def settle_intent(question: str, verdict: dict | None) -> dict | None:
     if intent == "compare" and _OVER_TIME.search(q):
         settled = "trend"
     elif intent in ("compare", "explain") and _HIGH_BUT_LOW.search(q):
+        settled = "aggregate"
+    elif intent == "compare" and _BY_HOW_MUCH.search(q):
+        # Asked in English it came back as a p-value across every group and
+        # the widest gap of AVERAGES, never the difference asked for
+        # (benchmark `na-minus-europe.en`, three runs, 2026-10-11).
         settled = "aggregate"
     elif _UNUSUAL.search(q) and not re.search(r"\bwhy\b", q, re.I) and intent not in ("chat", "describe_data"):
         settled = "aggregate"

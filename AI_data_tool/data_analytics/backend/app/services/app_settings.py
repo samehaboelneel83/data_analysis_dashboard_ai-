@@ -89,9 +89,16 @@ SPECS: list[Spec] = [
        "Of the concurrent calls, how many background work may never take."),
     _S("agent_statement_timeout_s", "ai", "AI query timeout (seconds)", "The longest one AI-generated query may run."),
     _S("agent_row_cap", "ai", "AI result row limit"),
+    _S("ai_tokens_per_user_per_day", "ai", "AI tokens per person per day",
+       "Besides the organisation's budget: one person cannot use everyone's. 0 = no per-person limit."),
     _S("suggest_ai_selection", "ai", "AI-designed dashboards: where charts come from",
        "cards: the AI chooses among charts already validated and drawn on the data. "
        "free: the AI proposes its own charts, each then checked. both: its proposals join the validated ones.",
+       options=("cards", "free", "both")),
+    _S("setup_ai_selection", "ai", "Guided setup: where charts come from",
+       "free: the AI designs a chart for each question, each then drawn and checked. cards: it only chooses among "
+       "charts the platform built (faster; questions about part of the rows may go unanswered). both: it chooses "
+       "first and designs for the questions left.",
        options=("cards", "free", "both")),
     _S("classify_columns_with_model", "ai", "Ask the model once what each column is",
        "Off: columns are classified from their values alone. The answer is kept and never asked twice."),
@@ -127,6 +134,8 @@ SPECS: list[Spec] = [
     _S("automation_frame_max_mb", "data", "Automation data limit (MB)"),
     _S("connector_allow_private_hosts", "data", "Allow connections to private network addresses"),
     _S("job_worker_enabled", "data", "Background job worker", "Runs queued imports and refreshes.", restart=True),
+    _S("job_time_limit_s", "data", "Longest background job (seconds)",
+       "A job still running after this ends as failed, so a stuck one cannot hold the worker. 0 = no limit."),
     # -- Maps -----------------------------------------------------------------
     _S("map_tile_hosts", "maps", "Allowed tile servers",
        "Comma-separated host names. Empty: an organization may use any tile server."),

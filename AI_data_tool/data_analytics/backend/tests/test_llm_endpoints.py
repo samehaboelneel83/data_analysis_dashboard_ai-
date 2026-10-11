@@ -20,6 +20,11 @@ TWO = [
 def _clean(monkeypatch):
     monkeypatch.setattr(settings, "super_admin_emails", "admin-a@example.com")
     monkeypatch.setattr(settings, "llm_enabled", True)
+    # Whatever model servers THIS machine lists in its environment
+    # (LLM_ENDPOINTS) are not part of what is tested: these tests are about
+    # the single endpoint and about what an administrator saves.
+    monkeypatch.setattr(settings, "llm_endpoints", "")
+    monkeypatch.setattr(settings, "llm_endpoints_default", "auto")
 
     async def no_probe():
         return None

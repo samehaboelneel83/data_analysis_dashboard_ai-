@@ -214,8 +214,25 @@ async def page_copilot(report_id: int, page_id: int, body: CopilotIn,
     from ..models.models import Dataset as _Dataset
     from ..services import ai_policy as _ai_policy
     _ids = [i for i in [report.dataset_id, *(report.additional_dataset_ids or [])] if i]
-    if not await _ai_policy.enter(db, datasets=[d for d in [await db.get(_Dataset, i) for i in _ids] if d]):
-        raise HTTPException(409, "AI is switched off for the data this dashboard reads")
+    _read = [d for d in [await db.get(_Dataset, i) for i in _ids] if d]
+
+    async def without_ai(reason: str) -> dict:
+        """What the platform can do for this message by itself: the page is
+        not changed (services/copilot_without_model.py)."""
+        from ..services import copilot_without_model
+        from ..services.discovery import engine as discovery
+        cards: list[dict] = []
+        try:
+            if _read and _read[0].org_id == user.org_id:
+                cards = (await discovery.opportunities(db, user, _read[0], None, depth=1)).get("cards") or []
+        except Exception:                                   # noqa: BLE001 -- suggestions, never a gate
+            cards = []
+        out = copilot_without_model.answer(body.message, await _page_columns(db, report, user), cards, reason)
+        return {"reply": out["reply"], "applied": [], "notes": [], "results": [],
+                "without_ai": True, "suggestions": out["suggestions"]}
+
+    if not await _ai_policy.enter(db, datasets=_read):
+        return await without_ai("AI is switched off for the data this dashboard reads")
 
     # Same daily cap as the chat agent: both are one LLM call per message.
     await quotas.enforce_agent_quota(db, user.org_id)

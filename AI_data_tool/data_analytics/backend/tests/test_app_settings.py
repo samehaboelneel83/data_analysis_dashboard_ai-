@@ -20,6 +20,11 @@ URL = "/api/v1/platform/settings"
 def _platform_admin(monkeypatch):
     # Org A's admin (admin-a@example.com, from two_orgs) is the platform admin.
     monkeypatch.setattr(settings, "super_admin_emails", "admin-a@example.com")
+    # Whatever model servers THIS machine lists in its environment
+    # (LLM_ENDPOINTS) are not part of what is tested: these tests are about
+    # the single endpoint and about what an administrator saves.
+    monkeypatch.setattr(settings, "llm_endpoints", "")
+    monkeypatch.setattr(settings, "llm_endpoints_default", "auto")
     yield
     # The overrides live on the shared settings object: put them back.
     app_settings._apply({})
@@ -178,3 +183,18 @@ class TestLlm:
         monkeypatch.setattr(llm_service.LLMClient, "complete", fake_complete)
         r = await client.post(URL + "/test-llm", headers=auth_headers["a"], json={})
         assert r.status_code == 200 and r.json() == {**r.json(), "ok": False, "detail": "connection refused"}
+
+
+def test_every_setting_has_its_label_in_both_languages():
+    """A setting added without its catalogue entries shows its English label
+    on an Arabic screen (six did, found on screen 2026-10-11)."""
+    import os
+    import re
+    from app.services import app_settings
+    path = os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "src", "i18n", "pages", "adminPlatform.ts")
+    if not os.path.exists(path):
+        pytest.skip("frontend catalogue not present in this checkout")
+    text = open(path, encoding="utf-8").read()
+    missing = [s.key for s in app_settings.SPECS
+               if len(re.findall(rf"'pg\.adminPlatform\.set\.{re.escape(s.key)}':", text)) != 2]
+    assert not missing, missing

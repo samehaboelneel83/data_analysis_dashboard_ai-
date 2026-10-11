@@ -194,6 +194,12 @@ _ANALYSES: dict[str, dict] = {
                         cost=1),
     "compare_scenarios": dict(family="scenario", answers=("what_if",), needs={"number": 2, "date": 1},
                               minimum={"periods": 11}, cost=1, claim="hypothesis"),
+    "simulate_scenarios": dict(family="scenario", answers=("what_if",), needs={"number": 2, "date": 1},
+                               minimum={"periods": 11}, cost=2, claim="hypothesis"),
+    # The identifier is found by the engine (one that REPEATS, of a fixed
+    # shape): fewer than a few hundred of them read as "things", not keys.
+    "cohort_retention": dict(family="pattern", answers=("compare", "what_is_in_it"), needs={"date": 1},
+                             minimum={"rows": 60}, cost=1),
     "goal_seek": dict(family="scenario", answers=("what_if",), needs={"number": 2}, cost=1, claim="hypothesis"),
     "anomaly_iqr": dict(family="anomaly", answers=("unusual",), needs={"number": 1}, cost=1),
     "anomaly_iforest": dict(family="anomaly", answers=("unusual",), needs={"number": 1}, minimum={"rows": 100}, cost=2),
@@ -214,6 +220,9 @@ _PROFILE: dict[str, dict] = {
     "duplicate_rows": dict(family="basics", answers=("what_is_in_it",), needs={}, cost=0),
     # Values that are not what their column mostly holds.
     "mistyped_values": dict(family="basics", answers=("what_is_in_it", "unusual"), needs={}, cost=0),
+    # The shape of a decision (options with amounts; every A against every B):
+    # recognised and written down as a specification, never solved here.
+    "decision_problem": dict(family="scenario", answers=("what_if",), needs={}, cost=0, claim="hypothesis"),
 }
 
 

@@ -12,6 +12,7 @@ import StatisticsPanel from '../components/StatisticsPanel'
 import DatasetSensitivity from '../components/DatasetSensitivity'
 import DatasetAllowAi from '../components/DatasetAllowAi'
 import HealthChecks from '../components/HealthChecks'
+import DecisionProblemPanel from '../components/dataset/DecisionProblemPanel'
 import NotebookSnippet from '../components/NotebookSnippet'
 import LoadError from '../components/ui/LoadError'
 import LoadingState from '../components/ui/LoadingState'
@@ -1360,6 +1361,7 @@ export default function DatasetDetail() {
                 )}
                 </>
               )}
+              {analysisPick === 'decide' && <DecisionProblemPanel datasetId={ds.id} />}
               {analysesFor(analysisPick) && (
                 <StatisticsPanel mode={ds.mode} datasetId={ds.id} columns={ds.columns ?? []} only={analysesFor(analysisPick)} />
               )}

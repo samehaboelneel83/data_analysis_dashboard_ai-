@@ -556,6 +556,62 @@ register(AnalysisSpec(
 ))
 
 register(AnalysisSpec(
+    name="simulate_scenarios",
+    description="How sure is a what-if? Each scenario as a range of outcomes from "
+                "many runs of the same model, with the chance it ends below "
+                "doing nothing. Seeded, so the same data gives the same answer. "
+                "Association, not intervention.",
+    params_schema={
+        "type": "object",
+        "required": ["date_column", "measure", "factors"],
+        "properties": {
+            "date_column": {"format": "column", "type": "string",
+                            "description": "The date column to project along."},
+            "measure": {"format": "column", "type": "string",
+                        "description": "The numeric column being projected."},
+            "factors": {"format": "column", "type": "array", "items": {"type": "string"},
+                        "description": "Numeric columns that may move it."},
+            "change_pct": {"type": ["number", "null"], "default": 10,
+                           "description": "Move every factor up by this percentage, and down by it. Defaults to 10."},
+            "floor": {"type": ["number", "null"],
+                      "description": "A total not to fall below: the chance of ending under it is reported."},
+            "periods": {"type": ["integer", "null"], "minimum": 1,
+                        "maximum": MAX_SCENARIO_HORIZON, "default": DEFAULT_SCENARIO_HORIZON,
+                        "description": "How far ahead to project."},
+            "granularity": {"type": "string", "enum": ["day", "week", "month", "quarter", "year"],
+                            "description": "Period size. Defaults to month."},
+        },
+    },
+    consumes_column_meta=False,
+    result_kind="simulate_scenarios",
+    handler="app.services.analysis.simulate_scenarios:simulate_scenarios",
+))
+
+register(AnalysisSpec(
+    name="cohort_retention",
+    description="Who comes back? Groups each one by the period it was first seen "
+                "and counts how many of each group are seen again in each "
+                "later period. Needs an identifier that repeats and a date.",
+    params_schema={
+        "type": "object",
+        "required": ["entity", "date_column"],
+        "properties": {
+            "entity": {"format": "column", "type": "string",
+                       "description": "The identifier that repeats: who or what comes back."},
+            "date_column": {"format": "column", "type": "string",
+                            "description": "The date of each row."},
+            "granularity": {"type": "string", "enum": ["day", "week", "month", "quarter", "year"],
+                            "description": "Period size. Defaults to month."},
+            "periods": {"type": ["integer", "null"], "minimum": 1, "maximum": 12, "default": 12,
+                        "description": "How many periods after the first to follow."},
+        },
+    },
+    consumes_column_meta=True,
+    result_kind="cohort_retention",
+    handler="app.services.analysis.cohort_retention:cohort_retention",
+))
+
+register(AnalysisSpec(
     name="stage_board",
     description="Where do rows stand? Rows by stage, how long the open ones have "
                 "been going, and -- with a finish date and a due date -- what "

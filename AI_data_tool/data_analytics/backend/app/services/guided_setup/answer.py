@@ -913,6 +913,7 @@ async def prepare(db, user, ds, dem: dict | None):
         inputs.profile = await asyncio.to_thread(build_profile, scoped, inputs.type_map, inputs.column_meta)
     roles = effective_roles(inputs.type_map, inputs.column_meta)
     facts = await asyncio.to_thread(build_facts, scoped, roles, inputs.column_meta, inputs.ineligible())
+    inputs.scoped = scoped          # the rows the person asked about, for the platform's own charts
     return inputs, facts, filters, words, len(scoped), total
 
 
@@ -1127,8 +1128,208 @@ def _finish(pages: list[dict], dem: dict, note: str | None, lang: str,
     return out
 
 
+PICKS_SCHEMA = {
+    "type": "object",
+    "properties": {"pages": {"type": "array", "items": {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string"},
+            "rationale": {"type": "string"},
+            "picks": {"type": "array", "items": {
+                "type": "object",
+                "properties": {"id": {"type": "integer"}, "question": {"type": "string"},
+                               "title": {"type": "string"}, "why": {"type": "string"}},
+                "required": ["id", "question", "why"]}},
+        },
+        "required": ["title", "rationale", "picks"]}}},
+    "required": ["pages"],
+}
+#: Charts shown to the model to choose from (the list is its whole menu):
+#: what the platform FOUND (statistics, discovery) and the plain charts of
+#: every column an ordinary question is answered with.
+MAX_FOUND = 40
+MAX_STANDARD = 90
+MAX_CARDS = MAX_FOUND + MAX_STANDARD
+#: Columns the plain charts are made for, richest first.
+STANDARD_GROUPS = 8
+STANDARD_NUMBERS = 4
+STANDARD_SHARES = 3
+
+
+def standard_cards(profile: dict, shares: list[dict] | None, column_meta: dict | None,
+                   ineligible: set[str] | frozenset = frozenset()) -> list[dict]:
+    """The plain charts of this data, made from its shape alone: how many, per
+    group, over time -- and for each yes/no column its share, for each number
+    its total or its typical value. Nothing here is a finding; it is the menu
+    an ordinary question ("which group has most?", "what share is X?") is
+    answered from when the model may only choose (live 2026-10-11: with the
+    found charts alone, three of five questions had nothing to choose)."""
+    from ..analyst_panel import _not_additive
+    from ..semantic_guard import default_summary
+    cols = [c for c in profile.get("columns", []) if c["name"] not in ineligible and not c.get("is_personal")]
+    made = {c["name"] for c in shares or []}
+    label = lambda m: str(m).replace("_", " ")                                  # noqa: E731
+    groups = [c["name"] for c in sorted(
+        (c for c in cols if c.get("role") == "categorical" and not c.get("is_identifier")
+         and c["name"] not in made and 2 <= (c.get("distinct") or 0) <= 60),
+        key=lambda c: (c.get("distinct") or 0))][:STANDARD_GROUPS]
+    numbers = [c["name"] for c in cols if c.get("role") == "numeric" and not c.get("is_identifier")
+               and c["name"] not in made][:STANDARD_NUMBERS]
+    rates = [c for c in shares or [] if c.get("is") == "yes"][:STANDARD_SHARES]
+    dates = [c["name"] for c in cols if c.get("role") == "datetime"][:1]
+    counted = next((c["name"] for c in cols if c.get("is_identifier")), cols[0]["name"] if cols else None)
+    if counted is None:
+        return []
+
+    words = {"sum": "Total", "avg": "Average", "median": "Typical", "max": "Highest", "min": "Lowest"}
+
+    def how(m: str) -> tuple[str, str] | None:
+        # As the platform rolls the column up when nobody said (the author's
+        # setting, the stored classification, then the name).
+        agg = default_summary(m, column_meta)
+        if agg == "sum" and _not_additive(m, column_meta):
+            agg = "avg"
+        return (agg, words[agg]) if agg in words else None
+
+    measures: list[tuple[str, str, str, str]] = [(counted, "count", "Number of records", "how many there are")]
+    for r in rates:
+        what = label(r["of"])
+        measures.append((r["name"], "avg", f"Share where {what} is yes (%)", f"what share of the records have {what}"))
+    for m in numbers:
+        got = how(m)
+        if got is None:
+            continue
+        agg, word = got
+        measures.append((m, agg, f"{word} {label(m)}", f"the {word.lower()} of {label(m)}"))
+
+    out: list[dict] = []
+
+    def add(wt: str, title: str, why: str, config: dict) -> None:
+        out.append({"widget_type": wt, "title": title, "why": why, "config": config, "source": "standard"})
+
+    for m, agg, title, why in measures:
+        add("kpi", title, f"One number: {why}.", {"measure": m, "aggregation": agg})
+    for g in groups:
+        for m, agg, title, why in measures:
+            add("bar", f"{title} by {label(g)}", f"Compares {why} across each {label(g)}.",
+                {"dimension": g, "measure": m, "aggregation": agg, "sort": "desc", **({"limit": TOP_N} if agg else {})})
+    for d in dates:
+        for m, agg, title, why in measures:
+            add("line", f"{title} by month", f"Shows how {why} changed month by month.",
+                {"dimension": d, "measure": m, "aggregation": agg, "dimension_granularity": "month"})
+    for i, a in enumerate(groups[:3]):
+        for b in groups[i + 1:3]:
+            add("heatmap", f"Number of records by {label(a)} and {label(b)}",
+                f"Shows which {label(a)} goes with which {label(b)}.",
+                {"dimension": a, "dimension2": b, "measure": counted, "aggregation": "count"})
+    return out[:MAX_STANDARD]
+
+
+def setup_selection_mode(selection: str | None = None) -> str:
+    """cards | free | both, as set now (settings.setup_ai_selection)."""
+    if selection in ("cards", "free", "both"):
+        return selection
+    from ...core.config import settings
+    mode = str(getattr(settings, "setup_ai_selection", "free") or "free")
+    return mode if mode in ("cards", "free", "both") else "free"
+
+
+async def validated_cards(inputs, facts: dict, scoped) -> list[dict]:
+    """The charts the PLATFORM makes for these rows, with no model: the
+    statistics engine's, the standard series, and what the discovery engine
+    found in a look at the rows. In "cards" mode (settings.suggest_ai_selection)
+    these are the only charts a page can hold -- the model chooses among them."""
+    import pandas as pd
+    from ..analyst_panel import (_section_for, choose_lenses, completion_trends, money_totals, rule_candidates,
+                                 series_backbone)
+    from ..discovery import engine as discovery
+    from ..insights import effective_roles, generate_insights, order_event_dates
+    roles = effective_roles(inputs.type_map, inputs.column_meta)
+    ineligible = inputs.ineligible()
+    profile = inputs.profile
+    dates = sorted(c["name"] for c in profile.get("columns", []) if c.get("role") == "datetime")
+
+    def build() -> list[dict]:
+        found = generate_insights(scoped, inputs.type_map, inputs.column_meta)
+        cards = rule_candidates(scoped, roles, inputs.column_meta, ineligible, found.get("findings") or [])
+        if "exceptions" in choose_lenses(profile, facts.get("facts") or []):
+            cards += series_backbone(profile, ineligible, facts.get("identical") or {}, order_event_dates(dates))
+        cards += completion_trends(profile, ineligible)
+        cards += money_totals(profile, ineligible, facts.get("mixed_units") or {}, facts.get("identical") or {})
+        try:
+            own = scoped[[c for c in scoped.columns if c in inputs.type_map]] if isinstance(scoped, pd.DataFrame) else scoped
+            cards += discovery.candidates(own, inputs.type_map, inputs.column_meta,
+                                          lambda wt, cfg: _section_for(wt, cfg, set(dates)))
+        except Exception:                                           # noqa: BLE001 -- extra ideas, never a gate
+            logger.warning("guided setup: discovery candidates failed", exc_info=True)
+        return cards
+
+    out, seen = [], set()
+    found = (await asyncio.to_thread(build))[:MAX_FOUND]
+    plain = standard_cards(profile, getattr(inputs, "shares", None), inputs.column_meta, ineligible)
+    for w in found + plain:
+        if not isinstance(w, dict) or not isinstance(w.get("config"), dict) or not w.get("widget_type"):
+            continue
+        key = json.dumps([w["widget_type"], w["config"]], sort_keys=True, default=str)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(w)
+    return out[:MAX_CARDS]
+
+
+def pick_messages(cards: list[dict], dem: dict, scope: list[str], scoped_rows: int, count: int, lang: str) -> list[dict]:
+    listing = "\n".join(
+        f"{i} | {w.get('widget_type')} | {str(w.get('title') or '')[:90]} | "
+        f"{str(w.get('takeaway') or w.get('why') or '')[:140]}" for i, w in enumerate(cards))
+    system = (
+        "You lay out the pages of ONE dashboard for one person who said what they want. Every chart in the list "
+        "has already been built on their data by the platform; the last column says what it shows.\n"
+        "- For each of their questions choose the charts that answer it, by id; `question` is that question's "
+        "id (q1, q2...). Choose ONLY from the list. You cannot change a chart or add one.\n"
+        "- A question that no chart in the list answers gets none: do not stretch a chart to fit.\n"
+        f"- Group what you chose into up to {count} pages, each a different angle on what they asked. Give each "
+        "a short title and one sentence on what it tells them.\n"
+        "- `title` says what the chart shows in the person's own vocabulary; `why` is one short sentence on what "
+        f"they learn from it. Write titles, sentences and whys in {_LANGUAGE.get(lang, 'English')}.")
+    user = (f"{_demand_text(dem, scope, scoped_rows, lang)}\n\n"
+            f"THE CHARTS (id | kind | title | what it shows)\n{_data_block(listing)}")
+    return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
+async def pick_pages(client, cards: list[dict], dem: dict, scope: list[str], scoped_rows: int, count: int,
+                     lang: str) -> list[dict]:
+    """Pages in the designer's own shape, every widget one of `cards`. An id
+    outside the list is dropped; a failure is no pages, never an error."""
+    if client is None or not cards:
+        return []
+    try:
+        got = await client.complete_json(pick_messages(cards, dem, scope, scoped_rows, count, lang), PICKS_SCHEMA,
+                                         max_tokens=3000, temperature=0.0, enforce=True)
+    except Exception as exc:                                        # noqa: BLE001
+        logger.warning("guided setup: choosing among the validated charts failed: %s", exc)
+        return []
+    pages, used = [], set()
+    for page in [p for p in (got or {}).get("pages") or [] if isinstance(p, dict)][:count]:
+        widgets = []
+        for pick in page.get("picks") or []:
+            i = pick.get("id") if isinstance(pick, dict) else None
+            if isinstance(i, bool) or not isinstance(i, int) or not (0 <= i < len(cards)) or i in used:
+                continue
+            used.add(i)
+            card = cards[i]
+            widgets.append({"question": str(pick.get("question") or ""), "widget_type": card["widget_type"],
+                            "title": str(pick.get("title") or card.get("title") or card["widget_type"])[:120],
+                            "why": str(pick.get("why") or card.get("why") or "")[:200],
+                            "config": dict(card["config"])})
+        if widgets:
+            pages.append({"title": str(page.get("title") or ""), "rationale": str(page.get("rationale") or ""),
+                          "widgets": widgets})
+    return pages
+
+
 async def design(db, user, ds, dem: dict | None, entry: dict | None, lang: str, count: int, client,
-                 meaning_map=None, tables: list[str] | None = None) -> dict:
+                 meaning_map=None, tables: list[str] | None = None, selection: str | None = None) -> dict:
     """{"proposals": pages to choose from, "reason": why some ideas were dropped}.
 
     One generation and one repair round, like the app's designer: the refused
@@ -1146,15 +1347,28 @@ async def design(db, user, ds, dem: dict | None, entry: dict | None, lang: str, 
     ids = {q["id"] for q in dem.get("questions") or []}
     gate = Gate(inputs, facts, allowed, ids, filters, lang, _given(dem, ds.id))
 
-    got = await client.complete_json(messages, PAGES_SCHEMA, max_tokens=9000, temperature=0.2, enforce=True)
-    proposed = [p for p in (got or {}).get("pages") or [] if isinstance(p, dict)][:count]
+    # Where the charts come from (settings.setup_ai_selection, the guided
+    # setup's own switch beside the one for "Suggest dashboards"): cards --
+    # the model only CHOOSES among charts the platform built for these rows;
+    # free -- it designs its own, each then checked; both -- it chooses
+    # first, and designs only for the questions no ready chart answered.
+    mode = setup_selection_mode(selection)
+    got, proposed = None, []
+    if mode in ("cards", "both"):
+        proposed = await pick_pages(client, await validated_cards(inputs, facts, getattr(inputs, "scoped", inputs.df)), dem, words, scoped_rows,
+                                    count, lang)
+        got = {"pages": proposed}
+    if not proposed and mode != "cards":
+        got = await client.complete_json(messages, PAGES_SCHEMA, max_tokens=9000, temperature=0.2, enforce=True)
+        proposed = [p for p in (got or {}).get("pages") or [] if isinstance(p, dict)][:count]
     if not proposed:
+        # In cards mode the caller falls back to the platform's own selection.
         return {"proposals": [], "reason": "failed"}
     pages, whys = await gate.pages(proposed)
     refused = [w for ws in whys for w in ws]
     answered = {w.get("question") for p in pages for w in p["widgets"]}
     missing = [q for q in dem.get("questions") or [] if q["id"] not in answered]
-    if refused or missing:
+    if (refused or missing) and mode != "cards":
         ask = "Some of that needs completing.\n"
         if refused:
             ask += ("For EACH page, in the same order, give replacement widgets only -- one per refused chart "

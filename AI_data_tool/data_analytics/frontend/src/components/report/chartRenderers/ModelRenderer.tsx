@@ -8,9 +8,11 @@
  * verdict. The shaper (backend services/model_widgets.py) supplies every
  * number; this file only draws them, and draws the refusals in words.
  */
+import SaidItems, { saidOf } from '../../analysis/SaidItems'
+import { sayText } from '../../../lib/readbackText'
 import { useState } from 'react'
 import { seriesColor } from '../chartUtils'
-import { useT, type MessageKey } from '../../../i18n'
+import { useT, type MessageKey, type TranslateFn } from '../../../i18n'
 import { useDirection, navArrows } from '../../../contexts/DirectionContext'
 import type { ChartRendererProps } from './types'
 import { familyLabel, rich } from '../../../i18n/pages/modelsMaps'
@@ -415,6 +417,16 @@ function RuleTable({ rules }: { rules: any[] }) {
   )
 }
 
+/** The headline's name as the shapers write it, in the reader's language. */
+const FIT_NAMES: Record<string, MessageKey> = {
+  'Overall rate': 'mdl.fit.overallRate', 'Overall average': 'mdl.fit.overallAverage',
+  'strongest lift': 'mdl.fit.strongestLift', score: 'mdl.fit.score',
+}
+function fitName(tr: TranslateFn, name: string): string {
+  const key = FIT_NAMES[name]
+  return key ? tr(key) : name
+}
+
 export default function ModelRenderer({ data }: ChartRendererProps) {
   const [tab, setTab] = useState<string | null>(null)
   const tr = useT()
@@ -486,7 +498,7 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
         )}
         {fit && kind !== 'compare' && kind !== 'rules' && (
           <div style={{ fontSize: 12 }}>
-            {fit.name}: <b style={{ color: 'var(--accent)' }}>{fmt(fit.value)}</b>{held ? '' : effect}
+            {fitName(tr, fit.name)}: <b style={{ color: 'var(--accent)' }}>{fmt(fit.value)}</b>{held ? '' : effect}
             {/* With a partition the headline is the held-out score; the
                 registry's sentence describes the TRAINING fit, so it says so. */}
             {r.interpretation && <span style={{ color: 'var(--muted)' }}> — {held ? tr('pg.modelsMaps.mr.onTraining', { text: String(r.interpretation) }) : r.interpretation}</span>}
@@ -505,7 +517,7 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
         {warnings.map((w, i) => (
           <div key={i} role="alert" style={{ fontSize: 11, padding: '4px 8px', borderRadius: 6,
             border: '1px solid var(--warning, #d68910)', background: 'color-mix(in srgb, var(--warning, #d68910) 10%, transparent)' }}>
-            ⚠ {w}
+            ⚠ {sayText(tr, w, saidOf(data, 'warnings')?.[i])}
           </div>
         ))}
       </div>
@@ -635,11 +647,11 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
         )}
         {active === 'fit' && fit && (
           <div style={{ fontSize: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <div>{fit.name}: <b>{fmt(fit.value)}</b>{effect}</div>
+            <div>{fitName(tr, fit.name)}: <b>{fmt(fit.value)}</b>{effect}</div>
             {Object.entries(fit.secondary ?? {}).map(([k, v]) => <div key={k}>{k}: <b>{fmt(v)}</b></div>)}
             {caveats.length > 0 && (
               <ul style={{ margin: '6px 0 0', paddingInlineStart: 18, color: 'var(--muted)', fontSize: 11 }}>
-                {caveats.map((c, i) => <li key={i}>{c}</li>)}
+                <SaidItems texts={caveats} i18n={saidOf(r, r.caveats ? 'caveats' : 'warnings')} />
               </ul>
             )}
           </div>

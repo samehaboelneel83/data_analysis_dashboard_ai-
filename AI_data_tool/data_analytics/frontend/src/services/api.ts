@@ -2045,6 +2045,7 @@ export interface OpportunityCard {
   action: { kind: 'add_widget'; widget_type: string; config: Record<string, unknown> }
     | { kind: 'run_analysis'; analysis: string; params: Record<string, unknown> }
     | { kind: 'open'; target: 'columns'; column?: string }
+    | ({ kind: 'decision_problem' } & DecisionShape)
   title_i18n?: SaidKey | null
   sentence_i18n?: SaidKey | null
   limits_i18n?: (SaidKey | null)[]
@@ -2105,6 +2106,33 @@ export interface DatasetHealth {
   summary: { pass: number; warn: number; fail: number; status: 'pass' | 'warn' | 'fail'
     not_checked: number; columns: number; rows: number | null; sampled: boolean }
   checks: HealthCheck[]
+}
+
+/** The shape of a decision recognised on a table (server: services/discovery/decision.py). */
+export type DecisionShape =
+  | { problem: 'allocation'; key: string; amounts: string[]; options: number }
+  | { problem: 'assignment'; from: string; to: string; numbers: string[]; pairs: number; fill: number }
+export interface DecisionChoices {
+  problem: 'allocation' | 'assignment'; objective: string; direction: 'largest' | 'smallest'
+  key?: string; limited?: string; limit?: number; at_most?: number
+  from_col?: string; to_col?: string; each_from?: 'exactly_one' | 'at_most_one'; each_to_at_most?: number
+}
+export interface DecisionCheck { code: string; column?: string; rows?: number; options?: number; of?: number; pairs?: number; total?: number }
+/** `datalytics.decision-problem/1`: the problem as the person described it. Never solved here. */
+export interface DecisionSpecification {
+  schema: string; problem: 'allocation' | 'assignment'; solved: false; note: string
+  objective: { direction: 'maximize' | 'minimize'; column: string; aggregate: string }
+  decisions: Record<string, unknown> & { count: number }
+  constraints: ({ kind: string; column?: string; value?: number; rule?: string })[]
+  data: { rows: number; columns: string[] }
+  checks: DecisionCheck[]
+  dataset: { id?: number; name?: string; version?: string }
+}
+export const decisionApi = {
+  problems: (dsId: number) =>
+    api.get<{ dataset_id: number; problems: DecisionShape[]; restricted: boolean }>(`/datasets/${dsId}/decision-problems`).then(r => r.data),
+  specification: (dsId: number, body: DecisionChoices) =>
+    api.post<DecisionSpecification>(`/datasets/${dsId}/decision-problems/specification`, body).then(r => r.data),
 }
 
 export const discoveryApi = {

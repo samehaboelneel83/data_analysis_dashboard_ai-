@@ -142,7 +142,13 @@ def non_additive_kind(column: str | None, column_meta: dict | None = None) -> st
 
 
 def is_quantity(column: str | None, column_meta: dict | None = None) -> bool:
-    """False for a column that must never enter a measure pool."""
+    """False for a column that must never enter a measure pool: an identifier
+    (by its stored role, or named like one), a coordinate, a year."""
+    meta = _entry(column, column_meta)
+    if meta.get("role") == "identifier":
+        # The person's own word for the column: it was left to the name alone,
+        # so a key they had marked still joined every correlation.
+        return False
     return non_additive_kind(column, column_meta) is None
 
 

@@ -1018,3 +1018,151 @@ The existing mechanism (`readback.Said`: the English sentence plus its key and p
 * Whole browser suite passes (4,385), type check clean; the engine neutrality test and the catalogue-parity tests pass.
 * **Left on purpose, as before** (docs/suggestions/PLAN.md §7): field-specific ordered scales are recognised when the data holds them; a tree is found through *parent / manager / supervisor / reports to*; accounting words are money words; personal-data detection keeps its lists; the currency list and the map packs include one country's entries among others.
 * **Not done:** the Arabic word list in the new test is short and leaves out «عميل» (also the word for a software client), so an Arabic-only example about customers would pass.
+
+## AU. Closing the gaps, 1 — Arabic on screen, and the English the server still wrote (2026-10-11)
+
+**Looked at in the browser, in Arabic** (signed in as the seeded admin): the home page, datasets, upload, Ask AI, insights, automations, dashboards, connections, lineage, glossary, dataflows, migration, one dataset's six tabs, one dashboard of 14 widgets, and twelve admin and monitoring pages. Method: on each page, every visible text, title, placeholder and screen-reader name that contains an English phrase and no Arabic was listed. Names of the person's own things (datasets, dashboards, connections) are theirs and stay as written.
+
+What that found, and what was done:
+
+| Found on screen | Cause | Done |
+|---|---|---|
+| Six settings with English labels and help | settings added in §AE–§AH without catalogue entries | entries added; a test now fails when a setting has no label in both languages (`test_app_settings.py`) |
+| Lineage badges ("Extracted from…", "N active steps…", "Never refreshed", "3h ago") | text built inside a function call, which the scanner of §AI does not read | translated; the age uses the shared `formatTimeAgo` |
+| Footnotes under results: statistical tests, model comparison, what-if, sentiment, clustering, the model widget's leak warning | written by the server as plain English | each is now a keyed sentence (`readback._s`, 45 keys under `rb.st.*`, `rb.ap.*`, `rb.fs.*`, `rb.ts.*`, `rb.sg.*`, `rb.mw.*`), carried beside the English (`caveats_i18n`, `warnings_i18n`) and said from the catalogue by one component (`components/analysis/SaidItems.tsx`) in every result view, the what-if dialog, saved models and the model widget |
+| "Overall rate", "strongest lift", "score" in the model widget; "Cumulative share (%)" on a Pareto | names the shapers write | translated where they are drawn |
+
+* A named scenario's "goes outside anything observed" keeps its key through the comparison of scenarios.
+* Tests: two new ones — every such sentence has a key in both catalogues with the same pieces; a statistical result's footnotes render from the catalogue to exactly what the server wrote. Whole browser suite passes (4,385).
+* **A defect found on the way:** a statistics scan with exactly one tested finding carried no adjusted p-value (`insights._apply_multiple_comparison_correction` returned early), which a test had been failing on since an earlier change to the scan. A family of one now reports its own value.
+
+**Not done, and why**
+* **Layout was not judged by eye.** The browser pane available here renders the page too small to read; the check was of text, not of spacing, truncation or mirrored layout.
+* The **headline sentence of a statistical test** ("Statistically significant difference in … with a small effect") and its "size of the gap" sentence are still English: they are composed from several clauses and need their own keys.
+* **Insight-detector card titles** and **column profile facts** are still English from the server.
+* Text **stored when it was written** stays in that language: a guided-setup run's findings and AI-written pages, a job's or an alert's last status and error, a suggested dashboard's description.
+* Pages not opened: the report builder's side panels and dialogs, the guided setup's steps, connection review, sharing dialogs, the print view.
+
+## AV. Closing the gaps, 2 — the guided setup's designer can choose among ready charts (2026-10-11)
+
+* New setting **`setup_ai_selection`** (Admin → Settings → AI model): `free` (default) · `cards` · `both`, the same three ways as `suggest_ai_selection` has for "Suggest dashboards", on its own switch.
+* **cards:** the platform builds its own charts for the rows the person asked about — the statistics engine's, the discovery engine's, the standard series, and the *plain charts of the data's shape* (how many, per group, over time; each yes/no column's share; each number rolled up the way the platform already rolls it up) — up to 130. The model answers with pages of **ids from that list**, a question id for each, and may give each chart a title and a reason in the person's language. It cannot change a chart or add one (`answer.validated_cards`, `standard_cards`, `pick_pages`). Every chosen chart still goes through the designer's gate.
+* **both:** it chooses first; the designer's existing repair round then designs only for the questions no ready chart answered.
+* If choosing returns nothing in `cards`, the flow falls back to the platform's own selection, as it does with no model.
+
+**Measured live** (real model, one request of five questions in Arabic about the returned part of a 64,420-row table):
+
+| Mode | Time | Pages | Questions answered | Note |
+|---|---|---|---|---|
+| free | 66 s | 3 | 5 of 5 | each chart filtered to the returned rows where the question needed it |
+| both | 108 s | 2–3 | 5 of 5 | |
+| cards, found charts only | 20 s | 2 | 2 of 5 | |
+| cards, with the plain charts | 25 s | 2 | 3 of 5 | one of the three answered "which area has most returns" with a count of **all** rows per area |
+
+**Why the default is `free`.** A question about a *part* of the rows needs a filter on a value, and no ready-made chart carries one; in `cards` such a question is left unanswered or, worse, matched to a chart of everything. In `free` each chart is still drawn and judged on the rows before it is offered, so nothing unchecked reaches the page in any mode. The setting is there for an installation that prefers speed and a closed menu.
+
+* Tests: 7 (a page holds only charts from the list; invented, repeated and non-numeric ids dropped; a failure is harmless; the list and request are fenced; the plain charts never use an identifier, a personal column or a column that may not be shown; the switch is its own).
+
+**Not done**
+* The **connection designer** (suggesting before a dataset exists) is unchanged, on purpose: until it has written a query there are no rows and so no ready charts to choose from; the query itself must come from the model; and its charts are already judged on the rows the query returns. Choosing among ready charts built on the query's result is possible as a later step; it was not built or measured.
+* Ready charts filtered to one value (the missing piece above) were not generated.
+* "Change this page" in the guided setup (a person's own typed request) still designs freely in every mode.
+* `cards` and `both` were measured once each, on one request.
+
+## AW. Closing the gaps, 3 — AI switched off (2026-10-11)
+
+* **Page copilot.** With "Allow AI" off for the data it no longer refuses (409). It answers in plain words that the page was not changed, names the columns the typed words point at, and lists up to five charts the platform has already built and checked on this data for those columns, each of which can be added from Suggest (`services/copilot_without_model.py`; reply carries `without_ai` and `suggestions`). When the model is on but does not answer, the reply is still the 502 it was: a test and the builder depend on telling the two apart.
+* **Ask AI's SQL writer.** The catalogue it is shown (table and column names, descriptions, value labels, glossary) is now fenced as data like every other piece of the person's own text.
+* Tests: 3 for the no-AI answer; the copilot's "AI is off" test now expects the answer instead of the refusal.
+* **Not done:** the no-AI answers of Ask AI and the copilot are written in English only. The copilot's suggestions are listed in words; the chat does not yet draw them as buttons.
+
+## AX. Closing the gaps, 4 — limits (2026-10-11)
+
+| Limit | Setting | Default | How |
+|---|---|---|---|
+| A query on **SQL Server** | `source_statement_timeout_s` (existing) | 900 s | pymssql: the driver's query timeout; pyodbc: set on each new connection |
+| A query on **Oracle** | same | 900 s | python-oracledb: `call_timeout` on each new connection |
+| One **background job** | `job_time_limit_s` (new) | 7,200 s | past it the job ends as failed with a plain sentence and the worker is free; 0 = none |
+| **AI tokens per person per day** | `ai_tokens_per_user_per_day` (new) | 0 = off | the tighter of this and the organisation's budget binds; the refusal says "your own AI budget"; scheduled work is charged to the organisation only |
+
+* Tests: 5 for the two database families (arguments, and the attribute set on a stand-in connection; the engine runs the hook on every new connection), 1 for the job limit, 3 for the per-person budget.
+* **Not verified against real servers:** no SQL Server or Oracle database is available here. The driver attributes are the documented ones; the behaviour on a live server was not observed.
+* A job stopped by the limit has its coroutine cancelled; work it had handed to a thread (a model fit, a blocking driver call) runs to its own end in the background.
+* **A fixture fixed on the way:** two Ask AI budget tests had been failing since "Allow AI" became one switch (§K) — their connection had it off, so no model was asked and nothing was metered. The fixture now allows AI.
+
+## AY. Phase 5 — cohorts, how sure a what-if is, and a decision written down (2026-10-11)
+
+The three capabilities of §G phase 5 (§D-19, §D-15, §D-21). Each is offered only when the table has the shape for it.
+
+### Who comes back (`cohort_retention`)
+
+* For a table where the same identifier appears on many rows over time. Each one's **cohort** is the period of its first row; it **came back** in a later period when it has at least one row there; **retention** is the share of a cohort seen again *k* periods after its first. Day, week, month, quarter or year; up to 12 periods; the newest 24 cohorts.
+* A cohort that has not lived through a period yet has an **empty** cell there, never a zero. A cohort of fewer than 20 is flagged. The last row is all cohorts together, weighted by size, counted only over the cohorts that reached each period.
+* **Offered** when a key repeats — at least 30 different values, more than 1.5 rows each — beside a date; a column of names with no fixed shape is not taken for an identifier. A look at the rows keeps the card only if there are at least three cohorts, and says what it found ("x% are seen again the month after their first…").
+* Analysis tab: "Who comes back?". As a tile on a dashboard: yes.
+
+### How sure a what-if is (`simulate_scenarios`)
+
+* The what-if model of `forecast_scenario`, run 2,000 times with its **coefficients** drawn from their estimated distribution and **each period's noise** drawn from the size of the fit's misses. For each scenario's total over the horizon: the middle, where 9 runs in 10 fall, where the middle half falls, the **chance of ending below doing nothing**, and — given a floor — the chance of ending below it.
+* The **same draws** for every scenario and the baseline (they differ by what was moved, not by luck), and a **fixed seed** (the same data gives the same answer every time).
+* One number is enough to ask: "move each factor by 10%" makes an up and a down scenario; named scenarios are accepted too.
+* It carries every warning of the what-if it rests on (association, not intervention; a scenario outside anything observed is named), and says first when the model explains little.
+* **Offered** beside "scenarios side by side", under the same look at the rows: withheld when the factor and the number rise together only because busier periods hold more of everything.
+* Analysis tab: "How sure is a what-if?". As a tile: yes.
+
+### A decision to set up (`discovery/decision.py`)
+
+* **Recognised by shape, from the stored profile:**
+  * *a choice among options* — one row per option (a key that never repeats), at least two amounts that add up, 5 to 5,000 rows, and **no date column**: a dated row is something that happened, not an option;
+  * *a matching of two sets* — two columns whose pairs fill at least half of the grid (every one of the first against every one of the second), with a number per pair, and no date column.
+* **Nothing is inferred about roles.** The person says which amount to make as large or as small as possible, which is limited and by how much (or how many options may be chosen); for a matching, how often each side may be used. That is checked on the rows — each row really one option, each pair really once, the limit above zero and not excluding everything, six of one side cannot each be matched to five of the other one-to-one — and refused in plain words when it cannot be a decision.
+* **What comes back** is a document, `schema: datalytics.decision-problem/1`: objective (direction, column), decisions (one per row, in or out), constraints, the columns involved, and checks worth knowing (a limit that rules nothing out; rows with no value; pairs missing from the grid). It holds no row of the data. It is **not solved, stored or sent anywhere**; the person may download it.
+* A reader under a row rule is offered nothing ("one row per option" is not true of a part of the table); a hidden column cannot be named.
+* Routes: `GET /datasets/{id}/decision-problems`, `POST /datasets/{id}/decision-problems/specification`. Analysis tab: "Is there a decision to set up?" — what was written is said in plain words first; the document is behind "Show details".
+
+### Checked
+
+* Tests: 31 on the server (cohorts counted by hand on a case of four; retention recovers the rate put in; a second row in a month changes nothing; the simulation's middle is the single what-if's total within 1%, a factor that really moves the number leaves under 1% chance of ending below doing nothing, a factor that does nothing lands between 5% and 95%, identical on a second run; a decision is recognised, refused for a dated table, for a repeated key, for too few options, for a sparse grid; the specification says exactly what was said; the routes as a reader, with a hidden column, across organisations) and 6 in the browser (the two result views; the decision form sends exactly what was chosen and shows the reason when refused).
+* **Live, on the 64,420-row shipments table:** no decision is offered (every row is dated) and no cohort card (it has no repeating identifier, only names) — as intended. Run by hand on the names column: 311 of them, 9.9% seen again the month after their first, 0.2 s. The simulation by hand on fee against weight: 0.2 s, 0% and 100% chance of ending below doing nothing — and the engine had **withheld** that card, because the two are linked only by volume. Seen in the browser in Arabic: the three new questions on the Analysis tab and the "no such shape" answer.
+
+### Not done
+
+* No table in this installation has the shape of a decision or a repeating identifier, so those two were checked live only in the negative; their positive cases are the tests.
+* The third decision shape of §D2 (**maximise a fitted response model** under ranges) is not written down as a specification: it needs the simulation's model exposed as an objective, which was not built.
+* The simulation draws from what the model estimates about itself; it does not widen for a model that is wrong in form (a curve fitted as a line). It says so.
+* The decision card appears in the engine's card list, but only the Analysis tab opens its form: the builder's suggestion pane shows charts only.
+* Refusals of the three (and of every analysis) are written by the server in English.
+* The analysis names in the Analysis tab's own list ("cohort retention") are the registry's English names, as for every analysis; five common form labels were translated on the way.
+
+## AZ. Closing the gaps, 5 — the three failing Ask AI cases (2026-10-11)
+
+The benchmark (26 questions, English and Arabic, `docs/ASK_BENCHMARK.md`) had three cases failing before and after phase 0. Each was looked at:
+
+| Case | What was wrong | Done | Now |
+|---|---|---|---|
+| "By how much did A's total exceed B's?" (English) | sent to a significance test between all groups; the answer was a p-value and a gap of averages | a question that asks *by how much*, *how much more*, or *the difference between* is an amount, not a test (`classify.settle_intent`, English and Arabic wording) | passes |
+| A column the data does not have, asked in Arabic | the answer declined correctly; the **scorer** did not recognise "this data does not contain…" | scorer's refusal wording extended, English and Arabic | passes |
+| Average of a percentage column, asked in Arabic | the dataset has a **defined measure** "Margin % (on totals)"; the Arabic wording is read as naming it (9.98%), as the platform's own rule for defined measures says, while the English wording is read as the column and averaged (19.01%), which the benchmark expects | a prompt line preferring the stored column was tried and **removed** — it contradicted the defined-measure rule and changed nothing | **still fails**; which answer is right is the owner's call |
+
+* Run three times today: morning (three fail), with only the schema fenced (the same three fail — the fence changed nothing measurable), and after these changes: **25 of 26**; English 10 of 10 answers, Arabic 9 of 10; refusals 3 of 3 in both; no ungrounded answer. All targets met.
+* Tests: three routing cases and two refusal phrasings added.
+* **Not done:** the Arabic average is left as it is: it follows the dataset's own defined measure. Either the benchmark case should expect the measure in both languages, or the question should name the column; that is a decision, not a fix.
+
+## BA. The whole backend suite, run end to end (2026-10-11)
+
+Until now only the suites near each change had been run. The whole suite (7,862 tests, 24 minutes in the container) was run once after §AU–§AZ: **7,811 passed, 25 failed, 25 errors.** Every one was looked at.
+
+| What failed | Why | Done |
+|---|---|---|
+| 43 of the 50: the architecture documents, the capability matrix, the demo reports, the live-query demo, the evaluation order | they read files outside the container (`docs/`, `frontend/src`, `ARCHITECTURE.*`) | run again with those files supplied: all pass except the count check below |
+| Counts in `ARCHITECTURE.md` and `.html` (tables, widget types, migrations, backend test modules, frontend test files) | the documents had not followed the code | updated in both: 96 tables, 77 widget types, 65 revisions, 516 test modules, 356 test files |
+| New data routes missing from the cross-surface security inventory | eight routes added since phase 0 were never listed | **opportunities, column profile, health and decision problems now go through the harness** — another organisation and a colleague without access get 404; a reader with a hidden column and a row rule gets neither; all pass. The specification, Allow AI, column lineage and "classify again" are listed with the reason each returns no row |
+| A service importing the web framework | the background analysis job caught the router's HTTP error by its class | caught by its shape instead; the layer rule holds |
+| A column marked as an identifier still entered correlations | `is_quantity` read the name only, not the stored role | **a real defect, fixed**: the person's own word for the column counts |
+| "salary is averaged", "pay findings are about averages", and "IMSI and LAC stay out of correlations" | these tests expected the platform to know one field's column names, which phase 0 removed on purpose | the tests now give the columns their stored classification, under which the same behaviour holds; one line asserts that the bare name decides nothing |
+| The classifier's Arabic example | the test looked for the example that phase 0 replaced with a neutral one | test updated |
+| Two settings tests, one model-endpoint test | they read the container's own list of model servers | the tests now set that list aside; they pass |
+
+* After the fixes, every affected suite was run again (1,173 tests) and the document tests with their files (107): all pass. The whole suite was **not** run a second time end to end.
+* Whole browser suite: 4,391 pass; type check clean.
+* **Afterwards:** the two settings tests and the model-endpoint test that failed only in this container now set aside the machine's own list of model servers, and pass. Nothing in the backend suite is known to fail.

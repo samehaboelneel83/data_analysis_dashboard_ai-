@@ -18,6 +18,7 @@ import { useDirection } from '../../contexts/DirectionContext'
 import { majorityDir } from '../../lib/autoDir'
 import { useT, type MessageKey, type TranslateFn } from '../../i18n'
 import { sayText, type SaidI18n } from '../../lib/readbackText'
+import SaidItems, { saidOf } from './SaidItems'
 import { rich } from '../../i18n/pages/modelsMaps'
 
 export interface Factor {
@@ -246,6 +247,12 @@ export function ResultFor({ kind, result, params }: {
   if (kind === 'automated_prediction') {
     return <AutomatedPrediction result={result as PredictionResult} />
   }
+  if (kind === 'cohort_retention' && (result as CohortRetentionPayload | null)?.meta?.curve) {
+    return <CohortRetention result={result as CohortRetentionPayload} />
+  }
+  if (kind === 'simulate_scenarios' && Array.isArray((result as SimulateScenariosResult | null)?.table)) {
+    return <SimulateScenarios result={result as SimulateScenariosResult} />
+  }
   if (kind === 'stage_board' && (result as StageBoardPayload | null)?.meta?.stage_col) {
     return <StageBoard result={result as StageBoardPayload} />
   }
@@ -410,7 +417,7 @@ function ResultCard({ result }: { result: StatisticalTestResult }) {
           sample". A reader who acts on the number without them is misled. */}
       {result.caveats.length > 0 && (
         <ul style={{ fontSize: 11, color: 'var(--muted)', margin: '10px 0 0', paddingInlineStart: 18 }}>
-          {result.caveats.map((c, i) => <li key={i}>{c}</li>)}
+          <SaidItems texts={result.caveats} i18n={saidOf(result)} />
         </ul>
       )}
     </div>
@@ -520,7 +527,7 @@ function DecisionTree({ result }: { result: DecisionTreeResult }) {
       {result.caveats?.length > 0 && (
         <ul style={{ fontSize: 11, color: 'var(--muted)', margin: '10px 0 0',
                      paddingInlineStart: 18 }}>
-          {result.caveats.map((c, i) => <li key={i}>{c}</li>)}
+          <SaidItems texts={result.caveats} i18n={saidOf(result)} />
         </ul>
       )}
     </div>
@@ -652,6 +659,138 @@ function CompareScenarios({ result }: { result: CompareScenariosResult }) {
       {result.caveats?.length > 0 && (
         <ul style={{ fontSize: 11, color: 'var(--muted)', margin: '10px 0 0', paddingInlineStart: 18 }}>
           {result.caveats.map((_c, i) => <li key={i}>{caveat(i)}</li>)}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+export interface CohortRetentionPayload {
+  rows: ({ cohort: string; size: number } & Record<string, number | string | null>)[]
+  warnings?: string[]
+  meta: { entity: string; date_column: string; granularity: string; periods: number; entities: number
+    once_only: number; cohorts: number; from: string; to: string
+    curve: { period: number; retention: number | null; cohorts: number; entities: number }[]
+    first_back: number; settled: number; settled_period: number
+    headline: string; headline_i18n?: SaidI18n | null; warnings_i18n?: (SaidI18n | null)[] }
+}
+
+/** Who comes back: one row per cohort, one column per period since its first. Empty cells are periods not lived yet. */
+function CohortRetention({ result }: { result: CohortRetentionPayload }) {
+  const t = useT()
+  const m = result.meta
+  const ks = Array.from({ length: m.periods }, (_, i) => i + 1)
+  const cell = (v: number | null | undefined) => v == null ? undefined
+    : `color-mix(in srgb, var(--accent) ${Math.round(Math.min(100, Math.max(0, v)) * 0.7)}%, transparent)`
+  const th = { textAlign: 'end' as const, padding: '2px 6px', fontWeight: 500 }
+  const td = { textAlign: 'end' as const, padding: '3px 6px', fontVariantNumeric: 'tabular-nums' as const }
+  return (
+    <div className="card" style={{ padding: 18 }}>
+      <SectionLabel>{t('res.co.title', { e: m.entity, g: t(`res.co.g.${m.granularity}` as MessageKey) })}</SectionLabel>
+      <div data-testid="cohort-headline" style={{ fontSize: 13, margin: '4px 0 12px' }}>{sayText(t, m.headline, m.headline_i18n)}</div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ fontSize: 12, borderCollapse: 'collapse' }}>
+          <thead><tr style={{ color: 'var(--muted)' }}>
+            <th style={{ textAlign: 'start', padding: '2px 8px 2px 0', fontWeight: 500 }}>{t('res.co.first')}</th>
+            <th style={th}>{t('res.co.size')}</th>
+            {ks.map(k => <th key={k} style={th}>+{k}</th>)}
+          </tr></thead>
+          <tbody>
+            {result.rows.map(r => (
+              <tr key={r.cohort} data-testid="cohort-row" style={{ borderTop: '1px solid var(--border)' }}>
+                <td dir="ltr" style={{ padding: '3px 8px 3px 0', textAlign: 'start' }}>{r.cohort}</td>
+                <td dir="ltr" style={td}>{Number(r.size).toLocaleString()}</td>
+                {ks.map(k => { const v = r[`p${k}`] as number | null | undefined
+                  return <td key={k} dir="ltr" style={{ ...td, background: cell(v) }}>{v == null ? '' : `${v}%`}</td> })}
+              </tr>
+            ))}
+            <tr data-testid="cohort-typical" style={{ borderTop: '2px solid var(--border)', fontWeight: 600 }}>
+              <td style={{ padding: '3px 8px 3px 0' }}>{t('res.co.typical')}</td>
+              <td dir="ltr" style={td}>{m.entities.toLocaleString()}</td>
+              {m.curve.map(c => <td key={c.period} dir="ltr" style={td}>{c.retention == null ? '' : `${c.retention}%`}</td>)}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>{t('res.co.legend', { g: t(`res.co.g.${m.granularity}` as MessageKey) })}</div>
+      {(result.warnings ?? []).length > 0 && (
+        <ul style={{ fontSize: 11, color: 'var(--muted)', margin: '10px 0 0', paddingInlineStart: 18 }}>
+          <SaidItems texts={result.warnings} i18n={m.warnings_i18n} />
+        </ul>
+      )}
+    </div>
+  )
+}
+
+interface SimulatedRow { scenario: string; expected: number; p05: number; p25: number; median: number; p75: number; p95: number
+  chance_below_baseline?: number; chance_below_floor?: number; median_gain?: number; gain_p05?: number; gain_p95?: number
+  extrapolating?: boolean }
+export interface SimulateScenariosResult {
+  measure: string; horizon: number; runs: number; r2: number; weak_fit?: boolean; floor: number | null
+  baseline: SimulatedRow; table: SimulatedRow[]; series: string[]
+  histogram: ({ from: number; to: number } & Record<string, number>)[]
+  highest: string; caveats: string[]; caveats_i18n?: (SaidI18n | null)[]
+}
+
+/** Each what-if as a range of outcomes: the middle, where most runs fall, and the chance of ending below doing nothing. */
+function SimulateScenarios({ result }: { result: SimulateScenariosResult }) {
+  const t = useT()
+  const n = (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: Math.abs(v) >= 100 ? 0 : 2 })
+  const pct = (v: number | undefined) => v == null ? '—' : `${Math.round(v * 100)}%`
+  const name = (sc: string) => sc === 'Nothing moved' ? t('res.sc.none') : sc
+  const rows = [result.baseline, ...result.table]
+  const lo = Math.min(...rows.map(r => r.p05)), hi = Math.max(...rows.map(r => r.p95))
+  const at = (v: number) => hi > lo ? ((v - lo) / (hi - lo)) * 100 : 50
+  const th = { textAlign: 'end' as const, padding: '2px 8px', fontWeight: 500 }
+  const td = { textAlign: 'end' as const, padding: '3px 8px', fontVariantNumeric: 'tabular-nums' as const }
+  const best = result.table.find(r => r.scenario === result.highest) ?? result.table[0]
+  return (
+    <div className="card" style={{ padding: 18 }}>
+      <SectionLabel>{t('res.sim.title', { m: result.measure })}</SectionLabel>
+      {result.weak_fit && result.caveats?.[0] && (
+        <div role="alert" data-testid="sim-weak" style={{ fontSize: 12, padding: '6px 10px', borderRadius: 6, margin: '4px 0 8px',
+          background: 'var(--surface2)', color: 'var(--danger)' }}>{sayText(t, result.caveats[0], result.caveats_i18n?.[0])}</div>
+      )}
+      {best && (
+        <div data-testid="sim-headline" style={{ fontSize: 13, margin: '4px 0 10px' }}>
+          {t('res.sim.head', { sc: best.scenario, n: result.horizon, lo: n(best.p05), hi: n(best.p95), mid: n(best.median),
+            chance: pct(best.chance_below_baseline) })}
+        </div>
+      )}
+      <table style={{ fontSize: 12, borderCollapse: 'collapse', width: '100%' }}>
+        <thead><tr style={{ color: 'var(--muted)' }}>
+          <th style={{ textAlign: 'start', padding: '2px 8px 2px 0', fontWeight: 500 }}>{t('res.sc.scenario')}</th>
+          <th style={th}>{t('res.sim.middle')}</th>
+          <th style={th}>{t('res.sim.range')}</th>
+          <th style={{ ...th, width: '28%' }} aria-hidden />
+          <th style={th}>{t('res.sim.below')}</th>
+          {result.floor != null && <th style={th}>{t('res.sim.belowFloor', { v: n(result.floor) })}</th>}
+        </tr></thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={r.scenario} data-testid="sim-row" style={{ borderTop: '1px solid var(--border)' }}>
+              <td style={{ padding: '3px 8px 3px 0' }}><bdi>{name(r.scenario)}</bdi>
+                {r.extrapolating && <span title={t('res.sc.beyondTip')} style={{ color: 'var(--danger)', marginInlineStart: 6 }}>{t('res.sc.beyond')}</span>}</td>
+              <td dir="ltr" style={td}>{n(r.median)}</td>
+              <td dir="ltr" style={td}>{n(r.p05)} – {n(r.p95)}</td>
+              <td style={{ padding: '3px 8px' }}>
+                <div dir="ltr" aria-hidden style={{ position: 'relative', height: 10, background: 'var(--surface2)', borderRadius: 5 }}>
+                  <div style={{ position: 'absolute', top: 3, height: 4, left: `${at(r.p05)}%`, width: `${Math.max(1, at(r.p95) - at(r.p05))}%`,
+                    background: 'var(--muted)', opacity: 0.5, borderRadius: 2 }} />
+                  <div style={{ position: 'absolute', top: 1, height: 8, left: `${at(r.p25)}%`, width: `${Math.max(1, at(r.p75) - at(r.p25))}%`,
+                    background: i === 0 ? 'var(--muted)' : 'var(--accent)', borderRadius: 3 }} />
+                </div>
+              </td>
+              <td dir="ltr" style={td}>{i === 0 ? '—' : pct(r.chance_below_baseline)}</td>
+              {result.floor != null && <td dir="ltr" style={td}>{pct(r.chance_below_floor)}</td>}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>{t('res.sim.legend', { n: result.runs.toLocaleString() })}</div>
+      {result.caveats?.length > 0 && (
+        <ul style={{ fontSize: 11, color: 'var(--muted)', margin: '10px 0 0', paddingInlineStart: 18 }}>
+          <SaidItems texts={result.caveats} i18n={result.caveats_i18n} />
         </ul>
       )}
     </div>
@@ -944,7 +1083,7 @@ function AutomatedPrediction({ result }: { result: PredictionResult }) {
       {result.caveats?.length > 0 && (
         <ul style={{ fontSize: 11, color: 'var(--muted)', margin: '10px 0 0',
                      paddingInlineStart: 18 }}>
-          {result.caveats.map((c, i) => <li key={i}>{c}</li>)}
+          <SaidItems texts={result.caveats} i18n={saidOf(result)} />
         </ul>
       )}
     </div>
@@ -1045,7 +1184,7 @@ function TextTopics({ result }: { result: TextTopicsResult }) {
       {result.caveats?.length > 0 && (
         <ul style={{ fontSize: 11, color: 'var(--muted)', margin: '14px 0 0',
                      paddingInlineStart: 18 }}>
-          {result.caveats.map((c, i) => <li key={i}>{c}</li>)}
+          <SaidItems texts={result.caveats} i18n={saidOf(result)} />
         </ul>
       )}
     </div>
@@ -1154,7 +1293,7 @@ function ForecastScenario({ result }: { result: ScenarioResult }) {
       {result.caveats?.length > 0 && (
         <ul style={{ fontSize: 11, color: 'var(--muted)', margin: '10px 0 0',
                      paddingInlineStart: 18 }}>
-          {result.caveats.map((c, i) => <li key={i}>{c}</li>)}
+          <SaidItems texts={result.caveats} i18n={saidOf(result)} />
         </ul>
       )}
     </div>
@@ -1263,7 +1402,7 @@ function TextSentiment({ result }: { result: TextSentimentResult }) {
       ))}
       {result.caveats?.length > 0 && (
         <ul style={{ fontSize: 11, color: 'var(--muted)', margin: '10px 0 0', paddingInlineStart: 18 }}>
-          {result.caveats.map((c, i) => <li key={i}>{c}</li>)}
+          <SaidItems texts={result.caveats} i18n={saidOf(result)} />
         </ul>
       )}
     </div>

@@ -4,18 +4,8 @@ import LoadingState from '../components/ui/LoadingState'
 import { Link } from 'react-router-dom'
 import { lineageApi, type LineageGraph } from '../services/api'
 import { useDirection } from '../contexts/DirectionContext'
-import { useT } from '../i18n'
+import { useT, formatTimeAgo } from '../i18n'
 
-function timeAgo(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime()
-  const mins = Math.round(ms / 60000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  const hours = Math.round(mins / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.round(hours / 24)
-  return `${days}d ago`
-}
 
 /**
  * The org's data estate as three columns — sources → datasets → reports — with
@@ -282,17 +272,17 @@ export default function Lineage() {
     const out: React.ReactNode[] = []
     const hb = healthBadge(d)
     if (hb) out.push(hb)
-    if (d.extraction_kind) out.push(badge('E', `Extracted from: ${d.extraction_kind}`))
-    const t = d.transform ?? { count: 0, kinds: [] }
-    if (t.count > 0) {
-      const kindsPreview = t.kinds.slice(0, 3).join(', ') + (t.kinds.length > 3 ? '…' : '')
-      out.push(badge('T', `${t.count} active step${t.count === 1 ? '' : 's'}: ${kindsPreview || t.kinds.join(', ')}`))
+    if (d.extraction_kind) out.push(badge('E', t('lin.extractedFrom', { kind: d.extraction_kind })))
+    const tf = d.transform ?? { count: 0, kinds: [] }
+    if (tf.count > 0) {
+      const kindsPreview = tf.kinds.slice(0, 3).join(', ') + (tf.kinds.length > 3 ? '…' : '')
+      out.push(badge('T', tf.count === 1 ? t('lin.oneStep', { kinds: kindsPreview || tf.kinds.join(', ') }) : t('lin.nSteps', { n: tf.count, kinds: kindsPreview || tf.kinds.join(', ') })))
     }
     const l = d.load ?? { last_refreshed_at: null, strategy: null, cursor_column: null, staleness: 'never' as const }
     if (l.staleness === 'never') {
-      out.push(badge('L', 'Never refreshed', 'var(--muted)'))
+      out.push(badge('L', t('lin.never'), 'var(--muted)'))
     } else if (l.last_refreshed_at) {
-      const label = `Refreshed ${timeAgo(l.last_refreshed_at)}${l.strategy ? ` · ${l.strategy}` : ''}`
+      const label = `${t('lin.refreshed', { ago: formatTimeAgo(l.last_refreshed_at, t) ?? '' })}${l.strategy ? ` · ${l.strategy}` : ''}`
       out.push(badge('L', label, l.staleness === 'stale' ? 'var(--warning)' : 'var(--success)'))
     }
     return out

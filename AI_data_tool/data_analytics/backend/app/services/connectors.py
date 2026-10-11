@@ -438,7 +438,9 @@ def connect_args(cfg: dict) -> dict:
     if backend == "mssql":
         driver = _driver_of(cfg)
         if driver == "pymssql":
-            return {"login_timeout": connect}
+            # pymssql's `timeout` is the QUERY timeout in seconds (0 = none):
+            # the same ceiling Postgres gets server-side.
+            return {"login_timeout": connect, **({"timeout": limit} if limit else {})}
         if driver == "pyodbc":
             return {"timeout": connect}
         return {}
@@ -470,6 +472,33 @@ def connect_args(cfg: dict) -> dict:
         args["options"] = " ".join(options)
     args.update(_tls_args(cfg, backend))
     return args
+
+
+def statement_limit_hook(cfg: dict):
+    """A function to run on each NEW driver connection so no query on it runs
+    past `source_statement_timeout_s` -- for the drivers that take the limit
+    as an attribute of the connection instead of a connect argument:
+
+    * SQL Server through pyodbc: `connection.timeout`, in seconds;
+    * Oracle through python-oracledb: `connection.call_timeout`, in milliseconds
+      (the round trip is abandoned and the session stays usable).
+
+    None when the limit is off, or the driver is bounded elsewhere
+    (`connect_args`) or not at all."""
+    limit = _statement_limit_s()
+    if not limit:
+        return None
+    backend = _backend_of(cfg)
+    driver = _driver_of(cfg)
+    if backend == "mssql" and driver == "pyodbc":
+        def bound(dbapi_connection) -> None:
+            dbapi_connection.timeout = limit
+        return bound
+    if backend == "oracle" and driver == "oracledb":
+        def bound(dbapi_connection) -> None:
+            dbapi_connection.call_timeout = limit * 1000
+        return bound
+    return None
 
 
 def _connect_timeout_s() -> int:

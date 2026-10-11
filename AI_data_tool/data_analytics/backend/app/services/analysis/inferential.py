@@ -28,6 +28,8 @@ is a meaningless one. Same stance as `influencers.MIN_ROWS`.
 """
 from __future__ import annotations
 
+from ..readback import _s, as_i18n
+
 import math
 from dataclasses import dataclass, field
 from typing import Any
@@ -87,7 +89,8 @@ class TestResult:
             "n": self.n,
             "detail": self.detail,
             "interpretation": self.interpretation,
-            "caveats": self.caveats,
+            "caveats": [str(c) for c in self.caveats],
+            "caveats_i18n": [as_i18n(c) for c in self.caveats],
         }
 
 
@@ -242,7 +245,7 @@ def compare_groups(df: pd.DataFrame, value_col: str, group_col: str) -> TestResu
     n = int(sum(len(v) for _, v in groups))
     caveats = []
     if sampled:
-        caveats.append(f"Computed on a {SAMPLE_ABOVE:,}-row sample of a larger dataset")
+        caveats.append(_s("st.sample", "Computed on a {n}-row sample of a larger dataset", n=f"{SAMPLE_ABOVE:,}"))
 
     summary = [{"group": name, "n": int(len(v)), "mean": _round(float(np.mean(v))),
                 "std": _round(float(np.std(v, ddof=1)) if len(v) > 1 else 0.0)}
@@ -272,7 +275,7 @@ def compare_groups(df: pd.DataFrame, value_col: str, group_col: str) -> TestResu
                                     f"difference in {value_col} between {n1} and {n2}")
             + " " + gap["sentence"],
             caveats=caveats + [
-                "Welch's t-test is used, which does not assume equal variances"],
+                _s("st.welch", "Welch's t-test is used, which does not assume equal variances")],
         )
 
     arrays = [v for _, v in groups]
@@ -297,8 +300,8 @@ def compare_groups(df: pd.DataFrame, value_col: str, group_col: str) -> TestResu
                                 f"difference in {value_col} across {group_col}")
         + " Widest gap -- " + gap["sentence"],
         caveats=caveats + [
-            "ANOVA reports that SOME group differs, not which -- compare pairs "
-            "individually to find out which"],
+            _s("st.anova", "ANOVA reports that SOME group differs, not which -- compare pairs "
+                           "individually to find out which")],
     )
 
 
@@ -340,15 +343,15 @@ def test_independence(df: pd.DataFrame, col_a: str, col_b: str) -> TestResult:
 
     caveats = []
     if sampled:
-        caveats.append(f"Computed on a {SAMPLE_ABOVE:,}-row sample of a larger dataset")
+        caveats.append(_s("st.sample", "Computed on a {n}-row sample of a larger dataset", n=f"{SAMPLE_ABOVE:,}"))
     # The textbook validity condition. Stated rather than silently ignored:
     # chi-square's approximation degrades badly on sparse tables.
     small_cells = int((expected < 5).sum())
     if small_cells:
         caveats.append(
-            f"{small_cells} cell(s) have an expected count below 5, where the "
-            f"chi-square approximation is unreliable -- treat this p-value as "
-            f"indicative only")
+            _s("st.smallcells", "{n} cell(s) have an expected count below 5, where the "
+               "chi-square approximation is unreliable -- treat this p-value as "
+               "indicative only", n=small_cells))
 
     return TestResult(
         kind="independence", statistic=float(chi2), p_value=float(p),
@@ -398,12 +401,12 @@ def correlation_test(df: pd.DataFrame, col_a: str, col_b: str,
     res = fn(a, b)
     r, p = float(res[0]), float(res[1])
     label = _label(r, 0.1, 0.3, 0.5)
-    caveats = ["Correlation is not causation: a third factor may drive both"]
+    caveats = [_s("st.corr", "Correlation is not causation: a third factor may drive both")]
     if sampled:
-        caveats.append(f"Computed on a {SAMPLE_ABOVE:,}-row sample of a larger dataset")
+        caveats.append(_s("st.sample", "Computed on a {n}-row sample of a larger dataset", n=f"{SAMPLE_ABOVE:,}"))
     if method == "pearson":
-        caveats.append("Pearson measures LINEAR association only; a curved "
-                       "relationship can show r near zero")
+        caveats.append(_s("st.pearson", "Pearson measures LINEAR association only; a curved "
+                          "relationship can show r near zero"))
 
     return TestResult(
         kind="correlation_test", statistic=r, p_value=p,
@@ -470,15 +473,15 @@ def regression(df: pd.DataFrame, target: str, predictors: list[str]) -> TestResu
     r2 = float(model.rsquared)
     label = _label(r2, 0.02, 0.13, 0.26)
     caveats = [
-        "OLS assumes a linear relationship, independent observations and "
-        "roughly constant error variance; none of these is checked here",
-        "Coefficients describe association within this data, not causation",
+        _s("st.ols", "OLS assumes a linear relationship, independent observations and "
+           "roughly constant error variance; none of these is checked here"),
+        _s("st.coef", "Coefficients describe association within this data, not causation"),
     ]
     if sampled:
-        caveats.append(f"Computed on a {SAMPLE_ABOVE:,}-row sample of a larger dataset")
+        caveats.append(_s("st.sample", "Computed on a {n}-row sample of a larger dataset", n=f"{SAMPLE_ABOVE:,}"))
     if len(predictors) > 1:
-        caveats.append("With correlated predictors, individual coefficients can "
-                       "be unstable even when the model as a whole fits well")
+        caveats.append(_s("st.collinear", "With correlated predictors, individual coefficients can "
+                          "be unstable even when the model as a whole fits well"))
 
     p_model = float(model.f_pvalue) if model.f_pvalue is not None else float("nan")
     return TestResult(
@@ -600,13 +603,13 @@ def glm_logistic(df: pd.DataFrame, target: str, predictors: list[str],
     label = _label(pseudo_r2, 0.05, 0.15, 0.3)
 
     caveats = [
-        f"Modelling the odds of '{positive}' against all other values",
-        "McFadden pseudo-R squared is not comparable to an OLS R squared: 0.2 "
-        "already indicates a good fit",
-        "Association within this data, not causation",
+        _s("st.odds", "Modelling the odds of '{v}' against all other values", v=positive),
+        _s("st.mcfadden", "McFadden pseudo-R squared is not comparable to an OLS R squared: 0.2 "
+           "already indicates a good fit"),
+        _s("st.assoc", "Association within this data, not causation"),
     ]
     if sampled:
-        caveats.append(f"Computed on a {SAMPLE_ABOVE:,}-row sample of a larger dataset")
+        caveats.append(_s("st.sample", "Computed on a {n}-row sample of a larger dataset", n=f"{SAMPLE_ABOVE:,}"))
 
     movers = [c for c in coefficients[1:] if c["significant"]]
     return TestResult(
@@ -712,12 +715,12 @@ def mixed_model(df: pd.DataFrame, target: str, predictors: list[str],
     label = _label(icc, 0.05, 0.15, 0.3)
 
     caveats = [
-        "Random intercepts only: each group gets its own baseline, but each "
-        "predictor is assumed to act the same way across groups",
-        "Association within this data, not causation",
+        _s("st.intercepts", "Random intercepts only: each group gets its own baseline, but each "
+           "predictor is assumed to act the same way across groups"),
+        _s("st.assoc", "Association within this data, not causation"),
     ]
     if sampled:
-        caveats.append(f"Computed on a {SAMPLE_ABOVE:,}-row sample of a larger dataset")
+        caveats.append(_s("st.sample", "Computed on a {n}-row sample of a larger dataset", n=f"{SAMPLE_ABOVE:,}"))
 
     return TestResult(
         kind="mixed_model", statistic=float(model.llf), p_value=float("nan"),
@@ -818,14 +821,14 @@ def survival(df: pd.DataFrame, duration_col: str, event_col: str,
     label = _label(strongest, 0.1, 0.3, 0.5)
 
     caveats = [
-        f"{censored:,} of {len(work):,} rows are censored (the event had not "
-        f"happened yet) and are used as 'at least this long', not discarded",
-        "Assumes proportional hazards: that each predictor's effect on risk "
-        "stays constant over time. This is not checked here",
-        "Association within this data, not causation",
+        _s("st.censored", "{n} of {total} rows are censored (the event had not "
+           "happened yet) and are used as 'at least this long', not discarded", n=f"{censored:,}", total=f"{len(work):,}"),
+        _s("st.hazards", "Assumes proportional hazards: that each predictor's effect on risk "
+           "stays constant over time. This is not checked here"),
+        _s("st.assoc", "Association within this data, not causation"),
     ]
     if sampled:
-        caveats.append(f"Computed on a {SAMPLE_ABOVE:,}-row sample of a larger dataset")
+        caveats.append(_s("st.sample", "Computed on a {n}-row sample of a larger dataset", n=f"{SAMPLE_ABOVE:,}"))
 
     sig = [c for c in coefficients if c["significant"]]
     return TestResult(
@@ -954,18 +957,18 @@ def pairwise_comparisons(df: pd.DataFrame, value_col: str, group_col: str,
     strongest = max((abs(p["cohens_d"] or 0) for p in pairs), default=0.0)
 
     caveats = [
-        f"{len(pairs)} comparisons were made; p-values are adjusted by the "
-        f"{method} method so the reported significance accounts for that",
-        "Welch's t-test is used for each pair, which does not assume equal "
-        "variances -- unlike Tukey's HSD",
+        _s("st.adjusted", "{n} comparisons were made; p-values are adjusted by the "
+           "{method} method so the reported significance accounts for that", n=len(pairs), method=method),
+        _s("st.welchpairs", "Welch's t-test is used for each pair, which does not assume equal "
+           "variances -- unlike Tukey's HSD"),
     ]
     if n_naive > n_sig:
         caveats.append(
-            f"{n_naive - n_sig} pair(s) would have looked significant without "
-            f"the correction; with this many comparisons some reach p < 0.05 by "
-            f"chance alone")
+            _s("st.naive", "{n} pair(s) would have looked significant without "
+               "the correction; with this many comparisons some reach p < 0.05 by "
+               "chance alone", n=n_naive - n_sig))
     if sampled:
-        caveats.append(f"Computed on a {SAMPLE_ABOVE:,}-row sample of a larger dataset")
+        caveats.append(_s("st.sample", "Computed on a {n}-row sample of a larger dataset", n=f"{SAMPLE_ABOVE:,}"))
 
     return TestResult(
         kind="pairwise_comparisons", statistic=float(len(pairs)),
@@ -1110,11 +1113,12 @@ def difference_check(df: pd.DataFrame, dimension: str, groups: list, measure: st
         raise StatisticalError(f"A '{agg}' bar is one extreme row; there is no spread to test against")
 
     out["caveats"] = [
-        f"Tested on the {na + nb:,} rows behind these two bars, after this chart's filters.",
-        f"Significance at {int(ALPHA * 100)}%; with many rows, tiny differences are 'significant'. "
-        f"The effect size says how much the groups overlap; the size of the gap says how much it matters.",
-        "An observed difference, not a cause.",
+        _s("st.twobars", "Tested on the {n} rows behind these two bars, after this chart's filters.", n=f"{na + nb:,}"),
+        _s("st.alpha", "Significance at {a}%; with many rows, tiny differences are 'significant'. "
+           "The effect size says how much the groups overlap; the size of the gap says how much it matters.", a=int(ALPHA * 100)),
+        _s("st.observed", "An observed difference, not a cause."),
     ]
+    out["caveats_i18n"] = [as_i18n(c) for c in out["caveats"]]
     return safe_json(out)
 
 

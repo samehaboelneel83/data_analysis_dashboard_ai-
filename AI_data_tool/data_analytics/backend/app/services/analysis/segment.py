@@ -14,6 +14,8 @@ reproducible across runs on the same data.
 """
 from __future__ import annotations
 
+from ..readback import _s, as_i18n
+
 import pandas as pd
 
 from ..analysis_contract import AnalysisContract
@@ -200,8 +202,8 @@ def segment_dataframe(
 
     warnings = []
     if sampled:
-        warnings.append(f"Clustered a random sample of {len(df):,} of {total_rows:,} rows")
+        warnings.append(_s("sg.sample", "Clustered a random sample of {n} of {total} rows", n=f"{len(df):,}", total=f"{total_rows:,}"))
     if n < len(df):
-        warnings.append(f"{len(df) - n} rows excluded (missing or non-numeric values in the selected columns)")
+        warnings.append(_s("sg.excluded", "{n} rows excluded (missing or non-numeric values in the selected columns)", n=len(df) - n))
 
-    return AnalysisContract(kind="segment", columns=columns_meta, rows=rows, meta=meta, warnings=warnings)
+    return AnalysisContract(kind="segment", columns=columns_meta, rows=rows, meta={**meta, "warnings_i18n": [as_i18n(w) for w in warnings]}, warnings=[str(w) for w in warnings])
