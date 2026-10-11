@@ -3247,7 +3247,9 @@ export const agentApi = {
       { question }).then(r => r.data),
   runDetail: (runId: number) =>
     api.get<{ steps: { sql: string | null; status: string; result_rows?: AgentResult | null }[]
-              context_objects?: string[] | null }>(
+              context_objects?: string[] | null
+              /** How long the whole run took. */
+              ms?: number | null }>(
       `/agent/runs/${runId}`).then(r => r.data),
   /** Download one answer's result as Excel or PDF, built server-side from
    *  the stored snapshot (CSV stays client-side -- the rows are already in

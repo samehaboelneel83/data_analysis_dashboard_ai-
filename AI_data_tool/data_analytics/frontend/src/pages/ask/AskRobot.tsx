@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState, type Ref } from 'react'
 import { useT } from '../../i18n'
 import type { RobotState } from './robotMood'
 
@@ -34,6 +34,88 @@ const MOVE_MS: Record<Move, number> = { wave: 1800, look: 2400, jump: 800, dance
 export const SLEEP_AFTER_MS = 20_000
 const CONFETTI = ['var(--dl-series-1)', 'var(--dl-series-2)', 'var(--dl-series-3)', 'var(--dl-series-4)', 'var(--dl-bot-glow)']
 const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+
+/** The drawing's gradients, glow filter and visor clip; ids are per instance. */
+export function RobotDefs({ uid }: { uid: string }) {
+  return (
+    <defs>
+      <radialGradient id={`${uid}-body`} cx="35%" cy="25%" r="85%">
+        <stop offset="0" className="dl-bot__s-hi" /><stop offset=".55" className="dl-bot__s-mid" /><stop offset="1" className="dl-bot__s-lo" />
+      </radialGradient>
+      <linearGradient id={`${uid}-visor`} x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" className="dl-bot__s-visor-hi" /><stop offset="1" className="dl-bot__s-visor-lo" />
+      </linearGradient>
+      <radialGradient id={`${uid}-eye`} cx="50%" cy="40%" r="60%">
+        <stop offset="0" className="dl-bot__s-hi" /><stop offset=".35" className="dl-bot__s-glow" /><stop offset="1" className="dl-bot__s-accent" />
+      </radialGradient>
+      <linearGradient id={`${uid}-scan`} x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" className="dl-bot__s-glow" stopOpacity="0" /><stop offset=".5" className="dl-bot__s-glow" /><stop offset="1" className="dl-bot__s-glow" stopOpacity="0" />
+      </linearGradient>
+      <filter id={`${uid}-glow`} x="-80%" y="-80%" width="260%" height="260%">
+        <feGaussianBlur stdDeviation="4" result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+      </filter>
+      <radialGradient id={`${uid}-shadow`}>
+        <stop offset="0" className="dl-bot__s-shade" /><stop offset="1" className="dl-bot__s-shade" stopOpacity="0" />
+      </radialGradient>
+      <clipPath id={`${uid}-clip`}><rect x="80" y="62" width="140" height="96" rx="46" /></clipPath>
+    </defs>
+  )
+}
+
+/** The head: antenna, ear pods and rings, helmet, visor and every set of
+ *  eyes. Shared with the chat's avatar (components/chat/RobotHead). */
+export function RobotHeadArt({ uid, gaze }: { uid: string; gaze?: Ref<SVGGElement> }) {
+  const url = (name: string) => `url(#${uid}-${name})`
+  return (
+    <g className="dl-bot__tilt"><g className="dl-bot__head">
+      <rect className="dl-bot__joint" x="147" y="22" width="6" height="18" rx="3" />
+      <circle className="dl-bot__bulb-ring" cx="150" cy="22" r="7" />
+      <circle className="dl-bot__bulb" cx="150" cy="22" r="7" filter={url('glow')} />
+
+      <g className="dl-bot__ears">
+        <circle cx="60" cy="112" r="20" fill={url('body')} />
+        <circle className="dl-bot__ear-ring dl-bot__ear-ring--l" cx="60" cy="112" r="12" filter={url('glow')} />
+        <circle cx="240" cy="112" r="20" fill={url('body')} />
+        <circle className="dl-bot__ear-ring dl-bot__ear-ring--r" cx="240" cy="112" r="12" filter={url('glow')} />
+      </g>
+
+      <rect x="62" y="34" width="176" height="146" rx="72" fill={url('body')} />
+      <path className="dl-bot__shine" d="M92 58c22-18 62-22 92-12" strokeOpacity=".85" strokeWidth="7" />
+
+      <g className="dl-bot__visor">
+        <rect x="80" y="62" width="140" height="96" rx="46" fill={url('visor')} />
+        <g clipPath={url('clip')}><rect className="dl-bot__scanline" x="80" y="108" width="140" height="5" fill={url('scan')} filter={url('glow')} /></g>
+        <path className="dl-bot__shine" d="M98 78c14-8 34-11 52-9" strokeOpacity=".22" strokeWidth="6" />
+        <rect className="dl-bot__visor-edge" x="80" y="62" width="140" height="96" rx="46" />
+      </g>
+
+      <g className="dl-bot__gaze" ref={gaze}><g className="dl-bot__look">
+        <g className="dl-bot__eyes" filter={url('glow')}>
+          <ellipse className="dl-bot__eye dl-bot__eye--l" cx="124" cy="110" rx="12" ry="13" fill={url('eye')} />
+          <ellipse className="dl-bot__eye dl-bot__eye--r" cx="176" cy="110" rx="12" ry="13" fill={url('eye')} />
+        </g>
+        <g className="dl-bot__happy" filter={url('glow')}>
+          <path d="M112 116q12-16 24 0" /><path d="M164 116q12-16 24 0" />
+        </g>
+        <g className="dl-bot__sleepy">
+          <path d="M113 112q11 7 22 0" /><path d="M165 112q11 7 22 0" />
+        </g>
+        <g className="dl-bot__wow"><circle cx="124" cy="110" r="18" /><circle cx="176" cy="110" r="18" /></g>
+      </g></g>
+      <g className="dl-bot__dots" filter={url('glow')}>
+        <circle cx="128" cy="112" r="6" /><circle cx="150" cy="112" r="6" /><circle cx="172" cy="112" r="6" />
+      </g>
+      <g className="dl-bot__orbiters" filter={url('glow')}>
+        <circle cx="150" cy="-2" r="4" /><circle cx="262" cy="150" r="3" /><circle cx="40" cy="160" r="3.5" />
+      </g>
+      <g className="dl-bot__qmark">
+        <circle cx="232" cy="40" r="17" />
+        <text x="232" y="47" textAnchor="middle" fontSize="20" fontWeight="700">?</text>
+      </g>
+      <path className="dl-bot__sweat" d="M212 62c-4 6-6 9-6 12a6 6 0 0 0 12 0c0-3-2-6-6-12z" />
+    </g></g>
+  )
+}
 
 export default function AskRobot({ state = 'idle', nod = 0, bare = false }: {
   state?: RobotState
@@ -182,27 +264,7 @@ export default function AskRobot({ state = 'idle', nod = 0, bare = false }: {
 
   const drawing = (
     <svg viewBox="0 0 300 380" aria-hidden="true" focusable="false">
-      <defs>
-        <radialGradient id={`${uid}-body`} cx="35%" cy="25%" r="85%">
-          <stop offset="0" className="dl-bot__s-hi" /><stop offset=".55" className="dl-bot__s-mid" /><stop offset="1" className="dl-bot__s-lo" />
-        </radialGradient>
-        <linearGradient id={`${uid}-visor`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" className="dl-bot__s-visor-hi" /><stop offset="1" className="dl-bot__s-visor-lo" />
-        </linearGradient>
-        <radialGradient id={`${uid}-eye`} cx="50%" cy="40%" r="60%">
-          <stop offset="0" className="dl-bot__s-hi" /><stop offset=".35" className="dl-bot__s-glow" /><stop offset="1" className="dl-bot__s-accent" />
-        </radialGradient>
-        <linearGradient id={`${uid}-scan`} x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0" className="dl-bot__s-glow" stopOpacity="0" /><stop offset=".5" className="dl-bot__s-glow" /><stop offset="1" className="dl-bot__s-glow" stopOpacity="0" />
-        </linearGradient>
-        <filter id={`${uid}-glow`} x="-80%" y="-80%" width="260%" height="260%">
-          <feGaussianBlur stdDeviation="4" result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
-        </filter>
-        <radialGradient id={`${uid}-shadow`}>
-          <stop offset="0" className="dl-bot__s-shade" /><stop offset="1" className="dl-bot__s-shade" stopOpacity="0" />
-        </radialGradient>
-        <clipPath id={`${uid}-clip`}><rect x="80" y="62" width="140" height="96" rx="46" /></clipPath>
-      </defs>
+      <RobotDefs uid={uid} />
 
       <ellipse className="dl-bot__shadow" cx="150" cy="366" rx="74" ry="11" fill={url('shadow')} />
 
@@ -246,53 +308,7 @@ export default function AskRobot({ state = 'idle', nod = 0, bare = false }: {
 
         <rect className="dl-bot__joint" x="134" y="166" width="32" height="18" rx="7" />
 
-        <g className="dl-bot__tilt"><g className="dl-bot__head">
-          <rect className="dl-bot__joint" x="147" y="22" width="6" height="18" rx="3" />
-          <circle className="dl-bot__bulb-ring" cx="150" cy="22" r="7" />
-          <circle className="dl-bot__bulb" cx="150" cy="22" r="7" filter={url('glow')} />
-
-          <g className="dl-bot__ears">
-            <circle cx="60" cy="112" r="20" fill={url('body')} />
-            <circle className="dl-bot__ear-ring dl-bot__ear-ring--l" cx="60" cy="112" r="12" filter={url('glow')} />
-            <circle cx="240" cy="112" r="20" fill={url('body')} />
-            <circle className="dl-bot__ear-ring dl-bot__ear-ring--r" cx="240" cy="112" r="12" filter={url('glow')} />
-          </g>
-
-          <rect x="62" y="34" width="176" height="146" rx="72" fill={url('body')} />
-          <path className="dl-bot__shine" d="M92 58c22-18 62-22 92-12" strokeOpacity=".85" strokeWidth="7" />
-
-          <g className="dl-bot__visor">
-            <rect x="80" y="62" width="140" height="96" rx="46" fill={url('visor')} />
-            <g clipPath={url('clip')}><rect className="dl-bot__scanline" x="80" y="108" width="140" height="5" fill={url('scan')} filter={url('glow')} /></g>
-            <path className="dl-bot__shine" d="M98 78c14-8 34-11 52-9" strokeOpacity=".22" strokeWidth="6" />
-            <rect className="dl-bot__visor-edge" x="80" y="62" width="140" height="96" rx="46" />
-          </g>
-
-          <g className="dl-bot__gaze" ref={gaze}><g className="dl-bot__look">
-            <g className="dl-bot__eyes" filter={url('glow')}>
-              <ellipse className="dl-bot__eye dl-bot__eye--l" cx="124" cy="110" rx="12" ry="13" fill={url('eye')} />
-              <ellipse className="dl-bot__eye dl-bot__eye--r" cx="176" cy="110" rx="12" ry="13" fill={url('eye')} />
-            </g>
-            <g className="dl-bot__happy" filter={url('glow')}>
-              <path d="M112 116q12-16 24 0" /><path d="M164 116q12-16 24 0" />
-            </g>
-            <g className="dl-bot__sleepy">
-              <path d="M113 112q11 7 22 0" /><path d="M165 112q11 7 22 0" />
-            </g>
-            <g className="dl-bot__wow"><circle cx="124" cy="110" r="18" /><circle cx="176" cy="110" r="18" /></g>
-          </g></g>
-          <g className="dl-bot__dots" filter={url('glow')}>
-            <circle cx="128" cy="112" r="6" /><circle cx="150" cy="112" r="6" /><circle cx="172" cy="112" r="6" />
-          </g>
-          <g className="dl-bot__orbiters" filter={url('glow')}>
-            <circle cx="150" cy="-2" r="4" /><circle cx="262" cy="150" r="3" /><circle cx="40" cy="160" r="3.5" />
-          </g>
-          <g className="dl-bot__qmark">
-            <circle cx="232" cy="40" r="17" />
-            <text x="232" y="47" textAnchor="middle" fontSize="20" fontWeight="700">?</text>
-          </g>
-          <path className="dl-bot__sweat" d="M212 62c-4 6-6 9-6 12a6 6 0 0 0 12 0c0-3-2-6-6-12z" />
-        </g></g>
+        <RobotHeadArt uid={uid} gaze={gaze} />
       </g></g>
     </svg>
   )

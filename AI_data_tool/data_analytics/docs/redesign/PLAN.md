@@ -144,11 +144,12 @@ Nothing is pushed.
   - [x] Part 0 Inventory — GATE 0 approved 2026-10-11 with decisions: duration from one `GET /agent/runs/{id}` after each answer (never delays it; nothing shown if it fails); Edit question on answers too (secondary); composer limit stays 2000 (warning from 1800); error chips kept, labelled as column-based suggestions; picker keeps Connections, no "Synced" line, a fixed hint with the last pick; loading shows elapsed time and a skeleton only.
   - [x] A Layout, hero, picker, step 2 and suggestion cards
     - >> GATE A; then A2, the owner's change to the empty page (two columns, chooser always open)
-  - [ ] B Loading and answer cards
+  - [x] B Loading and answer cards (after A3/A4: the robot, then the approved prototype ported; the robot's head is the cards' avatar)
+    - >> GATE B
   - [ ] C Error card and composer
   - [ ] D History rail
 - [ ] Then: Upload, Connections, Lineage, the AI button
-- [ ] FINAL Full regression: all tests, build, capture every screen, compare against all designs, final summary, fix the flaky `Lineage.test.tsx` (and watch `geoRenderers.test.tsx` and ReportBuilder's "report-level display rules" under load), and a clean-up list (test datasets 7 and 8, chat threads, the uncommitted init.sql edit). QA3 adds: dashboard "QA3-Builder" #16 (made 00:01; share link made and revoked 00:02–00:03; not made by the QA3 run, so the owner decides), and the cached insights QA3 may have saved on "Demo — Sales" and in the Builder AI panel. QA3 adds: stop the port-3002 Vite server ("before" captures) and remove its worktree (`git worktree remove` on the scratchpad `before` folder).
+- [ ] FINAL Full regression: all tests, build, capture every screen, compare against all designs, final summary, fix the flaky `Lineage.test.tsx` (and watch `geoRenderers.test.tsx`, `PrepPipelinePanel.test.tsx` ("shows the previewed shape…", failed once in a full run on 2026-10-11, passes alone) and ReportBuilder's "report-level display rules" under load), and a clean-up list (test datasets 7 and 8, chat threads, the uncommitted init.sql edit). QA3 adds: dashboard "QA3-Builder" #16 (made 00:01; share link made and revoked 00:02–00:03; not made by the QA3 run, so the owner decides), and the cached insights QA3 may have saved on "Demo — Sales" and in the Builder AI panel. QA3 adds: stop the port-3002 Vite server ("before" captures) and remove its worktree (`git worktree remove` on the scratchpad `before` folder).
   - >> GATE F: stop, final report
 
 ## Backend follow-ups (found during the frontend steps)
@@ -209,6 +210,7 @@ Not part of the frontend steps (1–7); candidates for the handoff's section 7 p
 | 7-QA6 A6 | Connector select options (TLS modes, auth types) are bare codes | The client names them by `field.code` with the code kept in view. The connector catalog should send labels or keys. |
 | 10 Ask AI (GATE 0) | Progress stages while a question runs (understanding → query → running → chart) | `/ask` is one synchronous call: no streaming, no stage events, no cancel (AN2). The page shows elapsed time and a skeleton only. |
 | 10 Ask AI (GATE 0) | The run's duration on the `/ask` response | Only `GET /agent/runs/{id}` has `ms`; the page makes that extra call after each answer. It should come back with the answer. |
+| 10 Ask AI (Part B) | The run's duration on stored messages | `GET /agent/conversations/{id}/messages` carries each run without `ms`, so an answer in a reopened thread shows no duration (the page does not fetch every run). |
 | 10 Ask AI (GATE 0) | History: last-activity time and a failed flag per thread | `GET /agent/conversations` has `created_at` only; whether a thread's last question failed is visible per message, not on the list, so the rail cannot mark failed questions. |
 | 10 Ask AI (GATE 0) | Error reasons and rephrase suggestions | `error` is one raw string; no reason code and no suggested rephrasings (with AN1/B3). The error card shows a generic message, the raw text under Technical details, and column-based suggestions built by the client. |
 | 10 Ask AI (GATE 0) | A connection's sync status in the picker ("Synced 15 min ago") | `DataSourceOut` has no sync status or time; the picker says only the type. |
@@ -1280,3 +1282,36 @@ The owner approved a prototype, `design-handoff-3/ask-ai/robot/ask-robot.html`. 
 - `askRobot.test.tsx` rewritten (21): the stage and the bare robot; the button and its label; the state mapping through the real `ChatPane` (focus or text → typing, a pending ask → thinking, an answer → happy with confetti → idle, a failure → error → idle, a nod per key); sleep after 20s and waking; no sleep outside idle; the routine's 6–9s and its stop outside idle; the hidden tab; click, hover and gaze; no timers after unmount; reduced motion; and the CSS (keyframes and transitions use transform and opacity only, no literal colour, the mirror).
 - Full suite: 349 files / 4373 tests pass, except `PrepPipelinePanel.test.tsx` (not touched here), which failed once in the full run and passes alone. Type-check and build pass.
 - Captures: `cap_10a.mjs` `empty` and `picked` at 1440 and 1024, EN/AR × light/dark; `cap_10robot.mjs`: the picture at 2× in each state, frames of thinking, happy, error, sleep, the wake-up and a click, 60 frames of the idle routine (`idle-sheet.png`, `idle-loop.gif`) and the reduced-motion pair. Before is :3001 at `3fc13ca`, taken before the change; after is in `redesign-captures/10-askai/R2-{before,after}/` (`states-sheet.png`, `step2-sheet.png` and `frames-sheet.png` are quick views). Typing and sleep are real in the captures; thinking / happy / error go through the page's own store (see the limit above); the model endpoints are faked as up in the browser so the question box can be typed in.
+
+### 10-B Ask AI: the loading card and the answer card — the commit that adds this entry
+
+The owner approved the robot port (10-A4, with its departures) and decided: the robot's head is the avatar on the cards.
+
+- **Only the Ask AI page is laid out as cards.** `ChatPane` takes `card={{ scopeName }}` from the page; the builder's copilot mounts pass nothing and keep the compact turn (pinned by a test). Styles: `pages/ask/askCards.css`.
+- **Question:** a bubble at the inline end (no user avatar).
+- **Loading card** (`LoadingCard` in `Pending.tsx`, sharing the wait's clock with the compact one): the thinking head, "Analyzing your data…", the dataset or connection, the elapsed time, and a skeleton (two lines, seven bars, one line). No step list (GATE 0). `aria-busy`; the "still working" note after 20s is kept.
+- **Answer card:**
+  - Header: the head, "Datalytics AI", then "data · duration · rows", and an "Auto chart · Bar / Line / Pie" chip when a chart is drawn (hidden below 1180px).
+  - **Duration:** one `GET /agent/runs/{id}` after the answer is on screen, never awaited by it; nothing is shown if the read fails or has no `ms`. A stored thread's answers show no duration (backend row).
+  - The answer text at 17px with its numbers marked (the evidence links are unchanged).
+  - The chart in its own frame; then **"Rows behind this answer"** as a band with the count: closed under a chart, open when the rows are all there is (`ResultView sectioned`; `drawnChart` is the one rule for the picture and the chip).
+  - **"Show SQL"** as a band: the statement left-to-right with keywords and strings picked out (`SqlBlock`, display only) and Copy in its corner; the tables line under it.
+  - Actions: Add to dashboard (primary), Copy, 👍 / 👎 (the "What was wrong?" field as before); on the far side CSV / Excel / PDF, Save as dataset (connections), **Edit question** (GATE 0) and Retry.
+  - A hidden live region says "Answer ready" when an answer lands.
+- **The head** (`components/chat/RobotHead.tsx`, the same drawing as the hero's: `AskRobot` now exports its head and its defs): head, visor, eyes, ear rings and antenna, 48px wide (37px tall).
+  - Loading: the thinking face (dots, scan line, orbiters, fast rings).
+  - An answer: happy eyes and a small hop for 3.5s, then calm. A failure: the shake, "?" and sweat drop for 3.5s, then calm.
+  - Calm is the eyes blinking only: no sway, routine, pointer or sleep.
+  - Only the newest card's head moves; older ones are still, with calm eyes. Reduced motion: every head is still, with the right eyes for its state (the error tilt is held without the animation).
+- **Clarification, limit and error replies** sit in the same card with the same header; their content is unchanged here (the error card is Part C).
+
+**Kept as they are (differences from the design, by rule):**
+- The chart is the app's own renderer (one colour per category, axis titles), not the design's single-colour horizontal bars; the rows use the app's grid (no totals row: the result has none).
+- No "N / 500" or other composer change (Part C). The 👍 / 👎 labels stay "Good answer" / "Bad answer".
+- Excel, PDF, CSV and Save as dataset are not in the design; they exist, so they stay.
+
+**Tests:**
+- New: `askCards.test.tsx` (14): the bubble and the loading card (busy, the clock, no steps, the thinking head); the header, chip and live region; the duration (one read, after the answer, hidden on failure or no `ms`); the rows band (closed under a chart, open for a plain table); the SQL band (LTR, marked, Copy); Edit question; the head's states and that only the newest moves; a stored thread (no per-message reads); no timers after unmount; the compact look outside the page; the Arabic strings; the SQL tokens.
+- The Ask AI guard covers `RobotHead`, `CardSection`, `SqlBlock` and `Pending`.
+- Full suite: 350 files / 4391 tests pass. Type-check and build pass.
+- Captures: `e2e/capture/redesign/cap_10b.mjs` (browser-only data: the answer, the run's duration, model endpoints up), EN/AR × light/dark: loading, the answer landing (happy head), the answer, rows and SQL open, a line chart, a plain table, a new answer under a stored one, and the answer and loading at 1024px. Before is :3001 at `2f98a95`; after is in `redesign-captures/10-askai/B-{before,after}/`.

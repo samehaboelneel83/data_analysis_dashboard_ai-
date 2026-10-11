@@ -53,6 +53,16 @@ export const en = {
   'ask2.composer.chooseFirst': 'Choose your data above to start asking',
   'ask2.composer.lock': 'Complete step 1 first',
   'ask2.disclaimer': 'Answers are generated from your data. Check the SQL before you share them.',
+  // Loading and answer cards (Part B)
+  'ask2.load.title': 'Analyzing your data…',
+  'ask2.live.ready': 'Answer ready',
+  'ask2.ans.who': 'Datalytics AI',
+  'ask2.ans.secs': '{n} s',
+  'ask2.ans.autoChart': 'Auto chart · {kind}',
+  'ask2.chart.bar': 'Bar',
+  'ask2.chart.line': 'Line',
+  'ask2.chart.pie': 'Pie',
+  'ask2.ans.rowsBehind': 'Rows behind this answer',
 } as const
 
 export const ar: Record<keyof typeof en, string> = {
@@ -95,4 +105,14 @@ export const ar: Record<keyof typeof en, string> = {
   'ask2.composer.chooseFirst': 'اختر بياناتك أعلاه لتبدأ بالسؤال',
   'ask2.composer.lock': 'أكمل الخطوة 1 أولاً',
   'ask2.disclaimer': 'تُنشأ الإجابات من بياناتك. راجع استعلام SQL قبل مشاركتها.',
+  // Loading and answer cards (Part B)
+  'ask2.load.title': 'جارٍ تحليل بياناتك…',
+  'ask2.live.ready': 'الإجابة جاهزة',
+  'ask2.ans.who': 'مساعد Datalytics',
+  'ask2.ans.secs': '{n} ث',
+  'ask2.ans.autoChart': 'مخطط تلقائي · {kind}',
+  'ask2.chart.bar': 'أعمدة',
+  'ask2.chart.line': 'خطي',
+  'ask2.chart.pie': 'دائري',
+  'ask2.ans.rowsBehind': 'الصفوف التي بُنيت عليها الإجابة',
 }

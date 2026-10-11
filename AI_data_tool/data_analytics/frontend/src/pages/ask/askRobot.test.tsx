@@ -281,7 +281,7 @@ describe('the robot CSS', () => {
     expect([...props].sort()).toEqual(['opacity', 'transform'])
     const moved = [...picture.matchAll(/transition:\s*([^;}]+)/g)]
       .flatMap(m => m[1].replace(/\([^)]*\)/g, '').split(',').map(p => p.trim().split(' ')[0]))
-    expect([...new Set(moved)].sort()).toEqual(['opacity', 'transform'])
+    expect([...new Set(moved)].filter(p => p !== 'none').sort()).toEqual(['opacity', 'transform'])
   })
 
   it('uses tokens, never a literal colour', () => {

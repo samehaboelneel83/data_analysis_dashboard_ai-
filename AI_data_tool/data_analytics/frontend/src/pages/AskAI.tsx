@@ -16,6 +16,7 @@ import { useConfirm } from '../components/ui/ConfirmDialog'
 import { connectionSuggestionCards, datasetSuggestionCards } from './ask/suggestions'
 import './ask/ask.css'
 import './ask/askLayout.css'
+import './ask/askCards.css'
 import DatasetListFilter, { useCleanDatasets } from '../components/dataset/DatasetListFilter'
 import { isCertified } from '../lib/cleanDatasets'
 
@@ -317,10 +318,12 @@ export default function AskAI() {
             )
             return sourceId != null
               ? <ChatPane key={scopeKey} dataSourceId={sourceId} conversationId={selected}
-                  onConversationCreated={created} suggestions={suggestions} initialInput={pendingQ} startView={startView} onActivity={signalRobot} />
+                  onConversationCreated={created} suggestions={suggestions} initialInput={pendingQ} startView={startView} onActivity={signalRobot}
+                  card={{ scopeName: scopeItem?.name ?? '' }} />
               : <ChatPane key={scopeKey} datasetIds={[datasetId as number]} conversationId={selected}
                   onConversationCreated={created} suggestions={suggestions}
-                  datasetColumns={columns?.map(c => c.name)} initialInput={pendingQ} startView={startView} onActivity={signalRobot} />
+                  datasetColumns={columns?.map(c => c.name)} initialInput={pendingQ} startView={startView} onActivity={signalRobot}
+                  card={{ scopeName: scopeItem?.name ?? '' }} />
           })()}
         </div>
       </section>

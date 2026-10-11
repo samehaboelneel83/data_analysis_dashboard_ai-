@@ -132,14 +132,16 @@
    prototype. Keyframes use transform and opacity only, so where the prototype
    animated a colour or a dash (the table scan, the donut arc, the links and
    cards while thinking) an overlay fades instead. */
-.dl-ill {
+.dl-ill, .dl-bot--head {
   --dl-bot-hi: var(--mc-surface); --dl-bot-mid: var(--mc-canvas-2); --dl-bot-lo: var(--mc-border-strong);
   --dl-bot-joint: var(--mc-ink-soft); --dl-bot-visor-hi: var(--mc-ink-soft); --dl-bot-visor-lo: var(--mc-ink);
   --dl-bot-glow: color-mix(in srgb, var(--accent) 62%, var(--dl-bot-hi));
   --dl-bot-shade: color-mix(in srgb, var(--mc-ink) 22%, transparent);
+}
+.dl-ill {
   position: relative; width: min(560px, 100%); aspect-ratio: 560 / 460; margin-bottom: 6px; flex: none; direction: ltr;
 }
-[data-theme="dark"] .dl-ill {
+[data-theme="dark"] .dl-ill, [data-theme="dark"] .dl-bot--head {
   --dl-bot-hi: var(--mc-ink); --dl-bot-mid: var(--mc-ink-soft); --dl-bot-lo: var(--mc-faint);
   --dl-bot-joint: var(--mc-border-strong); --dl-bot-visor-hi: var(--mc-surface); --dl-bot-visor-lo: var(--mc-canvas-2);
   --dl-bot-shade: color-mix(in srgb, var(--mc-canvas-2) 70%, transparent);
@@ -377,6 +379,21 @@
 .dl-bot[data-hover]:not([data-state="sleep"]) .dl-bot__eyes { transform: scale(1.12); }
 .dl-bot[data-hover]:not([data-state="sleep"]) .dl-bot__chest { fill: var(--dl-series-2); }
 
+/* The head alone, as the assistant's avatar on a chat card (RobotHead.tsx).
+   Only the newest card's head moves: thinking, happy or shaken for a moment,
+   then calm -- the eyes blink and nothing else. Older heads are still. */
+.dl-bot--head { position: static; display: block; flex: none; width: 48px; cursor: default; }
+[dir="rtl"] .dl-bot--head { transform: scaleX(-1); }
+.dl-bot--head .dl-bot__head, .dl-bot--head .dl-bot__bulb, .dl-bot--head .dl-bot__bulb-ring, .dl-bot--head .dl-bot__ear-ring { animation: none; }
+.dl-bot--head .dl-bot__bulb-ring { opacity: 0; }
+.dl-bot--head[data-live][data-state="thinking"] .dl-bot__ear-ring { animation: dl-bot-earspin .9s linear infinite; }
+.dl-bot--head[data-live][data-state="thinking"] .dl-bot__bulb { animation: dl-bot-bulb 1.1s ease-in-out infinite; }
+.dl-bot--head[data-live][data-state="happy"] .dl-bot__tilt { animation: dl-bot-head-hop .75s cubic-bezier(.3, 1.6, .5, 1) 3; }
+@keyframes dl-bot-head-hop { 0%, 100% { transform: translateY(0); } 45% { transform: translateY(-14px); } }
+/* Where the shake ends, held without the animation too (reduced motion). */
+.dl-bot--head[data-state="error"] .dl-bot__tilt { transform: rotate(-14deg); }
+.dl-bot--head:not([data-live]) *, .dl-bot--head:not([data-live]) { animation: none !important; transition: none !important; }
+
 /* ── Data picker ────────────────────────────────────────────────────────── */
 .dl-pick { position: relative; width: min(100%, 600px); }
 .dl-pick--compact { width: auto; flex: none; max-width: 100%; }
@@ -468,6 +485,7 @@
   .dl-hero > *, .dl-ill *, .dl-ill, .dl-ill__glow, .dl-ill__bars i, .dl-pick__pop, .dl-sug__card,
   .dl-ask--v2 .dl-hist, .dl-ask--v2 .dl-hist--open { animation: none !important; transition: none !important; }
   .dl-ill *::before, .dl-ill *::after { animation: none !important; transition: none !important; }
+  .dl-bot--head, .dl-bot--head * { animation: none !important; transition: none !important; }
   /* A static robot: no packets, confetti or sparks. */
   .dl-ill__pkt, .dl-ill__fx { display: none; }
 }

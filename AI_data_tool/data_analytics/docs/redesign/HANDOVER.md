@@ -233,6 +233,9 @@ section has the details of every step), then `DATALYTICS_REDESIGN_HANDOFF.md`.
   scheduled for FINAL.
 - **`src/components/report/chartRenderers/geoRenderers.test.tsx`:** failed to *load*
   once in a full run (2026-10-06), then passed alone and on the next full run. Watch it.
+- **`src/components/report/PrepPipelinePanel.test.tsx`**, "shows the previewed shape so the
+  author knows what they are keeping": failed once in a full run (2026-10-11), passes
+  alone. On the FINAL list.
 - **If a full run fails only on these,** re-run the file alone before treating it as
   real.
 

@@ -13,6 +13,11 @@ const FILES: string[] = [
   'pages/ask/AskRobot.tsx',
   'pages/ask/DataPicker.tsx',
   'pages/ask/SuggestionGrid.tsx',
+  // Part B
+  'components/chat/RobotHead.tsx',
+  'components/chat/CardSection.tsx',
+  'components/chat/SqlBlock.tsx',
+  'components/chat/Pending.tsx',
 ]
 
 describe('no hard-coded English: Ask AI (step 10)', () => {
