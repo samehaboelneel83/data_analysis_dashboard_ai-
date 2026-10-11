@@ -72,6 +72,27 @@ class SuggestInputs:
                 if isinstance(entry, dict) and entry.get("eligible_for_suggestion") is False}
 
 
+async def declared_hierarchies(db, dataset_id: int, columns: set[str]) -> list[list[str]]:
+    """The column nestings declared on a dataset (a folder of the hierarchy
+    tree holding two or more column levels, in order), restricted to columns
+    this reader's frame still has. Never raises."""
+    try:
+        from sqlalchemy import select
+        from ..models.models import HierarchyNode
+        nodes = (await db.execute(select(HierarchyNode).where(HierarchyNode.dataset_id == dataset_id)
+                                  .order_by(HierarchyNode.position, HierarchyNode.id))).scalars().all()
+    except Exception:                                           # noqa: BLE001
+        return []
+    out: list[list[str]] = []
+    for folder in [n for n in nodes if n.node_type == "folder"]:
+        levels = [n.column_name for n in nodes if n.parent_id == folder.id and n.column_name
+                  and n.node_type in ("dimension", "date") and n.column_name in columns]
+        levels = list(dict.fromkeys(levels))
+        if len(levels) >= 2 and levels not in out:
+            out.append(levels)
+    return out
+
+
 async def prepare(db, user, ds) -> SuggestInputs:
     from ..core.rls import resolve_denied_columns, resolve_rls_expr
     from . import analysis_frame as frames
@@ -80,6 +101,10 @@ async def prepare(db, user, ds) -> SuggestInputs:
     from .dataset_profile import build_profile
     from .prep import apply_prep_steps, prep_steps_of, resolve_join_frames
 
+    # "Allow AI" for this data: every designer starts here, so every model
+    # call a designer makes afterwards obeys it (services/ai_policy.py).
+    from . import ai_policy
+    await ai_policy.enter(db, datasets=[ds])
     if not ds.filename and ds.mode != "directquery":
         raise SuggestUnavailable("This dataset has no rows to suggest from yet")
 
@@ -123,9 +148,20 @@ async def prepare(db, user, ds) -> SuggestInputs:
     except FileNotFoundError:
         raise SuggestUnavailable("Dataset file not found on server", 404)
 
-    meta = ds.column_meta or {}
+    # Each column classified once and kept, so the designer, the panel and the
+    # guided setup read the same thing the insights engine does
+    # (services/column_classes.py).
+    from . import column_classes
+    meta = await column_classes.ensure(db, ds, df)
     type_map = await asyncio.to_thread(detect_types, df)
     profile = await asyncio.to_thread(build_profile, df, type_map, meta)
+    # Hierarchies the author DECLARED (Region > Country > City) lead the ones
+    # guessed from value counts: a declared nesting is a fact, a guessed one a
+    # hope (docs/suggestions/PLAN.md, phase 2).
+    declared = await declared_hierarchies(db, ds.id, {str(c) for c in df.columns})
+    if declared:
+        guessed = [h for h in (profile["structure"].get("hierarchies") or []) if h not in declared]
+        profile["structure"]["hierarchies"] = declared + guessed
     # What the platform KNOWS about these columns. `denied` is passed so a
     # column this role may not see cannot arrive in a prompt wearing a
     # description -- the same rule that dropped it from the frame above.
@@ -161,7 +197,7 @@ def _with_derived(inputs: "SuggestInputs", roles: dict, ineligible: set[str], mi
     from .derived_fields import as_definitions, augment_profile, propose, widgets_for
     from .insights import order_event_dates
     from .widget_data import apply_calculated_columns
-    fields = propose(inputs.df, roles, ineligible, mixed)
+    fields = propose(inputs.df, roles, ineligible, mixed, column_meta=inputs.column_meta)
     if inputs.live and fields["calculated_columns"]:
         # A live source computes a calculated column in its own SQL: only
         # offer the ones it can (a DATEDIFF on a family sql_expr writes).
@@ -221,6 +257,24 @@ async def panel(inputs: SuggestInputs, goal: str | None, size: int,
         facts = {**facts, "text": (facts.get("text") or "") + "\n" + "\n".join(
             f"- Derived field: {t}." for t in fields["facts"])}
     result = await asyncio.to_thread(generate_insights, inputs.df, inputs.type_map, meta)
+    # What the discovery engine found on these rows (a weekly rhythm, a
+    # season, two numbers set against each other...) joins the ideas: through
+    # the same gate, drawing and selection as every other one.
+    try:
+        import pandas as pd
+        from .analyst_panel import _section_for
+        from .discovery import engine as discovery
+        _dates = {c for c in inputs.df.columns if pd.api.types.is_datetime64_any_dtype(inputs.df[c])}
+        # On the data's own columns: the fields derived above for drawing
+        # have their own charts, and a sum of "days late" is not a headline.
+        _derived = [str(c.get("name")) for c in (fields.get("calculated_columns") or []) if isinstance(c, dict)]
+        _own = inputs.df.drop(columns=[c for c in _derived if c in inputs.df.columns], errors="ignore")
+        found = await asyncio.to_thread(discovery.candidates, _own, inputs.type_map, meta,
+                                        lambda wt, cfg: _section_for(wt, cfg, _dates))
+        extra = [*(extra or []), *found]
+    except Exception:                                        # noqa: BLE001 -- extra ideas, never a gate
+        import logging
+        logging.getLogger(__name__).warning("discovery candidates failed", exc_info=True)
     if client == "default":
         try:
             from .llm import get_client

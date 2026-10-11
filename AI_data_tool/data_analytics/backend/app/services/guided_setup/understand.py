@@ -54,6 +54,10 @@ _YEAR_NAME = re.compile(r"(^|_)(year|yr)($|_)", re.I)
 # ── facts ────────────────────────────────────────────────────────────────────
 
 def _is_measure(col: SourceColumn) -> bool:
+    # What a column HOLDS outranks what its values look like: a text column of
+    # place names once classified "percentage" is not a number to add up.
+    if col.dtype in ("text", "boolean"):
+        return False
     if col.semantic_type in ("currency", "percentage"):
         return True
     return (col.dtype in _NUMERIC and not col.is_primary_key
@@ -61,7 +65,10 @@ def _is_measure(col: SourceColumn) -> bool:
 
 
 def _is_date(col: SourceColumn) -> bool:
-    return col.dtype in ("datetime", "date", "timestamp") or col.semantic_type == "timestamp"
+    # A text column whose values merely look like timestamps (phone numbers:
+    # 0101002751) is not a date.
+    return col.dtype in ("datetime", "date", "timestamp") or (
+        col.semantic_type == "timestamp" and col.dtype != "text")
 
 
 def score_table(t: dict) -> float:
@@ -193,16 +200,35 @@ async def exact_ranges(db, user, source: DataSource, facts: list[dict]) -> dict[
         except (PolicyError, Exception):                    # noqa: BLE001
             continue
         if lo is not None and hi is not None:
-            out[t["name"]] = {"from": str(lo)[:10], "to": str(hi)[:10]}
+            out[t["name"]] = {"from": _day(lo), "to": _day(hi), "column": t["dates"][0]}
     return out
+
+
+def _day(v) -> str:
+    """A MIN/MAX of a date as YYYY-MM-DD. A timestamp column comes back from
+    some drivers as milliseconds since 1970: cut to ten characters that read
+    "1704099000 to 1790802000" on the page (Nile Express, 2026-10-10)."""
+    from datetime import datetime, timezone
+    text = str(v).strip()
+    if isinstance(v, (int, float)) or re.fullmatch(r"-?\d{9,14}(\.\d+)?", text):
+        n = float(text)
+        if abs(n) > 1e11:
+            n /= 1000.0
+        try:
+            return datetime.fromtimestamp(n, tz=timezone.utc).date().isoformat()
+        except (OverflowError, OSError, ValueError):
+            pass
+    return text[:10]
 
 
 def apply_ranges(facts: list[dict], ranges: dict[str, dict] | None) -> list[dict]:
     """The measured ranges in place of the sampled ones."""
     for t in facts:
         r = (ranges or {}).get(t["name"])
-        if r:
-            t["date_from"], t["date_to"], t["dates_exact"] = r["from"], r["to"], True
+        # A range is of ONE column: measured on a column no longer taken for a
+        # date, it says nothing about this table.
+        if r and t.get("dates") and r.get("column") == t["dates"][0]:
+            t["date_from"], t["date_to"], t["dates_exact"] = _day(r["from"]), _day(r["to"]), True
     return facts
 
 
@@ -235,13 +261,13 @@ SUMMARY_SCHEMA = {
 _LANGUAGE = {"ar": "Arabic (Modern Standard, simple words)", "en": "English"}
 
 
-def _column_line(c: SourceColumn, stats: dict) -> str:
+def _column_line(c: SourceColumn, stats: dict, top: int = PROMPT_TOP_VALUES) -> str:
     kind = c.semantic_type or c.dtype or "?"
     s = stats.get(c.id)
     extra = ""
     if s is not None:
         if s.top_k and c.dtype in ("text", "boolean"):
-            vals = [str(v.get("value")) for v in s.top_k[:PROMPT_TOP_VALUES] if v.get("value") is not None]
+            vals = [str(v.get("value")) for v in s.top_k[:top] if v.get("value") is not None]
             if vals:
                 extra = " e.g. " + ", ".join(vals)
         elif s.min_value is not None and s.max_value is not None:

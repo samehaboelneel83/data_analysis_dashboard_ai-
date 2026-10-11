@@ -406,13 +406,31 @@ def _series_totals(df, dim, dim_key, grouped, meas, agg, agg_fn, measure_def,
 _ID_NAME_PATTERN = re.compile(r"(^id$|_id$|_key$|_uuid$|^uuid$|_code$)", re.I)
 
 
-def _is_id_like_column(col: str) -> bool:
+def _is_id_like_column(col: str, column_meta: dict | None = None) -> bool:
     """True when `col`'s name matches the identifier pattern (id, state_id,
     A_NUMBER, IMEI, ...). One rule with the semantic veto's: this copy lagged
     it, so the profile called IMEI a measure while the veto was being taught
-    otherwise (live QA 2026-09-28)."""
-    from .semantic_guard import non_additive_kind
+    otherwise (live QA 2026-09-28).
+
+    The stored classification (`column_meta[col]["number"]`) is read first: a
+    column recorded as an amount is not an identifier because it is called
+    `unit_code`, and one recorded as a code is one whatever its name."""
+    from .semantic_guard import non_additive_kind, recorded_number
+    kind = recorded_number(col, column_meta)
+    if kind is not None:
+        return kind == "code"
     return bool(_ID_NAME_PATTERN.search(col)) or non_additive_kind(col) == "identifier"
+
+
+#: Calendar parts: a position in a cycle, not a point in time. Their labels
+#: carry the position first so an axis sorted as text is in calendar order.
+#: Weekday 1 is Monday (ISO 8601): a standard, not one region's week.
+_WEEKDAYS = ("1 Mon", "2 Tue", "3 Wed", "4 Thu", "5 Fri", "6 Sat", "7 Sun")
+_MONTHS = ("01 Jan", "02 Feb", "03 Mar", "04 Apr", "05 May", "06 Jun",
+           "07 Jul", "08 Aug", "09 Sep", "10 Oct", "11 Nov", "12 Dec")
+#: Every position of a cycle, so a grid or an axis shows the empty ones too.
+CALENDAR_AXES = {"hour_of_day": tuple(f"{h:02d}" for h in range(24)),
+                 "weekday": _WEEKDAYS, "month_of_year": _MONTHS}
 
 
 def _dimension_granularity_label(series: pd.Series, granularity: str) -> pd.Series:
@@ -460,6 +478,14 @@ def _dimension_granularity_label(series: pd.Series, granularity: str) -> pd.Seri
         return dt.dt.strftime("%Y-%m-%d %H:00")
     if granularity == "hour_of_day":
         return dt.dt.strftime("%H")
+    # Day of the week and month of the year, whatever the year (second
+    # reference set, 2026-10-11): "busiest on Thursday mornings", "each year
+    # over the months". Mapped from the number, not strftime("%a"), so the
+    # label never depends on the server's locale.
+    if granularity == "weekday":
+        return dt.dt.dayofweek.map(dict(enumerate(_WEEKDAYS))).where(dt.notna())
+    if granularity == "month_of_year":
+        return dt.dt.month.map(dict(enumerate(_MONTHS, start=1))).where(dt.notna())
     from .fiscal import fiscal_label, parse as parse_fiscal
     fiscal = parse_fiscal(granularity)
     if fiscal:
@@ -501,7 +527,76 @@ _BUCKET_LABEL_GRAINS = (
     (re.compile(r"\d{4}-\d{2}-\d{2}"), "day"),
     (re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:00"), "hour"),
     (re.compile(r"\d{2}"), "hour_of_day"),
+    (re.compile(r"[1-7] [A-Z][a-z]{2}"), "weekday"),
+    (re.compile(r"(0[1-9]|1[0-2]) [A-Z][a-z]{2}"), "month_of_year"),
 )
+
+
+def blank_outside_the_data(result: dict, df: pd.DataFrame, config: dict) -> None:
+    """Each year over the months: the months before the data begins and after
+    it stops hold no rows, and a total of no rows is drawn as 0 -- a line that
+    falls to nothing in the months that have not happened yet. Those cells are
+    emptied, so the first and the last year are drawn as far as they go."""
+    if not isinstance(result, dict) or result.get("type") != "crosstab":
+        return
+    if (str(config.get("dimension_granularity") or "").lower() != "month_of_year"
+            or str(config.get("dimension2_granularity") or "").lower() != "year"):
+        return
+    col = config.get("dimension2")
+    if col != config.get("dimension") or col not in df.columns:
+        return
+    try:
+        dt = pd.to_datetime(_apply_filters(df, config.get("filters") or [])[col], errors="coerce").dropna()
+    except Exception:                                   # noqa: BLE001 -- an extra, never the chart
+        return
+    if dt.empty:
+        return
+    first, last = dt.min(), dt.max()
+    columns = [str(c) for c in result.get("columns") or []]
+    # The month the data stops inside is not a month to set beside a whole
+    # one: twelve days of December against all of last December reads as a
+    # fall that did not happen. Left out, and said (same rule, and the same
+    # test of "unfinished", as a KPI's history).
+    cut = last.month
+    try:
+        from .relative_dates import partial_period
+        unfinished = partial_period(pd.DataFrame({col: dt}), col, "month",
+                                    {"rows": [{"name": last.strftime("%Y-%m")}]})
+    except Exception:                                   # noqa: BLE001
+        unfinished = None
+    if unfinished:
+        cut = last.month - 1
+        result["partial_period"] = {**unfinished, "dropped": True}
+    edges = {str(first.year): lambda m: m < first.month, str(last.year): lambda m: m > cut}
+    for row in result.get("rows") or []:
+        if not isinstance(row, list) or not row or str(row[0]) not in _MONTHS:
+            continue
+        month = _MONTHS.index(str(row[0])) + 1
+        for year, outside in edges.items():
+            if year in columns and outside(month):
+                row[columns.index(year)] = None
+
+
+def second_grain(df: pd.DataFrame, config: dict) -> tuple[pd.DataFrame, dict]:
+    """`dimension2_granularity`: the second field cut into date parts too --
+    which is what lets ONE date sit on both sides of a chart (weekday down,
+    hour across; month of the year along, a line per year). The part becomes a
+    column of its own, named for what it is, and the config points at it."""
+    grain = str(config.get("dimension2_granularity") or "").lower()
+    roles = config.get("roles") if isinstance(config.get("roles"), dict) else None
+    col = (roles or {}).get("category2") or config.get("dimension2")
+    if not grain or not col or col not in df.columns:
+        return df, config
+    labels = _dimension_granularity_label(df[col], grain)
+    if labels.isna().all():
+        return df, config                               # no dates here: the instruction did not apply
+    name = f"{col} ({grain.replace('_', ' ')})"
+    df = df.copy()
+    df[name] = labels
+    config = {**config, "dimension2": name}
+    if roles is not None:
+        config["roles"] = {**roles, "category2": name}
+    return df, config
 
 
 def _bucket_grain(value) -> str | None:
@@ -1152,6 +1247,14 @@ def shape_series(df: pd.DataFrame, config: dict) -> dict:
             grouped = grouped.merge(sort_vals, on=dim_key, how="left")
             grouped = grouped.sort_values(["_sv", dim_key], ascending=[sort == "asc", True])
             grouped = grouped.drop(columns=["_sv"])
+        elif sort_by == "order" and isinstance(config.get("category_order"), list):
+            # An ORDINAL category in its real order (Low, Medium, High; Jan,
+            # Feb, Mar) -- the order stored with the column's classification
+            # (services/column_classes.py). Alphabetical or by-value order
+            # scrambles a scale. Values the order does not name come last.
+            _rank = {str(v): i for i, v in enumerate(config["category_order"])}
+            grouped = (grouped.assign(_ord=grouped[dim_key].astype(str).map(_rank).fillna(len(_rank)))
+                       .sort_values(["_ord", dim_key], kind="mergesort").drop(columns=["_ord"]))
         elif sort_by == "name":
             grouped = grouped.sort_values(dim_key, ascending=(sort == "asc"))
         else:
@@ -1672,6 +1775,10 @@ def _cut(frame, limit: int, unit: str):
                  "limit": int(limit), "reason": "limit", "unit": unit}
 
 
+#: The share of a total a Pareto chart marks: how many groups it takes to reach it.
+PARETO_SHARE = 80.0
+
+
 def shape_dual_series(df: pd.DataFrame, config: dict) -> dict:
     """config roles: category OR start (grouping column), measure, measure2.
     At least one of measure/measure2 must be set. Used by dual-axis and
@@ -1757,7 +1864,25 @@ def shape_dual_series(df: pd.DataFrame, config: dict) -> dict:
             grouped = pd.concat([grouped, pd.DataFrame([_other_row])],
                                 ignore_index=True)
 
-    grouped, _truncation = _cut(grouped.sort_values(cat), limit, "categories")
+    # PARETO (`pareto: true`): the groups from the largest down, and beside
+    # each the share of the whole that it and every larger group carry -- the
+    # line that shows how few groups make up most of a total. The running
+    # share is taken over ALL groups before any cut, so a chart of the top 30
+    # still ends where the top 30 really end.
+    pareto = None
+    if config.get("pareto") and _col1:
+        grouped = grouped.sort_values(_col1, ascending=False, kind="stable").reset_index(drop=True)
+        _vals = pd.to_numeric(grouped[_col1], errors="coerce").fillna(0.0).clip(lower=0)
+        _whole = float(_vals.sum())
+        if _whole > 0:
+            grouped["__cum__"] = (_vals.cumsum() / _whole * 100).round(2)
+            _col2 = "__cum__"
+            reached = int((grouped["__cum__"] >= PARETO_SHARE).values.argmax()) + 1
+            pareto = {"share_pct": PARETO_SHARE, "groups": reached, "of": int(len(grouped)),
+                      "carried_pct": float(grouped["__cum__"].iloc[reached - 1])}
+        grouped, _truncation = _cut(grouped, int(config.get("limit") or 30), "categories")
+    else:
+        grouped, _truncation = _cut(grouped.sort_values(cat), limit, "categories")
     rows = []
     for _, row in grouped.iterrows():
         r = {"name": _safe(row[cat])}
@@ -1766,7 +1891,11 @@ def shape_dual_series(df: pd.DataFrame, config: dict) -> dict:
         if _col2:
             r["value2"] = _safe(row[_col2])
         rows.append(r)
-    return {"truncation": _truncation, "type": "dual_series", "category": cat, "measure": meas, "measure2": meas2, "rows": rows, "total": len(df)}
+    out = {"truncation": _truncation, "type": "dual_series", "category": cat, "measure": meas, "measure2": meas2,
+           "rows": rows, "total": len(df)}
+    if pareto:
+        out["pareto"] = pareto
+    return out
 
 
 def shape_xy_numeric(df: pd.DataFrame, config: dict) -> dict:
@@ -2101,11 +2230,22 @@ def shape_heatmap(df: pd.DataFrame, config: dict) -> dict:
             _other_frame = _excluded_raw.groupby(cat2)[meas].agg(agg_fn)
 
     pivot = df.groupby([cat, cat2])[meas].agg(agg_fn).unstack(cat2)
-    if str(dim_granularity or "").lower() == "hour_of_day" and _keep is None:
-        # Every hour on the axis. Filtered to incoming calls, hours 02-05 had
-        # none and vanished, closing up the day (live QA 2026-09-28).
-        pivot = pivot.reindex([f"{h:02d}" for h in range(24)])
-    if agg in ("count", "countd", "count_distinct", "distinct"):
+    # `difference_of`: each cell is the measure MINUS another number summed up
+    # the same way -- what was there against what was asked for. A cell where
+    # either side has no rows stays empty.
+    minus = config.get("difference_of")
+    diverging = bool(minus and minus in df.columns and minus != meas)
+    if diverging:
+        pivot = pivot - df.groupby([cat, cat2])[minus].agg(agg_fn).unstack(cat2).reindex_like(pivot)
+    # Every position of a cycle on its axis. Filtered to incoming calls, hours
+    # 02-05 had none and vanished, closing up the day (live QA 2026-09-28).
+    _full = CALENDAR_AXES.get(str(dim_granularity or "").lower())
+    if _full and _keep is None:
+        pivot = pivot.reindex(list(_full))
+    _full2 = CALENDAR_AXES.get(str(config.get("dimension2_granularity") or "").lower())
+    if _full2:
+        pivot = pivot.reindex(columns=list(_full2))
+    if agg in ("count", "countd", "count_distinct", "distinct") and not diverging:
         # No rows in a cell is a COUNT of 0 -- a number, not a gap. A sum or an
         # average over no rows stays empty: "never occurs" is worth seeing.
         pivot = pivot.fillna(0)
@@ -2119,6 +2259,8 @@ def shape_heatmap(df: pd.DataFrame, config: dict) -> dict:
         "type": "heatmap", "rows_axis": rows_axis, "cols_axis": cols_axis, "cells": cells,
         "min": min(flat_vals) if flat_vals else 0, "max": max(flat_vals) if flat_vals else 0,
         "total": len(df),
+        # Coloured around zero, by sign, not from the smallest to the largest.
+        **({"diverging": True, "difference": {"of": meas, "minus": minus}} if diverging else {}),
     }
 
 
@@ -2213,6 +2355,9 @@ def shape_waterfall(df: pd.DataFrame, config: dict) -> dict:
     if grain:
         df = df.copy()
         df[cat] = _bucket_dimension(df[cat], grain)
+    ref = config.get("bridge_from")
+    if ref:
+        return _shape_bridge(df, cat, meas, ref, agg, agg_fn, int(config.get("limit") or BRIDGE_STEPS))
     grouped, _truncation = _cut(df.groupby(cat)[meas].agg(agg_fn).sort_index(), limit, "categories")
     running = 0.0
     bars = []
@@ -2221,6 +2366,66 @@ def shape_waterfall(df: pd.DataFrame, config: dict) -> dict:
         bars.append({"name": _safe(name), "start": _safe(running), "delta": _safe(delta), "end": _safe(running + delta)})
         running += delta
     return {"truncation": _truncation, "type": "waterfall", "category": cat, "measure": meas, "bars": bars, "grand_total": _safe(running), "total": len(df)}
+
+
+#: Steps a bridge shows before the rest are gathered into one.
+BRIDGE_STEPS = 8
+BRIDGE_OTHER = "All other"
+
+
+def _shape_bridge(df: pd.DataFrame, cat: str, meas: str, ref: str, agg: str, agg_fn, steps: int) -> dict:
+    """A bridge from one number to another (`bridge_from`): the reference's
+    total, then each category's difference (largest first, the rest gathered),
+    arriving at the measure's total -- with the table behind it (`variance`).
+
+    Only for a total or a count: the differences of an average do not add up
+    to the difference of the averages, and a bridge that does not arrive is
+    worse than none."""
+    if ref not in df.columns or ref == meas:
+        return {"type": "error", "code": "bridge_reference",
+                "message": f"The number to bridge from ('{ref}') is not another column of this data.",
+                "rows": [], "total": 0}
+    if agg not in ("sum", "count", "countd"):
+        return {"type": "error", "code": "bridge_not_additive",
+                "message": "A bridge needs totals: the differences of an average do not add up. "
+                           "Use Sum, or compare the two numbers in a table.",
+                "rows": [], "total": 0}
+    both = df[pd.to_numeric(df[meas], errors="coerce").notna() & pd.to_numeric(df[ref], errors="coerce").notna()]
+    if both.empty:
+        return {"type": "empty", "rows": [], "total": 0}
+    # A row with no category is still in both totals: grouped under its own
+    # name, or the bridge would arrive somewhere other than the total.
+    key = both[cat].astype(object).where(both[cat].notna(), "(empty)")
+    a, b = both.groupby(key)[meas].agg(agg_fn), both.groupby(key)[ref].agg(agg_fn)
+    table = pd.DataFrame({"actual": a, "reference": b}).fillna(0.0)
+    table["delta"] = table["actual"] - table["reference"]
+    table = table.reindex(table["delta"].abs().sort_values(ascending=False, kind="mergesort").index)
+    start = float(table["reference"].sum())
+    end = float(table["actual"].sum())
+    shown, rest = table.head(steps), table.iloc[steps:]
+    bars = [{"name": ref, "start": 0.0, "delta": _safe(start), "end": _safe(start), "total": True}]
+    running = start
+    for name, row in shown.iterrows():
+        d = float(row["delta"])
+        bars.append({"name": _safe(name), "start": _safe(running), "delta": _safe(d), "end": _safe(running + d)})
+        running += d
+    if len(rest):
+        d = float(rest["delta"].sum())
+        bars.append({"name": BRIDGE_OTHER, "start": _safe(running), "delta": _safe(d), "end": _safe(running + d)})
+        running += d
+    bars.append({"name": meas, "start": 0.0, "delta": _safe(end), "end": _safe(end), "total": True})
+    pct = lambda d, base: round(d / abs(base) * 100, 1) if base else None     # noqa: E731
+    variance = [{"name": _safe(n), "actual": _safe(float(r["actual"])), "reference": _safe(float(r["reference"])),
+                 "delta": _safe(float(r["delta"])), "delta_pct": pct(float(r["delta"]), float(r["reference"]))}
+                for n, r in table.iterrows()]
+    return {"type": "waterfall", "category": cat, "measure": meas, "bars": bars, "grand_total": _safe(end),
+            "total": len(both),
+            "bridge": {"from": ref, "to": meas, "reference": _safe(start), "actual": _safe(end),
+                       "delta": _safe(end - start), "delta_pct": pct(end - start, start),
+                       "rows_left_out": int(len(df) - len(both))},
+            "variance": variance,
+            "truncation": {"applied": bool(len(rest)), "shown": int(len(shown)), "of": int(len(table)),
+                           "limit": steps, "reason": "limit", "unit": "categories"}}
 
 
 def shape_gauge(df: pd.DataFrame, config: dict) -> dict:
@@ -3931,6 +4136,214 @@ def resolve_roles(config: dict) -> dict:
     return roles
 
 
+#: A series longer than this is raw rows, not periods: each point is one
+#: record, and "outside the usual range" of single records is the outlier
+#: check's question, not a timeline's.
+TIMELINE_MAX_POINTS = 1000
+#: Notes written on a read line: the shift, then the periods furthest outside.
+TIMELINE_NOTES = 4
+
+
+def _plain_number(v: float) -> str:
+    return f"{v:,.0f}" if abs(v) >= 100 else f"{v:,.2f}".rstrip("0").rstrip(".")
+
+
+def timeline_notes(result: dict) -> list[dict]:
+    """What a read line found, as a few sentences pinned to their periods:
+    where the level changed, and the periods furthest outside what their own
+    history made likely. Written from the figures -- no model, and never a
+    reason: a note says what happened and when, not why."""
+    notes: list[dict] = []
+    values = {str(r.get("name")): r.get("value") for r in (result.get("rows") or []) if isinstance(r, dict)}
+    cp = result.get("change_point")
+    if isinstance(cp, dict):
+        from .readback import _s
+        pct = f" ({'+' if cp['shift_pct'] > 0 else ''}{cp['shift_pct']:.0f}%)" if cp.get("shift_pct") is not None else ""
+        said = _s("tl.rose" if cp["shift"] > 0 else "tl.fell",
+                  "From {period} the level rose: about {before} before, {after} since{pct}." if cp["shift"] > 0 else
+                  "From {period} the level fell: about {before} before, {after} since{pct}.",
+                  period=cp["period"], before=_plain_number(cp["before"]), after=_plain_number(cp["after"]), pct=pct)
+        notes.append({"period": cp["period"], "kind": "shift", "value": values.get(cp["period"]),
+                      "text": str(said), "text_i18n": said.as_i18n()})
+    ranked = sorted(result.get("anomalies") or [], key=lambda a: -float(a.get("deviations") or 0))
+    for a in ranked[:max(TIMELINE_NOTES - len(notes), 0)]:
+        from .readback import _s
+        above = a["side"] == "above"
+        said = _s("tl.above" if above else "tl.below",
+                  "{period}: {value}, where its history made at most {bound} likely." if above else
+                  "{period}: {value}, where its history made at least {bound} likely.",
+                  period=a["period"], value=_plain_number(a["value"]), bound=_plain_number(a["hi"] if above else a["lo"]))
+        notes.append({"period": a["period"], "kind": a["side"], "value": a["value"],
+                      "text": str(said), "text_i18n": said.as_i18n()})
+    order = {str(r.get("name")): i for i, r in enumerate(result.get("rows") or []) if isinstance(r, dict)}
+    notes.sort(key=lambda n: order.get(n["period"], 0))
+    for i, n in enumerate(notes, start=1):
+        n["n"] = i
+    return notes
+
+
+def read_timeline(result: dict, config: dict) -> None:
+    """Add to a drawn series what its own history says about it: `lo` / `hi`
+    on every period that could be judged, `anomaly` on the ones outside, and
+    `anomalies` / `change_point` on the result. The period the data stops
+    inside is drawn but not judged."""
+    from .analysis import timeline
+    rows = [r for r in (result.get("rows") or []) if isinstance(r, dict)]
+    if len(rows) > TIMELINE_MAX_POINTS:
+        result["timeline_skipped"] = "too_many_points"
+        return
+    judged = rows[:-1] if result.get("partial_period") and len(rows) > 1 else rows
+    values = [float(r["value"]) if isinstance(r.get("value"), (int, float)) else None for r in judged]
+    if config.get("anomaly_band"):
+        season = timeline.season_of(config.get("dimension_granularity"), len(values))
+        band = timeline.expected_band(values, season)
+        for r, b in zip(judged, band):
+            if b is not None:
+                r["lo"], r["hi"], r["expected"] = round(b["lo"], 4), round(b["hi"], 4), round(b["expected"], 4)
+        found = timeline.anomalies(values, band)
+        for a in found:
+            judged[a["index"]]["anomaly"] = a["side"]
+        result["anomalies"] = [{**{k: a[k] for k in ("value", "expected", "lo", "hi", "side", "deviations")},
+                                "period": str(judged[a["index"]].get("name"))} for a in found]
+        result["band"] = {"season": season, "judged": sum(b is not None for b in band), "k": timeline.BAND_K}
+    if config.get("change_point"):
+        cp = timeline.change_point(values)
+        result["change_point"] = None if cp is None else {
+            **{k: cp[k] for k in ("before", "after", "shift", "shift_pct", "p_value")},
+            "period": str(judged[cp["index"]].get("name")), "index": cp["index"]}
+    notes = timeline_notes(result)
+    if notes:
+        result["notes"] = notes
+
+
+#: Periods a KPI's sparkline shows, and the fewest it is worth drawing.
+KPI_TREND_PERIODS = 24
+KPI_TREND_MIN = 3
+#: Period sizes tried, finest first, until the history fits the sparkline.
+_KPI_GRAINS = ("day", "week", "month", "quarter", "year")
+
+
+def _year_before(label: str, grain: str) -> str | None:
+    """The label of the same period one year earlier, or None when there is
+    no such period (29 February; week 53 of a 52-week year is simply absent
+    from the series and so is not found)."""
+    try:
+        if grain == "day":
+            d = pd.Timestamp(label)
+            if d.month == 2 and d.day == 29:
+                return None
+            return d.replace(year=d.year - 1).strftime("%Y-%m-%d")
+        if grain in ("month", "quarter", "week") and len(label) > 4 and label[:4].isdigit():
+            return f"{int(label[:4]) - 1}{label[4:]}"
+    except Exception:                                   # noqa: BLE001
+        return None
+    return None                                         # a year's year-before is its previous period
+
+
+def kpi_trend(df: pd.DataFrame, config: dict, flag_partial: bool = True) -> dict | None:
+    """{granularity, series: [{period, value}], current, previous, change,
+    change_pct, period, previous_period, partial_dropped} for a KPI, or None
+    when the date has too little history to say anything.
+
+    The grain is the finest that still gives a readable history. The period
+    the data STOPS inside is left out: comparing three days of a month with
+    the whole month before it reports a collapse that did not happen."""
+    date_col = config.get("sparkline_date")
+    if not date_col or date_col not in df.columns:
+        return None
+    try:
+        dt = pd.to_datetime(df[date_col], errors="coerce").dropna()
+    except Exception:  # noqa: BLE001
+        return None
+    if dt.empty:
+        return None
+    span_days = max((dt.max() - dt.min()).days, 0)
+    asked = str(config.get("sparkline_granularity") or "").lower()
+    grain = asked if asked in _KPI_GRAINS else (
+        "day" if span_days <= 45 else "week" if span_days <= 26 * 7 else
+        "month" if span_days <= 3 * 366 else "quarter" if span_days <= 8 * 366 else "year")
+    base = {k: v for k, v in config.items()
+            if k not in ("sparkline_date", "sparkline_granularity", "limit", "sort", "sort_by", "sort_col",
+                         "display_rules", "caption", "dimension2")}
+    base.update(dimension=date_col, dimension_granularity=grain, sort="asc", sort_by="label")
+    try:
+        shaped = shape_series(df, base)
+    except Exception:  # noqa: BLE001 -- a trend is an extra; the KPI still shows
+        return None
+    rows = [r for r in (shaped.get("rows") or []) if isinstance(r, dict) and r.get("value") is not None
+            and r.get("name") not in (None, "", "NaT")]
+    rows.sort(key=lambda r: str(r["name"]))
+    dropped = False
+    if flag_partial and len(rows) > KPI_TREND_MIN:
+        try:
+            from .relative_dates import partial_period
+            dropped = bool(partial_period(df, date_col, grain, {"type": "series", "rows": rows}))
+        except Exception:  # noqa: BLE001
+            dropped = False
+        if dropped:
+            rows = rows[:-1]
+    every = {str(r["name"]): float(r["value"]) for r in rows}
+    rows = rows[-KPI_TREND_PERIODS:]
+    if len(rows) < KPI_TREND_MIN:
+        return None
+    current, previous = float(rows[-1]["value"]), float(rows[-2]["value"])
+    change = current - previous
+    # The same period a year before, when the history reaches that far: the
+    # comparison a seasonal number needs (December against November says
+    # little; December against last December says how the year went).
+    year_ago = None
+    before = _year_before(str(rows[-1]["name"]), grain)
+    if before is not None and before in every:
+        was = every[before]
+        year_ago = {"period": before, "value": was, "change": current - was,
+                    "change_pct": ((current - was) / abs(was) * 100) if was else None}
+    return {"granularity": grain, "date": date_col, "year_ago": year_ago,
+            "series": [{"period": str(r["name"]), "value": float(r["value"])} for r in rows],
+            "current": current, "previous": previous, "change": change,
+            "change_pct": (change / abs(previous) * 100) if previous else None,
+            "period": str(rows[-1]["name"]), "previous_period": str(rows[-2]["name"]),
+            "partial_dropped": dropped}
+
+
+def kpi_target(result: dict, config: dict) -> dict | None:
+    """A KPI against the target its author stored (`target_value`): how far
+    along it is, what is left, and whether it is met.
+
+    A target FOR A PERIOD (`target_period`: month | quarter | year) is set
+    against the last complete period of that size -- never against the total
+    of everything shown, which would call three years of rows "3,600% of the
+    monthly target". With no history of that size to read it from, the target
+    is returned as not applied, with the reason.
+
+    Met means at or above it -- or at or below it for a number where lower is
+    better (`trend_good: down`)."""
+    try:
+        target = float(config["target_value"])
+    except (TypeError, ValueError, KeyError):
+        return None
+    if target != target:
+        return None
+    period = str(config.get("target_period") or "").lower() or None
+    if period:
+        trend = result.get("trend") if isinstance(result.get("trend"), dict) else None
+        if not trend or trend.get("granularity") != period:
+            return {"value": target, "period": period, "applies": False,
+                    "reason": f"The target is for each {period}, and this number has no history by {period} to set against it."}
+        current, label = float(trend["current"]), str(trend["period"])
+    else:
+        rows = result.get("rows") or []
+        value = rows[0].get("value") if rows and isinstance(rows[0], dict) else result.get("value")
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            return None
+        current, label = float(value), None
+    lower_is_better = config.get("trend_good") == "down"
+    return {"value": target, "period": period, "applies": True, "against": current, "label": label,
+            "pct": round(current / target * 100, 1) if target else None,
+            "remaining": round(target - current, 6),
+            "met": bool(current <= target) if lower_is_better else bool(current >= target),
+            "lower_is_better": lower_is_better}
+
+
 def get_widget_data_from_df(
     df: pd.DataFrame, config: dict, widget_type: str = "bar",
     measures: list[dict] | None = None, flag_partial: bool = True,
@@ -4007,7 +4420,13 @@ def get_widget_data_from_df(
     elif is_multilevel(widget_type, config):
         shaper = shape_pivot
     try:
-        result = shaper(df, config)
+        if config.get("dimension2_granularity"):
+            asked, rows_in = config, df
+            df, config = second_grain(df, config)
+            result = shaper(df, config)
+            blank_outside_the_data(result, rows_in, asked)
+        else:
+            result = shaper(df, config)
     except ValueError as e:
         # Measure evaluation failed. Surfacing the error beats falling back to a base
         # column, which would render a plausible-looking but wrong number.
@@ -4016,6 +4435,21 @@ def get_widget_data_from_df(
         # read it -- the widget drew an empty chart and the message was lost.
         return {"type": "error", "code": "measure_error", "message": str(e),
                 "rows": [], "total": 0}
+
+    # A KPI with its recent history: the same number per period, so the card
+    # can show a sparkline and how the last full period compares with the one
+    # before it (config `sparkline_date`). Computed by the SAME shaper on the
+    # same rows, so the trend can never disagree with the headline.
+    if widget_type == "kpi" and config.get("sparkline_date") and isinstance(result, dict) \
+            and result.get("type") != "error":
+        trend = kpi_trend(df, config, flag_partial)
+        if trend:
+            result["trend"] = trend
+    if widget_type == "kpi" and config.get("target_value") is not None and isinstance(result, dict) \
+            and result.get("type") != "error":
+        against = kpi_target(result, config)
+        if against:
+            result["target"] = against
 
     # Display rules are resolved against the SHAPED result, because a rule refers to the
     # aggregated value a mark shows. Attached here rather than inside each of the 15
@@ -4043,6 +4477,16 @@ def get_widget_data_from_df(
             partial = None
         if partial:
             result["partial_period"] = partial
+    # A line READ as well as drawn (`anomaly_band`, `change_point`): for each
+    # period the range its own history made likely, the periods outside it,
+    # and the place the level changed (services/analysis/timeline.py). One
+    # series only -- a band per line of a split chart is not a chart.
+    if widget_type in ("line", "area", "step") and (config.get("anomaly_band") or config.get("change_point")) \
+            and isinstance(result, dict) and result.get("type") == "series" and not config.get("dimension2"):
+        try:
+            read_timeline(result, config)
+        except Exception:  # noqa: BLE001 -- the reading is an extra; the line still draws
+            pass
     # One disclosure vocabulary (constitution rules 4 and 5): every result says
     # how many rows it describes, under one name. Shapers already report that
     # population as `total`; the crosstab, whose `total` counts its grid,
@@ -4810,6 +5254,10 @@ def get_widget_data(
             # a histogram or any shaper that reads RAW rows would compute its
             # quartiles or bins over one pre-aggregated value per group (E04).
             and SHAPERS.get(widget_type, shape_series) is shape_series
+            # a KPI's history is computed from the rows themselves
+            and not config.get("sparkline_date")
+            # a second field cut into date parts is derived from the rows
+            and not config.get("dimension2_granularity")
             # a lattice needs the row-level frame to split into panels
             and not (config.get("lattice_rows") or config.get("lattice_columns")
                      or config.get("animate_by"))):

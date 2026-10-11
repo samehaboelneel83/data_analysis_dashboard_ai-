@@ -1,3 +1,4 @@
+import { useT } from '../../../i18n'
 import { fmtStr, seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
 
@@ -6,11 +7,12 @@ const MARGIN_BOTTOM = 20
 const LABEL_HEIGHT = 14
 
 export default function ParallelCoordinatesRenderer({ data, rtl, measureFmt }: ChartRendererProps) {
+  const t9 = useT()
   const axes: { name: string; min: number; max: number }[] = data?.axes ?? []
   const lines: number[][] = data?.lines ?? []
 
   if (axes.length < 2) {
-    return <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>Select at least 2 measures</div>
+    return <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>{t9('cr.twoMeasures')}</div>
   }
 
   const orderedAxes = rtl ? [...axes].reverse() : axes

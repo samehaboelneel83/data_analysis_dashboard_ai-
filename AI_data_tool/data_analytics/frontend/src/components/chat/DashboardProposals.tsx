@@ -1,3 +1,4 @@
+import { useT } from '../../i18n'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { dataSourcesApi, reportsApi } from '../../services/api'
@@ -80,6 +81,7 @@ const linkish: React.CSSProperties = {
 export default function DashboardProposals(
   { presentation }: { presentation: DashboardProposalsPresentation },
 ) {
+  const t9 = useT()
   const navigate = useNavigate()
   const [busy, setBusy] = useState<number | null>(null)
   const [failed, setFailed] = useState<Record<number, string>>({})
@@ -159,19 +161,19 @@ export default function DashboardProposals(
       <div style={{ fontSize: 12, marginBottom: 6 }}>
         <a href={`/setup/${presentation.source_id}`}
           onClick={e => { e.preventDefault(); navigate(`/setup/${presentation.source_id}`) }}>
-          {rtl ? 'جرّب الإعداد الموجَّه: اختيار البيانات وفحصها ثم تصميم اللوحة خطوة بخطوة'
+          {rtl ? 'جرّب الإعداد الموجَّه: اختيار البيانات وفحصها ثم تصميم اللوحة خطوة بخطوة'  // i18n-ok: follows the answer's language
                : 'Try the guided setup: choose and check the data, then design the dashboard step by step'}
         </a>
       </div>
       {brief && (
         <div style={{ ...card, fontSize: 12 }}>
-          {brief.role && <div><b>{rtl ? 'دورك: ' : 'Your role: '}</b>{brief.role}</div>}
+          {brief.role && <div><b>{rtl ? 'دورك: ' : 'Your role: ' /* i18n-ok: follows the answer's language */}</b>{brief.role}</div>}
           {brief.understanding && (
-            <div style={{ marginTop: 6 }}><b>{rtl ? 'ما تحتويه البيانات: ' : 'What this data holds: '}</b>
+            <div style={{ marginTop: 6 }}><b>{rtl ? 'ما تحتويه البيانات: ' : 'What this data holds: ' /* i18n-ok: follows the answer's language */}</b>
               {brief.understanding}</div>)}
           {!!brief.questions?.length && (
             <div style={{ marginTop: 6 }}>
-              <b>{rtl ? 'الأسئلة التي تغيّر قراراتك:' : 'The questions that change your decisions:'}</b>
+              <b>{rtl ? 'الأسئلة التي تغيّر قراراتك:' : 'The questions that change your decisions:' /* i18n-ok: follows the answer's language */}</b>
               <ol style={{ margin: '4px 0 0', paddingInlineStart: 18 }}>
                 {brief.questions.map((q, qi) => (
                   <li key={qi} style={{ padding: '1px 0' }}>{q.question}
@@ -181,7 +183,7 @@ export default function DashboardProposals(
             </div>)}
           {!!brief.cannot_answer?.length && (
             <div style={{ marginTop: 6, color: 'var(--muted)' }}>
-              <b>{rtl ? 'لا تستطيع هذه البيانات الإجابة عن:' : 'This data cannot answer:'}</b>
+              <b>{rtl ? 'لا تستطيع هذه البيانات الإجابة عن:' : 'This data cannot answer:' /* i18n-ok: follows the answer's language */}</b>
               <ul style={{ margin: '4px 0 0', paddingInlineStart: 18 }}>
                 {brief.cannot_answer.map((x, xi) => <li key={xi}>{x}</li>)}
               </ul>
@@ -211,14 +213,14 @@ export default function DashboardProposals(
                 cursor: busy === null ? 'pointer' : 'default',
                 background: 'var(--accent)', color: 'var(--mc-accent-fg)',
               }}>
-              {busy === i ? 'Building…' : 'Create dashboard'}
+              {busy === i ? t9('sdd.building') : t9('dp.create')}
             </button>
             <button style={linkish}
                     onClick={() => setOpenSql(s => ({ ...s, [i]: !s[i] }))}>
-              {openSql[i] ? 'Hide SQL' : 'Show SQL'}
+              {openSql[i] ? t9('ask.hideSql') : t9('ask.showSql')}
             </button>
             <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-              {p.widgets.length} widget{p.widgets.length === 1 ? '' : 's'}
+              {p.widgets.length === 1 ? t9('dp.oneWidget') : t9('dp.nWidgets', { n: p.widgets.length })}
             </span>
           </div>
 
@@ -231,7 +233,7 @@ export default function DashboardProposals(
 
           {failed[i] && (
             <div style={{ marginTop: 8, fontSize: 12, color: 'var(--danger, #b4232a)' }}>
-              Could not build this dashboard: {failed[i]}
+              {t9('dp.failed', { why: failed[i] })}
             </div>
           )}
         </div>

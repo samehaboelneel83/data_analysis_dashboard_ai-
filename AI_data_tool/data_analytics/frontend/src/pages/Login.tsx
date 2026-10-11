@@ -165,7 +165,7 @@ export default function Login() {
         <header className="dl-auth__bar">
           <div className="dl-auth__brand">
             <span className="dl-rail__mark" aria-hidden>D</span>
-            <span className="dl-rail__wordmark">datalytics</span>
+            <span className="dl-rail__wordmark">datalytics</span> {/* i18n-ok */}
           </div>
           <div className="dl-auth__tools">
             <LanguageSwitcher />

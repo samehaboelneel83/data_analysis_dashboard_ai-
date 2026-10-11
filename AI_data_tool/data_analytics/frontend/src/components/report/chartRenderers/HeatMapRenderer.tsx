@@ -1,3 +1,4 @@
+import { useT } from '../../../i18n'
 import { fmtStr, seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
 
@@ -10,7 +11,14 @@ function cellColor(v: number, min: number, max: number): string {
   return `color-mix(in srgb, ${seriesColor(0)} ${pct}%, transparent)`
 }
 
+/** A grid of DIFFERENCES: coloured by sign and by distance from zero. */
+function signedColor(v: number, far: number): string {
+  const pct = Math.round((0.08 + (far > 0 ? Math.abs(v) / far : 0) * 0.72) * 100)
+  return `color-mix(in srgb, ${v >= 0 ? 'var(--ok, #16a34a)' : 'var(--danger, #dc2626)'} ${pct}%, transparent)`
+}
+
 export default function HeatMapRenderer({ data, rtl, measureFmt, plotH }: ChartRendererProps) {
+  const t9 = useT()
   const rowsAxis: string[] = data?.rows_axis ?? []
   const colsAxis: string[] = data?.cols_axis ?? []
   const cells: (number | null)[][] = data?.cells ?? []
@@ -23,7 +31,7 @@ export default function HeatMapRenderer({ data, rtl, measureFmt, plotH }: ChartR
     // blaming the author (live QA 2026-09-28).
     const answered = data != null && (data.type === 'empty' || data.type === 'heatmap' || data.total === 0)
     return <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>
-      {answered ? 'No data for the current selection' : 'Configure widget to see data'}
+      {answered ? t9('cr.noDataSelection') : t9('cr.configure')}
     </div>
   }
 
@@ -55,10 +63,10 @@ export default function HeatMapRenderer({ data, rtl, measureFmt, plotH }: ChartR
               {colsAxis.map((c, j) => {
                 const v = cells[i]?.[j]
                 return (
-                  <td key={c} title={v == null ? 'No data' : `${r} × ${c}: ${fmtStr(v, measureFmt)}`}
+                  <td key={c} title={v == null ? t9('cr.noDataCell') : `${r} × ${c}: ${fmtStr(v, measureFmt)}`}
                     style={{ padding: 0, border: '1px solid var(--border)' }}>
-                    <div style={{ background: v == null ? 'var(--surface2)' : cellColor(v, min, max), width: '100%', height: rowH, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: 'var(--text)' }}>
-                      {!showFigures ? null : v == null ? '—' : fmtStr(v, measureFmt)}
+                    <div style={{ background: v == null ? 'var(--surface2)' : data?.diverging ? signedColor(v, Math.max(Math.abs(min), Math.abs(max))) : cellColor(v, min, max), width: '100%', height: rowH, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: 'var(--text)' }}>
+                      {!showFigures ? null : v == null ? '—' : `${data?.diverging && v > 0 ? '+' : ''}${fmtStr(v, measureFmt)}`}
                     </div>
                   </td>
                 )

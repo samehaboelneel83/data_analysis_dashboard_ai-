@@ -26,7 +26,8 @@ import re
 from .evidence import _NUMBER, _NOT_CLAIMS, _normalize, _parse
 
 _REFUSAL_CUES = re.compile(
-    r"can(?:no|')t|unable|not (?:able|available|in the data|possible)|don't have|do not have|"
+    # A model writes "can’t" with a typographic apostrophe as readily as "can't".
+    r"can(?:no|['’])t|unable|not (?:able|available|in the data|possible)|don['’]t have|do not have|"
     r"no (?:column|data|field|information)|which .* do you mean|did you mean|clarify|"
     r"لا يمكن|لا أستطيع|لا أملك|لا تتوفر|غير متوفر|غير متاح|لا توجد|هل تقصد|يرجى التوضيح",
     re.IGNORECASE)

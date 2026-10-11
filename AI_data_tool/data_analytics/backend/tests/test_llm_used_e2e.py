@@ -96,7 +96,8 @@ def two_step_agent(monkeypatch):
 
 
 async def _conversation(client, db_session, two_orgs, headers):
-    src = DataSource(name="wh", type="postgresql", org_id=two_orgs["a"]["org"].id)
+    src = DataSource(name="wh", type="postgresql", org_id=two_orgs["a"]["org"].id,
+                     allow_llm_sampling=True)          # "Allow AI" on: these tests are about WHICH model answers
     db_session.add(src)
     await db_session.commit()
     r = await client.post("/api/v1/agent/conversations", headers=headers, json={"data_source_id": src.id})

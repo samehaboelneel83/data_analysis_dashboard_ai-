@@ -133,7 +133,7 @@ export default function InsightsHub() {
               <option value="" disabled>{t('insights.choose')}</option>
               {(noMatches ? clean.visible : filtered).map(d => (
                 <option key={d.id} value={d.id}>
-                  {isCertified(d) ? '✓ ' : ''}{d.name}{d.mode === 'directquery' ? ' · live' : ''}
+                  {isCertified(d) ? '✓ ' : ''}{d.name}{d.mode === 'directquery' ? ` · ${t('common.live')}` : ''}
                 </option>
               ))}
             </select>
@@ -167,7 +167,7 @@ export default function InsightsHub() {
           )}
 
           {!isDirectQuery && scanLoading && (
-            <div style={{ marginBottom: 16 }}><LoadingState label="Scanning for insights…" /></div>
+            <div style={{ marginBottom: 16 }}><LoadingState label={t('insights.scanning')} /></div>
           )}
 
           {!isDirectQuery && scanError != null && (

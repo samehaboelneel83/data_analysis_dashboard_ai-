@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import ColumnMeaningPanel from './ColumnMeaningPanel'
-import { datasetsApi, type Dataset } from '../../services/api'
+import { datasetsApi, discoveryApi, type Dataset } from '../../services/api'
 
 /**
  * Every AI path in this product reads column descriptions now — the dashboard
@@ -169,5 +169,19 @@ describe('the Columns tab (redesign 3c)', () => {
   it('offers a reader no settings', () => {
     render(<ColumnMeaningPanel dataset={WIDE} canEdit={false} />)
     expect(screen.queryByRole('button', { name: 'How total is used' })).toBeNull()
+  })
+  it('shows a column\'s profile facts when it is opened', async () => {
+    vi.spyOn(discoveryApi, 'profile').mockResolvedValue({ columns: [{
+      column: 'total', kind: 'number', cells: 400, distinct: 380,
+      valid: { count: 376, pct: 94 }, unique: { count: 360, pct: 90 }, nonunique: { count: 16, pct: 4 },
+      invalid: { count: 24, pct: 6 }, mistyped: { count: 20, pct: 5, holds: 'number' }, missing: { count: 4, pct: 1 },
+      len_min: 1, len_max: 6, pattern: '9999',
+    }] } as never)
+    render(<ColumnMeaningPanel dataset={WIDE} canEdit />)
+    fireEvent.click(screen.getByRole('button', { name: 'How total is used' }))
+    const facts = await screen.findByTestId('column-profile-facts')
+    expect(facts.textContent).toContain('Valid376 (94%)')
+    expect(facts.textContent).toContain('Not a number20 (5%)')
+    expect(facts.textContent).toContain('Shape of its values9999')
   })
 })

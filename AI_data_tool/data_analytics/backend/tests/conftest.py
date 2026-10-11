@@ -35,6 +35,15 @@ def _fresh_lens_answers():
 
 
 @pytest.fixture(autouse=True)
+def _no_model_column_classes_by_default(monkeypatch):
+    """Asking the model what each number is (services/column_classes.py) is a
+    network call that would consume a test's queued fake answers; a test of
+    that step passes its own client."""
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "classify_columns_with_model", False)
+
+
+@pytest.fixture(autouse=True)
 def _no_duckdb_pushdown_by_default(monkeypatch):
     """Pin `widget_duckdb_pushdown` OFF for the suite.
 

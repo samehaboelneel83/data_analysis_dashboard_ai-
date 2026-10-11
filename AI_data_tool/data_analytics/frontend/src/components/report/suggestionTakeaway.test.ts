@@ -56,6 +56,16 @@ describe('axis names in words', () => {
 })
 
 describe('already on the page', () => {
+  it('reads a share stacked to 100% and the average of its percent column as one chart', () => {
+    const stacked = signature('bar', { dimension: 'region', dimension2: 'is_late', measure: 'region',
+      aggregation: 'count', bar_mode: 'stacked100' })
+    expect(signature('bar', { dimension: 'region', measure: 'is_late_pct', aggregation: 'avg' })).toBe(stacked)
+    // Another group, or a plain stack of counts, is another chart.
+    expect(signature('bar', { dimension: 'service', measure: 'is_late_pct', aggregation: 'avg' })).not.toBe(stacked)
+    expect(signature('bar', { dimension: 'region', dimension2: 'is_late', measure: 'region', aggregation: 'count' }))
+      .not.toBe(stacked)
+  })
+
   it('a donut of price by status is the same idea as a bar of it', () => {
     expect(signature('donut', { dimension: 'order_status', measure: 'price' }))
       .toBe(signature('bar', { dimension: 'order_status', measure: 'price', aggregation: 'sum' }))

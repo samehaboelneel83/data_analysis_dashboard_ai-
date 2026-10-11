@@ -30,7 +30,7 @@ _NEGATIVE_CODES = (-1, -9, -99, -999, -9999)
 _TEXT_CODES = {"n/", "n/a", "na", "#n/a", "-", "--", "?", "null", "none", "unknown", "nil"}
 
 
-def _placeholder(s: pd.Series, column: str) -> tuple[object, int] | None:
+def _placeholder(s: pd.Series, column: str, column_meta: dict | None = None) -> tuple[object, int] | None:
     """The value standing in for "unknown" in this column, and how many rows
     hold it -- or None. Live QA 2026-09-28: a call log's IMEI, IMSI and LAC
     held -1 in ~750 rows each, SITE_ID held 0 in 719 and ALPHA_SITE_ID "N/"
@@ -49,7 +49,7 @@ def _placeholder(s: pd.Series, column: str) -> tuple[object, int] | None:
             n = int(counts.get(code, 0))
             if n >= floor and bool((non_null[non_null != code] >= 0).all()):
                 return code, n
-        if non_additive_kind(column) == "identifier":
+        if non_additive_kind(column, column_meta) == "identifier":
             n = int(counts.get(0, 0))
             if n >= floor:
                 return 0, n
@@ -63,7 +63,7 @@ def _placeholder(s: pd.Series, column: str) -> tuple[object, int] | None:
     return None
 
 
-def _column(df: pd.DataFrame, c: str) -> dict:
+def _column(df: pd.DataFrame, c: str, column_meta: dict | None = None) -> dict:
     s = df[c]
     rows = len(df)
     non_null = s.dropna()
@@ -72,7 +72,7 @@ def _column(df: pd.DataFrame, c: str) -> dict:
     distinct = int(non_null.nunique())
     if rows > 1 and distinct <= 1:
         issues.append("constant" if distinct == 1 else "empty")
-    placeholder = _placeholder(s, c)
+    placeholder = _placeholder(s, c, column_meta)
     if placeholder:
         value, n = placeholder
         shown = f'"{value}"' if isinstance(value, str) else str(value)
@@ -105,12 +105,13 @@ def _column(df: pd.DataFrame, c: str) -> dict:
             "placeholder": ({"value": placeholder[0], "rows": placeholder[1]} if placeholder else None)}
 
 
-def quality_report(df: pd.DataFrame, rules: list[str] | None = None, examples: int = 5) -> dict:
+def quality_report(df: pd.DataFrame, rules: list[str] | None = None, examples: int = 5,
+                   column_meta: dict | None = None) -> dict:
     """Columns, duplicates and rule checks for `df`. Pure: no I/O."""
     from .widget_data import apply_filter_expr
 
     rows = len(df)
-    columns = [_column(df, c) for c in df.columns]
+    columns = [_column(df, c, column_meta) for c in df.columns]
     extra_copies = int(df.duplicated().sum()) if rows else 0
     dup_rows = df[df.duplicated(keep=False)] if extra_copies else df.iloc[0:0]
     checks = []

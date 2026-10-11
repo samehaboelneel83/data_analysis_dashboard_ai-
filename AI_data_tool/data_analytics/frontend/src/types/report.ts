@@ -13,7 +13,8 @@ export type WidgetType =
   | 'script'
   | 'tree' | 'sunburst' | 'icicle' | 'dendrogram' | 'org' | 'circle_pack'
 | 'custom_graph'
-  | 'model_linear' | 'model_logistic' | 'model_tree' | 'model_cluster' | 'model_compare' | 'model_score' | 'model_rules'
+  | 'model_linear' | 'model_logistic' | 'model_tree' | 'model_cluster' | 'model_compare' | 'model_score' | 'model_rules' | 'model_influencers'
+  | 'analysis_result'
 
 export interface Widget {
   id: number
@@ -230,6 +231,8 @@ export const WIDGET_CATALOG = [
   { type: 'model_compare'  as WidgetType, label: 'Model Comparison',    category: 'Models', icon: '⚖', defaultW: 7, defaultH: 6 },
   { type: 'model_score'    as WidgetType, label: 'Score with Saved Model', category: 'Models', icon: '🎯', defaultW: 6, defaultH: 6 },
   { type: 'model_rules'    as WidgetType, label: 'Association Rules',   category: 'Models', icon: '⇄', defaultW: 8, defaultH: 7 },
+  { type: 'model_influencers' as WidgetType, label: 'Key Influencers',  category: 'Models', icon: '↗', defaultW: 7, defaultH: 7 },
+  { type: 'analysis_result' as WidgetType, label: 'Analysis Result',  category: 'Models', icon: '∑', defaultW: 7, defaultH: 7 },
 ]
 
 export const ROLE_TO_CONFIG_KEY: Record<string, string> = { category: 'dimension', category2: 'dimension2', measure: 'measure' }
@@ -566,11 +569,18 @@ export const ROLE_SPECS: Record<WidgetType, RoleField[]> = {
     { role: 'predictors', label: 'Columns (blank = every text column; numbers become bands)', required: false, multi: true },
     { role: 'response',   label: 'Conclusions about (optional)', required: false },
   ],
+  // What goes with an outcome. Blank predictors looks in every usable column.
+  model_influencers: [
+    { role: 'response',   label: 'Outcome', required: true },
+    { role: 'predictors', label: 'Look in (blank = every other column)', required: false, multi: true },
+  ],
+  // Its inputs are an analysis' own parameters, set by the suggestion that adds it.
+  analysis_result: [],
 }
 
 /** Model widgets: their data is a fitted model, not an aggregated series. */
 export const MODEL_WIDGETS: readonly string[] = [
-  'model_linear', 'model_logistic', 'model_tree', 'model_cluster', 'model_compare', 'model_score', 'model_rules',
+  'model_linear', 'model_logistic', 'model_tree', 'model_cluster', 'model_compare', 'model_score', 'model_rules', 'model_influencers',
 ]
 
 export const AGGREGATIONS = [

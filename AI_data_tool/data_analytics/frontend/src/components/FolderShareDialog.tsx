@@ -1,3 +1,5 @@
+import { rich } from '../i18n/pages/modelsMaps'
+import { useT } from '../i18n'
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import { workspaceApi } from '../services/api'
@@ -34,6 +36,7 @@ export default function FolderShareDialog({ node, onClose, onChanged }: {
   /** Called after any successful change, so the tree can refresh badges. */
   onChanged?: () => void
 }) {
+  const t9 = useT()
   const dialogRef = useModalDialog<HTMLDivElement>(onClose)
   const [grants, setGrants] = useState<WorkspaceGrant[]>([])
   const [options, setOptions] = useState<WorkspaceShareOptions>({ roles: [], org_units: [] })
@@ -54,7 +57,7 @@ export default function FolderShareDialog({ node, onClose, onChanged }: {
   useEffect(() => {
     Promise.all([workspaceApi.grants(node.id), workspaceApi.shareOptions()])
       .then(([g, o]) => { setGrants(g); setOptions(o) })
-      .catch(() => toast.error('Failed to load sharing'))
+      .catch(() => toast.error(t9('fs.loadFailed')))
       .finally(() => setLoading(false))
   }, [node.id])
 
@@ -130,7 +133,7 @@ export default function FolderShareDialog({ node, onClose, onChanged }: {
     }
     if (await save([...grants.map(toEntry), entry])) {
       setEmail(''); setRoleId(''); setUnitId('')
-      toast.success('Shared')
+      toast.success(t9('fs.shared'))
     }
   }
 
@@ -159,79 +162,76 @@ export default function FolderShareDialog({ node, onClose, onChanged }: {
     <div onClick={onClose}
       style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 1000,
         display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={`Share ${node.name}`}
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={t9('fs.shareNamed', { name: String(node.name) })}
         onClick={e => e.stopPropagation()}
         style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10,
           padding: 18, width: 480, maxWidth: '92vw' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <strong style={{ fontSize: 13 }}>Share “{node.name}”</strong>
-          <button onClick={onClose} aria-label="Close"
+          <strong style={{ fontSize: 13 }}>{t9('fs.shareQuoted', { name: String(node.name) })}</strong>
+          <button onClick={onClose} aria-label={t9('cr.close')}
             style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 14, color: 'var(--muted)' }}>✕</button>
         </div>
         <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 12 }}>
-          Everyone you share with sees this workspace’s dashboards <strong>live</strong> — they
-          can open, filter and interact, with <strong>their own</strong> data-security rules
-          applied. <strong>View</strong> lets them look and explore; <strong>edit</strong> lets
-          them redesign too. Unpublished dashboards inside become visible to them.
-          Sharing with a department or region reaches <strong>everyone under
-          it</strong> in the org chart, teams included.
+          {rich(t9, 'fs.explain', { live: <strong>{t9('fs.live')}</strong>, own: <strong>{t9('fs.theirOwn')}</strong>,
+            view: <strong>{t9('fs.viewWord')}</strong>, edit: <strong>{t9('fs.editWord')}</strong>, under: <strong>{t9('fs.everyoneUnder')}</strong> })}
         </p>
 
         {loading ? (
-          <p style={{ fontSize: 12, color: 'var(--muted)' }}>Loading…</p>
+          <p style={{ fontSize: 12, color: 'var(--muted)' }}>{t9('fs.loading')}</p>
         ) : (
           <>
             <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
-              <select aria-label="Share with" value={kind}
+              <select aria-label={t9('fs.shareWith')} value={kind}
                 onChange={e => {
                   setKind(e.target.value as Kind)
                   setUnitId('')
                   setRoleId('')
                 }}
                 style={input}>
-                <option value="user">Member</option>
-                <option value="role">Role</option>
+                <option value="user">{t9('fs.member')}</option>
+                <option value="role">{t9('fs.role')}</option>
                 {unitTiers.map(([tier]) => (
                   <option key={tier} value={`unit:${tier}`}>{tier}</option>
                 ))}
               </select>
               {kind === 'user' && (
-                <input aria-label="Member email" type="email" placeholder="name@company.com"
+                <input aria-label={t9('fs.memberEmail')} type="email" placeholder="name@example.com" // i18n-ok: an address, not prose
+                 
                   value={email} onChange={e => setEmail(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') void add() }}
                   style={{ ...input, flex: 1, minWidth: 140 }} />
               )}
               {kind === 'role' && (
-                <select aria-label="Role to share with" value={roleId}
+                <select aria-label={t9('fs.roleToShare')} value={roleId}
                   onChange={e => setRoleId(e.target.value ? Number(e.target.value) : '')}
                   style={{ ...input, flex: 1 }}>
-                  <option value="">Select a role…</option>
+                  <option value="">{t9('fs.selectRole')}</option>
                   {options.roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                 </select>
               )}
               {selectedTier && (
-                <select aria-label={`${selectedTier} to share with`} value={unitId}
+                <select aria-label={t9('fs.unitToShare', { tier: selectedTier })} value={unitId}
                   onChange={e => setUnitId(e.target.value ? Number(e.target.value) : '')}
                   style={{ ...input, flex: 1 }}>
-                  <option value="">{`Select a ${selectedTier.toLowerCase()}…`}</option>
+                  <option value="">{t9('fs.selectUnit', { tier: selectedTier.toLowerCase() })}</option>
                   {unitsInTier.map(u => (
                     <option key={u.id} value={u.id}>{unitPath(u.id)}</option>
                   ))}
                 </select>
               )}
-              <select aria-label="Access level" value={level}
+              <select aria-label={t9('fs.accessLevel')} value={level}
                 onChange={e => setLevel(e.target.value as 'view' | 'edit')} style={input}>
-                <option value="view">View</option>
-                <option value="edit">Edit</option>
+                <option value="view">{t9('fs.view')}</option>
+                <option value="edit">{t9('fs.edit')}</option>
               </select>
               <button className="btn btn-primary btn-sm" onClick={() => void add()} disabled={saving}>
-                {saving ? 'Sharing…' : 'Share'}
+                {saving ? t9('fs.sharing') : t9('fs.share')}
               </button>
             </div>
 
             {grants.length === 0 ? (
               <p style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center', padding: '8px 0' }}>
-                Not shared with anyone yet.
+                {t9('fs.none')}
               </p>
             ) : (
               <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex',
@@ -241,16 +241,16 @@ export default function FolderShareDialog({ node, onClose, onChanged }: {
                     border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px' }}>
                     <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap' }}>{label(g)}</span>
-                    <select aria-label={`Access level for ${label(g)}`} value={g.level}
+                    <select aria-label={t9('fs.accessFor', { who: label(g) })} value={g.level}
                       disabled={saving}
                       onChange={e => void changeLevel(g, e.target.value as 'view' | 'edit')}
                       style={{ ...input, fontSize: 11, padding: '3px 6px' }}>
-                      <option value="view">View</option>
-                      <option value="edit">Edit</option>
+                      <option value="view">{t9('fs.view')}</option>
+                      <option value="edit">{t9('fs.edit')}</option>
                     </select>
-                    <button aria-label={`Stop sharing with ${label(g)}`} className="btn btn-ghost btn-sm"
+                    <button aria-label={t9('fs.stopFor', { who: label(g) })} className="btn btn-ghost btn-sm"
                       disabled={saving} style={{ fontSize: 11, color: 'var(--danger)' }}
-                      onClick={() => void remove(g)}>Remove</button>
+                      onClick={() => void remove(g)}>{t9('ws.remove')}</button>
                   </li>
                 ))}
               </ul>

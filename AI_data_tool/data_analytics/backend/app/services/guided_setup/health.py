@@ -53,8 +53,10 @@ _PERCENT = re.compile(r"(pct|percent|percentage|ratio|rate|change|chg|return|gro
 _LEVEL = re.compile(r"(^|_)(close|open|high|low|change|chg|return|price|index|level|rate|pct|percent|ratio|"
                     r"avg|average|mean|median|score|rating)(_|$)", re.I)
 
-_AMOUNT = re.compile(r"(price|amount|cost|salary|wage|fee|qty|quantity|mileage|km|kilometer|age|"
-                     r"revenue|sales|total|count|area|weight|height|rooms|bedrooms|bathrooms|duration)",
+_ID_COLUMN = re.compile(r"(^id$|_id$|^id_|_key$|^key$|_code$|_no$|^no$|number$)", re.I)
+
+_AMOUNT = re.compile(r"(price|amount|cost|fee|qty|quantity|age|revenue|total|count|area|weight|height|"
+                     r"length|distance|duration|مبلغ|سعر|كمية|عدد|وزن|مساحة|مدة)",
                      re.I)
 
 T = {
@@ -79,7 +81,7 @@ T = {
         "textnum.why": "Text cannot be added up, averaged or charted as an amount.",
         "textnum.todo": "Turn it into a number column.",
         "spaces.what": "{n} values of “{col}” have extra spaces.",
-        "spaces.why": "“Cairo” and “Cairo ” are counted as two different values.",
+        "spaces.why": "“North” and “North ” are counted as two different values.",
         "spaces.todo": "Remove the extra spaces.",
         "constant.what": "“{col}” has the same value in every row.",
         "constant.why": "It cannot tell rows apart, so it adds nothing to a chart.",
@@ -184,7 +186,14 @@ def _item(i: int, tone: str, kind: str, lang: str, *, column=None, what, why, to
             "what": what, "why": why, "todo": todo, "action": action, "rows": rows}
 
 
-def column_items(report: dict, df: pd.DataFrame, lang: str) -> list[dict]:
+def _number_of(col: str, column_meta: dict | None) -> str | None:
+    """What a number was classified as (services/column_classes.py), or None
+    for a column nobody classified -- its name is then the fallback."""
+    from ..semantic_guard import recorded_number
+    return recorded_number(col, column_meta)
+
+
+def column_items(report: dict, df: pd.DataFrame, lang: str, column_meta: dict | None = None) -> list[dict]:
     """Plain lines from the quality report, worst first."""
     rows = int(report.get("rows") or len(df))
     out: list[dict] = []
@@ -212,7 +221,9 @@ def column_items(report: dict, df: pd.DataFrame, lang: str) -> list[dict]:
                              action={"kind": "drop_column", "column": col, "label": _t(lang, "fix.drop_column")}))
             continue
         if pct >= EMPTY_NOTE:
-            act = None if numeric else {"kind": "fill", "column": col, "label": _t(lang, "fix.fill")}
+            # A date cannot be "Unknown": the word would turn the column into text.
+            dated = col in df.columns and pd.api.types.is_datetime64_any_dtype(df[col])
+            act = None if numeric or dated else {"kind": "fill", "column": col, "label": _t(lang, "fix.fill")}
             out.append(_item(len(out), "warning" if pct >= EMPTY_WARN else "info", "empty", lang, column=col,
                              what=_t(lang, "empty.what", col=col, pct=_pct(pct)),
                              why=_t(lang, "empty.why.num" if numeric else "empty.why", kept=_pct(1 - pct)),
@@ -230,7 +241,10 @@ def column_items(report: dict, df: pd.DataFrame, lang: str) -> list[dict]:
                              action={"kind": "exclude", "expression": _keep_rows(rule, [col]), "rule": rule,
                                      "label": _t(lang, "fix.exclude")}))
         n_out = c.get("outliers") or 0
-        if numeric and rows and n_out / rows >= OUTLIER_SHARE:
+        # An identifier has no "extreme values": branch 17 is not far from branch 1.
+        _kind = _number_of(col, column_meta)
+        if numeric and rows and n_out / rows >= OUTLIER_SHARE and (
+                _kind != "code" if _kind else not _ID_COLUMN.search(str(col))):
             s = pd.to_numeric(df[col], errors="coerce").dropna()
             if len(s):
                 out.append(_item(len(out), "info", "outliers", lang, column=col,
@@ -275,7 +289,8 @@ def _merge_outliers(items: list[dict], lang: str) -> list[dict]:
     return rest[:first] + [merged] + rest[first:]
 
 
-def generic_rules(df: pd.DataFrame, lang: str, skip: set[str] | None = None) -> list[dict]:
+def generic_rules(df: pd.DataFrame, lang: str, skip: set[str] | None = None,
+                  column_meta: dict | None = None) -> list[dict]:
     """Rules any database can break: negative amounts, dates in the future.
     `skip`: columns already explained (a -1 "unknown" code is not ALSO a
     negative amount)."""
@@ -284,7 +299,11 @@ def generic_rules(df: pd.DataFrame, lang: str, skip: set[str] | None = None) -> 
         if skip and col in skip:
             continue
         s = df[col]
-        if pd.api.types.is_numeric_dtype(s) and s.dtype != bool and _AMOUNT.search(str(col)):
+        # A quantity that cannot be below zero: by its classification (an
+        # amount, a count, a duration) when it has one, else by its name.
+        _kind = _number_of(str(col), column_meta)
+        _never_negative = (_kind in ("amount", "count", "duration")) if _kind else bool(_AMOUNT.search(str(col)))
+        if pd.api.types.is_numeric_dtype(s) and s.dtype != bool and _never_negative:
             n = int((s < 0).sum())
             if n >= 1 and n / max(1, s.notna().sum()) <= RULE_MAX_SHARE:
                 rule = f"{_q(col)} >= 0"
@@ -323,32 +342,50 @@ RULES_SCHEMA = {
 _LANGUAGE = {"ar": "Arabic (Modern Standard, simple words)", "en": "English"}
 
 
-def _profile(df: pd.DataFrame) -> str:
+#: A text column with at most this many different values is a category.
+FEW_VALUES = 20
+
+
+def _profile(df: pd.DataFrame, column_meta: dict | None = None) -> str:
     lines = []
     for col in list(df.columns)[:40]:
         s = df[col]
         if pd.api.types.is_numeric_dtype(s) and s.dtype != bool:
             q = s.dropna()
-            kind = "percentage" if _PERCENT.search(str(col)) else "number"
+            _kind = _number_of(str(col), column_meta)
+            kind = ("percentage" if _kind == "share" else _kind) if _kind \
+                else "percentage" if _PERCENT.search(str(col)) else "number"
             desc = (f"{kind}, min {_num(q.min())}, median {_num(q.median())}, max {_num(q.max())}"
                     if len(q) else f"{kind}, empty")
         elif pd.api.types.is_datetime64_any_dtype(s):
             desc = f"date, {s.min()} to {s.max()}"
         else:
-            top = s.dropna().astype(str).value_counts().head(4).index.tolist()
-            desc = "text, e.g. " + ", ".join(top)
+            # A CATEGORY's values are its labels and say what the column is; a
+            # column of many different texts (names, addresses, notes) is
+            # described by its shape, and none of its contents leave the
+            # server.
+            text = s.dropna().astype(str)
+            distinct = int(text.nunique())
+            if distinct <= FEW_VALUES:
+                desc = "category, values: " + ", ".join(v[:40] for v in text.value_counts().head(6).index.tolist())
+            else:
+                lengths = text.str.len()
+                desc = (f"text, {distinct:,} different values, {int(lengths.min())}-{int(lengths.max())} characters"
+                        if len(text) else "text, empty")
         lines.append(f"- `{col}`: {desc}; {s.isna().mean():.0%} empty")
     return "\n".join(lines)
 
 
-def build_rules_prompt(df: pd.DataFrame, brief: dict | None, lang: str) -> list[dict]:
-    sample = df.head(5).to_dict(orient="records")
+def build_rules_prompt(df: pd.DataFrame, brief: dict | None, lang: str,
+                       column_meta: dict | None = None) -> list[dict]:
+    # NO ROWS are sent: the model reasons about how the COLUMNS relate, and for
+    # that their names, kinds, ranges and category labels are enough. (Until
+    # 2026-10-10 the first five rows went too -- real values of real people.)
     system = (
         "You check a table for rows where two or more columns contradict each other. Every rule "
         "you write MUST name at least two different columns; a rule about one column is "
         "useless here (single-column checks are already done). Think about how the columns "
         "relate in the real world, for example:\n"
-        "- a car several years old has been driven: `mileage_km` >= 1000 or `car_age_years` <= 1\n"
         "- an end comes after its start: `end_date` >= `start_date`\n"
         "- a part is not bigger than its whole: `discount` <= `price`;  `paid` <= `total`\n"
         "- two columns that say the same thing agree: `age` == 2026 - `birth_year`\n"
@@ -358,12 +395,15 @@ def build_rules_prompt(df: pd.DataFrame, brief: dict | None, lang: str) -> list[
         "only comparisons (== != < <= > >=), arithmetic (+ - * /), numbers, quoted text and "
         "and/or/not -- no functions, and no 'implies' (write 'not A or B'). Columns marked "
         "'percentage' hold a percentage or a change, never an amount in the unit of other "
-        "columns: do not compare them with prices or counts. Only rules true by the nature of the data, not preferences. "
+        "columns: do not compare them with prices or counts. Only rules true by the nature of the data, not "
+        "preferences -- and never a promise or a target: a late completion, a missed deadline, an overrun budget or "
+        "a failed service level is a real event the person needs to see, not a contradiction. "
         "what/why/todo are plain sentences for someone who never used a database, in "
         f"{_LANGUAGE.get(lang, 'English')}: what = what is wrong in the rows that break the rule, "
         "why = why it matters, todo = what to do. For each rule first list its `columns` (two or "
         "more) and the real-world `relation` between them in a few words, then the expression.")
-    user = (f"Columns:\n{_profile(df)}\n\nFirst rows:\n{sample}\n\n"
+    from ..llm import data_block
+    user = (f"Columns:\n{data_block(_profile(df, column_meta), 'column summaries')}\n\n"
             f"About the person (hints): {brief or 'not given'}")
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
@@ -429,10 +469,11 @@ def verify_rule(df: pd.DataFrame, expr: str) -> tuple[int, int] | None:
     return len(judged) - len(kept), len(judged)
 
 
-async def model_rules(df: pd.DataFrame, brief: dict | None, lang: str, client) -> list[dict]:
+async def model_rules(df: pd.DataFrame, brief: dict | None, lang: str, client,
+                      column_meta: dict | None = None) -> list[dict]:
     if client is None or not getattr(client, "enabled", True) or df.empty:
         return []
-    got = await client.complete_json(build_rules_prompt(df, brief, lang), RULES_SCHEMA,
+    got = await client.complete_json(build_rules_prompt(df, brief, lang, column_meta), RULES_SCHEMA,
                                      max_tokens=1800, temperature=0.1, enforce=True)
     out = []
     for r in (got or {}).get("rules") or []:
@@ -487,10 +528,58 @@ def sensible(finding: dict) -> bool:
     return True
 
 
+#: Measures whose TOTAL means something. The statistics engine totals every
+#: number; a month's total of delivery days or of delivery attempts is the
+#: month's volume again, said as if it were a finding.
+_ADDITIVE = re.compile(r"(amount|revenue|fee|cost|total|qty|quantity|value|paid|income|expense|profit|spend|budget|"
+                       r"units|مبلغ|قيمة|كمية|إجمالي|اجمالي)", re.I)
+_TOTALLED = ("trend", "standout", "laggard")
+#: Said already by the check ("a few extreme values..."), and never an insight.
+_NOT_INSIGHTS = ("data_quality", "outlier_impact")
+
+
+def totals_mean_something(finding: dict, df: pd.DataFrame, kinds: dict | None = None) -> bool:
+    """False for a finding built on the total of a number that is not an amount.
+
+    `kinds`: what each column is, from the connection's Meaning map
+    ({column: "amount" | "level" | ...}); the name is only the fallback for a
+    column the map does not know."""
+    if finding.get("kind") not in _TOTALLED:
+        return True
+    numbers = [c for c in finding.get("columns") or []
+               if c in df.columns and pd.api.types.is_numeric_dtype(df[c]) and df[c].dtype != bool]
+    return all((kinds or {}).get(c) in ("amount", "count") if (kinds or {}).get(c)
+               else bool(_ADDITIVE.search(str(c))) for c in numbers)
+
+
+#: A group's share of a total must differ from its share of the rows by this
+#: many points before it is worth saying.
+SIZE_MARGIN = 5.0
+_NOTHING = {"", "nan", "none", "null", "nat"}
+
+
+def beyond_size(finding: dict, df: pd.DataFrame) -> bool:
+    """False for "Delivered carries 89% of delivery days" when 89% of the rows
+    ARE delivered: the group is big, and that is all the line says (Nile
+    Express, 2026-10-10 -- every insight shown was one of these). Also false
+    for a line about the group of empty values."""
+    member = (finding.get("figures") or {}).get("member")
+    if member is None:
+        return True
+    if str(member).strip().casefold() in _NOTHING:
+        return False
+    share = (finding.get("figures") or {}).get("share_pct")
+    cols = [c for c in finding.get("columns") or [] if c in df.columns]
+    if finding.get("kind") not in ("standout", "laggard") or not isinstance(share, (int, float)) or not cols:
+        return True
+    of_rows = float((df[cols[0]].astype(str) == str(member)).mean() * 100)
+    return abs(share - of_rows) >= SIZE_MARGIN
+
+
 async def plain_insights(findings: list[dict], brief: dict | None, lang: str, client) -> list[dict]:
     """The strongest findings, reworded for the person's work when the model can."""
     picked = [f for f in sorted(findings, key=lambda f: -(f.get("score") or 0))
-              if f.get("kind") != "data_quality" and sensible(f)][:MAX_INSIGHTS]
+              if f.get("kind") not in _NOT_INSIGHTS and sensible(f)][:MAX_INSIGHTS]
     base = [{"id": f"insight:{i}", "tone": "insight", "kind": f.get("kind"),
              "what": f.get("title") or "", "why": f.get("detail") or "", "todo": None,
              "columns": f.get("columns") or [], "action": None} for i, f in enumerate(picked)]
@@ -500,10 +589,12 @@ async def plain_insights(findings: list[dict], brief: dict | None, lang: str, cl
     msgs = [{"role": "system", "content":
              "Reword each finding for the person below, in "
              f"{_LANGUAGE.get(lang, 'English')}, plainly and briefly. Keep every number exactly as "
-             "given; add no new facts. Describe the data as what it is (for example market listings, "
-             "cases, patients) -- never call it the person's own stock, clients or records unless "
-             "they said so. what = the finding in one sentence; why = why it matters for their "
-             "work; todo = one thing they could do or check next."},
+             "given; add no new facts. Describe the data as what it is, in its own words -- never "
+             "call it the person's own stock, clients or records unless "
+             "they said so. what = the finding in one sentence; why = what it means, only as far as "
+             "the finding itself shows -- never guess a cause, and never link it to their problem "
+             "unless the finding measures that link; todo = one thing they could check next, or "
+             "empty."},
             {"role": "user", "content": f"About the person: {brief or 'not given'}\n\nFindings:\n{listing}"}]
     got = await client.complete_json(msgs, WORDS_SCHEMA, max_tokens=1500, temperature=0.2, enforce=True)
     for w in (got or {}).get("items") or []:

@@ -46,6 +46,51 @@ class SegmentError(ValueError):
     maps this to HTTP 400."""
 
 
+#: Points drawn in the 2-D picture of the groups; more only overplots.
+PROJECTION_POINTS = 1200
+#: Variables named on each axis of the picture.
+PROJECTION_AXIS_TERMS = 3
+
+
+def _projection(X, labels, centers, columns: list[str]) -> dict | None:
+    """The groups as a PICTURE: every row placed on the two directions along
+    which the rows differ most (principal components of the standardised
+    variables), coloured by its group.
+
+    With many variables no two of them show the groups; these two directions
+    are the best flat view there is. Each axis says how much of the variation
+    it carries and which variables weigh most on it, so it is not a mystery
+    axis. Returns None when it cannot be computed -- the table of group
+    averages stands on its own."""
+    try:
+        import numpy as np
+        from sklearn.decomposition import PCA
+        if X.shape[1] < 2 or X.shape[0] < 3:
+            return None
+        pca = PCA(n_components=2, random_state=RANDOM_STATE)
+        placed = pca.fit_transform(X)
+        rng = np.random.default_rng(RANDOM_STATE)
+        keep = np.arange(len(placed))
+        if len(keep) > PROJECTION_POINTS:
+            keep = np.sort(rng.choice(keep, PROJECTION_POINTS, replace=False))
+        axes = []
+        for i in range(2):
+            weights = pca.components_[i]
+            order = np.argsort(-np.abs(weights))[:PROJECTION_AXIS_TERMS]
+            axes.append({"share": float(pca.explained_variance_ratio_[i]),
+                         "variables": [{"name": columns[j], "weight": float(weights[j])} for j in order]})
+        middle = pca.transform(centers)
+        return {
+            "method": "pca",
+            "points": [[round(float(placed[i, 0]), 4), round(float(placed[i, 1]), 4), int(labels[i])] for i in keep],
+            "centers": [[round(float(middle[k, 0]), 4), round(float(middle[k, 1]), 4), int(k)]
+                        for k in range(len(middle))],
+            "axes": axes, "shown": int(len(keep)), "of": int(len(placed)),
+        }
+    except Exception:                                           # noqa: BLE001 -- a picture is optional
+        return None
+
+
 def segment_dataframe(
     df: pd.DataFrame, columns: list[str] | None = None, include_rows: bool = False,
     column_meta: dict | None = None,
@@ -92,14 +137,23 @@ def segment_dataframe(
     best_score = -2.0
     best_labels = None
     best_model = None
-    for k in range(2, max_k + 1):
-        model = KMeans(n_clusters=k, random_state=RANDOM_STATE, n_init=10)
-        labels = model.fit_predict(X)
-        if len(set(labels)) < 2:
-            continue
-        score = silhouette_score(X, labels, sample_size=sil_sample, random_state=RANDOM_STATE)
-        if score > best_score:
-            best_k, best_score, best_labels, best_model = k, score, labels, model
+    # ONE thread for the fits. On a many-core host the numeric library's
+    # threads fight over a 10,000-row problem that needs none of them: the
+    # same fit took 5 s on 24 threads and 0.03 s on one, and this search --
+    # seven sizes, ten starts each -- took 25 s where it takes under 2 s
+    # (scripts/bench_discovery.py, 2026-10-11). The answer is the same.
+    from threadpoolctl import threadpool_limits
+    from ...core.config import settings
+    threads = int(getattr(settings, "model_fit_threads", 1) or 0)
+    with threadpool_limits(limits=threads or None):
+        for k in range(2, max_k + 1):
+            model = KMeans(n_clusters=k, random_state=RANDOM_STATE, n_init=10)
+            labels = model.fit_predict(X)
+            if len(set(labels)) < 2:
+                continue
+            score = silhouette_score(X, labels, sample_size=sil_sample, random_state=RANDOM_STATE)
+            if score > best_score:
+                best_k, best_score, best_labels, best_model = k, score, labels, model
 
     if best_k is None:
         raise SegmentError("Could not find a stable clustering (every candidate k collapsed to one cluster)")
@@ -122,6 +176,8 @@ def segment_dataframe(
             centroid[col] = float(val)
         centroid_rows.append(centroid)
 
+    projection = _projection(X, best_labels, best_model.cluster_centers_, usable)
+
     columns_meta = [{"name": c, "dtype": "numeric"} for c in usable]
     meta = {
         "method": "kmeans",
@@ -135,6 +191,8 @@ def segment_dataframe(
         "n_rows_total": total_rows,
         "sampled": sampled,
     }
+    if projection:
+        meta["projection"] = projection
     if sampled:
         meta["sample_size"] = len(df)
     if include_rows:

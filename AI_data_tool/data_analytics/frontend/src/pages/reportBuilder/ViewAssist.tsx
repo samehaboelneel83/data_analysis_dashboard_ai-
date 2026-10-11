@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Lightbulb, MessageCircle, WandSparkles, X } from 'lucide-react'
+import { Lightbulb, ListChecks, MessageCircle, WandSparkles, X } from 'lucide-react'
 import AiMascot from '../../components/ai/AiMascot'
 import { useT, type MessageKey } from '../../i18n'
 
@@ -15,15 +15,17 @@ import { useT, type MessageKey } from '../../i18n'
  * widgets read" and "Based on" chips are left out (PLAN.md).
  */
 
-export type AssistTab = 'ask' | 'insights' | 'suggest'
+export type AssistTab = 'ask' | 'summary' | 'insights' | 'suggest'
 
-export default function ViewAssist({ tab, onTab, onClose, context, ask, insights, suggest }: {
+export default function ViewAssist({ tab, onTab, onClose, context, ask, summary, insights, suggest }: {
   tab: AssistTab
   onTab: (t: AssistTab) => void
   onClose: () => void
   /** "Dashboard · Page", under the title. */
   context: string
   ask: ReactNode
+  /** This page's key takeaways, read from its own charts -- no model. */
+  summary?: ReactNode
   insights: ReactNode
   /** Editors only: adding a chart changes the page. */
   suggest?: ReactNode
@@ -31,10 +33,11 @@ export default function ViewAssist({ tab, onTab, onClose, context, ask, insights
   const t = useT()
   const tabs: { k: AssistTab; icon: typeof MessageCircle; label: MessageKey }[] = [
     { k: 'ask', icon: MessageCircle, label: 'vw.ai.ask' },
+    ...(summary ? [{ k: 'summary' as AssistTab, icon: ListChecks, label: 'vw.ai.summary' as MessageKey }] : []),
     { k: 'insights', icon: Lightbulb, label: 'vw.ai.insights' },
     ...(suggest ? [{ k: 'suggest' as AssistTab, icon: WandSparkles, label: 'vw.ai.suggest' as MessageKey }] : []),
   ]
-  const current = tab === 'suggest' && !suggest ? 'ask' : tab
+  const current = (tab === 'suggest' && !suggest) || (tab === 'summary' && !summary) ? 'ask' : tab
   return (
     <aside className="dl-vw-ai" aria-labelledby="dl-vw-ai-t" data-testid="view-assist">
       <div className="dl-vw-ai__h">
@@ -54,6 +57,7 @@ export default function ViewAssist({ tab, onTab, onClose, context, ask, insights
       </div>
       <div className="dl-vw-ai__b" role="tabpanel">
         {current === 'ask' && ask}
+        {current === 'summary' && summary}
         {current === 'insights' && insights}
         {current === 'suggest' && suggest}
       </div>

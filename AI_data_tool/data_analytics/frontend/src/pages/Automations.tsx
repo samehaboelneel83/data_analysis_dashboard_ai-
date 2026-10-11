@@ -156,7 +156,7 @@ export default function Automations() {
           {t('auto.dataset')}
           <select value={chosen} onChange={e => setChosen(e.target.value)} style={{ minWidth: 260 }}>
             <option value="">{t('auto.chooseDataset')}</option>
-            {clean.visible.map(d => <option key={d.id} value={d.id}>{isCertified(d) ? '✓ ' : ''}{d.name}{d.mode === 'directquery' ? ' · live' : ''}</option>)}
+            {clean.visible.map(d => <option key={d.id} value={d.id}>{isCertified(d) ? '✓ ' : ''}{d.name}{d.mode === 'directquery' ? ` · ${t('common.live')}` : ''}</option>)}
           </select>
         </label>
         <DatasetListFilter state={clean} />

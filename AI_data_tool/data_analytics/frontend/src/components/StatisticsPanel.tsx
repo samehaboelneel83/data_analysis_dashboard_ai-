@@ -151,7 +151,7 @@ export default function StatisticsPanel({ datasetId, columns, mode, only }: {
   if (specError) {
     return <LoadError what="the analysis catalogue" error={specError} onRetry={loadSpecs} />
   }
-  if (!specs) return <p style={{ color: 'var(--muted)' }}>Loading…</p>
+  if (!specs) return <p style={{ color: 'var(--muted)' }}>{t('common.loading')}</p>
 
   return (
     <>
@@ -164,9 +164,7 @@ export default function StatisticsPanel({ datasetId, columns, mode, only }: {
       <p data-testid="directquery-analysis-notice"
         style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 12px', maxWidth: 680,
           border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px' }}>
-        This dataset is queried at its source. Analyses read it live, up to a
-        row limit, and each result says how many rows it measured — so a figure
-        drawn from a sample is never presented as if it came from everything.
+        {t('stp.live')}
       </p>
     )}
     <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
@@ -176,11 +174,11 @@ export default function StatisticsPanel({ datasetId, columns, mode, only }: {
           display: 'block', fontSize: 12, fontWeight: 600,
           color: 'var(--muted)', marginBottom: 4,
         }}>
-          Analysis
+          {t('stp.analysis')}
         </label>
         <select id="stat-analysis" value={chosen} onChange={e => pick(e.target.value)}
           style={{ width: '100%' }}>
-          <option value="">— choose —</option>
+          <option value="">{t('qbd.choose')}</option>
           {specs.map(s => (
             <option key={s.name} value={s.name}>{s.name.replace(/_/g, ' ')}</option>
           ))}
@@ -203,7 +201,7 @@ export default function StatisticsPanel({ datasetId, columns, mode, only }: {
               <label htmlFor={`stat-${key}`} style={{
                 display: 'block', fontSize: 12, color: 'var(--muted)', marginBottom: 2,
               }}>
-                {label}{isRequired ? '' : ' (optional)'}
+                {label}{isRequired ? '' : ` ${t('stp.optional')}`}
               </label>
 
               {kind === 'enum' ? (
@@ -245,7 +243,7 @@ export default function StatisticsPanel({ datasetId, columns, mode, only }: {
                 <select id={`stat-${key}`} value={(params[key] as string) ?? ''}
                   onChange={e => setParams(p => ({ ...p, [key]: e.target.value }))}
                   style={{ width: '100%' }}>
-                  <option value="">— choose —</option>
+                  <option value="">{t('qbd.choose')}</option>
                   {columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
                 </select>
               ) : kind === 'number' ? (
@@ -274,9 +272,9 @@ export default function StatisticsPanel({ datasetId, columns, mode, only }: {
         })}
 
         {spec && (
-          <button className="btn btn-primary btn-sm" disabled={!complete || running} title={!complete ? 'Choose every required column first' : undefined}
+          <button className="btn btn-primary btn-sm" disabled={!complete || running} title={!complete ? t('stp.chooseFirst') : undefined}
             onClick={() => void run()} style={{ marginTop: 12, width: '100%' }}>
-            {running ? 'Running…' : 'Run'}
+            {running ? t('stp.running') : t('stp.run')}
           </button>
         )}
       </div>

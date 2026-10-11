@@ -120,9 +120,6 @@ def _what(config: dict) -> Said:
     if not m or agg in ("count", "frequency"):
         return phrase("what.rows", "number of rows")
     if agg == "countd":
-        from .insights import _PERSON_ID
-        if any(k in str(m).lower() for k in _PERSON_ID):
-            return phrase("what.headcount", "headcount")
         # "student_id" counts students: "number of students", not "distinct
         # student id" (enrolments panel, 2026-10-02).
         stem = re.sub(r"[_ ]?(id|no|num|number|code|key|ref)$", "", str(m), flags=re.I).strip("_ ")
@@ -304,7 +301,13 @@ def _crosstab(config: dict, result: dict) -> str | None:
                    for sname, sh in per_series.items() if sh]
         if not spreads:
             return None
-        sname, lo, hi = max(spreads, key=lambda t: t[2][1] - t[1][1])
+        # Two series are each other's mirror (late / not late): the same spread
+        # either way. The sentence is then about the SMALLER one -- the thing
+        # that happens to some rows -- not "False is 86% of Canal".
+        def _mean_share(name) -> float:
+            sh = per_series.get(str(name)) or []
+            return sum(v for _, v in sh) / len(sh) if sh else 1.0
+        sname, lo, hi = max(spreads, key=lambda t: (round(t[2][1] - t[1][1], 6), -_mean_share(t[0])))
         # Counts carry their own noise: 750 people per bar move a 40% share by
         # ~4 points by chance alone. With counts, "the same" is judged by the
         # strength of the association (Cramer's V), which allows for size.

@@ -25,26 +25,26 @@ summary = dl.query(${datasetId}, dimensions=[...], measures=[{"column": ..., "ag
 }
 
 function Dialog({ code, onClose }: { code: string; onClose: () => void }) {
+  const t9 = useT()
   const ref = useModalDialog<HTMLDivElement>(onClose)
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.45)',
       display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div ref={ref} role="dialog" aria-modal="true" aria-label="Use in Python" onClick={e => e.stopPropagation()}
+      <div ref={ref} role="dialog" aria-modal="true" aria-label={t9('nbs.aria')} onClick={e => e.stopPropagation()}
         style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)',
           padding: 18, width: 'min(640px, calc(100vw - 32px))', display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <b>Use this dataset in Python</b>
-          <button type="button" className="btn btn-sm" aria-label="Close" onClick={onClose}>×</button>
+          <b>{t9('nbs.title')}</b>
+          <button type="button" className="btn btn-sm" aria-label={t9('nbs.close')} onClick={onClose}>×</button>
         </div>
         <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0 }}>
-          A notebook gets exactly what your dashboards show: your row and column security, the dataset's prep,
-          calculated columns and measures, its export policy and sensitivity label. Every call is audited.
+          {t9('nbs.what')}
         </p>
         <pre data-testid="notebook-code" dir="ltr" style={{ fontSize: 12, background: 'var(--surface2)', padding: 10,
           borderRadius: 6, overflow: 'auto', margin: 0 }}>{code}</pre>
         <button className="btn btn-sm" style={{ alignSelf: 'flex-start' }}
-          onClick={() => navigator.clipboard.writeText(code).then(() => toast.success('Copied')).catch(() => toast.error('Could not copy'))}>
-          Copy
+          onClick={() => navigator.clipboard.writeText(code).then(() => toast.success(t9('nbs.copied'))).catch(() => toast.error(t9('nbs.copyFailed')))}>
+          {t9('nbs.copy')}
         </button>
       </div>
     </div>

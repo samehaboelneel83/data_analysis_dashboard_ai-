@@ -651,7 +651,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
                   same stored snapshot the grid draws. */}
               <button type="button" aria-label={t('chat.dl.xlsx')} className="dl-act"
                 onClick={() => void downloadFile(runId, 'xlsx')}>
-                <Download size={14} aria-hidden /> Excel
+                <Download size={14} aria-hidden /> Excel {/* i18n-ok */}
               </button>
               <button type="button" aria-label={t('chat.dl.pdf')} className="dl-act"
                 onClick={() => void downloadFile(runId, 'pdf')}>

@@ -13,6 +13,75 @@ const sentiment = {
   caveats: ['4 of 40 comments contain no scored word and are left unscored rather than counted as neutral.'],
 }
 
+describe('where rows stand', () => {
+  it('shows the headline counts, then each stage with what is still going, overdue and on time', () => {
+    render(<ResultFor kind="stage_board" params={{}} result={{
+      meta: { stage_col: 'state', as_of: '2025-06-30', rows: 1000, open: 120, overdue: 30, overdue_pct: 25, finished: 880, on_time_pct: 91.5 },
+      rows: [{ stage: 'moving', rows: 120, share_pct: 12, open: 120, median_age_days: 4.5, oldest_days: 40, overdue: 30 },
+             { stage: 'done', rows: 880, share_pct: 88, open: 0, overdue: 0, finished: 880, on_time_pct: 91.5 }],
+      warnings: ['"Now" is the newest date in the data (2025-06-30), not today.'] }} />)
+    expect(screen.getAllByTestId('stage-stat').map(e => e.textContent)).toEqual(['Rows1,000', 'Still going120', 'Overdue30 (25%)', 'Finished on time91.5%'])
+    const rows = screen.getAllByTestId('stage-row')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].textContent).toContain('4.5')
+    expect(rows[1].textContent).toContain('91.5%')
+    expect(screen.getByText(/not today/)).toBeTruthy()
+  })
+})
+
+describe('scenarios side by side', () => {
+  it('leads with which ends higher, then each total against nothing moved, and flags one beyond the data', () => {
+    render(<ResultFor kind="compare_scenarios" params={{}} result={{
+      measure: 'revenue', horizon: 6, r2: 0.98, series: ['Nothing moved', 'spend +10%', 'spend -10%'],
+      highest: 'spend +10%', lowest: 'spend -10%', gap: 360, gap_pct: 6.5,
+      table: [{ scenario: 'Nothing moved', baseline: true, total: 5500, vs_baseline: 0, vs_baseline_pct: 0, extrapolating: false },
+              { scenario: 'spend +10%', baseline: false, total: 5680, vs_baseline: 180, vs_baseline_pct: 3.27, extrapolating: true },
+              { scenario: 'spend -10%', baseline: false, total: 5320, vs_baseline: -180, vs_baseline_pct: -3.27, extrapolating: false }],
+      chart: [{ name: '2026-07', 'Nothing moved': 900, 'spend +10%': 930, 'spend -10%': 870 }],
+      caveats: ['This is association, not intervention.'] }} />)
+    expect(screen.getByTestId('scenarios-headline').textContent).toMatch(/spend \+10%.*360.*above.*spend -10%/)
+    expect(screen.getAllByTestId('scenario-row')).toHaveLength(3)
+    expect(screen.getByText(/\+180 \(\+3\.27%\)/)).toBeTruthy()
+    expect(screen.getByText(/beyond the data/)).toBeTruthy()
+    expect(screen.getByText(/association, not intervention/)).toBeTruthy()
+  })
+})
+
+describe('two groups, one outcome', () => {
+  const base = { group_col: 'arm', outcome: 'done', outcome_value: 'yes', measure: 'rate' as const, baseline: 'first',
+    other: 'second', difference: 0.037, low: 0.017, high: 0.057, level: 0.95, lift_pct: 35.2, chance_higher: 0.98,
+    p_value: 0.001, verdict: 'higher' as const, sentence: 'second is higher than first, and the rows seen leave little room for the opposite.',
+    curves: { first: [[0.09, 0.1], [0.105, 1], [0.12, 0.1]] as [number, number][], second: [[0.127, 0.1], [0.142, 1], [0.157, 0.1]] as [number, number][] } }
+  const rows = [{ group: 'first', rows: 2000, baseline: true, rate: 0.105 }, { group: 'second', rows: 2000, baseline: false, rate: 0.142 }]
+
+  it('leads with the verdict, then each group, the range, the lift and the chance', () => {
+    render(<ResultFor kind="two_groups" params={{}} result={{ rows, meta: base,
+      warnings: ['If rows were not put in their groups at random, this is a difference between two kinds of rows, not the effect of the group.'] }} />)
+    expect(screen.getByTestId('two-groups-verdict').textContent).toMatch(/second is higher than first/)
+    expect(screen.getAllByTestId('two-groups-group')).toHaveLength(2)
+    expect(screen.getByText('14.2%')).toBeTruthy()
+    expect(screen.getByTestId('two-groups-difference').textContent).toMatch(/\+3\.7 points.*\+1\.7 points.*\+5\.7 points/)
+    expect(screen.getByTestId('two-groups-chance').textContent).toBe('98%')
+    expect(screen.getByText(/at random/)).toBeTruthy()
+  })
+})
+
+describe('phase 3 results', () => {
+  it('says where a change sits, and that it is not a cause', () => {
+    render(<ResultFor kind="change_drivers" params={{}} result={{
+      rows: [], warnings: ['This says WHERE the change sits, not what caused it.'],
+      meta: { measure: 'amount', period: '2024-06', baseline: '2024-05', now: 72000, then: 55800, change: 16200,
+        change_pct: 29, additive: true,
+        factors: [{ column: 'kind', top: 'b', concentration: 0.93, levels: 3,
+          values: [{ value: 'b', now: 36000, then: 18600, delta: 17400, share_of_change_pct: 107.4 }] }] },
+    }} />)
+    expect(screen.getByTestId('change-headline').textContent).toMatch(/55,800.*72,000/)
+    expect(screen.getByText(/mostly b/)).toBeTruthy()
+    expect(screen.getByText(/107\.4% of the change/)).toBeTruthy()
+    expect(screen.getByText(/not what caused it/)).toBeTruthy()
+  })
+})
+
 describe('text analytics results (Phase 6.6)', () => {
   it('renders the sentiment split with unscored kept apart, agreement and groups', () => {
     render(<ResultFor kind="text_sentiment" result={sentiment} params={{}} />)
@@ -123,5 +192,37 @@ describe('key influencers footnotes in Arabic (QA2 T1, new)', () => {
       // An unknown sentence is shown as sent, never dropped.
       expect(box.textContent).toContain('something new from the server')
     } finally { localStorage.removeItem('datalytics.language') }
+  })
+})
+
+
+describe('the new result views in Arabic', () => {
+  it('says the stage board and its warning in Arabic, numbers as they are', async () => {
+    localStorage.setItem('datalytics.language', 'ar')
+    const { DirectionProvider } = await import('../../contexts/DirectionContext')
+    render(<DirectionProvider><ResultFor kind="stage_board" params={{}} result={{
+      meta: { stage_col: 'state', as_of: '2025-06-30', rows: 1000, open: 120, overdue: 30, overdue_pct: 25,
+        warnings_i18n: [{ key: 'an.now', vars: { d: '2025-06-30' } }] },
+      rows: [{ stage: 'moving', rows: 120, share_pct: 12, open: 120, median_age_days: 4.5, overdue: 30 }],
+      warnings: ['"Now" is the newest date in the data (2025-06-30), not today.'] }} /></DirectionProvider>)
+    expect(screen.getAllByText('ما زالت جارية').length).toBeGreaterThan(0)
+    expect(screen.getByText(/«الآن» هو أحدث تاريخ في البيانات \(2025-06-30\)/)).toBeTruthy()
+    expect(screen.getByText('1,000')).toBeTruthy()
+    localStorage.removeItem('datalytics.language')
+  })
+
+  it('says an older view in Arabic too: the prediction comparison', async () => {
+    localStorage.setItem('datalytics.language', 'ar')
+    const { DirectionProvider } = await import('../../contexts/DirectionContext')
+    render(<DirectionProvider><ResultFor kind="automated_prediction" params={{}} result={{
+      task: 'classification', target: 'state', score_name: 'accuracy', n_train: 300, n_test: 100,
+      champion: { model: 'decision tree', score: 0.9, train_score: 0.92, n_test: 100, is_baseline: false, error: null },
+      candidates: [{ model: 'decision tree', score: 0.9, train_score: 0.92, n_test: 100, is_baseline: false, error: null },
+                   { model: 'always the most common', score: 0.6, train_score: 0.6, n_test: 100, is_baseline: true, error: null }],
+      baseline_score: 0.6, lift_over_baseline: 0.3, beats_baseline: true, predictors_skipped: [], caveats: [] }} /></DirectionProvider>)
+    expect(screen.getByText('توقّع state')).toBeTruthy()
+    expect(screen.getByText('كل ما جُرّب')).toBeTruthy()
+    expect(screen.getByTestId('prediction-verdict').textContent).toContain('أفضل بمقدار 0.3 من مجرد التخمين')
+    localStorage.removeItem('datalytics.language')
   })
 })

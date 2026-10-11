@@ -949,6 +949,8 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
         {['day', 'week', 'month', 'quarter', 'year'].map(g => <option key={g} value={g}>{g}</option>)}
         <option value="hour">{L("hour")}</option>
         <option value="hour_of_day">{L("hour of day (00–23)")}</option>
+        <option value="weekday">{L("day of the week")}</option>
+        <option value="month_of_year">{L("month of the year")}</option>
         <option value="hijri_month">{L("Hijri month (هجري)")}</option>
         <option value="hijri_year">{L("Hijri year (هجري)")}</option>
         {/* A forecast continues a calendar sequence (next month, next
@@ -2686,7 +2688,7 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
                     </label>
                     <input id="format-legend-title" value={legendTitle}
                       onChange={e => setLegendTitle(e.target.value)}
-                      style={{ width:'100%' }} placeholder={L("e.g. Customer Age Group")} />
+                      style={{ width:'100%' }} placeholder={L("e.g. Age group")} />
                     <div style={{ fontSize: 10.5, color:'var(--muted)', marginTop:3 }}>
                       {L("Names the FIELD the entries are values of — the swatches already say which value each colour is.")}
                     </div>

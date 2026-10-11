@@ -26,6 +26,12 @@ function say(tr: TranslateFn, said: SaidI18n): string | null {
   return tr(key as MessageKey, vars)
 }
 
+/** A server sentence in the reader's language, exactly as written (no
+ *  capital forced on its first letter: it may begin with a value's name). */
+export function sayText(tr: TranslateFn, text: string, said?: SaidI18n | null): string {
+  return (said ? say(tr, said) : null) ?? text
+}
+
 /** The takeaway to show, or undefined when there is none. */
 export function takeawayText(
   tr: TranslateFn, w: { takeaway?: string | null; takeaway_i18n?: SaidI18n | null },

@@ -683,7 +683,9 @@ async def rescan_insights(session, ds) -> bool:
         df = apply_prep_steps(df, steps, {})
         if ds.calculated_columns:
             df = apply_calculated_columns(df, ds.calculated_columns, ds.custom_functions)
-        return generate_insights(df, detect_types(df), ds.column_meta or {})
+        from . import column_classes
+        meta, _ = column_classes.classified(df, ds.column_meta or {})
+        return generate_insights(df, detect_types(df), meta)
 
     try:
         result = await asyncio.to_thread(_scan)

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { suggestApi, widgetDataApi } from '../../services/api'
-import type { ColumnMeta, DatasetColumn, WidgetSuggestion } from '../../services/api'
-import { defaultSummary, isIdentifier, nonAdditiveKind } from '../../lib/semanticGuard'
+import type { ColumnMeta, DatasetColumn, SuggestionFeedback, WidgetSuggestion } from '../../services/api'
+import { defaultSummary, isIdentifier, isOutcome, nonAdditiveKind, valueOrder } from '../../lib/semanticGuard'
 import type { Widget } from '../../types/report'
 import { translate, useT, type MessageKey, type TranslateFn } from '../../i18n'
 import { formattingCapabilities } from './widgetCapabilities'
@@ -47,11 +47,22 @@ export function suggestWidgets(
   const idCol = visible.find(c => isIdentifier(c.name, meta))
   const numeric = visible.filter(c => (c.dtype === 'numeric' || roleOf(c) === 'measure')
     && !isIdentifier(c.name, meta) && !['category', 'temporal', 'geography'].includes(roleOf(c) ?? '')
-    && (nonAdditiveKind(c.name) === null || roleOf(c) === 'measure'))
+    // The stored classification first (a code is never a measure, whatever its
+    // name); the name for a column nobody classified.
+    && (nonAdditiveKind(c.name, meta) === null || roleOf(c) === 'measure'))
   const cats = visible.filter(c => (c.dtype === 'categorical' && roleOf(c) !== 'measure' && !isIdentifier(c.name, meta))
     || roleOf(c) === 'category' || roleOf(c) === 'geography')
   const dates = visible.filter(c => c.dtype === 'datetime' || roleOf(c) === 'temporal')
   const out: Suggestion[] = []
+  // Columns that say what became of a row (late, returned): never a breakdown
+  // of their own here -- what they give is a SHARE per group.
+  const outcomes = visible.filter(c => isOutcome(c.name, meta))
+  const groups = cats.filter(c => !isOutcome(c.name, meta))
+  /** An ordinal category is drawn in its real order, never alphabetically. */
+  const inOrder = (dimension: string, config: Record<string, unknown>): Record<string, unknown> => {
+    const order = valueOrder(dimension, meta)
+    return order ? { ...config, sort_by: 'order', category_order: order } : config
+  }
 
   /**
    * How many distinct values a categorical column has, from the PROFILE.
@@ -80,31 +91,42 @@ export function suggestWidgets(
     ? tr('pg.panelsA.sw.countOver', { id: idCol.name, d }) : tr('pg.panelsA.sw.rowsOver', { d })
 
   // Head-counts first: the first question about any table of things.
-  for (const cat of cats.slice(0, 3)) {
+  for (const cat of groups.slice(0, 3)) {
     const n = card(cat)
-    const low = Number.isFinite(n) && n <= 6
+    // A scale (Low, Medium, High) is read along its order: bars, not slices.
+    const low = Number.isFinite(n) && n <= 6 && !valueOrder(cat.name, meta)
     out.push({ widget_type: low ? 'pie' : 'bar', title: countBy(cat.name),
-      reason: tr('pg.panelsA.sw.howManyEach', { cat: cat.name }), config: countCfg(cat.name) })
+      reason: tr('pg.panelsA.sw.howManyEach', { cat: cat.name }), config: inOrder(cat.name, countCfg(cat.name)) })
+  }
+  // The share with an outcome, per group: every bar the same height, split
+  // into with and without -- a big group cannot lead just by being big.
+  for (const o of outcomes.slice(0, 2)) {
+    for (const cat of groups.slice(0, 2)) {
+      out.push({ widget_type: 'bar', title: tr('pg.panelsA.sw.shareBy', { o: o.name, cat: cat.name }),
+        reason: tr('pg.panelsA.sw.shareWhy', { o: o.name, cat: cat.name }),
+        config: inOrder(cat.name, { dimension: cat.name, dimension2: o.name, measure: cat.name,
+                                    aggregation: 'count', bar_mode: 'stacked100' }) })
+    }
   }
   for (const d of dates.slice(0, 1)) {
     out.push({ widget_type: 'line', title: countOver(d.name),
       reason: tr('pg.panelsA.sw.perPeriod', { d: d.name }),
       config: { ...countCfg(d.name), dimension_granularity: 'month' } })
   }
-  for (const cat of cats) {
+  for (const cat of groups) {
     for (const m of numeric.slice(0, 2)) {
       const n = card(cat)
       const agg = defaultSummary(m.name, meta)
       const avg = agg === 'avg' || agg === 'median'
       // A pie is parts of a whole: an AVERAGE has no whole to be part of.
-      const low = Number.isFinite(n) && n <= 6 && !avg
+      const low = Number.isFinite(n) && n <= 6 && !avg && !valueOrder(cat.name, meta)
       out.push(low
         ? { widget_type: 'pie', title: tr('pg.panelsA.sw.mBy', { m: m.name, cat: cat.name }),
             reason: tr('pg.panelsA.sw.fewValues', { cat: cat.name }),
             config: { dimension: cat.name, measure: m.name, aggregation: agg } }
         : { widget_type: 'bar', title: tr(avg ? 'pg.panelsA.sw.avgBy' : 'pg.panelsA.sw.mBy', { m: m.name, cat: cat.name }),
             reason: tr(avg ? 'pg.panelsA.sw.compareAvg' : 'pg.panelsA.sw.compare', { m: m.name, cat: cat.name }),
-            config: { dimension: cat.name, measure: m.name, aggregation: agg } })
+            config: inOrder(cat.name, { dimension: cat.name, measure: m.name, aggregation: agg }) })
     }
   }
   for (const d of dates.slice(0, 1)) {
@@ -181,6 +203,21 @@ interface Item {
   fromInsights: boolean
   /** What it draws, read back from its result on every row (server). */
   takeaway?: string
+  /** What the idea cannot tell you (an association is not a cause). */
+  limits?: string[]
+}
+
+/** How a kind of chart has fared with this person (their organisation's
+ *  counts when they have not judged it yet): a kind they keep dismissing
+ *  sinks, one they keep adding rises. Counts only -- no model. */
+export function typeBias(widgetType: string, feedback: SuggestionFeedback | null): number {
+  if (!feedback) return 0
+  const mine = feedback.types?.[widgetType]
+  const c = mine && mine.added + mine.dismissed >= 3 ? mine : feedback.org_types?.[widgetType]
+  if (!c || c.added + c.dismissed < 3) return 0
+  if (c.dismissed > 2 * c.added) return -1.5
+  if (c.added > c.dismissed) return 0.5
+  return 0
 }
 
 const HIDDEN_KEY = (reportId?: number) => `datalytics:sug-hidden:${reportId ?? 'none'}`
@@ -288,11 +325,26 @@ export default function SuggestionsPane({ columns, analysis, onAdd, reportId, da
   const [added, setAdded] = useState<string[]>([])
   const [hidden, setHiddenState] = useState<string[]>(() => readHidden(reportId))
   const [showOnPage, setShowOnPage] = useState(false)
+  // What this person dismissed and added before, on ANY device, and how each
+  // kind of chart has fared (docs/suggestions/PLAN.md, phase 4). The browser's
+  // own list stays as the fallback when the server cannot be asked.
+  const [feedback, setFeedback] = useState<SuggestionFeedback | null>(null)
+  useEffect(() => {
+    if (!reportId) return
+    suggestApi.feedback(reportId).then(setFeedback).catch(() => setFeedback(null))
+  }, [reportId])
+  const remember = (widget_type: string, config: Record<string, unknown>, action: 'dismissed' | 'added') => {
+    if (!reportId) return
+    suggestApi.sendFeedback(reportId, { signature: signature(widget_type, config), widget_type, action })
+      .then(setFeedback).catch(() => { /* a convenience: the local list still hides it */ })
+  }
   const hide = (key: string) => {
     const next = [...hidden, key]
     setHiddenState(next)
     if (expanded === key) setExpanded(null)
     try { localStorage.setItem(HIDDEN_KEY(reportId), JSON.stringify(next)) } catch { /* a convenience */ }
+    const it = items.find(x => x.key === key)
+    if (it) remember(it.widget_type, it.config, 'dismissed')
   }
 
   const items: Item[] = useMemo(() => {
@@ -311,8 +363,12 @@ export default function SuggestionsPane({ columns, analysis, onAdd, reportId, da
       out.push({ ...it, key })
     }
     for (const s of insightSugs ?? []) {
-      push({ widget_type: s.widget_type, title: s.title, reason: s.reason, config: s.config,
+      // The engine's own words in the reader's language, when it sent their keys.
+      const say = (text: string, key?: unknown) =>
+        takeawayText(tr, { takeaway: text, takeaway_i18n: (key ?? null) as never }) ?? text
+      push({ widget_type: s.widget_type, title: say(s.title, s.title_i18n), reason: say(s.reason, s.reason_i18n), config: s.config,
         aligned: s.aligned, insightKind: s.kind, fromInsights: true,
+        limits: (s.limits ?? []).map((line, i) => say(line, s.limits_i18n?.[i])),
         // in the reader's language when the server sent the sentence's key
         takeaway: takeawayText(tr, s) })
     }
@@ -341,6 +397,11 @@ export default function SuggestionsPane({ columns, analysis, onAdd, reportId, da
     return m
   }, [pageWidgets])
 
+  // What the page is missing leads: a dashboard with no headline number is
+  // offered one first.
+  const pageLacksHeadline = (pageWidgets ?? []).length > 0
+    && !(pageWidgets ?? []).some(w => familyOf(w.widget_type) === 'summary')
+
   type View = Item & { take: Takeaway | null; headline: string; family: SugFamily; strength: number;
     shape: ReturnType<typeof thumbnail>; onPage?: Widget }
   const views: View[] = items.map(it => {
@@ -353,12 +414,16 @@ export default function SuggestionsPane({ columns, analysis, onAdd, reportId, da
     const headline = kpiValue != null ? `${it.title}: ${Math.abs(kpiValue) >= 1000 ? Math.round(kpiValue).toLocaleString() : Number(kpiValue.toFixed(2)).toLocaleString()}`
       : it.fromInsights ? it.title : (take?.headline ?? cap(words(it.title)))
     return { ...it, take, headline, family,
-      // Findings the insights engine ranked lead; then the strongest of the rest.
-      strength: (it.fromInsights ? 2 : 0) + (it.aligned ? 1 : 0) + (take?.strength ?? 0),
+      // Findings the insights engine ranked lead; then the strongest of the rest;
+      // then what this person does with each kind of chart, and what the page lacks.
+      strength: (it.fromInsights ? 2 : 0) + (it.aligned ? 1 : 0) + (take?.strength ?? 0)
+        + typeBias(it.widget_type, feedback) + (family === 'summary' && pageLacksHeadline ? 1.5 : 0),
       shape: thumbnail(it.widget_type, rows),
       onPage: added.includes(it.key) ? undefined : onPageBySig.get(signature(it.widget_type, it.config)) }
   })
-  const live = views.filter(v => !v.onPage && !hidden.includes(v.key))
+  const dismissedSigs = new Set(feedback?.dismissed ?? [])
+  const live = views.filter(v => !v.onPage && !hidden.includes(v.key)
+    && !dismissedSigs.has(signature(v.widget_type, v.config)))
   const onPage = views.filter(v => v.onPage)
   const shown = live.filter(v => filter === 'all' || v.family === filter)
   const sections = FAMILIES.map(f => ({
@@ -368,6 +433,7 @@ export default function SuggestionsPane({ columns, analysis, onAdd, reportId, da
 
   const add = (v: View) => {
     setAdded(a => [...a, v.key])
+    remember(v.widget_type, v.config, 'added')
     onAdd({ widget_type: v.widget_type, title: v.headline, reason: v.reason, config: labelled(v) })
   }
   const goTo = (w: Widget) => {
@@ -466,6 +532,9 @@ export default function SuggestionsPane({ columns, analysis, onAdd, reportId, da
                           <strong>{tr('sug.dataShows')}</strong> {v.takeaway}
                         </p>
                       )}
+                      {(v.limits ?? []).map(line => (
+                        <p key={line} className="dl-sug__detail" dir="auto" data-testid="suggestion-limit">{line}</p>
+                      ))}
                       <div className="dl-sug__actions">
                         {!isAdded && (
                           <button type="button" className="btn btn-primary btn-sm" onClick={() => add(v)}>

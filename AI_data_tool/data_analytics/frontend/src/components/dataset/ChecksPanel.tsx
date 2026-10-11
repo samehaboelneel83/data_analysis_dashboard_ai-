@@ -232,7 +232,7 @@ export default function ChecksPanel({ datasetId, columns, canEdit, children }: {
               {kind === 'accepted_values' && (
                 <label style={{ flex: 1, minWidth: 200 }}>{t('checks.values')}<br />
                   <input className="input" dir="auto" value={values} onChange={e => setValues(e.target.value)}
-                    placeholder="open, closed" style={{ fontSize: 12, width: '100%' }} />
+                    placeholder="open, closed" style={{ fontSize: 12, width: '100%' }} /> {/* i18n-ok */}
                 </label>
               )}
               {kind === 'row_count' && (<>
@@ -273,7 +273,7 @@ export default function ChecksPanel({ datasetId, columns, canEdit, children }: {
               {kind === 'rule' && (
                 <label style={{ flex: 1, minWidth: 220 }}>{t('checks.rule')}<br />
                   <input className="input" dir="ltr" value={expr} onChange={e => setExpr(e.target.value)}
-                    placeholder="amount >= 0" style={{ fontSize: 12, width: '100%', fontFamily: 'var(--mono)' }} />
+                    placeholder="amount >= 0" style={{ fontSize: 12, width: '100%', fontFamily: 'var(--mono)' }} /> {/* i18n-ok */}
                 </label>
               )}
               <label>{t('checks.col.ifFails')}<br />

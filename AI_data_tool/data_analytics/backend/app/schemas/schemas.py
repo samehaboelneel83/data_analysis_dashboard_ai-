@@ -169,11 +169,40 @@ class ColumnMeta(BaseModel):
     #: heuristic cannot know that `readmitted_30d` is the question this hospital
     #: actually cares about.
     target_candidate_priority: Optional[int] = None
+    # ── The stored classification (docs/suggestions/PLAN.md, phase 1) ────────
+    # What the column IS, decided once -- measured on the rows, named by the
+    # model, corrected by the author -- and read by every engine through
+    # services/semantic_guard.py instead of each one guessing from the name.
+    #: What a NUMBER is: amount | count (add up) · level | duration | score |
+    #: share (average, never total) · code (never calculate).
+    number: Optional[str] = None
+    #: Its unit, when known: "EGP", "kg", "days".
+    unit: Optional[str] = None
+    #: higher_better | higher_worse | neither -- which way "best" points.
+    direction: Optional[str] = None
+    #: Measurement level: nominal | ordinal | interval | ratio.
+    level: Optional[str] = None
+    #: The values of an ORDINAL column in their real order (Low, Medium, High).
+    order: Optional[list[str]] = None
+    #: country | region | city | postcode | latitude | longitude.
+    geo_level: Optional[str] = None
+    #: True for a column that says what became of a row (late, returned): its
+    #: share is measured, and groups are compared by that share.
+    outcome: Optional[bool] = None
+    #: Who decided the classification: measured | ai | confirmed. A confirmed
+    #: entry is the author's and is never overwritten.
+    class_source: Optional[str] = None
+    #: The number the author says this column should reach -- never guessed,
+    #: never set by a model. `target_period` says what it is a target FOR:
+    #: each month | quarter | year, or (absent) the whole of what is shown.
+    target: Optional[float] = None
+    target_period: Optional[str] = None
 
 
 class DataViewDefault(BaseModel):
     """Whether this view is the one applied to newly uploaded datasets."""
     default: bool
+
 
 
 class ColumnMetaUpdate(BaseModel):

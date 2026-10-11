@@ -122,6 +122,9 @@ async def _migrate(conn):
         "ALTER TABLE datasets ADD COLUMN IF NOT EXISTS description_source VARCHAR(20)",
         "ALTER TABLE datasets ADD COLUMN IF NOT EXISTS last_profiled_at TIMESTAMP WITH TIME ZONE",
         "ALTER TABLE data_sources ADD COLUMN IF NOT EXISTS allow_llm_sampling BOOLEAN NOT NULL DEFAULT FALSE",
+        # "Allow AI" per dataset (0064): NULL = follow the connection, or the
+        # installation default for an uploaded file (services/ai_policy.py).
+        "ALTER TABLE datasets ADD COLUMN IF NOT EXISTS allow_ai BOOLEAN",
         # Guided setup (0059): the Understand step's kept summary, added after the
         # table first shipped -- create_all never adds a column to a live table.
         "ALTER TABLE setup_journeys ADD COLUMN IF NOT EXISTS summary JSON",

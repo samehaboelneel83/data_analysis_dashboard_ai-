@@ -5,7 +5,8 @@ import { suggestApi, widgetDataApi } from '../../services/api'
 import type { DatasetColumn } from '../../services/api'
 
 vi.mock('../../services/api', () => ({
-  suggestApi: { forReport: vi.fn() },
+  suggestApi: { forReport: vi.fn(), feedback: vi.fn().mockResolvedValue({ dismissed: [], types: {}, org_types: {} }),
+                sendFeedback: vi.fn().mockResolvedValue({ dismissed: [], types: {}, org_types: {} }) },
   widgetDataApi: { query: vi.fn().mockResolvedValue({ rows: [{ name: 'A', value: 8 }, { name: 'B', value: 2 }] }) },
 }))
 
@@ -242,7 +243,9 @@ describe('suggestWidgets on an HR table (evaluation 2026-10-01)', () => {
     { id: 5, name: 'salary', dtype: 'numeric', missing_pct: 0, stats: {} },
   ] as unknown as DatasetColumn[]
   const prof = { numeric: {}, categorical: { columns: { gender: { n_unique: 2 }, dept_name: { n_unique: 9 } } } }
-  const all = [0, 1, 2, 3].flatMap(seed => suggestWidgets(hr, prof, seed))
+  // The dataset as the server hands it over: each number classified once.
+  const hrMeta = { salary: { number: 'level' as const } }
+  const all = [0, 1, 2, 3].flatMap(seed => suggestWidgets(hr, prof, seed, hrMeta))
 
   it('never sums or averages an identifier', () => {
     for (const s of all) {
@@ -252,7 +255,7 @@ describe('suggestWidgets on an HR table (evaluation 2026-10-01)', () => {
   })
 
   it('leads with head-counts, and averages salary', () => {
-    const first = suggestWidgets(hr, prof, 0)[0]
+    const first = suggestWidgets(hr, prof, 0, hrMeta)[0]
     expect(first.config).toMatchObject({ measure: 'emp_no', aggregation: 'countd' })
     const pay = all.find(s => s.config.measure === 'salary' && s.config.dimension === 'gender')
     expect(pay?.config.aggregation).toBe('avg')
@@ -265,5 +268,64 @@ describe('suggestWidgets on an HR table (evaluation 2026-10-01)', () => {
       .find(x => x.config.measure === 'salary' && x.config.dimension === 'dept_name')
     expect(s.length).toBeGreaterThan(0)
     expect(pay?.config.aggregation).toBe('sum')
+  })
+})
+
+describe('suggestWidgets reads each column\'s stored classification', () => {
+  const cols = [
+    { id: 1, name: 'priority', dtype: 'categorical', missing_pct: 0, stats: {} },
+    { id: 2, name: 'region', dtype: 'categorical', missing_pct: 0, stats: {} },
+    { id: 3, name: 'is_late', dtype: 'categorical', missing_pct: 0, stats: {} },
+    { id: 4, name: 'val2', dtype: 'numeric', missing_pct: 0, stats: {} },
+    { id: 5, name: 'ref9', dtype: 'numeric', missing_pct: 0, stats: {} },
+  ] as unknown as DatasetColumn[]
+  const prof = { numeric: {}, categorical: { columns: { priority: { n_unique: 3 }, region: { n_unique: 4 }, is_late: { n_unique: 2 } } } }
+  const meta = {
+    priority: { level: 'ordinal' as const, order: ['Low', 'Medium', 'High'] },
+    is_late: { outcome: true },
+    val2: { number: 'score' as const },
+    ref9: { number: 'code' as const },
+  }
+  const all = [0, 1, 2, 3, 4].flatMap(seed => suggestWidgets(cols, prof, seed, meta))
+
+  it('draws an ordered category in its order, as bars', () => {
+    const byPriority = all.filter(s => s.config.dimension === 'priority' && !s.config.dimension2)
+    expect(byPriority.length).toBeGreaterThan(0)
+    for (const s of byPriority) {
+      expect(s.widget_type).toBe('bar')
+      expect(s.config).toMatchObject({ sort_by: 'order', category_order: ['Low', 'Medium', 'High'] })
+    }
+  })
+
+  it('offers the share with an outcome per group, never the outcome as its own breakdown', () => {
+    const share = all.find(s => s.config.dimension2 === 'is_late')
+    expect(share?.title).toBe('Share of is_late by priority')
+    expect(share?.config).toMatchObject({ aggregation: 'count', bar_mode: 'stacked100' })
+    expect(all.some(s => s.config.dimension === 'is_late')).toBe(false)
+  })
+
+  it('averages a score and never calculates a code, whatever they are called', () => {
+    const score = all.find(s => s.config.measure === 'val2')
+    expect(score?.config.aggregation).toBe('avg')
+    expect(all.some(s => s.config.measure === 'ref9' && s.config.aggregation !== 'countd')).toBe(false)
+  })
+})
+
+describe('suggestions that remember (server side)', () => {
+  it('sinks a kind of chart this person keeps dismissing and lifts one they keep adding', async () => {
+    const { typeBias } = await import('./SuggestionsPane')
+    const fb = { dismissed: [], org_types: {},
+                 types: { histogram: { added: 0, dismissed: 4 }, bar: { added: 5, dismissed: 1 }, pie: { added: 1, dismissed: 1 } } }
+    expect(typeBias('histogram', fb)).toBeLessThan(0)
+    expect(typeBias('bar', fb)).toBeGreaterThan(0)
+    expect(typeBias('pie', fb)).toBe(0)                 // too little to judge
+    expect(typeBias('line', fb)).toBe(0)
+    expect(typeBias('bar', null)).toBe(0)
+  })
+
+  it('uses the organisation\'s experience for a kind the person has not judged', async () => {
+    const { typeBias } = await import('./SuggestionsPane')
+    const fb = { dismissed: [], types: {}, org_types: { treemap: { added: 0, dismissed: 9 } } }
+    expect(typeBias('treemap', fb)).toBeLessThan(0)
   })
 })

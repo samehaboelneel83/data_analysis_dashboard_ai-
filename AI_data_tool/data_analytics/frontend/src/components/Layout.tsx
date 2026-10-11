@@ -210,7 +210,7 @@ export default function Layout() {
         ...(narrow ? { position: 'fixed', insetBlock: 0, insetInlineStart: 0, zIndex: 1100 } : null) }}>
       <div className="dl-rail__brand">
         <span className="dl-rail__mark" title="Datalytics" aria-hidden>D</span>
-        {labeled && <span className="dl-rail__wordmark">datalytics</span>}
+        {labeled && <span className="dl-rail__wordmark">datalytics</span>} {/* i18n-ok */}
         {labeled && (
           <button onClick={() => narrow ? setDrawerOpen(false) : builderCompact ? setBuilderCompact(false) : setExpanded(e => !e)}
             aria-label={narrow ? t('nav.close') : t('nav.collapse')}

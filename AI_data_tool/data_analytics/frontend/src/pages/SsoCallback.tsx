@@ -1,3 +1,4 @@
+import { useT } from '../i18n'
 import { useEffect } from 'react'
 
 /** Landing page for the SSO redirect (OIDC and SAML). Since T6 the backend sets
@@ -7,6 +8,7 @@ import { useEffect } from 'react'
  *  /auth/me; if the IdP round-trip set no cookie, that answer sends the person
  *  to the login page like any other signed-out visit. */
 export default function SsoCallback() {
+  const t9 = useT()
   useEffect(() => {
     window.location.replace('/')
   }, [])
@@ -14,7 +16,7 @@ export default function SsoCallback() {
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
                   background: 'var(--bg)', color: 'var(--muted)', fontSize: 14 }}>
-      Signing you in…
+      {t9('sso.signingIn')}
     </div>
   )
 }

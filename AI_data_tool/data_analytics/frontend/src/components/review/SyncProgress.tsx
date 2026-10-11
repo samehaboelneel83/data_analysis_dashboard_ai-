@@ -1,3 +1,4 @@
+import { useT } from '../../i18n'
 import type { SyncRun } from '../../services/api'
 import { useDirection } from '../../contexts/DirectionContext'
 import { friendlyMessage } from '../../lib/friendlyError'
@@ -50,13 +51,14 @@ function stageDetail(name: string, detail?: Record<string, any>): string | null 
 }
 
 export default function SyncProgress({ run }: { run: SyncRun | null }) {
+  const t9 = useT()
   // The interface's language, not the browser's: "27م 4:07:09 2026/9/" on an
   // English page (live QA 2026-09-28).
   const { language } = useDirection()
   if (!run || run.status === 'never_run') {
     return (
       <p style={{ color: '#64748b', fontSize: 13 }}>
-        This source has not been synced yet. Run a sync to build its metadata.
+        {t9('syp.never')}
       </p>
     )
   }
@@ -64,7 +66,7 @@ export default function SyncProgress({ run }: { run: SyncRun | null }) {
   return (
     <div>
       <div style={{ fontSize: 13, marginBottom: 8 }}>
-        Last run: <strong>{run.status}</strong>
+        {t9('syp.lastRun')} <strong>{run.status}</strong>
         {run.finished_at && <> · {new Date(run.finished_at).toLocaleString(language, { dateStyle: 'medium', timeStyle: 'medium' })}</>}
       </div>
       <ol style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: 13 }}>
@@ -95,13 +97,14 @@ export default function SyncProgress({ run }: { run: SyncRun | null }) {
 
 /** A driver error in plain words, with the original behind "Technical details". */
 function Friendly({ text }: { text: string }) {
+  const t9 = useT()
   const nice = friendlyMessage(text)
   if (nice === text) return <>{text}</>
   return (
     <span>
       {nice}
       <details className="dl-conn-test__raw" style={{ display: 'inline-block', marginInlineStart: 8, verticalAlign: 'top' }}>
-        <summary>Technical details</summary>
+        <summary>{t9('eb.details')}</summary>
         <pre>{text}</pre>
       </details>
     </span>

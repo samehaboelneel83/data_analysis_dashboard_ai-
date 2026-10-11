@@ -1,3 +1,4 @@
+import { useT } from '../../../i18n'
 import type { ChartRendererProps } from './types'
 import { fmtStr, seriesColor } from '../chartUtils'
 
@@ -22,6 +23,7 @@ import { fmtStr, seriesColor } from '../chartUtils'
 export default function DecompositionRenderer(
   { data, cfg, measureFmt, onClickPoint }: ChartRendererProps,
 ) {
+  const t9 = useT()
   const total: number = data?.total ?? 0
   const children: any[] = data?.children ?? []
   const path: { field: string; value: string }[] = data?.path ?? []
@@ -42,7 +44,7 @@ export default function DecompositionRenderer(
       {/* Breadcrumb — always shows where you are and how to get back */}
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4, marginBottom: 8 }}>
         <button type="button" onClick={() => goTo([], data?.split_by)}
-          style={crumbStyle(path.length === 0)}>All</button>
+          style={crumbStyle(path.length === 0)}>{t9('cr.all')}</button>
         {path.map((p, i) => (
           <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <span style={{ color: 'var(--muted)' }}>›</span>
@@ -57,13 +59,13 @@ export default function DecompositionRenderer(
       <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 2 }}>{fmt(total)}</div>
       <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>
         {data?.split_by
-          ? <>by <strong>{data.split_by}</strong>
+          ? <>{t9('cr.by')} <strong>{data.split_by}</strong>
               {/* Never let a server-chosen level pass as the reader's own. */}
-              {data?.auto && <span title="chosen automatically as the field that separates this level most"> · suggested</span>}
+              {data?.auto && <span title={t9('cr.autoTip')}> · {t9('cr.suggested')}</span>}
             </>
           : available.length
-            ? 'choose a field to break this down by'
-            : 'nothing left to break down'}
+            ? t9('cr.chooseField')
+            : t9('cr.nothingLeft')}
       </div>
 
       {children.map((c, i) => {
@@ -82,7 +84,7 @@ export default function DecompositionRenderer(
               <span style={{ fontWeight: 500 }}>
                 {c.name}
                 {c.collapsed ? <span style={{ color: 'var(--muted)', fontWeight: 400 }}>
-                  {' '}({c.collapsed} more)</span> : null}
+                  {' '}({t9('cr.nMore', { n: c.collapsed })})</span> : null}
               </span>
               <span style={{ fontFamily: 'var(--mono)', whiteSpace: 'nowrap' }}>
                 {fmt(c.value)}
@@ -107,7 +109,7 @@ export default function DecompositionRenderer(
 
       {!children.length && (
         <div style={{ color: 'var(--muted)', fontSize: 11 }}>
-          {path.length ? 'No rows in this branch.' : 'No data.'}
+          {path.length ? t9('cr.noRowsBranch') : t9('cr.noData')}
         </div>
       )}
     </div>

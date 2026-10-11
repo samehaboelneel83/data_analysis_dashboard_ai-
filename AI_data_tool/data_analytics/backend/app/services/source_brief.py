@@ -36,6 +36,8 @@ Nothing is created here; the person picks a proposal and the client builds it.
 """
 from __future__ import annotations
 
+from .llm import data_block as _data_block
+
 import json
 import logging
 import math
@@ -51,8 +53,11 @@ log = logging.getLogger(__name__)
 _UNIT_NAME = re.compile(r"(^|_)(unit|units|uom|unit_of_measure|measure_unit|currency)($|_)", re.I)
 #: A year held as a plain number.
 _YEAR_NAME = re.compile(r"(^|_)(year|yr|fiscal_year)($|_)", re.I)
-#: Columns that name an item (what a price or quantity is OF).
-_ITEM_NAME = re.compile(r"(commodity|product|item|sku|goods|article|indicator|series)", re.I)
+#: Columns that name WHAT a row's number is a number OF -- in the neutral
+#: words any table uses for it (an item, a kind, a series, an indicator), not
+#: one trade's (services/semantic_guard.py explains the rule).
+_ITEM_NAME = re.compile(r"(item|kind|type|category|class|indicator|series|variable|metric|"
+                        r"الصنف|البند|النوع|المؤشر)", re.I)
 _DATE_TYPES = ("date", "datetime", "timestamp", "time")
 _NUM_TYPES = ("integer", "int", "float", "numeric", "decimal", "number", "double", "real", "bigint")
 
@@ -116,7 +121,7 @@ async def load_catalog_facts(db, source_id: int) -> list[dict]:
 
 
 #: Values that mark a TOTAL row stored beside its parts (gender = 'all').
-_TOTAL_VALUES = {"all", "total", "both sexes", "both", "الكل", "الإجمالي", "اجمالي", "إجمالي"}
+_TOTAL_VALUES = {"all", "total", "overall", "both", "الكل", "الجميع", "الإجمالي", "اجمالي", "إجمالي"}
 
 
 def total_rows(catalog: list[dict]) -> dict[str, dict[str, str]]:
@@ -401,6 +406,27 @@ def _table_facts(t: dict, max_values: int = 12) -> str:
         return "\n".join(lines)
 
 
+def _item_columns(cols: list[dict], unit: dict, unit_values: int) -> list[str]:
+    """The columns that say WHAT a row's number is a number of, where a table
+    holds several units.
+
+    Read from the table's shape, not from a trade's nouns: whatever fixes the
+    unit of a row has at least as many different values as there are units --
+    forty items in six units, never two markets in six units. So: every text
+    column, other than the unit itself, with at least as many values as the
+    unit column. A column named in the neutral words for it (`item`, `kind`,
+    `series`...) counts even when nothing was measured."""
+    out = []
+    for x in cols:
+        name = x["name"]
+        if name == unit["name"] or _is_num(x.get("dtype")) or _is_date(x.get("dtype"), name):
+            continue
+        measured = x.get("distinct") or len(_values(x.get("top_k")))
+        if (measured and measured >= unit_values) or _ITEM_NAME.search(name):
+            out.append(name)
+    return out
+
+
 def mixed_unit_tables(catalog: list[dict]) -> dict[str, dict]:
     """`table -> {"unit": col, "items": [cols], "measures": [cols]}` for every
     table whose numbers come in several units."""
@@ -413,7 +439,7 @@ def mixed_unit_tables(catalog: list[dict]) -> dict[str, dict]:
             if _UNIT_NAME.search(c["name"]) and n and n > 1:
                 # What a price is OF: the commodity (or its id), never a group
                 # of commodities such as a category.
-                items = [x["name"] for x in cols if x["name"] != c["name"] and _ITEM_NAME.search(x["name"])]
+                items = _item_columns(cols, c, n)
                 measures = [x["name"] for x in cols if _is_num(x.get("dtype")) and not _YEAR_NAME.search(x["name"])
                             and not x["name"].lower().endswith("_id")
                             and x["name"].lower() not in ("latitude", "longitude")]
@@ -462,16 +488,16 @@ BRIEF_SYSTEM = """You are a senior analyst preparing to build dashboards for \
 one specific person. Before any chart, you write a BRIEF.
 
 1. role: what this person is responsible for and the decisions they take \
-(budgets, subsidies, stock, prices, staffing, targeting...). Two sentences.
+(what they allocate, approve, plan, watch or fix). Two sentences.
 2. understanding: what this database really contains, read from the FACTS \
 below (which tables have real data, over which years, at what level: \
-national, governorate, item). Two or three sentences, honest about gaps.
+the whole, each place or group, each single item). Two or three sentences, honest about gaps.
 3. questions: the 6 to 9 questions whose answers would change one of this \
 person's decisions, and that THIS data can answer. For each: the question, \
 the decision it informs, the tables it needs, and `how`: the exact measure \
-and grain (e.g. "price of each commodity per month, % change vs the same \
-month a year earlier", "share of poor people per governorate x population = \
-number of poor people"). Prefer questions that reveal something the person \
+and grain (e.g. "the value of each item per month, % change vs the same \
+month a year earlier", "a rate per group x the size of that group = the \
+number affected"). Prefer questions that reveal something the person \
 does not already know: what changed fastest, where the most people are \
 affected, what is out of line, what moves together. Ask about the WORLD the \
 data describes (prices, people, places), never about the data itself (units, \
@@ -503,7 +529,7 @@ def build_brief_prompt(facts: str, persona: str, request: str | None,
                        joins_text: str = "", count: int = 3) -> list[dict]:
     user = (f"The person: {persona}\n"
             + (f"Their request, in their words: {request}\n" if request else "")
-            + f"\nFACTS ABOUT THE DATABASE (measured)\n{facts}{joins_text}\n\n"
+            + f"\nFACTS ABOUT THE DATABASE (measured)\n{_data_block(facts + joins_text, 'measured on the database')}\n\n"
             "Write the brief.")
     return [{"role": "system", "content": BRIEF_SYSTEM.replace("{count}", str(count))},
             {"role": "user", "content": user}]
@@ -565,22 +591,22 @@ repeats that question and its `title` states what the chart shows in plain \
 words, in the language of the brief.
 
 SQL -- build the dataset at the grain the questions need:
-- one row per item per period (e.g. commodity x month) or per place, never one \
+- one row per item per period (e.g. item x month) or per place, never one \
 row per raw record when a summary is meant;
 - compute the measures the questions need IN SQL, with clear snake_case \
 aliases. Change and level are always computed PER ITEM -- partition by every \
-column that identifies the series (item AND market/place/unit), never by a \
+column that identifies the series (item AND place AND unit), never by a \
 group of different items such as a category:
   * % change vs a year earlier: self-join the same item on period = period - \
 interval '1 year' (safer than LAG when months are missing);
   * index vs a base period: value / the item's own first value x 100;
   * volatility: the standard deviation of the item's monthly % change, or its \
-std / mean -- never the raw std of prices (dear items always win);
-  * a rate x population = number of people; a share of a total;
+std / mean -- never the raw std of the values (items with large values always win);
+  * a rate x the size of its group = the number affected; a share of a total;
   * a rate is SUM(part) / SUM(whole) at the grain of the chart -- never the \
-AVG of rates of groups of different size; a ranking of a ratio (bad reviews \
-per seller) shows only groups with enough volume -- put that minimum on the \
-ranking chart itself (filter_column total_orders, filter_value ">= 20"), never \
+AVG of rates of groups of different size; a ranking of a ratio (failures \
+per group) shows only groups with enough volume -- put that minimum on the \
+ranking chart itself (filter_column total_count, filter_value ">= 20"), never \
 as a WHERE/HAVING on the whole dataset, or every total leaves the small groups out;
 - when KPIs need "the latest period", add a 0/1 column such as is_latest \
 (1 on the most recent period OF EACH ITEM) and filter the KPI on it;
@@ -626,8 +652,8 @@ sort desc on the column that matters (put it as measure); limit 10-25.
 MUST be output aliases of that dashboard's SQL.
 
 Make the dashboards DIFFERENT: each answers different questions of the brief \
-(e.g. prices and inflation of staples; where the poor live and how many; \
-pressure from new population such as refugees). A chart that only counts rows, \
+(for instance: how the main values moved over time; where the largest \
+groups are and how large; what is out of line). A chart that only counts rows, \
 or draws one number against itself, is not allowed."""
 
 
@@ -647,7 +673,7 @@ def build_design_prompt(brief: dict, facts: str, persona: str, title: str,
             f"LANGUAGE for titles: {brief.get('language') or 'en'}\n\n"
             f"THIS DASHBOARD: {title}\nITS QUESTIONS\n{qs}\n"
             + (f"\nTHE DATA CANNOT ANSWER (do not try)\n{no}\n" if no else "")
-            + f"\nFACTS ABOUT THE TABLES (measured)\n{facts}{joins_text}\n\n"
+            + f"\nFACTS ABOUT THE TABLES (measured)\n{_data_block(facts + joins_text, 'measured on the database')}\n\n"
             "Return exactly 1 dashboard under 'proposals'.")
     return [{"role": "system", "content": DESIGN_SYSTEM}, {"role": "user", "content": user}]
 
@@ -698,7 +724,7 @@ def tables_for(questions: list[dict], catalog: list[dict], joins: list[dict] | N
 # database, live 2026-10-03: total_duration_ms was refused as a percentage).
 _TITLE_RATE = re.compile(r"\b(rate|ratio|share|percent|percentage)\b|%", re.I)
 _RATE_WORDS = re.compile(r"(^|_)(rate|ratio|pct|percent|percentage|share)(_|$)|_per_", re.I)
-_SIZE_WORDS = re.compile(r"^(total_|n_|num_|count|orders$|total$|n$)|(_count|_orders|_total)$", re.I)
+_SIZE_WORDS = re.compile(r"^(total_|n_|num_|count|rows$|records$|total$|n$)|(_count|_rows|_records|_total)$", re.I)
 _PCT_WORDS = re.compile(r"(pct|percent|ratio|rate|index|change|share|growth|yoy|mom|_per_|score)", re.I)
 
 
@@ -1260,7 +1286,7 @@ def sql_problems(sql: str, mixed: dict[str, dict] | None,
                             key = agg.sql()[:80]
                             if key not in flagged:
                                 flagged.add(key)
-                                out.append(f"{key} adds or averages prices of DIFFERENT items, which are in "
+                                out.append(f"{key} adds or averages values of DIFFERENT items, which are in "
                                            f"different units ({units}) -- group by the item "
                                            f"({', '.join(sorted(items)[:3])}) or compare % changes instead")
                     carriers.add(alias)

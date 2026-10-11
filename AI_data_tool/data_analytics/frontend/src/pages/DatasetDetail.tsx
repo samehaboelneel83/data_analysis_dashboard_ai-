@@ -10,6 +10,8 @@ import ChecksPanel, { ChecksBlockedDialog } from '../components/dataset/ChecksPa
 import IncrementalSettingsForm from '../components/dataset/IncrementalSettings'
 import StatisticsPanel from '../components/StatisticsPanel'
 import DatasetSensitivity from '../components/DatasetSensitivity'
+import DatasetAllowAi from '../components/DatasetAllowAi'
+import HealthChecks from '../components/HealthChecks'
 import NotebookSnippet from '../components/NotebookSnippet'
 import LoadError from '../components/ui/LoadError'
 import LoadingState from '../components/ui/LoadingState'
@@ -20,6 +22,7 @@ import { useParams, Link, useLocation, useSearchParams, useNavigate } from 'reac
 import { useCrumbTitle } from '../lib/crumb'
 import NotFound from './NotFound'
 import { formatTimeAgo, useT, type MessageKey } from '../i18n'
+import { rich } from '../i18n/pages/modelsMaps'
 import ActionMenu from '../components/ActionMenu'
 import { localDigits } from '../lib/arabicFormats'
 import Overview, { fmtBytes } from './datasetDetail/Overview'
@@ -364,7 +367,7 @@ export default function DatasetDetail() {
       const next = mergeCellEdit(existing, { keyColumn, column, key: rowKey, value })
       await prepApi.set(dsId, next)
       setPrepSteps(next)
-      toast.success(`Saved as a prep step — ${column} for ${rowKey}`)
+      toast.success(tr('dd.savedStep', { column: String(column), row: String(rowKey) }))
       await loadPreview()
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: string } } })
@@ -387,11 +390,11 @@ export default function DatasetDetail() {
     try {
       const r = await analysisApi.run(dsId)
       setAnalysis(r)
-      toast.success('Analysis complete')
+      toast.success(tr('dd.analysisDone'))
     } catch (e) {
       const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
       setProfileError(typeof detail === 'string' ? detail : (e as Error)?.message || 'no response')
-      toast.error('Analysis failed')
+      toast.error(tr('dd.analysisFailed'))
     }
     finally { setRunning(false) }
   }
@@ -461,10 +464,10 @@ export default function DatasetDetail() {
       setDs(updated)
       setSavedFilter(val || null)
       setFilterPreview(null)
-      toast.success(val ? 'Global filter saved' : 'Global filter cleared')
+      toast.success(val ? tr('dd.filterSaved') : tr('dd.filterCleared'))
       if (tab === 'data') loadPreview(0, filterRows, calcCols, sortBy, sortDir, search)
     } catch {
-      toast.error('Failed to save filter')
+      toast.error(tr('dd.filterFailed'))
     } finally {
       setFilterSaving(false)
     }
@@ -560,8 +563,8 @@ export default function DatasetDetail() {
       const updated = await datasetsApi.setSchedule(dsId, minutes)
       setDs(updated)
       toast.success(minutes
-        ? `Refreshing automatically every ${minutes} minutes`
-        : 'Automatic refresh turned off')
+        ? tr('dd.autoEvery', { n: minutes })
+        : tr('dd.autoOff'))
     } catch (err: any) {
       toast.error(err?.response?.data?.detail ?? 'Could not change the schedule')
     } finally {
@@ -575,10 +578,10 @@ export default function DatasetDetail() {
     try {
       const sources = await dataSourcesApi.list()
       const src = sources.find(s => s.id === ds.data_source_id)
-      if (!src) { toast.error('Original connection no longer exists'); return }
+      if (!src) { toast.error(tr('dd.connGone')); return }
       setEditingQuerySource(src)
     } catch {
-      toast.error('Could not load the connection')
+      toast.error(tr('dd.connFailed'))
     } finally {
       setQueryEditLoading(false)
     }
@@ -786,6 +789,7 @@ export default function DatasetDetail() {
                   title={tr('dsf.certifiedBy', { who: certificationOf(ds)?.by_email ?? '' })}>✓ {tr('dsf.badge')}</span>
               : <span className="dl-dsd__pill">{tr('ov3.notCertified')}</span>}
             <DatasetSensitivity datasetId={ds.id} />
+            <DatasetAllowAi datasetId={ds.id} />
             {ds.shared && (
               <span className="dl-dsd__pill" title={tr('dataset.sharedTitle')}>
                 <IconLabel icon={Link2}>{tr('dataset.sharedWithYou')}</IconLabel>
@@ -857,15 +861,15 @@ export default function DatasetDetail() {
                 {refreshMode === 'incremental' && (
                   <select value={refreshCursorCol} onChange={e => setRefreshCursorCol(e.target.value)}
                     className="input" style={{ width: '100%', fontSize: 12, marginBottom: 8 }}
-                    aria-label="Watermark column">
-                    <option value="">Watermark column…</option>
+                    aria-label={tr('dd.watermark')}>
+                    <option value="">{tr('dd.watermarkPick')}</option>
                     {ds.columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
                   </select>
                 )}
                 <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                   <button className="btn btn-ghost btn-sm" onClick={() => setShowRefreshMenu(false)}>{tr('common.cancel')}</button>
                   <button className="btn btn-primary btn-sm"
-                    disabled={refreshMode === 'incremental' && !refreshCursorCol} title={refreshMode === 'incremental' && !refreshCursorCol ? 'An incremental refresh needs a cursor column: choose one first' : undefined}
+                    disabled={refreshMode === 'incremental' && !refreshCursorCol} title={refreshMode === 'incremental' && !refreshCursorCol ? tr('dd.needCursor') : undefined}
                     onClick={() => handleRefresh(refreshMode, refreshCursorCol)}>
                     {tr('dataset.run')}
                   </button>
@@ -880,7 +884,7 @@ export default function DatasetDetail() {
                   : {}}>
                   <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>{tr('dataset.autoRefresh')}</div>
                   <select
-                    aria-label="Automatic refresh interval"
+                    aria-label={tr('dd.autoInterval')}
                     disabled={savingSchedule}
                     value={afterSource ? 'after' : ds.refresh_interval_minutes ?? ''}
                     onChange={e => {
@@ -972,7 +976,7 @@ export default function DatasetDetail() {
         <div>
             {analysis?.sampled && (
               <div style={{ marginBottom: 12, fontSize: 12, color: 'var(--muted)', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px' }}>
-                Based on a live sample of {analysis.sample_size?.toLocaleString()} of {analysis.total_rows?.toLocaleString()} rows.
+                {tr('dd.liveSample', { n: analysis.sample_size?.toLocaleString() ?? '', total: analysis.total_rows?.toLocaleString() ?? '' })}
               </div>
             )}
           {/* Guided setup phase 5: plain first, the full column table below. */}
@@ -988,7 +992,7 @@ export default function DatasetDetail() {
                 </h2>
                 <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
                   <table>
-                    <thead><tr><th>Column</th><th>Count</th><th>Mean</th><th>Std</th><th>Min</th><th>Median</th><th>Max</th><th>Missing%</th></tr></thead>
+                    <thead><tr><th>{tr('dd.th.column')}</th><th>{tr('dd.th.count')}</th><th>{tr('dd.th.mean')}</th><th>{tr('dd.th.std')}</th><th>{tr('dd.th.min')}</th><th>{tr('dd.th.median')}</th><th>{tr('dd.th.max')}</th><th>{tr('dd.th.missing')}</th></tr></thead>
                     <tbody>
                       {numCols.map(([col, s]: [string, any]) => (
                         <tr key={col}>
@@ -1029,16 +1033,16 @@ export default function DatasetDetail() {
                         <>
                           <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
                             {String(s.min).slice(0, s.granularity === 'date' ? 10 : 16)} → {String(s.max).slice(0, s.granularity === 'date' ? 10 : 16)}
-                            <span style={{ fontFamily: 'var(--mono)' }}> · {s.range_days}d span · {s.n_unique} unique</span>
-                            {s.missing_pct > 0 && <span style={{ color: s.missing_pct > 10 ? 'var(--danger)' : undefined }}> · {s.missing_pct}% missing</span>}
-                            {s.gaps_over_7d > 0 && <span> · {s.gaps_over_7d} gap{s.gaps_over_7d === 1 ? '' : 's'} &gt;7d</span>}
+                            <span style={{ fontFamily: 'var(--mono)' }}> · {tr('dd.spanUnique', { d: s.range_days, n: s.n_unique })}</span>
+                            {s.missing_pct > 0 && <span style={{ color: s.missing_pct > 10 ? 'var(--danger)' : undefined }}> · {tr('dd.pctMissing', { p: s.missing_pct })}</span>}
+                            {s.gaps_over_7d > 0 && <span> · {tr(s.gaps_over_7d === 1 ? 'dd.gap' : 'dd.gaps', { n: s.gaps_over_7d })}</span>}
                           </div>
                           {s.monthly_counts && (() => {
                             const max = Math.max(...s.monthly_counts.map((m: any) => m.count), 1)
                             return (
                               <div style={{ marginBottom: 8 }}>
                                 <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 3 }}>
-                                  {tr('ov.byMonth')}{s.busiest_period ? ` — busiest ${s.busiest_period.period} (${s.busiest_period.count.toLocaleString()})` : ''}
+                                  {tr('ov.byMonth')}{s.busiest_period ? ` — ${tr('dd.busiest', { period: s.busiest_period.period, n: s.busiest_period.count.toLocaleString() })}` : ''}
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'flex-end', gap: 1, height: 28 }}>
                                   {s.monthly_counts.map((m: any) => (
@@ -1085,7 +1089,7 @@ export default function DatasetDetail() {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
                   {catCols.map(([col, s]: [string, any]) => (
                     <div key={col} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 14 }}>
-                      <div style={{ fontWeight: 700, marginBottom: 6 }}>{col} <span style={{ color: 'var(--muted)', fontSize: 12, fontWeight: 400 }}>({s.n_unique} unique)</span></div>
+                      <div style={{ fontWeight: 700, marginBottom: 6 }}>{col} <span style={{ color: 'var(--muted)', fontSize: 12, fontWeight: 400 }}>({tr('dd.nUnique', { n: s.n_unique })})</span></div>
                       {(s.top_values ?? []).slice(0, 5).map((v: any) => (
                         <div key={v.value} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '2px 0', color: 'var(--muted)' }}>
                           <span style={{ color: 'var(--text)' }}>{isMissingLabel(v.value) ? <em>{tr('setup.u.emptyValue')}</em> : v.value}</span>
@@ -1116,13 +1120,13 @@ export default function DatasetDetail() {
                 <section id="influencers" style={{ marginBottom: 24 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
                     <h2 style={{ fontSize: 15, fontWeight: 700 }}>{tr('ov.keyInfluencers')}</h2>
-                    <select value={influencerTarget} aria-label="Outcome to explain"
+                    <select value={influencerTarget} aria-label={tr('dd.outcomeToExplain')}
                       onChange={e => { setInfluencerTarget(e.target.value); setInfluencers(null); setInfluencerNeedsPick(false) }}
                       style={{ fontSize: 12 }}>
                       <option value="">{tr('ki.chooseOutcome')}</option>
                       {ds.columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
                     </select>
-                    <button className="btn btn-sm" disabled={influencerBusy || !influencerTarget} title={!influencerTarget ? 'Choose the column to explain first' : undefined}
+                    <button className="btn btn-sm" disabled={influencerBusy || !influencerTarget} title={!influencerTarget ? tr('dd.chooseOutcomeFirst') : undefined}
                       onClick={() => runInfluencers(influencerTarget)}>
                       {influencerBusy ? tr('ov.analysing')
                           : influencers ? <IconLabel icon={RefreshCw}>{tr('ov.rerun')}</IconLabel>
@@ -1229,16 +1233,15 @@ export default function DatasetDetail() {
                     {segment && (
                       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 14 }}>
                         <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
-                          k = {segment.meta.params.k} clusters over {segment.meta.params.columns.join(', ')}
-                          {' · '}silhouette {segment.meta.silhouette.toFixed(3)}
-                          {' · '}{segment.meta.n_rows_used.toLocaleString()} rows clustered
+                          {tr('dd.clusterSummary', { k: segment.meta.params.k, cols: segment.meta.params.columns.join(', '),
+                            s: segment.meta.silhouette.toFixed(3), n: segment.meta.n_rows_used.toLocaleString() })}
                         </div>
                         <table>
                           <thead>
                             <tr>
-                              <th>Cluster</th>
-                              <th>Size</th>
-                              {segment.meta.params.columns.map(c => <th key={c}>{c} (mean)</th>)}
+                              <th>{tr('dd.cluster')}</th>
+                              <th>{tr('dd.size')}</th>
+                              {segment.meta.params.columns.map(c => <th key={c}>{tr('dd.colMean', { c })}</th>)}
                             </tr>
                           </thead>
                           <tbody>
@@ -1295,17 +1298,17 @@ export default function DatasetDetail() {
                                 {(f.novelty === 'new' || f.novelty === 'changed') && (
                                   <span style={{ background: 'var(--accent)', color: 'var(--surface)',
                                     borderRadius: 3, padding: '0 4px', fontSize: 8, fontWeight: 700 }}>
-                                    {f.novelty === 'new' ? 'NEW' : 'CHANGED'}
+                                    {f.novelty === 'new' ? tr('dd.new') : tr('dd.changed')}
                                   </span>
                                 )}
-                                <button aria-label={`Pin finding: ${f.title}`}
-                                  title="Pin to your dashboard — re-evaluated live on every visit"
+                                <button aria-label={tr('dd.pinFinding', { title: f.title })}
+                                  title={tr('dd.pinTip')}
                                   onClick={() => void pinsApi
                                     .create({ dataset_id: ds.id,
                                               finding_key: findingKey(f) })
                                     .then(r => toast.success(r.already_pinned
-                                      ? 'Already on your dashboard' : 'Pinned to your dashboard'))
-                                    .catch(() => toast.error('Could not pin this finding'))}
+                                      ? tr('dd.alreadyPinned') : tr('dd.pinned')))
+                                    .catch(() => toast.error(tr('dd.pinFailed')))}
                                   style={{ background: 'none', border: 'none', cursor: 'pointer',
                                     fontSize: 11, padding: 0, marginInlineStart: 'auto' }}><Pin size={12} /></button>
                                 <span style={{ fontSize: 10.5, color: 'var(--muted)', marginInlineStart: 'auto' }}>{Math.round(f.score * 100)}</span>
@@ -1338,21 +1341,20 @@ export default function DatasetDetail() {
                   <section id="anomalies" style={{ marginBottom: 24 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
                       <h2 style={{ fontSize: 15, fontWeight: 700 }}>{tr('ov.anomalies')}</h2>
-                      <select value={outlierColumn} aria-label="Column to inspect for outliers"
+                      <select value={outlierColumn} aria-label={tr('dd.outlierColumn')}
                         onChange={e => setOutlierColumn(e.target.value)} style={{ fontSize: 12 }}>
-                        <option value="">choose a numeric column…</option>
+                        <option value="">{tr('dd.chooseNumeric')}</option>
                         {ds.columns.filter(c => c.dtype === 'numeric').map(c => (
                           <option key={c.name} value={c.name}>{c.name}</option>
                         ))}
                       </select>
-                      <button className="btn btn-sm" disabled={!outlierColumn} title={!outlierColumn ? 'Choose a numeric column first' : undefined}
+                      <button className="btn btn-sm" disabled={!outlierColumn} title={!outlierColumn ? tr('dd.chooseNumericFirst') : undefined}
                         onClick={() => setOutlierOpen(true)}>
                         <IconLabel icon={TriangleAlert}>{tr('ov.inspectOutliers')}</IconLabel>
                       </button>
                     </div>
                     <p style={{ fontSize: 12, color: 'var(--muted)' }}>
-                      Box-plot fences, the outlying rows themselves, and what they do to the total
-                      and the mean — on the same secured data widgets read.
+                      {tr('dd.outlierHelp')}
                     </p>
                   </section>
                 )}
@@ -1430,6 +1432,7 @@ export default function DatasetDetail() {
           insights={insights} insightsBusy={insightsBusy} onGenerateInsights={generateInsights}
           firstRun={firstRun} onBuild={() => void buildDashboard()} />
       )}
+      {tab === 'overview' && ds && (ds.filename || ds.mode === 'directquery') && <HealthChecks datasetId={ds.id} />}
 
       {/* ── Data tab ── */}
       {/* ── Data tab ── (redesign 3c: v1's left panel became a toolbar; each
@@ -1442,7 +1445,7 @@ export default function DatasetDetail() {
               <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 12,
                             display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 12 }}>
-                  Built from {derivedSourceNames || 'other datasets'}
+                  {tr('dd.builtFrom', { names: derivedSourceNames || tr('dd.otherDatasets') })}
                   {derivedFrom.built_at && <> · {new Date(String(derivedFrom.built_at)).toLocaleString()}</>}
                 </span>
                 <button className="btn btn-ghost" style={{ fontSize: 12 }}
@@ -1452,19 +1455,19 @@ export default function DatasetDetail() {
                     try {
                       const updated = await prepApi.rebuild(dsId)
                       setDs(updated)
-                      toast.success('Rebuilt from the current source data')
+                      toast.success(tr('dd.rebuilt'))
                     } catch (e: any) {
                       // 409s name what broke (a deleted source, a vanished join
                       // key); showing the server's words is the whole point.
-                      toast.error(e?.response?.data?.detail || 'Rebuild failed')
+                      toast.error(e?.response?.data?.detail || tr('dd.rebuildFailed'))
                     } finally {
                       setRebuilding(false)
                     }
                   }}>
-                  {rebuilding ? 'Rebuilding…' : 'Rebuild'}
+                  {rebuilding ? tr('dd.rebuilding') : tr('dd.rebuild')}
                 </button>
                 <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-                  This does not update on its own.
+                  {tr('dd.notAuto')}
                 </span>
               </div>
             )}
@@ -1591,7 +1594,7 @@ export default function DatasetDetail() {
                 functionsCatalog={FILTER_FUNC_CATS}
                 value={filterExpr}
                 onChange={next => { setFilterExpr(next); setFilterPreview(null) }}
-                placeholder={"الفئة == 'ضابط' AND المرتب > 20000"}
+                placeholder={tr('dd.filterExample')}
                 rows={3}
               />
               {filterPreview && (
@@ -1701,7 +1704,7 @@ export default function DatasetDetail() {
                 {editCells && (
                   <>
                     <label htmlFor="cell-edit-key" style={{ fontSize: 11, color: 'var(--muted)' }}>
-                      Rows identified by
+                      {tr('dd.rowsBy')}
                     </label>
                     <select id="cell-edit-key" value={keyColumn || preview.columns[0]}
                       onChange={e => { setKeyColumn(e.target.value); setEditingAt(null) }}
@@ -1710,9 +1713,8 @@ export default function DatasetDetail() {
                       {preview.columns.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
                     <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-                      Corrections are saved as a prep step — the uploaded file is
-                      never changed, and removing the step restores the original.
-                      Every row sharing the key value is corrected.
+                      {tr('dd.correctionsNote')}{' '}
+                      {tr('dd.correctionsAll')}
                     </span>
                   </>
                 )}
@@ -1720,17 +1722,17 @@ export default function DatasetDetail() {
             )}
 
             {pvLoading && (
-              <div style={{ textAlign: 'center', padding: 40 }}><LoadingState label="Loading data…" /></div>
+              <div style={{ textAlign: 'center', padding: 40 }}><LoadingState label={tr('dd.loadingData')} /></div>
             )}
             {!pvLoading && preview && preview.rows.length === 0 && (
-              <EmptyState icon={Search} title="No rows match"
-                description="Try adjusting or clearing the filters and search above." />
+              <EmptyState icon={Search} title={tr('dd.noRows')}
+                description={tr('dd.noRowsHelp')} />
             )}
             {!pvLoading && preview && preview.rows.length > 0 && (
               <>
                 {ds.mode === 'directquery' && (
                   <div style={{ marginBottom: 8, fontSize: 12, color: 'var(--muted)', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px', flexShrink: 0 }}>
-                    Showing the first {PAGE_SIZE} rows live from the source. Filtering, sorting, search, and calculated columns aren't supported yet for DirectQuery previews.
+                    {tr('dd.liveFirst', { n: PAGE_SIZE })}
                   </div>
                 )}
                 <div style={{ flex: 1, overflow: 'auto', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8 }}>
@@ -1788,7 +1790,7 @@ export default function DatasetDetail() {
                                 ? () => setEditingAt({ row: i, column }) : undefined}>
                               {isEditing ? (
                                 <input autoFocus defaultValue={v == null ? '' : String(v)}
-                                  aria-label={`Edit ${column} for ${rowKey}`}
+                                  aria-label={tr('dd.editCell', { column: String(column), row: String(rowKey) })}
                                   onBlur={e => { setEditingAt(null); saveCellEdit(i, column, e.target.value) }}
                                   onKeyDown={e => {
                                     if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
@@ -1838,27 +1840,25 @@ export default function DatasetDetail() {
             {!pvLoading && pvError && (
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 40 }}>
                 <FolderOpen size={32} color="var(--muted)" aria-hidden />
-                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>Dataset file not found</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>{tr('dd.fileMissing')}</div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center', maxWidth: 360 }}>{pvError}</div>
                 {ds?.data_source_id && (ds?.source_table || ds?.source_query) ? (
                   <button className="btn btn-primary btn-sm" onClick={() => handleRefresh('full')} disabled={refreshing}
                     style={{ marginTop: 8 }}>
-                    {refreshing ? refreshStage : '↻ Refresh from source'}
+                    {refreshing ? refreshStage : tr('dd.refreshFromSource')}
                   </button>
                 ) : ds?.data_source_id ? (
                   <div style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center', maxWidth: 320 }}>
-                    Original query not recorded.{' '}
-                    <Link to={`/connections/${ds.data_source_id}/review`} style={{ color: 'var(--accent)' }}>Re-import from this connection</Link>{' '}
-                    to restore this dataset.
+                    {rich(tr, 'dd.reimport', { link: <Link to={`/connections/${ds.data_source_id}/review`} style={{ color: 'var(--accent)' }}>{tr('dd.reimportLink')}</Link> })}
                   </div>
                 ) : (
-                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>Re-upload the file to restore this dataset.</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>{tr('dd.reupload')}</div>
                 )}
               </div>
             )}
             {!pvLoading && !preview && !pvError && (
               <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 13 }}>
-                Loading data…
+                {tr('dd.loadingData')}
               </div>
             )}
           </div>

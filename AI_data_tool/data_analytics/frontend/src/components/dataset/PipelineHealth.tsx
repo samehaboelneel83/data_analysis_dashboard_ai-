@@ -103,7 +103,7 @@ export function PipelineAlertsForm({ datasetId, health, onSaved }: {
         {t('health.recipients')}
       </label>
       <input id="health-recipients" className="input" dir="ltr" style={{ width: '100%', fontSize: 12, marginBottom: 6 }}
-        value={recipients} onChange={e => setRecipients(e.target.value)} placeholder="ops@example.com" />
+        value={recipients} onChange={e => setRecipients(e.target.value)} placeholder="name@example.com" /> {/* i18n-ok */}
       {health.email_ready === false && typedEmail && (
         <div role="status" data-testid="health-email-off" style={{ fontSize: 11, color: WARN, marginBottom: 6 }}>
           {t('health.emailOff')}{' '}

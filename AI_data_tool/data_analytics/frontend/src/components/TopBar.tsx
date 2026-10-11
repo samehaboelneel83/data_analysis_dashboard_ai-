@@ -147,7 +147,7 @@ export default function TopBar({ onOpenNav, theme, onToggleTheme }: {
         {!compact && (
           <span aria-hidden style={{ fontFamily: 'var(--mono)', fontSize: 10.5,
             border: '1px solid var(--border)', borderRadius: 4, padding: '1px 5px',
-            background: 'var(--surface)' }}>Ctrl K</span>
+            background: 'var(--surface)' }}>Ctrl K{/* i18n-ok */}</span>
         )}
       </button>
 

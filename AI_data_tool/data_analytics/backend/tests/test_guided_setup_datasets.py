@@ -312,12 +312,16 @@ class TestNeverStuck:
         json.dumps(run)
 
     async def test_a_job_that_dies_while_saving_is_marked_failed(self, db_session, two_orgs, cars):
-        from app.models.models import SetupJourney
+        from app.models.models import SetupFlow, SetupJourney
         from app.routers.guided_setup import _failer
         src, _ = cars
-        j = SetupJourney(org_id=src.org_id, user_id=two_orgs["a"]["user"].id, data_source_id=src.id,
-                         proposals={"attempt": "a1", "pending": True, "items": []},
-                         designs={"attempt": "d1", "items": [{"id": "x", "changing": "c1"}]})
+        journey = SetupJourney(org_id=src.org_id, user_id=two_orgs["a"]["user"].id, data_source_id=src.id)
+        db_session.add(journey)
+        await db_session.flush()
+        j = SetupFlow(org_id=src.org_id, user_id=two_orgs["a"]["user"].id, data_source_id=src.id,
+                      journey_id=journey.id,
+                      proposals={"attempt": "a1", "pending": True, "items": []},
+                      designs={"attempt": "d1", "items": [{"id": "x", "changing": "c1"}]})
         db_session.add(j)
         await db_session.commit()
         await _failer(j.id, "proposals", "a1")(db_session)

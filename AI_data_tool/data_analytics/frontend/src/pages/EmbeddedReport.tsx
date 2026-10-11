@@ -1,3 +1,4 @@
+import { useT } from '../i18n'
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { embedApi } from '../services/api'
@@ -32,6 +33,7 @@ const RATE_LIMITED = Symbol('rate-limited')
  * the host's doing, server-side; this page has no say in it.
  */
 export default function EmbeddedReport() {
+  const t9 = useT()
   const [params] = useSearchParams()
   const token = params.get('token') ?? ''
   const [report, setReport] = useState<(Report & { column_formats?: Record<string, unknown> }) | null>(null)
@@ -98,11 +100,11 @@ export default function EmbeddedReport() {
       {error}
     </div>
   )
-  if (!report || data === null) return <div style={{ padding: 40, color: 'var(--muted)' }}>Loading…</div>
+  if (!report || data === null) return <div style={{ padding: 40, color: 'var(--muted)' }}>{t9('common.loading')}</div>
 
   const pages = report.pages.filter(p => p.page_type === 'normal')
   if (pages.length === 0) return (
-    <div style={{ padding: 40, color: 'var(--muted)' }}>This report has no page to show.</div>
+    <div style={{ padding: 40, color: 'var(--muted)' }}>{t9('shr.noPage')}</div>
   )
   const page = pages[Math.min(pageIdx, pages.length - 1)]
   const CELL = 62
@@ -112,7 +114,7 @@ export default function EmbeddedReport() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 18px',
         borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
         <strong style={{ fontSize: 14 }}>{report.name}</strong>
-        <span style={{ fontSize: 11, color: 'var(--muted)' }}>Embedded view · read only</span>
+        <span style={{ fontSize: 11, color: 'var(--muted)' }}>{t9('shr.embedded')}</span>
         {pages.length > 1 && (
           <div style={{ marginInlineStart: 'auto', display: 'flex', gap: 4 }}>
             {pages.map((p, i) => (
@@ -156,11 +158,11 @@ export default function EmbeddedReport() {
                   justifyContent: 'center', gap: 8, height: '100%', border: '1px dashed var(--border)',
                   borderRadius: 8, background: 'var(--surface)', color: 'var(--muted)', fontSize: 12,
                   textAlign: 'center', padding: 10 }}>
-                  <span>Temporarily rate-limited — retrying may help</span>
+                  <span>{t9('shr.rateLimited')}</span>
                   <button onClick={() => retryWidget(w)}
                     style={{ padding: '3px 10px', fontSize: 11, borderRadius: 6, border: '1px solid var(--border)',
                       background: 'var(--surface2)', color: 'var(--text)', cursor: 'pointer' }}>
-                    Try again
+                    {t9('sb.retry')}
                   </button>
                 </div>
               ) : (

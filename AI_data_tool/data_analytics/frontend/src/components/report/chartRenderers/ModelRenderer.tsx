@@ -35,7 +35,7 @@ const pfmt = (p: unknown) => (p == null ? '—' : Number(p) < 0.001 ? '< 0.001' 
 // (the interpretation, caveats) still arrive in English from the server.
 const MODEL_NAMES: Record<string, MessageKey> = {
   linear: 'mdl.linear', logistic: 'mdl.logistic', tree: 'mdl.tree',
-  cluster: 'mdl.cluster', compare: 'mdl.compare', score: 'mdl.score', rules: 'mdl.rules',
+  cluster: 'mdl.cluster', compare: 'mdl.compare', score: 'mdl.score', rules: 'mdl.rules', influencers: 'mdl.influencers',
 }
 
 function Population({ pop }: { pop: any }) {
@@ -57,6 +57,110 @@ function Population({ pop }: { pop: any }) {
 }
 
 /** A small scatter drawn in SVG (≤ 400 points), with an optional reference line. */
+/** The groups as a picture: each row placed on the two directions along which
+ *  the rows differ most, coloured by its group (server: analysis/segment.py
+ *  `_projection`). Each axis says how much of the variation it carries and
+ *  which variables weigh most on it. */
+function ClusterMap({ projection, tr }: {
+  projection: { points: [number, number, number][]; centers: [number, number, number][]
+    axes: { share: number; variables: { name: string; weight: number }[] }[]; shown: number; of: number }
+  tr: ReturnType<typeof useT>
+}) {
+  const pts = projection.points
+  if (!pts.length) return <p style={{ fontSize: 12, color: 'var(--muted)' }}>{tr('pg.modelsMaps.mr.nothing')}</p>
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1])
+  const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)]
+  const W = 320, H = 200, P = 8
+  const sx = (v: number) => P + ((v - x0) / ((x1 - x0) || 1)) * (W - 2 * P)
+  const sy = (v: number) => H - P - ((v - y0) / ((y1 - y0) || 1)) * (H - 2 * P)
+  const groups = [...new Set(pts.map(p => p[2]))].sort((a, b) => a - b)
+  const axis = (i: number) => {
+    const a = projection.axes[i]
+    return a ? tr('mdl.map.axis', { pct: Math.round(a.share * 100), cols: a.variables.map(v => v.name).join(', ') }) : ''
+  }
+  return (
+    <div data-testid="cluster-map">
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={tr('mdl.map.aria', { n: pts.length, k: groups.length })}
+        style={{ width: '100%', maxHeight: 260, border: '1px solid var(--border)', borderRadius: 6 }}>
+        {pts.map((p, i) => <circle key={i} cx={sx(p[0])} cy={sy(p[1])} r={1.8} fill={seriesColor(p[2])} fillOpacity={0.55} />)}
+        {projection.centers.map(c => (
+          <circle key={`c${c[2]}`} cx={sx(c[0])} cy={sy(c[1])} r={5} fill={seriesColor(c[2])} stroke="var(--panel, #fff)" strokeWidth={1.5} />
+        ))}
+      </svg>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 11, margin: '4px 0' }}>
+        {groups.map(g => (
+          <span key={g} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <span aria-hidden style={{ width: 9, height: 9, borderRadius: 9, background: seriesColor(g), display: 'inline-block' }} />
+            {tr('pg.modelsMaps.mr.segmentN', { n: g + 1 })}
+          </span>
+        ))}
+      </div>
+      <p style={{ fontSize: 10.5, color: 'var(--muted)', margin: 0 }} dir="auto">
+        {tr('mdl.map.across')} {axis(0)} · {tr('mdl.map.up')} {axis(1)}
+        {projection.shown < projection.of ? ` · ${tr('mdl.map.sample', { n: projection.shown.toLocaleString(), of: projection.of.toLocaleString() })}` : ''}
+      </p>
+    </div>
+  )
+}
+
+/** The rules as a network: each value that takes part in a rule is a node
+ *  (larger when more rules touch it), each rule a line from what it starts
+ *  with to what it concludes, thicker the further above chance it is
+ *  (server: analysis/patterns.py `rules_network`). Values sit on a circle, so
+ *  the picture is the same every time. */
+function RuleNetwork({ network, tr }: {
+  network: { nodes: { id: string; column: string; label: string; rules: number }[]
+    edges: { source: string; target: string; lift: number; confidence: number; support_rows?: number }[] }
+  tr: ReturnType<typeof useT>
+}) {
+  const nodes = [...network.nodes].sort((a, b) => a.column.localeCompare(b.column) || a.label.localeCompare(b.label))
+  const W = 340, H = 260, R = 92, cx = W / 2, cy = H / 2
+  const at = new Map(nodes.map((n, i) => {
+    const a = (2 * Math.PI * i) / Math.max(nodes.length, 1) - Math.PI / 2
+    return [n.id, { x: cx + R * Math.cos(a), y: cy + R * Math.sin(a), a }]
+  }))
+  const columns = [...new Set(nodes.map(n => n.column))]
+  const top = Math.max(...network.edges.map(e => e.lift || 1), 1.0001)
+  const most = Math.max(...nodes.map(n => n.rules), 1)
+  return (
+    <div data-testid="rule-network">
+      <svg viewBox={`0 0 ${W} ${H}`} role="img"
+        aria-label={tr('mdl.net.aria', { n: nodes.length, k: network.edges.length })} style={{ width: '100%', maxHeight: 320 }}>
+        {network.edges.map((e, i) => {
+          const a = at.get(e.source), b = at.get(e.target)
+          if (!a || !b) return null
+          return <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="var(--muted)" strokeOpacity={0.55}
+            strokeWidth={0.8 + 3 * ((e.lift - 1) / (top - 1 || 1))}>
+            <title>{`${e.source} → ${e.target} · ${tr('mdl.net.lift', { x: Number(e.lift).toFixed(2) })}`}</title>
+          </line>
+        })}
+        {nodes.map(n => {
+          const p = at.get(n.id)!
+          const out = Math.cos(p.a) >= 0
+          return (
+            <g key={n.id}>
+              <circle cx={p.x} cy={p.y} r={4 + 6 * (n.rules / most)} fill={seriesColor(columns.indexOf(n.column))} />
+              <text x={p.x + (out ? 10 : -10)} y={p.y + 3} fontSize={9} textAnchor={out ? 'start' : 'end'} fill="currentColor">
+                {n.label.length > 16 ? `${n.label.slice(0, 15)}…` : n.label}
+              </text>
+            </g>
+          )
+        })}
+      </svg>
+      {columns.length > 1 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 11 }}>
+          {columns.map((c, i) => (
+            <span key={c} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <span aria-hidden style={{ width: 9, height: 9, borderRadius: 9, background: seriesColor(i), display: 'inline-block' }} />{c}
+            </span>
+          ))}
+        </div>
+      )}
+      <p style={{ fontSize: 10.5, color: 'var(--muted)', margin: '4px 0 0' }}>{tr('mdl.net.note')}</p>
+    </div>
+  )
+}
+
 function MiniScatter({ points, xLabel, yLabel, refLine }: {
   points: [number | null, number | null][]; xLabel: string; yLabel: string; refLine?: 'zero' | 'identity'
 }) {
@@ -199,6 +303,32 @@ function TreeOutline({ node, depth = 0 }: { node: any; depth?: number }) {
   )
 }
 
+/** Key influencers: each group, what it shows, and how far that is from usual. */
+function Influencers({ rows, percent }: { rows: { factor: string; group: string; value: number; lift: number; rows: number }[]; percent: boolean }) {
+  const tr = useT()
+  const far = Math.max(...rows.map(r => Math.abs(r.lift - 1)), 0) || 1
+  return (
+    <div data-testid="influencers" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {rows.map((r, i) => (
+        <div key={i} data-testid="influencer" style={{ display: 'grid', gridTemplateColumns: 'minmax(110px, 40%) 1fr max-content', gap: 6, alignItems: 'center', fontSize: 12 }}>
+          <span title={`${r.factor}: ${r.group}`} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span style={{ color: 'var(--muted)' }}>{r.factor}</span> <bdi><b>{r.group}</b></bdi>
+          </span>
+          <div style={{ background: 'var(--surface2)', borderRadius: 4, height: 14 }}>
+            <div style={{ width: `${(Math.abs(r.lift - 1) / far) * 100}%`, height: '100%', borderRadius: 4,
+              background: 'color-mix(in srgb, var(--muted) 45%, transparent)' }} />
+          </div>
+          <span style={{ textAlign: 'end', fontVariantNumeric: 'tabular-nums' }}
+            title={tr('mdl.infl.rows', { n: r.rows.toLocaleString() })}>
+            {percent ? `${(r.value * 100).toFixed(1)}%` : fmt(r.value, Math.abs(r.value) >= 100 ? 0 : 2)}
+            <span style={{ color: 'var(--muted)' }}> · {tr(r.lift >= 1 ? 'mdl.infl.above' : 'mdl.infl.below', { x: fmt(r.lift, 2) })}</span>
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function Bars({ rows, accentId, baseline, percent }: { rows: { id?: unknown; name: string; value: number | null }[]; accentId?: unknown; baseline?: { label: string; value: number }; percent?: boolean }) {
   const tr = useT()
   // Whole units from 100 up: a predicted salary read "88,851.211" -- and the
@@ -310,9 +440,16 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
   const tabs: Tab[] = kind === 'linear' ? [{ key: 'coef', label: tr('mdl.tab.coef') }, { key: 'resid', label: tr('mdl.tab.resid') }, { key: 'ap', label: tr('mdl.tab.ap') }, { key: 'fit', label: tr('mdl.tab.fit') }]
     : kind === 'logistic' ? [{ key: 'coef', label: tr('mdl.tab.odds') }, { key: 'cm', label: tr('mdl.tab.cm') }, { key: 'roc', label: 'ROC' }, { key: 'fit', label: tr('mdl.tab.fit') }] // i18n-ok: ROC
     : kind === 'tree' ? [{ key: 'imp', label: tr('mdl.tab.imp') }, { key: 'rules', label: tr('mdl.tab.rules') }, { key: 'fit', label: tr('mdl.tab.fit') }]
-    : kind === 'cluster' ? [{ key: 'seg', label: tr('mdl.tab.seg') }, { key: 'fit', label: tr('mdl.tab.fit') }]
+    : kind === 'cluster' ? [{ key: 'seg', label: tr('mdl.tab.seg') },
+      // The groups as a picture, when the server could place the rows in two dimensions.
+      ...(data.result?.meta?.projection ? [{ key: 'map', label: tr('mdl.tab.map') }] : []),
+      { key: 'fit', label: tr('mdl.tab.fit') }]
+    : kind === 'influencers' ? [{ key: 'infl', label: tr('mdl.tab.infl') }, { key: 'fit', label: tr('mdl.tab.fit') }]
     : kind === 'score' ? [{ key: 'pred', label: tr('mdl.tab.pred') }, { key: 'fit', label: tr('mdl.tab.check') }]
-    : kind === 'rules' ? [{ key: 'rlist', label: tr('mdl.tab.rules') }, { key: 'lift', label: tr('mdl.tab.lift') }, { key: 'rfit', label: tr('mdl.tab.fit') }]
+    : kind === 'rules' ? [{ key: 'rlist', label: tr('mdl.tab.rules') },
+      // The rules as a network of values, when there is more than one to connect.
+      ...((data.network?.edges ?? []).length > 1 ? [{ key: 'net', label: tr('mdl.tab.net') }] : []),
+      { key: 'lift', label: tr('mdl.tab.lift') }, { key: 'rfit', label: tr('mdl.tab.fit') }]
     : (data.models ?? []).some((m: any) => Array.isArray(m.roc))
       ? [{ key: 'verdict', label: tr('mdl.tab.verdict') }, { key: 'rocs', label: 'ROC' }] // i18n-ok
       : [{ key: 'verdict', label: tr('mdl.tab.verdict') }]
@@ -405,6 +542,8 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
           <p style={{ fontSize: 10, color: 'var(--muted)' }}>{tr('pg.modelsMaps.mr.coinToss')}</p>
         </>}
         {active === 'rocs' && <RocOverlay models={(data.models ?? []).filter((m: any) => Array.isArray(m.roc))} winner={data.winner} />}
+        {active === 'infl' && <Influencers rows={data.influencers ?? []} percent={data.value_format === 'percent'} />}
+        {active === 'infl' && caveats[0] && <p role="note" style={{ fontSize: 10.5, color: 'var(--muted)', margin: '6px 0 0' }}>{caveats[0]}</p>}
         {active === 'imp' && <Bars rows={(data.rows ?? []).map((x: any) => ({ name: x.name, value: x.value }))} />}
         {active === 'rules' && <TreeOutline node={r.tree} />}
         {active === 'pred' && <>
@@ -431,6 +570,8 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
             </tbody>
           </table>
         )}
+        {active === 'net' && data.network && <RuleNetwork network={data.network} tr={tr} />}
+        {active === 'map' && r.meta?.projection && <ClusterMap projection={r.meta.projection} tr={tr} />}
         {active === 'verdict' && (
           <Bars rows={(data.models ?? []).map((m: any) => ({ id: m.id, name: m.title, value: m.score }))}
             accentId={data.winner}

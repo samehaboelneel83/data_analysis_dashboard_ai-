@@ -750,6 +750,10 @@ async def _describe_step(ctx: StepContext, session) -> str:
     ds = await session.get(Dataset, ctx.subject_id)
     if ds is None or ds.org_id != ctx.org_id:
         raise StepRefused("dataset not found")
+    # "Allow AI" for this data: with it off, the model path below returns
+    # nothing and the deterministic proposal is used (services/ai_policy.py).
+    from . import ai_policy
+    await ai_policy.enter(session, datasets=[ds])
 
     user = await _load_creator(session, ctx.user_id)
     if user is None:
@@ -893,8 +897,10 @@ async def _scan_step(ctx: StepContext, session) -> str:
 
     def _scan() -> dict:
         type_map = detect_types(frame)
-        roles = effective_roles(type_map, column_meta)
-        result = generate_insights(frame, type_map, column_meta)
+        from . import column_classes
+        classed, _ = column_classes.classified(frame, column_meta)
+        roles = effective_roles(type_map, classed)
+        result = generate_insights(frame, type_map, classed)
         scanned = sorted(c for c, kind in roles.items()
                          if kind in ("numeric", "categorical", "datetime"))
         # Named, not dropped. A column that simply vanishes reads as one the
@@ -1363,6 +1369,12 @@ def _structural_name_part(findings: list) -> str:
         if kind in ("standout", "laggard", "concentration", "breakdown") and len(columns) >= 2:
             # standout/laggard findings list [category, measure]
             return f"{h(columns[1])} by {h(columns[0])}"
+        if kind == "rate" and len(columns) >= 2:
+            # rate findings list [group, outcome]
+            return f"share of {h(columns[1])} by {h(columns[0])}"
+        if kind == "gradient" and len(columns) >= 2:
+            # gradient findings list [ordered category, measure]
+            return f"{h(columns[1])} across {h(columns[0])}"
         if kind == "correlation" and len(columns) >= 2:
             return f"{h(columns[0])} and {h(columns[1])}"
         if kind == "outlier":

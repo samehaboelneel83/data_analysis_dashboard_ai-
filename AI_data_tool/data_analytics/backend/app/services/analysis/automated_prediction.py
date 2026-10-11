@@ -36,8 +36,56 @@ from typing import Any
 
 import pandas as pd
 
-from .decision_tree import (MAX_TARGET_CLASSES, RANDOM_STATE, _encode,
+from .decision_tree import (MAX_TARGET_CLASSES, RANDOM_STATE, SEP, _encode,
                             _usable_predictors, group_rare)
+
+#: Times each column is shuffled; the answer is the average, with its spread.
+IMPORTANCE_REPEATS = 5
+#: Held-back rows the shuffling is scored on (it scores the model once per
+#: column per repeat).
+IMPORTANCE_ROWS = 5_000
+#: A fall in score smaller than this is not told apart from shuffling noise.
+IMPORTANCE_FLOOR = 0.002
+
+
+def _importance_note(score_name: str):
+    from ..readback import _s
+    return _s("an.impnote", "How much {score} falls on the held-back rows when a column's values are shuffled. "
+                            "Columns that carry the same information share the credit. "
+                            "It is what the model uses, not what causes the outcome.", score=score_name)
+
+
+def permutation_importance(model, X_test, y_test, columns: list[str]) -> list[dict]:
+    """How much the score on the held-back rows FALLS when one column's values
+    are shuffled -- what the model actually leans on, measured on rows it never
+    saw, for any model (docs/discovery/PLAN.md, phase 3 #16).
+
+    A text column is one-hot encoded into several; they are shuffled together,
+    so the answer is per column of the data, not per encoded piece. Two columns
+    that carry the same information share the credit: shuffling one leaves the
+    other to answer, and both read as less important than they are together."""
+    import numpy as np
+    if len(X_test) > IMPORTANCE_ROWS:
+        X_test = X_test.sample(IMPORTANCE_ROWS, random_state=RANDOM_STATE)
+        y_test = y_test.loc[X_test.index]
+    rng = np.random.default_rng(RANDOM_STATE)
+    base = float(model.score(X_test, y_test))
+    out: list[dict] = []
+    for c in columns:
+        pieces = [k for k in X_test.columns if str(k) == c or str(k).startswith(c + SEP)]
+        if not pieces:
+            continue
+        falls = []
+        for _ in range(IMPORTANCE_REPEATS):
+            shuffled = X_test.copy()
+            shuffled[pieces] = X_test[pieces].to_numpy()[rng.permutation(len(X_test))]
+            falls.append(base - float(model.score(shuffled, y_test)))
+        fall, spread = float(np.mean(falls)), float(np.std(falls))
+        out.append({"column": c, "drop": round(fall, 4), "spread": round(spread, 4),
+                    # Clear of its own shuffling noise, and of the floor.
+                    "matters": bool(fall > max(IMPORTANCE_FLOOR, 2 * spread))})
+    out.sort(key=lambda r: -r["drop"])
+    return out
 
 #: A quarter held back, same as the tree.
 TEST_SIZE = 0.25
@@ -172,6 +220,7 @@ def automated_prediction(df: pd.DataFrame, target: str,
         score_name = "r2"
 
     results: list[dict] = []
+    fitted: dict[str, Any] = {}
     for name, model, is_baseline in candidates:
         try:
             model.fit(X_train, y_train)
@@ -188,6 +237,7 @@ def automated_prediction(df: pd.DataFrame, target: str,
         results.append({"model": name, "score": score, "train_score": train,
                         "n_test": int(len(X_test)), "is_baseline": is_baseline,
                         "error": None})
+        fitted[name] = model
 
     scored = [r for r in results if r["score"] is not None]
     if not scored:
@@ -229,6 +279,15 @@ def automated_prediction(df: pd.DataFrame, target: str,
     if sampled:
         caveats.append(f"Fitted on a random sample of {FRAME_SAMPLE_THRESHOLD:,} rows.")
 
+    # What the winner leans on. Not for a winner that is the guess (it uses no
+    # column), nor one that does not beat it (there is nothing to explain).
+    importance: list[dict] = []
+    if beats and not champion["is_baseline"]:
+        try:
+            importance = permutation_importance(fitted[champion["model"]], X_test, y_test, used)
+        except Exception:                                       # noqa: BLE001 - an extra, never the result
+            importance = []
+
     return {
         "kind": "automated_prediction",
         "task": "classification" if classification else "regression",
@@ -241,6 +300,10 @@ def automated_prediction(df: pd.DataFrame, target: str,
         "lift_over_baseline": lift,
         "beats_baseline": beats,
         "predictors_used": used,
+        "importance": importance,
+        "importance_of": champion["model"] if importance else None,
+        "importance_note": str(_importance_note(score_name)) if importance else None,
+        "importance_note_i18n": _importance_note(score_name).as_i18n() if importance else None,
         "predictors_grouped": {c: len(v) - 1 for c, v in grouped.items()},
         "predictors_skipped": skipped,
         "n_train": int(len(X_train)),

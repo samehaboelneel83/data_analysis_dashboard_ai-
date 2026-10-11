@@ -210,6 +210,13 @@ async def page_copilot(report_id: int, page_id: int, body: CopilotIn,
     # planning edits that would then be rolled back.
     await require_capability(db, user, report_id, "edit")
 
+    # "Allow AI" for the data this report reads (services/ai_policy.py).
+    from ..models.models import Dataset as _Dataset
+    from ..services import ai_policy as _ai_policy
+    _ids = [i for i in [report.dataset_id, *(report.additional_dataset_ids or [])] if i]
+    if not await _ai_policy.enter(db, datasets=[d for d in [await db.get(_Dataset, i) for i in _ids] if d]):
+        raise HTTPException(409, "AI is switched off for the data this dashboard reads")
+
     # Same daily cap as the chat agent: both are one LLM call per message.
     await quotas.enforce_agent_quota(db, user.org_id)
     quotas.enforce_ai_budget(meter)

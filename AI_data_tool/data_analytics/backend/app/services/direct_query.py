@@ -1184,7 +1184,7 @@ def _fetch_and_compute(
 #: Config keys whose meaning needs every group, or the raw rows, after
 #: aggregation -- see `_needs_rows`.
 _ROW_LEVEL_KEYS = ("having", "suppress_below", "quick_calc", "sort_custom",
-                   "dimension_levels", "dimension_granularity", "running",
+                   "dimension_levels", "dimension_granularity", "dimension2_granularity", "running",
                    # Number ranges (services/auto_bin.py) when no bucket SQL
                    # exists for the dialect: the shaper bins the fetched rows.
                    "dimension_bin",

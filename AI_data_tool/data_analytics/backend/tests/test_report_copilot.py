@@ -444,7 +444,7 @@ class TestDataQuestions:
         # the source. Found live -- the demo Live Orders report.
         from app.models.models import DataSource
         src = DataSource(name="wh", type="postgresql",
-                         org_id=two_orgs["a"]["org"].id)
+                         org_id=two_orgs["a"]["org"].id, allow_llm_sampling=True)
         db_session.add(src)
         await db_session.flush()
         world["dataset"].data_source_id = src.id
@@ -656,3 +656,13 @@ class TestAiBudget:
         assert r.status_code == 429
         assert "AI budget" in r.json()["detail"]
         assert len(model) == 1, "the model must not be asked"
+
+
+class TestAllowAi:
+    async def test_the_copilot_refuses_when_ai_is_off_for_the_data(self, client, world, auth_headers, db_session):
+        """One switch for every AI feature (services/ai_policy.py): a dataset
+        with "Allow AI" off is not sent to the model by the copilot either."""
+        world["dataset"].allow_ai = False
+        await db_session.commit()
+        r = await call(client, auth_headers["a"], world, "add a chart")
+        assert r.status_code == 409 and "switched off" in r.json()["detail"]

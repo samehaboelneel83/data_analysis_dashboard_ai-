@@ -26,7 +26,9 @@ export default function DualAxisBarLineChartRenderer({ rows, cfg, rtl, measureFm
   const view = useChartViewport(cfg, rows, plotW, { dataKey: 'value', onChange: onBrushChange })
   // The second series is named like the first -- "sum(RATED_AMOUNT)" beside
   // "count(RATED_AMOUNT)", not the bare column.
-  const name2 = titles.measure2 ?? (cfg.measure2 as string | undefined) ?? 'value2'
+  // A Pareto's line is the running share of the whole, named by its axis label.
+  const name2 = cfg.pareto ? String(cfg.y2_axis_label ?? 'Cumulative share (%)')
+    : titles.measure2 ?? (cfg.measure2 as string | undefined) ?? 'value2'
   return (
     <ResponsiveContainer width="100%" height="100%">
       <ComposedChart data={rows} margin={chartMargin(rtl, { top: 4, right: 8, bottom: 20, left: 0 })}

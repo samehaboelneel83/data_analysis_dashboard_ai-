@@ -2,6 +2,7 @@
  * Geo contour (MASTER_PLAN Phase 4 item 5): the density surface the server
  * estimates from coordinates, shaded, with its isolines on top.
  */
+import { useT } from '../../../i18n'
 import { useMemo } from 'react'
 import { seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
@@ -12,6 +13,7 @@ import { isolines } from '../../../lib/contours'
 interface Grid { west: number; east: number; south: number; north: number; nx: number; ny: number; values: number[] }
 
 export default function GeoContourRenderer({ data, plotW, plotH }: ChartRendererProps) {
+  const t9 = useT()
   const { ref, w, h, tiles, view } = useMapBox(plotW, plotH)
   const d = data as { grid?: Grid | null; levels?: number[]; reason?: string; points_used?: number; dropped?: number;
     sampled_from?: number | null; weighted_by?: string | null }
@@ -54,7 +56,7 @@ export default function GeoContourRenderer({ data, plotW, plotH }: ChartRenderer
   return (
     <div ref={ref} style={MAP_WRAP_STYLE}>
       <MapSvg view={view} w={w} h={h} projection={projection} tiles={tiles} role="img"
-        aria-label={`Density contours of ${d.points_used?.toLocaleString()} located rows`}>
+        aria-label={t9('cr.contoursOf', { n: d.points_used?.toLocaleString() ?? '' })}>
         {COUNTRIES.map(f => <path key={f.properties.name} d={path(f) ?? undefined} fill="var(--surface2)" stroke="var(--border)" strokeWidth={0.4} />)}
         <g data-testid="contour-surface">
           {cells.map((c, i) => <path key={i} d={c.d} fill={seriesColor(0)} fillOpacity={0.08 + 0.55 * c.v} stroke="none" />)}
@@ -64,9 +66,9 @@ export default function GeoContourRenderer({ data, plotW, plotH }: ChartRenderer
         </g>
       </MapSvg>
       <div style={{ position: 'absolute', bottom: 4, left: 8, fontSize: 10, color: 'var(--muted)' }}>
-        {d.points_used?.toLocaleString()} located rows{d.weighted_by ? `, weighted by ${d.weighted_by}` : ''}
-        {d.dropped ? ` · ${d.dropped.toLocaleString()} without usable coordinates` : ''}
-        {d.sampled_from ? ` · surface estimated from a ${d.sampled_from.toLocaleString()}-row sample` : ''}
+        {t9('cr.locatedRows', { n: d.points_used?.toLocaleString() ?? '' })}{d.weighted_by ? t9('cr.weightedBy', { c: String(d.weighted_by) }) : ''}
+        {d.dropped ? ` · ${t9('cr.noCoords', { n: d.dropped.toLocaleString() })}` : ''}
+        {d.sampled_from ? ` · ${t9('cr.sampledSurface', { n: d.sampled_from.toLocaleString() })}` : ''}
       </div>
     </div>
   )

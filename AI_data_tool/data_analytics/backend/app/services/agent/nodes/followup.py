@@ -63,25 +63,25 @@ FORMATS = ("table", "bar", "line", "pie", "csv")
 _TURN_CHARS = 400
 _BLOCK_CHARS = 1800
 
-_EXAMPLES = """Examples, after a conversation where the user asked "orders per city" and the assistant answered from SQL that returned 2 rows:
-New message: can you present a table -> {"kind": "presentation", "question": "Show the orders per city as a table", "format": "table", "limit": null, "x": null, "y": null}
-New message: as a bar chart -> {"kind": "presentation", "question": "Show the orders per city as a bar chart", "format": "bar", "limit": null, "x": null, "y": null}
-New message: download it as csv -> {"kind": "presentation", "question": "Download the orders per city as CSV", "format": "csv", "limit": null, "x": null, "y": null}
-New message: execute the query and show me the result -> {"kind": "presentation", "question": "Show the rows the orders per city query returned", "format": "table", "limit": null, "x": null, "y": null}
-New message: only the first one -> {"kind": "presentation", "question": "Show the first row of the orders per city result", "format": "table", "limit": 1, "x": null, "y": null}
-New message: chart for samples -> {"kind": "presentation", "question": "Draw the orders per city result as a chart", "format": "bar", "limit": null, "x": null, "y": null}
-New message: Chart n by city -> {"kind": "presentation", "question": "Draw n by city as a bar chart", "format": "bar", "limit": null, "x": "city", "y": "n"}
-New message: plot revenue against month as a line -> {"kind": "presentation", "question": "Draw revenue by month as a line chart", "format": "line", "limit": null, "x": "month", "y": "revenue"}
+_EXAMPLES = """Examples, after a conversation where the user asked "rows per region" and the assistant answered from SQL that returned 2 rows:
+New message: can you present a table -> {"kind": "presentation", "question": "Show the rows per region as a table", "format": "table", "limit": null, "x": null, "y": null}
+New message: as a bar chart -> {"kind": "presentation", "question": "Show the rows per region as a bar chart", "format": "bar", "limit": null, "x": null, "y": null}
+New message: download it as csv -> {"kind": "presentation", "question": "Download the rows per region as CSV", "format": "csv", "limit": null, "x": null, "y": null}
+New message: execute the query and show me the result -> {"kind": "presentation", "question": "Show the rows the rows per region query returned", "format": "table", "limit": null, "x": null, "y": null}
+New message: only the first one -> {"kind": "presentation", "question": "Show the first row of the rows per region result", "format": "table", "limit": 1, "x": null, "y": null}
+New message: chart for samples -> {"kind": "presentation", "question": "Draw the rows per region result as a chart", "format": "bar", "limit": null, "x": null, "y": null}
+New message: Chart n by region -> {"kind": "presentation", "question": "Draw n by region as a bar chart", "format": "bar", "limit": null, "x": "region", "y": "n"}
+New message: plot amount against month as a line -> {"kind": "presentation", "question": "Draw amount by month as a line chart", "format": "line", "limit": null, "x": "month", "y": "amount"}
 -- when the message NAMES the two columns, `x` is the one that labels the
 -- marks and `y` the one that sizes them -- "chart Y by X". Copy the names
 -- exactly as written; leave both null when the message does not say.
-New message: give me some suggested charts -> {"kind": "presentation", "question": "Draw the orders per city result as a chart", "format": "bar", "limit": null, "x": null, "y": null}
+New message: give me some suggested charts -> {"kind": "presentation", "question": "Draw the rows per region result as a chart", "format": "bar", "limit": null, "x": null, "y": null}
 -- asking to CHART, PLOT or VISUALISE what was just shown -- or for chart
 -- suggestions about it -- re-draws the LAST RESULT as a chart (bar unless
 -- another type is named). It is never a query against a table that happens
 -- to be called "charts".
-New message: explain this chart -> {"kind": "describe", "question": "Explain the orders per city result", "format": null, "limit": null, "x": null, "y": null}
-New message: what does this mean -> {"kind": "describe", "question": "Explain the orders per city result", "format": null, "limit": null, "x": null, "y": null}
+New message: explain this chart -> {"kind": "describe", "question": "Explain the rows per region result", "format": null, "limit": null, "x": null, "y": null}
+New message: what does this mean -> {"kind": "describe", "question": "Explain the rows per region result", "format": null, "limit": null, "x": null, "y": null}
 -- asking what the LAST RESULT MEANS, or to explain, interpret, summarise or
 -- comment on it, is answered in words from rows that already exist. It needs
 -- no query, and "explain" here does not mean a statistical analysis.
@@ -102,10 +102,10 @@ New message: ok great, what can you do -> {"kind": "chat", "question": "ok great
 -- talk, a question about you. `question` comes back exactly as typed; there
 -- is nothing to rewrite. A message that DOES ask for data is never chat, even
 -- when it is wrapped in politeness.
-New message: the same for Cairo only -> {"kind": "data", "question": "How many orders are there per city, for the city Cairo only?", "format": null, "limit": null, "x": null, "y": null}
-New message: show 50 rows -> {"kind": "data", "question": "Show the first 50 rows of orders per city", "format": null, "limit": null, "x": null, "y": null}
+New message: the same for North only -> {"kind": "data", "question": "How many rows are there per region, for the region North only?", "format": null, "limit": null, "x": null, "y": null}
+New message: show 50 rows -> {"kind": "data", "question": "Show the first 50 rows of rows per region", "format": null, "limit": null, "x": null, "y": null}
 -- more rows than the last result returned is a new query, not a re-show.
-New message: what is the total revenue by region -> {"kind": "data", "question": "what is the total revenue by region", "format": null, "limit": null, "x": null, "y": null}
+New message: what is the total amount by region -> {"kind": "data", "question": "what is the total amount by region", "format": null, "limit": null, "x": null, "y": null}
 -- already standalone: returned unchanged."""
 
 
@@ -211,7 +211,7 @@ async def resolve(question: str, history: list[dict], client) -> dict | None:
             "YOU or about nothing.\n"
             "Return kind=\"data\" for anything that needs a query: a new "
             "question, or a follow-up that leans on earlier turns ('it', "
-            "'that', 'the same for Cairo', 'now by month', more rows than "
+            "'that', 'the same for North', 'now by month', more rows than "
             "were returned). Rewrite `question` as ONE complete standalone "
             "question carrying over every table, column, filter, limit and "
             "metric it depends on, in the earlier turns' exact words. A "

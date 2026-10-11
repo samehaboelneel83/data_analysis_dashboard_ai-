@@ -75,7 +75,7 @@ export default function ReportPrint() {
     // text -- in dark mode they were dark cards with near-black text.
     <div data-product="datalytics" data-theme="light" className="dl-paper"
       style={{ background: '#fff', color: '#111', minHeight: '100%', colorScheme: 'light' }}>
-      <style>{`
+      <style>{/* i18n-ok: CSS */`
         @media print {
           .print-toolbar { display: none !important; }
           .print-page { break-after: page; }

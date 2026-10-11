@@ -1,3 +1,4 @@
+import { useT } from '../../../i18n'
 import type { ChartRendererProps } from './types'
 import { fmtStr, seriesColor } from '../chartUtils'
 
@@ -17,6 +18,7 @@ import { fmtStr, seriesColor } from '../chartUtils'
 export default function SmallMultiplesRenderer(
   { data, measureFmt }: ChartRendererProps,
 ) {
+  const t9 = useT()
   const panels: any[] = data?.panels ?? []
   const omitted: number = data?.omitted ?? 0
   // Fall back to per-panel scaling only when the server had no numeric rows to
@@ -24,7 +26,7 @@ export default function SmallMultiplesRenderer(
   const shared: number | null = data?.max_value ?? null
 
   if (!panels.length) {
-    return <div style={{ color: 'var(--muted)', fontSize: 12, padding: 8 }}>No data.</div>
+    return <div style={{ color: 'var(--muted)', fontSize: 12, padding: 8 }}>{t9('cr.noData')}</div>
   }
 
   return (
@@ -66,7 +68,7 @@ export default function SmallMultiplesRenderer(
                 </div>
               ))}
               {!rows.length && (
-                <div style={{ fontSize: 10, color: 'var(--muted)' }}>no rows</div>
+                <div style={{ fontSize: 10, color: 'var(--muted)' }}>{t9('cr.noRows')}</div>
               )}
             </div>
           )
@@ -77,13 +79,13 @@ export default function SmallMultiplesRenderer(
           onto the page, so the count of those has to be stated. */}
       {omitted > 0 && (
         <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 6 }}>
-          {omitted} more {data?.facet_by ? `${data.facet_by} value` : 'value'}
-          {omitted === 1 ? '' : 's'} not shown.
+          {data?.facet_by ? t9(omitted === 1 ? 'cr.facetOmitted1' : 'cr.facetOmitted', { n: omitted, by: String(data.facet_by) })
+            : t9(omitted === 1 ? 'cr.valueOmitted1' : 'cr.valueOmitted', { n: omitted })}
         </div>
       )}
       {shared === null && panels.length > 1 && (
         <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
-          Panels are scaled independently.
+          {t9('cr.independent')}
         </div>
       )}
     </div>

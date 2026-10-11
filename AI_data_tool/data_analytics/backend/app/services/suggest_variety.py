@@ -74,7 +74,7 @@ class _Profile:
 
     def __init__(self, df: pd.DataFrame, roles: dict[str, str],
                  column_meta: dict | None, ineligible: set[str] | None):
-        from .insights import _NOT_START_DATE, _PERSON_ID, _START_DATE
+        from .insights import _NOT_START_DATE, order_event_dates
         from .semantic_guard import default_summary, is_identifier
         from .widget_data import _is_id_like_column
         self.df = df
@@ -82,26 +82,24 @@ class _Profile:
         cols = [c for c in df.columns if c in roles and str(c).casefold() not in blocked]
         self.card = {c: self._nunique(c) for c in cols}
         n = len(df)
-        self.ids = [c for c in cols if (is_identifier(c, column_meta) or _is_id_like_column(c))
+        self.ids = [c for c in cols if (is_identifier(c, column_meta) or _is_id_like_column(c, column_meta))
                     and self.card[c] >= 0.5 * n]
         self.id_col = self.ids[0] if self.ids else None
         self.cats = [c for c in cols if roles.get(c) == "categorical" and c not in self.ids
                      and 2 <= self.card[c] <= 50]
         self.nums = [c for c in cols if roles.get(c) == "numeric" and c not in self.ids
-                     and not _is_id_like_column(c) and not is_identifier(c, column_meta)
+                     and not _is_id_like_column(c, column_meta) and not is_identifier(c, column_meta)
                      and self.card[c] > 2]
         from .insights import drop_duplicate_measures
         self.nums = drop_duplicate_measures(df, self.nums)
         self.dates = [c for c in cols if roles.get(c) == "datetime"
                       and not any(k in str(c).lower() for k in _NOT_START_DATE)]
-        self.dates.sort(key=lambda c: 0 if any(k in str(c).lower() for k in _START_DATE[:-1]) else 1)
+        self.dates = order_event_dates(self.dates, df)
         self.summary = {m: (default_summary(m, column_meta) if default_summary(m, column_meta)
                             in ("avg", "median", "sum") else "avg") for m in self.nums}
-        if self.id_col and any(k in str(self.id_col).lower() for k in _PERSON_ID):
-            self.count_word = "Headcount"
-            self.entity = "employees"
-        elif self.id_col:
-            self.count_word = f"Number of {_h(self.id_col)}"
+        if self.id_col:
+            from .insights import counted_as
+            self.count_word = counted_as(self.id_col)
             self.entity = _h(self.id_col)
         else:
             self.count_word, self.entity = "Rows", "rows"
@@ -301,8 +299,7 @@ def _split_trend(p: _Profile) -> list[dict]:
     if not best or best[1] < MIN_TREND_V:
         return []                          # the mix is the same every year: one line says it
     c, v = best
-    title = (f"Hires per year by {_h(c)}" if "hire" in str(d).lower()
-             else f"{p.count_word} per year of {_h(d)} by {_h(c)}")
+    title = f"{p.count_word} per year of {_h(d)} by {_h(c)}"
     return [_item("line", title,
                   f"The mix of {_h(c)} changes over time (Cramer's V {v:.2f}), so one line per value.",
                   {"dimension": d, "dimension2": c, **p.count(d), "dimension_granularity": "year"},

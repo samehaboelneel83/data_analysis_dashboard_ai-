@@ -2257,6 +2257,31 @@ async def get_column_meta(dataset_id: int, db: AsyncSession = Depends(get_db), c
     return ds.column_meta or {}
 
 
+@router.post("/{dataset_id}/column-meta/classify-again")
+async def classify_columns_again(dataset_id: int, db: AsyncSession = Depends(get_db),
+                                 current_user: User = Depends(get_current_user)):
+    """Ask the AI again what each number of this dataset is.
+
+    What a column is, is asked ONCE and kept (services/column_classes.py);
+    this is the button that asks again. Everything worked out automatically is
+    dropped and re-read; what a person set by hand is left exactly as it is."""
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_capability(db, current_user, dataset_id, "data")
+    from sqlalchemy.orm.attributes import flag_modified as _flag
+    from ..services import column_classes as _cc
+    from ..services import ai_policy as _ai_policy
+    if not await _ai_policy.enter(db, datasets=[ds]):
+        raise HTTPException(409, "AI is switched off for this data")
+    ds.column_meta = _cc.forget(ds.column_meta)
+    _flag(ds, "column_meta")
+    await db.commit()
+    denied = await resolve_denied_columns(db, current_user, dataset_id)
+    numbers = await _cc.model_hints(db, ds, denied=set(denied or []))
+    return {"asked": len(((ds.column_meta or {}).get(_cc.AI_KEY) or {}).get("asked") or []),
+            "classified": len(numbers), "column_meta": ds.column_meta or {}}
+
+
 @router.put("/{dataset_id}/column-meta")
 async def set_column_meta(dataset_id: int, req: ColumnMetaUpdate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Replaces the whole map. That is deliberate: it makes a bulk edit across many
@@ -2293,6 +2318,20 @@ async def set_column_meta(dataset_id: int, req: ColumnMetaUpdate, db: AsyncSessi
             raise HTTPException(400, "target_candidate_priority must be zero or more")
         if meta.boundary_set_id is not None and meta.boundary_set_id < 1:
             raise HTTPException(400, "boundary_set_id must be a positive id")
+        # The stored classification: only values the engines know how to read.
+        from ..services import semantic_guard as _sg
+        if meta.number is not None and meta.number not in _sg.NUMBER_KINDS:
+            raise HTTPException(400, f"number must be one of {list(_sg.NUMBER_KINDS)}, got '{meta.number}'")
+        if meta.direction is not None and meta.direction not in _sg.DIRECTIONS:
+            raise HTTPException(400, f"direction must be one of {list(_sg.DIRECTIONS)}")
+        if meta.level is not None and meta.level not in _sg.LEVELS:
+            raise HTTPException(400, f"level must be one of {list(_sg.LEVELS)}")
+        if meta.geo_level is not None and meta.geo_level not in _sg.GEO_LEVELS:
+            raise HTTPException(400, f"geo_level must be one of {list(_sg.GEO_LEVELS)}")
+        if meta.class_source is not None and meta.class_source not in ("measured", "ai", "confirmed"):
+            raise HTTPException(400, "class_source must be measured, ai or confirmed")
+        if meta.order is not None and len(meta.order) > 60:
+            raise HTTPException(400, "an ordered scale has at most 60 values")
         if meta.aggregation is not None and meta.aggregation not in _VALID_AGGREGATIONS:
             # A bad aggregation would be silently ignored at query time and render a
             # plausible-looking wrong number, so refuse it at write time.
@@ -2363,6 +2402,14 @@ async def suggest_dashboards(dataset_id: int, req: SuggestDashboardsRequest,
     if req.mode == "panel":
         return await sug.panel(inputs, goal, req.size, fresh=req.fresh)
     fields: dict = {"facts": []}
+    from ..services.analyst_panel import selection_mode
+    if goal and selection_mode() == "cards":
+        # The validated set is the single source of truth: the model chooses
+        # among charts already built and drawn (the panel in "cards" mode --
+        # one question-reading call and one choosing call), instead of the
+        # quick designer inventing its own (settings.suggest_ai_selection).
+        out = await sug.panel(inputs, goal, 24, fresh=req.fresh)
+        return {**out, "question": None}
     if goal:
         # Measured facts, not column shapes: the designer proposes for the
         # differences that exist (HR analyst panel, 2026-10-02).
@@ -2384,6 +2431,20 @@ async def suggest_dashboards(dataset_id: int, req: SuggestDashboardsRequest,
         if fields["facts"]:
             facts = {**facts, "text": (facts.get("text") or "") + "\n" + "\n".join(
                 f"- Derived field: {t}." for t in fields["facts"])}
+        # What the connection's Meaning map measured (what is counted against
+        # what, what became of a row), for the columns this dataset kept: the
+        # same reading the guided setup designs with (docs/suggestions/PLAN.md).
+        if ds.data_source_id:
+            try:
+                from ..services.guided_setup import meaning
+                _map = await meaning.load(db, ds.data_source_id)
+                _reading = meaning.prompt_text(_map, None, {str(c) for c in inputs.df.columns})
+                if _reading:
+                    facts = {**facts, "text": (facts.get("text") or "") + "\nHow to read this data:\n" + _reading
+                             + "\nNever rank groups by a count of an outcome alone when its share per group "
+                               "can be drawn."}
+            except Exception:                                # noqa: BLE001 -- a help, never a gate
+                pass
         df, type_map, profile = inputs.df, inputs.type_map, inputs.profile
         probe, drawn = inputs.probe, inputs.drawn
         from ..services.suggest_dataset_dashboard import suggest_for_dataset
@@ -2535,6 +2596,10 @@ async def dataset_insights(dataset_id: int, db: AsyncSession = Depends(get_db),
     # neither -- no file and no connection is genuinely nothing to analyse.
     if not ds.filename and ds.mode != "directquery":
         raise HTTPException(400, "This dataset has no rows to analyse yet")
+    # "Allow AI" for this data, applied to every model call below
+    # (services/ai_policy.py).
+    from ..services import ai_policy as _ai_policy
+    await _ai_policy.enter(db, datasets=[ds])
     denied = await resolve_denied_columns(db, current_user, dataset_id)
     rls_expr = await resolve_rls_expr(db, current_user, dataset_id)
     from ..services.prep import apply_prep_steps, prep_steps_of, resolve_join_frames
@@ -2571,6 +2636,9 @@ async def dataset_insights(dataset_id: int, db: AsyncSession = Depends(get_db),
         except frames.FrameUnavailable as exc:
             raise HTTPException(400, str(exc))
 
+    from ..services import column_classes as _cc
+    _class_hints = await _cc.hints_for(db, ds, denied=set(denied or []))
+
     def _run():
         from ..services.analytics import detect_types
         from ..services.insights import generate_insights
@@ -2587,8 +2655,14 @@ async def dataset_insights(dataset_id: int, db: AsyncSession = Depends(get_db),
             provenance = frames.imported_frame(df)
         if ds.calculated_columns:
             df = apply_calculated_columns(df, ds.calculated_columns, ds.custom_functions)
-        result = generate_insights(df, detect_types(df), ds.column_meta or {},
+        # Each column classified once and kept (services/column_classes.py):
+        # the engine reads what a column IS from there, not from its name.
+        from ..services import column_classes
+        _meta, _changed = column_classes.classified(df, ds.column_meta or {}, *_class_hints)
+        result = generate_insights(df, detect_types(df), _meta,
                                    labels=_labels, value_labels=_value_labels)
+        if _changed:
+            result["_classes"] = _meta
         # Said, not implied. A reader comparing two datasets deserves to know
         # one was measured over every row and the other over a sample -- and
         # `insights.py` promises every number is computed rather than guessed,
@@ -2604,6 +2678,9 @@ async def dataset_insights(dataset_id: int, db: AsyncSession = Depends(get_db),
 
     try:
         result = await asyncio.to_thread(_run)
+        _classes = result.pop("_classes", None)
+        if _classes is not None:
+            await _cc.remember(db, ds, _classes)
     except FileNotFoundError:
         raise HTTPException(404, "Dataset file not found on server — please re-upload the file")
 
@@ -2728,6 +2805,10 @@ async def explain_column(dataset_id: int, column: str, body: dict | None = None,
     await require_dataset_read(db, current_user, dataset_id)
     if not ds.filename or ds.mode == "directquery":
         raise HTTPException(400, "Explanation is available for import-mode datasets only")
+    # "Allow AI" for this data, applied to every model call below
+    # (services/ai_policy.py).
+    from ..services import ai_policy as _ai_policy
+    await _ai_policy.enter(db, datasets=[ds])
     denied = await resolve_denied_columns(db, current_user, dataset_id)
     if column in (denied or []):
         raise HTTPException(404, f"Column '{column}' not found")
@@ -3335,6 +3416,130 @@ async def set_dataset_sensitivity(dataset_id: int, body: dict, db: AsyncSession 
     return await get_dataset_sensitivity(dataset_id, db, current_user)
 
 
+@router.get("/{dataset_id}/opportunities")
+async def dataset_opportunities(dataset_id: int, goal: str | None = None, depth: int = 1, limit: int = 24,
+                                fresh: bool = False, db: AsyncSession = Depends(get_db),
+                                current_user: User = Depends(get_current_user)):
+    """What is worth doing with this dataset, for this reader: the analyses
+    and charts its shape supports, and what its rows show -- decided without
+    a model (services/discovery, docs/discovery/PLAN.md).
+
+    `depth=0` answers from what is stored about the dataset (no row is read
+    once its profile is kept); `depth=1` also looks for evidence in the
+    reader's own rows. Each card says separately whether the data fits, how
+    strong the evidence is, what kind of claim it is and what it costs."""
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
+    if not ds.filename and ds.mode != "directquery":
+        raise HTTPException(400, "This dataset has no rows to analyse yet")
+    from ..services.discovery import engine as discovery
+    from ..services import analysis_frame as frames
+    try:
+        return await discovery.opportunities(db, current_user, ds, goal, depth=max(0, min(int(depth), 1)),
+                                             limit=max(1, min(int(limit), 60)), fresh=bool(fresh))
+    except frames.FrameUnavailable as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.get("/{dataset_id}/profile")
+async def dataset_profile_cards(dataset_id: int, db: AsyncSession = Depends(get_db),
+                                current_user: User = Depends(get_current_user)):
+    """Each column's profile: how many values are valid, unique, mistyped or
+    missing; the most and least common value; text lengths; the shape values
+    share; how old the newest date is. Remembered per version of the data, so
+    it is measured once. A reader with hidden columns does not get them, and
+    a reader under a row rule gets counts but no value of any row."""
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
+    if not ds.filename and ds.mode != "directquery":
+        raise HTTPException(400, "This dataset has no rows to analyse yet")
+    from ..services import analysis_frame as frames
+    from ..services.discovery import engine as discovery
+    try:
+        return await discovery.column_profile(db, current_user, ds)
+    except frames.FrameUnavailable as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.get("/{dataset_id}/health")
+async def dataset_health(dataset_id: int, db: AsyncSession = Depends(get_db),
+                         current_user: User = Depends(get_current_user)):
+    """The dataset's health: is it still arriving, is the latest month's
+    volume what its history made likely, did the columns change, are values
+    present and of the right kind, are rows copied -- each passed, worth a
+    look, or failed, with one sentence. Read off the stored profile."""
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
+    if not ds.filename and ds.mode != "directquery":
+        raise HTTPException(400, "This dataset has no rows to analyse yet")
+    from ..services import analysis_frame as frames
+    from ..services.discovery import engine as discovery
+    try:
+        return await discovery.dataset_health(db, current_user, ds)
+    except frames.FrameUnavailable as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.get("/capabilities/registry")
+async def capability_registry(current_user: User = Depends(get_current_user)):
+    """Every widget and analysis with what it needs of the data, what it costs
+    and what kind of claim its result is -- the one description the server,
+    the designers and the browser share (services/discovery/capabilities.py)."""
+    from ..services.discovery import capabilities as caps
+    return {"kinds": list(caps.KINDS), "claims": list(caps.CLAIMS),
+            "capabilities": [c.to_dict() for c in caps.all_capabilities().values()]}
+
+
+async def _allow_ai_state(db: AsyncSession, ds: Dataset) -> dict:
+    """Who decides "Allow AI" for this dataset, and what the answer is."""
+    from ..services import ai_policy
+    source = await db.get(DataSource, ds.data_source_id) if ds.data_source_id else None
+    return {
+        # The dataset's own choice: true / false, or null = not set here.
+        "own": ds.allow_ai,
+        "effective": await ai_policy.dataset_allows(db, ds),
+        # connection: the connection's switch decides unless this dataset says no;
+        # dataset: set here; default: an uploaded file nobody set a choice on.
+        "decided_by": ("dataset" if ds.allow_ai is False else "connection" if source is not None
+                       else "dataset" if ds.allow_ai is True else "default"),
+        "connection": source.name if source is not None else None,
+    }
+
+
+@router.get("/{dataset_id}/allow-ai")
+async def get_dataset_allow_ai(dataset_id: int, db: AsyncSession = Depends(get_db),
+                               current_user: User = Depends(get_current_user)):
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_read(db, current_user, dataset_id)
+    return await _allow_ai_state(db, ds)
+
+
+@router.put("/{dataset_id}/allow-ai")
+async def set_dataset_allow_ai(dataset_id: int, body: dict, db: AsyncSession = Depends(get_db),
+                               current_user: User = Depends(get_current_user)):
+    """Whether AI may be used on this dataset: true, false, or null to follow
+    its connection (or, for an uploaded file, the installation default).
+    One switch for every AI feature (services/ai_policy.py). Needs data-level
+    access; audited. A dataset cannot switch on what its connection switched
+    off -- that is the connection owner's decision."""
+    ds = await db.get(Dataset, dataset_id)
+    check_org(ds, current_user, "Dataset not found")
+    await require_dataset_write(db, current_user, ds, "data")
+    allow = body.get("allow")
+    if allow is not None and not isinstance(allow, bool):
+        raise HTTPException(400, "allow must be true, false or null")
+    ds.allow_ai = allow
+    await db.flush()
+    await audit(db, current_user, "dataset.allow_ai", "dataset", dataset_id,
+                "on" if allow is True else "off" if allow is False else "(follow)")
+    await db.commit()
+    return await _allow_ai_state(db, ds)
+
+
 @router.post("/{dataset_id}/join-check")
 async def check_join(dataset_id: int, body: dict, db: AsyncSession = Depends(get_db),
                      current_user: User = Depends(get_current_user)):
@@ -3414,7 +3619,7 @@ async def data_quality(dataset_id: int, body: QualityRequest = QualityRequest(),
         present = [c for c in (denied or []) if c in df.columns]
         if present:
             df = df.drop(columns=present)
-        report = quality_report(df, body.rules)
+        report = quality_report(df, body.rules, column_meta=ds.column_meta)
         # The example ROWS carry personal values; the column statistics do not.
         report["duplicate_examples"] = _mask_records(report["duplicate_examples"], personal)
         for check in report["rules"]:

@@ -1,3 +1,4 @@
+import { useT } from '../../../i18n'
 import { useState, useEffect, useRef } from 'react'
 import { ScatterChart, Scatter, ZAxis, XAxis, YAxis, CartesianGrid, Tooltip, Cell, ResponsiveContainer, LabelList } from 'recharts'
 import { COLORS, TT, fmtStr } from '../chartUtils'
@@ -5,6 +6,7 @@ import type { ChartRendererProps } from './types'
 import { axisTitles, xAxisProps, yAxisProps, gridProps, labelListProps, chartMargin } from './axisOptions'
 
 export default function BubbleChangePlotRenderer({ data, cfg, rtl, broadcasts, localSelected, onClickPoint, measureFmt, measure2Fmt, ruleStyles, plotH }: ChartRendererProps) {
+  const t9 = useT()
   const rawFrames: unknown[] = data?.frames ?? []
   // Playback order: SAS exposes ascending/descending frame order.
   const frames: unknown[] = (cfg.anim_order === 'desc' ? [...rawFrames].reverse() : rawFrames)
@@ -24,7 +26,7 @@ export default function BubbleChangePlotRenderer({ data, cfg, rtl, broadcasts, l
   useEffect(() => { setFrameIdx(0); setPlaying(false) }, [frames.length])
 
   if (frames.length === 0) {
-    return <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>Configure widget to see data</div>
+    return <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>{t9('cr.configure')}</div>
   }
 
   const currentFrame = frames[frameIdx]

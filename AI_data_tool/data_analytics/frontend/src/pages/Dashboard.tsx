@@ -453,7 +453,7 @@ export default function Dashboard() {
                       <th className="dl-table__num">{t('datasets.col.size')}</th>
                       <th>{t('dsl.col.freshness')}</th>
                       <th className="dl-table__num">{t('dsl.col.dashboards')}</th>
-                      <th className="dl-table__actions" aria-label="Actions" />
+                      <th className="dl-table__actions" aria-label={t('ag.actions')} />
                     </tr>
                   </thead>
                   <tbody>
@@ -489,7 +489,7 @@ export default function Dashboard() {
                               )}
                               {ds.shared && (
                                 <span className="dl-chip dl-chip--shared"
-                                  title="Shared with you by an org admin">
+                                  title={t('home.sharedByAdmin')}>
                                   <IconLabel icon={Link2} size={12}>{t('datasets.shared')}</IconLabel>
                                 </span>
                               )}

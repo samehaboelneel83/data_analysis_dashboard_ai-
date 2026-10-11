@@ -59,6 +59,26 @@ reason, then the summary per language; `--out` keeps every answer.
 
 ## Results
 
-Not run yet: the model was not reachable from the environment this was built
-in. The runner was exercised end to end there (the expected values computed,
-the conversations made and deleted, the model's failure scored as failed).
+**2026-10-11, model `qwen3.8_27b` (Auto), demo dataset, 26 cases.** Run twice on the same day: once with the
+example questions as they were, and once after they were reworded in neutral terms (no customers, revenue,
+departments or city names -- docs/discovery/PLAN.md, phase 0).
+
+| | English | Arabic |
+|---|---|---|
+| Answers right — before rewording | 9 of 10 (90 %) | 9 of 10 (90 %) |
+| Answers right — after rewording | 9 of 10 (90 %) | 9 of 10 (90 %) |
+| Ungrounded answers (both runs) | 0 | 0 |
+| Refusals right — before | 3 of 3 | 2 of 3 |
+| Refusals right — after | 3 of 3 | 2 of 3 |
+
+The same three cases fail in both runs, so the rewording changed nothing measurable:
+
+* `na-minus-europe.en` -- a difference of two totals; the answer gives the two totals and a ratio, not the difference.
+* `avg-margin.ar` -- an average of a percentage column; the Arabic question gets a different figure.
+* `refuse-salary.ar` -- asked for a column the data does not have, in Arabic; it does not decline.
+
+(The "after" run first scored `refuse-dashboard.en` as wrong: the answer began "I can’t change dashboard
+settings here" with a typographic apostrophe, which the scorer's refusal pattern did not accept. The pattern was
+fixed; the answer was a correct refusal.)
+
+Targets met in English on answers and refusals; Arabic meets the answers target and misses one refusal.

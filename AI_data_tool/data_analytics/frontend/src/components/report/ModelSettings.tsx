@@ -35,7 +35,7 @@ export function seedModelOpts(cfg: Record<string, unknown>): ModelOpts {
 
 /** The keys this widget type writes; nothing for a type that ignores them. */
 export function modelOptsConfig(wt: string, o: ModelOpts): Record<string, unknown> {
-  if (wt === 'model_logistic' && o.event_value) return { event_value: o.event_value }
+  if ((wt === 'model_logistic' || wt === 'model_influencers') && o.event_value) return { event_value: o.event_value }
   if (wt === 'model_tree' && o.max_depth) return { max_depth: o.max_depth }
   if (wt === 'model_compare') return { compare: o.compare ?? [] }
   if (wt === 'model_score') {
@@ -128,6 +128,16 @@ export default function ModelSettings({ widget, pages, value, onChange, datasetI
   const t = useT()
   const wt = widget.widget_type
   if (wt === 'model_score') return <SavedModelPicker datasetId={datasetId} value={value} onChange={onChange} />
+  if (wt === 'model_influencers') {
+    // Which value of the outcome to explain; blank = the rarest one.
+    return (
+      <div style={{ marginBottom: 12 }}>
+        <label htmlFor="model-event" style={lbl}>{t('pg.modelsMaps.ms.event')}</label>
+        <input id="model-event" value={value.event_value ?? ''} placeholder={t('mdl.infl.eventBlank')}
+          onChange={e => onChange({ ...value, event_value: e.target.value || undefined })} style={{ width: '100%' }} />
+      </div>
+    )
+  }
   if (wt === 'model_logistic') {
     return (
       <div style={{ marginBottom: 12 }}>

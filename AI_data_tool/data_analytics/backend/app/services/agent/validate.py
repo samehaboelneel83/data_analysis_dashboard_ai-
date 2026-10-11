@@ -251,8 +251,8 @@ def validate_sql(sql: str, context: SchemaContext) -> ValidationFailure | None:
 import re as _re  # noqa: E402
 
 #: Words that ask HOW MANY rows, not how much of a column.
-_COUNTING = _re.compile(r"\b(activity|activities|how many|number of|traffic|busiest|"
-                        r"most active|handled the most)\b", _re.I)
+_COUNTING = _re.compile(r"\b(activity|activities|how many|number of|count of|busiest|"
+                        r"most active|most frequent)\b", _re.I)
 
 
 def measure_fit(question: str, sql: str, family: str) -> ValidationFailure | None:

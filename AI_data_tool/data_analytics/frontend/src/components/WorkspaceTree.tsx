@@ -1,3 +1,4 @@
+import { useT } from '../i18n'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
@@ -80,6 +81,7 @@ function subtreeReportIds(node: WorkspaceNode): number[] {
 }
 
 export default function WorkspaceTree({ selectedFolderId, onSelectFolder }: Props) {
+  const t9 = useT()
   const confirm = useConfirm()
   const prompt = usePrompt()
   const [tree, setTree] = useState<Tree>({ roots: [], unfiled: [] })
@@ -168,8 +170,8 @@ export default function WorkspaceTree({ selectedFolderId, onSelectFolder }: Prop
    *  and widening it here would be a change nobody asked for. */
   const addFolder = async (parentId: number | null = null) => {
     const name = (await prompt({
-      title: parentId === null ? 'New folder' : 'New subfolder',
-      label: 'Folder name', placeholder: 'e.g. Finance', confirmLabel: 'Create',
+      title: parentId === null ? t9('ws.newFolder') : t9('ws.newSubfolder'),
+      label: t9('ws.folderName'), placeholder: t9('ws.folderExample'), confirmLabel: t9('ws.create'),
     }))?.trim()
     if (!name) return
     setBusy(true)
@@ -180,9 +182,9 @@ export default function WorkspaceTree({ selectedFolderId, onSelectFolder }: Prop
       })
       if (parentId !== null) openFolder(parentId)
       await refresh()
-      toast.success(`Created ${name}`)
+      toast.success(t9('ws.created', { name }))
     } catch {
-      toast.error('Could not create the folder')
+      toast.error(t9('ws.folderFailed'))
     } finally {
       setBusy(false)
     }
@@ -198,8 +200,8 @@ export default function WorkspaceTree({ selectedFolderId, onSelectFolder }: Prop
    */
   const addDashboard = async (parentId: number | null) => {
     const name = (await prompt({
-      title: 'New dashboard', label: 'Dashboard name',
-      placeholder: 'e.g. Q3 revenue', confirmLabel: 'Create',
+      title: t9('ws.newDashboard'), label: t9('ws.dashboardName'),
+      placeholder: t9('ws.dashboardExample'), confirmLabel: t9('ws.create'),
     }))?.trim()
     if (!name) return
     setBusy(true)
@@ -208,7 +210,7 @@ export default function WorkspaceTree({ selectedFolderId, onSelectFolder }: Prop
       try {
         report = await reportsApi.create({ name })
       } catch {
-        toast.error('Could not create the dashboard')
+        toast.error(t9('ws.dashboardFailed'))
         return
       }
       try {
@@ -216,9 +218,9 @@ export default function WorkspaceTree({ selectedFolderId, onSelectFolder }: Prop
           node_type: 'report', report_id: report.id, parent_id: parentId,
         })
         if (parentId !== null) openFolder(parentId)
-        toast.success(`Created ${name}`)
+        toast.success(t9('ws.created', { name }))
       } catch {
-        toast.error(`${name} was created but could not be filed here — it is under Unfiled`)
+        toast.error(t9('ws.createdUnfiled', { name }))
       }
       await refresh()
       navigate(`/reports/${report.id}`)
@@ -232,16 +234,16 @@ export default function WorkspaceTree({ selectedFolderId, onSelectFolder }: Prop
       await workspaceApi.update(node.id, { published: !node.published })
       await refresh()
       toast.success(node.published
-        ? `${node.name} is a private workspace again`
-        : `${node.name} published — its dashboards are now open to everyone, view-only`)
+        ? t9('ws.privateAgain', { name: String(node.name) })
+        : t9('ws.publishedNow', { name: String(node.name) }))
     } catch {
-      toast.error('Could not change publication')
+      toast.error(t9('ws.publishFailed'))
     }
   }
 
   const renameFolder = async (node: WorkspaceNode) => {
     const name = (await prompt({
-      title: 'Rename folder', defaultValue: node.name ?? '', confirmLabel: 'Rename',
+      title: t9('ws.renameFolder'), defaultValue: node.name ?? '', confirmLabel: t9('ws.rename'),
     }))?.trim()
     if (!name || name === node.name) return
     await workspaceApi.update(node.id, { name })
@@ -254,11 +256,11 @@ export default function WorkspaceTree({ selectedFolderId, onSelectFolder }: Prop
     // will not believe that unless it is written down.
     const isFolder = node.node_type === 'folder'
     if (!await confirm({
-      title: isFolder ? `Delete the folder "${node.name}"?` : 'Remove this dashboard from the tree?',
+      title: isFolder ? t9('ws.deleteFolderQ', { name: String(node.name) }) : t9('ws.removeDashboardQ'),
       body: isFolder
-        ? 'Anything inside it moves up a level — no dashboards are deleted.'
-        : 'The dashboard itself is kept.',
-      confirmLabel: isFolder ? 'Delete folder' : 'Remove',
+        ? t9('ws.deleteFolderBody')
+        : t9('ws.removeDashboardBody'),
+      confirmLabel: isFolder ? t9('ws.deleteFolder') : t9('ws.remove'),
     })) return
     await workspaceApi.delete(node.id)
     await refresh()
@@ -278,13 +280,12 @@ export default function WorkspaceTree({ selectedFolderId, onSelectFolder }: Prop
    */
   const editRoles = async (node: WorkspaceNode) => {
     const answer = await prompt({
-      title: 'Who can see this folder?',
-      body: 'Role IDs allowed to see it, comma-separated. '
-          + 'Leave empty for everyone in the organisation.',
-      label: 'Role IDs',
+      title: t9('ws.whoSeesQ'),
+      body: t9('ws.whoSeesBody'),
+      label: t9('ws.roleIds'),
       defaultValue: node.role_ids.join(', '),
-      placeholder: 'e.g. 2, 5',
-      confirmLabel: 'Save',
+      placeholder: t9('ws.roleIdsExample'),
+      confirmLabel: t9('ws.save'),
       // An empty answer is the documented way to clear the restriction, so it
       // must be submittable rather than blocked as "nothing entered".
       required: false,
@@ -298,10 +299,10 @@ export default function WorkspaceTree({ selectedFolderId, onSelectFolder }: Prop
       await workspaceApi.setRoles(node.id, ids)
       await refresh()
       toast.success(ids.length
-        ? `Restricted to ${ids.length} role(s)`
-        : 'Visible to everyone')
+        ? t9('ws.restrictedTo', { n: ids.length })
+        : t9('ws.visibleAll'))
     } catch {
-      toast.error('Could not change who can see this folder')
+      toast.error(t9('ws.rolesFailed'))
     }
   }
 
@@ -333,7 +334,7 @@ export default function WorkspaceTree({ selectedFolderId, onSelectFolder }: Prop
     } catch {
       // The commonest refusal is the cycle guard; anything else is equally
       // worth showing rather than silently leaving the tree unchanged.
-      toast.error('That move is not allowed')
+      toast.error(t9('ws.moveRefused'))
     } finally {
       setDragId(null)
       setOverId(null)
@@ -424,14 +425,14 @@ export default function WorkspaceTree({ selectedFolderId, onSelectFolder }: Prop
               listed -- discovering it only inside the builder ("why is
               everything disabled?") is the surprise this icon prevents. */}
           {!isFolder && node.my_capability === 'view' && (
-            <span title="View only" aria-label="View only"
+            <span title={t9('ws.viewOnly')} aria-label={t9('ws.viewOnly')}
               className="dl-tree__badge"><Eye size={12} /></span>
           )}
           {/* The viewer's side of a share: this workspace reaches them
               through a folder grant. The badge answers "why can I see
               this?" where the folder is listed. */}
           {isFolder && node.shared_with_me && (
-            <span title="Shared with you" aria-label="Shared with you"
+            <span title={t9('ws.sharedWithYou')} aria-label={t9('ws.sharedWithYou')}
               className="dl-tree__badge"><Users size={12} /></span>
           )}
 
@@ -449,15 +450,15 @@ export default function WorkspaceTree({ selectedFolderId, onSelectFolder }: Prop
                       is actually on, which means an ordinary folder spends
                       its whole width on its NAME. */}
                   {node.role_ids.length > 0 && (
-                    <span aria-label={`${node.name} is restricted to ${node.role_ids.length} role(s)`}
-                      title={`Restricted to ${node.role_ids.length} role(s)`}
+                    <span aria-label={t9('ws.nameRestricted', { name: String(node.name), n: node.role_ids.length })}
+                      title={t9('ws.restrictedTo', { n: node.role_ids.length })}
                       className="dl-tree__badge dl-tree__state">
                       <Lock size={12} />
                     </span>
                   )}
                   {node.published && (
-                    <span aria-label={`${node.name} is published to everyone`}
-                      title="Published — its dashboards are open to everyone, view-only"
+                    <span aria-label={t9('ws.namePublished', { name: String(node.name) })}
+                      title={t9('ws.publishedTip')}
                       className="dl-tree__badge dl-tree__state dl-tree__state--published">
                       <Megaphone size={12} />
                     </span>
@@ -473,7 +474,7 @@ export default function WorkspaceTree({ selectedFolderId, onSelectFolder }: Prop
                       not also collapse the folder underneath it. */}
                   <span onClick={e => e.stopPropagation()} className="dl-tree__glyph">
                     <ActionMenu
-                      label={`Actions for ${node.name}`}
+                      label={t9('ws.actionsFor', { name: String(node.name) })}
                       triggerClassName="dl-tree__btn"
                       triggerStyle={undefined}
                       // The rail is `overflow-x: hidden` and 248px wide, so a
@@ -483,25 +484,25 @@ export default function WorkspaceTree({ selectedFolderId, onSelectFolder }: Prop
                       // room the rail does not.
                       align="end"
                       items={[
-                        { key: 'dashboard', label: 'New dashboard',
+                        { key: 'dashboard', label: t9('ws.newDashboard'),
                           icon: <BarChart3 size={13} />,
                           onSelect: () => void addDashboard(node.id) },
-                        { key: 'subfolder', label: 'New subfolder',
+                        { key: 'subfolder', label: t9('ws.newSubfolder'),
                           icon: <FolderPlus size={13} />,
                           onSelect: () => void addFolder(node.id) },
-                        { key: 'rename', label: 'Rename', icon: <Pencil size={13} />,
+                        { key: 'rename', label: t9('ws.rename'), icon: <Pencil size={13} />,
                           onSelect: () => void renameFolder(node) },
-                        { key: 'share', label: 'Share with people',
+                        { key: 'share', label: t9('ws.shareWithPeople'),
                           icon: <Share2 size={13} />,
                           onSelect: () => setShareNode(node) },
                         { key: 'publish',
-                          label: node.published ? 'Make private again' : 'Publish to everyone',
+                          label: node.published ? t9('ws.makePrivate') : t9('ws.publishAll'),
                           icon: <Megaphone size={13} />,
                           onSelect: () => void togglePublish(node) },
-                        { key: 'roles', label: 'Who can see it',
+                        { key: 'roles', label: t9('ws.whoSees'),
                           icon: node.role_ids.length ? <Lock size={13} /> : <Unlock size={13} />,
                           onSelect: () => void editRoles(node) },
-                        { key: 'delete', label: 'Delete folder', icon: <X size={13} />,
+                        { key: 'delete', label: t9('ws.deleteFolder'), icon: <X size={13} />,
                           danger: true, onSelect: () => void removeNode(node) },
                       ]}
                     />
@@ -509,8 +510,8 @@ export default function WorkspaceTree({ selectedFolderId, onSelectFolder }: Prop
                 </>
               ) : (
                 <button
-                  aria-label={`Remove ${node.name ?? 'report'} from the tree`}
-                  title="Remove from tree"
+                  aria-label={t9('ws.removeNamed', { name: String(node.name ?? '') })}
+                  title={t9('ws.removeFromTree')}
                   onClick={e => { e.stopPropagation(); void removeNode(node) }}
                   className="dl-tree__btn"
                 ><X size={14} /></button>
@@ -578,7 +579,7 @@ export default function WorkspaceTree({ selectedFolderId, onSelectFolder }: Prop
         {[0, 1, 2, 3].map(i => (
           <div key={i} className="dl-tree__skeleton" aria-hidden />
         ))}
-        <span className="dl-sr-only">Loading your workspaces…</span>
+        <span className="dl-sr-only">{t9('ws.loading')}</span>
       </div>
     )
   }
@@ -603,13 +604,13 @@ export default function WorkspaceTree({ selectedFolderId, onSelectFolder }: Prop
       <span aria-hidden className="dl-tree__glyph"><BarChart3 size={16} /></span>
       <span title={node.name ?? undefined} className="dl-tree__name">{node.name}</span>
       {node.my_capability === 'view' && (
-        <span title="View only" aria-label="View only"
+        <span title={t9('ws.viewOnly')} aria-label={t9('ws.viewOnly')}
           className="dl-tree__badge"><Eye size={12} /></span>
       )}
       <span className="dl-tree__actions">
         <button
-          aria-label={`File ${node.name} in the tree`}
-          title="Add to tree"
+          aria-label={t9('ws.fileNamed', { name: String(node.name) })}
+          title={t9('ws.addToTree')}
           onClick={e => { e.stopPropagation(); void fileReport(node, null) }}
           className="dl-tree__btn"
         ><Plus size={14} /></button>
@@ -625,14 +626,14 @@ export default function WorkspaceTree({ selectedFolderId, onSelectFolder }: Prop
         className="dl-tree__head">
         {/* Dropping on the header moves a node back to the root -- otherwise
             anything dragged into a folder could never come out again. */}
-        <span title="Drop here to move to the top level">Workspaces</span>
+        <span title={t9('ws.dropTop')}>{t9('ws.workspaces')}</span>
         <button
           // Wrapped, not passed by reference: addFolder now takes a parent and
           // the click event would arrive as one.
           onClick={() => void addFolder(null)}
           disabled={busy}
-          aria-label="New folder"
-          title="New folder"
+          aria-label={t9('ws.newFolder')}
+          title={t9('ws.newFolder')}
           className="dl-tree__btn dl-tree__btn--end"
         ><Plus size={14} /></button>
       </div>
@@ -652,7 +653,7 @@ export default function WorkspaceTree({ selectedFolderId, onSelectFolder }: Prop
           bordered block above and never borrows this copy. */}
       {tree.roots.length === 0 && tree.unfiled.length === 0 && (
         <p className="dl-tree__empty">
-          No folders yet. Create one to group your dashboards.
+          {t9('ws.empty')}
         </p>
       )}
 
@@ -669,7 +670,7 @@ export default function WorkspaceTree({ selectedFolderId, onSelectFolder }: Prop
           {tree.roots.map(node => renderNode(node, 0))}
           {tree.unfiled.length > 0 && (
             <>
-              <div className="dl-tree__group">Unfiled</div>
+              <div className="dl-tree__group">{t9('ws.unfiled')}</div>
               {tree.unfiled.map(renderUnfiled)}
             </>
           )}

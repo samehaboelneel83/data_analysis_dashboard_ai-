@@ -303,8 +303,20 @@ async def run_agent(db, *, question: str, source: DataSource | None = None,
     verdict = await classify(effective_question, await get_context(), client,
                              history=history)
     if verdict is None:
-        return _finish(run, started, status="failed",
-                       error="the model endpoint could not classify the question")
+        # No model -- switched off, not allowed for this data, out of budget
+        # or not answering. Ask AI still answers: with what the platform can
+        # compute by itself for this question (agent/without_model.py),
+        # saying plainly that no AI was used.
+        from . import without_model
+        from ..llm import AI_NOT_ALLOWED, BUDGET_SPENT
+        last = getattr(client, "last_error", None)
+        reason = ("AI is switched off for this data" if last == AI_NOT_ALLOWED
+                  else "the AI budget is used up" if last == BUDGET_SPENT
+                  else "AI is switched off" if not getattr(client, "enabled", True)
+                  else "it did not answer")
+        run.intent = "chat"
+        return _finish(run, started, status="ok",
+                       answer=without_model.answer(effective_question, await get_context(), reason))
     run.intent = verdict["intent"]
 
     # The message that is not a question about the data at all. Checked BEFORE

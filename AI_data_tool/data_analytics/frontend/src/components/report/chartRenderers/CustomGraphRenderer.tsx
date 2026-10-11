@@ -1,3 +1,4 @@
+import { useT } from '../../../i18n'
 import {
   ComposedChart, Bar, Line, Area, Scatter, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
@@ -32,6 +33,7 @@ interface Layer {
 export default function CustomGraphRenderer(
   { data, cfg, rtl, measureFmt }: ChartRendererProps,
 ) {
+  const t9 = useT()
   const layers: Layer[] = data?.layers ?? []
   const rows: Record<string, unknown>[] = data?.rows ?? []
   // This renderer draws its own axes rather than going through axisOptions,
@@ -59,9 +61,9 @@ export default function CustomGraphRenderer(
       <div style={{ height: '100%', display: 'flex', flexDirection: 'column',
         alignItems: 'center', justifyContent: 'center', gap: 4,
         color: 'var(--muted)', fontSize: 12, textAlign: 'center', padding: 10 }}>
-        <span>Add a layer to build this graph.</span>
+        <span>{t9('cr.addLayer')}</span>
         <span style={{ fontSize: 11 }}>
-          Each layer is a measure drawn as bars, a line, an area or points.
+          {t9('cr.layerHelp')}
         </span>
       </div>
     )
@@ -119,7 +121,7 @@ export default function CustomGraphRenderer(
         // Named, because a layer that silently never appears sends the author
         // looking for a bug in the chart rather than at a column that has gone.
         <div style={{ fontSize: 10, color: '#f59e0b', padding: '2px 6px' }}>
-          Not drawn — no such column: {skipped.join(', ')}
+          {t9('cr.noSuchColumn', { list: skipped.join(', ') })}
         </div>
       )}
     </div>

@@ -101,7 +101,9 @@ async def suggest_from_insights(df, profile: dict, probe=None,
     )
 
     try:
-        insights = generate_insights(df, detect_types(df), None)
+        from . import column_classes
+        _classed, _ = column_classes.classified(df, None)
+        insights = generate_insights(df, detect_types(df), _classed)
     except Exception as exc:                                 # noqa: BLE001
         return [], "the data could not be analysed: {}".format(exc)
 

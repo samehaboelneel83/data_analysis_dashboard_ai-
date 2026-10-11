@@ -192,7 +192,7 @@ class TestTheChatIntent:
         assert '"intent": "chat"' in prompt
         # ...and the example that stops it over-triggering: a greeting wrapped
         # around a real question is still the question.
-        assert "hi, how many orders are there" in prompt
+        assert "hi, how many rows are there" in prompt
 
     async def test_a_greeting_comes_back_as_chat(self):
         client = FakeClient({"intent": "chat", "ambiguous": False,

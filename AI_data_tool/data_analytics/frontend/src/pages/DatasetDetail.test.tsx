@@ -25,6 +25,9 @@ vi.mock('../services/api', () => ({
   // Phase 7.6: the "Use in Python" snippet reads the API origin.
   api: { defaults: { baseURL: 'http://localhost:8000/api/v1' } },
   // Phase 7.3: the header's sensitivity control.
+  // The Columns tab's profile facts (services/discovery/profile on the server).
+  discoveryApi: { profile: vi.fn().mockResolvedValue({ columns: [] }), health: vi.fn().mockRejectedValue(new Error('none')) },
+  allowAiApi: { get: vi.fn().mockResolvedValue({ own: null, effective: true, decided_by: 'default', connection: null }), set: vi.fn() },
   sensitivityApi: { get: vi.fn().mockResolvedValue({ label: null, effective: null, reasons: [],
     options: ['Public', 'Internal', 'Confidential', 'Restricted'], redacted_on_share: [] }), set: vi.fn() },
   widgetDataApi: { query: vi.fn() },
@@ -623,6 +626,10 @@ describe('DatasetDetail key influencers', () => {
         { id: 4, name: 'IMEI', dtype: 'numeric', missing_pct: 0, stats: {} },
         { id: 5, name: 'RATED_AMOUNT', dtype: 'numeric', missing_pct: 0, stats: {} },
       ]
+      // That IMEI is a code and LATITUDE a coordinate is the dataset's stored
+      // classification (read from the values on the server), not a telecom
+      // word the browser knows.
+      ds.column_meta = { IMEI: { number: 'code' }, LATITUDE: { number: 'level', geo_level: 'latitude' } } as any
       vi.mocked(datasetsApi.get).mockResolvedValue(ds)
       vi.mocked(analysisApi.get).mockResolvedValue(null)
       vi.mocked(analysisApi.keyInfluencers).mockResolvedValue(result)

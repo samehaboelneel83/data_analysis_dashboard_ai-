@@ -85,7 +85,7 @@ export default function HistoryPanel({
             ...g.items.map(c => (
               <li key={c.id} className={`dl-hist__item${selected === c.id ? ' is-current' : ''}`}>
                 {editing?.id === c.id ? (
-                  <input aria-label="Title" autoFocus value={editing.title} className="dl-hist__input"
+                  <input aria-label={t('askh.title')} autoFocus value={editing.title} className="dl-hist__input"
                     onChange={e => onEdit({ id: c.id, title: e.target.value })}
                     onKeyDown={e => {
                       if (e.key === 'Enter') onSave()
@@ -104,11 +104,11 @@ export default function HistoryPanel({
                   </button>
                 )}
                 <span className="dl-hist__tools">
-                  <button type="button" aria-label={`Rename ${c.title}`} title={t('ask.rename')} className="dl-hist__icon"
+                  <button type="button" aria-label={t('askh.rename', { name: c.title })} title={t('ask.rename')} className="dl-hist__icon"
                     onClick={() => onEdit({ id: c.id, title: c.title })}>
                     <Pencil size={13} aria-hidden />
                   </button>
-                  <button type="button" aria-label={`Delete ${c.title}`} title={t('ask.delete')} className="dl-hist__icon"
+                  <button type="button" aria-label={t('al.deleteName', { name: c.title })} title={t('ask.delete')} className="dl-hist__icon"
                     onClick={() => onDelete(c)}>
                     <Trash2 size={13} aria-hidden />
                   </button>

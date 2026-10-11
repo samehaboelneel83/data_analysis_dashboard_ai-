@@ -616,7 +616,7 @@ def one_proposal(widgets):
 
 
 async def probe_all_good(widget_type, config):
-    return {"type": "series", "rows": [{"name": "Cardiology", "value": 3}]}
+    return {"type": "series", "rows": [{"name": "Cardiology", "value": 3}, {"name": "Oncology", "value": 5}]}
 
 
 async def probe_all_empty(widget_type, config):
@@ -648,7 +648,7 @@ class TestProbingIsConcurrent:
             active["peak"] = max(active["peak"], active["now"])
             await asyncio.sleep(0.05)
             active["now"] -= 1
-            return {"type": "series", "rows": [{"name": "a", "value": 1}]}
+            return {"type": "series", "rows": [{"name": "a", "value": 1}, {"name": "b", "value": 3}]}
 
         widgets = [{"widget_type": "bar", "title": "w%d" % i, "why": "x",
                     "config": {"dimension": "department", "measure": "wait_minutes",
@@ -668,7 +668,7 @@ class TestProbingIsConcurrent:
             active["peak"] = max(active["peak"], active["now"])
             await asyncio.sleep(0.05)
             active["now"] -= 1
-            return {"type": "series", "rows": [{"name": "a", "value": 1}]}
+            return {"type": "series", "rows": [{"name": "a", "value": 1}, {"name": "b", "value": 3}]}
 
         widgets = [{"widget_type": "bar", "title": "w%d" % i, "why": "x",
                     "config": {"dimension": "department", "measure": "wait_minutes",
@@ -686,7 +686,7 @@ class TestProbingIsConcurrent:
         async def probe(widget_type, config):
             # The later ones finish first, to break any accidental ordering.
             await asyncio.sleep(0.05 if "1" in str(config.get("limit")) else 0.01)
-            return {"type": "series", "rows": [{"name": "a", "value": 1}]}
+            return {"type": "series", "rows": [{"name": "a", "value": 1}, {"name": "b", "value": 3}]}
 
         widgets = [{"widget_type": "bar", "title": "w%d" % i, "why": "x",
                     "config": {"dimension": "department", "measure": "wait_minutes",
@@ -731,7 +731,7 @@ class TestEndToEnd:
         got, _ = await suggest_for_dataset(
             profile, None, 1, client=FakeClient(one_proposal([GOOD])),
             probe=probe_all_good)
-        assert got[0]["widgets"][0]["row_count"] == 1
+        assert got[0]["widgets"][0]["row_count"] == 2
 
     async def test_it_retries_once_when_everything_was_rejected(self, profile):
         bad = {"widget_type": "bar", "title": "Invented",

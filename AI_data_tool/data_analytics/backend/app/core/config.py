@@ -1,4 +1,6 @@
-﻿from pydantic import Field, model_validator
+﻿from typing import Literal
+
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -94,6 +96,26 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_timeout_s: float = Field(default=180.0, gt=0)
     llm_enabled: bool = True
+    # Where the charts of an AI-designed dashboard come from.
+    #   cards -- the model CHOOSES among charts the platform has already built,
+    #            validated and drawn on the data (the statistics engine, the
+    #            discovery engine, the standard series). It cannot invent one:
+    #            the validated set is the single source of truth.
+    #   free  -- the model proposes its own charts, lens by lens, and each is
+    #            then checked and drawn (how it worked before 2026-10-11).
+    #   both  -- the model's own proposals join the validated set, and it also
+    #            chooses among everything that survived.
+    suggest_ai_selection: Literal["cards", "free", "both"] = "cards"
+    # What each numeric column of a dataset IS (an amount to add up, a level to
+    # average, a code...) is asked of the model ONCE per dataset and kept in
+    # its column settings (services/column_classes.py). That is what lets the
+    # platform read any field of work without a built-in list of one
+    # industry's words. False = the rows and a neutral vocabulary only.
+    classify_columns_with_model: bool = True
+    # "Allow AI" for an UPLOADED file that nobody set a choice on. A dataset
+    # built from a connection follows the connection's switch instead
+    # (services/ai_policy.py).
+    ai_for_uploads_default: bool = True
     # Several endpoints (services/llm_endpoints.py): a JSON list of
     #   {"id", "name", "base_url", "model", "strength"?, "context"?, "api_key"?}
     # used until a platform admin saves a list in Platform settings. Empty =
@@ -227,6 +249,21 @@ class Settings(BaseSettings):
     #: 112,650-row table would be a needless estimate; pulling millions across
     #: the wire to compute a mean is a download, not an analysis.
     analysis_row_cap: int = Field(default=250_000, ge=1)
+    #: Rows from which a SLOW analysis (one that fits a model) is queued as a
+    #: background job instead of answered in the request. Measured
+    #: (scripts/bench_discovery.py, 2026-10-11): each answers in 0.1-5.6 s on
+    #: 2,000,000 rows on the development machine, so the default leaves room
+    #: for a slower host. 0 = never queue by size.
+    analysis_background_rows: int = Field(default=1_000_000, ge=0)
+    #: Rows the discovery engine measures a dataset on -- its profile, and the
+    #: look at the rows before a suggestion is offered. A larger table is
+    #: sampled (seeded, so the same data gives the same answer) and says so.
+    discovery_sample_rows: int = Field(default=200_000, ge=1_000)
+    #: Threads the model fits may use (the search for groups of similar rows).
+    #: ONE by default: on a many-core host the numeric library's threads fight
+    #: over a small problem -- 26 s on 24 threads, 4 s on one, same answer
+    #: (2026-10-11). 0 = leave it to the library.
+    model_fit_threads: int = Field(default=1, ge=0, le=256)
 
     # The automation chain's per-run frame ceiling, in megabytes of parquet.
     #

@@ -1,3 +1,4 @@
+import { useT } from '../i18n'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { TrendingDown, TrendingUp } from 'lucide-react'
@@ -69,6 +70,7 @@ export default function DynamicPinCard({ tile, refreshNonce }: {
   tile: PinnedTileInfo
   refreshNonce?: number
 }) {
+  const t9 = useT()
   const [finding, setFinding] = useState<Finding | null>(null)
   const [state, setState] = useState<'loading' | 'ready' | 'gone' | 'error'>('loading')
   const [polished, setPolished] = useState<string | null>(null)
@@ -99,20 +101,19 @@ export default function DynamicPinCard({ tile, refreshNonce }: {
   }, [tile.dataset_id, tile.finding_key, refreshNonce])
 
   if (state === 'loading') {
-    return <p style={{ color: 'var(--muted)', fontSize: 12, margin: 0 }}>Evaluating…</p>
+    return <p style={{ color: 'var(--muted)', fontSize: 12, margin: 0 }}>{t9('dpc.evaluating')}</p>
   }
   if (state === 'error') {
     return (
       <p role="alert" style={{ color: 'var(--muted)', fontSize: 12, margin: 0 }}>
-        Could not evaluate this finding right now.
+        {t9('dpc.error')}
       </p>
     )
   }
   if (state === 'gone' || !finding) {
     return (
       <p data-testid="pin-dormant" style={{ color: 'var(--muted)', fontSize: 12, margin: 0 }}>
-        Not currently detected — the data may have changed. The pin stays until
-        you remove it.
+        {t9('dpc.gone')}
       </p>
     )
   }
@@ -124,15 +125,15 @@ export default function DynamicPinCard({ tile, refreshNonce }: {
         {(finding.novelty === 'new' || finding.novelty === 'changed') && (
           <span style={{ background: 'var(--accent)', color: 'var(--surface)',
             borderRadius: 3, padding: '0 5px', fontSize: 10.5, fontWeight: 700 }}>
-            {finding.novelty === 'new' ? 'NEW' : 'CHANGED'}
+            {finding.novelty === 'new' ? t9('dpc.new') : t9('dpc.changed')}
           </span>
         )}
         {finding.significant === true && (
           <span title={finding.p_adjusted != null
-              ? `adjusted p = ${finding.p_adjusted}` : 'statistically significant'}
+              ? t9('dpc.adjustedP', { p: finding.p_adjusted }) : t9('dpc.significantTip')}
             style={{ fontSize: 10.5, color: 'var(--muted)', border: '1px solid var(--border)',
               borderRadius: 3, padding: '0 4px' }}>
-            significant
+            {t9('dpc.significant')}
           </span>
         )}
       </div>

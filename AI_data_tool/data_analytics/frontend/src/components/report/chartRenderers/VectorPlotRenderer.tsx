@@ -1,3 +1,4 @@
+import { useT } from '../../../i18n'
 import type { ChartRendererProps } from './types'
 import { seriesColor } from '../chartUtils'
 
@@ -8,10 +9,11 @@ const PAD = 40
 interface VecRow { x: number; y: number; size: number; direction: number }
 
 export default function VectorPlotRenderer({ data, rtl }: ChartRendererProps) {
+  const t9 = useT()
   const rows: VecRow[] = data?.rows ?? []
 
   if (rows.length === 0) {
-    return <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>Configure widget to see data</div>
+    return <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12 }}>{t9('cr.configure')}</div>
   }
 
   const xs = rows.map(r => r.x), ys = rows.map(r => r.y), sizes = rows.map(r => Math.abs(r.size))
@@ -40,7 +42,7 @@ export default function VectorPlotRenderer({ data, rtl }: ChartRendererProps) {
           return (
             <g key={i}>
               <line x1={cx} y1={cy} x2={cx + dx} y2={cy + dy} stroke={seriesColor(0)} strokeWidth={1.5} markerEnd="url(#vec-arrowhead)" />
-              <title>{`(${r.x}, ${r.y}) size ${r.size} @ ${r.direction}°`}</title>
+              <title>{t9('cr.vector', { x: String(r.x), y: String(r.y), size: String(r.size), dir: String(r.direction) })}</title>
             </g>
           )
         })}

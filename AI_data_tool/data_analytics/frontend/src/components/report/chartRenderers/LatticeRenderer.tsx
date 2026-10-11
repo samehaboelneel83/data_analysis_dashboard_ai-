@@ -1,3 +1,4 @@
+import { useT } from '../../../i18n'
 import type { ComponentType } from 'react'
 import type { ChartRendererProps } from './types'
 import { MeasuredChart } from '../MeasuredChart'
@@ -20,6 +21,7 @@ export default function LatticeRenderer({ Inner, props }: {
   Inner: ComponentType<ChartRendererProps>
   props: ChartRendererProps
 }) {
+  const t9 = useT()
   const data = props.data
   const rowVals: (string | null)[] = data.row_values?.length ? data.row_values : [null]
   const colVals: (string | null)[] = data.col_values?.length ? data.col_values : [null]
@@ -43,7 +45,7 @@ export default function LatticeRenderer({ Inner, props }: {
     textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, padding: '0 4px' }
   return (
     <div data-testid="lattice" style={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      <div role="grid" aria-label={`${data.inner} by ${[data.rows_by, data.cols_by].filter(Boolean).join(' and ')}`}
+      <div role="grid" aria-label={t9('cr.innerBy', { inner: String(data.inner), by: [data.rows_by, data.cols_by].filter(Boolean).join(' × ') })}
         style={{ flex: 1, minHeight: 0, display: 'grid', gap: 4,
           gridTemplateColumns: `${hasRows ? '72px ' : ''}repeat(${colVals.length}, minmax(0, 1fr))`,
           gridTemplateRows: `${hasCols ? 'auto ' : ''}repeat(${rowVals.length}, minmax(0, 1fr))` }}>
@@ -80,7 +82,7 @@ export default function LatticeRenderer({ Inner, props }: {
             style={{ minWidth: 0, minHeight: 0, border: '1px solid var(--border)', borderRadius: 4, position: 'relative' }}>
             {empty
               ? <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 10, color: 'var(--muted)' }}>no rows</div>
+                  fontSize: 10, color: 'var(--muted)' }}>{t9('cr.noRows')}</div>
               : <MeasuredChart>{(w, h) => (
                   <Inner {...props} data={res} rows={res.rows ?? []} cfg={cellCfg} plotW={w} plotH={h} />
                 )}</MeasuredChart>}

@@ -47,7 +47,7 @@ export function pickInfluencerOutcome(ds: Dataset): OutcomePick {
   const measure = ds.columns.find(c => ds.column_meta?.[c.name]?.role === 'measure')?.name
   if (measure) return { target: measure, reason: 'measure', skipped }
 
-  const inferred = numeric.find(c => !looksLikeIdentifier(c.name) && nonAdditiveKind(c.name) === null
+  const inferred = numeric.find(c => !looksLikeIdentifier(c.name) && nonAdditiveKind(c.name, ds.column_meta) === null
                                      && (c.missing_pct ?? 0) < 100)?.name
   if (inferred) return { target: inferred, reason: 'inferred', skipped }
   return { target: null, reason: null, skipped }

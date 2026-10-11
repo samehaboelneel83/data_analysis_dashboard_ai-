@@ -8,6 +8,7 @@
  * without a word; a map missing a layer it does not mention reads as "there is
  * nothing there", which is the wrong conclusion.
  */
+import { useT } from '../../../i18n'
 import { useEffect, useMemo, useState } from 'react'
 import type { ChartRendererProps } from './types'
 import { COLORS, fmtStr } from '../chartUtils'
@@ -50,6 +51,7 @@ function useSets(ids: number[]) {
 
 export default function GeoLayerStackRenderer({ data, measureFmt, broadcasts, localSelected,
                                                 onClickPoint, plotW, plotH }: ChartRendererProps) {
+  const t9 = useT()
   const { ref, w, h, tiles, view } = useMapBox(plotW, plotH)
   const [hover, setHover] = useState<string | null>(null)
   const layers: StackLayer[] = (data as { layers?: StackLayer[] })?.layers ?? []
@@ -90,7 +92,7 @@ export default function GeoLayerStackRenderer({ data, measureFmt, broadcasts, lo
           const c = !l.error ? setOf(l)?.attribution : undefined
           return c ? [c] : []
         }))].join(' · ') || null}
-        role="img" aria-label={`Map with ${layers.filter(l => !l.error).length} layers`}>
+        role="img" aria-label={t9('cr.mapLayers', { n: layers.filter(l => !l.error).length })}>
         {COUNTRIES.map(f => (
           <path key={f.properties.name} d={path(f) ?? undefined} fill="var(--surface2)" stroke="var(--border)" strokeWidth={0.4} />
         ))}
@@ -167,12 +169,12 @@ export default function GeoLayerStackRenderer({ data, measureFmt, broadcasts, lo
             <span aria-hidden style={{ width: 8, height: 8, borderRadius: l.kind === 'regions' ? 2 : 4,
               background: l.error ? 'transparent' : layerColor(l, i), border: '1px solid var(--border)' }} />
             <span style={{ color: l.error ? 'var(--danger)' : 'var(--text)' }}>
-              {l.title}{l.error ? ` — not drawn: ${l.error}` : ''}
+              {l.title}{l.error ? ` — ${t9('cr.notDrawn', { why: String(l.error) })}` : ''}
               {!l.error && unmatched.length > 0 && (
-                <span style={{ color: 'var(--muted)' }}> · not on the map: {unmatched.slice(0, 3).join(', ')}{unmatched.length > 3 ? '…' : ''}</span>
+                <span style={{ color: 'var(--muted)' }}> · {t9('cr.notOnMap', { list: unmatched.slice(0, 3).join(', ') + (unmatched.length > 3 ? '…' : '') })}</span>
               )}
               {!l.error && l.truncation?.applied && (
-                <span style={{ color: 'var(--muted)' }}> · showing {l.truncation.shown?.toLocaleString()} of {l.truncation.of?.toLocaleString()}</span>
+                <span style={{ color: 'var(--muted)' }}> · {t9('cr.showingOf', { n: l.truncation.shown?.toLocaleString() ?? '', total: l.truncation.of?.toLocaleString() ?? '' })}</span>
               )}
             </span>
           </div>

@@ -1,3 +1,4 @@
+import { useT } from '../../i18n'
 import type { ReactNode } from 'react'
 import type { ReportPage, Widget } from '../../types/report'
 import { CrossFilterProvider } from './CrossFilterContext'
@@ -28,6 +29,7 @@ interface Props {
  * mirroring how drillthrough carries its source selection.
  */
 export default function TooltipPageOverlay({ page, x, y, onDismiss, renderWidget }: Props) {
+  const t9 = useT()
   return (
     <div
       role="tooltip"
@@ -54,7 +56,7 @@ export default function TooltipPageOverlay({ page, x, y, onDismiss, renderWidget
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 10 }}>
         <CrossFilterProvider pageMode={page.mobile_layout?.interaction_mode ?? 'manual'}>
           {page.widgets.length === 0 ? (
-            <span style={{ fontSize: 11, color: 'var(--muted)' }}>This page has no widgets yet</span>
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>{t9('cr.noWidgets')}</span>
           ) : (
             page.widgets.map(w => (
               <div key={w.id} style={{ minHeight: 100 }}>

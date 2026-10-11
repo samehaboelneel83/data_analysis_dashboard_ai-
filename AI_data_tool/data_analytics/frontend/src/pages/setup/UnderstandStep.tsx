@@ -15,6 +15,7 @@ import { useT, type TranslateFn } from '../../i18n'
 import { useDirection } from '../../contexts/DirectionContext'
 import { localDigits } from '../../lib/arabicFormats'
 import { metadataApi, setupApi, type SetupSample, type SetupSummary, type SetupTable } from '../../services/api'
+import MeaningCard from '../../components/setup/MeaningCard'
 import LoadError from '../../components/ui/LoadError'
 import LoadingState from '../../components/ui/LoadingState'
 
@@ -101,6 +102,8 @@ export default function UnderstandStep({ sourceId, onNext }: { sourceId: number;
       <Overview data={data} sourceId={sourceId} slow={gaveUp} onChanged={() => load()}
         onAskAgain={() => { polls.current = 0; setGaveUp(false); load(true) }}
         onCheckAgain={() => { polls.current = 0; setGaveUp(false); load() }} />
+
+      <MeaningCard sourceId={sourceId} canEdit={data.can_edit} />
 
       <section aria-labelledby="setup-main" className="setup-section">
         <h2 id="setup-main" className="setup-section__title">{t('setup.u.whereToStart')}</h2>

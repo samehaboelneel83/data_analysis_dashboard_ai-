@@ -39,6 +39,9 @@ REQUIRED_ROLES: dict[str, tuple[str, ...]] = {
     # Association rules: the columns are optional (blank = every usable text
     # column), and so is the column the conclusions must be about.
     "model_rules": (),
+    "model_influencers": ("response",),
+    # An analysis result as a tile: its inputs are the analysis' own parameters.
+    "analysis_result": (),
     "area": ("category",),
     "bar": ("category",),
     "box_plot": ("category", "measure"),
@@ -310,7 +313,7 @@ VOCABULARIES: dict[str, frozenset] = {
     "gauge_shape": frozenset({"arc", "speedometer", "bullet", "thermometer", "progress"}),
     "container_mode": frozenset({"group", "tabs", "scroll", "prompt", "precision"}),
     "dimension_granularity": frozenset({"year", "quarter", "month", "week", "day",
-                                        "hour", "hour_of_day",
+                                        "hour", "hour_of_day", "weekday", "month_of_year",
                                         "hijri_month", "hijri_year",
                                         "fiscal_year", "fiscal_quarter"}),
 }

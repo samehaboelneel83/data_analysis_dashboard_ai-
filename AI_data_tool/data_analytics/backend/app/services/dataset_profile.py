@@ -67,6 +67,14 @@ def _granularity_for(days: float) -> str:
     return "quarter"
 
 
+def _date_median(series: pd.Series) -> str | None:
+    try:
+        dt = pd.to_datetime(series, errors="coerce").dropna()
+        return None if dt.empty else str(dt.sort_values().iloc[len(dt) // 2])
+    except Exception:                                        # noqa: BLE001
+        return None
+
+
 def _looks_like(name: str, words) -> bool:
     low = str(name).lower()
     return any(low == w or low.endswith("_" + w) or low.startswith(w + "_")
@@ -100,15 +108,20 @@ def _coordinate_pairs(columns, roles) -> list:
     return pairs
 
 
-def _parent_child(df: pd.DataFrame, columns) -> list:
+def _parent_child(df: pd.DataFrame, columns, column_meta: dict | None = None) -> list:
     """Self-referencing pairs: an identifier column, and a column holding values
     drawn from it. That is what an org chart is, and nothing else in the profile
     would reveal it."""
-    ids = [c for c in columns if _is_id_like_column(c)]
+    ids = [c for c in columns if _is_id_like_column(c, column_meta)]
+    # A column that POINTS at the key: named for the link every kind of tree
+    # has (a parent; in an organisation, who one reports to), or itself an
+    # identifier other than the key. The check below (its values are all
+    # values of the key) is what makes it a tree -- of people, parts, accounts
+    # or places.
     parent_words = ("parent", "manager", "reports_to", "supervisor", "reports")
     out: list = []
     for cand in columns:
-        if not _looks_like(cand, parent_words):
+        if not (_looks_like(cand, parent_words) or cand in ids):
             continue
         for id_col in ids:
             if id_col == cand:
@@ -131,10 +144,23 @@ def _hierarchies(profiled) -> list:
     cats = [c for c in profiled
             if c["role"] == "categorical" and not c["is_identifier"]
             and not c["is_personal"] and 1 < (c["distinct"] or 0) <= HIGH_CARDINALITY]
-    if len(cats) < 2:
-        return []
-    ordered = sorted(cats, key=lambda c: c["distinct"])
-    return [[c["name"] for c in ordered[:3]]]
+    out: list = []
+    # Places nest by what they ARE, not by how many values they have: a
+    # country holds regions holds cities (the classification's geo_level).
+    rank = {"country": 0, "region": 1, "city": 2, "postcode": 3}
+    places = sorted([c for c in profiled if c.get("geo_level") in rank and c["role"] == "categorical"
+                     and not c["is_personal"]], key=lambda c: rank[c["geo_level"]])
+    levels: list = []
+    for c in places:
+        if not levels or rank[c["geo_level"]] > rank[next(p for p in places if p["name"] == levels[-1])["geo_level"]]:
+            levels.append(c["name"])
+    if len(levels) >= 2:
+        out.append(levels)
+    if len(cats) >= 2:
+        guessed = [c["name"] for c in sorted(cats, key=lambda c: c["distinct"])[:3]]
+        if guessed not in out:
+            out.append(guessed)
+    return out
 
 
 def _detect_role(series: pd.Series) -> str:
@@ -196,12 +222,29 @@ def build_profile(df: pd.DataFrame, type_map: dict | None = None,
             semantic = detect_semantic_type(series.dropna().head(200).tolist())
         except Exception:                                    # noqa: BLE001
             semantic = None
+        # The column's stored classification outranks its name
+        # (services/column_classes.py): `val2` recorded as a score is a score.
+        from . import semantic_guard as _guard
+        _number = _guard.recorded_number(name, column_meta)
         entry = {
             "name": name,
             "role": role,
             "distinct": int(series.nunique(dropna=True)) if len(series) else 0,
             "missing_pct": missing_pct(series),
-            "is_identifier": bool(_is_id_like_column(name)),
+            # When a date column's values fall: what orders the dates of a
+            # record (which began it, which finished it) without reading
+            # their names (insights.order_event_dates, completion_trends).
+            **({"date_median": _date_median(series)} if role == "datetime" else {}),
+            "is_identifier": (_number == "code") if _number else bool(_is_id_like_column(name)),
+            "number": _number,
+            "unit": (((column_meta or {}).get(name) or {}).get("unit")
+                     if isinstance((column_meta or {}).get(name), dict) else None),
+            "direction": _guard.direction_of(name, column_meta),
+            "order": _guard.value_order(name, column_meta),
+            "outcome": _guard.is_outcome(name, column_meta),
+            # country | region | city | postcode ... (services/column_classes.py)
+            "geo_level": ((column_meta or {}).get(name) or {}).get("geo_level")
+            if isinstance((column_meta or {}).get(name), dict) else None,
             "is_personal": bool(is_pii(semantic)),
             # A 0/1 column. The number people want from one is the SHARE that are
             # 1 -- a mortality rate, an abnormal rate -- which is its average.
@@ -234,7 +277,7 @@ def build_profile(df: pd.DataFrame, type_map: dict | None = None,
         "other_columns": overflow,
         "structure": {
             "coordinate_pairs": _coordinate_pairs(columns, roles),
-            "parent_child": _parent_child(df, columns),
+            "parent_child": _parent_child(df, columns, column_meta),
             "hierarchies": _hierarchies(profiled),
             "date_range": _date_range(profiled),
         },
@@ -319,6 +362,18 @@ def describe_for_prompt(profile: dict, knowledge=None) -> str:
         if c.get("is_flag"):
             head += ("  [0/1 flag - its share is `avg`; `count` of it counts "
                      "every row and is never a rate]")
+        if c.get("number") and c["number"] != "code":
+            how = ("add it up" if c["number"] in ("amount", "count")
+                   else "average it (or take its median); never total it")
+            way = {"higher_better": "; higher is BETTER", "higher_worse": "; higher is WORSE"}.get(
+                c.get("direction"), "")
+            head += "  [{}: {}{}]".format(c["number"], how, way)
+        if c.get("order"):
+            head += ("\n    ORDERED, low to high: " + " < ".join(str(v)[:20] for v in c["order"][:12])
+                     + "  -- chart it in this order (`sort_by`: \"order\"), never alphabetically")
+        if c.get("outcome"):
+            head += ("  [says what became of a row - compare groups by the SHARE with it, "
+                     "not by the count]")
         if c["role"] == "numeric" and c["min"] is not None:
             head += "  range {:g} to {:g}".format(c["min"], c["max"])
         if c["role"] == "datetime" and c["min"]:

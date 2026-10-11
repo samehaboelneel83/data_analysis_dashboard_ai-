@@ -6,6 +6,7 @@
  * map now names what it plots, how many places carry a value and the highest
  * and lowest; and carries its values as a table that is read, not drawn.
  */
+import { useT } from '../../../i18n'
 import { fmtStr } from '../chartUtils'
 
 export interface MapEntry { label: string; value: number }
@@ -28,17 +29,18 @@ export function mapSummary(kind: string, entries: MapEntry[], measureFmt?: unkno
 export function MapDataTable({ caption, entries, measureFmt, unmatched = 0 }: {
   caption: string; entries: MapEntry[]; measureFmt?: unknown; unmatched?: number
 }) {
+  const t9 = useT()
   const sorted = [...entries].sort((a, b) => b.value - a.value)
   return (
     <table className="dl-sr-only" data-testid="map-data-table">
-      <caption>{caption}{unmatched > 0 ? ` (${unmatched} row${unmatched === 1 ? '' : 's'} not placed on the map)` : ''}</caption>
-      <thead><tr><th scope="col">Place</th><th scope="col">Value</th></tr></thead>
+      <caption>{caption}{unmatched > 0 ? ` (${t9(unmatched === 1 ? 'cr.rowNotPlaced' : 'cr.rowsNotPlaced', { n: unmatched })})` : ''}</caption>
+      <thead><tr><th scope="col">{t9('cr.place')}</th><th scope="col">{t9('cr.value')}</th></tr></thead>
       <tbody>
         {sorted.slice(0, MAX_ROWS).map((e, i) => (
           <tr key={`${e.label}-${i}`}><th scope="row">{e.label}</th><td>{fmtStr(e.value, measureFmt as never)}</td></tr>
         ))}
         {sorted.length > MAX_ROWS && (
-          <tr><td colSpan={2}>{`… and ${sorted.length - MAX_ROWS} more`}</td></tr>
+          <tr><td colSpan={2}>{t9('cr.andMore', { n: sorted.length - MAX_ROWS })}</td></tr>
         )}
       </tbody>
     </table>

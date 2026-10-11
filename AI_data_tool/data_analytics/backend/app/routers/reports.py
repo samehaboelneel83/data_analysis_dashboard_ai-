@@ -1787,6 +1787,10 @@ async def suggest_widgets(report_id: int, db: AsyncSession = Depends(get_db),
     live = ds is not None and ds.mode == "directquery" and ds.data_source_id
     if ds is None or ds.org_id != report.org_id or not (ds.filename or live):
         raise HTTPException(400, "Suggestions need a dataset with data behind it")
+    # "Allow AI" for this data, applied to every model call below
+    # (services/ai_policy.py).
+    from ..services import ai_policy as _ai_policy
+    await _ai_policy.enter(db, datasets=[ds])
     # Read through THIS report, as a widget on it would: the report being
     # viewable is not by itself licence to its dataset (E01).
     await require_dataset_read(db, current_user, ds.id, report_id=report_id)
@@ -1814,6 +1818,8 @@ async def suggest_widgets(report_id: int, db: AsyncSession = Depends(get_db),
                        ds.id, exc_info=True)
         _ineligible = set()
 
+    from ..services import column_classes as column_classes_service
+    _class_hints = await column_classes_service.hints_for(db, ds, denied=set(denied or []))
     live_frame = None
     if live:
         # A live dataset is read through its SQL (row rule pushed down, denied
@@ -1843,16 +1849,165 @@ async def suggest_widgets(report_id: int, db: AsyncSession = Depends(get_db),
         if ds.calculated_columns:
             df = apply_calculated_columns(df, ds.calculated_columns, ds.custom_functions)
         type_map = detect_types(df)
-        result = generate_insights(df, type_map, ds.column_meta or {})
-        roles = effective_roles(type_map, ds.column_meta or {})
+        # Each column classified once and kept (services/column_classes.py).
+        from ..services import column_classes
+        meta, changed = column_classes.classified(df, ds.column_meta or {}, *_class_hints)
+        result = generate_insights(df, type_map, meta)
+        roles = effective_roles(type_map, meta)
         return {"suggestions": suggest_widgets_from_findings(
             result["findings"], roles, description, ineligible=_ineligible,
-            column_meta=ds.column_meta or {}, frame=df)}
+            column_meta=meta, frame=df), "_classes": meta if changed else None}
 
     try:
-        return await asyncio.to_thread(_run)
+        out = await asyncio.to_thread(_run)
+        classes = out.pop("_classes", None)
+        if classes is not None:
+            await column_classes_service.remember(db, ds, classes)
+        return out
     except FileNotFoundError:
         raise HTTPException(404, "Dataset file not found on server — please re-upload the file")
+
+
+# ── Suggestions that remember (docs/suggestions/PLAN.md, phase 4) ───────────
+from typing import Literal as _Literal
+
+from pydantic import BaseModel as _BaseModel, Field as _Field
+
+
+class SuggestionFeedbackIn(_BaseModel):
+    signature: str = _Field(..., min_length=1, max_length=600)
+    widget_type: str = _Field(..., min_length=1, max_length=50)
+    #: dismissed | added | restored (take a dismissal back)
+    action: _Literal["dismissed", "added", "restored"]
+
+
+async def _feedback_out(db: AsyncSession, user: User, dataset_id: int) -> dict:
+    """This person's dismissals on the dataset, and how each KIND of chart has
+    fared -- their own counts, and the organisation's for a kind they have not
+    judged yet."""
+    from ..models.models import SuggestionFeedback
+    rows = (await db.execute(select(SuggestionFeedback).where(
+        SuggestionFeedback.org_id == user.org_id, SuggestionFeedback.dataset_id == dataset_id))).scalars().all()
+    mine: dict[str, dict] = {}
+    org: dict[str, dict] = {}
+    for r in rows:
+        for bucket in ([mine, org] if r.user_id == user.id else [org]):
+            entry = bucket.setdefault(r.widget_type, {"added": 0, "dismissed": 0})
+            if r.action in entry:
+                entry[r.action] += 1
+    return {"dismissed": sorted(r.signature for r in rows if r.user_id == user.id and r.action == "dismissed"),
+            "types": mine, "org_types": org}
+
+
+@router.get("/{report_id}/pages/{page_id}/takeaways")
+async def page_takeaways(report_id: int, page_id: int, db: AsyncSession = Depends(get_db),
+                         current_user: User = Depends(get_current_user)):
+    """The key takeaways of one dashboard page, without a model: every data
+    widget computed as THIS reader sees it (row rules, hidden columns, report
+    filters), its result read back into a sentence with its own numbers, the
+    sentences in reading order (services/discovery/takeaways.py)."""
+    from ..schemas.schemas import WidgetDataRequest
+    from ..services.discovery import takeaways as takeaways_service
+    from .widget_data import _resolve_widget_data
+
+    report = await db.get(Report, report_id)
+    check_org(report, current_user, "Report not found")
+    page = (await db.execute(select(ReportPage).options(selectinload(ReportPage.widgets)).where(
+        ReportPage.id == page_id, ReportPage.report_id == report_id))).scalar_one_or_none()
+    if page is None or page.id not in await _visible_page_ids(db, report, current_user):
+        raise HTTPException(404, "Page not found")
+    common = [{"column": f["column"], "op": f["op"], "value": f["value"]}
+              for f in await _common_filters_of(report_id, db)]
+    items = []
+    for w in sorted(page.widgets, key=lambda x: ((x.layout or {}).get("y", 0), (x.layout or {}).get("x", 0)))[:40]:
+        if w.widget_type in ("text", "button", "image", "shape", "slicer", "container", "web_content", "script",
+                             "custom_visual", "table", "list"):
+            continue
+        cfg = dict(w.config or {})
+        ds_id = cfg.get("dataset_id") or report.dataset_id
+        if not ds_id:
+            continue
+        # The report's own filters narrow every widget on it, as on the page.
+        if common:
+            cfg["filters"] = [*(cfg.get("filters") or []), *common]
+        try:
+            result = await _resolve_widget_data(
+                int(ds_id), WidgetDataRequest(config=cfg, widget_type=w.widget_type, report_id=report.id),
+                db, current_user, via_report_id=report.id)
+        except Exception:  # noqa: BLE001 -- a widget the reader may not compute has nothing to say to them
+            result = None
+        items.append({"widget_id": w.id, "title": w.title, "widget_type": w.widget_type, "config": cfg,
+                      "result": result})
+    return {"report_id": report_id, "page_id": page_id, "page": page.name, **takeaways_service.summarise(items)}
+
+
+@router.get("/{report_id}/opportunities")
+async def report_opportunities(report_id: int, depth: int = 1, limit: int = 30, fresh: bool = False,
+                               db: AsyncSession = Depends(get_db),
+                               current_user: User = Depends(get_current_user)):
+    """What is worth adding to THIS dashboard: the discovery engine's cards
+    for the report's dataset, with the report's name and description as the
+    goal (services/discovery). The builder's Suggest pane reads this -- the
+    same engine, gate and evidence as every other door."""
+    from ..models.models import Dataset
+    from ..services import analysis_frame as frames
+    from ..services.discovery import engine as discovery
+
+    report = await db.get(Report, report_id)
+    check_org(report, current_user, "Report not found")
+    if not report.dataset_id:
+        raise HTTPException(400, "Attach a dataset to this report first")
+    ds = await db.get(Dataset, report.dataset_id)
+    live = ds is not None and ds.mode == "directquery" and ds.data_source_id
+    if ds is None or ds.org_id != report.org_id or not (ds.filename or live):
+        raise HTTPException(400, "Suggestions need a dataset with data behind it")
+    # Read through THIS report, as a widget on it would (E01).
+    await require_dataset_read(db, current_user, ds.id, report_id=report_id)
+    goal = " ".join(x for x in [report.name, report.description] if x)
+    try:
+        return await discovery.opportunities(db, current_user, ds, goal, depth=max(0, min(int(depth), 1)),
+                                             limit=max(1, min(int(limit), 60)), fresh=bool(fresh))
+    except frames.FrameUnavailable as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.get("/{report_id}/suggestion-feedback")
+async def get_suggestion_feedback(report_id: int, db: AsyncSession = Depends(get_db),
+                                  current_user: User = Depends(get_current_user)):
+    """What this person dismissed and added among the suggestions for this
+    report's dataset, on any device."""
+    report = await db.get(Report, report_id)
+    check_org(report, current_user, "Report not found")
+    if not report.dataset_id:
+        return {"dismissed": [], "types": {}, "org_types": {}}
+    return await _feedback_out(db, current_user, report.dataset_id)
+
+
+@router.post("/{report_id}/suggestion-feedback")
+async def post_suggestion_feedback(report_id: int, body: SuggestionFeedbackIn, db: AsyncSession = Depends(get_db),
+                                   current_user: User = Depends(get_current_user)):
+    """Record that a suggestion was dismissed, added, or that a dismissal was
+    taken back. One row per person, dataset and chart: the last action stands."""
+    from ..models.models import SuggestionFeedback
+    report = await db.get(Report, report_id)
+    check_org(report, current_user, "Report not found")
+    if not report.dataset_id:
+        raise HTTPException(400, "Attach a dataset to this report first")
+    await require_dataset_read(db, current_user, report.dataset_id, report_id=report_id)
+    row = (await db.execute(select(SuggestionFeedback).where(
+        SuggestionFeedback.user_id == current_user.id, SuggestionFeedback.dataset_id == report.dataset_id,
+        SuggestionFeedback.signature == body.signature))).scalar_one_or_none()
+    if body.action == "restored":
+        if row is not None and row.action == "dismissed":
+            await db.delete(row)
+    elif row is None:
+        db.add(SuggestionFeedback(org_id=current_user.org_id, user_id=current_user.id,
+                                  dataset_id=report.dataset_id, signature=body.signature,
+                                  widget_type=body.widget_type, action=body.action))
+    else:
+        row.action, row.widget_type = body.action, body.widget_type
+    await db.commit()
+    return await _feedback_out(db, current_user, report.dataset_id)
 
 
 @router.post("/{report_id}/auto-compose")
@@ -1924,8 +2079,10 @@ async def auto_compose(report_id: int, db: AsyncSession = Depends(get_db),
         if ds.calculated_columns:
             df = apply_calculated_columns(df, ds.calculated_columns, ds.custom_functions)
         type_map = detect_types(df)
-        result = generate_insights(df, type_map, ds.column_meta or {})
-        roles = effective_roles(type_map, ds.column_meta or {})
+        from ..services import column_classes
+        _meta, _ = column_classes.classified(df, ds.column_meta or {})
+        result = generate_insights(df, type_map, _meta)
+        roles = effective_roles(type_map, _meta)
         suggestions = suggest_widgets_from_findings(
             result["findings"], roles, description, ineligible=_ineligible,
             column_meta=ds.column_meta or {}, frame=df)

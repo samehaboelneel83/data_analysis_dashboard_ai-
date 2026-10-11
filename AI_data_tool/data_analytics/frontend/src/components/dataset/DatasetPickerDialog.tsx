@@ -10,6 +10,7 @@
  * Recents are this viewer's own picks in this browser (localStorage) -- a
  * convenience, never a source of truth, so every access is guarded.
  */
+import { useT } from '../../i18n'
 import { useMemo, useState } from 'react'
 import { Database, Search } from 'lucide-react'
 import type { Dataset } from '../../services/api'
@@ -53,13 +54,15 @@ export function sizeLabel(d: Dataset): string {
   return [rows, cols].filter(Boolean).join(' · ')
 }
 
-export default function DatasetPickerDialog({ datasets, onPick, onClose, title = 'Choose the data for this dashboard', excludeIds = [] }: {
+export default function DatasetPickerDialog({ datasets, onPick, onClose, title: titleIn, excludeIds = [] }: {
   datasets: Dataset[]
   onPick: (d: Dataset) => void
   onClose: () => void
   title?: string
   excludeIds?: number[]
 }) {
+  const t9 = useT()
+  const title = titleIn ?? t9('dpk.title')
   const ref = useModalDialog<HTMLDivElement>(onClose)
   const [query, setQuery] = useState('')
   const available = useMemo(() => datasets.filter(d => !excludeIds.includes(d.id)), [datasets, excludeIds])
@@ -107,21 +110,21 @@ export default function DatasetPickerDialog({ datasets, onPick, onClose, title =
           <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10 }}>{title}</div>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px', background: 'var(--surface2)' }}>
             <Search size={14} style={{ color: 'var(--muted)' }} />
-            <input autoFocus value={query} onChange={e => setQuery(e.target.value)} placeholder="Search datasets…" aria-label="Search datasets"
+            <input autoFocus value={query} onChange={e => setQuery(e.target.value)} placeholder={t9('dpk.searchPh')} aria-label={t9('dpk.search')}
               style={{ border: 'none', background: 'transparent', outline: 'none', flex: 1, font: 'inherit', color: 'var(--text)' }} />
           </label>
         </div>
         <div style={{ overflowY: 'auto', padding: '0 6px 8px' }}>
-          {recent.length > 0 && <>{heading('Recently used')}<ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>{recent.map(row)}</ul></>}
-          {rest.length > 0 && <>{heading(recent.length ? 'All datasets' : `${rest.length} dataset${rest.length === 1 ? '' : 's'}`)}<ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>{rest.map(row)}</ul></>}
+          {recent.length > 0 && <>{heading(t9('dpk.recent'))}<ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>{recent.map(row)}</ul></>}
+          {rest.length > 0 && <>{heading(recent.length ? t9('dpk.all') : rest.length === 1 ? t9('dpk.one') : t9('dpk.n', { n: rest.length }))}<ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>{rest.map(row)}</ul></>}
           {recent.length + rest.length === 0 && (
             <p style={{ padding: 16, color: 'var(--muted)', fontSize: 13 }}>
-              {available.length === 0 ? 'There are no datasets yet. Upload a file or connect a database first.' : `Nothing matches "${query}".`}
+              {available.length === 0 ? t9('dpk.none') : t9('dpk.noMatch', { q: query })}
             </p>
           )}
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, padding: '10px 16px', borderTop: '1px solid var(--border)' }}>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>Not now — I'll add data later</button>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>{t9('dpk.later')}</button>
         </div>
       </div>
     </div>

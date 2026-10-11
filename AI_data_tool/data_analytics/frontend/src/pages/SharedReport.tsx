@@ -1,3 +1,4 @@
+import { useT } from '../i18n'
 import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { sharedApi } from '../services/api'
@@ -30,6 +31,7 @@ const RATE_LIMITED = Symbol('rate-limited')
  * no credentials to re-query with.
  */
 export default function SharedReport() {
+  const t9 = useT()
   const { token } = useParams()
   const [report, setReport] = useState<(Report & { column_formats?: Record<string, unknown>; pinned?: boolean }) | null>(null)
   const [data, setData] = useState<Record<number, unknown> | null>(null)
@@ -91,7 +93,7 @@ export default function SharedReport() {
       {error}
     </div>
   )
-  if (!report || data === null) return <div style={{ padding: 40, color: 'var(--muted)' }}>Loading…</div>
+  if (!report || data === null) return <div style={{ padding: 40, color: 'var(--muted)' }}>{t9('common.loading')}</div>
 
   // The server already omits non-normal pages for guest links; this filter is
   // defense-in-depth (never trust the client's data shape blindly) and keeps
@@ -102,7 +104,7 @@ export default function SharedReport() {
   // belong in the tab strip here.
   const pages = report.pages.filter(p => p.page_type === 'normal')
   if (pages.length === 0) return (
-    <div style={{ padding: 40, color: 'var(--muted)' }}>This report has no page to show.</div>
+    <div style={{ padding: 40, color: 'var(--muted)' }}>{t9('shr.noPage')}</div>
   )
   const page = pages[Math.min(pageIdx, pages.length - 1)]
   const CELL = 62
@@ -113,19 +115,19 @@ export default function SharedReport() {
         borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
         <strong style={{ fontSize: 14 }}>{report.name}</strong>
         {report.classification && (
-          <span title="Sensitivity label" style={{
+          <span title={t9('shr.sensitivity')} style={{
             fontSize: 11, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase',
             color: '#fff', padding: '2px 7px', borderRadius: 4,
             background: ({ Public: '#2e7d32', Internal: '#1565c0', Confidential: '#e65100', Restricted: '#c62828' } as Record<string, string>)[report.classification] ?? '#666' }}>
             {report.classification}
           </span>
         )}
-        <span style={{ fontSize: 11, color: 'var(--muted)' }}>Shared view · read only</span>
+        <span style={{ fontSize: 11, color: 'var(--muted)' }}>{t9('shr.readOnly')}</span>
         {report.pinned && (
-          <span title="This link's pages and widget layout were frozen when it was created; the numbers still update live."
+          <span title={t9('shr.pinnedTip')}
             style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', border: '1px solid var(--border)',
               borderRadius: 4, padding: '2px 6px' }}>
-            Layout pinned at share time
+            {t9('shr.pinned')}
           </span>
         )}
         {pages.length > 1 && (
@@ -186,11 +188,11 @@ export default function SharedReport() {
                   justifyContent: 'center', gap: 8, height: '100%', border: '1px dashed var(--border)',
                   borderRadius: 8, background: 'var(--surface)', color: 'var(--muted)', fontSize: 12,
                   textAlign: 'center', padding: 10 }}>
-                  <span>Temporarily rate-limited — retrying may help</span>
+                  <span>{t9('shr.rateLimited')}</span>
                   <button onClick={() => retryWidget(w)}
                     style={{ padding: '3px 10px', fontSize: 11, borderRadius: 6, border: '1px solid var(--border)',
                       background: 'var(--surface2)', color: 'var(--text)', cursor: 'pointer' }}>
-                    Try again
+                    {t9('sb.retry')}
                   </button>
                 </div>
               ) : (
@@ -206,7 +208,7 @@ export default function SharedReport() {
           ))}
         </div>
         {narrow && pages.length > 1 && (
-          <div role="tablist" aria-label="Pages" style={{ position: 'fixed', bottom: 10, left: 0, right: 0,
+          <div role="tablist" aria-label={t9('shx.ex.pages')} style={{ position: 'fixed', bottom: 10, left: 0, right: 0,
             display: 'flex', justifyContent: 'center', gap: 6 }}>
             {pages.map((p, i) => (
               <button key={p.id} role="tab" aria-selected={i === pageIdx} aria-label={p.name} onClick={() => setPageIdx(i)}

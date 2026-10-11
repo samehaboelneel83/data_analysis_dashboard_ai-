@@ -111,3 +111,87 @@ async def test_home_lists_only_unfinished_journeys(client, db_session, two_orgs,
     await client.patch(f"/api/v1/setup/{shop.id}", headers=auth_headers["a"], json={"step": "done"})
     resp = await client.get("/api/v1/setup/journeys", headers=auth_headers["a"])
     assert [j["source"]["name"] for j in resp.json()] == ["cars"]
+
+
+# ── flows: several analyses (steps 2-4) on one connection (PLAN_V2, part 1) ──
+
+async def _past_understand(client, src, headers):
+    await client.get(f"/api/v1/setup/{src.id}", headers=headers)
+    return (await client.patch(f"/api/v1/setup/{src.id}", headers=headers, json={"step": "data"})).json()
+
+
+async def test_a_second_analysis_never_replaces_the_first(client, db_session, two_orgs, auth_headers):
+    h = auth_headers["a"]
+    src = await _source(db_session, two_orgs["a"]["org"].id)
+    first = await _past_understand(client, src, h)
+    ds = Dataset(name="parcels", org_id=two_orgs["a"]["org"].id, data_source_id=src.id)
+    db_session.add(ds)
+    await db_session.commit()
+    await db_session.refresh(ds)
+    await client.patch(f"/api/v1/setup/{src.id}", headers=h, json={
+        "brief": {"work": "ops manager", "focus": "Express only"}, "dataset_ids": [ds.id],
+        "created_ids": [ds.id], "step": "check"})
+
+    second = (await client.post(f"/api/v1/setup/{src.id}/flows", headers=h)).json()
+    assert second["flow_id"] != first["flow_id"] and second["step"] == "data"
+    # Who the person is was asked once; what they want this time was not.
+    assert second["brief"] == {"work": "ops manager"} and second["dataset_ids"] == []
+    assert [f["step"] for f in second["flows"]] == ["check", "data"]
+
+    await client.patch(f"/api/v1/setup/{src.id}", headers=h, params={"flow": second["flow_id"]},
+                       json={"brief": {"focus": "returns"}})
+    one = (await client.get(f"/api/v1/setup/{src.id}", headers=h, params={"flow": first["flow_id"]})).json()
+    assert one["brief"]["focus"] == "Express only" and one["dataset_ids"] == [ds.id] and one["step"] == "check"
+    two = (await client.get(f"/api/v1/setup/{src.id}", headers=h, params={"flow": second["flow_id"]})).json()
+    assert two["brief"] == {"focus": "returns"} and two["step"] == "data"
+
+
+async def test_pressing_new_twice_makes_one_empty_analysis(client, db_session, two_orgs, auth_headers):
+    h = auth_headers["a"]
+    src = await _source(db_session, two_orgs["a"]["org"].id)
+    await _past_understand(client, src, h)
+    a = (await client.post(f"/api/v1/setup/{src.id}/flows", headers=h)).json()
+    b = (await client.post(f"/api/v1/setup/{src.id}/flows", headers=h)).json()
+    assert a["flow_id"] == b["flow_id"] and len(b["flows"]) == 1      # the first was still empty
+
+
+async def test_a_journey_from_before_flows_keeps_its_progress(client, db_session, two_orgs, auth_headers, org_admin=None):
+    from app.models.models import SetupJourney
+    org, user = two_orgs["a"]["org"], two_orgs["a"]["user"]
+    src = await _source(db_session, org.id)
+    db_session.add(SetupJourney(org_id=org.id, user_id=user.id, data_source_id=src.id, step="check",
+                                brief={"work": "dealer"}, proposals={"items": [{"id": "p1"}]}))
+    await db_session.commit()
+    body = (await client.get(f"/api/v1/setup/{src.id}", headers=auth_headers["a"])).json()
+    assert body["step"] == "check" and body["brief"] == {"work": "dealer"} and len(body["flows"]) == 1
+    step = (await client.get(f"/api/v1/setup/{src.id}/datasets", headers=auth_headers["a"])).json()
+    assert [p["id"] for p in step["proposals"]["items"]] == ["p1"]
+
+
+async def test_home_offers_each_unfinished_analysis_and_can_rename_or_remove_one(
+        client, db_session, two_orgs, auth_headers):
+    h = auth_headers["a"]
+    src = await _source(db_session, two_orgs["a"]["org"].id)
+    first = await _past_understand(client, src, h)
+    await client.patch(f"/api/v1/setup/{src.id}", headers=h, json={"brief": {"focus": "Express only"}})
+    second = (await client.post(f"/api/v1/setup/{src.id}/flows", headers=h)).json()
+    await client.patch(f"/api/v1/setup/{src.id}/flows/{second['flow_id']}", headers=h, json={"name": "Returns"})
+    mine = (await client.get("/api/v1/setup/journeys", headers=h)).json()
+    assert {(m["flow_id"], m["flow_name"]) for m in mine} == {(first["flow_id"], "Express only"),
+                                                               (second["flow_id"], "Returns")}
+    # A finished analysis is no longer offered to continue.
+    await client.patch(f"/api/v1/setup/{src.id}", headers=h, params={"flow": first["flow_id"]}, json={"step": "done"})
+    mine = (await client.get("/api/v1/setup/journeys", headers=h)).json()
+    assert [m["flow_id"] for m in mine] == [second["flow_id"]]
+    left = (await client.patch(f"/api/v1/setup/{src.id}/flows/{second['flow_id']}", headers=h,
+                               json={"archived": True})).json()
+    assert [f["id"] for f in left["flows"]] == [first["flow_id"]]
+
+
+async def test_another_persons_analysis_cannot_be_opened(client, db_session, two_orgs, auth_headers):
+    org = two_orgs["a"]["org"]
+    src = await _source(db_session, org.id)
+    mine = await _past_understand(client, src, auth_headers["a"])
+    other = await _member(db_session, org.id, "flows-other@example.invalid")
+    resp = await client.get(f"/api/v1/setup/{src.id}", headers=_h(other), params={"flow": mine["flow_id"]})
+    assert resp.status_code == 404

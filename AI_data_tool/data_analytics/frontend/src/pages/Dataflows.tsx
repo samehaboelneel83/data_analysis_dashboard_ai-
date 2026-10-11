@@ -48,7 +48,7 @@ export default function Dataflows() {
   const [srcCols, setSrcCols] = useState<string[]>([])
   const [snapGroup, setSnapGroup] = useState('')
   const [snapCount, setSnapCount] = useState('')   // '' = rows, else distinct of this column
-  const [snapAs, setSnapAs] = useState('headcount')
+  const [snapAs, setSnapAs] = useState('row_count')
   const [snapBackfill, setSnapBackfill] = useState(false)
   const [bfFrom, setBfFrom] = useState('')
   const [bfTo, setBfTo] = useState('')
@@ -60,7 +60,7 @@ export default function Dataflows() {
       if (!live) return
       const cols = (d.columns ?? []).map(c => c.name)
       setSrcCols(cols)
-      setBfFrom(cols.find(c => /^(from|start|valid_from|hire)_?(date|dt)?$/i.test(c)) ?? '')
+      setBfFrom(cols.find(c => /^(from|start|valid_from|begin)_?(date|dt)?$/i.test(c)) ?? '')
       setBfTo(cols.find(c => /^(to|end|valid_to|until)_?(date|dt)?$/i.test(c)) ?? '')
     }).catch(() => { if (live) setSrcCols([]) })
     return () => { live = false }
@@ -88,7 +88,7 @@ export default function Dataflows() {
     try {
       const snapshot: DataflowSnapshot | null = kind === 'snapshot' ? {
         every: 'month', group_by: snapGroup ? [snapGroup] : [],
-        measure: snapCount || null, agg: snapCount ? 'nunique' : 'count', as: snapAs.trim() || 'headcount',
+        measure: snapCount || null, agg: snapCount ? 'nunique' : 'count', as: snapAs.trim() || 'row_count',
         backfill: snapBackfill && bfFrom && bfTo ? { from_column: bfFrom, to_column: bfTo, start: bfStart } : null,
       } : null
       const flow = await dataflowsApi.create({ name: newName.trim(), source_dataset_id: Number(newSource), steps: [],

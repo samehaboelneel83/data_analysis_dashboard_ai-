@@ -41,8 +41,8 @@ describe('Guided setup — Choose data', () => {
     renderStep()
     fireEvent.change(await screen.findByLabelText('What is your work?'), { target: { value: 'Lawyer' } })
     fireEvent.click(screen.getByRole('button', { name: 'Suggest datasets' }))
-    await waitFor(() => expect(setupApi.update).toHaveBeenCalledWith(38, { brief: { work: 'Lawyer' } }))
-    expect(setupApi.suggestDatasets).toHaveBeenCalledWith(38, 'en')
+    await waitFor(() => expect(setupApi.update).toHaveBeenCalledWith(38, { brief: { work: 'Lawyer' } }, undefined))
+    expect(setupApi.suggestDatasets).toHaveBeenCalledWith(38, 'en', undefined)
   })
 
   it('can skip About you', async () => {
@@ -73,7 +73,7 @@ describe('Guided setup — Choose data', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Change it' }))
     fireEvent.change(screen.getByRole('textbox', { name: /Ask for a change/ }), { target: { value: 'only 2015 and newer' } })
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
-    await waitFor(() => expect(setupApi.refineDataset).toHaveBeenCalledWith(38, 'p1', 'only 2015 and newer', 'en'))
+    await waitFor(() => expect(setupApi.refineDataset).toHaveBeenCalledWith(38, 'p1', 'only 2015 and newer', 'en', undefined))
   })
 
   it('creates the chosen dataset, waits for the import, then moves on', async () => {
@@ -84,8 +84,8 @@ describe('Guided setup — Choose data', () => {
     const onDone = renderStep()
     fireEvent.click(await screen.findByRole('checkbox', { name: 'Use "Car prices"' }))
     fireEvent.click(screen.getByRole('button', { name: 'Create 1 dataset and continue' }))
-    await waitFor(() => expect(onDone).toHaveBeenCalledWith([501]))
-    expect(setupApi.createDatasets).toHaveBeenCalledWith(38, [{ id: 'p1', name: 'Car prices' }], 'import')
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith([501], [501]))
+    expect(setupApi.createDatasets).toHaveBeenCalledWith(38, [{ id: 'p1', name: 'Car prices' }], 'import', undefined)
   })
 
   it('can use datasets that already exist instead', async () => {
@@ -93,7 +93,7 @@ describe('Guided setup — Choose data', () => {
     const onDone = renderStep()
     fireEvent.click(await screen.findByRole('checkbox', { name: /cars_hatla2ee/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Next: Check & discover' }))
-    await waitFor(() => expect(onDone).toHaveBeenCalledWith([7]))
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith([7], []))
     expect(setupApi.createDatasets).not.toHaveBeenCalled()
   })
 

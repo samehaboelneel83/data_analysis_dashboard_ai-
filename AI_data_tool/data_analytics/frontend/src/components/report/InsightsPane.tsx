@@ -33,6 +33,7 @@ export default function InsightsPane({ datasetId, columnTypes, onAdd, reportId, 
   /** Called after a page is written, so the builder can reload and show it. */
   onComposed?: (pageId: number) => void
 }) {
+  const t9 = useT()
   const t = useT()
   // The engine's kinds, in the reader's words (QA2 T12); an unknown kind is
   // shown as sent.
@@ -147,8 +148,8 @@ export default function InsightsPane({ datasetId, columnTypes, onAdd, reportId, 
                       border: `1px solid ${f.significant ? 'var(--accent)' : 'var(--border)'}` }}>
                       {f.evidence.test} · {f.evidence.effect} · n = {f.evidence.n.toLocaleString()} ·{' '}
                       {f.p_value < 0.001 ? 'p < 0.001' : `p = ${f.p_value.toPrecision(2)}`}
-                      {f.p_adjusted != null ? ` (adjusted ${f.p_adjusted < 0.001 ? '< 0.001' : f.p_adjusted.toPrecision(2)})` : ''}
-                      {f.significant ? '' : ' · not significant'}
+                      {f.p_adjusted != null ? ` (${t9('cr.adjusted', { p: f.p_adjusted < 0.001 ? '< 0.001' : f.p_adjusted.toPrecision(2) })})` : ''}
+                      {f.significant ? '' : ` · ${t9('cr.notSignificant')}`}
                     </div>
                   )}
                   <div style={{ display: 'flex', gap: 6 }}>

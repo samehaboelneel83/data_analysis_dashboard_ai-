@@ -18,6 +18,15 @@ from app.models.models import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _the_model_proposes_its_own_charts(monkeypatch):
+    """These tests are of the "free" way of designing (the model proposes,
+    lens by lens); the default is now "cards" (tests/test_suggest_cards.py)."""
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "suggest_ai_selection", "free")
+
+
+
 @pytest.fixture
 def clinic_csv(tmp_path):
     p = tmp_path / "clinic.csv"

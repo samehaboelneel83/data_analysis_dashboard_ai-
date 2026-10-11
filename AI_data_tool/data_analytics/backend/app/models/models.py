@@ -10,6 +10,10 @@ class Dataset(Base):
     name        = Column(String(255), nullable=False)
     description = Column(Text)
     filename    = Column(String(500))
+    #: "Allow AI" for this dataset. None = follow the connection it was built
+    #: from, or the installation default for an upload; False always wins
+    #: (services/ai_policy.py).
+    allow_ai    = Column(Boolean, nullable=True)
     row_count   = Column(Integer, default=0)
     col_count   = Column(Integer, default=0)
     file_size   = Column(BigInteger, default=0)
@@ -2580,3 +2584,118 @@ class SetupJourney(Base):
     designs        = Column(JSON, nullable=True)
     created_at     = Column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at     = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class DatasetProfile(Base):
+    """What is remembered about a dataset so it is not read again
+    (services/discovery/profile.py): each column's kind, counts, ranges,
+    category labels, date coverage -- measured once per version of the data.
+
+    A TABLE OF ITS OWN, deliberately. The first version kept this in
+    `DatasetColumn.stats` and `Dataset.column_meta`, which are returned with
+    every dataset payload: a reader under a row rule would have been handed
+    the ranges and labels of rows they may not see. Nothing serialises this
+    table; it is read only through `profile.for_reader`, which removes hidden
+    columns and withholds every value-level figure from a restricted reader.
+    """
+    __tablename__ = "dataset_profiles"
+    dataset_id  = Column(Integer, ForeignKey("datasets.id", ondelete="CASCADE"), primary_key=True)
+    #: The data's fingerprint when this was measured (profile.fingerprint).
+    version     = Column(String(120), nullable=False)
+    #: {"table": {...}, "columns": {name: stats}}
+    body        = Column(JSON, nullable=False, default=dict)
+    measured_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class SuggestionFeedback(Base):
+    """What a person did with a suggested chart (docs/suggestions/PLAN.md,
+    phase 4): dismissed it, or added it to a dashboard.
+
+    A dismissal used to live in one browser's storage: it came back on the
+    next device, and nothing anywhere knew which kinds of suggestion people
+    keep or throw away. Kept here per person and dataset, a dismissed idea
+    stays dismissed everywhere, and the counts per kind of chart rank what is
+    offered next -- counts only, no model.
+    """
+    __tablename__ = "suggestion_feedback"
+    __table_args__ = (UniqueConstraint("user_id", "dataset_id", "signature", name="uq_suggestion_feedback_sig"),)
+    id          = Column(Integer, primary_key=True)
+    org_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id     = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    dataset_id  = Column(Integer, ForeignKey("datasets.id", ondelete="CASCADE"), nullable=False, index=True)
+    #: The chart's identity as the pane computes it (type + what it measures by what).
+    signature   = Column(String(600), nullable=False)
+    widget_type = Column(String(50), nullable=False)
+    #: dismissed | added -- the LAST thing the person did with it.
+    action      = Column(String(20), nullable=False)
+    created_at  = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class MeaningFact(Base):
+    """One checked fact about what a connection's data MEANS
+    (docs/meaning-map/PLAN.md) -- beside the catalog, which says what shape
+    it has.
+
+    A count says nothing until it is read against its base: 1,000 complaints
+    out of 1,000,000 shipments is nothing. No engine could know that from
+    tables and joins, so it is written down once per connection -- measured on
+    the database, named by the model, corrected by a person -- and read by
+    every step.
+
+    kind:  grain   what one row of a table is, and what kind of table it is
+           base    events counted against the rows they happen to
+           outcome a column saying what became of a row (late, returned)
+           number  what a numeric column is: amount, level, duration, score...
+    """
+    __tablename__ = "meaning_facts"
+    __table_args__ = (UniqueConstraint("data_source_id", "kind", "subject", name="uq_meaning_facts_subject"),)
+    id             = Column(Integer, primary_key=True)
+    org_id         = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    data_source_id = Column(Integer, ForeignKey("data_sources.id", ondelete="CASCADE"), nullable=False, index=True)
+    kind           = Column(String(20), nullable=False)
+    #: "table", "table.column" or "events>base": what the fact is about.
+    subject        = Column(String(600), nullable=False)
+    body           = Column(JSON, nullable=False)
+    #: measured (counted on the database) | ai | confirmed (a person's word wins)
+    source         = Column(String(20), nullable=False, default="measured", server_default="measured")
+    #: active | rejected -- a person can say "not right"; it is then never used.
+    status         = Column(String(20), nullable=False, default="active", server_default="active")
+    measured_at    = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class SetupFlow(Base):
+    """One run of steps 2-4 of the guided setup (docs/guided-setup/PLAN_V2.md, part 1).
+
+    A person can want several things from one database: the journey keeps
+    what is shared (the Understand step's words), and each flow keeps its own
+    request, datasets, check and dashboard, so a second analysis never
+    replaces the first and two can be worked on side by side.
+    """
+    __tablename__ = "setup_flows"
+    id             = Column(Integer, primary_key=True)
+    org_id         = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id        = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    journey_id     = Column(Integer, ForeignKey("setup_journeys.id", ondelete="CASCADE"), nullable=False, index=True)
+    data_source_id = Column(Integer, ForeignKey("data_sources.id", ondelete="CASCADE"), nullable=False, index=True)
+    name           = Column(String(255), nullable=True)
+    #: data | check | dashboard | done
+    step           = Column(String(20), nullable=False, default="data", server_default="data")
+    #: {"work", "focus", "questions", "exclude"} -- what the person typed
+    brief          = Column(JSON, nullable=True)
+    #: What the person wants, written once from everything they said and
+    #: checked against the data (services/guided_setup/demand.py). Binding on
+    #: the check and the dashboard, unlike `brief`, which is only a hint.
+    demand         = Column(JSON, nullable=True)
+    dataset_ids    = Column(JSON, nullable=True)
+    #: The datasets this flow made itself: only these are cleaned automatically.
+    created_ids    = Column(JSON, nullable=True)
+    report_id      = Column(Integer, ForeignKey("reports.id", ondelete="SET NULL"), nullable=True)
+    proposals      = Column(JSON, nullable=True)
+    findings       = Column(JSON, nullable=True)
+    #: {"<dataset id>": {"actions": [...], "undone": [...], "rows_before", "rows_after"}}
+    cleaning       = Column(JSON, nullable=True)
+    designs        = Column(JSON, nullable=True)
+    archived       = Column(Boolean, nullable=False, default=False, server_default="0")
+    created_at     = Column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at     = Column(DateTime(timezone=True), default=datetime.utcnow)
+

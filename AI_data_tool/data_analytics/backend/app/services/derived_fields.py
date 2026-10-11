@@ -34,10 +34,7 @@ import pandas as pd
 _GENERIC = {"total", "sum", "count", "num", "number", "n", "all", "value", "amount", "daily",
             "per", "day", "qty", "quantity", "of"}
 #: A date the record is promised or due by.
-_PROMISE = ("estimated", "expected", "due", "deadline", "limit", "promised", "planned", "sla", "target")
-#: A date something actually happened on.
-_ACTUAL = ("delivered", "delivery", "completed", "closed", "resolved", "shipped", "carrier", "finished",
-           "done", "actual", "returned", "paid", "approved")
+_PROMISE = ("estimated", "expected", "due", "deadline", "limit", "promised", "planned", "target")
 MAX_DURATIONS = 3
 MAX_RATES = 3
 
@@ -60,10 +57,11 @@ def _numeric(df: pd.DataFrame, c: str) -> pd.Series:
     return pd.to_numeric(df[c], errors="coerce")
 
 
-def rate_measures(df: pd.DataFrame, nums: list[str], taken: set[str]) -> list[dict]:
+def rate_measures(df: pd.DataFrame, nums: list[str], taken: set[str],
+                  column_meta: dict | None = None) -> list[dict]:
     """Part/whole pairs drawn as SUM(part) / SUM(whole) * 100."""
     from .semantic_guard import is_intensive, non_additive_kind
-    cands = [c for c in nums if not is_intensive(c) and non_additive_kind(c) is None]
+    cands = [c for c in nums if not is_intensive(c, column_meta) and non_additive_kind(c, column_meta) is None]
     out: list[dict] = []
     # A total, when there is one, is THE whole: canceled orders are a share
     # of total orders, not of delivered orders.
@@ -117,7 +115,7 @@ def durations(df: pd.DataFrame, date_cols: list[str], taken: set[str]) -> list[d
     """Days from the record's start date to each later event, and days late
     against a promised date."""
     from .insights import order_event_dates
-    dates = _dates(df, order_event_dates(list(date_cols)))
+    dates = _dates(df, order_event_dates(list(date_cols), df))
     if len(dates) < 2:
         return []
     start = next(iter(dates))
@@ -155,7 +153,10 @@ def durations(df: pd.DataFrame, date_cols: list[str], taken: set[str]) -> list[d
     for promise in dates:
         if not any(k in promise.lower() for k in _PROMISE):
             continue
-        actuals = [a for a in dates if a != promise and any(k in a.lower() for k in _ACTUAL)
+        # What a promise is measured against is any date something HAPPENED on
+        # after the record began -- whatever that event is called in this
+        # field of work. Which one: the event that lands nearest the promise.
+        actuals = [a for a in dates if a not in (promise, start)
                    and not any(k in a.lower() for k in _PROMISE)]
 
         def distance(a: str) -> float:
@@ -193,7 +194,8 @@ def durations(df: pd.DataFrame, date_cols: list[str], taken: set[str]) -> list[d
 
 
 def propose(df: pd.DataFrame | None, roles: dict[str, str],
-            ineligible: set[str] | None = None, mixed: dict | None = None) -> dict:
+            ineligible: set[str] | None = None, mixed: dict | None = None,
+            column_meta: dict | None = None) -> dict:
     if df is None or len(df) < 20:
         return {"measures": [], "calculated_columns": [], "facts": []}
     blocked = {str(c).casefold() for c in (ineligible or set())}
@@ -201,7 +203,7 @@ def propose(df: pd.DataFrame | None, roles: dict[str, str],
     nums = [c for c in cols if roles.get(c) == "numeric" and c not in (mixed or {})]
     dates = [c for c in cols if roles.get(c) == "datetime"]
     taken = set(map(str, df.columns))
-    fields = rate_measures(df, nums, taken) + durations(df, dates, taken)
+    fields = rate_measures(df, nums, taken, column_meta) + durations(df, dates, taken)
     measures = [f for f in fields if f["kind"] in ("rate", "late_rate")]
     calc = [f for f in fields if f["kind"] in ("duration", "lateness")]
     return {"measures": measures, "calculated_columns": calc, "facts": [f["fact"] for f in fields]}

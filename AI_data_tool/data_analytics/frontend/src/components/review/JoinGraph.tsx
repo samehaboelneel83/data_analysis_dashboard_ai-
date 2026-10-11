@@ -1,3 +1,5 @@
+import { useT } from '../../i18n'
+import { rich } from '../../i18n/pages/modelsMaps'
 import { useMemo, useState } from 'react'
 import ReactFlow, {
   Background, Controls, MarkerType,
@@ -67,6 +69,7 @@ export interface JoinGraphProps {
 }
 
 export default function JoinGraph({ queue, selectedIds, onToggle, filter }: JoinGraphProps) {
+  const t9 = useT()
   const [focusId, setFocusId] = useState<number | null>(null)
   const [showViews, setShowViews] = useState(false)
   const [showAll, setShowAll] = useState(false)
@@ -193,7 +196,7 @@ export default function JoinGraph({ queue, selectedIds, onToggle, filter }: Join
   if (!queue.datasets.length) {
     return (
       <div style={{ padding: 32, color: '#64748b', fontSize: 14 }}>
-        No tables yet. Run a sync to read this connection&apos;s schema.
+        {t9('jg.noTables')}
       </div>
     )
   }
@@ -206,20 +209,19 @@ export default function JoinGraph({ queue, selectedIds, onToggle, filter }: Join
                     fontSize: 12, color: '#64748b', margin: '0 0 8px' }}>
         {model.centre != null && !showAll && (
           <span>
-            Showing <strong style={{ color: '#101822' }}>{centreName}</strong> and what
-            it joins to. Click another table to centre on it.
+            {rich(t9, 'jg.showing', { name: <strong style={{ color: '#101822' }}>{centreName}</strong> })}
           </span>
         )}
         <span style={{ flex: 1 }} />
         <label style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           <input type="checkbox" checked={showViews}
                  onChange={e => setShowViews(e.target.checked)} />
-          Include views
+          {t9('jg.views')}
         </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           <input type="checkbox" checked={showAll}
                  onChange={e => setShowAll(e.target.checked)} />
-          Show every table at once
+          {t9('jg.all')}
         </label>
       </div>
 
@@ -227,11 +229,10 @@ export default function JoinGraph({ queue, selectedIds, onToggle, filter }: Join
         <div style={{ padding: 28, border: '1px solid #e2e8f0', borderRadius: 6,
                       color: '#64748b', fontSize: 13 }}>
           {filter
-            ? `No relationships involve a table matching “${filter}”.`
+            ? t9('jg.noneMatching', { filter })
             : showViews
-              ? 'No relationships found between these objects yet.'
-              : 'No relationships between tables. Tick “Include views” to see '
-                + 'relationships involving views.'}
+              ? t9('jg.noneYet')
+              : t9('jg.noneTables')}
         </div>
       ) : (
         <div style={{ height: 460, border: '1px solid #e2e8f0', borderRadius: 6 }}>
@@ -252,11 +253,9 @@ export default function JoinGraph({ queue, selectedIds, onToggle, filter }: Join
 
       <p style={{ fontSize: 12, color: '#64748b', margin: '6px 0 0' }}>
         {showAll
-          ? `All ${model.totalConnected} connected objects, ${model.totalEdges} relationships.`
-          : `${nodes.length} of ${model.totalConnected} connected objects shown, `
-            + `${edges.length} of ${model.totalEdges} relationships.`}
-        {' '}Dashed edges are proposals; solid ones are already settled.
-        {' '}Click an edge to select it.
+          ? t9('jg.countAll', { n: model.totalConnected, e: model.totalEdges })
+          : t9('jg.countSome', { shown: nodes.length, n: model.totalConnected, es: edges.length, e: model.totalEdges })}
+        {' '}{t9('jg.legend')}
       </p>
     </>
   )

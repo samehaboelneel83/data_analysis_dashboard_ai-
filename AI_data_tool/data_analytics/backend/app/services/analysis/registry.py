@@ -250,8 +250,8 @@ register(AnalysisSpec(
 
 register(AnalysisSpec(
     name="association_rules",
-    description="Which values travel together: 'customers on the premium tier "
-                 "also choose express shipping'. Reports lift (how many times "
+    description="Which values travel together: 'rows with one value in a column "
+                 "tend to have a particular value in another'. Reports lift (how many times "
                  "more often than chance), confidence, the base rate it must "
                  "be read against, and the supporting row count. "
                  "Co-occurrence, not causation.",
@@ -286,7 +286,7 @@ register(AnalysisSpec(
                 "type": ["string", "null"],
                 "description": "For a categorical target, the outcome of "
                                 "interest. Defaults to the RAREST value -- "
-                                "'what drives churn' is asked far more often "
+                                "'what drives the uncommon outcome' is asked far more often "
                                 "than 'what drives staying'.",
             },
             "factors": {
@@ -499,6 +499,88 @@ register(AnalysisSpec(
 ))
 
 register(AnalysisSpec(
+    name="compare_two_groups",
+    description="How do two groups compare on one outcome? The rate or average in each, the "
+                "difference with its likely range, the lift, the chance one is "
+                "really higher, and a plain verdict. The reading of an experiment "
+                "-- it says so when the groups may not have been chosen at random.",
+    params_schema={
+        "type": "object",
+        "required": ["group_col", "outcome"],
+        "properties": {
+            "group_col": {"format": "column", "type": "string",
+                          "description": "The column that marks the two groups."},
+            "outcome": {"format": "column", "type": "string",
+                        "description": "What is compared: a yes/no outcome (as a rate) or a number (as an average)."},
+            "outcome_value": {"type": ["string", "null"],
+                              "description": "The value counted, for a rate. Defaults to the rarer one."},
+            "baseline": {"type": ["string", "null"],
+                         "description": "The group the other is set against. Defaults to the larger."},
+        },
+    },
+    consumes_column_meta=True,
+    result_kind="two_groups",
+    handler="app.services.analysis.two_groups:compare_two_groups",
+))
+
+register(AnalysisSpec(
+    name="compare_scenarios",
+    description="Which what-if ends higher? Two to four side by side: the same projection with "
+                "different factors moved, set beside the projection with nothing "
+                "moved -- period by period, in total and against each other. "
+                "Each scenario keeps its own warnings. Association, not intervention.",
+    params_schema={
+        "type": "object",
+        "required": ["date_column", "measure", "factors", "scenarios"],
+        "properties": {
+            "date_column": {"format": "column", "type": "string",
+                            "description": "The date column to project along."},
+            "measure": {"format": "column", "type": "string",
+                        "description": "The numeric column being projected."},
+            "factors": {"format": "column", "type": "array", "items": {"type": "string"},
+                        "description": "Numeric columns that may move it."},
+            "scenarios": {"type": "array", "minItems": 2, "maxItems": 4,
+                          "items": {"type": "object"},
+                          "description": "Each {\"name\": ..., \"adjustments\": {factor: fraction}}; "
+                                         "{\"spend\": 0.1} is +10%."},
+            "periods": {"type": ["integer", "null"], "minimum": 1,
+                        "maximum": MAX_SCENARIO_HORIZON, "default": DEFAULT_SCENARIO_HORIZON,
+                        "description": "How far ahead to project."},
+            "granularity": {"type": "string", "enum": ["day", "week", "month", "quarter", "year"],
+                            "description": "Period size. Defaults to month."},
+        },
+    },
+    consumes_column_meta=False,
+    result_kind="compare_scenarios",
+    handler="app.services.analysis.compare_scenarios:compare_scenarios",
+))
+
+register(AnalysisSpec(
+    name="stage_board",
+    description="Where do rows stand? Rows by stage, how long the open ones have "
+                "been going, and -- with a finish date and a due date -- what "
+                "finished on time and what is overdue. Open means no finish "
+                "date; now means the newest date in the data.",
+    params_schema={
+        "type": "object",
+        "required": ["stage_col", "start_date"],
+        "properties": {
+            "stage_col": {"format": "column", "type": "string",
+                          "description": "The column that says where each row stands."},
+            "start_date": {"format": "column", "type": "string",
+                           "description": "The date each row began."},
+            "done_date": {"format": "column", "type": ["string", "null"],
+                          "description": "The date each row was finished; empty while it is open."},
+            "due_date": {"format": "column", "type": ["string", "null"],
+                         "description": "The date each row was due."},
+        },
+    },
+    consumes_column_meta=True,
+    result_kind="stage_board",
+    handler="app.services.analysis.stage_board:stage_board",
+))
+
+register(AnalysisSpec(
     name="test_independence",
     description="Are two categorical columns related or independent? "
                 "Chi-square with Cramer's V.",
@@ -581,7 +663,7 @@ register(AnalysisSpec(
 
 register(AnalysisSpec(
     name="mixed_model",
-    description="Repeated measurements within groups (stores, patients, "
+    description="Repeated measurements within groups (sites, people, "
                 "regions). Random-intercept model; reports the share of "
                 "variation that is between groups.",
     params_schema={
@@ -744,12 +826,69 @@ register(AnalysisSpec(
 
 
 register(AnalysisSpec(
+    name="explain_change",
+    description="Why did it change? Splits the difference between two periods by "
+                "each category and says which values carry it -- with no periods "
+                "named, the last complete period against the one before. It says "
+                "where the change sits, not what caused it.",
+    params_schema={
+        "type": "object",
+        "required": ["date_column", "measure"],
+        "properties": {
+            "date_column": {"format": "column", "type": "string",
+                            "description": "The date the periods are cut from."},
+            "measure": {"format": "column", "type": "string",
+                        "description": "The number whose change is explained."},
+            "aggregation": {"type": "string",
+                            "description": "How each period is summed up. Defaults to sum."},
+            "granularity": {"type": "string", "enum": ["day", "week", "month", "quarter", "year"],
+                            "description": "Period size. Defaults to month."},
+            "period": {"type": ["string", "null"],
+                       "description": "The period to explain, e.g. 2026-09. Defaults to the last complete one."},
+            "baseline": {"type": ["string", "null"],
+                         "description": "The period to compare with. Defaults to the one before."},
+            "factors": {"format": "column", "type": ["array", "null"], "items": {"type": "string"},
+                        "description": "Categories to split by. Defaults to every usable one."},
+        },
+    },
+    consumes_column_meta=True,
+    result_kind="change_drivers",
+    handler="app.services.analysis.change_drivers:explain_change",
+))
+
+
+register(AnalysisSpec(
+    name="explain_variance",
+    description="Where do two numbers differ? One against another on the same rows -- what was reached "
+                "against what was expected -- with the difference split by each "
+                "category. It says where the difference sits, not what caused it.",
+    params_schema={
+        "type": "object",
+        "required": ["measure", "reference"],
+        "properties": {
+            "measure": {"format": "column", "type": "string",
+                        "description": "The number being judged."},
+            "reference": {"format": "column", "type": "string",
+                          "description": "The number it is set against."},
+            "aggregation": {"type": "string",
+                            "description": "How each is summed up. Defaults to sum."},
+            "factors": {"format": "column", "type": ["array", "null"], "items": {"type": "string"},
+                        "description": "Categories to split by. Defaults to every usable one."},
+        },
+    },
+    consumes_column_meta=True,
+    result_kind="change_drivers",
+    handler="app.services.analysis.change_drivers:explain_variance",
+))
+
+
+register(AnalysisSpec(
     name="decision_tree",
     description="The rules that separate one outcome from another: a shallow, "
                 "readable tree, scored on rows it never saw. Says which "
                 "splits matter, how many rows take each branch, and what it "
-                "predicts at the end -- 'margin below 12% and Wholesale: three "
-                "quarters churn'. Association, not causation.",
+                "predicts at the end -- 'a measure below 12 and one group: three "
+                "quarters end with the outcome'. Association, not causation.",
     params_schema={
         "type": "object",
         "required": ["target"],

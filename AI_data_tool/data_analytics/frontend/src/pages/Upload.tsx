@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { datasetsApi } from '../services/api'
 import type { BatchUploadItem, BatchUploadMode, Dataset } from '../services/api'
 import toast from 'react-hot-toast'
-import { useT } from '../i18n'
+import { rich } from '../i18n/pages/modelsMaps'
+import { useT, type TranslateFn } from '../i18n'
 import LoadingState from '../components/ui/LoadingState'
 import { FileUp, UploadCloud } from 'lucide-react'
 
@@ -14,10 +15,10 @@ const ALL_SHEETS = '\u0000all'
 /** E07: the server names an existing dataset holding the same bytes. The
  *  upload still happened; say so, long enough to read, so a dashboard is not
  *  built on the wrong copy by accident. */
-function warnDuplicates(list: (Dataset | null | undefined)[]) {
+function warnDuplicates(list: (Dataset | null | undefined)[], t: TranslateFn) {
   for (const d of list) {
     if (d?.duplicate_of) {
-      toast(`"${d.name}" has the same content as "${d.duplicate_of.name}", which you already have.`,
+      toast(t('upload.duplicate', { name: d.name, other: d.duplicate_of.name }),
             { icon: '⚠', duration: 10000 })
     }
   }
@@ -109,25 +110,25 @@ export default function Upload() {
       if (files.length === 1 && !isAccess(files[0]) && sheet !== ALL_SHEETS) {
         const ds = await datasetsApi.upload(files[0], name, desc, sheet || undefined)
         toast.success(t('upload.done'))
-        warnDuplicates([ds])
+        warnDuplicates([ds], t)
         navigate(`/datasets/${ds.id}?new=1`)
         return
       }
 
       const res = await datasetsApi.uploadBatch(files, name, desc, mode)
       const failures = res.items.filter(i => i.status === 'error')
-      warnDuplicates(res.items.map(i => i.dataset))
+      warnDuplicates(res.items.map(i => i.dataset), t)
       setErrors(failures)
 
       if (failures.length) {
         // Deliberately no navigation: leaving the page would take the only
         // record of which files failed, and why, with it.
-        toast.error(`${res.created} uploaded, ${res.failed} failed`)
+        toast.error(t('upload.partly', { ok: res.created, failed: res.failed }))
         setBusy(false)
         return
       }
 
-      toast.success(`Uploaded ${res.created} dataset${res.created === 1 ? '' : 's'}`)
+      toast.success(res.created === 1 ? t('upload.doneOne') : t('upload.doneMany', { n: res.created }))
       const only = res.items[0]?.dataset
       navigate(res.created === 1 && only ? `/datasets/${only.id}?new=1` : '/datasets')
     } catch (e: any) {
@@ -135,7 +136,7 @@ export default function Upload() {
       const detail = e?.response?.data?.detail
       if (detail?.items) {
         setErrors(detail.items.filter((i: BatchUploadItem) => i.status === 'error'))
-        toast.error(`Nothing could be uploaded (${detail.failed} failed)`)
+        toast.error(t('upload.nothing', { failed: detail.failed }))
       } else if (Array.isArray(detail?.sheets) && detail.sheets.length) {
         setSheets(detail.sheets)
         setSheet(detail.sheets[0])
@@ -179,7 +180,7 @@ export default function Upload() {
           {files.length ? <FileUp size={22} /> : <UploadCloud size={22} />}
         </span>
         {files.length === 1
-          ? <p className="dl-dropzone__title dl-dropzone__title--file">{files[0].name} ({(files[0].size / 1024).toFixed(1)} KB)</p>
+          ? <p className="dl-dropzone__title dl-dropzone__title--file">{t('upload.oneFile', { name: files[0].name, size: (files[0].size / 1024).toFixed(1) })}</p>
           : files.length > 1
           ? <p className="dl-dropzone__title dl-dropzone__title--file">
               {t('upload.nFiles', { n: files.length, size: (files.reduce((n, f) => n + f.size, 0) / 1024 / 1024).toFixed(1) })}
@@ -196,8 +197,7 @@ export default function Upload() {
 
       {files.some(isAccess) && (
         <p style={{ color: 'var(--muted)', fontSize: 12, marginBottom: 14 }}>
-          An Access database becomes <strong>one dataset per table</strong>. Encrypted
-          files cannot be read — save an unencrypted copy first.
+          {rich(t, 'upload.access', { each: <strong>{t('upload.accessEach')}</strong> })}
         </p>
       )}
 
@@ -232,7 +232,7 @@ export default function Upload() {
           )}
           {many && mode === 'separate' && (
             <p style={{ color: 'var(--muted)', fontSize: 11, marginTop: 4 }}>
-              Each file's own name is added, e.g. “{name || 'My dataset'} — {files[0].name.replace(/\.[^.]+$/, '')}”.
+              {t('upload.eachName', { example: `${name || t('upload.myDataset')} — ${files[0].name.replace(/\.[^.]+$/, '')}` })}
             </p>
           )}
         </div>
@@ -242,10 +242,10 @@ export default function Upload() {
         </label>
         {sheets.length > 0 && (
           <label className="dl-field" style={{ marginBottom: 0 }}>
-            <span className="dl-field__label">Sheet</span>
+            <span className="dl-field__label">{t('upload.sheet')}</span>
             <select value={sheet} onChange={e => setSheet(e.target.value)} className="dl-field__input">
               {sheets.map(s => <option key={s} value={s}>{s}</option>)}
-              <option value={ALL_SHEETS}>All sheets — one dataset each</option>
+              <option value={ALL_SHEETS}>{t('upload.allSheets')}</option>
             </select>
           </label>
         )}
@@ -257,14 +257,14 @@ export default function Upload() {
           // multi-hundred-MB upload or an Access file with many tables can sit
           // here for a while, and a disabled button gives no sense that
           // anything is still happening versus having silently stalled.
-          <LoadingState label={`Uploading and processing your ${many ? 'files' : 'file'}…`} />
+          <LoadingState label={many ? t('upload.busyMany') : t('upload.busyOne')} />
         )}
       </div>
 
       {errors.length > 0 && (
         <div role="alert" className="dl-upload__errors">
           <p style={{ fontWeight: 600, marginBottom: 8 }}>
-            {errors.length} file{errors.length === 1 ? '' : 's'} could not be uploaded
+            {errors.length === 1 ? t('upload.failedOne') : t('upload.failedMany', { n: errors.length })}
           </p>
           <ul style={{ margin: 0, paddingInlineStart: 18 }}>
             {errors.map((e, i) => (

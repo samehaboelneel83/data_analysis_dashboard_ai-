@@ -22,15 +22,17 @@ export default function SetupContinue({ journeys }: { journeys: SetupJourney[] |
         {journeys.slice(0, 3).map(j => {
           const step = STEPS.find(s => s.key === j.step)
           return (
-            <li key={j.id} className="hm-setup__item">
+            <li key={`${j.id}:${j.flow_id ?? 0}`} className="hm-setup__item">
               <Compass size={16} aria-hidden="true" />
               <span className="hm-setup__text">
-                {t('setup.home.item', {
-                  name: j.source.name, n: localDigits(String(j.position)), total: localDigits(String(j.total)),
+                {t(j.flow_name ? 'setup.home.flowItem' : 'setup.home.item', {
+                  name: j.source.name, flow: j.flow_name ?? '',
+                  n: localDigits(String(j.position)), total: localDigits(String(j.total)),
                   step: step ? t(step.label) : '',
                 })}
               </span>
-              <Link className="btn btn-sm btn-primary" to={`/setup/${j.source.id}`}
+              <Link className="btn btn-sm btn-primary"
+                to={j.flow_id != null && j.step !== 'understand' ? `/setup/${j.source.id}?flow=${j.flow_id}` : `/setup/${j.source.id}`}
                 aria-label={`${t('setup.home.continue')}: ${j.source.name}`}>
                 {t('setup.home.continue')}
               </Link>

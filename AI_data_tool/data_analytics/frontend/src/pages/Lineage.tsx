@@ -55,12 +55,12 @@ export default function Lineage() {
     if (!graph) return []
     const out: { from: string; to: string; label?: string }[] = []
     for (const d of graph.datasets) {
-      if (d.source_id != null) out.push({ from: `src:${d.source_id}`, to: `ds:${d.id}`, label: 'extract' })
+      if (d.source_id != null) out.push({ from: `src:${d.source_id}`, to: `ds:${d.id}`, label: t('lin.extract') })
       for (const j of d.joins) out.push({ from: `ds:${j}`, to: `ds:${d.id}` })
     }
     for (const r of graph.reports) for (const id of r.dataset_ids) out.push({ from: `ds:${id}`, to: `rep:${r.id}` })
     return out
-  }, [graph])
+  }, [graph, t])
 
   const touching = useMemo(() => {
     if (!selected) return null
@@ -226,7 +226,7 @@ export default function Lineage() {
           {badges && <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 5 }}>{badges}</div>}
         </div>
         {link && (
-          <Link to={link} aria-label={`Open ${title}`} title={`Open ${title}`}
+          <Link to={link} aria-label={t('lin.open', { name: title })} title={t('lin.open', { name: title })}
             // A 24px hit area (WCAG 2.5.8), not the 9px glyph.
             style={{ position: 'absolute', top: 2, insetInlineEnd: 2, fontSize: 12,
               minWidth: 24, minHeight: 24, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',

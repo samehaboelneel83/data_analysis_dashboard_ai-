@@ -122,7 +122,7 @@ async def run_analysis(dataset_id: int, req: AnalysisRequest, db: AsyncSession =
         dq_present = [c for c in dq_denied if c in df.columns]
         if dq_present:
             df = df.drop(columns=dq_present)
-        analysis = run_full_analysis(df)
+        analysis = run_full_analysis(df, ds.column_meta)
         analysis["sampled"] = live.sampled
         analysis["total_rows"] = live.total_rows
         analysis["measured"] = live.describe()
@@ -152,7 +152,7 @@ async def run_analysis(dataset_id: int, req: AnalysisRequest, db: AsyncSession =
         present = [c for c in denied if c in df.columns]
         if present:
             df = df.drop(columns=present)
-        return run_full_analysis(df)
+        return run_full_analysis(df, ds.column_meta)
 
     result = await asyncio.to_thread(_load_and_analyze)
 
@@ -593,6 +593,10 @@ async def run_pairwise(
 class RunAnalysisRequest(BaseModel):
     name: str
     params: dict = {}
+    #: true: queue it as a job and answer with `job_id`. "auto" (what the
+    #: browser sends): queue only a slow analysis on a large table. Absent or
+    #: false: run in the request, as always.
+    background: bool | str | None = None
 
 
 def _strings_in(value) -> list[str]:
@@ -673,6 +677,19 @@ async def run_catalogued_analysis(
         # typo, and the caller can act on the difference.
         raise HTTPException(
             400, f"'{req.name}' is listed but cannot be run through this endpoint yet")
+
+    from ..services import analysis_jobs
+    ds = await db.get(Dataset, dataset_id)
+    if analysis_jobs.should_queue(req.name, getattr(ds, "row_count", None), req.background):
+        # Minutes, on a large table: a job the person can leave and come back
+        # to. Readability and hidden columns are checked again when it runs,
+        # as the person is then (services/analysis_jobs.py).
+        from ..services import jobs as job_service
+        job, _ = await job_service.enqueue(
+            db, user=current_user, kind=analysis_jobs.ANALYSIS_JOB_KIND,
+            inputs={"dataset_id": dataset_id, "name": req.name, "params": safe_clean(req.params)},
+            subject=f"{req.name}: {getattr(ds, 'name', dataset_id)}", max_attempts=1)
+        return {"analysis": spec.name, "result_kind": spec.result_kind, "job_id": job.id, "state": job.state}
 
     df, denied = await _secured_frame(dataset_id, db, current_user)
     _refuse_denied(_strings_in(req.params), denied)

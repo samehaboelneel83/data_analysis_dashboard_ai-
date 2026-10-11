@@ -40,6 +40,11 @@ PREVIEW_ROWS = 8
 COUNT_TIMEOUT_S = 20.0
 #: Columns per table described to the model.
 PROMPT_COLUMNS = 40
+#: Values shown per text column: a subject the person names ("only X") can be
+#: filtered correctly only when the model has seen how the column spells it.
+PROMPT_VALUES = 12
+NO_ROWS = ("the query returns no rows: a filter value does not match how the data spells it -- use only "
+           "values listed for the column, compare text without case, or drop that filter")
 
 #: Columns a first dataset is better without, by what they hold.
 _PERSONAL = {"email", "phone", "national_id", "ip", "credit_card", "iban"}
@@ -185,7 +190,7 @@ def _describe(facts: list[dict], words: dict | None) -> str:
         if t["related"]:
             lines.append("Joins to: " + ", ".join(t["related"]))
         lines.append("Columns: " + "; ".join(
-            understand._column_line(c, t["_stats"]) for c in t["_columns"][:PROMPT_COLUMNS]))
+            understand._column_line(c, t["_stats"], PROMPT_VALUES) for c in t["_columns"][:PROMPT_COLUMNS]))
     return "\n".join(lines)
 
 
@@ -203,8 +208,8 @@ def _rules(lang: str) -> str:
         "- Each dataset is ONE read-only SQL query (SELECT, or WITH ... SELECT) over the tables "
         "listed. Use only the listed tables and columns. Join tables where 'Joins to' says they "
         "connect, or on a shared column that clearly means the same thing in both (the same "
-        "date, the same id). When the person's questions compare two tables (a stock against "
-        "the market index, sales against targets), one proposal should be that join, so they "
+        "date, the same id). When the person's questions compare two tables (a figure against "
+        "its benchmark, actuals against targets), one proposal should be that join, so they "
         "can compare without building it themselves.\n"
         "- Keep rows, not totals: a dataset feeds many charts, so do not GROUP BY unless the "
         "person clearly needs a summary table.\n"
@@ -213,39 +218,84 @@ def _rules(lang: str) -> str:
         "(names, phones, emails, ids of people) unless their work needs them. Honour 'What to "
         "leave out'.\n"
         "- Give columns plain snake_case aliases only when the original name is unclear.\n"
-        "- The proposals must answer DIFFERENT questions, not three versions of one query: "
-        "make the first the broad one (every relevant row and the useful columns, no narrowing "
-        "filter beyond what the person asked), and let the others take a different angle -- a "
-        "different table or join, a different slice of rows, or a summary table -- each saying "
-        "in 'why' what it lets them see that the others do not.\n"
-        "- Only filter rows when the person's answers ask for it, and say so in leaves_out.\n"
+        "- When the person asked for a PART of the data -- one kind, one place, one period, a "
+        "range ('I need ...', 'only ...', 'under ...', 'since ...') -- the FIRST proposal is "
+        "exactly that part: narrow the rows to it with WHERE, spelling each value the way the "
+        "column's listed values spell it (compare text without case; match a word inside a longer "
+        "text with LIKE), keep the column you filtered on, and say in leaves_out what was left "
+        "out. The SECOND is then the broad one (every row), for comparing their subject with the "
+        "rest. When they asked for nothing in particular, the first is the broad one: every "
+        "relevant row and the useful columns.\n"
+        "- If the part they ask for is NOT in this database -- no listed column or value is that "
+        "thing -- do not pretend: never write a filter that keeps everything, and never name a "
+        "dataset after something it does not hold. Propose the broad dataset under its true name "
+        "and say in 'why', plainly, that the database has nothing called what they asked for and "
+        "what it has instead.\n"
+        "- Narrow only by the SUBJECT (what kind of thing, where, when) -- never by what they want "
+        "MEASURED. 'How many are late / returned / cancelled / unpaid' needs the rows that are not, "
+        "too: without them there is no share to show. So 'only online orders, how many were "
+        "cancelled' keeps every online order and the column that says whether it was cancelled.\n"
+        "- Keep every column that could answer or break down their questions -- the measures, the "
+        "dates, and the columns that say what kind, where and who (as categories) -- not only the "
+        "ones they named: one dataset feeds many charts.\n"
+        "- The proposals must answer DIFFERENT questions, not three versions of one query: the "
+        "others take a different angle -- a different table or join, a different slice of rows, or "
+        "a summary table -- each saying in 'why' what it lets them see that the others do not.\n"
+        "- Never narrow the rows for a reason the person did not give.\n"
         "- name is a short plain title, the way a person would say it (e.g. 'Daily stock prices', "
-        "'Cars for sale in Cairo') -- never snake_case or a table name; it becomes the dataset's "
+        "'Open support requests', 'Clinic visits this year') -- never snake_case or a table name; it becomes the dataset's "
         "name.\n"
         f"- Write name, purpose, includes, leaves_out and why in {_LANGUAGE.get(lang, 'English')}, "
         "in plain words for someone who never wrote SQL: purpose = one sentence on what it is for; "
-        "includes/leaves_out = short items in business words (e.g. 'Price and mileage', "
-        "'Seller phone numbers'); why = one or two sentences tying the choice to their work.\n"
+        "includes/leaves_out = short items in business words (e.g. 'Amounts and dates', "
+        "'Personal phone numbers'); why = one or two sentences tying the choice to their work.\n"
     )
 
 
+def _reading(meaning_text: str) -> str:
+    """The Meaning map and the one rule it adds: bring the base along."""
+    if not meaning_text:
+        return ""
+    return (
+        "\n\nHOW TO READ THIS DATABASE (measured on it):\n" + meaning_text + "\n"
+        "RULE -- bring the base along. A count of things that HAPPEN TO other rows says nothing until it "
+        "stands beside those rows: the biggest group has the most of everything because it is the biggest. "
+        "So when their request is about such things and compares anything (which, where, more, most, by "
+        "..., per ...), the FIRST proposal keeps ONE ROW PER ROW OF THE BASE with the event attached -- "
+        "FROM the base LEFT JOIN (SELECT the join column, COUNT(*) AS <events>_count, and EVERY number of "
+        "the events their questions need -- amounts summed, durations and scores averaged -- FROM the "
+        "events [WHERE the kind of event they asked for] GROUP BY the join column) -- with "
+        "a true/false column `has_<event>` (the joined key IS NOT NULL), the count and summed amounts with "
+        "COALESCE(..., 0) (averages left empty where there is no event), and the base's own columns that "
+        "say what kind, where, when and who. If the "
+        "events carry a group the base lacks, join it through the base's own column for it. "
+        "Its 'why' says it includes the rows WITHOUT the event, so groups can be compared fairly. A later "
+        "proposal may hold only the events, to read them one by one.\n"
+        "The same holds for a column listed above as saying WHAT BECAME of a row: when they ask about one "
+        "of its outcomes and compare anything ('which ... have more of them', 'where', 'by ...'), the FIRST "
+        "proposal keeps ALL the rows with that column, so the share with the outcome can be compared across "
+        "groups -- even when they say 'only' those rows. The rows with the outcome alone are the SECOND "
+        "proposal, and its 'why' says it can count them but not compare groups fairly.\n")
+
+
 def build_prompt(source: DataSource, facts: list[dict], words: dict | None,
-                 brief: dict | None, lang: str) -> list[dict]:
+                 brief: dict | None, lang: str, meaning_text: str = "") -> list[dict]:
     system = ("You help a person pick the right part of a database to analyse. You propose "
               f"up to {MAX_PROPOSALS} datasets.\n" + _rules(lang))
-    user = (f"Database: {source.name}\n\nAbout the person (hints, not rules):\n{_brief_text(brief)}\n\n"
-            f"Tables:\n{_describe(facts, words)}")
+    user = (f"Database: {source.name}\n\nWhat the person said (follow it):\n{_brief_text(brief)}\n\n"
+            f"Tables:\n{_describe(facts, words)}" + _reading(meaning_text))
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
 def build_refine_prompt(source: DataSource, facts: list[dict], words: dict | None, brief: dict | None,
-                        proposal: dict, history: list[dict], message: str, lang: str) -> list[dict]:
+                        proposal: dict, history: list[dict], message: str, lang: str,
+                        meaning_text: str = "") -> list[dict]:
     system = ("You change ONE dataset proposal as the person asks, keeping everything else "
               "about it. Return the whole revised proposal and a one-sentence reply saying what "
               f"you changed, in {_LANGUAGE.get(lang, 'English')}.\n" + _rules(lang))
     convo = "\n".join(f"{m['role']}: {m['text']}" for m in history[-6:])
     user = (f"Database: {source.name}\n\nAbout the person:\n{_brief_text(brief)}\n\n"
-            f"Tables:\n{_describe(facts, words)}\n\nCurrent proposal:\n"
+            f"Tables:\n{_describe(facts, words)}{_reading(meaning_text)}\n\nCurrent proposal:\n"
             f"name: {proposal.get('name', '')}\npurpose: {proposal.get('purpose', '')}\n"
             f"sql: {proposal.get('sql') or '(missing -- write one)'}\n"
             f"includes: {proposal.get('includes', [])}\nleaves_out: {proposal.get('leaves_out', [])}\n\n"
@@ -272,7 +322,7 @@ def _tables_in(sql: str, family: str) -> list[str]:
 
 
 async def _accept(db, user, source, item: dict, catalog: list[dict], family: str,
-                  repair) -> dict | None:
+                  repair, meaning_map=None) -> dict | None:
     """Check, run, and if needed repair one proposal. None when it cannot be used."""
     sql, why = check_sql(item.get("sql", ""), family, catalog)
     run = None
@@ -280,7 +330,7 @@ async def _accept(db, user, source, item: dict, catalog: list[dict], family: str
         run = await test_run(db, user, source, sql)
         why = run["error"]
         if why is None and run["row_count"] == 0:
-            why = "the query returns no rows"
+            why = NO_ROWS
     if why is not None and repair is not None:
         fixed = await repair(item, why)
         if fixed:
@@ -288,7 +338,7 @@ async def _accept(db, user, source, item: dict, catalog: list[dict], family: str
             sql, why = check_sql(item.get("sql", ""), family, catalog)
             if sql is not None:
                 run = await test_run(db, user, source, sql)
-                why = run["error"] or ("the query returns no rows" if run["row_count"] == 0 else None)
+                why = run["error"] or (NO_ROWS if run["row_count"] == 0 else None)
     if why is not None or sql is None or run is None:
         logger.info("guided setup: dropped proposal %r: %s", item.get("name"), why)
         return None
@@ -298,6 +348,9 @@ async def _accept(db, user, source, item: dict, catalog: list[dict], family: str
         "purpose": str(item.get("purpose") or "").strip(),
         "sql": sql,
         "tables": _tables_in(sql, family),
+        # Events without what they are counted against: counts, never rates.
+        "counts_only": [{"events": b["events"], "base": b["base"]}
+                        for b in (meaning_map.events_without_base(_tables_in(sql, family)) if meaning_map else [])],
         "includes": _clean_list(item.get("includes")),
         "leaves_out": _clean_list(item.get("leaves_out")),
         "why": str(item.get("why") or "").strip(),
@@ -376,6 +429,9 @@ async def propose(db: AsyncSession, user: User, source: DataSource, brief: dict 
         return [], "empty"
     family = _family(source)
     catalog = catalog_of(facts)
+    from . import meaning
+    m = await meaning.load(db, source.id)
+    reading = meaning.prompt_text(m)
     reason = None
     got = None
     if not source.allow_llm_sampling:
@@ -385,8 +441,8 @@ async def propose(db: AsyncSession, user: User, source: DataSource, brief: dict 
     else:
         from .access import release
         await release(db)
-        got = await client.complete_json(build_prompt(source, facts, words, brief, lang),
-                                         PROPOSALS_SCHEMA, max_tokens=3500, temperature=0.2, enforce=True)
+        got = await client.complete_json(build_prompt(source, facts, words, brief, lang, reading),
+                                         PROPOSALS_SCHEMA, max_tokens=4000, temperature=0.2, enforce=True)
         if not got:
             reason = "failed"
 
@@ -394,19 +450,20 @@ async def propose(db: AsyncSession, user: User, source: DataSource, brief: dict 
         if client is None or reason is not None:
             return None
         msgs = build_refine_prompt(source, facts, words, brief, item, [],
-                                   f"The query failed: {why}. Fix the SQL so it runs; keep the purpose.", lang)
+                                   f"The query failed: {why}. Fix the SQL so it runs; keep the purpose.", lang,
+                                   reading)
         fixed = await client.complete_json(msgs, REFINE_SCHEMA, max_tokens=2000, temperature=0.1, enforce=True)
         return (fixed or {}).get("proposal")
 
     accepted: list[dict] = []
     for item in ((got or {}).get("proposals") or [])[:MAX_PROPOSALS]:
         if isinstance(item, dict):
-            ok = await _accept(db, user, source, item, catalog, family, repair)
+            ok = await _accept(db, user, source, item, catalog, family, repair, m)
             if ok:
                 accepted.append(ok)
     if not accepted:
         for item in fallback_items(facts, family, lang, reason or ("failed" if got is not None else None), words):
-            ok = await _accept(db, user, source, item, catalog, family, None)
+            ok = await _accept(db, user, source, item, catalog, family, None, m)
             if ok:
                 accepted.append(ok)
         if reason is None:
@@ -424,10 +481,13 @@ async def refine(db: AsyncSession, user: User, source: DataSource, brief: dict |
     facts = await understand.load_facts(db, source)
     family = _family(source)
     history = list(proposal.get("history") or [])
+    from . import meaning
     from .access import release
+    m = await meaning.load(db, source.id)
+    reading = meaning.prompt_text(m)
     await release(db)
     got = await client.complete_json(
-        build_refine_prompt(source, facts, words, brief, proposal, history, message, lang),
+        build_refine_prompt(source, facts, words, brief, proposal, history, message, lang, reading),
         REFINE_SCHEMA, max_tokens=2500, temperature=0.2, enforce=True)
     if not got or not isinstance(got.get("proposal"), dict):
         return None, "failed"
@@ -435,12 +495,13 @@ async def refine(db: AsyncSession, user: User, source: DataSource, brief: dict |
     async def repair(item: dict, why: str) -> dict | None:
         fixed = await client.complete_json(
             build_refine_prompt(source, facts, words, brief, item, history,
-                                f"The query failed: {why}. Fix the SQL so it runs; keep the change asked for.", lang),
+                                f"The query failed: {why}. Fix the SQL so it runs; keep the change asked for.", lang,
+                                reading),
             REFINE_SCHEMA, max_tokens=2000, temperature=0.1, enforce=True)
         return (fixed or {}).get("proposal")
 
     revised = await _accept(db, user, source, {**got["proposal"], "source": "ai"},
-                            catalog_of(facts), family, repair)
+                            catalog_of(facts), family, repair, m)
     if revised is None:
         return None, "unusable"
     reply = str(got.get("reply") or "").strip()

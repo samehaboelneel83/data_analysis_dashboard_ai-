@@ -9,7 +9,7 @@ vi.mock('../services/api', async (orig) => {
   return {
     ...real,
     setupApi: {
-      get: vi.fn(), update: vi.fn(), journeys: vi.fn(), summary: vi.fn(), refreshSummary: vi.fn(),
+      get: vi.fn(), update: vi.fn(), journeys: vi.fn(), startFlow: vi.fn(), meaning: vi.fn().mockResolvedValue(null), summary: vi.fn(), refreshSummary: vi.fn(),
       sample: vi.fn(), editOverview: vi.fn(), editTable: vi.fn(),
       datasets: vi.fn(), suggestDatasets: vi.fn(), refineDataset: vi.fn(), createDatasets: vi.fn(),
     },
@@ -140,7 +140,7 @@ describe('Guided setup — Understand', () => {
     vi.mocked(setupApi.update).mockResolvedValue(journey({ step: 'data', position: 2 }))
     renderAt()
     fireEvent.click(await screen.findByRole('button', { name: 'Next: Choose data' }))
-    await waitFor(() => expect(setupApi.update).toHaveBeenCalledWith(37, { step: 'data' }))
+    await waitFor(() => expect(setupApi.update).toHaveBeenCalledWith(37, { step: 'data' }, undefined))
     expect(await screen.findByRole('heading', { name: 'About you' })).toBeInTheDocument()
   })
 
@@ -177,5 +177,28 @@ describe('Guided setup — Understand', () => {
     renderAt()
     expect(await screen.findByText(/still see its earlier description/)).toBeInTheDocument()
     expect(screen.getByText('Used-car listings across Egypt.')).toBeInTheDocument()
+  })
+  it('lists the analyses of this connection once Understand is done, and opens another', async () => {
+    const flows = [
+      { id: 5, name: 'Express parcels', step: 'done' as const, position: 4, dataset_ids: [1], report_id: 9, updated_at: null },
+      { id: 6, name: null, step: 'data' as const, position: 2, dataset_ids: [], report_id: null, updated_at: null }]
+    vi.mocked(setupApi.get).mockResolvedValue(journey({ step: 'data', position: 2, flow_id: 6, flows }))
+    renderAt()
+    const nav = await screen.findByRole('navigation', { name: 'Your analyses of this database' })
+    expect(nav).toHaveTextContent('Express parcels')
+    expect(nav).toHaveTextContent('Dashboard made')
+    expect(nav).toHaveTextContent('Analysis 2')
+    fireEvent.click(screen.getByRole('button', { name: /Express parcels/ }))
+    await waitFor(() => expect(setupApi.get).toHaveBeenCalledWith(37, 5))
+  })
+
+  it('starts a new analysis from Choose data without touching the others', async () => {
+    const flows = [{ id: 5, name: 'Express parcels', step: 'done' as const, position: 4, dataset_ids: [1], report_id: 9, updated_at: null }]
+    vi.mocked(setupApi.get).mockResolvedValue(journey({ step: 'done', position: 4, flow_id: 5, flows }))
+    vi.mocked(setupApi.startFlow).mockResolvedValue(journey({ step: 'data', position: 2, flow_id: 6, flows: [
+      ...flows, { id: 6, name: null, step: 'data', position: 2, dataset_ids: [], report_id: null, updated_at: null }] }))
+    renderAt()
+    fireEvent.click(await screen.findByRole('button', { name: 'New analysis' }))
+    await waitFor(() => expect(setupApi.startFlow).toHaveBeenCalledWith(37))
   })
 })

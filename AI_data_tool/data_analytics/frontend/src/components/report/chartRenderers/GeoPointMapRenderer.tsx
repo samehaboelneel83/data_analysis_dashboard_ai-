@@ -1,3 +1,4 @@
+import { useT } from '../../../i18n'
 import { useMemo, useRef, useState } from 'react'
 import type { ChartRendererProps } from './types'
 import { fmtStr, TT, seriesColor } from '../chartUtils'
@@ -48,6 +49,7 @@ export function markersWithin(markers: { name: string; x: number; y: number }[],
  */
 function GeoPointMapRenderer({ rows, data, cfg, measureFmt, ruleStyles, variant, broadcasts,
                               localSelected, onClickPoint, plotW, plotH }: ChartRendererProps & { variant: 'points' | 'bubbles' }) {
+  const t9 = useT()
   const { ref, w, h, tiles, view } = useMapBox(plotW, plotH)
   // The author's boundary set (Egypt's governorates), drawn as outlines over
   // the country base so a reader can tell which governorate a site sits in.
@@ -291,7 +293,7 @@ function GeoPointMapRenderer({ rows, data, cfg, measureFmt, ruleStyles, variant,
       {broadcasts && markers.length > 0 && (
         <div style={{ position: 'absolute', top: 4, right: 8, fontSize: 10,
           color: 'var(--muted)', pointerEvents: 'none' }}>
-          Shift-drag to select an area
+          {t9('cr.shiftDrag')}
         </div>
       )}
       {hover && (
@@ -303,7 +305,7 @@ function GeoPointMapRenderer({ rows, data, cfg, measureFmt, ruleStyles, variant,
       {unmatched > 0 && (
         <div data-testid="geo-unmatched" style={{ position: 'absolute', bottom: 4, left: 8,
           fontSize: 10, color: 'var(--muted)' }}>
-          {unmatched} row{unmatched === 1 ? '' : 's'} did not match a country
+          {t9(unmatched === 1 ? 'cr.rowNoCountry' : 'cr.rowsNoCountry', { n: unmatched })}
         </div>
       )}
     </div>

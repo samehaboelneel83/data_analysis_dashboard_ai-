@@ -48,7 +48,9 @@ _DEPRECATED_PATTERNS = (
 #: Currency and percentage are semantic types a regex over VALUES cannot see —
 #: they live in the column NAME. Kept separate from pii's value classifiers.
 _NAME_SEMANTICS = (
-    ("currency", re.compile(r"(price|amount|cost|revenue|salary|total|fee|charge)", re.I)),
+    # Money, in the words any organisation's books use (the note on neutral
+    # vocabulary is in services/semantic_guard.py).
+    ("currency", re.compile(r"(price|amount|cost|revenue|fee|charge|payment|balance|مبلغ|سعر|تكلفة|رسوم)", re.I)),
     ("percentage", re.compile(r"(pct|percent|rate|ratio)", re.I)),
 )
 
@@ -137,9 +139,8 @@ def classify_role(
 #: quantity is common (a fee schedule, a small price list) AND where treating it
 #: as a category produces a chart that looks plausible and answers nothing.
 _CONTINUOUS_NAME = re.compile(
-    r"(^|_)(price|prices|amount|amounts|cost|costs|fee|fees|revenue|sales|"
-    r"salary|wage|balance|spend|budget|total|subtotal|charge|payment|"
-    r"turnover|profit|margin|value)($|_)",
+    r"(^|_)(price|prices|amount|amounts|cost|costs|fee|fees|revenue|income|expense|"
+    r"balance|spend|budget|total|subtotal|charge|payment|profit|margin|value)($|_)",
     re.IGNORECASE)
 
 
@@ -715,8 +716,8 @@ def build_entity_prompt(source_name: str, tables: list[dict]) -> list[dict]:
             "role": "system",
             "content": (
                 "You identify the named business entities a database models "
-                "-- the real-world things a person would ask about (customer, "
-                "order, product, ...), each backed by one or more of the "
+                "-- the real-world things a person would ask about (the people, "
+                "things, events and places its tables describe), each backed by one or more of the "
                 "tables listed. For each entity give: name (short, "
                 "lowercase_snake_case, unique), business_name (a human "
                 "label), grain (one short sentence starting 'One row per ...' "

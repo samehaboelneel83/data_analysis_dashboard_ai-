@@ -24,7 +24,7 @@ class TestRegistryContents:
             # Two that shipped reachable from one dialog each and were never
             # catalogued -- so the endpoint, the generic panel and the agent
             # all believed the platform could not do them.
-            "explain_response", "goal_seek",
+            "compare_scenarios", "compare_two_groups", "stage_board", "explain_change", "explain_variance", "explain_response", "goal_seek",
             # "When will this reach X?" -- goal-seek along a forecast rather
             # than across two columns.
             "forecast_goal",

@@ -767,6 +767,9 @@ async def suggest_dashboard_for_role(source_id: int, body: SuggestDashboardIn,
     """
     src = await db.get(DataSource, source_id)
     check_org(src, current_user, "Data source not found")
+    # "Allow AI" for this connection (services/ai_policy.py).
+    from ..services import ai_policy as _ai_policy
+    await _ai_policy.enter(db, source=src)
 
     from ..services.suggest_dashboard import load_catalog, load_joins
     catalog = await load_catalog(db, source_id)

@@ -144,7 +144,7 @@ export default function ShareDashboardDialog({ report, canEdit, isAdmin, pageId,
       {manages ? (<>
         <div className="shx-inv">
           <input className="shx-in" type="email" value={email} onChange={e => setEmail(e.target.value)} dir="ltr"
-            placeholder="colleague@company.com" aria-label={t('dsh.sd.email')}
+            placeholder="name@example.com" /* i18n-ok: an address */ aria-label={t('dsh.sd.email')}
             onKeyDown={e => { if (e.key === 'Enter') void invite() }} />
           {levelSelect(level, setLevel, t('dsh.sd.level'))}
           <button type="button" className="btn btn-primary" onClick={() => void invite()} disabled={busy || !email.trim()}

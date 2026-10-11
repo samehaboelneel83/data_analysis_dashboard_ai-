@@ -34,16 +34,16 @@ import { formatDate } from '../../lib/dateFormat'
 
 /** The same aggregate namespace measures use — the expression is evaluated by
  *  the widget sandbox, so the palette must not offer anything it would reject. */
-const ALERT_FUNCS = [
+const alertFuncs = (t: TranslateFn) => [
   {
-    label: 'Aggregation', color: '#f472b6',
+    label: t('al.fn.group'), color: '#f472b6',
     items: [
-      { label: 'SUM(col)', snippet: 'SUM()', back: 1, hint: 'Total over the dataset' },
-      { label: 'AVG(col)', snippet: 'AVG()', back: 1, hint: 'Mean over the dataset' },
-      { label: 'COUNT(col)', snippet: 'COUNT()', back: 1, hint: 'Non-null count' },
-      { label: 'COUNTD(col)', snippet: 'COUNTD()', back: 1, hint: 'Distinct count' },
-      { label: 'MIN(col)', snippet: 'MIN()', back: 1, hint: 'Smallest value' },
-      { label: 'MAX(col)', snippet: 'MAX()', back: 1, hint: 'Largest value' },
+      { label: 'SUM(col)', snippet: 'SUM()', back: 1, hint: t('al.fn.sum') },  // i18n-ok: a function's signature
+      { label: 'AVG(col)', snippet: 'AVG()', back: 1, hint: t('al.fn.avg') },  // i18n-ok
+      { label: 'COUNT(col)', snippet: 'COUNT()', back: 1, hint: t('al.fn.count') },  // i18n-ok
+      { label: 'COUNTD(col)', snippet: 'COUNTD()', back: 1, hint: t('al.fn.countd') },  // i18n-ok
+      { label: 'MIN(col)', snippet: 'MIN()', back: 1, hint: t('al.fn.min') },  // i18n-ok
+      { label: 'MAX(col)', snippet: 'MAX()', back: 1, hint: t('al.fn.max') },  // i18n-ok
     ],
   },
 ]
@@ -157,8 +157,8 @@ export default function AlertsPanel({ datasetId, columns }: {
 
   const remove = async (alert: DataAlert) => {
     if (!await confirm({
-      title: `Delete the alert "${alert.name}"?`,
-      body: 'It stops being checked immediately. This cannot be undone.',
+      title: t('al.deleteQ', { name: alert.name }),
+      body: t('al.deleteBody'),
     })) return
     await alertsApi.remove(datasetId, alert.id)
     load()
@@ -167,7 +167,7 @@ export default function AlertsPanel({ datasetId, columns }: {
   if (loadError) {
     return <LoadError what="the alerts on this dataset" error={loadError} onRetry={load} />
   }
-  if (!alerts) return <p style={{ color: 'var(--muted)' }}>Loading…</p>
+  if (!alerts) return <p style={{ color: 'var(--muted)' }}>{t('fs.loading')}</p>
 
   return (
     <section className="dl-rules__card">
@@ -189,47 +189,47 @@ export default function AlertsPanel({ datasetId, columns }: {
             <label htmlFor="alert-name" style={label}>{t('alerts.name')}</label>
             <input id="alert-name" value={name} style={{ width: '100%' }}
               onChange={e => setName(e.target.value)}
-              placeholder="Revenue fell below target" />
+              placeholder={t('al.nameExample')} />
           </div>
 
-          <div role="radiogroup" aria-label="What to watch" style={{ display: 'flex', gap: 14, marginBottom: 10, fontSize: 12 }}>
+          <div role="radiogroup" aria-label={t('al.whatToWatch')} style={{ display: 'flex', gap: 14, marginBottom: 10, fontSize: 12 }}>
             <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
               <input type="radio" name="alert-kind" checked={kind === 'condition'} onChange={() => { setKind('condition'); setTest(null) }} />
-              When a condition turns true
+              {t('al.kindCondition')}
             </label>
             <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
               <input type="radio" name="alert-kind" checked={kind === 'change'} onChange={() => { setKind('change'); setTest(null) }} />
-              A number changes by a percentage
+              {t('al.kindChange')}
             </label>
           </div>
 
           <div style={{ marginBottom: 10 }}>
-            <label htmlFor="alert-expr" style={label}>{kind === 'condition' ? t('alerts.condition') : 'Number to watch'}</label>
+            <label htmlFor="alert-expr" style={label}>{kind === 'condition' ? t('alerts.condition') : t('al.numberToWatch')}</label>
             <ExpressionBuilder
-              columns={columns} functionsCatalog={ALERT_FUNCS}
+              columns={columns} functionsCatalog={alertFuncs(t)}
               value={expression} onChange={v => { setExpression(v); setTest(null) }}
               layout="flat" rows={2} textareaId="alert-expr"
-              placeholder={kind === 'condition' ? 'SUM(revenue) < 100000' : 'COUNT(emp_no)'} />
+              placeholder={kind === 'condition' ? 'SUM(amount) < 100000' : 'COUNT(id)'} />  {/* i18n-ok: an expression */}
           </div>
 
           {kind === 'change' && (
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, fontSize: 12, flexWrap: 'wrap' }}>
-              Fire when it
-              <select aria-label="Direction" value={direction} onChange={e => setDirection(e.target.value as 'up' | 'down' | 'any')}>
-                <option value="any">moves (up or down)</option>
-                <option value="up">rises</option>
-                <option value="down">falls</option>
+              {t('al.fireWhen')}
+              <select aria-label={t('al.direction')} value={direction} onChange={e => setDirection(e.target.value as 'up' | 'down' | 'any')}>
+                <option value="any">{t('al.moves')}</option>
+                <option value="up">{t('al.rises')}</option>
+                <option value="down">{t('al.falls')}</option>
               </select>
-              by at least
-              <input aria-label="Change percent" type="number" min={1} value={changePct}
+              {t('al.byAtLeast')}
+              <input aria-label={t('al.changePercent')} type="number" min={1} value={changePct}
                 onChange={e => setChangePct(e.target.value)} style={{ width: 70 }} />
-              % since the previous check
+              {t('al.sincePrevious')}
             </div>
           )}
 
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
             <button className="btn btn-sm" disabled={!expression.trim() || testing} onClick={() => void runTest()}>
-              {testing ? 'Testing…' : 'Test now'}
+              {testing ? t('al.testing') : t('al.testNow')}
             </button>
             {test && (
               <span role="status" data-testid="alert-test-result" style={{ fontSize: 12,
@@ -243,16 +243,16 @@ export default function AlertsPanel({ datasetId, columns }: {
               <label htmlFor="alert-emails" style={label}>{t('alerts.email')}</label>
               <input id="alert-emails" value={emails} style={{ width: '100%' }}
                 onChange={e => setEmails(e.target.value)}
-                placeholder="ops@example.com, lead@example.com" />
+                placeholder="one@example.com, two@example.com" />  {/* i18n-ok: addresses */}
               <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
                 {t('alerts.comma')}
               </div>
             </div>
             <div style={{ flex: '1 1 260px' }}>
-              <label htmlFor="alert-webhook" style={label}>Teams / Slack webhook (optional)</label>
+              <label htmlFor="alert-webhook" style={label}>{t('al.webhook')}</label>
               <input id="alert-webhook" value={webhook} style={{ width: '100%' }}
                 onChange={e => setWebhook(e.target.value)}
-                placeholder="https://…" />
+                placeholder="https://…" /> {/* i18n-ok */}
             </div>
             <div style={{ width: 150 }}>
               <label htmlFor="alert-interval" style={label}>{t('alerts.every')}</label>
@@ -260,11 +260,11 @@ export default function AlertsPanel({ datasetId, columns }: {
                 onChange={e => setInterval(Number(e.target.value))}>
                 {/* 15 is the floor the endpoint clamps to; offering 5 here would
                     silently become 15 on save. */}
-                <option value={15}>15 minutes</option>
-                <option value={30}>30 minutes</option>
-                <option value={60}>hour</option>
-                <option value={360}>6 hours</option>
-                <option value={1440}>day</option>
+                <option value={15}>{t('al.every15')}</option>
+                <option value={30}>{t('al.every30')}</option>
+                <option value={60}>{t('al.everyHour')}</option>
+                <option value={360}>{t('al.every6h')}</option>
+                <option value={1440}>{t('al.everyDay')}</option>
               </select>
             </div>
           </div>
@@ -275,13 +275,13 @@ export default function AlertsPanel({ datasetId, columns }: {
           )}
 
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn btn-primary btn-sm" disabled={!complete || saving} title={!complete ? 'Give the alert a name, a condition and an email first' : undefined}
+            <button className="btn btn-primary btn-sm" disabled={!complete || saving} title={!complete ? t('al.incomplete') : undefined}
               onClick={() => void create()}>
-              {saving ? 'Creating…' : 'Create'}
+              {saving ? t('al.creating') : t('ws.create')}
             </button>
             <button className="btn btn-sm" onClick={() => {
               setAdding(false); setSaveError(null)
-            }}>Cancel</button>
+            }}>{t('cm.cancel')}</button>
           </div>
         </div>
       )}

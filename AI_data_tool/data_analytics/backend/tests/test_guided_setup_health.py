@@ -259,3 +259,31 @@ def test_many_extreme_value_lines_read_as_one():
     items = health.column_items(quality_report(df), df, "en")
     outl = [i for i in items if i["kind"] == "outliers"]
     assert len(outl) == 1 and outl[0]["what"].startswith("4 number columns")
+
+
+class TestBeyondSize:
+    def frame(self):
+        return pd.DataFrame({"status": ["Delivered"] * 89 + ["Returned"] * 11, "days": [1.0] * 100})
+
+    def test_a_big_group_carrying_a_big_share_says_nothing(self):
+        f = {"kind": "standout", "columns": ["status", "days"], "figures": {"member": "Delivered", "share_pct": 89.0}}
+        assert health.beyond_size(f, self.frame()) is False
+
+    def test_a_group_carrying_more_than_its_size_is_kept(self):
+        f = {"kind": "standout", "columns": ["status", "days"], "figures": {"member": "Returned", "share_pct": 40.0}}
+        assert health.beyond_size(f, self.frame()) is True
+
+    def test_the_group_of_empty_values_is_never_an_insight(self):
+        f = {"kind": "laggard", "columns": ["status", "days"], "figures": {"member": "nan", "share_pct": 1.2}}
+        assert health.beyond_size(f, self.frame()) is False
+
+    def test_other_kinds_pass(self):
+        assert health.beyond_size({"kind": "trend", "columns": ["days"], "figures": {"delta_pct": 28}}, self.frame())
+
+
+class TestTotals:
+    def test_a_total_of_a_number_that_is_not_an_amount_is_not_a_finding(self):
+        df = pd.DataFrame({"month": ["a", "b"], "delivery_days": [1.0, 2.0], "delivery_fee_egp": [5.0, 6.0]})
+        assert not health.totals_mean_something({"kind": "trend", "columns": ["delivery_days", "month"]}, df)
+        assert health.totals_mean_something({"kind": "trend", "columns": ["delivery_fee_egp", "month"]}, df)
+        assert health.totals_mean_something({"kind": "correlation", "columns": ["delivery_days"]}, df)

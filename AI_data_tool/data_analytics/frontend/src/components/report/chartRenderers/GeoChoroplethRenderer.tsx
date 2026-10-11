@@ -1,3 +1,4 @@
+import { useT } from '../../../i18n'
 import { useMemo, useState } from 'react'
 import type { ChartRendererProps } from './types'
 import { fmtStr, TT, seriesColor } from '../chartUtils'
@@ -24,6 +25,7 @@ import { MapDataTable, mapSummary } from '../geo/MapDataTable'
 export default function GeoChoroplethRenderer({ rows, data, cfg, measureFmt, broadcasts,
                                                localSelected, onClickPoint,
                                                geography, plotW, plotH }: ChartRendererProps) {
+  const t9 = useT()
   const { ref, w, h, tiles, view } = useMapBox(plotW, plotH)
   // Precedence, and the order matters: the widget's own setting is a DELIBERATE
   // override and must beat the dataset's classification, which in turn beats
@@ -153,7 +155,7 @@ export default function GeoChoroplethRenderer({ rows, data, cfg, measureFmt, bro
       )}
       {loading && (
         <div data-testid="geo-loading" style={{ position: 'absolute', top: 6, left: 8,
-          fontSize: 10, color: 'var(--muted)' }}>Loading boundaries…</div>
+          fontSize: 10, color: 'var(--muted)' }}>{t9('cr.loadingBoundaries')}</div>
       )}
       {error && (
         <div role="alert" style={{ position: 'absolute', top: 6, left: 8,
@@ -162,8 +164,8 @@ export default function GeoChoroplethRenderer({ rows, data, cfg, measureFmt, bro
       {!loading && unmatched > 0 && (
         <div data-testid="geo-unmatched" style={{ position: 'absolute', bottom: 4, left: 8,
           fontSize: 10, color: 'var(--muted)' }}>
-          {unmatched} row{unmatched === 1 ? '' : 's'} did not match a
-          {setId != null ? ' region in this boundary set' : ' country'}
+          {setId != null ? t9(unmatched === 1 ? 'cr.rowNoRegion' : 'cr.rowsNoRegion', { n: unmatched }) : t9(unmatched === 1 ? 'cr.rowNoCountry' : 'cr.rowsNoCountry', { n: unmatched })}
+          
           {/* Named, so the reader knows WHICH places are missing from the
               picture -- a count alone cannot be acted on. */}
           {unmatchedNames.length > 0 && `: ${unmatchedNames.slice(0, 3).join(', ')}${unmatchedNames.length > 3 ? '…' : ''}`}

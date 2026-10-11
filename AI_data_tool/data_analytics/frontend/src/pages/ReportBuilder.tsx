@@ -92,6 +92,7 @@ import ToolbarMenu from '../components/report/ToolbarMenu'
 import ActionMenu from '../components/ActionMenu'
 import AiMascot from '../components/ai/AiMascot'
 import ViewAssist, { type AssistTab } from './reportBuilder/ViewAssist'
+import PageTakeaways from './reportBuilder/PageTakeaways'
 import FocusView from './reportBuilder/FocusView'
 import PresentControls from './reportBuilder/PresentControls'
 import { useAiOffline } from './ask/useAiOffline'
@@ -1327,7 +1328,7 @@ export default function ReportBuilder() {
     // geography -- IMEI and A_NUMBER sat under Measures with a Sum beside them
     // (live QA 2026-09-28). `isNumericField` applies the same rule, so the
     // group, the icon, the buttons and a click always agree (Fields plan F1).
-    if (!columnMeta[c.name]?.role && c.dtype === 'numeric' && nonAdditiveKind(c.name) === 'coordinate') return 'Geography'
+    if (!columnMeta[c.name]?.role && c.dtype === 'numeric' && nonAdditiveKind(c.name, columnMeta) === 'coordinate') return 'Geography'
     return isNumericField(c) ? 'Measures' : 'Dimensions'
   }
 
@@ -2258,7 +2259,7 @@ export default function ReportBuilder() {
     const next = isNumericField(c) ? 'category' : 'measure'
     if (next === 'measure' && c.dtype !== 'numeric') return
     // The same rule as isNumericField: a year or an id is a category by default.
-    const detectedDefault = c.dtype === 'numeric' && nonAdditiveKind(c.name) == null ? 'measure' : 'category'
+    const detectedDefault = c.dtype === 'numeric' && nonAdditiveKind(c.name, columnMeta) == null ? 'measure' : 'category'
     const meta: Record<string, ColumnMeta> = {}
     for (const [k, v] of Object.entries(columnMeta)) {
       if (!k.startsWith('__')) meta[k] = { ...(v as ColumnMeta) }
@@ -2301,7 +2302,7 @@ export default function ReportBuilder() {
     // The semantic veto on the drag path: a dragged latitude, id or year starts
     // on the aggregation that means something for it, never on Sum.
     else if (target.role.startsWith('measure')) {
-      const kind = nonAdditiveKind(columnName)
+      const kind = nonAdditiveKind(columnName, columnMeta)
       if (kind) next.aggregation = SAFE_AGGREGATION[kind].value
       else {
         // Fields plan F2 (2026-10-09): a chart that was COUNTING rows (no
@@ -2693,7 +2694,7 @@ export default function ReportBuilder() {
     const role = columnMeta[c.name]?.role
     if (role) return role === 'measure'
     if (c.dtype === 'calculated') return true
-    return c.dtype === 'numeric' && nonAdditiveKind(c.name) == null
+    return c.dtype === 'numeric' && nonAdditiveKind(c.name, columnMeta) == null
   }
   const visibleColumns = columns.filter(c => !columnMeta[c.name]?.hidden)
   // Fields plan F7: report filters, as the canvas filter bar shows them.
@@ -4248,6 +4249,7 @@ export default function ReportBuilder() {
               ) : (
                 <p style={{ padding: 14, fontSize: 13, color: 'var(--muted)', margin: 0 }}>{tr('vw.ai.noData')}</p>
               )}
+              summary={activePage ? <PageTakeaways key={activePage.id} reportId={reportId} pageId={activePage.id} /> : undefined}
               insights={<InsightsPane datasetId={report.dataset_id ?? null}
                 columnTypes={Object.fromEntries(columns.map(c => [c.name,
                   columnMeta[c.name]?.role === 'category' ? 'categorical'

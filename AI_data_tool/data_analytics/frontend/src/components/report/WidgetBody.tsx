@@ -4,7 +4,7 @@ import PivotTable, { type PivotData } from './PivotTable'
 import { Suspense, useEffect, useMemo, useState } from 'react'
 import { renderTextWithLinks } from '../../lib/inlineMarkup'
 import { useDirection, widgetIsRtl } from '../../contexts/DirectionContext'
-import { useT } from '../../i18n'
+import { useT, type MessageKey, type TranslateFn } from '../../i18n'
 import type { CalcColumnFormat } from '../../services/api'
 import type { Widget, WidgetType } from '../../types/report'
 import type { RuleStyles } from '../../lib/displayRules'
@@ -65,6 +65,7 @@ function SlicerList({ rows, rtl, checked, onToggle, searchable }: {
   onToggle?: (v: unknown) => void
   searchable: boolean
 }) {
+  const tw = useT()
   const [query, setQuery] = useState('')
   const visible = searchable && query
     ? rows.filter(r => String(r.name).toLowerCase().includes(query.toLowerCase()))
@@ -72,8 +73,8 @@ function SlicerList({ rows, rtl, checked, onToggle, searchable }: {
   return (
     <div dir={rtl ? 'rtl' : undefined} style={{ overflow: 'auto', height: '100%', padding: 6 }}>
       {searchable && (
-        <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search values…"
-          aria-label="Search slicer values"
+        <input value={query} onChange={e => setQuery(e.target.value)} placeholder={tw('wb.searchValues')}
+          aria-label={tw('wb.searchSlicer')}
           style={{ width: '100%', fontSize: 12, marginBottom: 6 }} />
       )}
       {visible.map((row, i) => (
@@ -132,6 +133,7 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
     onAnimationFrame?: (label: string | null) => void ; onApplyFix?: (patch: Record<string, unknown>, label: string) => void
     /** A paged raw table: fetch the next page (the reader scrolled near the end). */
     onLoadMore?: () => void; loadingMore?: boolean }) {
+  const tw = useT()
 
   const wt = widget.widget_type
   const cfg = widget.config as any
@@ -180,7 +182,8 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
         : <span key={i}>{text}</span>
     })
     return (
-      <div dir={rtl ? 'rtl' : undefined} style={{ padding: 12, fontSize: 13, whiteSpace: 'pre-wrap' }}>{rendered}</div>
+      // dir="auto": Arabic text reads right-to-left even when the app is in English.
+      <div dir={rtl ? 'rtl' : 'auto'} style={{ padding: 12, fontSize: 13, whiteSpace: 'pre-wrap' }}>{rendered}</div>
     )
   }
   if (wt === 'button') return (
@@ -257,16 +260,15 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
         {payload.truncated && (
           <div style={{ padding: '4px 10px', fontSize: 10.5, color: 'var(--muted)',
             borderTop: '1px solid var(--border)' }}>
-            Showing the first {rows.length.toLocaleString()} rows
-            {payload.row_count ? ` of ${payload.row_count.toLocaleString()}` : ''} —
-            the rest were truncated.
+            {payload.row_count
+              ? tw('wb.firstOf', { n: rows.length.toLocaleString(), total: payload.row_count.toLocaleString() })
+              : tw('wb.first', { n: rows.length.toLocaleString() })}
           </div>
         )}
         {payload.input_truncated && (
           <div style={{ padding: '4px 10px', fontSize: 10.5, color: 'var(--warning, var(--muted))',
             borderTop: '1px solid var(--border)' }}>
-            The script only saw the first {(payload.rows_in ?? 0).toLocaleString()} rows
-            of this data — any total below is of those rows, not of everything.
+            {tw('wb.scriptSaw', { n: (payload.rows_in ?? 0).toLocaleString() })}
           </div>
         )}
         {payload.stdout ? (
@@ -335,7 +337,7 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
   if (!data && fetchError) {
     // A refused aggregation (a summed year, an averaged id) comes with its
     // fix: one click switches to the aggregation that means something.
-    const fix = fetchError.code === 'semantic_veto' && onApplyFix ? semanticFix(widget.config as Record<string, unknown>) : null
+    const fix = fetchError.code === 'semantic_veto' && onApplyFix ? semanticFix(widget.config as Record<string, unknown>, tw) : null
     if (fix) {
       return <EmptyState msg={fetchError.detail}
         action={{ label: fix.label, onClick: () => onApplyFix!(fix.patch, fix.label) }} />
@@ -387,8 +389,8 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
       const col = String(cfg.dimension ?? cfg.column ?? data?.column ?? '')
       return (
         <div dir={rtl ? 'rtl' : undefined} style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <input type="text" aria-label={`Filter by ${col}`} defaultValue={textFilter}
-            placeholder={col ? `Type a ${col}…` : 'Type a value…'}
+          <input type="text" aria-label={tw('wb.filterBy', { c: col })} defaultValue={textFilter}
+            placeholder={col ? tw('wb.typeA', { c: col }) : tw('wb.typeValue')}
             onKeyDown={e => {
               if (e.key !== 'Enter') return
               onSubmitTextFilter?.((e.target as HTMLInputElement).value.trim(), col)
@@ -397,7 +399,7 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
               border: '1px solid var(--border)', borderRadius: 6,
               background: 'var(--surface)', color: 'var(--text)' }} />
           <span style={{ fontSize: 10, color: 'var(--muted)' }}>
-            Press Enter to filter. Leave empty to clear.
+            {tw('wb.enterToFilter')}
           </span>
         </div>
       )
@@ -424,7 +426,7 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
       const selected = rows.filter(r => checked?.has(r.name)).map(r => r.name)
       return (
         <div dir={rtl ? 'rtl' : undefined} style={{ padding: 8 }}>
-          <select multiple aria-label="Slicer values" value={selected.map(String)}
+          <select multiple aria-label={tw('wb.slicerValues')} value={selected.map(String)}
             onChange={e => {
               const next = new Set([...e.target.selectedOptions].map(o => o.value))
               for (const r of rows) {
@@ -450,6 +452,15 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
       : (Array.isArray(first) ? first[first.length - 1] : '—')
     const kpiIcon = ruleStyles?.rows?.[0]?.icon
     const kpiText = fmtStr(val, measureFmt)
+    // Its recent history, when the widget asks for one (`sparkline_date`): the
+    // change of the last complete period against the one before, and the
+    // shape of the periods before that (server: widget_data.kpi_trend).
+    const trend = (data as { trend?: KpiTrend }).trend
+    const pct = trend && typeof trend.change_pct === 'number' ? trend.change_pct : null
+    const up = pct != null && pct > 0, flat = pct != null && Math.abs(pct) < 0.05
+    // Which way is good is the column's stored direction; with none, no colour.
+    const good = cfg.trend_good === 'up' ? up : cfg.trend_good === 'down' ? !up : null
+    const trendColor = flat || good == null ? 'var(--muted)' : good ? 'var(--ok, #16a34a)' : 'var(--danger, #dc2626)'
     return (
       <div dir={rtl ? 'rtl' : undefined} style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '0 10px', minWidth: 0, containerType: 'inline-size' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, maxWidth: '100%', minWidth: 0 }}>
@@ -464,9 +475,65 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
           {/* A count or an average is not the column itself: "Records" read
               3,576 over the subtitle RATED_AMOUNT (live QA 2026-09-28). A sum
               keeps the column's name, as it always has. */}
-          {cfg.measure && cfg.aggregation && String(cfg.aggregation).toLowerCase() !== 'sum'
-            ? seriesName(cfg) : (cfg.measure || cfg.dimension || 'Value')}
+          {/* A caption written for the reader (the guided setup's "why")
+              instead of "avg(is_late_pct)". */}
+          {typeof cfg.caption === 'string' && cfg.caption.trim() ? cfg.caption
+            : cfg.measure && cfg.aggregation && String(cfg.aggregation).toLowerCase() !== 'sum'
+              ? seriesName(cfg) : (cfg.measure || cfg.dimension || 'Value')}
         </div>
+        {trend && trend.series.length >= 2 && (
+          <div data-testid="kpi-trend" style={{ display: 'flex', alignItems: 'center', gap: 8, maxWidth: '100%', minWidth: 0 }}
+            title={`${trend.period}: ${fmtStr(trend.current, measureFmt)} · ${trend.previous_period}: ${fmtStr(trend.previous, measureFmt)}`}>
+            {pct != null && (
+              <span data-testid="kpi-change" dir="ltr"
+                style={{ fontSize: 12, fontWeight: 600, color: trendColor, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                {flat ? '→' : up ? '▲' : '▼'} {Math.abs(pct).toFixed(1)}%
+              </span>
+            )}
+            <Sparkline values={trend.series.map(p => p.value)} width={96} height={22} />
+            <span style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {trend.period}
+            </span>
+          </div>
+        )}
+        {/* Against the target its author stored (server: widget_data.kpi_target). */}
+        {(() => {
+          const tg = (data as { target?: KpiTarget }).target
+          if (!tg) return null
+          if (!tg.applies) {
+            return <div data-testid="kpi-target" style={{ fontSize: 10.5, color: 'var(--muted)', textAlign: 'center' }}>{tg.reason}</div>
+          }
+          const pctOf = typeof tg.pct === 'number' ? tg.pct : null
+          const tone = tg.met ? 'var(--ok, #16a34a)' : 'var(--muted)'
+          return (
+            <div data-testid="kpi-target" data-met={tg.met ? 'yes' : 'no'} style={{ width: 'min(180px, 90%)' }}
+              title={tg.label ? `${tg.label}: ${fmtStr(tg.against, measureFmt)}` : undefined}>
+              <div dir="ltr" style={{ fontSize: 11, color: 'var(--muted)', textAlign: 'center', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+                {pctOf != null && <b style={{ color: tone }}>{pctOf.toFixed(0)}%</b>} {tw('wb.of')} {fmtStr(tg.value, measureFmt)}
+                {tg.period ? ` · ${tg.label ?? tg.period}` : ''}
+              </div>
+              <div aria-hidden="true" style={{ height: 4, borderRadius: 2, background: 'var(--surface2)', marginTop: 2, overflow: 'hidden' }}>
+                <div style={{ width: `${Math.max(0, Math.min(pctOf ?? 0, 100))}%`, height: '100%', background: tone }} />
+              </div>
+            </div>
+          )
+        })()}
+        {/* Against the same period a year before -- beside, not instead of,
+            the change on the previous period. Same rule for its colour. */}
+        {trend?.year_ago && typeof trend.year_ago.change_pct === 'number' && (() => {
+          const y = trend.year_ago!.change_pct as number
+          const yUp = y > 0, yFlat = Math.abs(y) < 0.05
+          const yGood = cfg.trend_good === 'up' ? yUp : cfg.trend_good === 'down' ? !yUp : null
+          return (
+            <div data-testid="kpi-year-ago" dir="ltr"
+              title={`${trend.year_ago!.period}: ${fmtStr(trend.year_ago!.value, measureFmt)}`}
+              style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+              <span style={{ fontWeight: 600, color: yFlat || yGood == null ? 'var(--muted)' : yGood ? 'var(--ok, #16a34a)' : 'var(--danger, #dc2626)' }}>
+                {yFlat ? '→' : yUp ? '▲' : '▼'} {Math.abs(y).toFixed(1)}%
+              </span>{' '}{tw('wb.vs')} {trend.year_ago!.period}
+            </div>
+          )
+        })()}
       </div>
     )
   }
@@ -476,7 +543,7 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
     const rows: any[] = data.rows ?? []
     return (
       // Focusable: a card with more figures than its tile scrolls (E10).
-      <div dir={rtl ? 'rtl' : undefined} tabIndex={0} role="region" aria-label="Values"
+      <div dir={rtl ? 'rtl' : undefined} tabIndex={0} role="region" aria-label={tw('wb.values')}
         style={{ height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 10, padding: 8, containerType: 'inline-size' }}>
         {rows.map((row, i) => (
           <div key={i} style={{ textAlign: 'center', minWidth: 0 }}>
@@ -597,11 +664,27 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
   return <EmptyState msg={`Unknown widget: ${wt}`} />
 }
 
+/** A KPI against its stored target (server: services/widget_data.kpi_target). */
+interface KpiTarget {
+  value: number; period: string | null; applies: boolean; reason?: string
+  against?: number; label?: string | null; pct?: number | null; remaining?: number; met?: boolean; lower_is_better?: boolean
+}
+
+/** A KPI's recent history (server: services/widget_data.kpi_trend). */
+interface KpiTrend {
+  granularity: string; date: string; series: { period: string; value: number }[]
+  current: number; previous: number; change: number; change_pct: number | null
+  period: string; previous_period: string; partial_dropped: boolean
+  /** The same period one year before, when the history reaches that far. */
+  year_ago?: { period: string; value: number; change: number; change_pct: number | null } | null
+}
+
 /** An inline row sparkline: the row's numeric cells across the (time-ordered)
  *  crosstab columns, drawn as a mini trend line. Scaled to the row's OWN min/max
  *  so the shape reads at a glance -- a sparkline shows movement, not magnitude.
  *  Fewer than two points is not a trend, so it renders nothing. */
 function Sparkline({ values, width = 76, height = 20 }: { values: number[]; width?: number; height?: number }) {
+  const tw = useT()
   const nums = values.filter(v => typeof v === 'number' && isFinite(v))
   if (nums.length < 2) return null
   const min = Math.min(...nums), max = Math.max(...nums)
@@ -610,7 +693,7 @@ function Sparkline({ values, width = 76, height = 20 }: { values: number[]; widt
   const y = (v: number) => (height - 2 - ((v - min) / span) * (height - 4))
   const pts = nums.map((v, i) => `${(i * stepX).toFixed(1)},${y(v).toFixed(1)}`).join(' ')
   return (
-    <svg width={width} height={height} style={{ display: 'block' }} role="img" aria-label="trend sparkline">
+    <svg width={width} height={height} style={{ display: 'block' }} role="img" aria-label={tw('wb.sparkline')}>
       <polyline points={pts} fill="none" stroke="var(--accent)" strokeWidth={1.5}
         strokeLinejoin="round" strokeLinecap="round" />
       <circle cx={(nums.length - 1) * stepX} cy={y(nums[nums.length - 1])} r={1.8} fill="var(--accent)" />
@@ -645,6 +728,7 @@ function WindowedTable({ rtl, cfg, data, cols: inCols, rows: inRows, ruleStyles,
   broadcasts: boolean
   onClickPoint: (name: unknown) => void
 }) {
+  const tw = useT()
   // Totals placement. 'before' draws the totals row above the data and the row
   // subtotal column (`__total__`) ahead of the value columns, right after the row
   // label. Absent means 'after': how every table saved before placement existed
@@ -742,15 +826,15 @@ function WindowedTable({ rtl, cfg, data, cols: inCols, rows: inRows, ruleStyles,
     // Focusable, so a keyboard user can scroll a table wider or longer than
     // its tile (axe scrollable-region-focusable, E10).
     <div dir={rtl ? 'rtl' : undefined} ref={win.containerRef} onScroll={onScroll}
-      tabIndex={0} role="region" aria-label="Table"
+      tabIndex={0} role="region" aria-label={tw('wb.table')}
       style={{ overflow: 'auto', height: '100%' }}>
       <table style={{ fontSize: 12 }}>
         <thead>
           <tr>
             {rowNumbers && <th>#</th>}
             {/* `__total__` is the grid's row subtotal: its name on screen is "Total". */}
-            {cols.map((c: string) => <th key={c} style={{ padding: cellPad }}>{c === '__total__' ? 'Total' : headerOf(c)}</th>)}
-            {showSpark && <th style={{ padding: cellPad }}>Trend</th>}
+            {cols.map((c: string) => <th key={c} style={{ padding: cellPad }}>{c === '__total__' ? tw('wb.total') : headerOf(c)}</th>)}
+            {showSpark && <th style={{ padding: cellPad }}>{tw('wb.trend')}</th>}
           </tr>
           {totalsBefore && totalsRowEl}
         </thead>
@@ -811,13 +895,13 @@ function WindowedTable({ rtl, cfg, data, cols: inCols, rows: inRows, ruleStyles,
         // groups it left out: "Showing 6 of 3576" read as a cut table (live QA
         // 2026-09-28). A left-out group is the truncation note's to say.
         <div data-testid="table-footer" style={{ padding: '6px 12px', color: 'var(--muted)', fontSize: 11, borderTop: '1px solid var(--border)' }}>
-          {rows.length.toLocaleString()} {rows.length === 1 ? 'group' : 'groups'} from {Number(data.total).toLocaleString()} rows
+          {tw(rows.length === 1 ? 'wb.groupFrom' : 'wb.groupsFrom', { n: rows.length.toLocaleString(), total: Number(data.total).toLocaleString() })}
         </div>
       )}
       {!grouped && data.total > rows.length && (
         <div data-testid="table-footer" style={{ padding: '6px 12px', color: 'var(--muted)', fontSize: 11, borderTop: '1px solid var(--border)' }}>
-          Showing {rows.length.toLocaleString()} of {Number(data.total).toLocaleString()} rows
-          {morePending && (loadingMore ? ' — loading more…' : ' — scroll for more')}
+          {tw('wb.showing', { n: rows.length.toLocaleString(), total: Number(data.total).toLocaleString() })}
+          {morePending && (loadingMore ? ` — ${tw('wb.loadingMore')}` : ` — ${tw('wb.scrollMore')}`)}
         </div>
       )}
       {/* The server sets this when "Show totals" was on but the only number it could
@@ -844,12 +928,13 @@ function WindowedList({ rtl, rows, ruleStyles, localSelected, broadcasts, onClic
   onClickPoint: (name: unknown) => void
   measureFmt: CalcColumnFormat | undefined
 }) {
+  const tw = useT()
   const win = useWindowedRows(rows.length, 33, rows.length > WINDOW_THRESHOLD)
   return (
     // Focusable, so a keyboard user can scroll a table wider or longer than
     // its tile (axe scrollable-region-focusable, E10).
     <div dir={rtl ? 'rtl' : undefined} ref={win.containerRef} onScroll={win.onScroll}
-      tabIndex={0} role="region" aria-label="Table"
+      tabIndex={0} role="region" aria-label={tw('wb.table')}
       style={{ overflow: 'auto', height: '100%' }}>
       {win.padTop > 0 && <div aria-hidden="true" style={{ height: win.padTop }} />}
       {rows.slice(win.start, win.end).map((row: any, idx: number) => {
@@ -903,7 +988,7 @@ function WindowedList({ rtl, rows, ruleStyles, localSelected, broadcasts, onClic
 
 /** The one-click fix for a refused aggregation: the first measure whose
  *  aggregation is meaningless for what it is, switched to the one that is. */
-export function semanticFix(cfg: Record<string, unknown>): { patch: Record<string, unknown>; label: string } | null {
+export function semanticFix(cfg: Record<string, unknown>, t?: TranslateFn): { patch: Record<string, unknown>; label: string } | null {
   const agg = (cfg.aggregation as string) || (cfg.agg as string) || 'sum'
   const pairs: [string, string, string][] = [
     [String(cfg.measure ?? ''), agg, 'aggregation'],
@@ -911,8 +996,11 @@ export function semanticFix(cfg: Record<string, unknown>): { patch: Record<strin
   ]
   for (const [col, a, key] of pairs) {
     if (!col || !semanticAggregationWarning(col, a)) continue
-    const safe = SAFE_AGGREGATION[nonAdditiveKind(col)!]
-    return { patch: { [key]: safe.value }, label: `Use ${safe.label} of ${col}` }
+    const kind = nonAdditiveKind(col)!
+    const safe = SAFE_AGGREGATION[kind]
+    const label = t ? t('wb.useAggOf', { agg: t(`wb.safeAgg.${kind}` as MessageKey), col })
+      : `Use ${safe.label} of ${col}`  // i18n-ok: only without a translator (tests)
+    return { patch: { [key]: safe.value }, label }
   }
   return null
 }

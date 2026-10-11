@@ -94,7 +94,8 @@ HANDLERS: dict[str, Handler] = {}
 #: `enqueue` know every kind without depending on import order elsewhere.
 HANDLER_MODULES = ("app.services.source_import", "app.services.refresh_jobs",
                    "app.services.delivery_jobs", "app.services.model_scoring",
-                   "app.services.model_drift", "app.services.suggest_jobs")
+                   "app.services.model_drift", "app.services.suggest_jobs",
+                   "app.services.analysis_jobs")
 
 
 def load_handlers() -> None:
@@ -445,6 +446,10 @@ async def execute(session_factory, job_id: int, token: str) -> str | None:
 
     beat = asyncio.create_task(_heartbeat(session_factory, job_id, token))
     try:
+        # A worker runs job after job in one task: the previous job's "AI is
+        # off for this data" must not carry over (services/ai_policy.py).
+        from . import llm as _llm
+        _llm.allow_ai()
         await handler(ctx)
         if not ctx.completed:
             # A handler with no effects to commit still has to end its job.

@@ -24,10 +24,13 @@ const num = (n: number | null | undefined) => localDigits((n ?? 0).toLocaleStrin
 
 type Creating = { name: string; state: 'running' | 'done' | 'failed'; error?: string | null; datasetId?: number | null }
 
-export default function ChooseDataStep({ sourceId, onDone }: {
+export default function ChooseDataStep({ sourceId, flow, onDone }: {
   sourceId: number
-  /** Called with every dataset id the setup now uses, once they exist. */
-  onDone: (datasetIds: number[]) => Promise<void>
+  /** The analysis this step belongs to (a connection can have several). */
+  flow?: number
+  /** Called with every dataset id the setup now uses, once they exist, and
+   *  which of them this step made (the rest were adopted). */
+  onDone: (datasetIds: number[], createdIds: number[]) => Promise<void>
 }) {
   const t = useT()
   const { language } = useDirection()
@@ -46,11 +49,11 @@ export default function ChooseDataStep({ sourceId, onDone }: {
   const load = useCallback(async () => {
     try {
       setError(null)
-      const d = await setupApi.datasets(sourceId, language)
+      const d = await setupApi.datasets(sourceId, language, flow)
       setData(d)
       setAnswers(n => n + 1)
     } catch (e) { setError(e) }
-  }, [sourceId, language])
+  }, [sourceId, language, flow])
   useEffect(() => { polls.current = 0; load() }, [load])
 
   // The datasets already chosen in an earlier visit stay ticked.
@@ -68,11 +71,11 @@ export default function ChooseDataStep({ sourceId, onDone }: {
 
   async function suggest(brief?: SetupBrief) {
     try {
-      if (brief) await setupApi.update(sourceId, { brief })
+      if (brief) await setupApi.update(sourceId, { brief }, flow)
       setEditingBrief(false)
       polls.current = 0
       setGaveUp(false)
-      await setupApi.suggestDatasets(sourceId, language)
+      await setupApi.suggestDatasets(sourceId, language, flow)
       await load()
     } catch { toast.error(t('setup.d.suggestFailed')) }
   }
@@ -81,7 +84,7 @@ export default function ChooseDataStep({ sourceId, onDone }: {
     try {
       polls.current = 0
       setGaveUp(false)
-      await setupApi.refineDataset(sourceId, p.id, message, language)
+      await setupApi.refineDataset(sourceId, p.id, message, language, flow)
       await load()
     } catch { toast.error(t('setup.d.refineFailed')) }
   }
@@ -90,10 +93,10 @@ export default function ChooseDataStep({ sourceId, onDone }: {
     if (!data) return
     const chosen = data.proposals.items.filter(p => picked.has(p.id))
     const kept = [...adopted]
-    if (!chosen.length) { await onDone(kept); return }
+    if (!chosen.length) { await onDone(kept, []); return }
     setCreating(chosen.map(p => ({ name: names[p.id] ?? p.name, state: 'running' })))
     try {
-      const res = await setupApi.createDatasets(sourceId, chosen.map(p => ({ id: p.id, name: names[p.id] ?? p.name })), mode)
+      const res = await setupApi.createDatasets(sourceId, chosen.map(p => ({ id: p.id, name: names[p.id] ?? p.name })), mode, flow)
       const results = await Promise.all(res.items.map(async (item, i): Promise<Creating> => {
         if (item.error) return { name: item.name, state: 'failed', error: item.error }
         if (item.dataset_id) return { name: item.name, state: 'done', datasetId: item.dataset_id }
@@ -102,12 +105,12 @@ export default function ChooseDataStep({ sourceId, onDone }: {
       }))
       setCreating(results)
       const made = results.filter(r => r.state === 'done' && r.datasetId).map(r => r.datasetId!)
-      if (made.length === results.length) await onDone([...kept, ...made])
+      if (made.length === results.length) await onDone([...kept, ...made], made)
       else if (made.length) toast(t('setup.d.someFailed'))
       else toast.error(t('setup.d.allFailed'))
       if (made.length && made.length < results.length) {
         // Keep what worked; the failed ones stay on screen with their reason.
-        await setupApi.update(sourceId, { dataset_ids: [...kept, ...made] })
+        await setupApi.update(sourceId, { dataset_ids: [...kept, ...made], created_ids: made }, flow)
       }
     } catch (e) {
       setCreating(null)
@@ -347,6 +350,12 @@ function ProposalCard({ p, checked, canCreate, allowAi, name, onName, onToggle, 
         </div>
       </div>
       {p.purpose && <p className="setup-table__what">{p.purpose}</p>}
+      {(p.counts_only ?? []).map(c => (
+        <p key={c.events} className="setup-counts-only">
+          <span className="setup-badge">{t('setup.d.countsOnly')}</span>{' '}
+          {t('setup.d.countsOnlyWhy', { events: c.events.replace(/_/g, ' '), base: c.base.replace(/_/g, ' ') })}
+        </p>
+      ))}
       <div className="setup-split">
         <div>
           <h4 className="setup-split__title setup-split__title--in">{t('setup.d.includes')}</h4>

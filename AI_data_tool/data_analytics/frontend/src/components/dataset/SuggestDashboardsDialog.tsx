@@ -247,7 +247,7 @@ export default function SuggestDashboardsDialog(
   const newReport = async (name: string) => {
     const report = await reportsApi.create({
       name,
-      description: goal ? `Suggested for: ${goal}` : 'Suggested from the data',
+      description: goal ? tr('sdd.descFor', { goal }) : tr('sdd.descData'),
       dataset_id: datasetId,
     } as never)
     return { reportId: (report as { id: number }).id,
