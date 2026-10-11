@@ -1244,3 +1244,39 @@ The owner decided to build Ask AI from the new design (handoff `design-handoff-3
 - New: `askRobot.test.tsx` (11): the parts as separate groups, the small picture without cards, the moods and their timings, what `ChatPane` reports, and the CSS (keyframes use transform and opacity only, no literal colour, the Arabic mirror, reduced motion). `AskRobot.tsx` is in the Ask AI guard.
 - Full suite: 349 files / 4363 tests. Two failed in the full run, in files this step does not touch (`ReportBuilder.test.tsx` E09 and `SourceReview.live.test.tsx`), and both files pass alone (174/174). Type-check and build pass.
 - Captures: `cap_10a.mjs` `empty` and `picked` (EN/AR × light/dark, and at 1024px), and the new `cap_10robot.mjs`: the picture at 2×, each reaction, 30 frames of the idle loop (`idle-00…29.png`, `idle-sheet.png`, `idle-loop.gif`) and the reduced-motion pair. Before is :3001 at `c3e8b6e`, taken before the change; after is in `redesign-captures/10-askai/R-{before,after}/`. In the captures, thinking / happy / error are set on the robot directly (see the limit above), and the model endpoints are faked as up so the question box can be typed in.
+
+### 10-A4 Ask AI: the approved robot prototype, ported (replaces 10-A3's drawing) — the commit that adds this entry
+
+The owner approved a prototype, `design-handoff-3/ask-ai/robot/ask-robot.html`. It was opened in a browser first and every control tried (states, the seven moves, pointer, hover, click, typing, 20s idle, theme and direction); captures of it are in `redesign-captures/10-askai/design/robot/`. The 10-A3 robot is gone.
+
+- **Component** (`pages/ask/AskRobot.tsx`): `state` = idle | typing | thinking | happy | error | sleep, `nod` (a keystroke counter) and `bare` (the step-2 robot). The SVG shapes, gradients, transform origins and keyframe timings are the prototype's. Ids became classes (`dl-bot__*`, `dl-ill__*`) and gradient ids are per instance. The demo controls are not ported.
+- **Colours → tokens:** accent `--accent`; glow = accent mixed with the robot's highlight; body, joints and visor from the neutral scale (`--dl-bot-*`, light body and dark visor in both themes); shadow `--dl-bot-shade`; warning `--warning`; the sweat drop, the hover chest light and the confetti use the chart series tokens (`--dl-series-1…4`) instead of a fixed set. No literal colour.
+- **Behaviour ported:**
+  - Idle routine: a random move every 6–9s (wave, look around, jump, dance, scan, stretch, spin), only while idle and while the tab is visible. The prototype's code waits 5.5–9s; the brief's 6–9s is used.
+  - Pointer: the eyes follow a mouse or pen, only while idle (never a touch). Hover enlarges the eyes. A click, or Enter / Space, does a spin or a jump with 12 sparks.
+  - Typing: a nod on each keystroke.
+  - Sleep after 20s with no pointer, key or scroll activity while idle (closed eyes, Zzz, slower float); any activity wakes it with the wide eyes. Returning to idle restarts the 20s.
+  - Ambient: antenna pulse, spinning ear rings, chest beat, packets flowing along the links, and the animated cards.
+- **Wiring** (`pages/ask/robotMood.ts`, a store the picture reads, so the page does not re-render):
+  - typing while the question box has focus or text (`ChatPane` reports `compose-on` / `compose-off` / `key` through `onActivity`);
+  - thinking while a question runs (links glow, cards highlight);
+  - happy for 3.5s at an answer, with 28 confetti; error for 3.5s when it fails;
+  - idle otherwise; sleep is the robot's own and only happens in idle.
+- **Placement:** the full stage on the empty page (560×460, as wide as its column below that; the old scale at 1279px is gone). Step 2: the robot alone, 124px wide.
+- **Arabic:** the stage is mirrored, as in the prototype (the pointer's x is mirrored with it).
+- **Reduced motion:** no animation or transition, and no routine, gaze, nod, confetti, sparks or packets. Checked in the browser: two captures 2.5s apart are identical.
+- **Accessibility:** the robot is a `<button>` with a translated label (`ask2.robot.label`); everything else in the picture is `aria-hidden`. Under reduced motion a press would do nothing, so it is a plain hidden picture, not a button.
+- **Timers:** the routine and the sleep clock stop while the tab is hidden; every timer and listener is dropped on unmount.
+
+**Deviations from the prototype (our rules win):**
+- *Transform and opacity only.* Where the prototype animated something else, an overlay fades instead: the table's row scan (background), the donut's growing arc (dash length), the cards' highlight while thinking (border and shadow), and the links while thinking (dash offset → an opacity pulse). The chest light changes colour on hover without a transition.
+- The packets keep the prototype's SVG `animateMotion` along the link paths (a motion transform; nothing else can follow a curve with transform alone). They are not rendered under reduced motion.
+- The nod is removed after it plays; in the prototype the first nod stopped the head's sway for good.
+- The empty page's question box is locked, so there "typing" is the data chooser's search box (focus or text). Not in the brief; easy to remove.
+
+**Known limit, for Part B (unchanged from 10-A3):** the hero leaves the page when a question is sent, so thinking, happy and error are wired and tested but are not seen on the page yet; typing, sleep, the routine, the pointer and the click are live. This needs the owner's decision: the robot as the avatar on Part B's loading / answer / error cards, or the hero kept during the first question.
+
+**Tests:**
+- `askRobot.test.tsx` rewritten (21): the stage and the bare robot; the button and its label; the state mapping through the real `ChatPane` (focus or text → typing, a pending ask → thinking, an answer → happy with confetti → idle, a failure → error → idle, a nod per key); sleep after 20s and waking; no sleep outside idle; the routine's 6–9s and its stop outside idle; the hidden tab; click, hover and gaze; no timers after unmount; reduced motion; and the CSS (keyframes and transitions use transform and opacity only, no literal colour, the mirror).
+- Full suite: 349 files / 4373 tests pass, except `PrepPipelinePanel.test.tsx` (not touched here), which failed once in the full run and passes alone. Type-check and build pass.
+- Captures: `cap_10a.mjs` `empty` and `picked` at 1440 and 1024, EN/AR × light/dark; `cap_10robot.mjs`: the picture at 2× in each state, frames of thinking, happy, error, sleep, the wake-up and a click, 60 frames of the idle routine (`idle-sheet.png`, `idle-loop.gif`) and the reduced-motion pair. Before is :3001 at `3fc13ca`, taken before the change; after is in `redesign-captures/10-askai/R2-{before,after}/` (`states-sheet.png`, `step2-sheet.png` and `frames-sheet.png` are quick views). Typing and sleep are real in the captures; thinking / happy / error go through the page's own store (see the limit above); the model endpoints are faked as up in the browser so the question box can be typed in.

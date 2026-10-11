@@ -69,10 +69,10 @@ export interface ChatPaneProps {
    *  Ask AI page's "What would you like to know?" hero and its suggestion
    *  cards. Handed the pane's own send, so a card is sent like a typed question. */
   startView?: (ask: (question: string) => void, busy: boolean) => ReactNode
-  /** Step 10: what the pane is doing, for the Ask AI page's robot -- a key in
-   *  the question box, a question sent, and how it came back. `rest` when the
-   *  pane goes away. */
-  onActivity?: (what: 'typing' | 'running' | 'answer' | 'error' | 'rest') => void
+  /** Step 10: what the pane is doing, for the Ask AI page's robot -- the
+   *  question box has focus or text (`compose-on`) or neither, a key in it, a
+   *  question sent, and how it came back. `rest` when the pane goes away. */
+  onActivity?: (what: 'compose-on' | 'compose-off' | 'key' | 'running' | 'answer' | 'error' | 'rest') => void
 }
 
 type MessageKind = 'answer' | 'clarify' | 'error' | 'limit'
@@ -230,6 +230,10 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
       .finally(() => { if (seq === loadSeq.current) setLoading(false) })
   }, [owned, conversationId])
 
+  const [composerFocused, setComposerFocused] = useState(false)
+  const composing = composerFocused || input !== ''
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { onActivity?.(composing ? 'compose-on' : 'compose-off') }, [composing])
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => () => onActivity?.('rest'), [])
 
@@ -584,9 +588,9 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
         })}
         <div ref={endRef} />
       </div>
-      <div className="dl-chat__composer">
+      <div className="dl-chat__composer" onFocus={() => setComposerFocused(true)} onBlur={() => setComposerFocused(false)}>
         {offline && <p role="status" className="dl-chat__note dl-chat__note--error dl-chat__offline" data-testid="ai-offline">{t('off.title')}</p>}
-        <Composer value={input} onChange={v => { setInput(v); onActivity?.('typing') }} onSend={() => void send()} busy={busy}
+        <Composer value={input} onChange={v => { setInput(v); onActivity?.('key') }} onSend={() => void send()} busy={busy}
           locked={offline} lockedHint={offline ? t('off.composer') : undefined} />
       </div>
     </div>

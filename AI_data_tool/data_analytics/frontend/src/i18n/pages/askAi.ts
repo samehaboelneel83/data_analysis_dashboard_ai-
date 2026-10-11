@@ -12,6 +12,7 @@ const arCount = (v: string, one: string, two: string, few: string, many: string,
 export const en = {
   // Hero, step 1
   'ask2.hero.title': 'Ask your data anything',
+  'ask2.robot.label': 'Assistant robot. Press it to make it move.',
   'ask2.hero.sub': 'Pick a dataset, ask in plain language, and get answers with the rows and SQL behind them.',
   'ask2.step': 'Step {n}',
   'ask2.step1': 'Choose your data',
@@ -56,6 +57,7 @@ export const en = {
 
 export const ar: Record<keyof typeof en, string> = {
   'ask2.hero.title': 'اسأل بياناتك عن أي شيء',
+  'ask2.robot.label': 'روبوت المساعد. اضغط عليه ليتحرك.',
   'ask2.hero.sub': 'اختر مجموعة بيانات، واسأل بلغتك اليومية، واحصل على إجابات مع الصفوف واستعلام SQL الذي بُنيت عليه.',
   'ask2.step': 'الخطوة {n}',
   'ask2.step1': 'اختر بياناتك',

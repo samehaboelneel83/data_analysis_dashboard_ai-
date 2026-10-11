@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type FocusEvent, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Bot, History } from 'lucide-react'
 import EmptyState from '../components/ui/EmptyState'
@@ -161,6 +161,7 @@ export default function AskAI() {
   const choose = (value: string) => {
     // "d:32" or "s:3" -- one picker, two scope kinds, because the question
     // "what am I asking about?" has one answer, not two fields.
+    signalRobot('rest')
     if (!value) { setParams({}, { replace: true }); return }
     const [kind, id] = value.split(':')
     setParams(kind === 's' ? { source: id } : { dataset: id }, { replace: true })
@@ -212,6 +213,15 @@ export default function AskAI() {
     return !f
   })
 
+  // The empty page's question box is locked, so there the robot's "typing"
+  // is the data chooser's search box: while it has focus or text.
+  const searchBox = (e: FocusEvent<HTMLDivElement> | FormEvent<HTMLDivElement>) => {
+    const box = e.target
+    if (!(box instanceof HTMLInputElement) || box.type === 'checkbox' || box.type === 'radio') return
+    if (e.type === 'input') signalRobot('key')
+    signalRobot((e.type !== 'blur' && document.activeElement === box) || box.value ? 'compose-on' : 'compose-off')
+  }
+
   const scoped = sourceId != null || datasetId != null
   // The pane copies the question into its box when it mounts; after that it is
   // the pane's, so a later scope change does not put it back.
@@ -255,7 +265,7 @@ export default function AskAI() {
                 // and the subtitle on the inline end. The page does not
                 // scroll: the chooser's list scrolls in its own column.
                 <div className="dl-ask__split">
-                  <div className="dl-ask__chooser" onInput={() => signalRobot('typing')}>
+                  <div className="dl-ask__chooser" onFocus={searchBox} onBlur={searchBox} onInput={searchBox}>
                     {pendingQ && (
                       <p className="dl-ask__pending" data-testid="ask-pending-q">
                         {t('ask2.pendingQ')} <q dir="auto">{pendingQ}</q>
@@ -264,7 +274,7 @@ export default function AskAI() {
                     <DataPicker items={items} value="" onChoose={choose} size="inline" loading={loading} />
                     <div className="dl-ask__filter"><DatasetListFilter state={clean} /></div>
                   </div>
-                  <AskHero id="dl-ask-title" title={t('ask2.hero.title')} sub={t('ask2.hero.sub')} look="side" />
+                  <AskHero id="dl-ask-title" title={t('ask2.hero.title')} sub={t('ask2.hero.sub')} />
                 </div>
               )}
             </div>

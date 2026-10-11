@@ -10,15 +10,13 @@ import AskIllustration from './AskIllustration'
  * the picture, the headline and the subtitle (the empty page's inline-end
  * column, where Step 1 sits with the data chooser).
  */
-export default function AskHero({ id, title, sub, step, stepLabel, small, look, children }: {
+export default function AskHero({ id, title, sub, step, stepLabel, small, children }: {
   id: string
   title: string
   sub: ReactNode
   step?: number
   stepLabel?: string
   small?: boolean
-  /** Where the reader types, for the robot to look at (see AskIllustration). */
-  look?: 'down' | 'side'
   children?: ReactNode
 }) {
   const t = useT()
@@ -26,7 +24,7 @@ export default function AskHero({ id, title, sub, step, stepLabel, small, look, 
   const last = words.pop()
   return (
     <section className={`dl-hero${small ? ' dl-hero--sm' : ''}`} aria-labelledby={id}>
-      <AskIllustration small={small} look={look} />
+      <AskIllustration small={small} />
       <h1 id={id} className="dl-hero__title">
         {words.join(' ')}{words.length ? ' ' : ''}<span className="dl-hero__accent">{last}</span>
       </h1>
