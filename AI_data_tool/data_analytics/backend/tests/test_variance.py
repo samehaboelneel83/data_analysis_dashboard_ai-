@@ -92,7 +92,8 @@ def test_two_numbers_of_one_unit_and_one_size_are_offered_against_each_other():
     prof = store.compute(rows())
     kinds = engine.column_kinds(prof, META)
     assert engine.comparable_pairs(prof, kinds, META) == [("reached", "expected")]      # weight: same unit, another size
-    cards = [c for c in engine.tier0(prof, META)["cards"] if "expected" in c["fields"] and "reached" in c["fields"]]
+    cards = [c for c in engine.tier0(prof, META)["cards"] if "expected" in c["fields"] and "reached" in c["fields"]
+             and c["action"]["kind"] != "decision_problem"]        # a decision on the same columns is its own card
     kinds_offered = {c["action"].get("analysis") or c["action"].get("widget_type") for c in cards}
     assert kinds_offered == {"explain_variance", "waterfall", "heatmap"}
     assert all(any("yardstick" in l for l in c["limits"]) for c in cards)

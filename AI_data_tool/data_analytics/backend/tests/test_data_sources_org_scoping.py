@@ -149,7 +149,7 @@ async def test_reimport_carries_forward_semantic_type_by_column_name(client, db_
 
     fresh = pd.DataFrame([{"id": 1, "email": "a@x.com"}, {"id": 2, "email": "b@x.com"}])
     monkeypatch.setattr("app.services.source_import.import_to_dataframe",
-                        lambda cfg, table, query: fresh)
+                        lambda cfg, table, query, **kw: fresh)
 
     resp = await client.post(
         f"/api/v1/data-sources/{src.id}/import",
