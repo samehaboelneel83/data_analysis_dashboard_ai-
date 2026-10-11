@@ -143,7 +143,7 @@ Nothing is pushed.
 - [ ] 10 Ask AI redesign (design handoff `design-handoff-3/ask-ai/`). Reference captures: `redesign-captures/10-askai/design/`.
   - [x] Part 0 Inventory — GATE 0 approved 2026-10-11 with decisions: duration from one `GET /agent/runs/{id}` after each answer (never delays it; nothing shown if it fails); Edit question on answers too (secondary); composer limit stays 2000 (warning from 1800); error chips kept, labelled as column-based suggestions; picker keeps Connections, no "Synced" line, a fixed hint with the last pick; loading shows elapsed time and a skeleton only.
   - [x] A Layout, hero, picker, step 2 and suggestion cards
-    - >> GATE A
+    - >> GATE A; then A2, the owner's change to the empty page (two columns, chooser always open)
   - [ ] B Loading and answer cards
   - [ ] C Error card and composer
   - [ ] D History rail
@@ -1203,4 +1203,21 @@ The owner decided to build Ask AI from the new design (handoff `design-handoff-3
 - Re-pinned: 4 AskAI tests (locked box before Step 1; a new chat by default).
 - Full suite: 348 files / 4349 tests pass. The flaky `Lineage.test.tsx` failed once under the capture load and passes alone (15/15). Type-check and build pass.
 - Captures: `e2e/capture/redesign/cap_10a.mjs` (empty, open, search, picked, picked at 1024, History overlay at 1024), EN/AR × light/dark. Before is :3011 at `4a86b44`; after is in `redesign-captures/10-askai/A-{before,after}/`.
+
+### 10-A2 Ask AI empty page in two columns (owner's change at GATE A) — the commit that adds this entry
+
+- The empty page is two columns, wider than the chat column (1120px max). On the inline start is the data chooser; on the inline end are the picture, "Ask your data anything" and the subtitle, vertically centred. Logical properties throughout, so Arabic mirrors.
+- **The chooser is always open** (`DataPicker size="inline"`), with no trigger or popover:
+  - "Step 1 · Choose your data", the search box on its own line, the All / Datasets / Connections tabs under it.
+  - The Recent / Datasets / Connections groups with their meta lines, and Upload dataset at the foot.
+  - ↑ ↓ Home End Enter work in the search box; Escape clears the search (the footer says "to clear the search").
+  - It does not take focus on load.
+  - The page does not scroll; the list scrolls inside its column.
+- Below 1280px the picture scales down (72%, its box with it) and the type steps down; checked at 1024px.
+- The question box stays locked at the foot. After a dataset is chosen, Step 2 is unchanged: the context row with the compact chip and its popover, the small hero, the cards.
+- **Tests:**
+  - New: the inline chooser (2): open without a trigger, with search, tabs, list and Upload; arrows/Enter choose, and Escape clears.
+  - Re-pinned: 3 AskAI tests no longer click a trigger.
+  - Full suite 348 files / 4351 tests pass; type-check and build pass.
+- Captures: `cap_10a.mjs` `empty` and `empty-1024`, EN/AR × light/dark. Before is :3011 at `70b38f2`; after is in `redesign-captures/10-askai/A2-{before,after}/`.
 

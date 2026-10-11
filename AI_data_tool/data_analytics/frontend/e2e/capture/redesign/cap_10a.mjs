@@ -14,6 +14,7 @@ const trigger = p => p.getByRole('button', { name: /What to ask about|ما ال�
 
 const scenes = [
   { id: 'empty', url: '/ask' },
+  { id: 'empty-1024', url: '/ask', view: { width: 1024, height: 768 } },
   { id: 'open', url: '/ask', act: async p => { await trigger(p).click(); await sleep(700) } },
   { id: 'search', url: '/ask', act: async p => {
     await trigger(p).click(); await sleep(500); await p.keyboard.type('dem'); await sleep(500) } },

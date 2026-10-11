@@ -6,14 +6,16 @@ import AskIllustration from './AskIllustration'
  * The centred hero (step 10 design: `.hero`): the picture, a headline whose
  * last word is in the accent, a subtitle, then the numbered step and whatever
  * the step holds (the picker, or the suggestion cards). `small` is the
- * dataset-picked version, with a smaller picture.
+ * dataset-picked version, with a smaller picture. Without a step it is just
+ * the picture, the headline and the subtitle (the empty page's inline-end
+ * column, where Step 1 sits with the data chooser).
  */
 export default function AskHero({ id, title, sub, step, stepLabel, small, children }: {
   id: string
   title: string
   sub: ReactNode
-  step: number
-  stepLabel: string
+  step?: number
+  stepLabel?: string
   small?: boolean
   children?: ReactNode
 }) {
@@ -27,9 +29,11 @@ export default function AskHero({ id, title, sub, step, stepLabel, small, childr
         {words.join(' ')}{words.length ? ' ' : ''}<span className="dl-hero__accent">{last}</span>
       </h1>
       <p className="dl-hero__sub">{sub}</p>
-      <div className="dl-hero__step">
-        <span className="dl-hero__stn">{t('ask2.step', { n: step })}</span>{stepLabel}
-      </div>
+      {step != null && (
+        <div className="dl-hero__step">
+          <span className="dl-hero__stn">{t('ask2.step', { n: step })}</span>{stepLabel}
+        </div>
+      )}
       {children}
     </section>
   )

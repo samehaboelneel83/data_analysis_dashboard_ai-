@@ -249,16 +249,22 @@ export default function AskAI() {
                 <EmptyState icon={Bot} title={t('ask.noData')}
                   action={<Link to="/upload" className="btn btn-primary">{t('ask.uploadDataset')}</Link>} />
               ) : (
-                <AskHero id="dl-ask-title" title={t('ask2.hero.title')} sub={t('ask2.hero.sub')}
-                  step={1} stepLabel={t('ask2.step1')}>
-                  {pendingQ && (
-                    <p className="dl-ask__pending" data-testid="ask-pending-q">
-                      {t('ask2.pendingQ')} <q dir="auto">{pendingQ}</q>
-                    </p>
-                  )}
-                  <DataPicker items={items} value="" onChoose={choose} size="hero" loading={loading} />
-                  <div className="dl-ask__filter"><DatasetListFilter state={clean} /></div>
-                </AskHero>
+                // Owner's change to Part A: two columns. The data chooser,
+                // always open, on the inline start; the picture, the headline
+                // and the subtitle on the inline end. The page does not
+                // scroll: the chooser's list scrolls in its own column.
+                <div className="dl-ask__split">
+                  <div className="dl-ask__chooser">
+                    {pendingQ && (
+                      <p className="dl-ask__pending" data-testid="ask-pending-q">
+                        {t('ask2.pendingQ')} <q dir="auto">{pendingQ}</q>
+                      </p>
+                    )}
+                    <DataPicker items={items} value="" onChoose={choose} size="inline" loading={loading} />
+                    <div className="dl-ask__filter"><DatasetListFilter state={clean} /></div>
+                  </div>
+                  <AskHero id="dl-ask-title" title={t('ask2.hero.title')} sub={t('ask2.hero.sub')} />
+                </div>
               )}
             </div>
           </div>

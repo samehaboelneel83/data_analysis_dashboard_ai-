@@ -77,19 +77,16 @@ describe('AskAI', () => {
 
   it('picking a scope in the picker mounts the pane for it', async () => {
     renderAt('/ask')
-    const trigger = await screen.findByRole('button', { name: 'What to ask about' })
-    await waitFor(() => expect(trigger).not.toBeDisabled())
-    fireEvent.click(trigger)
+    // The empty page's chooser is always open (owner's change to Part A).
     fireEvent.click(await screen.findByRole('option', { name: /Orders/ }))
     expect(await screen.findByTestId('chat-pane')).toHaveTextContent('datasets:32')
   })
 
   it('the picker searches, and says what each choice is', async () => {
     renderAt('/ask')
-    const trigger = await screen.findByRole('button', { name: 'What to ask about' })
-    await waitFor(() => expect(trigger).not.toBeDisabled())
-    fireEvent.click(trigger)
+    // The empty page's chooser is always open (owner's change to Part A).
     const search = await screen.findByRole('combobox', { name: /search/i })
+    await screen.findByRole('option', { name: /Warehouse/ })
     expect(screen.getAllByRole('option').map(o => o.textContent)).toEqual(
       expect.arrayContaining([expect.stringMatching(/Warehouse/)]))
     fireEvent.change(search, { target: { value: 'ware' } })
@@ -249,9 +246,7 @@ describe('AskAI — the conversation list', () => {
       { id: 167, name: 'Live orders', mode: 'directquery', filename: null } as any,
     ])
     renderAt('/ask')
-    const trigger = await screen.findByRole('button', { name: 'What to ask about' })
-    await waitFor(() => expect(trigger).not.toBeDisabled())
-    fireEvent.click(trigger)
+    // The empty page's chooser is always open (owner's change to Part A).
     await waitFor(() => expect(screen.getByText('Orders')).toBeInTheDocument(),
                   { timeout: 5000 })
     expect(screen.queryByText('Live orders')).not.toBeInTheDocument()

@@ -123,3 +123,32 @@ describe('ChatPane start view', () => {
     await waitFor(() => expect(screen.queryByRole('button', { name: 'card' })).not.toBeInTheDocument())
   })
 })
+
+describe('the inline chooser (empty page, owner\'s change)', () => {
+  const ITEMS = [
+    { key: 'd:1', kind: 'dataset' as const, name: 'Sales 2026', rows: 12400, cols: 9 },
+    { key: 's:3', kind: 'source' as const, name: 'Warehouse', sourceType: 'postgres' },
+  ]
+  it('is open without a trigger: Step 1, search, tabs, the list and Upload', () => {
+    render(<MemoryRouter><DataPicker items={ITEMS} value="" onChoose={() => {}} size="inline" /></MemoryRouter>)
+    expect(screen.queryByRole('button', { name: 'What to ask about' })).not.toBeInTheDocument()
+    expect(screen.getByText('Step 1')).toBeInTheDocument()
+    expect(screen.getByRole('combobox')).toBeInTheDocument()
+    expect(screen.getAllByRole('tab')).toHaveLength(3)
+    expect(screen.getAllByRole('option')).toHaveLength(2)
+    expect(screen.getByRole('link', { name: /Upload dataset/ })).toHaveAttribute('href', '/upload')
+  })
+
+  it('arrows and Enter choose; Escape clears the search and keeps the list', () => {
+    const onChoose = vi.fn()
+    render(<MemoryRouter><DataPicker items={ITEMS} value="" onChoose={onChoose} size="inline" /></MemoryRouter>)
+    const search = screen.getByRole('combobox')
+    fireEvent.change(search, { target: { value: 'zzz' } })
+    fireEvent.keyDown(search, { key: 'Escape' })
+    expect(search).toHaveValue('')
+    expect(screen.getAllByRole('option')).toHaveLength(2)
+    fireEvent.keyDown(search, { key: 'ArrowDown' })
+    fireEvent.keyDown(search, { key: 'Enter' })
+    expect(onChoose).toHaveBeenCalledWith('s:3')
+  })
+})

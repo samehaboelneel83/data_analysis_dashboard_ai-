@@ -9,10 +9,12 @@ import { fmtDate } from './dates'
 /**
  * Step 1 of Ask AI: choose the data (step 10 design: `picker()` / `list()`).
  *
- * Two triggers: the large one in the hero ("Choose a dataset or connection",
- * with the counts and the reader's last pick) and a compact chip in the
- * "Asking about" row. The list opens in a portal, fixed under the trigger,
- * and flips above it when there is no room below. All / Datasets /
+ * Three forms. `inline` (the empty page, owner's change to Part A): the list
+ * itself, always open in its own column, with "Step 1 · Choose your data"
+ * above it -- no trigger. `compact`: a chip in the "Asking about" row whose
+ * list opens in a portal, fixed under it, flipping above when there is no
+ * room below. `hero`: the large trigger ("Choose a dataset or connection",
+ * the counts and the reader's last pick) with the same popover. All / Datasets /
  * Connections tabs; Recent first (this browser's own picks, then datasets made
  * in the last day), then datasets, then connections. Each row says what the
  * thing is, how big it is and how fresh (a connection has no sync time the
@@ -90,12 +92,15 @@ export default function DataPicker({ items, value, onChoose, size = 'hero', load
   items: PickerItem[]
   value: string
   onChoose: (key: string) => void
-  size?: 'hero' | 'compact'
+  size?: 'hero' | 'compact' | 'inline'
   loading?: boolean
 }) {
   const t = useT()
+  const inline = size === 'inline'
   const uid = useId().replace(/:/g, '')
-  const [open, setOpen] = useState(false)
+  const [openState, setOpen] = useState(false)
+  // The inline list is always open; the others open from their trigger.
+  const open = inline || openState
   const [query, setQuery] = useState('')
   const [tab, setTab] = useState<Tab>('all')
   const [active, setActive] = useState(0)
@@ -109,7 +114,7 @@ export default function DataPicker({ items, value, onChoose, size = 'hero', load
   // Measured before paint, so the popup never flashes on the wrong side. It is
   // fixed to the window (it lives in a portal), so the window is its bounds.
   useLayoutEffect(() => {
-    if (!open || !triggerRef.current) return
+    if (inline || !open || !triggerRef.current) return
     const measure = () => {
       const tr = triggerRef.current
       if (!tr) return
@@ -127,7 +132,7 @@ export default function DataPicker({ items, value, onChoose, size = 'hero', load
     window.addEventListener('resize', measure)
     window.addEventListener('scroll', measure, true)
     return () => { window.removeEventListener('resize', measure); window.removeEventListener('scroll', measure, true) }
-  }, [open, size])
+  }, [open, size, inline])
 
   const selected = items.find(i => i.key === value)
   const nDatasets = items.filter(i => i.kind === 'dataset').length
@@ -167,7 +172,7 @@ export default function DataPicker({ items, value, onChoose, size = 'hero', load
 
   useEffect(() => { setActive(0) }, [query, tab, open])
   useEffect(() => {
-    if (!open) return
+    if (!open || inline) return
     const onDown = (e: MouseEvent) => {
       const n = e.target as Node
       if (!rootRef.current?.contains(n) && !popRef.current?.contains(n)) setOpen(false)
@@ -175,12 +180,16 @@ export default function DataPicker({ items, value, onChoose, size = 'hero', load
     document.addEventListener('mousedown', onDown)
     requestAnimationFrame(() => inputRef.current?.focus())
     return () => document.removeEventListener('mousedown', onDown)
-  }, [open])
+  }, [open, inline])
   useEffect(() => {
     document.getElementById(`${uid}-opt-${active}`)?.scrollIntoView?.({ block: 'nearest' })
   }, [active, uid])
 
-  const close = () => { setOpen(false); setQuery(''); setTab('all'); requestAnimationFrame(() => triggerRef.current?.focus()) }
+  const close = () => {
+    // Inline, Escape only clears the search: there is nothing to close.
+    if (inline) { setQuery(''); return }
+    setOpen(false); setQuery(''); setTab('all'); requestAnimationFrame(() => triggerRef.current?.focus())
+  }
   const choose = (item: PickerItem) => {
     pushRecent(item.key)
     onChoose(item.key)
@@ -224,9 +233,10 @@ export default function DataPicker({ items, value, onChoose, size = 'hero', load
   const q = query.trim().toLowerCase()
   let n = -1
   const pop = open && (
-    <div ref={popRef} className={`dl-pick__pop${pos.up ? ' dl-pick__pop--up' : ''}`} role="dialog" aria-label={t('ask2.pick.dialog')}
-      data-placement={pos.up ? 'top' : 'bottom'}
-      style={{ ...pos.style, '--dl-pick-list-max': `${pos.listMax}px` } as CSSProperties}>
+    <div ref={popRef} className={inline ? 'dl-pick__panel' : `dl-pick__pop${pos.up ? ' dl-pick__pop--up' : ''}`}
+      role={inline ? 'group' : 'dialog'} aria-label={t('ask2.pick.dialog')}
+      data-placement={inline ? undefined : pos.up ? 'top' : 'bottom'}
+      style={inline ? undefined : { ...pos.style, '--dl-pick-list-max': `${pos.listMax}px` } as CSSProperties}>
       <div className="dl-pick__search">
         <Search size={16} aria-hidden />
         <input ref={inputRef} value={query} onChange={e => setQuery(e.target.value)} onKeyDown={onKey}
@@ -281,11 +291,22 @@ export default function DataPicker({ items, value, onChoose, size = 'hero', load
       <div className="dl-pick__foot">
         <span aria-hidden><kbd>↑</kbd> <kbd>↓</kbd> {t('ask2.pick.move')}</span>
         <span aria-hidden><kbd>Enter</kbd> {t('ask2.pick.select')}</span>
-        <span aria-hidden><kbd>Esc</kbd> {t('ask2.pick.close')}</span>
+        <span aria-hidden><kbd>Esc</kbd> {t(inline ? 'ask2.pick.clear' : 'ask2.pick.close')}</span>
         <Link to="/upload" className="dl-pick__upload"><Upload size={14} aria-hidden /> {t('ask2.pick.upload')}</Link>
       </div>
     </div>
   )
+
+  if (inline) {
+    return (
+      <div ref={rootRef} className="dl-pick dl-pick--inline">
+        <div className="dl-pick__step">
+          <span className="dl-hero__stn">{t('ask2.step', { n: 1 })}</span>{t('ask2.step1')}
+        </div>
+        {pop}
+      </div>
+    )
+  }
 
   return (
     <div ref={rootRef} className={`dl-pick dl-pick--${size}${open ? ' dl-pick--open' : ''}`}>

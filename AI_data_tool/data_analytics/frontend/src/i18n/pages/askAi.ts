@@ -37,6 +37,7 @@ export const en = {
   'ask2.pick.move': 'to move',
   'ask2.pick.select': 'to select',
   'ask2.pick.close': 'to close',
+  'ask2.pick.clear': 'to clear the search',
   'ask2.pick.upload': 'Upload dataset',
   'ask2.pick.change': 'Change data: {name}',
   // Dataset picked
@@ -79,6 +80,7 @@ export const ar: Record<keyof typeof en, string> = {
   'ask2.pick.move': 'للتنقل',
   'ask2.pick.select': 'للاختيار',
   'ask2.pick.close': 'للإغلاق',
+  'ask2.pick.clear': 'لمسح البحث',
   'ask2.pick.upload': 'رفع مجموعة بيانات',
   'ask2.pick.change': 'تغيير البيانات: {name}',
   'ask2.ctx.asking': 'تسأل عن',
