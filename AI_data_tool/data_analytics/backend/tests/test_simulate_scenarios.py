@@ -74,3 +74,56 @@ def test_the_warnings_of_the_what_if_come_with_it_and_carry_keys():
     keys = [k["key"] for k in got["caveats_i18n"] if k]
     assert {"sim.what", "sim.same", "fs.assoc", "an.outside.named"} <= set(keys)
     assert {r["scenario"]: r["extrapolating"] for r in got["table"]} == {"more": False, "doubled": True}
+
+
+# ── A model of the wrong form (the open item of §AY) ─────────────────────────
+
+import pandas as pd
+
+
+def _history(curve: bool, n: int = 48, seed: int = 4):
+    """One row per month: the number follows the factor in a straight line, or
+    (curve) with a bend that grows as the factor grows -- and the factor rises
+    over time, so the newest periods are where the line is most wrong."""
+    rng = np.random.default_rng(seed)
+    months = pd.date_range("2021-01-01", periods=n, freq="MS")
+    spend = np.linspace(10.0, 60.0, n) + rng.normal(0, 1.0, n)
+    outcome = 50 + 3.0 * spend + (0.25 * (spend - 10) ** 2 if curve else 0.0) + rng.normal(0, 4.0, n)
+    return pd.DataFrame({"month": months, "spend": spend, "outcome": outcome})
+
+
+def test_a_straight_line_through_a_curve_is_widened_and_said_to_bend():
+    got = simulate_scenarios(_history(curve=True), "month", "outcome", ["spend"], [UP])
+    assert got["widened"] and got["bends"]
+    assert got["noise"]["unseen"] > got["noise"]["own"] * 1.25
+    keys = [c["key"] for c in got["caveats_i18n"] if c]
+    assert "sim.widened" in keys and "sim.bends" in keys
+
+
+def test_the_widened_range_is_really_wider_than_the_models_own():
+    from app.services.analysis import simulate_scenarios as sim
+    df = _history(curve=True)
+    wide = simulate_scenarios(df, "month", "outcome", ["spend"], [UP])["table"][0]
+    old = sim.WIDEN_FROM
+    sim.WIDEN_FROM = 1e9                                   # never widen: the model's own idea of its noise
+    try:
+        narrow = simulate_scenarios(df, "month", "outcome", ["spend"], [UP])["table"][0]
+    finally:
+        sim.WIDEN_FROM = old
+    assert (wide["p95"] - wide["p05"]) > 1.2 * (narrow["p95"] - narrow["p05"])
+    # The middle does not move: only how sure it is.
+    assert abs(wide["median"] - narrow["median"]) / abs(narrow["median"]) < 0.02
+
+
+def test_a_model_of_the_right_form_is_left_as_it_was():
+    got = simulate_scenarios(_history(curve=False), "month", "outcome", ["spend"], [UP])
+    assert not got["widened"] and not got["bends"]
+    assert not {"sim.widened", "sim.bends"} & {c["key"] for c in got["caveats_i18n"] if c}
+
+
+def test_too_short_a_history_to_hold_any_back_measures_nothing():
+    from app.services.analysis.simulate_scenarios import _unseen_miss
+    x = np.column_stack([np.ones(7), np.arange(7.0), np.arange(7.0) ** 0.5])
+    assert _unseen_miss(np.arange(7.0), x) is None
+    longer = np.column_stack([np.ones(30), np.arange(30.0), np.sin(np.arange(30.0))])
+    assert _unseen_miss(np.arange(30.0) * 2 + 1, longer) < 1e-6        # a perfect line misses nothing

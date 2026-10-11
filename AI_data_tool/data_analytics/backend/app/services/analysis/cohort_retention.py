@@ -38,21 +38,20 @@ def cohort_retention(df: pd.DataFrame, entity: str, date_column: str, granularit
                      periods: int = MAX_PERIODS, column_meta: dict | None = None) -> AnalysisContract:
     for col in (entity, date_column):
         if col not in df.columns:
-            raise CohortRetentionError(f"column '{col}' is not in this dataset")
+            raise CohortRetentionError(_s("no.change_drivers.1", "column '{a}' is not in this dataset", cap=False, a=col))
     if granularity not in _FREQ:
-        raise CohortRetentionError(f"granularity must be one of {', '.join(_FREQ)}")
+        raise CohortRetentionError(_s("no.cohort_retention.1", "granularity must be one of {a}", cap=False, a=', '.join(_FREQ)))
     periods = max(1, min(int(periods or MAX_PERIODS), MAX_PERIODS))
     when = pd.to_datetime(df[date_column], errors="coerce")
     frame = pd.DataFrame({"e": df[entity], "p": when.dt.to_period(_FREQ[granularity])}).dropna()
     left_out = int(len(df) - len(frame))
     if frame.empty:
-        raise CohortRetentionError(f"{date_column} holds no dates")
+        raise CohortRetentionError(_s("no.change_drivers.3", "{a} holds no dates", cap=False, a=date_column))
     entities = int(frame["e"].nunique())
     if entities < MIN_ENTITIES:
-        raise CohortRetentionError(f"'{entity}' has {entities} different values; at least {MIN_ENTITIES} are needed "
-                                   "to say who comes back")
+        raise CohortRetentionError(_s("no.cohort_retention.2", "'{a}' has {b} different values; at least {c} are needed to say who comes back", cap=False, a=entity, b=entities, c=MIN_ENTITIES))
     if len(frame) == entities:
-        raise CohortRetentionError(f"every '{entity}' appears on one row only: nothing comes back")
+        raise CohortRetentionError(_s("no.cohort_retention.3", "every '{a}' appears on one row only: nothing comes back", cap=False, a=entity))
 
     pairs = frame.drop_duplicates()
     first = pairs.groupby("e")["p"].min().rename("cohort")
@@ -84,7 +83,7 @@ def cohort_retention(df: pd.DataFrame, entity: str, date_column: str, granularit
                       "cohorts": len(reached), "entities": base})
     known = [p for p in curve if p["retention"] is not None]
     if not known:
-        raise CohortRetentionError("the data covers one period only: there is no later period to come back in")
+        raise CohortRetentionError(_s("no.cohort_retention.4", "the data covers one period only: there is no later period to come back in", cap=False))
     first_back = known[0]["retention"]
     settled = known[-1]
     once = int((pairs.groupby("e")["p"].nunique() == 1).sum())

@@ -312,3 +312,58 @@ async def apply(proposals: list[dict], gate, inputs, lang: str) -> None:
         back = navigation(titles[:1] + [drill["title"]], 1, lang) if titles and titles[0] else []
         drill["widgets"] = back + drill["widgets"]
         proposals.append(drill)
+
+
+async def redress(page: dict, previous: dict, gate, inputs, lang: str, richness: str) -> None:
+    """One page after the person changed it ("Change this page"), dressed again.
+
+    Narrower than `apply`, because here a person has spoken: a chart is never
+    turned into another kind, and a chart carried over from the page as it was
+    keeps exactly the options it had. Only a chart that is NEW gets a headline's
+    history or the marking of groups above the average. The page keeps the
+    buttons it had (they name the other pages, which did not change); its
+    filter controls and click-to-filter links are worked out again, since the
+    charts they belong to may have changed."""
+    if richness == "basic" or not page:
+        return
+    from ..insights import order_event_dates
+    from .answer import with_scope
+    dates = [d for d in order_event_dates(sorted(gate.dates)) if d in inputs.df.columns]
+    scope = [f for f in page.get("scope_filters") or [] if isinstance(f, dict)]
+    was = previous.get("widgets") or []
+    before = {(w.get("widget_type"), str(w.get("title") or "")) for w in was if w.get("widget_type") not in _PLAIN}
+
+    async def draws(widget: dict) -> dict:
+        try:
+            result, _why = await gate._draw({**widget, "config": with_scope(widget.get("config") or {}, scope)})
+        except Exception as exc:                                    # noqa: BLE001 -- an option, never a gate
+            logger.info("guided setup: an option was not kept: %s", exc)
+            return {}
+        return result or {}
+
+    dressed = []
+    for w in page.get("widgets") or []:
+        wt, cfg = w.get("widget_type"), dict(w.get("config") or {})
+        if wt in _PLAIN or (wt, str(w.get("title") or "")) in before:
+            dressed.append(w)
+            continue
+        if (wt == "kpi" and dates and cfg.get("measure") and not cfg.get("sparkline_date")
+                and not any(isinstance(f, dict) and f.get("column") == dates[0] for f in cfg.get("filters") or [])):
+            trended = {**w, "config": {**cfg, "sparkline_date": dates[0]}}
+            if len((((await draws(trended)).get("trend") or {}).get("series")) or []) >= SPARK_MIN_PERIODS:
+                dressed.append(trended)
+                continue
+        rule = above_average_rule(w, await draws(w), lang, inputs.column_meta, getattr(gate, "flag_of", None))
+        if rule is not None and not cfg.get("display_rules"):
+            ruled = {**w, "config": {**cfg, "display_rules": [rule]}}
+            drawn = await draws(ruled)
+            if drawn.get("rows") and not drawn.get("rule_errors"):
+                dressed.append(ruled)
+                continue
+        dressed.append(w)
+    head = [w for w in dressed if w.get("widget_type") == "text"]
+    body = [w for w in dressed if w.get("widget_type") not in _PLAIN]
+    nav = [w for w in was if w.get("widget_type") == "button"]
+    scoped = {f.get("column") for f in scope}
+    page["widgets"] = head + nav + slicers(body, inputs.profile, inputs.ineligible(), scoped, lang) + body
+    page["relations"] = relations(page["widgets"], gate.dates)

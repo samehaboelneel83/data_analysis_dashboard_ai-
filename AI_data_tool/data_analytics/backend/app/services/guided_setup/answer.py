@@ -1296,7 +1296,9 @@ PICKS_SCHEMA = {
             "picks": {"type": "array", "items": {
                 "type": "object",
                 "properties": {"id": {"type": "integer"}, "question": {"type": "string"},
-                               "title": {"type": "string"}, "why": {"type": "string"}},
+                               "title": {"type": "string"}, "why": {"type": "string"},
+                               # One listed value of a column the chart is narrowed to (`parts_of`).
+                               "part": {"type": "integer"}},
                 "required": ["id", "question", "why"]}},
         },
         "required": ["title", "rationale", "picks"]}}},
@@ -1312,6 +1314,11 @@ MAX_CARDS = MAX_FOUND + MAX_STANDARD
 STANDARD_GROUPS = 8
 STANDARD_NUMBERS = 4
 STANDARD_SHARES = 3
+
+
+#: The first word of a column's name that already says how it is rolled up.
+_SAID_ALREADY = {"sum": ("total", "sum"), "avg": ("average", "avg", "mean"), "median": ("median", "typical"),
+                 "max": ("max", "maximum", "highest"), "min": ("min", "minimum", "lowest")}
 
 
 def standard_cards(profile: dict, shares: list[dict] | None, column_meta: dict | None,
@@ -1358,7 +1365,12 @@ def standard_cards(profile: dict, shares: list[dict] | None, column_meta: dict |
         if got is None:
             continue
         agg, word = got
-        measures.append((m, agg, f"{word} {label(m)}", f"the {word.lower()} of {label(m)}"))
+        # A column already named for how it is rolled up ("total shipments",
+        # "avg days") is not given the word twice.
+        said = label(m).casefold().split()
+        named = bool(said) and said[0] in _SAID_ALREADY.get(agg, ())
+        title = label(m).capitalize() if named else f"{word} {label(m)}"
+        measures.append((m, agg, title, f"the {word.lower()} of {label(m)}" if not named else label(m)))
 
     out: list[dict] = []
 
@@ -1471,7 +1483,41 @@ async def validated_cards(inputs, facts: dict, scoped) -> list[dict]:
     return out[:MAX_CARDS]
 
 
-def pick_messages(cards: list[dict], dem: dict, scope: list[str], scoped_rows: int, count: int, lang: str) -> list[dict]:
+#: A ready chart may be narrowed to ONE value of a category: the values offered.
+PART_MAX_DISTINCT = 12
+PART_VALUES = 8
+PART_MIN_ROWS = 20
+MAX_PARTS = 40
+
+
+def parts_of(profile: dict, df, ineligible: set[str] | frozenset = frozenset(),
+             skip: set[str] | frozenset = frozenset()) -> list[dict]:
+    """The parts of the rows a ready chart may be drawn on: one value of a
+    category with few values -- [{"column", "value", "rows"}]. From the rows
+    themselves, so every part exists and is large enough to say something
+    about. Columns the page is already narrowed by (`skip`) offer none."""
+    out = []
+    for c in profile.get("columns", []):
+        name = c.get("name")
+        if (c.get("role") not in ("categorical", "boolean") or c.get("is_identifier") or c.get("is_personal")
+                or name in ineligible or name in skip or name not in getattr(df, "columns", [])):
+            continue
+        counts = df[name].dropna().value_counts()
+        if not (2 <= len(counts) <= PART_MAX_DISTINCT):
+            continue
+        for value, n in counts.head(PART_VALUES).items():
+            if int(n) >= PART_MIN_ROWS:
+                out.append({"column": name, "value": value.item() if hasattr(value, "item") else value, "rows": int(n)})
+    return out[:MAX_PARTS]
+
+
+def _splits_by(config: dict, column: str) -> bool:
+    return (column in (config.get("dimension"), config.get("dimension2"), config.get("measure"))
+            or any(isinstance(f, dict) and f.get("column") == column for f in config.get("filters") or []))
+
+
+def pick_messages(cards: list[dict], dem: dict, scope: list[str], scoped_rows: int, count: int, lang: str,
+                  parts: list[dict] | None = None) -> list[dict]:
     listing = "\n".join(
         f"{i} | {w.get('widget_type')} | {str(w.get('title') or '')[:90]} | "
         f"{str(w.get('takeaway') or w.get('why') or '')[:140]}" for i, w in enumerate(cards))
@@ -1487,17 +1533,29 @@ def pick_messages(cards: list[dict], dem: dict, scope: list[str], scoped_rows: i
         f"they learn from it. Write titles, sentences and whys in {_LANGUAGE.get(lang, 'English')}.")
     user = (f"{_demand_text(dem, scope, scoped_rows, lang)}\n\n"
             f"THE CHARTS (id | kind | title | what it shows)\n{_data_block(listing)}")
+    if parts:
+        system += (
+            "\n- A question about ONE part of the rows (one value of a column) is answered by a chart from the "
+            "list drawn on that part alone: add `part`, the part's id from THE PARTS. Its title must then say "
+            "which part it is. Never give a part to a chart that already splits by that part's column, and "
+            "leave `part` out when the question is about all the rows. Use a part only when the question names "
+            "that very value; a value that merely resembles what was asked is NOT it -- when the part asked for "
+            "is not in THE PARTS, the question has no chart.")
+        user += ("\n\nTHE PARTS (id | column = value | rows)\n" + _data_block("\n".join(
+            f"{i} | {p['column']} = {p['value']} | {p['rows']:,}" for i, p in enumerate(parts))))
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
 async def pick_pages(client, cards: list[dict], dem: dict, scope: list[str], scoped_rows: int, count: int,
-                     lang: str) -> list[dict]:
-    """Pages in the designer's own shape, every widget one of `cards`. An id
-    outside the list is dropped; a failure is no pages, never an error."""
+                     lang: str, parts: list[dict] | None = None) -> list[dict]:
+    """Pages in the designer's own shape, every widget one of `cards` -- as it
+    is, or narrowed to one of `parts`. An id outside either list is dropped
+    (the part alone, when the chart is real: the chart then stands on all the
+    rows); a failure is no pages, never an error."""
     if client is None or not cards:
         return []
     try:
-        got = await client.complete_json(pick_messages(cards, dem, scope, scoped_rows, count, lang), PICKS_SCHEMA,
+        got = await client.complete_json(pick_messages(cards, dem, scope, scoped_rows, count, lang, parts), PICKS_SCHEMA,
                                          max_tokens=3000, temperature=0.0, enforce=True)
     except Exception as exc:                                        # noqa: BLE001
         logger.warning("guided setup: choosing among the validated charts failed: %s", exc)
@@ -1507,14 +1565,30 @@ async def pick_pages(client, cards: list[dict], dem: dict, scope: list[str], sco
         widgets = []
         for pick in page.get("picks") or []:
             i = pick.get("id") if isinstance(pick, dict) else None
-            if isinstance(i, bool) or not isinstance(i, int) or not (0 <= i < len(cards)) or i in used:
+            if isinstance(i, bool) or not isinstance(i, int) or not (0 <= i < len(cards)):
                 continue
-            used.add(i)
             card = cards[i]
+            config = dict(card["config"])
+            k = pick.get("part")
+            part = (parts[k] if parts and isinstance(k, int) and not isinstance(k, bool) and 0 <= k < len(parts)
+                    and not _splits_by(config, parts[k]["column"]) else None)
+            if (i, k if part else None) in used:
+                continue
+            used.add((i, k if part else None))
+            title = str(pick.get("title") or card.get("title") or card["widget_type"])
+            if part:
+                config["filters"] = list(config.get("filters") or []) + [
+                    {"column": part["column"], "op": "eq", "value": part["value"]}]
+                # The part is named even when the model forgot to: a chart of
+                # some rows must not read as a chart of all of them.
+                said = (f"{str(part['column']).replace('_', ' ')}: {part['value']}"
+                        if isinstance(part["value"], bool) else str(part["value"]))
+                if str(part["value"]).casefold() not in title.casefold() or isinstance(part["value"], bool):
+                    title = f"{title} ({said})"
             widgets.append({"question": str(pick.get("question") or ""), "widget_type": card["widget_type"],
-                            "title": str(pick.get("title") or card.get("title") or card["widget_type"])[:120],
+                            "title": title[:120],
                             "why": str(pick.get("why") or card.get("why") or "")[:200],
-                            "config": dict(card["config"])})
+                            "config": config})
         if widgets:
             pages.append({"title": str(page.get("title") or ""), "rationale": str(page.get("rationale") or ""),
                           "widgets": widgets})
@@ -1551,8 +1625,10 @@ async def design(db, user, ds, dem: dict | None, entry: dict | None, lang: str, 
     mode = setup_selection_mode(selection)
     got, proposed = None, []
     if mode in ("cards", "both"):
-        proposed = await pick_pages(client, await validated_cards(inputs, facts, getattr(inputs, "scoped", inputs.df)), dem, words, scoped_rows,
-                                    count, lang)
+        rows = getattr(inputs, "scoped", inputs.df)
+        proposed = await pick_pages(client, await validated_cards(inputs, facts, rows), dem, words, scoped_rows,
+                                    count, lang,
+                                    parts_of(inputs.profile, rows, inputs.ineligible(), {f["column"] for f in filters}))
         got = {"pages": proposed}
     if not proposed and mode != "cards":
         got = await client.complete_json(messages, PAGES_SCHEMA, max_tokens=9000, temperature=0.2, enforce=True)
@@ -1639,7 +1715,8 @@ async def change(db, user, ds, dem: dict | None, entry: dict | None, page: dict,
                 "why": w.get("why") or "",
                 "config": {**w["config"], "filters": [f for f in w["config"].get("filters") or []
                                                       if f.get("column") not in scoped]}}
-               for w in page.get("widgets") or [] if w.get("widget_type") != "text"]
+               # Words, buttons and filter controls are not charts: they are put back afterwards.
+               for w in page.get("widgets") or [] if w.get("widget_type") not in ("text", "slicer", "button")]
     ask = ("This page was proposed:\n" + json.dumps({"pages": [{"title": page.get("title"),
                                                                "rationale": page.get("rationale"),
                                                                "widgets": current}]}, default=str)[:9000]
@@ -1662,4 +1739,12 @@ async def change(db, user, ds, dem: dict | None, entry: dict | None, page: dict,
     made = derived_for(pages, inputs, gate.made)
     with_captions(pages, gate)
     done = _finish(pages, dem, scope_note(words, filters, scoped_rows, total, lang, dem, ds.id), lang, filters)
-    return {**done[0], "_derived": made} if done else None
+    if not done:
+        return None
+    # The page keeps its buttons, filters and click-to-filter; a new chart gets its options (dress.redress).
+    from . import dress
+    try:
+        await dress.redress(done[0], page, gate, inputs, lang, richness_now())
+    except Exception:                                               # noqa: BLE001 -- the page stands without it
+        logger.warning("guided setup: dressing the changed page failed", exc_info=True)
+    return {**done[0], "_derived": made}

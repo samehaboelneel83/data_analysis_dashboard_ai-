@@ -73,6 +73,27 @@ def post_webhook(url: str, title: str, text: str) -> str | None:
         return f"webhook failed: {e}"
 
 
+def _content(payload: bytes) -> bytes:
+    """What a workbook SAYS, for "only if changed": every sheet's name and
+    cells. Its bytes cannot be compared -- a workbook stamps the second it was
+    built into itself, so two deliveries of the same data never had the same
+    bytes and "nothing sent, no change" could only happen when both were built
+    within the same second (found 2026-10-11, when a test that relied on that
+    failed). Anything that is not a workbook is compared as it is."""
+    import io
+    try:
+        from openpyxl import load_workbook
+        book = load_workbook(io.BytesIO(payload), read_only=True, data_only=True)
+    except Exception:                                       # noqa: BLE001 -- not a workbook
+        return payload
+    parts: list[str] = []
+    for sheet in book.worksheets:
+        parts.append(f"## {sheet.title}")
+        for row in sheet.iter_rows(values_only=True):
+            parts.append("\x1f".join("" if v is None else str(v) for v in row))
+    return "\n".join(parts).encode("utf-8")
+
+
 async def build_digest(db, report: Report, creator: User,
                        context_label: str | None = None, release=None,
                        skip_dataset_ids: set[int] | None = None,
@@ -372,7 +393,7 @@ async def run_schedule(db, schedule) -> None:
         import hashlib
         h = hashlib.sha256()
         for _to, a, _n in (built or [([], attach, count_note)]):
-            h.update(a[1])
+            h.update(_content(a[1]))
         digest = h.hexdigest()
         if fmt == "pdf":
             # A PDF embeds its build time; compare the DATA instead.

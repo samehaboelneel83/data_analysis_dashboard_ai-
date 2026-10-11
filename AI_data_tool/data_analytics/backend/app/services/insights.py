@@ -23,6 +23,24 @@ import re
 
 import pandas as pd
 from .readback import Said, _s, as_i18n
+
+
+def _d(key: str, template: str, **vars):
+    """A finding's detail sentence, keyed (`rb.ins.d.<key>`) and said verbatim."""
+    return _s("ins.d." + key, template, cap=False, **vars)
+
+
+def _p(p):
+    return _d("p", "p = {p}.", p=f"{p:.3g}") if p is not None else None
+
+
+def _then(*parts):
+    """Sentences one after another, each keeping its own key."""
+    parts = [x for x in parts if x]
+    if len(parts) == 1:
+        return parts[0]
+    return _s(f"seq.{len(parts)}", " ".join("{" + c + "}" for c in "abc"[:len(parts)]), cap=False,
+              **dict(zip("abc", parts)))
 from .semantic_guard import (default_summary, direction_of, is_identifier, is_outcome, is_quantity,
                              value_order)
 
@@ -301,9 +319,8 @@ def _mean_standouts(v: pd.Series, levels: pd.Series, cat: str, m: str,
             "kind": "standout",
             "score": min((hi / overall - 1) * 2, 1.0) * (0.4 if weak else 1.0),
             "title": _s("ins.highest", "{g} has the highest average {m}", cap=False, g=val_label(cat, hi_name), m=col_label(m)),
-            "detail": (f"{_fmt(hi)} against {_fmt(overall)} overall, across "
-                       f"{int(stats.loc[hi_name, 'count']):,} rows."
-                       + (f" p = {p:.3g}." if p is not None else "")),
+            "detail": _then(_d("vsOverall", "{v} against {o} overall, across {n} rows.", v=_fmt(hi), o=_fmt(overall),
+                               n=f"{int(stats.loc[hi_name, 'count']):,}"), _p(p)),
             "columns": [cat, m],
             "figures": {"mean": round(hi, 4), "overall_mean": round(overall, 4),
                         "member": str(hi_name), "ratio": round(hi / overall, 4)},
@@ -318,8 +335,8 @@ def _mean_standouts(v: pd.Series, levels: pd.Series, cat: str, m: str,
             "kind": "laggard",
             "score": min((1 - lo / overall) * 2, 0.9) * (0.4 if weak else 1.0),
             "title": _s("ins.lowest", "{g} has the lowest average {m}", cap=False, g=val_label(cat, lo_name), m=col_label(m)),
-            "detail": (f"{_fmt(lo)} against {_fmt(overall)} overall, across "
-                       f"{int(stats.loc[lo_name, 'count']):,} rows."),
+            "detail": _d("vsOverall", "{v} against {o} overall, across {n} rows.", v=_fmt(lo), o=_fmt(overall),
+                         n=f"{int(stats.loc[lo_name, 'count']):,}"),
             "columns": [cat, m],
             "figures": {"mean": round(lo, 4), "overall_mean": round(overall, 4),
                         "member": str(lo_name), "ratio": round(lo / overall, 4)},
@@ -517,14 +534,16 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                     if v_prior:
                         volume_change = (float(vol.iloc[-1]) - v_prior) / abs(v_prior) * 100
                         if abs(volume_change) >= 10 and abs(change - volume_change) < VOLUME_MARGIN:
-                            volume_note = (f" The number of rows moved the same way ({volume_change:+.0f}%),"
-                                           " so this is the month's volume rather than a change per row.")
+                            volume_note = _d("volume", "The number of rows moved the same way ({pct}%),"
+                                             " so this is the month's volume rather than a change per row.",
+                                             pct=f"{volume_change:+.0f}")
                 direction = "above" if change > 0 else "below"
                 findings.append({
                     "kind": "trend", "score": min(abs(change) / 100, 1.0) * (0.6 if volume_note else 1.0),
                     "title": _s(f"ins.trend.{direction}", "{m} in {when} ran {pct}% " + direction + " its monthly average", cap=False,
                                 m=m_said(m, True), when=str(monthly.index[-1]), pct=f"{abs(change):.0f}"),
-                    "detail": f"{_fmt(float(last))} against an average of {_fmt(float(prior))} over the prior {len(monthly) - 1} months.{volume_note}",
+                    "detail": _then(_d("vsPrior", "{v} against an average of {avg} over the prior {k} months.",
+                                       v=_fmt(float(last)), avg=_fmt(float(prior)), k=len(monthly) - 1), volume_note),
                     "columns": [m, dcol],
                     # The evidence boundary: the numbers as DATA. A consumer must
                     # never have to regex a finding's own sentence to draw a badge.
@@ -575,15 +594,12 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                     # the confidence of a finding.
                     p = _uniformity_p(shares)
                     weak = p is not None and p >= SIGNIFICANCE_ALPHA
-                    detail = (f"{n_levels} values of {cat} would average "
-                              f"{uniform * 100:.0f}% each; {top_name} holds "
-                              f"{_fmt(float(shares.max()))} of {_fmt(float(total))}"
-                              f" with {float(of_rows.get(top_name, 0.0)) * 100:.0f}% of the rows.")
-                    if p is not None:
-                        detail += f" p = {p:.3g}."
-                    if weak:
-                        detail += (" The split is not distinguishable from an even "
-                                   "one at this sample size.")
+                    detail = _then(
+                        _d("share", "{k} values of {c} would average {u}% each; {g} holds {v} of {t} with {r}% of the rows.",
+                           k=n_levels, c=cat, u=f"{uniform * 100:.0f}", g=top_name, v=_fmt(float(shares.max())),
+                           t=_fmt(float(total)), r=f"{float(of_rows.get(top_name, 0.0)) * 100:.0f}"),
+                        _p(p),
+                        weak and _d("evenish", "The split is not distinguishable from an even one at this sample size."))
                     findings.append({
                         "kind": "standout",
                         "score": min((top_frac - uniform) * 2, 1.0) * (0.4 if weak else 1.0)
@@ -614,7 +630,8 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                         "kind": "laggard", "score": min((uniform - low_frac) * 2, 0.9),
                         "title": _s("ins.trails", "{g} trails the other {c} values on {m}", cap=False,
                                     g=val_label(cat, low_name), c=col_label(cat), m=col_label(m)),
-                        "detail": f"{low_frac * 100:.0f}% of {m}, against an even share of {uniform * 100:.0f}%.",
+                        "detail": _d("lowShare", "{pct}% of {m}, against an even share of {u}%.",
+                                     pct=f"{low_frac * 100:.0f}", m=m, u=f"{uniform * 100:.0f}"),
                         "columns": [cat, m],
                         "figures": {"share_pct": round(low_frac * 100, 2),
                                     "member": str(low_name)},
@@ -638,14 +655,11 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                         # useful than silence.
                         p = _pearson_p(nums[a], nums[b])
                         weak = p is not None and p >= SIGNIFICANCE_ALPHA
-                        detail = ("Strong enough that either could stand in for the "
-                                  "other in a first look.")
-                        if p is not None:
-                            detail += f" p = {p:.3g}."
-                        if weak:
-                            detail += (" Not statistically significant, so treat it "
-                                       "as a pattern in these rows rather than a "
-                                       "reliable relationship.")
+                        detail = _then(
+                            _d("standIn", "Strong enough that either could stand in for the other in a first look."),
+                            _p(p),
+                            weak and _d("notSig", "Not statistically significant, so treat it as a pattern in these rows"
+                                        " rather than a reliable relationship."))
                         findings.append({
                             "kind": "correlation",
                             "score": (abs(float(r)) - 0.3) * (0.4 if weak else 1.0),
@@ -691,8 +705,8 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                         "kind": "outlier_impact", "score": min(abs(shift) * 4, 0.9),
                         "title": _s("ins.outMove", "{n} outlying rows move the average {m} by {pct}%", cap=False,
                                     n=count, m=col_label(m), pct=f"{abs(shift) * 100:.0f}"),
-                        "detail": (f"Average {_fmt(mean_all)} with them, {_fmt(mean_in)} without; "
-                                   f"{count} of {len(v):,} rows sit beyond the 1.5×IQR fences."),
+                        "detail": _d("outMove", "Average {a} with them, {b} without; {n} of {t} rows sit beyond the 1.5×IQR fences.",
+                                     a=_fmt(mean_all), b=_fmt(mean_in), n=count, t=f"{len(v):,}"),
                         "columns": [m],
                         "figures": {"shift_pct": round(shift * 100, 2), "count": int(count)},
                     })
@@ -706,7 +720,7 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                     "kind": "outlier_impact", "score": min(abs(share) * 2, 0.95),
                     "title": _s("ins.outCarry", "{n} outlying rows carry {pct}% of {m}", cap=False,
                                 n=count, pct=f"{share * 100:.0f}", m=col_label(m)),
-                    "detail": f"{count} of {len(v):,} rows sit beyond the 1.5×IQR fences.",
+                    "detail": _d("fences", "{n} of {t} rows sit beyond the 1.5×IQR fences.", n=count, t=f"{len(v):,}"),
                     "columns": [m],
                     "figures": {"share_pct": round(float(share) * 100, 2),
                                 "count": int(count)},
@@ -720,7 +734,7 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                 findings.append({
                     "kind": "data_quality", "score": min(miss, 0.85),
                     "title": _s("ins.missing", "{c} is {pct}% missing", cap=False, c=col_label(c), pct=f"{miss * 100:.0f}"),
-                    "detail": "Aggregations over this column silently ignore the gaps.",
+                    "detail": _d("gapsIgnored", "Aggregations over this column silently ignore the gaps."),
                     "columns": [c],
                     "figures": {"missing_pct": round(float(miss) * 100, 2)},
                 })
@@ -735,7 +749,7 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                         "title": (_s("ins.gaps", "{c} has {n} gaps of more than two weeks", cap=False, c=col_label(dcol), n=gaps)
                                   if gaps != 1 else
                                   _s("ins.gap", "{c} has 1 gap of more than two weeks", cap=False, c=col_label(dcol))),
-                        "detail": "Trend lines bridge these gaps as if the time in between never happened.",
+                        "detail": _d("bridged", "Trend lines bridge these gaps as if the time in between never happened."),
                         "columns": [dcol],
                     })
 
@@ -790,10 +804,9 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                         "score": min((hi / overall - 1) * 1.2, 1.0) * (0.4 if weak else 1.0),
                         "title": _s("ins.rate", "{g} has the highest share of {what}: {hi}% against {all}% overall", cap=False,
                                     g=group_label(cat, hi_name), what=what, hi=f"{hi * 100:.1f}", all=f"{overall * 100:.1f}"),
-                        "detail": (f"{int(stats.loc[hi_name, 'sum']):,} of {int(stats.loc[hi_name, 'count']):,} rows; "
-                                   f"the lowest {col_label(cat)} is at {lo * 100:.1f}%. Groups under "
-                                   f"{RATE_MIN_BASE} rows are left out."
-                                   + (f" p = {p:.3g}." if p is not None else "")),
+                        "detail": _then(_d("rate", "{a} of {b} rows; the lowest {c} is at {lo}%. Groups under {k} rows are left out.",
+                                           a=f"{int(stats.loc[hi_name, 'sum']):,}", b=f"{int(stats.loc[hi_name, 'count']):,}",
+                                           c=col_label(cat), lo=f"{lo * 100:.1f}", k=RATE_MIN_BASE), _p(p)),
                         "columns": [cat, oc],
                         "figures": {"rate_pct": round(hi * 100, 2), "overall_pct": round(overall * 100, 2),
                                     "lowest_pct": round(lo * 100, 2), "member": str(hi_name),
@@ -879,10 +892,10 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                         "kind": "anomaly", "score": min(0.4 + a["deviations"] / 20, 0.95),
                         "title": _s(f"ins.anomaly.{a['side']}", "{m} in {when} was far " + str(a["side"]) + " its usual range",
                                     cap=False, m=m_said(m, True), when=str(monthly.index[a["index"]])),
-                        "detail": (f"{_fmt(a['value'])} against an expected {_fmt(a['lo'])} to {_fmt(a['hi'])}, "
-                                   f"judged from the months before it."
-                                   + (f" {len(out) - 1} other month{'s' if len(out) > 2 else ''} also fell outside."
-                                      if len(out) > 1 else "")),
+                        "detail": _then(_d("expected", "{v} against an expected {lo} to {hi}, judged from the months before it.",
+                                           v=_fmt(a["value"]), lo=_fmt(a["lo"]), hi=_fmt(a["hi"])),
+                                        _d("alsoOut.one", "1 other month also fell outside.") if len(out) == 2 else
+                                        _d("alsoOut.many", "{n} other months also fell outside.", n=len(out) - 1) if len(out) > 2 else None),
                         "columns": [m, dcol],
                         "figures": {"period": str(monthly.index[a["index"]]), "value": round(a["value"], 4),
                                     "lo": round(a["lo"], 4), "hi": round(a["hi"], 4), "side": a["side"],
@@ -896,8 +909,8 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                                     "{m} has run {pct}% " + ("higher" if cp["shift"] > 0 else "lower") + " since {when}",
                                     cap=False, m=m_said(m, True), pct=f"{abs(cp['shift_pct']):.0f}",
                                     when=str(monthly.index[cp["index"]])),
-                        "detail": (f"About {_fmt(cp['before'])} a month before, {_fmt(cp['after'])} from then on. "
-                                   "The change is in the level, not in one month."),
+                        "detail": _d("level", "About {a} a month before, {b} from then on. The change is in the level, not in one month.",
+                                     a=_fmt(cp["before"]), b=_fmt(cp["after"])),
                         "columns": [m, dcol], "p_value": cp["p_value"], "significant": True,
                         "figures": {"period": str(monthly.index[cp["index"]]), "before": round(cp["before"], 4),
                                     "after": round(cp["after"], 4), "shift_pct": round(cp["shift_pct"], 2)},
@@ -932,8 +945,8 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                     "score": min(0.35 + (PARETO_FEW - few / n_levels) / PARETO_FEW * 0.55, 0.9),
                     "title": _s("ins.pareto", "{k} of {n} {c} values carry {pct}% of {m}", cap=False, k=few, n=n_levels,
                                 c=col_label(cat), pct=f"{running.iloc[few - 1] * 100:.0f}", m=col_label(m)),
-                    "detail": (f"Largest first: {', '.join(str(x) for x in names)}"
-                               + ("..." if few > 3 else "") + f". The other {n_levels - few} share the rest."),
+                    "detail": _d("largest", "Largest first: {names}. The other {n} share the rest.",
+                                 names=", ".join(str(x) for x in names) + ("..." if few > 3 else ""), n=n_levels - few),
                     "columns": [cat, m],
                     "figures": {"groups": few, "of": int(n_levels),
                                 "share_pct": round(float(running.iloc[few - 1]) * 100, 2)},
@@ -983,6 +996,9 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
         if isinstance(f.get("title"), Said):
             f["title_i18n"] = as_i18n(f["title"])
             f["title"] = str(f["title"])
+        if isinstance(f.get("detail"), Said):
+            f["detail_i18n"] = as_i18n(f["detail"])
+            f["detail"] = str(f["detail"])
     findings.sort(key=lambda f: f["score"], reverse=True)
     # A ranked list that is five "outlying rows" lines says one thing five
     # times: each kind keeps its strongest few, and the places go to the rest.
@@ -1005,12 +1021,21 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
         parts = [f["title"] for f in findings[:4]]
         narrative = (f"Across {len(df):,} rows: " + ". ".join(parts) + "."
                      ).replace("..", ".")
+        # The same paragraph for another language: the lead, then each title by
+        # its own key. Only when every title has one -- half a paragraph in each
+        # language reads worse than the English one.
+        said = [f.get("title_i18n") for f in findings[:4]]
+        narrative_i18n = ({"key": f"ins.n.{len(said)}",
+                           "vars": {"n": f"{len(df):,}", **dict(zip("abcd", said))}}
+                          if all(said) else None)
     else:
         narrative = f"Across {len(df):,} rows, nothing stands out strongly — shares are even, correlations weak, and the data is clean."
+        narrative_i18n = {"key": "ins.n.0", "vars": {"n": f"{len(df):,}"}}
     # row_count rides along so narrate_findings can hand the model the dataset
     # size as EVIDENCE -- without it the digit guard would correctly discard
     # any prose that mentions the row total.
-    return {"findings": findings, "narrative": narrative, "row_count": int(len(df))}
+    return {"findings": findings, "narrative": narrative, "narrative_i18n": narrative_i18n,
+            "row_count": int(len(df))}
 
 # ── LLM narrative: phrasing, never evidence ──────────────────────────────────
 

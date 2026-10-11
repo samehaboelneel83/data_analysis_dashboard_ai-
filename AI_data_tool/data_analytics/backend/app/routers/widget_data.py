@@ -650,6 +650,12 @@ async def _resolve_widget_data(
                 cfg.pop("dimension_granularity", None)
                 req = req.model_copy(update={"config": auto_bin.dq_config(cfg, bin_plan)})
 
+        # Give this request's own database connection back BEFORE the wait: a
+        # chart on a large source can take many seconds, queued behind others,
+        # and thirty readers each holding a connection through that emptied
+        # the pool (30 s later: "QueuePool limit reached", a 500 for everyone;
+        # measured 2026-10-11). Everything the thread needs was read above.
+        await db.commit()
         try:
             # to_thread keeps the sync SQLAlchemy round-trip off the event loop --
             # one slow customer database must not stall every other request on
@@ -781,15 +787,19 @@ async def _resolve_widget_data(
         # bounds how many pipelines run at once: the GIL serializes the pandas
         # work regardless, so extra parallelism only starves the loop
         # (measured -- see widget_work_max_concurrency in config.py).
+        # The connection goes back to the pool for the length of the computation
+        # (see the same note on the live-source path above).
+        ds_filename, ds_id, ds_custom_functions = ds.filename, ds.id, ds.custom_functions
+        await db.commit()
         result = await _run_gated(
             request, get_widget_data,
-            ds.filename, req.config, widget_type=req.widget_type,
+            ds_filename, req.config, widget_type=req.widget_type,
             calculated_columns=calc_cols or None, filter_expr=author_filter_expr or None,
             rls_filter_expr=rls_filter_expr, measures=measure_defs or None,
             drop_columns=denied or None, prep_steps=steps or None,
             prep_aux_frames=aux or None,
-            org_id=current_user.org_id, dataset_id=ds.id,
-            custom_functions=ds.custom_functions,
+            org_id=current_user.org_id, dataset_id=ds_id,
+            custom_functions=ds_custom_functions,
         )
         if bin_plan is not None:
             from ..services import auto_bin

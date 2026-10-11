@@ -83,6 +83,13 @@ def _read_sidecar(pq_path: str) -> pd.DataFrame:
 
 
 def _parse(path: str) -> pd.DataFrame:
+    # Before anything is read: does it fit? (services/memory_guard.py)
+    from . import memory_guard
+    with memory_guard.reserved(path):
+        return _parse_unguarded(path)
+
+
+def _parse_unguarded(path: str) -> pd.DataFrame:
     """The uncached read: what load_file always did, except a CSV with a
     fresh parquet sidecar (written by write_parquet_sidecar at upload/refresh
     time, strictly newer than the CSV, verified at write time) loads from the

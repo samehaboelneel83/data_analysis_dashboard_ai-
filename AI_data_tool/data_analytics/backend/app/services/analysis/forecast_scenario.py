@@ -65,23 +65,20 @@ def forecast_scenario(df: pd.DataFrame, date_column: str, measure: str,
 
     for column in (date_column, measure):
         if column not in df.columns:
-            raise ForecastScenarioError(f"Column '{column}' not found")
+            raise ForecastScenarioError(_s("no.automated_prediction.1", "Column '{a}' not found", cap=False, a=column))
     factors = [f for f in (factors or [])]
     if not factors:
         raise ForecastScenarioError(
-            "A scenario needs at least one factor to move. Without one this is "
-            "an ordinary forecast -- use `forecast_ets`.")
+            _s("no.forecast_scenario.1", "A scenario needs at least one factor to move. Without one this is an ordinary forecast -- use `forecast_ets`.", cap=False))
     if len(factors) > MAX_FACTORS:
         raise ForecastScenarioError(
-            f"At most {MAX_FACTORS} factors; more than that and the fit "
-            f"describes the noise as readily as the signal.")
+            _s("no.forecast_scenario.2", "At most {a} factors; more than that and the fit describes the noise as readily as the signal.", cap=False, a=MAX_FACTORS))
     for f in factors:
         if f not in df.columns:
-            raise ForecastScenarioError(f"Factor '{f}' not found")
+            raise ForecastScenarioError(_s("no.forecast_scenario.3", "Factor '{a}' not found", cap=False, a=f))
         if not pd.api.types.is_numeric_dtype(df[f]):
             raise ForecastScenarioError(
-                f"Factor '{f}' is not numeric. A scenario moves a quantity by a "
-                f"percentage; a category has no percentage to move.")
+                _s("no.forecast_scenario.4", "Factor '{a}' is not numeric. A scenario moves a quantity by a percentage; a category has no percentage to move.", cap=False, a=f))
 
     dates = pd.to_datetime(df[date_column], errors="coerce")
     freq = {"day": "D", "week": "W", "month": "MS",
@@ -96,9 +93,7 @@ def forecast_scenario(df: pd.DataFrame, date_column: str, measure: str,
     needed = MIN_PERIODS + PERIODS_PER_FACTOR * len(factors)
     if len(grouped) < needed:
         raise ForecastScenarioError(
-            f"Only {len(grouped)} periods of history; {needed} are needed to fit "
-            f"a trend plus {len(factors)} factor(s) without simply tracing the "
-            f"data back.")
+            _s("no.forecast_scenario.5", "Only {a} periods of history; {b} are needed to fit a trend plus {c} factor(s) without simply tracing the data back.", cap=False, a=len(grouped), b=needed, c=len(factors)))
 
     horizon = max(1, min(int(periods or DEFAULT_HORIZON), MAX_HORIZON))
     y = grouped[measure].astype(float)

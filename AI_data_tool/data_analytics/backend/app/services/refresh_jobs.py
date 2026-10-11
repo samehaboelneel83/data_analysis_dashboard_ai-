@@ -177,11 +177,10 @@ async def _refresh_now(
     `before_commit` has run -- which is where a job fences its success -- so
     a refresh whose outcome does not stand writes nothing."""
     from ..services.audit import record as audit
-    from ..services.dataset_refresh import (SchemaBreak, refresh_dataset,
-                                            write_dataset_files,
+    from ..services.dataset_refresh import (SchemaBreak, missing_of, refresh_dataset,
+                                            rows_of, write_dataset_files,
                                             write_materialization)
     from ..services.dependencies import find_dependents_of
-    from ..services.ingest import missing_pct
     from ..services.query_log import log_query_run_sync
 
     dataset, src = await load_refreshable(db, user, dataset_id)
@@ -260,12 +259,12 @@ async def _refresh_now(
     duration_ms = int((time.monotonic() - start) * 1000)
     if checkpoint is not None:
         # The last point a cancel can stop it: nothing has been written yet.
-        await checkpoint("saving", rows=len(outcome["df"]))
+        await checkpoint("saving", rows=rows_of(outcome["df"]))
 
     df, type_map = outcome["df"], outcome["type_map"]
     if _state is not None:
         _state["mutating"] = True
-    dataset.row_count = len(df)
+    dataset.row_count = rows_of(df)
     dataset.col_count = len(df.columns)
     dataset.last_refreshed_at = datetime.utcnow()
 
@@ -275,7 +274,7 @@ async def _refresh_now(
     for col_name, dtype in type_map.items():
         db.add(DatasetColumn(
             dataset_id=dataset.id, name=col_name, dtype=dtype,
-            missing_pct=missing_pct(df[col_name]), stats={},
+            missing_pct=missing_of(df, col_name), stats={},
             semantic_type=semantic_types.get(col_name),
         ))
 
@@ -300,12 +299,12 @@ async def _refresh_now(
     if dataset.filename:
         await write_materialization(
             db, dataset.id, dataset.filename, outcome["mode"],
-            len(df), list(df.columns), outcome.get("cursor_value"),
+            rows_of(df), list(df.columns), outcome.get("cursor_value"),
         )
 
     # E07: a manual reload replaces what every dashboard on it shows.
     await audit(db, user, "dataset.refresh", "dataset", dataset.id,
-                f"{outcome['mode']} from {src.name} -> {len(df):,} rows"
+                f"{outcome['mode']} from {src.name} -> {rows_of(df):,} rows"
                 + (" (forced past a schema break)" if force else ""))
     if before_commit is not None:
         await before_commit(db, dataset, outcome)
@@ -317,7 +316,7 @@ async def _refresh_now(
 
     log_query_run_sync(
         org_id=user.org_id, source_kind="refresh", data_source_id=dataset.data_source_id,
-        dataset_id=dataset.id, sql_hash=None, rows_returned=len(df),
+        dataset_id=dataset.id, sql_hash=None, rows_returned=rows_of(df),
         duration_ms=duration_ms, executor="pandas", cache_hit=False,
     )
     return dataset, outcome.get("warning")

@@ -817,6 +817,13 @@ def _decision_cards(profile: dict, kinds: dict) -> list[dict]:
                                             "written down as a problem a solver can read.",
                           k=_h(found["key"]), a=", ".join(_h(c) for c in found["amounts"][:3]))
             fields = [found["key"], *found["amounts"][:3]]
+        elif found["problem"] == "response":
+            title = _T("decide.resp.t", "Levels to set could be worked out for {m}", m=_h(found["measures"][0]))
+            sentence = _T("decide.resp.s", "{m} moves over time beside other numbers ({f}). Say which to make as large "
+                                           "or as small as possible and which levels could be set, and the model "
+                                           "behind a what-if is written down as a problem a solver can read.",
+                          m=_h(found["measures"][0]), f=", ".join(_h(c) for c in found["factors"][:3]))
+            fields = [found["date"], found["measures"][0], *found["factors"][:2]]
         else:
             title = _T("decide.assign.t", "A matching of {a} to {b} could be set up", a=_h(found["from"]), b=_h(found["to"]))
             sentence = _T("decide.assign.s", "The rows hold nearly every {a} against every {b}, with a number for each "

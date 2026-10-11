@@ -1793,6 +1793,96 @@ def wrap_limit(sql: str, limit: int, family: str | None = None) -> str:
 #: its own, concurrently, so a failing one costs time only on its own path).
 REPAIR_ROUNDS = 2
 
+# ── Charts chosen from a ready list (settings.source_ai_selection = cards) ────
+
+#: Ready charts shown to the model for one dashboard, and the most it may take.
+READY_MAX = 60
+READY_PICKS = 8
+READY_SCHEMA = {
+    "type": "object", "required": ["picks"],
+    "properties": {"picks": {"type": "array", "items": {
+        "type": "object", "required": ["id", "question", "title"],
+        "properties": {"id": {"type": "integer"}, "question": {"type": "string"},
+                       "title": {"type": "string"}}}}},
+}
+
+
+def selection_mode(selection: str | None = None) -> str:
+    """free | cards, as set now (settings.source_ai_selection)."""
+    if selection in ("free", "cards"):
+        return selection
+    from ..core.config import settings
+    mode = str(getattr(settings, "source_ai_selection", "free") or "free")
+    return mode if mode in ("free", "cards") else "free"
+
+
+def ready_widgets(columns: list[str], rows: list[list]) -> list[dict]:
+    """The plain charts of a query's own result, made from its shape with no
+    model (how many, per group, over time, each number's total or typical
+    value), in the designer's widget shape -- and only those that pass the
+    same check on the rows a designed chart must pass (`assess`)."""
+    import pandas as pd
+
+    from .dataset_profile import build_profile
+    from .guided_setup.answer import standard_cards
+    from .ingest import detect_types
+    if not rows or not columns:
+        return []
+    df = pd.DataFrame(rows, columns=columns)
+    profile = build_profile(df, detect_types(df))
+    made = []
+    for card in standard_cards(profile, None, None):
+        cfg = card.get("config") or {}
+        if card.get("widget_type") not in WIDGET_TYPES or cfg.get("aggregation") not in AGGREGATIONS:
+            continue
+        made.append({**normalise_widget({"widget_type": card["widget_type"], "title": card.get("title"),
+                                         "question": "", **cfg}), "shows": str(card.get("why") or "")})
+    bad: set[int] = set()
+    assess({"title": "", "purpose": "", "sql": "", "questions": [], "widgets": made}, columns, rows, None, bad)
+    return [w for i, w in enumerate(made) if i not in bad][:READY_MAX]
+
+
+def ready_messages(ready: list[dict], questions: list[dict], persona: str, language: str | None) -> list[dict]:
+    from .llm import data_block
+    listing = "\n".join(f"{i} | {w['widget_type']} | {w['title'][:90]} | {w.get('shows', '')[:140]}"
+                        for i, w in enumerate(ready))
+    asked = "\n".join(f"- {q.get('question')}" for q in questions if q.get("question"))
+    system = (
+        "You lay out ONE dashboard for one person. Its query has already run, and every chart in the list has "
+        "already been built on the query's result by the platform; the last column says what it shows.\n"
+        f"- Choose up to {READY_PICKS} charts, by id, that answer the person's questions. Choose ONLY from "
+        "the list: you cannot change a chart or add one.\n"
+        "- A question no chart in the list answers gets none: do not stretch a chart to fit.\n"
+        "- `question` is the question the chart answers, in the person's words; `title` says what the chart "
+        f"shows. Write both in {language or 'the language of the questions'}.")
+    user = (f"The person: {persona}\n\nTHEIR QUESTIONS\n{asked}\n\n"
+            f"THE CHARTS (id | kind | title | what it shows)\n{data_block(listing)}")
+    return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
+async def choose_ready(client, ready: list[dict], questions: list[dict], persona: str,
+                       language: str | None = None) -> list[dict]:
+    """The charts of one dashboard, each one of `ready`. An id outside the
+    list, or given twice, is dropped; a failure is no charts, never an error."""
+    if client is None or not ready:
+        return []
+    try:
+        got = await client.complete_json(ready_messages(ready, questions, persona, language), READY_SCHEMA,
+                                         max_tokens=1500, temperature=0.0, enforce=True)
+    except Exception as exc:                                # noqa: BLE001
+        log.warning("choosing among the ready charts failed: %s", exc)
+        return []
+    out, used = [], set()
+    for pick in (got or {}).get("picks") or []:
+        i = pick.get("id") if isinstance(pick, dict) else None
+        if isinstance(i, bool) or not isinstance(i, int) or not (0 <= i < len(ready)) or i in used:
+            continue
+        used.add(i)
+        chart = {k: v for k, v in ready[i].items() if k != "shows"}
+        out.append({**chart, "title": str(pick.get("title") or chart["title"])[:120],
+                    "question": str(pick.get("question") or "")[:200]})
+    return out[:READY_PICKS]
+
 
 #: Model time a whole request may take before it answers with the dashboards
 #: that are ready; the rest are reported as not built.
@@ -1865,9 +1955,15 @@ async def design(*, client, catalog: list[dict], persona: str, request: str | No
                  joins: list[dict] | None, run_query: Callable[[str, int], Awaitable[dict]],
                  count: int = 3, progress=None, quote=None, fresh: bool = False,
                  deadline_s: float = DESIGN_DEADLINE_S,
-                 enriched: bool = False) -> tuple[list[dict], dict | None, str]:
+                 enriched: bool = False, selection: str | None = None) -> tuple[list[dict], dict | None, str]:
     """`(proposals, brief, reason)`. Every returned proposal has run, and every
-    chart in it was judged on the rows it will draw."""
+    chart in it was judged on the rows it will draw.
+
+    `selection` (settings.source_ai_selection): free -- the model designs the
+    charts; cards -- once its query has run it only chooses among the charts
+    the platform made from the result (`ready_widgets`). The query is the
+    model's in both: there are no rows to make charts from until it has run."""
+    mode = selection_mode(selection)
     import asyncio
 
     from .suggest_dashboard import _describe_joins, validate_column_references
@@ -1961,6 +2057,14 @@ async def design(*, client, catalog: list[dict], persona: str, request: str | No
                            "CTE first and join the small results, never row-by-row joins of big tables")
                 except Exception as exc:                   # noqa: BLE001
                     why = f"the database refused the query: {str(exc)[:300]}"
+            if out is not None and mode == "cards":
+                # The charts are the platform's: made from this result, checked
+                # on it, and the model only chooses. Fewer than two chosen and
+                # the model's own charts stand, checked as in `free`.
+                chosen = await choose_ready(client, ready_widgets(out.get("columns") or [], out.get("rows") or []),
+                                            questions, persona, brief.get("language"))
+                if len(chosen) >= 2:
+                    p = {**p, "widgets": chosen, "charts_from": "ready"}
             if out is not None:
                 bad: set[int] = set()
                 problems = assess(p, out.get("columns") or [], out.get("rows") or [], mixed, bad)

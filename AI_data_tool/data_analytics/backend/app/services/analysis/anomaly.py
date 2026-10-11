@@ -17,6 +17,7 @@ into the same binary "is this row flagged" mask the IQR path already returns.
 from __future__ import annotations
 
 import pandas as pd
+from ..readback import _s
 
 RANDOM_STATE = 42
 CONTAMINATION = 0.1
@@ -35,7 +36,7 @@ def _pyod_mask(clean: pd.Series, detector: str) -> pd.Series:
         from pyod.models.ecod import ECOD
         model = ECOD(contamination=CONTAMINATION)
     else:
-        raise AnomalyError(f"Unknown detector: {detector}")
+        raise AnomalyError(_s("no.anomaly.1", "Unknown detector: {a}", cap=False, a=detector))
 
     X = clean.to_numpy(dtype=float).reshape(-1, 1)
     model.fit(X)
@@ -51,7 +52,7 @@ def detect(clean: pd.Series, detector: str = "iqr") -> tuple[pd.Series, float, f
     detector uses them to build the mask.
     """
     if detector not in DETECTORS:
-        raise AnomalyError(f"Unknown detector '{detector}' (expected one of {DETECTORS})")
+        raise AnomalyError(_s("no.anomaly.2", "Unknown detector '{a}' (expected one of {b})", cap=False, a=detector, b=DETECTORS))
 
     q1, q3 = float(clean.quantile(0.25)), float(clean.quantile(0.75))
     iqr = q3 - q1
@@ -61,7 +62,7 @@ def detect(clean: pd.Series, detector: str = "iqr") -> tuple[pd.Series, float, f
         mask = (clean < lo) | (clean > hi)
     else:
         if len(clean) < 3:
-            raise AnomalyError(f"'{detector}' needs at least 3 numeric values")
+            raise AnomalyError(_s("no.anomaly.3", "'{a}' needs at least 3 numeric values", cap=False, a=detector))
         mask = _pyod_mask(clean, detector)
 
     return mask, lo, hi

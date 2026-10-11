@@ -78,9 +78,16 @@ def pin_utc_on_connect(sync_engine):
     return _utc
 
 
+def _pool_args(url: str) -> dict:
+    """The pool's size, where the database has a pool to size (SQLite in tests has none)."""
+    if str(url).startswith("sqlite"):
+        return {}
+    return {"pool_size": settings.db_pool_size, "max_overflow": settings.db_pool_overflow}
+
+
 engine = create_async_engine(
     settings.database_url, echo=False, pool_pre_ping=True, pool_recycle=1800,
-    connect_args=utc_connect_args(settings.database_url))
+    connect_args=utc_connect_args(settings.database_url), **_pool_args(settings.database_url))
 
 
 def utc_bound_datetimes(async_engine):

@@ -10,6 +10,7 @@ const TITLE_KEY: Record<string, MessageKey> = {
   'Actions': 'group.actions',
   'Animation (play through)': 'group.animation_play_through',
   'Appearance': 'group.appearance',
+  'Dashboard style': 'tpl.style.group',
   'Behaviour': 'group.behaviour',
   'Data & aggregation': 'group.data_aggregation',
   'Display rules': 'group.display_rules',

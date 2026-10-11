@@ -33,6 +33,7 @@ import itertools
 import pandas as pd
 
 from ..analysis_contract import AnalysisContract
+from ..readback import _s
 
 RANDOM_STATE = 42
 
@@ -232,7 +233,7 @@ def association_rules(df: pd.DataFrame,
     if columns:
         missing = [c for c in columns if c not in df.columns]
         if missing:
-            raise PatternError(f"column '{missing[0]}' is not in this dataset")
+            raise PatternError(_s("no.change_drivers.1", "column '{a}' is not in this dataset", cap=False, a=missing[0]))
         usable = list(columns)
         if then_column and then_column not in usable:
             usable.append(then_column)
@@ -243,7 +244,7 @@ def association_rules(df: pd.DataFrame,
         if then_column and then_column in df.columns and then_column not in usable:
             usable.append(then_column)
     if then_column and then_column not in df.columns:
-        raise PatternError(f"column '{then_column}' is not in this dataset")
+        raise PatternError(_s("no.change_drivers.1", "column '{a}' is not in this dataset", cap=False, a=then_column))
 
     if len(usable) < 2:
         raise PatternError(
@@ -253,15 +254,13 @@ def association_rules(df: pd.DataFrame,
     n = len(df)
     if n < MIN_SUPPORT_COUNT * 2:
         raise PatternError(
-            f"need at least {MIN_SUPPORT_COUNT * 2} rows to mine rules; "
-            f"this has {n}")
+            _s("no.patterns.1", "need at least {a} rows to mine rules; this has {b}", cap=False, a=MIN_SUPPORT_COUNT * 2, b=n))
 
     dependent = _dependent_pairs(df, usable)
     ordered, masks = _items(df, usable)
     if len(ordered) < 2:
         raise PatternError(
-            "no value appears often enough to form a rule "
-            f"(each needs {MIN_SUPPORT_COUNT} rows)")
+            _s("no.patterns.2", "no value appears often enough to form a rule (each needs {a} rows)", cap=False, a=MIN_SUPPORT_COUNT))
 
     # ---- frequent itemsets, apriori-style ------------------------------------
     # Each level is built only from surviving items of the previous one: an
@@ -410,17 +409,17 @@ def basket_rules(df: pd.DataFrame, basket: str, item: str) -> AnalysisContract:
     Same thresholds as the row-wise rules -- 20 groups, lift 1.2."""
     for col in (basket, item):
         if col not in df.columns:
-            raise PatternError(f"column '{col}' is not in this dataset")
+            raise PatternError(_s("no.change_drivers.1", "column '{a}' is not in this dataset", cap=False, a=col))
     if basket == item:
-        raise PatternError("the group and the thing must be two different columns")
+        raise PatternError(_s("no.patterns.3", "the group and the thing must be two different columns", cap=False))
     pairs = df[[basket, item]].dropna().astype({item: str}).drop_duplicates()
     sizes = pairs.groupby(basket)[item].size()
     n = int(len(sizes))
     if n < MIN_SUPPORT_COUNT * 2:
-        raise PatternError(f"needs at least {MIN_SUPPORT_COUNT * 2} different values of {basket}; found {n}")
+        raise PatternError(_s("no.patterns.4", "needs at least {a} different values of {b}; found {c}", cap=False, a=MIN_SUPPORT_COUNT * 2, b=basket, c=n))
     several = sizes[(sizes >= 2) & (sizes <= MAX_BASKET_ITEMS)].index
     if len(several) < MIN_SUPPORT_COUNT:
-        raise PatternError(f"almost every {basket} holds a single {item}: nothing occurs together")
+        raise PatternError(_s("no.patterns.5", "almost every {a} holds a single {b}: nothing occurs together", cap=False, a=basket, b=item))
     held = pairs.groupby(item)[basket].nunique()
     frequent = held[held >= MIN_SUPPORT_COUNT].sort_values(ascending=False).head(MAX_ITEMS)
     inside = pairs[pairs[basket].isin(several) & pairs[item].isin(frequent.index)]

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from ..core.database import get_db
+from ..core.said_errors import refused
 from ..core.config import settings
 from ..core.org_scope import check_org
 from ..core.capability import (readable_dataset_ids, require_dataset_capability,
@@ -386,7 +387,7 @@ async def _ingest_upload_file(
     try:
         upload_store.allowed_suffix(source_filename)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
 
     file_path = upload_store.allocate_path(org_id, source_filename)
 
@@ -565,7 +566,7 @@ async def _ingest_access_file(
     try:
         upload_store.allowed_suffix(source_filename)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
 
     mdb_path = upload_store.allocate_path(org_id, source_filename)
     _copy_capped(stream, mdb_path)
@@ -580,7 +581,7 @@ async def _ingest_access_file(
         try:
             tables = await asyncio.to_thread(mdb.list_tables, str(mdb_path))
         except (mdb.MdbUnavailable, mdb.MdbReadError) as e:
-            raise HTTPException(400, str(e))
+            raise refused(400, e)
         if not tables:
             raise HTTPException(400, "This Access file contains no user tables")
 
@@ -1431,7 +1432,7 @@ async def _rename(dataset_id: int, kind: str, old: str, body: RenameRequest,
     try:
         rewritten = await rename_field(db, ds, kind, old, body.new_name)
     except RenameRefused as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     await db.commit()
     return {"old_name": old, "new_name": body.new_name.strip(), "rewritten": rewritten}
 
@@ -1498,7 +1499,7 @@ async def _validate_measure(measure: MeasureDef, ds: Dataset, db: AsyncSession) 
     try:
         _validate_expr_safety(measure.expression)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
 
     result = await db.execute(select(DatasetColumn.name).where(DatasetColumn.dataset_id == ds.id))
     column_names = {r[0] for r in result.all()}
@@ -1698,7 +1699,7 @@ async def save_custom_function(dataset_id: int, fn: CustomFunctionDef, db: Async
         validate_custom_function_def(fn.name, fn.params, fn.expression,
                                       column_names, calc_names, measure_names, existing)
     except CustomFunctionError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
 
     items = [f for f in (ds.custom_functions or []) if f.get("name") != fn.name]
     items.append(fn.model_dump())
@@ -1948,7 +1949,7 @@ async def create_data_check(dataset_id: int, body: DataCheckIn, db: AsyncSession
     try:
         params = validate_check(body.kind, body.column, body.params, body.severity)
     except InvalidCheck as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     await _check_reference(db, current_user, ds, body.kind, params)
     row = DataCheck(org_id=ds.org_id, dataset_id=ds.id, kind=body.kind,
                     column=(body.column or None) if body.kind in COLUMN_KINDS else None,
@@ -1975,7 +1976,7 @@ async def update_data_check(dataset_id: int, check_id: int, body: DataCheckIn,
     try:
         params = validate_check(body.kind, body.column, body.params, body.severity)
     except InvalidCheck as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     await _check_reference(db, current_user, ds, body.kind, params)
     row.kind, row.params, row.severity, row.enabled = body.kind, params, body.severity, body.enabled
     row.column = (body.column or None) if body.kind in COLUMN_KINDS else None
@@ -2727,7 +2728,8 @@ async def dataset_insights(dataset_id: int, db: AsyncSession = Depends(get_db),
     from ..services.insights import narrate_findings
     prose = await narrate_findings(result["findings"], row_count=result.get("row_count"))
     if prose:
-        result = {**result, "narrative": prose, "narrative_source": "llm"}
+        # The model's paragraph replaces the keyed one, so its key goes too.
+        result = {**result, "narrative": prose, "narrative_source": "llm", "narrative_i18n": None}
     else:
         result = {**result, "narrative_source": "template"}
 
@@ -2786,7 +2788,7 @@ async def goal_seek(dataset_id: int, x_column: str, y_column: str, target_y: flo
     except GoalSeekError as e:
         # The service raises ValueError subclasses; no service layer in this
         # codebase raises HTTP, so the translation happens here.
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     except FileNotFoundError:
         raise HTTPException(404, "Dataset file not found on server — please re-upload the file")
 
@@ -2969,7 +2971,7 @@ async def outlier_details(dataset_id: int, column: str, detector: str = "iqr",
         try:
             clean_mask, lo, hi = detect_anomalies(clean, detector)
         except AnomalyError as e:
-            raise HTTPException(400, str(e))
+            raise refused(400, e)
         mask = clean_mask.reindex(s.index, fill_value=False)
         out_vals = s[mask.fillna(False)]
         total = float(clean.sum())
@@ -3297,7 +3299,7 @@ async def set_prep_steps(dataset_id: int, steps: list[dict], db: AsyncSession = 
     try:
         validate_prep_steps(steps, known, join_columns)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
 
     meta = dict(ds.column_meta or {})
     if steps:
@@ -3499,6 +3501,12 @@ class DecisionProblemIn(BaseModel):
     to_col: str | None = None
     each_from: str | None = None
     each_to_at_most: int | None = None
+    # levels to set, under the fitted what-if model
+    date_col: str | None = None
+    factors: list[str] | None = None
+    ranges: dict[str, list[float | None]] | None = None
+    granularity: str | None = None
+    periods: int | None = None
 
 
 @router.get("/{dataset_id}/decision-problems")
@@ -3541,7 +3549,8 @@ async def decision_problem_specification(dataset_id: int, body: DecisionProblemI
     except Exception:                                           # noqa: BLE001
         raise HTTPException(400, "This dataset could not be read")
     denied = {str(c).casefold() for c in await resolve_denied_columns(db, current_user, dataset_id) or []}
-    named = [c for c in (body.key, body.objective, body.limited, body.from_col, body.to_col) if c]
+    named = [c for c in (body.key, body.objective, body.limited, body.from_col, body.to_col, body.date_col,
+                         *(body.factors or [])) if c]
     if any(c.casefold() in denied for c in named):
         raise HTTPException(403, "One of those columns is not available to you")
     choices = body.model_dump(exclude={"problem"}, exclude_none=True)
@@ -3820,12 +3829,13 @@ async def _write_frame_as_dataset_file(db: AsyncSession, org_id: int, out):
 
     Returns (path, size, type_map). Raises after cleaning up its own bytes.
     """
-    from ..services.prep import MATERIALIZE_MAX_ROWS
+    from ..services.prep import materialize_limit
 
-    if len(out) > MATERIALIZE_MAX_ROWS:
+    limit = materialize_limit()
+    if limit is not None and len(out) > limit:
         raise HTTPException(
             400, f"The result has {len(out):,} rows, over the "
-                 f"{MATERIALIZE_MAX_ROWS:,} limit for a saved dataset. Add a "
+                 f"{limit:,} limit for a saved dataset. Add a "
                  f"filter or aggregate step, or use a narrower join.")
 
     path = upload_store.allocate_path(org_id, "joined.csv")
@@ -3885,7 +3895,7 @@ async def materialize_dataset(
     try:
         validate_prep_steps(steps, known, join_columns)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
 
     join_ids = collect_join_dataset_ids(steps)
     inherited = await _refuse_if_ungovernable(db, [dataset_id] + join_ids)
@@ -3992,7 +4002,7 @@ async def _build_aggregate_file(db: AsyncSession, current_user: User, ds: Datase
     from ..services.aggregates import (AggregateSpecError, compile_aggregate_sql,
                                        normalise_spec, rls_columns_outside_grain)
     from ..services.dataset_refresh import rewrite_dataset_file
-    from ..services.prep import MATERIALIZE_MAX_ROWS
+    from ..services.prep import materialize_limit
 
     if ds.default_filter_expr:
         raise HTTPException(400, "The source has a report-level filter expression; an aggregate "
@@ -4001,7 +4011,7 @@ async def _build_aggregate_file(db: AsyncSession, current_user: User, ds: Datase
     try:
         spec = normalise_spec({"grain": grain, "measures": measures}, known)
     except AggregateSpecError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     rules = await _source_rules(db, ds.id)
     bad = rls_columns_outside_grain([r for r, _ in rules], spec["grain"], known)
     if bad:
@@ -4022,12 +4032,13 @@ async def _build_aggregate_file(db: AsyncSession, current_user: User, ds: Datase
         path.unlink(missing_ok=True)
         remove_parquet_sidecar(str(path))
         raise HTTPException(400, f"The source rejected the aggregate query: {type(e).__name__}")
-    if len(df) > MATERIALIZE_MAX_ROWS:
+    limit = materialize_limit()
+    if limit is not None and len(df) > limit:
         path.unlink(missing_ok=True)
         remove_parquet_sidecar(str(path))
         raise HTTPException(
             400, f"The grain is too fine: this aggregate has {len(df):,} rows, over the "
-                 f"{MATERIALIZE_MAX_ROWS:,} limit for a saved dataset. Add a coarser grain "
+                 f"{limit:,} limit for a saved dataset. Add a coarser grain "
                  "column or fewer measures.")
     size = path.stat().st_size
     try:
@@ -4390,7 +4401,7 @@ async def data_preview(dataset_id: int, req: DataPreviewRequest, db: AsyncSessio
                 org_id=current_user.org_id,
             )
         except DirectQueryUnsupported as e:
-            raise HTTPException(400, str(e))
+            raise refused(400, e)
         cols = result.get("columns", [])
         rows = result.get("rows", [])
         if denied:
@@ -4629,7 +4640,7 @@ async def queue_refresh(
             subject=f"{dataset.name} · {what} from {src.name}",
             idempotency_key=idempotency_key)
     except job_service.IdempotencyConflict as e:
-        raise HTTPException(409, str(e))
+        raise refused(409, e)
     return JobOut.model_validate(job)
 
 

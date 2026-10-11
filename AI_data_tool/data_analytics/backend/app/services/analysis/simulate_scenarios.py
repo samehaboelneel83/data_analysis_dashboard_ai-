@@ -51,9 +51,58 @@ def _fit(df: pd.DataFrame, date_column: str, measure: str, factors: list[str], g
     grouped = frame.groupby("__p__")[[measure, *factors]].sum().sort_index().dropna()
     design = grouped[factors].astype(float).copy()
     design.insert(0, "__t__", np.arange(len(grouped), dtype=float))
-    fitted = sm.OLS(grouped[measure].astype(float).to_numpy(), sm.add_constant(design.to_numpy())).fit()
+    y, X = grouped[measure].astype(float).to_numpy(), sm.add_constant(design.to_numpy())
+    fitted = sm.OLS(y, X).fit()
     recent = {f: float(grouped[f].astype(float).tail(RECENT_PERIODS).mean()) for f in factors}
-    return grouped, fitted, recent
+    return grouped, fitted, recent, y, X
+
+
+#: The misses on periods the model had not seen must be this much larger than
+#: its misses on the periods it was fitted to before the ranges are widened.
+WIDEN_FROM = 1.25
+#: Periods held back, one at a time from the end, to measure those misses.
+HOLD_BACK = 8
+#: A bend is called when adding curvature improves the fit at this level.
+BEND_ALPHA = 0.01
+
+
+def _unseen_miss(y: np.ndarray, X: np.ndarray) -> float | None:
+    """The size of the model's misses on periods it had NOT seen: for each of
+    the last few periods, the model is fitted on everything before it and
+    asked for that period. None when the history is too short to hold any back.
+
+    A model of the wrong form (a line through a curve) fits its own past well
+    and misses what comes next; its own estimate of its noise cannot show
+    that, and this can."""
+    import statsmodels.api as sm
+    n, k = X.shape
+    held = min(HOLD_BACK, max(0, n - (k + 3)))
+    if held < 3:
+        return None
+    misses = []
+    for i in range(n - held, n):
+        try:
+            fit = sm.OLS(y[:i], X[:i]).fit()
+            misses.append(float(y[i] - fit.predict(X[i:i + 1])[0]))
+        except Exception:                                           # noqa: BLE001
+            continue
+    return float(np.sqrt(np.mean(np.square(misses)))) if len(misses) >= 3 else None
+
+
+def _bends(y: np.ndarray, X: np.ndarray, fitted) -> bool:
+    """Does the data bend where the model is straight? The same model with each
+    of its terms squared added: when that fits clearly better, it does."""
+    import statsmodels.api as sm
+    n, k = X.shape
+    extra = X[:, 1:] ** 2
+    if n < 2 * k + 4 or not extra.shape[1]:
+        return False
+    try:
+        wider = sm.OLS(y, np.column_stack([X, extra])).fit()
+        f, p, _df = wider.compare_f_test(fitted)
+    except Exception:                                               # noqa: BLE001
+        return False
+    return bool(np.isfinite(p) and p < BEND_ALPHA)
 
 
 def simulate_scenarios(df: pd.DataFrame, date_column: str, measure: str, factors: list[str],
@@ -66,26 +115,26 @@ def simulate_scenarios(df: pd.DataFrame, date_column: str, measure: str, factors
     if not scenarios:
         pct = abs(float(change_pct if change_pct not in (None, "") else 10.0))
         if not pct:
-            raise SimulateScenariosError("give a change other than 0%, or name the scenarios")
+            raise SimulateScenariosError(_s("no.simulate_scenarios.1", "give a change other than 0%, or name the scenarios", cap=False))
         scenarios = [{"name": f"+{pct:g}%", "adjustments": {f: pct / 100.0 for f in factors or []}},
                      {"name": f"-{pct:g}%", "adjustments": {f: -pct / 100.0 for f in factors or []}}]
     if floor in ("",):
         floor = None
     if not isinstance(scenarios, list) or not (1 <= len(scenarios) <= MAX_SCENARIOS):
-        raise SimulateScenariosError(f"give 1 to {MAX_SCENARIOS} scenarios to simulate")
+        raise SimulateScenariosError(_s("no.simulate_scenarios.2", "give 1 to {a} scenarios to simulate", cap=False, a=MAX_SCENARIOS))
     runs = max(200, min(int(runs or DEFAULT_RUNS), MAX_RUNS))
     horizon = max(1, min(int(periods or DEFAULT_HORIZON), MAX_HORIZON))
     seen: set[str] = set()
     cleaned: list[tuple[str, dict, dict]] = []
     for i, sc in enumerate(scenarios, start=1):
         if not isinstance(sc, dict):
-            raise SimulateScenariosError("each scenario is a name and its adjustments")
+            raise SimulateScenariosError(_s("no.compare_scenarios.2", "each scenario is a name and its adjustments", cap=False))
         name = str(sc.get("name") or f"Scenario {i}").strip()
         moves = {k: float(v) for k, v in (sc.get("adjustments") or {}).items() if v}
         if name.casefold() in seen:
-            raise SimulateScenariosError(f"two scenarios are both called '{name}'")
+            raise SimulateScenariosError(_s("no.compare_scenarios.3", "two scenarios are both called '{a}'", cap=False, a=name))
         if not moves:
-            raise SimulateScenariosError(f"'{name}' moves nothing: that is the baseline, which is always shown")
+            raise SimulateScenariosError(_s("no.compare_scenarios.4", "'{a}' moves nothing: that is the baseline, which is always shown", cap=False, a=name))
         seen.add(name.casefold())
         try:
             # The single what-if validates the columns and history, and writes the warnings.
@@ -94,17 +143,25 @@ def simulate_scenarios(df: pd.DataFrame, date_column: str, measure: str, factors
             raise SimulateScenariosError(str(e)) from e
         cleaned.append((name, moves, single))
 
-    grouped, fitted, recent = _fit(df, date_column, measure, list(factors), granularity)
+    grouped, fitted, recent, y, X = _fit(df, date_column, measure, list(factors), granularity)
     rng = np.random.default_rng(seed)
     k = len(fitted.params)
     cov = np.asarray(fitted.cov_params(), dtype=float)
+    # How wrong the model is on what it has not seen, against how wrong it
+    # believes itself to be. Larger by enough: every range is widened to it.
+    own = float(np.sqrt(max(float(fitted.scale), 0.0)))
+    unseen = _unseen_miss(y, X)
+    widen = bool(unseen is not None and own > 0 and unseen > own * WIDEN_FROM)
+    bends = _bends(y, X, fitted)
+    if widen:
+        cov = cov * (unseen / own) ** 2
     # Coefficients as the fit is unsure of them; a covariance that is not
     # usable (a perfect fit, a degenerate design) leaves them at their estimate.
     try:
         betas = rng.multivariate_normal(np.asarray(fitted.params, dtype=float), cov, size=runs, method="svd")
     except Exception:                                               # noqa: BLE001
         betas = np.tile(np.asarray(fitted.params, dtype=float), (runs, 1))
-    sigma = float(np.sqrt(max(float(fitted.scale), 0.0)))
+    sigma = unseen if widen else own
     noise = rng.normal(0.0, sigma, size=(runs, horizon)) if sigma > 0 else np.zeros((runs, horizon))
     steps = np.arange(1, horizon + 1, dtype=float) + (len(grouped) - 1)
 
@@ -159,6 +216,14 @@ def simulate_scenarios(df: pd.DataFrame, date_column: str, measure: str, factors
         caveats.append(_s("sim.weakfit", "The model behind these ranges explains only {r2} of how {m} has moved: "
                                          "the ranges are wide because it knows little, and may still be too narrow.",
                           r2=f"{r2:.0%}", m=measure))
+    if widen:
+        caveats.append(_s("sim.widened", "On periods it had not seen, this model missed by about {x} times what "
+                                         "it expects of itself, so every range here was widened to that size.",
+                          x=f"{unseen / own:.1f}"))
+    if bends:
+        caveats.append(_s("sim.bends", "How {m} moves with these factors bends, and the model is a straight "
+                                       "line: far from the levels seen so far it will be further off than "
+                                       "these ranges say.", m=measure))
     caveats.append(_s("sim.what", "Each range comes from {n} runs of the same model with its coefficients and each "
                                   "period's noise drawn at random; it shows what the model is unsure of, not what "
                                   "it has never seen.", n=f"{runs:,}"))
@@ -182,6 +247,9 @@ def simulate_scenarios(df: pd.DataFrame, date_column: str, measure: str, factors
     return {
         "kind": "simulate_scenarios", "measure": measure, "factors": list(factors), "horizon": horizon,
         "granularity": granularity, "runs": runs, "seed": seed, "r2": round(r2, 4), "weak_fit": r2 < WEAK_FIT,
+        # Was the model's own idea of its noise enough? (`_unseen_miss`, `_bends`)
+        "widened": widen, "bends": bends,
+        "noise": {"own": round(own, 4), "unseen": round(unseen, 4) if unseen is not None else None},
         "periods_fitted": int(len(grouped)), "floor": float(floor) if floor is not None else None,
         "baseline": baseline, "table": out_rows, "series": names, "histogram": histogram,
         "highest": best["scenario"],

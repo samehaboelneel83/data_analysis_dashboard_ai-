@@ -7,6 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from .core.widget_errors import CodedHTTPException
+from .core.said_errors import SaidHTTPException
+from .services.memory_guard import TooLargeToLoad as _TooLargeToLoad
 from .core.config import settings
 from .services.quotas import QuotaExceeded
 
@@ -106,6 +108,7 @@ async def _migrate(conn):
         "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS fiscal_year_start_month INTEGER NOT NULL DEFAULT 1",
         "ALTER TABLE reports ADD COLUMN IF NOT EXISTS theme VARCHAR(20) NOT NULL DEFAULT 'default'",
         "ALTER TABLE reports ADD COLUMN IF NOT EXISTS display_rules JSON DEFAULT '[]'",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS style JSON DEFAULT '{}'",
         # ── Layer 1 — Connectors & Ingestion ────────────────────────────────
         # The four new metadata tables come free from create_all; these are the
         # columns Layer 1 adds to tables that already exist in live databases.
@@ -719,6 +722,8 @@ app.include_router(notifications.router, prefix="/api/v1")
 app.include_router(shared.router,        prefix="/api/v1")
 app.include_router(embed.router,         prefix="/api/v1")
 app.include_router(widget_templates.router, prefix="/api/v1")
+from .routers import dashboard_templates as _dashboard_templates  # noqa: E402
+app.include_router(_dashboard_templates.router, prefix="/api/v1")
 app.include_router(workspace.router,     prefix="/api/v1")
 app.include_router(dataflows.router,     prefix="/api/v1")
 app.include_router(platform.router,      prefix="/api/v1")
@@ -749,6 +754,23 @@ app.include_router(guided_setup.router, prefix="/api/v1")
 # test_router_reachability.py now pins every router to the prefix the client
 # actually uses, so a future unprefixed mount fails instead of going dark.
 app.include_router(agent_router.router,  prefix="/api/v1")
+
+
+@app.exception_handler(_TooLargeToLoad)
+async def _too_large_to_load_handler(request, exc: _TooLargeToLoad):
+    """A dataset that does not fit in this server's free memory: said, with
+    what still works, instead of a dead process (services/memory_guard.py)."""
+    return JSONResponse(status_code=413, content={"detail": str(exc), "code": "too_large_to_load"})
+
+
+@app.exception_handler(SaidHTTPException)
+async def _said_http_exception_handler(request, exc: SaidHTTPException):
+    """A refusal with its sentence's key beside the English, so the browser
+    says it in the reader's language -- see core/said_errors.py. On the
+    subclass, for the reason given below."""
+    return JSONResponse(status_code=exc.status_code,
+                        content={"detail": exc.detail, "detail_i18n": exc.detail_i18n},
+                        headers=getattr(exc, "headers", None))
 
 
 @app.exception_handler(CodedHTTPException)

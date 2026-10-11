@@ -325,6 +325,7 @@ async def embed_report(token: str, request: Request, response: Response, db: Asy
     return {
         "name": report.name,
         "theme": fields["theme"],
+        "style": fields.get("style") or {},
         "theme_colors": await theme_colors(db, report, fields["theme"]),
         "classification": classif.label if classif else None,
         "common_filters": fields["common_filters"],

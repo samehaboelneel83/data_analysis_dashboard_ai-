@@ -135,6 +135,11 @@ def _one(df: pd.DataFrame, check: dict, previous_rows: int | None,
     res: dict[str, Any] = {"id": check.get("id"), "kind": kind, "column": col,
                            "severity": check.get("severity", "warn"), "passed": True,
                            "failing": 0, "detail": None}
+    # A reload larger than memory is checked on a random sample of its rows;
+    # the row count, and how empty a column is, are the whole file's.
+    total = int(df.attrs.get("rows", len(df)))
+    if "rows" in df.attrs:
+        res["sampled"] = int(len(df))
     if kind in COLUMN_KINDS and col not in df.columns:
         res.update(passed=False, detail=f"the data has no column '{col}'")
         return res
@@ -142,8 +147,11 @@ def _one(df: pd.DataFrame, check: dict, previous_rows: int | None,
         s = df[col]
         blank = s.isna() | (s.astype(str).str.strip() == "")
         n = int(blank.sum())
+        counted = df.attrs.get("missing")
+        if isinstance(counted, dict) and col in counted:
+            n = max(n, int(round(float(counted[col]) * total / 100.0)))
         if n:
-            res.update(passed=False, failing=n, detail=f"{n:,} of {len(df):,} rows have no {col}")
+            res.update(passed=False, failing=n, detail=f"{n:,} of {total:,} rows have no {col}")
     elif kind == "unique":
         s = df[col].dropna()
         dup = s[s.duplicated(keep=False)]
@@ -160,7 +168,7 @@ def _one(df: pd.DataFrame, check: dict, previous_rows: int | None,
                        detail=f"{len(bad):,} rows have values outside the list "
                               f"({bad.nunique():,} different values)")
     elif kind == "row_count":
-        n, lo, hi = len(df), params.get("min"), params.get("max")
+        n, lo, hi = total, params.get("min"), params.get("max")
         if lo is not None and n < lo:
             res.update(passed=False, detail=f"{n:,} rows, fewer than the minimum {int(lo):,}")
         elif hi is not None and n > hi:
@@ -168,10 +176,10 @@ def _one(df: pd.DataFrame, check: dict, previous_rows: int | None,
     elif kind == "row_drop":
         pct = float(params.get("max_drop_pct") or 0)
         if previous_rows and previous_rows > 0:
-            fell = (previous_rows - len(df)) * 100.0 / previous_rows
+            fell = (previous_rows - total) * 100.0 / previous_rows
             if fell > pct:
                 res.update(passed=False,
-                           detail=f"rows fell {fell:.0f}% ({previous_rows:,} to {len(df):,}); "
+                           detail=f"rows fell {fell:.0f}% ({previous_rows:,} to {total:,}); "
                                   f"the limit is {pct:g}%")
     elif kind == "references":
         # Every value must exist in the other dataset's column (an order's

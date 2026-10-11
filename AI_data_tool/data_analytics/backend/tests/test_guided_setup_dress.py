@@ -206,3 +206,56 @@ class TestBarAfterBar:
         kinds = [w["widget_type"] for w in pages[0]["widgets"] if w["widget_type"] != "text"]
         # two bars kept; the third becomes a treemap; the fourth would be a second treemap, so it stays; the averages a dot plot
         assert kinds == ["bar", "bar", "treemap", "bar", "dot_plot"]
+
+
+class TestAChangedPage:
+    """"Change this page": the person has spoken, so less is done than on a
+    first design -- and nothing the page had is lost."""
+
+    def _was(self):
+        return {"title": "Overview", "scope_filters": [], "widgets": [
+            {"widget_type": "text", "title": "Overview", "config": {"content": "the answer"}},
+            {"widget_type": "button", "title": "Go to By kind",
+             "config": {"label": "By kind", "action": "navigate", "actionPageTitle": "By kind"}},
+            {"widget_type": "slicer", "title": "Filter by group", "config": {"dimension": "group"}},
+            {**bar(), "title": "Amount by group", "config": {**bar()["config"], "display_rules": [{"kept": True}]}}]}
+
+    def _gate(self):
+        series = [{"period": f"2025-{m:02d}", "value": m} for m in range(1, 9)]
+        return Gate({("bar", "group", False, False): rows(10, 30, 50, 20, 15),
+                     ("bar", "kind", False, False): rows(10, 30, 50),
+                     ("kpi", None, False, False): {"rows": [{"name": "amount", "value": 125}]},
+                     ("kpi", None, True, False): {"rows": [{"name": "amount", "value": 125}], "trend": {"series": series}}})
+
+    def test_the_page_keeps_its_buttons_and_gets_its_filters_and_clicks_back(self):
+        was = self._was()
+        new = page("Overview", was["widgets"][3], {**bar("kind"), "title": "Amount by kind"})
+        asyncio.run(dress.redress(new, was, self._gate(), INPUTS, "en", "balanced"))
+        kinds = [w["widget_type"] for w in new["widgets"]]
+        assert kinds[:2] == ["text", "button"] and "slicer" in kinds
+        assert new["widgets"][1]["config"]["actionPageTitle"] == "By kind"
+        assert new["relations"]
+
+    def test_a_chart_carried_over_is_left_exactly_as_it_was(self):
+        was = self._was()
+        new = page("Overview", was["widgets"][3])
+        asyncio.run(dress.redress(new, was, self._gate(), INPUTS, "en", "balanced"))
+        kept = next(w for w in new["widgets"] if w["title"] == "Amount by group")
+        assert kept is was["widgets"][3] and kept["config"]["display_rules"] == [{"kept": True}]
+
+    def test_a_new_chart_keeps_its_kind_and_a_new_number_gets_its_history(self):
+        was = self._was()
+        number = {"widget_type": "kpi", "title": "Total", "question": "q1",
+                  "config": {"measure": "amount", "aggregation": "sum"}}
+        new = page("Overview", number, {**bar("kind"), "title": "Amount by kind"})
+        asyncio.run(dress.redress(new, was, self._gate(), INPUTS, "en", "balanced"))
+        by_title = {w["title"]: w for w in new["widgets"]}
+        assert by_title["Amount by kind"]["widget_type"] == "bar"
+        assert by_title["Total"]["config"].get("sparkline_date") == "day"
+
+    def test_basic_adds_nothing(self):
+        was = self._was()
+        new = page("Overview", {**bar("kind"), "title": "Amount by kind"})
+        before = [dict(w) for w in new["widgets"]]
+        asyncio.run(dress.redress(new, was, self._gate(), INPUTS, "en", "basic"))
+        assert new["widgets"] == before and "relations" not in new

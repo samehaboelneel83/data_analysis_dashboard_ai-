@@ -628,6 +628,9 @@ async def plain_insights(findings: list[dict], brief: dict | None, lang: str, cl
               if f.get("kind") not in _NOT_INSIGHTS and sensible(f)][:MAX_INSIGHTS]
     base = [{"id": f"insight:{i}", "tone": "insight", "kind": f.get("kind"),
              "what": f.get("title") or "", "why": f.get("detail") or "", "todo": None,
+             # The computed sentences' keys: kept while the words are still the
+             # engine's own, so a run opened in another language reads in it.
+             "what_i18n": f.get("title_i18n"), "why_i18n": f.get("detail_i18n"),
              "columns": f.get("columns") or [], "action": None} for i, f in enumerate(picked)]
     if not base or client is None or not getattr(client, "enabled", True):
         return base
@@ -646,6 +649,7 @@ async def plain_insights(findings: list[dict], brief: dict | None, lang: str, cl
     for w in (got or {}).get("items") or []:
         i = w.get("index")
         if isinstance(i, int) and 0 <= i < len(base) and str(w.get("what") or "").strip():
+            base[i].update(what_i18n=None, why_i18n=None)       # the model's words now
             base[i].update(what=str(w["what"]).strip(), why=str(w.get("why") or "").strip(),
                            todo=(str(w.get("todo")).strip() or None) if w.get("todo") else None)
     return base

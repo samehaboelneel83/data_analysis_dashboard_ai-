@@ -65,14 +65,14 @@ def explain_change(df: pd.DataFrame, date_column: str, measure: str, aggregation
     how = "avg" if how in ("mean", "average") else how
     for col in (date_column, measure):
         if col not in df.columns:
-            raise ChangeError(f"column '{col}' is not in this dataset")
+            raise ChangeError(_s("no.change_drivers.1", "column '{a}' is not in this dataset", cap=False, a=col))
     freq = _GRAIN.get(str(granularity or "month").lower())
     if not freq:
-        raise ChangeError("granularity must be day, week, month, quarter or year")
+        raise ChangeError(_s("no.change_drivers.2", "granularity must be day, week, month, quarter or year", cap=False))
     dt = pd.to_datetime(df[date_column], errors="coerce")
     frame = df[dt.notna()].copy()
     if frame.empty:
-        raise ChangeError(f"{date_column} holds no dates")
+        raise ChangeError(_s("no.change_drivers.3", "{a} holds no dates", cap=False, a=date_column))
     frame["__p__"] = dt[dt.notna()].dt.to_period(freq).astype(str)
     periods = sorted(frame["__p__"].unique())
 
@@ -85,17 +85,17 @@ def explain_change(df: pd.DataFrame, date_column: str, measure: str, aggregation
             partial = None
         usable = periods[:-1] if partial and len(periods) > 1 else periods
         if len(usable) < 2:
-            raise ChangeError("needs at least two complete periods to compare")
+            raise ChangeError(_s("no.change_drivers.4", "needs at least two complete periods to compare", cap=False))
         period, baseline = usable[-1], baseline or usable[-2]
     period, baseline = str(period), str(baseline) if baseline is not None else None
     if baseline is None:
         earlier = [p for p in periods if p < period]
         if not earlier:
-            raise ChangeError(f"there is no period before {period} to compare with")
+            raise ChangeError(_s("no.change_drivers.5", "there is no period before {a} to compare with", cap=False, a=period))
         baseline = earlier[-1]
     for p in (period, baseline):
         if p not in periods:
-            raise ChangeError(f"no rows fall in {p}")
+            raise ChangeError(_s("no.change_drivers.6", "no rows fall in {a}", cap=False, a=p))
 
     now, then = frame[frame["__p__"] == period], frame[frame["__p__"] == baseline]
     total_now, total_then = _agg(now[measure], how), _agg(then[measure], how)
@@ -107,7 +107,7 @@ def explain_change(df: pd.DataFrame, date_column: str, measure: str, aggregation
     if factors:
         missing = [c for c in factors if c not in df.columns]
         if missing:
-            raise ChangeError(f"column '{missing[0]}' is not in this dataset")
+            raise ChangeError(_s("no.change_drivers.1", "column '{a}' is not in this dataset", cap=False, a=missing[0]))
         candidates = list(factors)
     else:
         candidates = []
@@ -197,15 +197,15 @@ def explain_variance(df: pd.DataFrame, measure: str, reference: str, aggregation
     how = "avg" if how in ("mean", "average") else how
     for col in (measure, reference):
         if col not in df.columns:
-            raise ChangeError(f"column '{col}' is not in this dataset")
+            raise ChangeError(_s("no.change_drivers.1", "column '{a}' is not in this dataset", cap=False, a=col))
     if measure == reference:
-        raise ChangeError("the two numbers are the same column")
+        raise ChangeError(_s("no.change_drivers.7", "the two numbers are the same column", cap=False))
     # Rows where either number is missing are in neither total: a difference
     # of a number against nothing is not a difference.
     frame = df[pd.to_numeric(df[measure], errors="coerce").notna()
                & pd.to_numeric(df[reference], errors="coerce").notna()]
     if frame.empty:
-        raise ChangeError(f"no row holds both {measure} and {reference}")
+        raise ChangeError(_s("no.change_drivers.8", "no row holds both {a} and {b}", cap=False, a=measure, b=reference))
     total_now, total_then = _agg(frame[measure], how), _agg(frame[reference], how)
     change = total_now - total_then
     additive = how in _ADDITIVE
@@ -215,7 +215,7 @@ def explain_variance(df: pd.DataFrame, measure: str, reference: str, aggregation
     if factors:
         missing = [c for c in factors if c not in df.columns]
         if missing:
-            raise ChangeError(f"column '{missing[0]}' is not in this dataset")
+            raise ChangeError(_s("no.change_drivers.1", "column '{a}' is not in this dataset", cap=False, a=missing[0]))
         candidates = list(factors)
     else:
         candidates = []

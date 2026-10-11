@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 
 from . import jobs
+from .readback import Said, _s
 
 ANALYSIS_JOB_KIND = "analysis.run"
 #: Rows from which a slow analysis is queued instead of run in the request.
@@ -66,10 +67,10 @@ async def run_analysis_job(ctx: jobs.JobContext) -> None:
     async with ctx.session_factory() as db:
         user = await ctx.load_user(db)
         if user is None:
-            raise jobs.JobError("The person who asked for this analysis can no longer use it.", code="forbidden")
+            raise jobs.JobError(_s("job.noLonger", "The person who asked for this can no longer use it."), code="forbidden")
         ds = await db.get(Dataset, dataset_id)
         if ds is None or ds.org_id != ctx.org_id or not await can_read_dataset(db, user, dataset_id):
-            raise jobs.JobError("The dataset is gone, or no longer readable by you.", code="not_found")
+            raise jobs.JobError(_s("job.datasetGone", "The dataset is gone, or no longer readable by you."), code="not_found")
         spec = registry.get(name)
         if spec is None or spec.handler is None:
             raise jobs.JobError(f"No analysis named '{name}' can be run.", code="refused")
@@ -89,7 +90,8 @@ async def run_analysis_job(ctx: jobs.JobContext) -> None:
         raise
     except (ValueError, TypeError, KeyError) as exc:
         # The analysis' own refusal, in its own words: the same 400 the request gives.
-        raise jobs.JobError(str(exc)[:500], code="refused") from exc
+        said = exc.args[0] if exc.args else None
+        raise jobs.JobError(said if isinstance(said, Said) else str(exc)[:500], code="refused") from exc
     except Exception as exc:                                 # noqa: BLE001
         raise jobs.JobError(f"The analysis stopped: {type(exc).__name__}: {exc}"[:500], code="analysis_failed") from exc
     from .suggest_jobs import _json_safe

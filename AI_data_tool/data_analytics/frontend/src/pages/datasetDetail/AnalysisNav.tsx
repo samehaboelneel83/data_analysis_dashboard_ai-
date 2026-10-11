@@ -48,6 +48,8 @@ export const analysesFor = (pick: AnalysisPick): string[] | undefined =>
 /** Deep-link anchors (from the Insights hub) and the question they open. */
 export const HASH_PICK: Record<string, AnalysisPick> = {
   influencers: 'drives', segment: 'alike', associations: 'together', insights: 'insights', anomalies: 'unusual',
+  // The builder's suggestions link here: a decision is set up on the dataset, not on a page.
+  decide: 'decide',
 }
 
 export default function AnalysisNav({ pick, onPick, live, hasNumeric }: {

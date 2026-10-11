@@ -104,6 +104,8 @@ export interface Report {
   dataset_id: number | null
   additional_dataset_ids: number[]
   theme: string
+  /** The dashboard's look beyond its palette (lib/dashboardStyle). */
+  style?: import('../lib/dashboardStyle').DashboardStyle | null
   /** Bumped server-side by every mutation to this report or anything nested under
    *  it. Compared against a poll to notice that another session changed it. */
   revision?: number

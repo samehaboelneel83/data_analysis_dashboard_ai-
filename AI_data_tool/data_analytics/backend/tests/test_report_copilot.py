@@ -671,3 +671,45 @@ class TestAllowAi:
         got = r.json()
         assert got["without_ai"] is True and got["applied"] == []
         assert "switched off" in got["reply"] and "not changed" in got["reply"]
+
+
+class TestWithoutAModel:
+    """A plain instruction is carried out with no model at all
+    (services/copilot_commands.py), through the same checked path."""
+
+    @pytest.fixture
+    def ai_off(self, monkeypatch):
+        async def never(db, **kw):
+            return False
+        monkeypatch.setattr("app.services.ai_policy.enter", never)
+
+    async def test_with_ai_off_a_plain_instruction_changes_the_page_and_can_be_undone(
+            self, client, auth_headers, world, columns, ai_off, model, db_session):
+        r = await call(client, auth_headers["a"], world, "add units by region")
+        assert r.status_code == 200, r.text
+        got = r.json()
+        assert got["without_ai"] is True and got["applied"][0]["op"] == "create"
+        assert got["before_version_id"]
+        made = (await db_session.execute(select(ReportWidget).where(
+            ReportWidget.id == got["applied"][0]["widget_id"]))).scalar_one()
+        assert made.widget_type == "bar" and made.config == {
+            "aggregation": "sum", "measure": "units", "dimension": "region"}
+
+    async def test_with_ai_off_anything_else_changes_nothing_and_says_what_can_be_done(
+            self, client, auth_headers, world, columns, ai_off, model, db_session):
+        r = await call(client, auth_headers["a"], world, "make this page tell a better story")
+        got = r.json()
+        assert r.status_code == 200 and got["without_ai"] is True and got["applied"] == []
+        assert "suggestions" in got
+
+    async def test_when_no_model_answers_a_plain_instruction_is_still_done(
+            self, client, auth_headers, world, columns, model, db_session):
+        r = await call(client, auth_headers["a"], world, "remove Revenue by region")
+        assert r.status_code == 200, r.text
+        assert r.json()["applied"] == [{"op": "delete", "widget_id": world["widget"].id,
+                                        "title": "Revenue by region"}]
+
+    async def test_when_no_model_answers_anything_else_is_the_error_it_was(
+            self, client, auth_headers, world, columns, model):
+        r = await call(client, auth_headers["a"], world, "what does this page say about growth?")
+        assert r.status_code == 502

@@ -33,23 +33,23 @@ def _dates(df: pd.DataFrame, col: str | None) -> pd.Series | None:
     if not col:
         return None
     if col not in df.columns:
-        raise StageBoardError(f"column '{col}' is not in this dataset")
+        raise StageBoardError(_s("no.change_drivers.1", "column '{a}' is not in this dataset", cap=False, a=col))
     return pd.to_datetime(df[col], errors="coerce")
 
 
 def stage_board(df: pd.DataFrame, stage_col: str, start_date: str, done_date: str | None = None,
                 due_date: str | None = None, column_meta: dict | None = None) -> AnalysisContract:
     if stage_col not in df.columns:
-        raise StageBoardError(f"column '{stage_col}' is not in this dataset")
+        raise StageBoardError(_s("no.change_drivers.1", "column '{a}' is not in this dataset", cap=False, a=stage_col))
     start, done, due = _dates(df, start_date), _dates(df, done_date), _dates(df, due_date)
     if start is None or start.notna().sum() == 0:
-        raise StageBoardError(f"{start_date} holds no dates")
+        raise StageBoardError(_s("no.change_drivers.3", "{a} holds no dates", cap=False, a=start_date))
     stage = df[stage_col].astype(object).where(df[stage_col].notna(), "(empty)").astype(str)
     names = stage.value_counts()
     if len(names) > MAX_STAGES:
-        raise StageBoardError(f"'{stage_col}' has {len(names)} values; a board of stages needs {MAX_STAGES} or fewer")
+        raise StageBoardError(_s("no.stage_board.1", "'{a}' has {b} values; a board of stages needs {c} or fewer", cap=False, a=stage_col, b=len(names), c=MAX_STAGES))
     if len(names) < 2:
-        raise StageBoardError(f"'{stage_col}' has one value: there are no stages to set side by side")
+        raise StageBoardError(_s("no.stage_board.2", "'{a}' has one value: there are no stages to set side by side", cap=False, a=stage_col))
 
     # "Now" is the newest date the data holds, in any of its date columns.
     as_of = max(s.max() for s in (start, done, due) if s is not None and s.notna().any())

@@ -16,6 +16,7 @@ type PublishedMappings = {
   datasets?: Record<string, { columns: { name: string }[] }>
 }
 import type { Report, ReportPage, Widget } from '../types/report'
+import { styleVars } from '../lib/dashboardStyle'
 
 // Sentinel distinguishing "the server throttled this widget's request" from
 // "the widget's own query genuinely returned nothing" -- both look like a
@@ -168,8 +169,10 @@ export default function SharedReport() {
             setPageIdx(i => Math.max(0, Math.min(pages.length - 1, i + (end < start ? 1 : -1))))
           }}
           style={narrow
-            ? { display: 'flex', flexDirection: 'column', gap: 10, padding: '12px 10px 40px' }
-            : { position: 'relative', maxWidth: 1400, margin: '20px auto',
+            ? { display: 'flex', flexDirection: 'column', gap: 10, padding: '12px 10px 40px', ...styleVars(report.style),
+                background: 'var(--dl-s-page-bg, transparent)' }
+            : { position: 'relative', maxWidth: 1400, margin: '20px auto', ...styleVars(report.style),
+                background: 'var(--dl-s-page-bg, transparent)',
                 height: Math.max(400, ...(page.widgets ?? []).map(w => ((w.layout?.y ?? 0) + (w.layout?.h ?? 4)) * CELL + 40)) }}>
           {/* On a phone the dashboard is read top to bottom, in the author's
               reading order (row, then column), each widget full width. */}

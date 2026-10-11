@@ -61,22 +61,20 @@ def _label_from_column(v) -> str | None:
 def text_sentiment(df: pd.DataFrame, column: str, group_by: str | None = None,
                    validate_against: str | None = None) -> dict:
     if column not in df.columns:
-        raise TextSentimentError(f"Column '{column}' not found")
+        raise TextSentimentError(_s("no.automated_prediction.1", "Column '{a}' not found", cap=False, a=column))
     series = df[column]
     if pd.api.types.is_numeric_dtype(series) or pd.api.types.is_datetime64_any_dtype(series):
         raise TextSentimentError(
-            f"'{column}' is not text. Sentiment is read from what people wrote, so "
-            f"this needs a column of comments or reviews.")
+            _s("no.text_sentiment.1", "'{a}' is not text. Sentiment is read from what people wrote, so this needs a column of comments or reviews.", cap=False, a=column))
     for extra, what in ((group_by, "Group"), (validate_against, "Label")):
         if extra and extra not in df.columns:
-            raise TextSentimentError(f"{what} column '{extra}' not found")
+            raise TextSentimentError(_s("no.text_sentiment.2", "{a} column '{b}' not found", cap=False, a=what, b=extra))
 
     mask = series.notna() & (series.astype(str).str.strip().str.len() >= MIN_DOCUMENT_CHARS)
     frame = df.loc[mask]
     if len(frame) < MIN_DOCUMENTS:
         raise TextSentimentError(
-            f"Only {len(frame)} usable comments; at least {MIN_DOCUMENTS} are needed "
-            f"for a split worth reading.")
+            _s("no.text_sentiment.3", "Only {a} usable comments; at least {b} are needed for a split worth reading.", cap=False, a=len(frame), b=MIN_DOCUMENTS))
     texts = frame[column].astype(str).tolist()
     langs = detect_languages(texts)
 
@@ -99,8 +97,7 @@ def text_sentiment(df: pd.DataFrame, column: str, group_by: str | None = None,
     scored = len(texts) - counts.get("unscored", 0)
     if scored == 0:
         raise TextSentimentError(
-            f"None of the {len(texts):,} comments contains a word the lexicon knows "
-            f"(it covers English and Arabic). Nothing can be said about tone here.")
+            _s("no.text_sentiment.4", "None of the {a} comments contains a word the lexicon knows (it covers English and Arabic). Nothing can be said about tone here.", cap=False, a=f'{len(texts):,}'))
     scored_values = [s for s in scores if s is not None]
     split = {k: counts.get(k, 0) for k in ("positive", "neutral", "negative", "unscored")}
 

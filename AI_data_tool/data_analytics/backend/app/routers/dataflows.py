@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.capability import (effective_dataflow_capability,
                                require_dataflow_capability)
+from ..core.said_errors import refused
 from ..core.database import get_db
 from ..core.org_scope import check_org
 from ..dependencies import get_current_user
@@ -41,7 +42,7 @@ from ..models.models import (Dataflow, DataflowCapability, Dataset,
 from ..services.audit import record as audit
 from ..services.ingest import missing_pct
 # A run writes a file per output; the same ceiling materialize already enforces.
-from ..services.prep import MATERIALIZE_MAX_ROWS
+from ..services.prep import materialize_limit
 
 router = APIRouter(prefix="/dataflows", tags=["dataflows"])
 
@@ -218,7 +219,7 @@ async def create_dataflow(req: DataflowIn, db: AsyncSession = Depends(get_db),
     try:
         validate_prep_steps(steps, known, join_columns)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
 
     from ..services.snapshot_flow import validate_spec
     try:
@@ -230,7 +231,7 @@ async def create_dataflow(req: DataflowIn, db: AsyncSession = Depends(get_db),
                                                  ((req.snapshot or {}).get("backfill") or {}).get("from_column"),
                                                  ((req.snapshot or {}).get("backfill") or {}).get("to_column")] if c})
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
 
     flow = Dataflow(
         snapshot=snapshot,
@@ -291,7 +292,7 @@ async def update_dataflow(flow_id: int, req: DataflowPatch,
         try:
             validate_prep_steps(req.steps, known, join_columns)
         except ValueError as e:
-            raise HTTPException(400, str(e))
+            raise refused(400, e)
         flow.steps = req.steps
         flow.join_dataset_ids = sorted(set(collect_join_dataset_ids(req.steps)))
 
@@ -303,7 +304,7 @@ async def update_dataflow(flow_id: int, req: DataflowPatch,
                 if not (flow.steps or []) else set((req.snapshot or {}).get("group_by") or []) | {
                     c for c in [(req.snapshot or {}).get("measure")] if c})
         except ValueError as e:
-            raise HTTPException(400, str(e))
+            raise refused(400, e)
 
     if req.refresh_interval_minutes is not None:
         if req.refresh_interval_minutes and req.refresh_interval_minutes < MIN_INTERVAL_MINUTES:
@@ -389,18 +390,19 @@ async def run_dataflow(flow_id: int, req: RunRequest,
     except FileNotFoundError:
         raise HTTPException(404, "Source dataset file not found on server")
     except (FrameUnavailable, ValueError) as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     spec = None
     if getattr(flow, "snapshot", None):
         try:
             spec = validate_spec(flow.snapshot, set(out.columns))
         except ValueError as e:
-            raise HTTPException(400, str(e))
+            raise refused(400, e)
         out = snapshot_rows(out, spec)
 
-    if len(out) > MATERIALIZE_MAX_ROWS:
+    limit = materialize_limit()
+    if limit is not None and len(out) > limit:
         raise HTTPException(400, f"Result has {len(out):,} rows, above the "
-                                 f"{MATERIALIZE_MAX_ROWS:,} limit for a saved dataset")
+                                 f"{limit:,} limit for a saved dataset")
 
     now = datetime.utcnow()
     made: list[Dataset] = []

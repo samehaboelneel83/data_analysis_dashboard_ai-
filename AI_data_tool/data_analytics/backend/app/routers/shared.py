@@ -126,13 +126,14 @@ async def distributed_fields(db: AsyncSession, report: Report) -> dict:
     release = await latest_release(db, report.id)
     if release is not None:
         rep = release.snapshot.get("report") or {}
-        return {"theme": rep.get("theme") or report.theme, "dataset_id": rep.get("dataset_id"),
+        return {"theme": rep.get("theme") or report.theme, "style": rep.get("style") or {},
+                "dataset_id": rep.get("dataset_id"),
                 "common_filters": list(release.snapshot.get("common_filters") or [])}
     rows = (await db.execute(
         select(CommonFilter).where(CommonFilter.report_id == report.id)
         .order_by(CommonFilter.position, CommonFilter.id)
     )).scalars().all()
-    return {"theme": report.theme, "dataset_id": report.dataset_id,
+    return {"theme": report.theme, "style": report.style or {}, "dataset_id": report.dataset_id,
             "common_filters": [{"id": f.id, "column": f.column, "op": f.op, "value": f.value} for f in rows]}
 
 
@@ -371,7 +372,7 @@ async def shared_report(token: str, request: Request, db: AsyncSession = Depends
     if link.snapshot is None:
         fields = await distributed_fields(db, report)
     else:
-        fields = {"theme": report.theme, "dataset_id": report.dataset_id, "common_filters": [
+        fields = {"theme": report.theme, "style": report.style or {}, "dataset_id": report.dataset_id, "common_filters": [
             {"id": f.id, "column": f.column, "op": f.op, "value": f.value}
             for f in (await db.execute(
                 select(CommonFilter).where(CommonFilter.report_id == report.id)
@@ -383,6 +384,7 @@ async def shared_report(token: str, request: Request, db: AsyncSession = Depends
     return {
         "name": report.name,
         "theme": fields["theme"],
+        "style": fields.get("style") or {},
         "theme_colors": await theme_colors(db, report, fields["theme"]),
         "classification": classif.label if classif else None,
         "common_filters": fields["common_filters"],

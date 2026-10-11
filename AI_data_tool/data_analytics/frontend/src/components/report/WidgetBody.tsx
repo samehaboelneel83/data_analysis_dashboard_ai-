@@ -466,7 +466,8 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, maxWidth: '100%', minWidth: 0 }}>
           {kpiIcon && <span aria-hidden="true" style={{ fontSize: 28, flex: '0 0 auto' }}>{kpiIcon}</span>}
           <div title={kpiText}
-            style={{ fontSize: fitFigureSize(kpiText, 36), fontWeight: 650, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.02em', color: ruleStyles?.rows?.[0]?.fill ?? 'var(--accent)',
+            // The dashboard's style may set the headline number's size (lib/dashboardStyle); else it is fitted to the text.
+            style={{ fontSize: `var(--dl-s-number-size, ${fitFigureSize(kpiText, 36)})`, fontWeight: 650, fontVariantNumeric: 'tabular-nums', letterSpacing: '-.02em', color: ruleStyles?.rows?.[0]?.fill ?? 'var(--accent)',
               minWidth: 0, maxWidth: '100%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: 1.15 }}>
             {kpiText}
           </div>

@@ -1,6 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import toast from 'react-hot-toast'
-import { Plus, Trash2 } from 'lucide-react'
+import { LayoutTemplate, Plus, Trash2 } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import SaveTemplateDialog from '../templates/SaveTemplateDialog'
+import '../reports/dashboards.css'
 import { pageTemplatesApi, reportsApi } from '../../services/api'
 import { useConfirm } from '../../components/ui/ConfirmDialog'
 import { useT } from '../../i18n'
@@ -15,8 +18,10 @@ import Thumb from '../home/Thumb'
  * page templates (deletable), importing a page from another dashboard and
  * saving the open page -- and v1's widget templates follow underneath.
  */
-export default function TemplatesPane({ reportId, activePageId, onAdded, widgetTemplates }: {
+export default function TemplatesPane({ reportId, reportName, activePageId, onAdded, widgetTemplates }: {
   reportId: number
+  /** The dashboard's name, offered as the name of a template saved from it. */
+  reportName?: string
   activePageId: number | null
   onAdded: () => void
   /** v1's saved widget templates (state lives in the builder). */
@@ -28,6 +33,7 @@ export default function TemplatesPane({ reportId, activePageId, onAdded, widgetT
   const [saved, setSaved] = useState<{ id: number; name: string; widgets: number }[]>([])
   const [naming, setNaming] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [savingTemplate, setSavingTemplate] = useState(false)
   const [reports, setReports] = useState<{ id: number; name: string }[]>([])
   const [source, setSource] = useState<{ id: number; pages: { id: number; name: string }[] } | null>(null)
 
@@ -48,6 +54,14 @@ export default function TemplatesPane({ reportId, activePageId, onAdded, widgetT
 
   return (
     <div className="dl-bd-tpls">
+      {/* The whole dashboard as a reusable template (the gallery), beside the page layouts below. */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+        <button type="button" className="btn btn-secondary btn-sm" data-testid="save-as-template" onClick={() => setSavingTemplate(true)}>
+          <LayoutTemplate size={13} aria-hidden /> {t('tpl.save.open')}
+        </button>
+        <Link to="/templates" className="btn btn-ghost btn-sm dl-bd-line">{t('tpl.gallery')}</Link>
+      </div>
+      {savingTemplate && <SaveTemplateDialog reportId={reportId} defaultName={reportName} onClose={() => setSavingTemplate(false)} />}
       <h3 className="dl-bd-gh">{t('bd.tpl.layouts')}</h3>
       {builtins === null && <p className="dl-bd-note">{t('common.loading')}</p>}
       {builtins?.map(b => (

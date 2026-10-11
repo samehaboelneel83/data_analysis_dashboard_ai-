@@ -81,7 +81,7 @@ def test_what_is_not_a_decision_is_refused_in_plain_words():
         decision.specify(df, "allocation", **{**ok, "limit": 1})
     with pytest.raises(decision.DecisionProblemError, match="holds no numbers"):
         decision.specify(df, "allocation", **{**ok, "objective": "kind"})
-    with pytest.raises(decision.DecisionProblemError, match="'allocation' or 'assignment'"):
+    with pytest.raises(decision.DecisionProblemError, match="'allocation', 'assignment' or 'response'"):
         decision.specify(df, "routing", **ok)
 
 
@@ -183,3 +183,85 @@ async def test_a_hidden_column_cannot_be_named_and_another_organisation_sees_not
     assert r.status_code == 403
     other = await client.get(f"/api/v1/datasets/{ds.id}/decision-problems", headers=auth_headers["b"])
     assert other.status_code in (403, 404)
+
+
+# ── The third shape: levels to set, under the what-if's model ────────────────
+
+def history(n=72, seed=3, curve=False):
+    """One row per month: the outcome follows spend in a straight line (or with
+    a bend), staff moves nothing."""
+    rng = np.random.default_rng(seed)
+    days = pd.date_range("2019-01-01", periods=n, freq="MS")
+    spend = np.linspace(10.0, 60.0, n) + rng.normal(0, 1.0, n)
+    staff = rng.normal(20.0, 3.0, n)
+    outcome = 50 + 3.0 * spend + (0.2 * (spend - 10) ** 2 if curve else 0) + rng.normal(0, 6.0, n)
+    return pd.DataFrame({"day": days, "spend": spend, "staff": staff, "outcome": outcome})
+
+
+def test_a_dated_table_with_numbers_that_move_together_is_offered_levels_to_set():
+    got = found(history(), {"day": "datetime", "spend": "numeric", "staff": "numeric", "outcome": "numeric"})
+    assert [g["problem"] for g in got] == ["response"]
+    assert got[0]["date"] == "day" and "outcome" in got[0]["measures"] and len(got[0]["factors"]) >= 2
+    # Too few rows, or only one number: nothing.
+    few = history(n=30)
+    assert found(few, {"day": "datetime", "spend": "numeric", "staff": "numeric", "outcome": "numeric"}) == []
+
+
+def test_the_model_its_ranges_and_its_doubts_are_written_down_and_nothing_is_solved():
+    spec = decision.specify(history(), "response", date_col="day", objective="outcome", direction="largest",
+                            factors=["spend", "staff"])
+    assert spec["schema"] == decision.SCHEMA and spec["solved"] is False
+    assert spec["objective"] == {"direction": "maximize", "column": "outcome", "aggregate": "total_over_horizon",
+                                 "horizon": spec["objective"]["horizon"], "per": "month"}
+    model = spec["model"]
+    assert model["form"] == "linear" and set(model["coefficients"]) == {"spend", "staff"}
+    assert 2.0 < model["coefficients"]["spend"] / 1.0 and model["r2"] > 0.8
+    by = {d["name"]: d for d in spec["decisions"]}
+    assert by["spend"]["lower"] == by["spend"]["observed"][0] and by["spend"]["upper"] == by["spend"]["observed"][1]
+    codes = [c["code"] for c in spec["checks"]]
+    # A factor that moves nothing is said to be unclear; a straight line's best is always at an end.
+    assert {"code": "effect_unclear", "column": "staff", "p": next(c["p"] for c in spec["checks"] if c["code"] == "effect_unclear")} in spec["checks"]
+    assert "linear_optimum_at_bounds" in codes and "association_not_intervention" in codes
+    assert "bends" not in codes
+
+
+def test_a_range_beyond_anything_seen_and_a_bend_are_said():
+    spec = decision.specify(history(curve=True), "response", date_col="day", objective="outcome",
+                            direction="largest", factors=["spend"], ranges={"spend": [0, 100000]})
+    codes = [c["code"] for c in spec["checks"]]
+    assert "beyond_observed" in codes and "bends" in codes
+    assert spec["constraints"] == [{"kind": "range", "column": "spend", "lower": 0.0, "upper": 100000.0}]
+
+
+def test_what_cannot_be_such_a_decision_is_refused_in_plain_words():
+    df = history()
+    for kw, said in [
+        (dict(date_col="day", objective="outcome", direction="largest", factors=[]), "at least one factor"),
+        (dict(date_col="day", objective="outcome", direction="largest", factors=["outcome"]), "cannot also be a factor"),
+        (dict(date_col="nope", objective="outcome", direction="largest", factors=["spend"]), "date column"),
+        (dict(date_col="day", objective="outcome", direction="sideways", factors=["spend"]), "large or as small"),
+        (dict(date_col="day", objective="outcome", direction="largest", factors=["spend"], ranges={"spend": [5, 5]}),
+         "highest level above"),
+    ]:
+        with pytest.raises(decision.DecisionProblemError, match=said):
+            decision.specify(df, "response", **kw)
+
+
+def test_a_factor_that_only_rises_with_how_busy_a_period_was_is_said():
+    # Each row's units and amount are unrelated; some months simply hold more rows,
+    # so the monthly totals of both rise and fall together.
+    rng = np.random.default_rng(5)
+    parts = []
+    for m, day in enumerate(pd.date_range("2022-01-01", periods=30, freq="MS")):
+        k = int(rng.integers(40, 400))
+        parts.append(pd.DataFrame({"day": day + pd.to_timedelta(rng.integers(0, 27, k), unit="D"),
+                                   "units": rng.uniform(1, 9, k), "amount": rng.uniform(10, 90, k)}))
+    busy = pd.concat(parts, ignore_index=True)
+    spec = decision.specify(busy, "response", date_col="day", objective="amount", direction="largest",
+                            factors=["units"])
+    assert spec["model"]["r2"] > 0.8                                   # it LOOKS like a strong model
+    assert {"code": "only_volume", "column": "units"} in spec["checks"]
+    # A factor that does move the number row by row is not doubted this way.
+    codes = [c["code"] for c in decision.specify(history(), "response", date_col="day", objective="outcome",
+                                                 direction="largest", factors=["spend"])["checks"]]
+    assert "only_volume" not in codes

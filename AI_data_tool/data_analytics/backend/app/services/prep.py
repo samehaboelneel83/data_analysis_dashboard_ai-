@@ -65,7 +65,19 @@ DERIVED_FROM_KEY = "__derived_from__"
 #: A many-to-many join multiplies rows: 10k x 10k on a shared key is 100M rows,
 #: which exhausts memory long before the storage quota would notice. Checked on
 #: the in-memory frame before anything is written.
-MATERIALIZE_MAX_ROWS = 2_000_000
+#:
+#: None = follow the import row limit (settings.import_row_cap), so a dataset
+#: saved from a pipeline and one imported from a file obey ONE number, set in
+#: one place. A number here overrides it.
+MATERIALIZE_MAX_ROWS: int | None = None
+
+
+def materialize_limit() -> int | None:
+    """Most rows a saved (derived) dataset may hold; None = no limit."""
+    if MATERIALIZE_MAX_ROWS is not None:
+        return MATERIALIZE_MAX_ROWS
+    from ..core.config import settings
+    return int(settings.import_row_cap or 0) or None
 
 _AGGS = {"sum": "sum", "avg": "mean", "mean": "mean", "min": "min", "max": "max",
          "count": "count", "median": "median", "nunique": "nunique"}

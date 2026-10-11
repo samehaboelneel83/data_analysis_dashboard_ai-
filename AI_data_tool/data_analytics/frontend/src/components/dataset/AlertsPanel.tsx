@@ -9,6 +9,7 @@ import { Bell, BellRing } from 'lucide-react'
 import '../../pages/datasetDetail/rules.css'
 import { useConfirm } from '../ui/ConfirmDialog'
 import { formatDate } from '../../lib/dateFormat'
+import { storedStatus } from '../../lib/storedStatus'
 
 /**
  * Watch a condition on this dataset and email someone when it becomes true.
@@ -325,7 +326,7 @@ function AlertRow({ alert, onDelete }: { alert: DataAlert; onDelete: () => void 
             the condition stopped being watched. */}
         {failed ? (
           <div style={{ fontSize: 11, color: 'var(--danger)', marginTop: 4 }}>
-            {t('al.failed')} — <bdi>{alert.last_status}</bdi>
+            {t('al.failed')} — <bdi>{storedStatus(alert.last_status, t)}</bdi>
           </div>
         ) : alert.last_checked_at ? (
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>

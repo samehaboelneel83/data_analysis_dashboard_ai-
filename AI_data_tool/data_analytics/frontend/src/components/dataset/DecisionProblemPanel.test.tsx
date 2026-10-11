@@ -63,4 +63,34 @@ describe('a decision to set up', () => {
       direction: 'smallest', each_from: 'exactly_one', each_to_at_most: 1 })
     expect(screen.queryByTestId('decision-spec')).toBeNull()
   })
+
+  it('sets up levels: sends the number, the factors and only the ranges the person gave, and says the doubts', async () => {
+    problems.mockResolvedValue({ dataset_id: 1, restricted: false, problems: [
+      { problem: 'response', date: 'day', dates: ['day'], measures: ['outcome'], factors: ['outcome', 'spend', 'staff'], rows: 400 }] })
+    specification.mockResolvedValue({
+      schema: 'datalytics.decision-problem/1', problem: 'response', solved: false, note: '',
+      objective: { direction: 'maximize', column: 'outcome', aggregate: 'total_over_horizon', horizon: 6, per: 'month' },
+      model: { form: 'linear', r2: 0.91, periods_fitted: 72, coefficients: { spend: 3.1 } },
+      decisions: [{ name: 'spend', recent: 58, lower: 10, upper: 80, observed: [9.2, 61.3] }],
+      constraints: [{ kind: 'range', column: 'spend', lower: 10, upper: 80 }],
+      data: { rows: 400, columns: ['day', 'outcome', 'spend'] }, dataset: {},
+      checks: [{ code: 'beyond_observed', column: 'spend', observed: [9.2, 61.3] }, { code: 'linear_optimum_at_bounds' }],
+    })
+    render(<DecisionProblemPanel datasetId={1} />)
+    await screen.findByTestId('decision-response')
+    // The number being made large is not offered as something to set.
+    expect(screen.queryByRole('checkbox', { name: 'outcome' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'dcp.write' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'spend' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'staff' }))
+    fireEvent.change(screen.getByLabelText('dcp.resp.lowest:spend'), { target: { value: '10' } })
+    fireEvent.change(screen.getByLabelText('dcp.resp.highest:spend'), { target: { value: '80' } })
+    fireEvent.click(screen.getByRole('button', { name: 'dcp.write' }))
+    await waitFor(() => expect(specification).toHaveBeenCalledWith(1, { problem: 'response', objective: 'outcome', direction: 'largest',
+      date_col: 'day', factors: ['spend', 'staff'], ranges: { spend: [10, 80] } }))
+    expect(await screen.findByText('dcp.say.level:spend,10,80,58')).toBeInTheDocument()
+    const checks = screen.getByTestId('decision-checks').textContent ?? ''
+    expect(checks).toContain('dcp.chk.beyond_observed:spend,9.2,61.3')
+    expect(checks).toContain('dcp.chk.linear_optimum_at_bounds')
+  })
 })

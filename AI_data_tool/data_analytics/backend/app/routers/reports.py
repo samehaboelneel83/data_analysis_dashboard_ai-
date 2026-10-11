@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update as sa_update
 from sqlalchemy.orm import selectinload
 from ..core.database import get_db
+from ..core.said_errors import refused
 from ..core.org_scope import check_org
 from ..core.capability import (_config_dataset_ids, can_read_dataset, effective_capabilities,
                                effective_capability, require_capability, require_dataset_read)
@@ -162,7 +163,7 @@ async def _capture_version(report_id: int, db: AsyncSession,
     widget_t = ReportWidget.__table__
     with db.sync_session.no_autoflush:
         rep = (await db.execute(
-            select(rep_t.c.revision, rep_t.c.theme, rep_t.c.display_rules)
+            select(rep_t.c.revision, rep_t.c.theme, rep_t.c.display_rules, rep_t.c.style)
             .where(rep_t.c.id == report_id))).first()
         if rep is None:
             return None
@@ -183,7 +184,7 @@ async def _capture_version(report_id: int, db: AsyncSession,
             {"id": w["id"], "widget_type": w["widget_type"], "title": w["title"],
              "config": w["config"], "layout": w["layout"]})
     snapshot = {
-        "report": {"theme": rep.theme, "display_rules": rep.display_rules},
+        "report": {"theme": rep.theme, "display_rules": rep.display_rules, "style": rep.style or {}},
         "pages": [{
             "id": p["id"],
             "name": p["name"], "title": p["title"], "page_type": p["page_type"],
@@ -409,6 +410,7 @@ async def _serve_release(db: AsyncSession, out: ReportOut, snapshot: dict, user:
     rep = snapshot.get("report") or {}
     out.theme = rep.get("theme") or out.theme
     out.display_rules = rep.get("display_rules") or []
+    out.style = rep.get("style") or {}
     out.dataset_id = rep.get("dataset_id")
     out.additional_dataset_ids = list(rep.get("additional_dataset_ids") or [])
     out.common_filters = list(snapshot.get("common_filters") or [])
@@ -522,7 +524,7 @@ async def add_common_filter(report_id: int, body: dict,
         try:
             body = {**body, "value": validate_spec(body.get("value"))}
         except RelativeDateError as e:
-            raise HTTPException(400, str(e))
+            raise refused(400, e)
     await _bump_revision(report_id, db, current_user)  # also enforces edit capability
     n = len((await db.execute(
         select(CommonFilter).where(CommonFilter.report_id == report_id))).scalars().all())
@@ -561,7 +563,12 @@ async def update_report(report_id: int, body: ReportUpdate, db: AsyncSession = D
     for k, v in body.model_dump(exclude_unset=True).items():
         if v is None and k != "dataset_id":
             continue
+        if k == "style":
+            from ..services.dashboard_templates.spec import clean_style
+            v = clean_style(v)
         setattr(obj, k, v)
+    if body.style is not None:
+        flag_modified(obj, 'style')
     if body.additional_dataset_ids is not None:
         flag_modified(obj, 'additional_dataset_ids')
     if body.display_rules is not None:
@@ -853,7 +860,7 @@ def _validate_widget(widget_type: str | None, config: dict | None, changed_keys=
     try:
         validate_widget_payload(widget_type, config, changed_keys=changed_keys)
     except InvalidWidget as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
 
 
 #: The widget types whose renderer draws totals and subtotals (WidgetBody's table
@@ -1313,6 +1320,8 @@ async def restore_version(report_id: int, version_id: int,
         report.theme = rep_content["theme"]
     if rep_content.get("display_rules") is not None:
         report.display_rules = rep_content["display_rules"]
+    if rep_content.get("style") is not None:
+        report.style = rep_content["style"]
     await audit(db, current_user, "report.restore_version", "report",
                 report_id, f"restored to revision {version.revision}")
     await db.commit()
@@ -1831,7 +1840,7 @@ async def suggest_widgets(report_id: int, db: AsyncSession = Depends(get_db),
             live_frame = (await load_directquery_frame(
                 db, ds, rls_filter_expr=rls_expr, denied=set(denied or ()))).frame
         except FrameUnavailable as e:
-            raise HTTPException(400, str(e))
+            raise refused(400, e)
 
     def _run():
         from ..services.analytics import detect_types, load_file

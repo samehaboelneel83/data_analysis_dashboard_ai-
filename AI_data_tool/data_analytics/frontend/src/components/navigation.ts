@@ -1,4 +1,4 @@
-import { Home, Bot, Database, GitBranch, Waypoints, BookOpen, LayoutDashboard, Sparkles, RefreshCw, Mail, Activity, Users, Shield, Lock, EyeOff, Download, Key, Fingerprint, ScrollText, Building2, Network, Upload, Plug, Map as MapIcon, Workflow, CalendarDays, ArrowRightLeft, Settings as SettingsIcon, SlidersHorizontal, type LucideIcon } from 'lucide-react'
+import { LayoutTemplate, Home, Bot, Database, GitBranch, Waypoints, BookOpen, LayoutDashboard, Sparkles, RefreshCw, Mail, Activity, Users, Shield, Lock, EyeOff, Download, Key, Fingerprint, ScrollText, Building2, Network, Upload, Plug, Map as MapIcon, Workflow, CalendarDays, ArrowRightLeft, Settings as SettingsIcon, SlidersHorizontal, type LucideIcon } from 'lucide-react'
 
 /**
  * The navigation tree, as data.
@@ -86,6 +86,8 @@ export const NAVIGATION: NavSection[] = [
     permission: 'member',
     items: [
       { to: '/reports', label: 'Dashboards', icon: LayoutDashboard, permission: 'member' },
+      // Dashboards as reusable specifications: the platform's, the organisation's, your own.
+      { to: '/templates', label: 'Templates', icon: LayoutTemplate, permission: 'member' },
       { to: '/insights', label: 'Insights', icon: Sparkles, permission: 'member' },
       { to: '/automation', label: 'Automations', icon: Workflow, permission: 'member' },
       // E17: the old estate, item by item; owners sign off here, so members see it.

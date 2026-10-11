@@ -143,6 +143,8 @@ import { PageTemplateMenu } from './reportBuilder/PageTemplateMenu'
 import ConflictMergeDialog from '../components/report/ConflictMergeDialog'
 import { structuredDetail } from '../lib/friendlyError'
 import type { WidgetEdit } from '../lib/threeWayMerge'
+import { styleVars } from '../lib/dashboardStyle'
+import type { DashboardStyle } from '../lib/dashboardStyle'
 // Lazy: the geography check matches against the bundled world geometry (~740 kB
 // raw), which an author who never maps a column should not download.
 const GeoMatchCheck = lazy(() => import('../components/report/GeoMatchCheck'))
@@ -1098,6 +1100,18 @@ export default function ReportBuilder() {
   // as "changed in another session".
   const syncRevisionAfterOwnWrite = async () => {
     try { setLoadedRevision(await reportsApi.getRevision(reportId)) } catch { /* next poll decides */ }
+  }
+
+  /** Change the dashboard's look (fonts, borders, corners...) as one undoable step. */
+  const setStyleUndoable = async (next: DashboardStyle) => {
+    const prev = (report?.style ?? {}) as DashboardStyle
+    try {
+      await reportsApi.update(reportId, { style: next })
+    } catch { toast.error(tr('tpl.style.failed')); return }
+    pushUndo({ label: tr('tpl.style.undo'),
+      undo: () => reportsApi.update(reportId, { style: prev }).then(() => {}),
+      redo: () => reportsApi.update(reportId, { style: next }).then(() => {}) })
+    await loadReport()
   }
 
   /** Switch the report theme as one undoable step (loadReport applies it). */
@@ -2827,7 +2841,8 @@ export default function ReportBuilder() {
                           ...Object.entries(orgThemes).map(([key, t]) => ({ key, name: t.name, colors: t.colors })),
                         ]}
                         currentPalette={report.theme ?? 'default'}
-                        onPalette={setThemeUndoable} />
+                        onPalette={setThemeUndoable}
+                        dashboardStyle={report.style} onDashboardStyle={setStyleUndoable} />
                   }
     </>
   )
@@ -2922,7 +2937,7 @@ export default function ReportBuilder() {
                   name, then drop it onto any report. The object-level analogue of a
                   DataView; apply is a plain insert carrying the saved config. */}
               {editMode && activeView === 'report' && leftTab === 'more' && (
-                <TemplatesPane reportId={reportId} activePageId={activePage?.id ?? null} onAdded={() => { loadReport() }}
+                <TemplatesPane reportId={reportId} reportName={report?.name} activePageId={activePage?.id ?? null} onAdded={() => { loadReport() }}
                   widgetTemplates={
                 <div className="dl-bd-wtpl">
                   <div style={{ display:'flex', gap:4, marginBottom:6 }}>
@@ -4055,7 +4070,9 @@ export default function ReportBuilder() {
                 ...(activePage?.background_url
                   ? { backgroundImage: `url(${activePage.background_url})`,
                       backgroundSize: 'cover', backgroundPosition: 'center' }
-                  : { background:'var(--surface2)' }),
+                  : { background:'var(--dl-s-page-bg, var(--surface2))' }),
+                // The dashboard's own look: fonts, card borders, corners, light or dark.
+                ...styleVars(report?.style),
                 borderRadius:'var(--radius)', border:'1px solid var(--border)',
                 ...(fitScale < 1 ? { width: MIN_CANVAS_W } : {}),
                 transform: `scale(${canvasScale})`, transformOrigin: 'top left' }}>

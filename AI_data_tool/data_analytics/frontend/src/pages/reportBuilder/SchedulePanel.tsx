@@ -5,6 +5,7 @@ import { schedulesApi, deliveriesApi, COMMON_TIMEZONES } from '../../services/ap
 import { useConfirm } from '../../components/ui/ConfirmDialog'
 import { useT, type TranslateFn, type MessageKey } from '../../i18n'
 import { localDigits } from '../../lib/arabicFormats'
+import { storedStatus } from '../../lib/storedStatus'
 
 /** A translated sentence with some of its slots filled by elements (a <bdi>
  *  around a time or an e-mail list), so the whole template is translated as
@@ -81,11 +82,11 @@ export function SchedulePanel({ reportId }: { reportId: number }) {
           </div>
           {/* The status line is the whole observability story: it says whether the
               last run sent, and if not, why -- including "SMTP is not configured". */}
-          {r.last_status && <div style={{ color: 'var(--muted)', marginTop: 3 }}>{r.last_status}</div>}
+          {r.last_status && <div style={{ color: 'var(--muted)', marginTop: 3 }}>{storedStatus(r.last_status, t)}</div>}
           <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
             <button className="btn btn-ghost btn-sm"
               onClick={() => schedulesApi.runNow(reportId, r.id)
-                .then(res => { toast.success(res.last_status); reload(); reloadDeliveries() })
+                .then(res => { toast.success(storedStatus(res.last_status, t)); reload(); reloadDeliveries() })
                 .catch(() => toast.error(t('bc.rules.sched.runFailed')))}>
               {t('bc.rules.sched.runNow')}
             </button>

@@ -95,6 +95,10 @@ SPECS: list[Spec] = [
        "cards: the AI chooses among charts already validated and drawn on the data. "
        "free: the AI proposes its own charts, each then checked. both: its proposals join the validated ones.",
        options=("cards", "free", "both")),
+    _S("source_ai_selection", "ai", "Suggesting from a connection: where charts come from",
+       "free: the AI writes the query and designs the charts, each then checked on the rows. cards: the AI "
+       "writes the query, the platform makes the plain charts of its result, and the AI only chooses among them.",
+       options=("free", "cards")),
     _S("setup_ai_selection", "ai", "Guided setup: where charts come from",
        "free: the AI designs a chart for each question, each then drawn and checked. cards: it only chooses among "
        "charts the platform built (faster; questions about part of the rows may go unanswered). both: it chooses "
@@ -129,6 +133,12 @@ SPECS: list[Spec] = [
     _S("max_upload_files", "data", "Files per upload", minimum=1),
     _S("max_batch_upload_mb", "data", "Largest multi-file upload (MB)", minimum=1),
     _S("import_row_cap", "data", "Import row limit", "A larger file or query is refused, never cut short. 0 = no limit."),
+    _S("import_stream_rows", "data", "Write large imports straight to disk from (rows)",
+       "An import from a database with more rows than this is written to disk as it arrives, so its size is "
+       "not limited by the server's memory. 0 = always gather it in memory first."),
+    _S("load_memory_share", "data", "Memory one dataset may take",
+       "The share of the server's free memory (0 to 1) that loading one whole dataset may use. A dataset needing "
+       "more is refused with a message instead of stopping the server. 0 = never refuse."),
     _S("analysis_row_cap", "data", "Analysis row limit"),
     _S("analysis_background_rows", "data", "Run slow analyses in the background from (rows)",
        "A model-fitting analysis on a table at least this large is queued instead of held in the request. 0 = never."),
@@ -163,6 +173,10 @@ SPECS: list[Spec] = [
     _S("widget_duckdb_pushdown", "performance", "Compute charts in DuckDB"),
     _S("widget_duckdb_threads", "performance", "DuckDB threads per chart"),
     _S("widget_work_max_concurrency", "performance", "Charts computed at once", restart=True),
+    _S("db_pool_size", "performance", "Connections kept to the app's database",
+       "How many this server keeps open to its own database.", restart=True),
+    _S("db_pool_overflow", "performance", "Extra connections under load",
+       "How many more it may open when all are busy.", restart=True),
     _S("widget_data_cache_maxsize", "performance", "Chart result cache (entries)"),
     _S("widget_data_cache_max_entry_bytes", "performance", "Largest cached chart result (bytes)"),
     _S("frame_cache_enabled", "performance", "Keep parsed files in memory"),

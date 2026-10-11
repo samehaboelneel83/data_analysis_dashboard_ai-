@@ -200,6 +200,10 @@ class Report(Base):
     # Report-level display rules: applied to every object on every page, ahead of any
     # widget-level rules, which override them by list order. See services/display_rules.py.
     display_rules          = Column(JSON, default=list)
+    #: The dashboard's look beyond its palette: fonts, card borders, corners,
+    #: shadows, backgrounds (services/dashboard_templates/spec.STYLE_KEYS).
+    #: Empty = the app's own look.
+    style                  = Column(JSON, default=dict)
     # Monotonic counter bumped by every mutation to this report or anything nested
     # under it. Every edit here persists immediately with no explicit save, so this
     # is what lets a client notice another session moved the report underneath it.
@@ -856,6 +860,54 @@ class PageTemplate(Base):
     kind       = Column(String(20), nullable=False, default="page")   # page | object
     payload    = Column(JSON, nullable=False, default=dict)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class DashboardTemplate(Base):
+    """A dashboard as a reusable specification (services/dashboard_templates).
+
+    `spec` holds pages, layouts, widget settings, metric definitions, filters
+    and style with the columns replaced by named slots; using it on a dataset
+    maps each slot to a column. `visibility` is personal (its author only) or
+    org (everyone in the organisation). Every saved change keeps the version
+    before it in `dashboard_template_versions`.
+    """
+    __tablename__ = "dashboard_templates"
+    id          = Column(Integer, primary_key=True)
+    org_id      = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    name        = Column(String(120), nullable=False)
+    description = Column(Text)
+    category    = Column(String(30), nullable=False, default="overview")
+    tags        = Column(JSON, default=list)
+    spec        = Column(JSON, nullable=False, default=dict)
+    visibility  = Column(String(20), nullable=False, default="personal")   # personal | org
+    version     = Column(Integer, nullable=False, default=1)
+    uses        = Column(Integer, nullable=False, default=0)
+    created_by  = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_at  = Column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at  = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class DashboardTemplateVersion(Base):
+    """A template as it was before a change: restoring one makes a new version."""
+    __tablename__ = "dashboard_template_versions"
+    id          = Column(Integer, primary_key=True)
+    template_id = Column(Integer, ForeignKey("dashboard_templates.id", ondelete="CASCADE"), nullable=False, index=True)
+    version     = Column(Integer, nullable=False)
+    name        = Column(String(120), nullable=False)
+    spec        = Column(JSON, nullable=False, default=dict)
+    note        = Column(String(300))
+    created_by  = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at  = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class TemplateFavorite(Base):
+    """One person's starred template: `template_ref` is "builtin:<key>" or "t:<id>"."""
+    __tablename__ = "template_favorites"
+    __table_args__ = (UniqueConstraint("user_id", "template_ref", name="uq_template_favorite"),)
+    id           = Column(Integer, primary_key=True)
+    user_id      = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    template_ref = Column(String(80), nullable=False)
+    created_at   = Column(DateTime(timezone=True), default=datetime.utcnow)
 
 
 class RecentView(Base):

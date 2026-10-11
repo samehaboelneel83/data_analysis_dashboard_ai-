@@ -123,10 +123,10 @@ def _est(v):
 
 def _numeric(df: pd.DataFrame, col: str) -> pd.Series:
     if col not in df.columns:
-        raise StatisticalError(f"Column not found: {col}")
+        raise StatisticalError(_s("no.inferential.1", "Column not found: {a}", cap=False, a=col))
     s = pd.to_numeric(df[col], errors="coerce").dropna()
     if s.empty:
-        raise StatisticalError(f"Column '{col}' has no numeric values")
+        raise StatisticalError(_s("no.inferential.2", "Column '{a}' has no numeric values", cap=False, a=col))
     return s
 
 
@@ -254,7 +254,7 @@ def compare_groups(df: pd.DataFrame, value_col: str, group_col: str) -> TestResu
     # 500 instead of a sentence telling them which column is wrong.
     for c in (group_col, value_col):
         if c not in df.columns:
-            raise StatisticalError(f"Column not found: {c}")
+            raise StatisticalError(_s("no.inferential.1", "Column not found: {a}", cap=False, a=c))
     frame, sampled = _sampled(df)
     work = frame[[group_col, value_col]].copy()
     work[value_col] = pd.to_numeric(work[value_col], errors="coerce")
@@ -266,12 +266,10 @@ def compare_groups(df: pd.DataFrame, value_col: str, group_col: str) -> TestResu
 
     if len(groups) < 2:
         raise StatisticalError(
-            f"Need at least two groups with {MIN_ROWS_PER_GROUP}+ rows each; "
-            f"found {len(groups)}")
+            _s("no.inferential.3", "Need at least two groups with {a}+ rows each; found {b}", cap=False, a=MIN_ROWS_PER_GROUP, b=len(groups)))
     if len(groups) > MAX_GROUPS:
         raise StatisticalError(
-            f"{len(groups)} groups is too many for one comparison (limit "
-            f"{MAX_GROUPS}) -- the combined test stops answering a useful question")
+            _s("no.inferential.4", "{a} groups is too many for one comparison (limit {b}) -- the combined test stops answering a useful question", cap=False, a=len(groups), b=MAX_GROUPS))
 
     n = int(sum(len(v) for _, v in groups))
     caveats = []
@@ -352,21 +350,20 @@ def test_independence(df: pd.DataFrame, col_a: str, col_b: str) -> TestResult:
 
     for c in (col_a, col_b):
         if c not in df.columns:
-            raise StatisticalError(f"Column not found: {c}")
+            raise StatisticalError(_s("no.inferential.1", "Column not found: {a}", cap=False, a=c))
     frame, sampled = _sampled(df)
     work = frame[[col_a, col_b]].dropna()
     if len(work) < MIN_ROWS_PER_GROUP:
         raise StatisticalError(
-            f"Only {len(work)} complete rows; need at least {MIN_ROWS_PER_GROUP}")
+            _s("no.inferential.5", "Only {a} complete rows; need at least {b}", cap=False, a=len(work), b=MIN_ROWS_PER_GROUP))
 
     table = pd.crosstab(work[col_a], work[col_b])
     if table.shape[0] < 2 or table.shape[1] < 2:
         raise StatisticalError(
-            "Both columns need at least two distinct values to be tested")
+            _s("no.inferential.6", "Both columns need at least two distinct values to be tested", cap=False))
     if table.shape[0] > MAX_GROUPS or table.shape[1] > MAX_GROUPS:
         raise StatisticalError(
-            f"Too many categories ({table.shape[0]}x{table.shape[1]}); limit is "
-            f"{MAX_GROUPS} per column")
+            _s("no.inferential.7", "Too many categories ({a}x{b}); limit is {c} per column", cap=False, a=table.shape[0], b=table.shape[1], c=MAX_GROUPS))
 
     chi2, p, dof, expected = chi2_contingency(table)
     n = int(table.to_numpy().sum())
@@ -413,22 +410,21 @@ def correlation_test(df: pd.DataFrame, col_a: str, col_b: str,
     from scipy import stats
 
     if method not in ("pearson", "spearman"):
-        raise StatisticalError("method must be 'pearson' or 'spearman'")
+        raise StatisticalError(_s("no.inferential.8", "method must be 'pearson' or 'spearman'", cap=False))
     for c in (col_a, col_b):
         if c not in df.columns:
-            raise StatisticalError(f"Column not found: {c}")
+            raise StatisticalError(_s("no.inferential.1", "Column not found: {a}", cap=False, a=c))
 
     frame, sampled = _sampled(df)
     work = frame[[col_a, col_b]].apply(pd.to_numeric, errors="coerce").dropna()
     if len(work) < MIN_ROWS_PER_GROUP:
         raise StatisticalError(
-            f"Only {len(work)} rows with both values; need at least "
-            f"{MIN_ROWS_PER_GROUP}")
+            _s("no.inferential.9", "Only {a} rows with both values; need at least {b}", cap=False, a=len(work), b=MIN_ROWS_PER_GROUP))
 
     a, b = work[col_a].to_numpy(), work[col_b].to_numpy()
     if np.std(a) == 0 or np.std(b) == 0:
         raise StatisticalError(
-            "One of the columns is constant, so no correlation is defined")
+            _s("no.inferential.10", "One of the columns is constant, so no correlation is defined", cap=False))
 
     fn = stats.pearsonr if method == "pearson" else stats.spearmanr
     res = fn(a, b)
@@ -468,13 +464,13 @@ def regression(df: pd.DataFrame, target: str, predictors: list[str]) -> TestResu
     import statsmodels.api as sm
 
     if target not in df.columns:
-        raise StatisticalError(f"Column not found: {target}")
+        raise StatisticalError(_s("no.inferential.1", "Column not found: {a}", cap=False, a=target))
     predictors = [p for p in (predictors or []) if p != target]
     if not predictors:
-        raise StatisticalError("At least one predictor column is required")
+        raise StatisticalError(_s("no.inferential.11", "At least one predictor column is required", cap=False))
     missing = [p for p in predictors if p not in df.columns]
     if missing:
-        raise StatisticalError(f"Column not found: {missing[0]}")
+        raise StatisticalError(_s("no.inferential.1", "Column not found: {a}", cap=False, a=missing[0]))
 
     frame, sampled = _sampled(df)
     work = frame[[target] + predictors].apply(pd.to_numeric, errors="coerce").dropna()
@@ -483,8 +479,7 @@ def regression(df: pd.DataFrame, target: str, predictors: list[str]) -> TestResu
     need = max(MIN_ROWS_PER_GROUP, len(predictors) * 5)
     if len(work) < need:
         raise StatisticalError(
-            f"Only {len(work)} complete numeric rows; need at least {need} for "
-            f"{len(predictors)} predictor(s)")
+            _s("no.inferential.12", "Only {a} complete numeric rows; need at least {b} for {c} predictor(s)", cap=False, a=len(work), b=need, c=len(predictors)))
 
     y = work[target]
     X = sm.add_constant(work[predictors], has_constant="add")
@@ -559,13 +554,13 @@ def glm_logistic(df: pd.DataFrame, target: str, predictors: list[str],
     import statsmodels.api as sm
 
     if target not in df.columns:
-        raise StatisticalError(f"Column not found: {target}")
+        raise StatisticalError(_s("no.inferential.1", "Column not found: {a}", cap=False, a=target))
     predictors = [p for p in (predictors or []) if p != target]
     if not predictors:
-        raise StatisticalError("At least one predictor column is required")
+        raise StatisticalError(_s("no.inferential.11", "At least one predictor column is required", cap=False))
     missing = [p for p in predictors if p not in df.columns]
     if missing:
-        raise StatisticalError(f"Column not found: {missing[0]}")
+        raise StatisticalError(_s("no.inferential.1", "Column not found: {a}", cap=False, a=missing[0]))
 
     frame, sampled = _sampled(df)
     work = frame[[target] + predictors].dropna()
@@ -575,13 +570,10 @@ def glm_logistic(df: pd.DataFrame, target: str, predictors: list[str],
     uniques = list(pd.Series(work[target]).unique())
     if len(uniques) < 2:
         raise StatisticalError(
-            f"'{target}' has only one value, so there is no outcome to model")
+            _s("no.inferential.13", "'{a}' has only one value, so there is no outcome to model", cap=False, a=target))
     if len(uniques) > 2 and target_value is None:
         raise StatisticalError(
-            f"'{target}' has {len(uniques)} distinct values; logistic "
-            f"regression needs a binary (yes/no) outcome. Set the Event, the "
-            f"outcome being predicted (target_value), to model one value "
-            f"against the rest.")
+            _s("no.inferential.14", "'{a}' has {b} distinct values; logistic regression needs a binary (yes/no) outcome. Set the Event, the outcome being predicted (target_value), to model one value against the rest.", cap=False, a=target, b=len(uniques)))
 
     if target_value is not None:
         positive = str(target_value)
@@ -598,23 +590,20 @@ def glm_logistic(df: pd.DataFrame, target: str, predictors: list[str],
     need = max(MIN_ROWS_PER_GROUP, len(predictors) * MIN_EVENTS_PER_PREDICTOR)
     if events < need or (len(y) - events) < MIN_ROWS_PER_GROUP:
         raise StatisticalError(
-            f"Only {events} '{positive}' outcome(s) among {len(y)} rows; need at "
-            f"least {need} of each outcome for {len(predictors)} predictor(s)")
+            _s("no.inferential.15", "Only {a} '{b}' outcome(s) among {c} rows; need at least {d} of each outcome for {e} predictor(s)", cap=False, a=events, b=positive, c=len(y), d=need, e=len(predictors)))
 
     X = sm.add_constant(work[predictors], has_constant="add")
     try:
         model = sm.GLM(y, X, family=sm.families.Binomial()).fit()
     except Exception as e:  # noqa: BLE001
-        raise StatisticalError(f"The model could not be fitted: {e}")
+        raise StatisticalError(_s("no.inferential.16", "The model could not be fitted: {a}", cap=False, a=e))
 
     # Perfect separation makes statsmodels return enormous coefficients with
     # enormous standard errors rather than raising. Passing that through would
     # be emitting garbage with a p-value attached to it.
     if not np.all(np.isfinite(model.bse)) or float(np.max(np.abs(model.params))) > 50:
         raise StatisticalError(
-            "The model did not converge -- usually a predictor separates the "
-            "outcome perfectly (it predicts it exactly). Remove that predictor "
-            "and try again.")
+            _s("no.inferential.17", "The model did not converge -- usually a predictor separates the outcome perfectly (it predicts it exactly). Remove that predictor and try again.", cap=False))
 
     conf = model.conf_int()
     coefficients = []
@@ -689,13 +678,13 @@ def mixed_model(df: pd.DataFrame, target: str, predictors: list[str],
 
     for c in [target, group_col]:
         if c not in df.columns:
-            raise StatisticalError(f"Column not found: {c}")
+            raise StatisticalError(_s("no.inferential.1", "Column not found: {a}", cap=False, a=c))
     predictors = [p for p in (predictors or []) if p not in (target, group_col)]
     if not predictors:
-        raise StatisticalError("At least one predictor column is required")
+        raise StatisticalError(_s("no.inferential.11", "At least one predictor column is required", cap=False))
     missing = [p for p in predictors if p not in df.columns]
     if missing:
-        raise StatisticalError(f"Column not found: {missing[0]}")
+        raise StatisticalError(_s("no.inferential.1", "Column not found: {a}", cap=False, a=missing[0]))
 
     frame, sampled = _sampled(df)
     work = frame[[target, group_col] + predictors].dropna()
@@ -706,13 +695,11 @@ def mixed_model(df: pd.DataFrame, target: str, predictors: list[str],
     n_groups = int(work[group_col].nunique())
     if n_groups < 3:
         raise StatisticalError(
-            f"Only {n_groups} group(s) in '{group_col}'; a mixed model needs at "
-            f"least 3 to estimate between-group variation")
+            _s("no.inferential.18", "Only {a} group(s) in '{b}'; a mixed model needs at least 3 to estimate between-group variation", cap=False, a=n_groups, b=group_col))
     per_group = len(work) / max(n_groups, 1)
     if per_group < 2:
         raise StatisticalError(
-            "Groups average fewer than 2 rows each, so there are no repeated "
-            "measurements to model -- ordinary regression is the right tool here")
+            _s("no.inferential.19", "Groups average fewer than 2 rows each, so there are no repeated measurements to model -- ordinary regression is the right tool here", cap=False))
 
     try:
         model = sm.MixedLM(
@@ -720,14 +707,13 @@ def mixed_model(df: pd.DataFrame, target: str, predictors: list[str],
             sm.add_constant(work[predictors], has_constant="add"),
             groups=work[group_col]).fit()
     except Exception as e:  # noqa: BLE001
-        raise StatisticalError(f"The model could not be fitted: {e}")
+        raise StatisticalError(_s("no.inferential.16", "The model could not be fitted: {a}", cap=False, a=e))
 
     # Refused rather than reported with a buried warning: a non-converged fit
     # produces numbers that look exactly like estimates and are not.
     if not getattr(model, "converged", True):
         raise StatisticalError(
-            "The model did not converge -- try fewer predictors, or a grouping "
-            "with more rows per group")
+            _s("no.inferential.20", "The model did not converge -- try fewer predictors, or a grouping with more rows per group", cap=False))
 
     conf = model.conf_int()
     coefficients = []
@@ -797,47 +783,41 @@ def survival(df: pd.DataFrame, duration_col: str, event_col: str,
 
     for c in (duration_col, event_col):
         if c not in df.columns:
-            raise StatisticalError(f"Column not found: {c}")
+            raise StatisticalError(_s("no.inferential.1", "Column not found: {a}", cap=False, a=c))
     predictors = [p for p in (predictors or []) if p not in (duration_col, event_col)]
     if not predictors:
-        raise StatisticalError("At least one predictor column is required")
+        raise StatisticalError(_s("no.inferential.11", "At least one predictor column is required", cap=False))
     missing = [p for p in predictors if p not in df.columns]
     if missing:
-        raise StatisticalError(f"Column not found: {missing[0]}")
+        raise StatisticalError(_s("no.inferential.1", "Column not found: {a}", cap=False, a=missing[0]))
 
     frame, sampled = _sampled(df)
     work = frame[[duration_col, event_col] + predictors].apply(
         pd.to_numeric, errors="coerce").dropna()
     if work.empty:
-        raise StatisticalError("No complete numeric rows to model")
+        raise StatisticalError(_s("no.inferential.21", "No complete numeric rows to model", cap=False))
 
     if (work[duration_col] <= 0).any():
         raise StatisticalError(
-            f"'{duration_col}' contains values at or below zero; a duration must "
-            f"be positive")
+            _s("no.inferential.22", "'{a}' contains values at or below zero; a duration must be positive", cap=False, a=duration_col))
     ev = work[event_col]
     if not set(pd.unique(ev)).issubset({0, 1}):
         raise StatisticalError(
-            f"'{event_col}' must be 1 where the event happened and 0 where it "
-            f"has not (censored)")
+            _s("no.inferential.23", "'{a}' must be 1 where the event happened and 0 where it has not (censored)", cap=False, a=event_col))
 
     events = int(ev.sum())
     need = len(predictors) * MIN_EVENTS_PER_PREDICTOR
     if events == 0:
         raise StatisticalError(
-            "No events occurred, so there is nothing to model -- every row is "
-            "censored")
+            _s("no.inferential.24", "No events occurred, so there is nothing to model -- every row is censored", cap=False))
     if events < need:
         raise StatisticalError(
-            f"Only {events} event(s); Cox regression needs about "
-            f"{MIN_EVENTS_PER_PREDICTOR} per predictor ({need} for "
-            f"{len(predictors)}). Rows without an event carry very little "
-            f"information here, however many there are.")
+            _s("no.inferential.25", "Only {a} event(s); Cox regression needs about {b} per predictor ({c} for {d}). Rows without an event carry very little information here, however many there are.", cap=False, a=events, b=MIN_EVENTS_PER_PREDICTOR, c=need, d=len(predictors)))
 
     try:
         model = PHReg(work[duration_col], work[predictors], status=ev).fit()
     except Exception as e:  # noqa: BLE001
-        raise StatisticalError(f"The model could not be fitted: {e}")
+        raise StatisticalError(_s("no.inferential.16", "The model could not be fitted: {a}", cap=False, a=e))
 
     conf = model.conf_int()
     coefficients = []
@@ -949,7 +929,7 @@ def pairwise_comparisons(df: pd.DataFrame, value_col: str, group_col: str,
 
     for c in (group_col, value_col):
         if c not in df.columns:
-            raise StatisticalError(f"Column not found: {c}")
+            raise StatisticalError(_s("no.inferential.1", "Column not found: {a}", cap=False, a=c))
     frame, sampled = _sampled(df)
     work = frame[[group_col, value_col]].copy()
     work[value_col] = pd.to_numeric(work[value_col], errors="coerce")
@@ -960,13 +940,10 @@ def pairwise_comparisons(df: pd.DataFrame, value_col: str, group_col: str,
     groups = [(gname, v) for gname, v in groups if len(v) >= MIN_ROWS_PER_GROUP]
     if len(groups) < 2:
         raise StatisticalError(
-            f"Need at least two groups with {MIN_ROWS_PER_GROUP}+ rows each; "
-            f"found {len(groups)}")
+            _s("no.inferential.3", "Need at least two groups with {a}+ rows each; found {b}", cap=False, a=MIN_ROWS_PER_GROUP, b=len(groups)))
     if len(groups) > MAX_GROUPS:
         raise StatisticalError(
-            f"{len(groups)} groups would need "
-            f"{len(groups) * (len(groups) - 1) // 2} comparisons (limit "
-            f"{MAX_GROUPS} groups)")
+            _s("no.inferential.26", "{a} groups would need {b} comparisons (limit {c} groups)", cap=False, a=len(groups), b=len(groups) * (len(groups) - 1) // 2, c=MAX_GROUPS))
 
     pairs, raw_p = [], []
     for (na, a), (nb, b) in combinations(groups, 2):
@@ -1053,11 +1030,11 @@ def difference_check(df: pd.DataFrame, dimension: str, groups: list, measure: st
     from scipy import stats
 
     if dimension not in df.columns:
-        raise StatisticalError(f"Column not found: {dimension}")
+        raise StatisticalError(_s("no.inferential.1", "Column not found: {a}", cap=False, a=dimension))
     if measure and measure not in df.columns:
-        raise StatisticalError(f"Column not found: {measure}")
+        raise StatisticalError(_s("no.inferential.1", "Column not found: {a}", cap=False, a=measure))
     if not isinstance(groups, (list, tuple)) or len(groups) != 2 or str(groups[0]) == str(groups[1]):
-        raise StatisticalError("Pick two different bars to compare")
+        raise StatisticalError(_s("no.inferential.27", "Pick two different bars to compare", cap=False))
     agg = (aggregation or ("sum" if measure else "count")).lower()
     if not measure:
         agg = "count"
@@ -1070,7 +1047,7 @@ def difference_check(df: pd.DataFrame, dimension: str, groups: list, measure: st
     in_a, in_b = keys == a_name, keys == b_name
     na, nb = int(in_a.sum()), int(in_b.sum())
     if na == 0 or nb == 0:
-        raise StatisticalError(f"No rows for {a_name if na == 0 else b_name} under this chart's filters")
+        raise StatisticalError(_s("no.inferential.28", "No rows for {a} under this chart's filters", cap=False, a=a_name if na == 0 else b_name))
 
     population = {"rows_a": na, "rows_b": nb, "group_a": a_name, "group_b": b_name,
                   "dimension": dimension, "measure": measure, "aggregation": agg}
@@ -1094,8 +1071,7 @@ def difference_check(df: pd.DataFrame, dimension: str, groups: list, measure: st
         vb = pd.to_numeric(df.loc[in_b, measure], errors="coerce").dropna().to_numpy()
         if len(va) < MIN_ROWS_PER_GROUP or len(vb) < MIN_ROWS_PER_GROUP:
             raise StatisticalError(
-                f"Each bar needs at least {MIN_ROWS_PER_GROUP} rows with a {measure} value to test; "
-                f"{a_name} has {len(va)}, {b_name} has {len(vb)}")
+                _s("no.inferential.29", "Each bar needs at least {a} rows with a {b} value to test; {c} has {d}, {e} has {f}", cap=False, a=MIN_ROWS_PER_GROUP, b=measure, c=a_name, d=len(va), e=b_name, f=len(vb)))
         if kind == "median":
             u, p = stats.mannwhitneyu(va, vb, alternative="two-sided")
             r = 1 - 2 * float(u) / (len(va) * len(vb))
@@ -1147,7 +1123,7 @@ def difference_check(df: pd.DataFrame, dimension: str, groups: list, measure: st
         out["summary"] = ("A total is rows × typical value. " + tail + " "
                           + out["business"]["sentence"])
     else:
-        raise StatisticalError(f"A '{agg}' bar is one extreme row; there is no spread to test against")
+        raise StatisticalError(_s("no.inferential.30", "A '{a}' bar is one extreme row; there is no spread to test against", cap=False, a=agg))
 
     out["caveats"] = [
         _s("st.twobars", "Tested on the {n} rows behind these two bars, after this chart's filters.", n=f"{na + nb:,}"),

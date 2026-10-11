@@ -1142,7 +1142,7 @@ relationships, a profile, and no unmasked personal data.
 
 ### Relational store
 
-PostgreSQL 16 Alpine. **96 tables** defined in `models/models.py` via async
+PostgreSQL 16 Alpine. **99 tables** defined in `models/models.py` via async
 SQLAlchemy, grouped by concern:
 
 | Group | Representative tables |
@@ -1166,7 +1166,7 @@ SQLAlchemy, grouped by concern:
 | Platform | `saml_authn_requests`, `org_mcp_access`, `eval_runs` |
 | Ops | `sync_runs`, `schema_versions`, `column_stats`, `materializations`, `quotas`, `query_runs`, `ai_usage`, `migration_items` |
 
-Schema changes go through **Alembic** (`backend/alembic/`, 65 revisions).
+Schema changes go through **Alembic** (`backend/alembic/`, 66 revisions).
 Every timestamp column is `TIMESTAMPTZ` and the app writes naive UTC; `core/database.py` marks each bound naive datetime as UTC (asyncpg would read it as the process's local time) and pins the session time zone to UTC, so stored times are right on a server whose clock is not UTC.
 `postgres/init.sql` provides the initial schema and indexes.
 
@@ -1316,9 +1316,11 @@ render holds its own frame.
 truncated frame would produce totals over an arbitrary subset with no way to say so in
 the result, and a confident wrong number is worse than an error. Over the cap the
 request returns **413** naming both the dataset size and the limit. It defaults to
-**2,000,000 rows** — roughly where the measured 1.8 GB-per-render cost stops being
-survivable on a shared box. An operator with the memory to spare can still set `0` to
-disable it.
+**200,000,000 rows** (2,000,000 until 2026-10-11) and is an administrator's setting
+(Admin → Settings, or `IMPORT_ROW_CAP`); `0` disables it. At the default the host's
+memory is the real limit — about 2.1 GB per million rows at import on the benchmark
+table — so a small or shared host should set it to what `scripts/bench_import.py`
+reports there.
 
 Both hand their result to the **same shaper**, `get_widget_data_from_df`, which is why
 `direct_query.py` rejects aggregations that are not grain-safe: the shaper re-runs its
@@ -1508,7 +1510,7 @@ breaks an org's tokens down by day, feature and person.
 
 ### Routers
 
-**36 router modules**, mounted with 37 `include_router` calls in `main.py` --
+**37 router modules**, mounted with 37 `include_router` calls in `main.py` --
 `analysis` and `metadata` each expose a second router. All under `/api/v1`
 except the agent:
 
@@ -2101,7 +2103,7 @@ React 18 · TypeScript · Vite · Recharts.
 
 ### Pages
 
-**22 pages** in `frontend/src/pages/`:
+**23 pages** in `frontend/src/pages/`:
 
 | Page | Purpose |
 |------|---------|
@@ -2357,8 +2359,8 @@ Agent pane (7)
 
 | Suite | Scope | Count |
 |-------|-------|-------|
-| Backend | `backend/tests/` | ~6,670 tests across 516 modules |
-| Frontend | colocated `*.test.ts(x)` | ~3,410 tests across 356 files |
+| Backend | `backend/tests/` | ~6,670 tests across 526 modules |
+| Frontend | colocated `*.test.ts(x)` | ~3,410 tests across 360 files |
 | Evals | `backend/evals/` | Agent quality gates (`run_eval_gate.ps1`) |
 | Conformance | `tests/test_layer_conformance.py` | Enforces the layer boundaries above |
 | Doc audit | `tests/test_architecture_doc.py` | Enforces the *counts* in this document |

@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     # seconds). Bounded, the queue drains at the same total rate and the loop
     # stays responsive.
     widget_work_max_concurrency: int = Field(default=4, ge=1)
+    # Connections this process keeps to the app's own database, and how many
+    # more it may open under load. A request holds one only while it reads or
+    # writes the app's records -- not while a chart is being computed -- so
+    # this is sized for requests in flight, not for readers.
+    db_pool_size: int = Field(default=10, ge=1)
+    db_pool_overflow: int = Field(default=20, ge=0)
 
     # DirectQuery pools one SQLAlchemy engine per distinct connection (services/
     # direct_query.py). The registry is an LRU capped here: beyond the cap the
@@ -114,6 +120,13 @@ class Settings(BaseSettings):
     # carries. Every chart is drawn and judged before it is offered in all
     # three modes.
     setup_ai_selection: Literal["cards", "free", "both"] = "free"
+    # The same choice for dashboards suggested from a CONNECTION, before any
+    # dataset exists (services/source_brief.py). The model always writes the
+    # query there -- there are no rows until it has. free: it also designs the
+    # charts on the query's result, each then checked on the rows. cards: once
+    # the query has run, the platform makes the plain charts of its result and
+    # the model only chooses among them.
+    source_ai_selection: Literal["cards", "free"] = "free"
     # How much the guided setup's dashboards use beyond a number, a bar and a
     # line (services/guided_setup/dress.py): basic -- the simplest chart for
     # each question, nothing added; balanced -- further chart kinds where the
@@ -267,7 +280,26 @@ class Settings(BaseSettings):
     # and the limit is a better answer than a dead worker, and 2M is roughly
     # where the measured 1.8 GB-per-render cost stops being survivable on a
     # shared box. An operator with the memory to spare can still set 0.
-    import_row_cap: int = Field(default=2_000_000, ge=0)
+    #
+    # Raised to 200M on 2026-10-11 at the owner's request. At that size the
+    # limit no longer protects a small host: scripts/bench_import.py measured
+    # about 2.1 GB of memory per million rows at import on a twenty-column
+    # table, so the number a host can really carry is its memory, and an
+    # administrator of a shared or small machine should lower this on the
+    # Settings page (or with IMPORT_ROW_CAP) to what that script reports.
+    import_row_cap: int = Field(default=200_000_000, ge=0)
+    # The share of the machine's FREE memory one whole-dataset load may take
+    # (services/memory_guard.py). Looked at before a file is read into memory:
+    # a dataset that would need more is refused with a sentence instead of
+    # ending the server process. Charts computed without loading (the DuckDB
+    # aggregate path, live connections) are not affected. 0 = never refuse.
+    load_memory_share: float = Field(default=0.6, ge=0, le=1)
+    # From how many rows an import from a database is written to disk AS IT
+    # ARRIVES instead of being gathered in memory first (services/connections.py,
+    # `Streamed`). Below it an import is as it always was; above it memory stays
+    # at about one chunk of rows whatever the size, and the dataset is kept as
+    # a parquet file. 0 = never stream.
+    import_stream_rows: int = Field(default=1_000_000, ge=0)
     #: How many rows an ANALYSIS pulls from a live source. Between the two
     #: caps either side of it: the widget cap (10,000) sizes a scatter plot,
     #: the import cap sizes a file on disk. Statistics over 10,000 rows of a

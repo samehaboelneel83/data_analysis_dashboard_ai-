@@ -17,6 +17,7 @@ type PublishedMappings = {
   datasets?: Record<string, { columns: { name: string }[] }>
 }
 import type { Report, ReportPage, Widget } from '../types/report'
+import { styleVars } from '../lib/dashboardStyle'
 
 // Same sentinel SharedReport uses -- distinguishes "the server throttled this
 // widget's request" from "the widget's own query genuinely returned nothing".
@@ -145,7 +146,8 @@ export default function EmbeddedReport() {
         {/* A reader of a shared link scrolls further than an author does, and
             has no other way back to the filters. */}
         <FloatingFilterWindow />
-        <div style={{ position: 'relative', maxWidth: 1400, margin: '20px auto',
+        <div style={{ position: 'relative', maxWidth: 1400, margin: '20px auto', ...styleVars(report.style),
+          background: 'var(--dl-s-page-bg, transparent)',
           height: Math.max(400, ...(page.widgets ?? []).map(w => ((w.layout?.y ?? 0) + (w.layout?.h ?? 4)) * CELL + 40)) }}>
           {(page.widgets ?? []).map(w => (
             <div key={w.id} style={{ position: 'absolute',

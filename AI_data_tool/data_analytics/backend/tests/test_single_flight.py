@@ -1,0 +1,102 @@
+"""The same work asked for by several people at once is done once
+(services/single_flight.py), and concurrent loads are weighed together
+(services/memory_guard.reserved)."""
+import threading
+import time
+
+import pandas as pd
+import pytest
+
+from app.core.config import settings
+from app.services import memory_guard as mg
+from app.services import single_flight as sf
+
+
+def _together(n, fn):
+    out, errors = [None] * n, []
+    start = threading.Barrier(n)
+
+    def go(i):
+        start.wait()
+        try:
+            out[i] = fn(i)
+        except Exception as e:                              # noqa: BLE001
+            errors.append(e)
+    threads = [threading.Thread(target=go, args=(i,)) for i in range(n)]
+    [t.start() for t in threads]
+    [t.join(30) for t in threads]
+    return out, errors
+
+
+def test_identical_requests_arriving_together_are_computed_once_and_each_gets_its_own_copy():
+    ran = []
+
+    def work():
+        ran.append(1)
+        time.sleep(0.3)
+        return {"rows": [1, 2, 3]}
+    out, errors = _together(8, lambda i: sf.run("same", work))
+    assert not errors and len(ran) == 1
+    assert all(o == {"rows": [1, 2, 3]} for o in out)
+    out[0]["rows"].append(4)                               # one reader's copy is not another's
+    assert out[1] == {"rows": [1, 2, 3]}
+
+
+def test_different_requests_are_not_shared_and_nothing_is_kept_afterwards():
+    ran = []
+    out, _ = _together(4, lambda i: sf.run(f"k{i}", lambda: ran.append(i) or i))
+    assert sorted(out) == [0, 1, 2, 3] and len(ran) == 4
+    assert sf.run("same-again", lambda: 1) == 1 and sf.run("same-again", lambda: 2) == 2   # not a cache
+
+
+def test_when_the_first_fails_the_others_compute_for_themselves():
+    calls = []
+
+    def work():
+        calls.append(1)
+        time.sleep(0.2)
+        if len(calls) == 1:
+            raise ValueError("the first one failed")
+        return "ok"
+    out, errors = _together(3, lambda i: sf.run("flaky", work))
+    assert len(errors) == 1 and sorted(o for o in out if o) == ["ok", "ok"]
+
+
+def test_no_key_means_never_shared():
+    ran = []
+    _together(3, lambda i: sf.run(None, lambda: ran.append(1) or time.sleep(0.1)))
+    assert len(ran) == 3 and sf.key_of(object()) is not None and sf.key_of({"a": 1}) == sf.key_of({"a": 1})
+
+
+def test_a_chart_asked_for_by_many_at_once_is_drawn_once(tmp_path, monkeypatch):
+    from app.services import widget_data as wd
+    path = tmp_path / "d.csv"
+    pd.DataFrame({"g": ["a", "b"] * 50, "v": range(100)}).to_csv(path, index=False)
+    ran = []
+    real = wd._get_widget_data
+
+    def slow(*a, **k):
+        ran.append(1)
+        time.sleep(0.3)
+        return real(*a, **k)
+    monkeypatch.setattr(wd, "_get_widget_data", slow)
+    config = {"dimension": "g", "measure": "v", "aggregation": "sum"}
+    out, errors = _together(6, lambda i: wd.get_widget_data(str(path), config, "bar", use_cache=False))
+    assert not errors and len(ran) == 1
+    assert all(o["rows"] == out[0]["rows"] for o in out)
+
+
+def test_loads_in_progress_are_weighed_together(tmp_path, monkeypatch):
+    path = tmp_path / "rows.parquet"
+    pd.DataFrame({"a": range(5000), "b": ["text"] * 5000}).to_parquet(path)
+    needed, _ = mg.estimate(str(path))
+    monkeypatch.setattr(settings, "load_memory_share", 1.0, raising=False)
+    monkeypatch.setattr(mg, "free_bytes", lambda: int(needed * 2.5))        # room for two, not three
+    with mg.reserved(str(path)):
+        with mg.reserved(str(path)):
+            with pytest.raises(mg.TooLargeToLoad):
+                with mg.reserved(str(path)):
+                    pass
+        with mg.reserved(str(path)):                       # one finished: there is room again
+            pass
+    assert mg._RESERVED == 0

@@ -503,6 +503,9 @@ class ReportUpdate(BaseModel):
     additional_dataset_ids: Optional[list[int]] = None
     theme: Optional[str] = None
     display_rules: Optional[list[dict]] = None
+    #: The dashboard's look (fonts, borders, corners...); unknown keys and
+    #: values out of range are dropped on the way in.
+    style: Optional[dict] = None
 
 
 class ReportOut(BaseModel):
@@ -514,6 +517,7 @@ class ReportOut(BaseModel):
     additional_dataset_ids: list[int] = []
     theme: str = "default"
     display_rules: list[dict] = []
+    style: Optional[dict] = None
     # Bumped by every mutation to this report or anything nested under it, so a
     # client can tell that another session changed the report underneath it.
     revision: int = 0

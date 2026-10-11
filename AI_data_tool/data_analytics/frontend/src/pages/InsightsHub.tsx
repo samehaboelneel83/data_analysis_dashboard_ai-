@@ -200,7 +200,7 @@ export default function InsightsHub() {
                   thing saying how they relate. */}
               {scan.narrative && strong.length !== 1 && (
                 // QA3 D5: the server's sentence takes its own direction; numbers and ranges keep their order.
-                <p dir="auto" style={{ fontSize: 13, marginBottom: strong.length ? 8 : 0 }}>{isolateNumbers(scan.narrative)}</p>
+                <p dir="auto" style={{ fontSize: 13, marginBottom: strong.length ? 8 : 0 }}>{isolateNumbers(sayText(t, scan.narrative, (scan as { narrative_i18n?: unknown }).narrative_i18n as never))}</p>
               )}
               {strong.length > 0 && (
                 <ul style={{ margin: 0, paddingInlineStart: 18, display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -208,7 +208,7 @@ export default function InsightsHub() {
                   {strong.slice(0, 3).map((f, i) => (
                     <li key={i} dir="auto" style={{ fontSize: 12 }}>
                       <strong>{isolateNumbers(sayText(t, f.title, (f as { title_i18n?: { key: string; vars?: Record<string, unknown> } | null }).title_i18n as never))}</strong>
-                      {f.detail && <span style={{ color: 'var(--muted)' }}> — {isolateNumbers(f.detail)}</span>}
+                      {f.detail && <span style={{ color: 'var(--muted)' }}> — {isolateNumbers(sayText(t, f.detail, (f as { detail_i18n?: unknown }).detail_i18n as never))}</span>}
                       {current && (
                         <FindingChart datasetId={current.id} finding={f}
                           columnTypes={Object.fromEntries(current.columns.map(c => [c.name, c.dtype ?? '']))} />

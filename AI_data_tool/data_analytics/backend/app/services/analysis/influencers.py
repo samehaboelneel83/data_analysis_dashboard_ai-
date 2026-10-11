@@ -29,6 +29,7 @@ from __future__ import annotations
 import pandas as pd
 
 from ..analysis_contract import AnalysisContract
+from ..readback import _s
 
 RANDOM_STATE = 42
 
@@ -182,7 +183,7 @@ def key_influencers(
     the analysis compares group means instead of rates.
     """
     if target not in df.columns:
-        raise InfluencerError(f"column '{target}' is not in this dataset")
+        raise InfluencerError(_s("no.change_drivers.1", "column '{a}' is not in this dataset", cap=False, a=target))
 
     total_rows = len(df)
     sampled = total_rows > FRAME_SAMPLE_THRESHOLD
@@ -192,8 +193,7 @@ def key_influencers(
     df = df[df[target].notna()]
     if len(df) < MIN_ROWS:
         raise InfluencerError(
-            f"need at least {MIN_ROWS} rows with a value for '{target}' "
-            f"to find influencers; this has {len(df)}")
+            _s("no.influencers.1", "need at least {a} rows with a value for '{b}' to find influencers; this has {c}", cap=False, a=MIN_ROWS, b=target, c=len(df)))
 
     numeric_target = pd.api.types.is_numeric_dtype(df[target]) and df[target].nunique() > 2
     if numeric_target:
@@ -204,13 +204,13 @@ def key_influencers(
         levels = df[target].value_counts()
         if len(levels) < 2:
             raise InfluencerError(
-                f"'{target}' has only one value, so nothing distinguishes its rows")
+                _s("no.influencers.2", "'{a}' has only one value, so nothing distinguishes its rows", cap=False, a=target))
         # The rarest level by default: "what drives churn" is asked far more
         # often than "what drives staying", and the minority class is the one
         # a lift is informative about.
         chosen = target_value if target_value is not None else levels.index[-1]
         if chosen not in set(levels.index):
-            raise InfluencerError(f"'{chosen}' is not a value of '{target}'")
+            raise InfluencerError(_s("no.influencers.3", "'{a}' is not a value of '{b}'", cap=False, a=chosen, b=target))
         outcome = (df[target] == chosen).astype(float)
         baseline = float(outcome.mean())
         measure = "rate"
@@ -218,8 +218,7 @@ def key_influencers(
     usable, warnings = _usable_factors(df, target, factors, column_meta)
     if not usable:
         raise InfluencerError(
-            "no usable factors: every other column is constant, empty, or has "
-            "too many distinct values to group")
+            _s("no.influencers.4", "no usable factors: every other column is constant, empty, or has too many distinct values to group", cap=False))
 
     min_rows = max(MIN_GROUP_ROWS, int(len(df) * MIN_GROUP_FRACTION))
     found: list[dict] = []
@@ -248,8 +247,7 @@ def key_influencers(
 
     if not found:
         raise InfluencerError(
-            f"no group large enough to be meaningful (each needs at least "
-            f"{min_rows} rows)")
+            _s("no.influencers.5", "no group large enough to be meaningful (each needs at least {a} rows)", cap=False, a=min_rows))
 
     # Rank by distance from the baseline in either direction: a factor that
     # HALVES the outcome is exactly as informative as one that doubles it, and

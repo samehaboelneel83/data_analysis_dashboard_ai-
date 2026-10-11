@@ -34,6 +34,10 @@ GRID_FILL = 0.5
 GRID_MIN_SIDE = 2
 GRID_MAX_SIDE = 400
 MAX_OFFERED = 3
+#: Rows a dated table needs before "which levels make this number largest" is offered.
+RESPONSE_MIN_ROWS = 60
+#: Factors a response problem may set at once (the what-if model's own limit).
+RESPONSE_MAX_FACTORS = 4
 
 
 class DecisionProblemError(ValueError):
@@ -50,7 +54,17 @@ def recognise(profile: dict, kinds: dict[str, set[str]]) -> list[dict]:
     # A row that carries a date is something that HAPPENED; a decision is made
     # among things. Every table of events has a key and amounts too -- without
     # this, any small table of records would be offered a choice to set up.
-    if any("date" in ks for ks in kinds.values()):
+    # What a dated table CAN have is the third shape: a number that moved over
+    # time beside other numbers that moved with it -- levels to set.
+    dates = [c for c, ks in kinds.items() if "date" in ks]
+    if dates:
+        got = lambda c: int((cols.get(c) or {}).get("count") or 0)               # noqa: E731
+        outcomes = [c for c, ks in kinds.items() if "additive" in ks and got(c) >= 0.9 * rows]
+        levers = [c for c, ks in kinds.items() if ks & {"additive", "level", "number"} and "key" not in ks
+                  and "date" not in ks and got(c) >= 0.9 * rows]
+        if rows >= RESPONSE_MIN_ROWS and outcomes and len(levers) >= 2:
+            return [{"problem": "response", "date": dates[0], "dates": dates[:4], "measures": outcomes[:6],
+                     "factors": levers[:8], "rows": rows}]
         return []
     distinct = lambda c: int((cols.get(c) or {}).get("distinct") or 0)           # noqa: E731
     filled = lambda c: int((cols.get(c) or {}).get("count") or 0)                # noqa: E731
@@ -107,11 +121,114 @@ def specify(df: pd.DataFrame, problem: str, *, dataset: dict | None = None, **ch
         spec = _allocation(df, **choices)
     elif problem == "assignment":
         spec = _assignment(df, **choices)
+    elif problem == "response":
+        spec = _response(df, **choices)
     else:
-        raise DecisionProblemError("problem must be 'allocation' or 'assignment'")
+        raise DecisionProblemError("problem must be 'allocation', 'assignment' or 'response'")
     return {"schema": SCHEMA, "problem": problem, **spec,
             "dataset": dataset or {}, "solved": False,
             "note": "A specification only: nothing here has been optimised."}
+
+
+def _only_volume(df: pd.DataFrame, factor: str, objective: str) -> bool:
+    """The engine's own rule for withholding a what-if (evidence._scenarios):
+    with enough rows to judge, the factor and the number barely move together
+    row by row, so a fit on period totals is reading volume."""
+    import numpy as np
+
+    from .evidence import SCENARIO_TOGETHER
+    x, y = pd.to_numeric(df[factor], errors="coerce"), pd.to_numeric(df[objective], errors="coerce")
+    both = x.notna() & y.notna()
+    if both.sum() < 30 or not x[both].std() or not y[both].std():
+        return False
+    together = float(np.corrcoef(x[both], y[both])[0, 1])
+    return not np.isfinite(together) or abs(together) < SCENARIO_TOGETHER
+
+
+def _response(df: pd.DataFrame, date_col: str = "", objective: str = "", direction: str = "",
+              factors: list[str] | None = None, ranges: dict | None = None, granularity: str = "month",
+              periods: int | None = None, **_ignored) -> dict:
+    """Which LEVELS of some factors make a number largest (or smallest) over
+    the next periods, under the model the what-if fits: a level, a trend and
+    one straight-line effect per factor. Each factor may be set anywhere in a
+    range -- the person's, or what was observed. The model and its doubts go
+    into the document; the best levels are not worked out here."""
+    import numpy as np
+
+    from ..analysis import simulate_scenarios as sim
+    from ..analysis.forecast_scenario import ForecastScenarioError, forecast_scenario
+    way = _direction(direction)
+    chosen = [f for f in dict.fromkeys(factors or []) if f]
+    if not date_col or date_col not in df.columns:
+        raise DecisionProblemError("choose the date column")
+    _number(df, objective, "what is to be made large or small")
+    if not chosen:
+        raise DecisionProblemError("choose at least one factor whose level could be set")
+    if len(chosen) > RESPONSE_MAX_FACTORS:
+        raise DecisionProblemError(f"at most {RESPONSE_MAX_FACTORS} factors can be set at once")
+    if objective in chosen:
+        raise DecisionProblemError("the objective cannot also be a factor to set")
+    for f in chosen:
+        _number(df, f, f"the factor '{f}'")
+    horizon = int(periods or sim.DEFAULT_HORIZON)
+    try:
+        # The what-if's own checks of columns and history, in its own words.
+        single = forecast_scenario(df, date_col, objective, chosen, {chosen[0]: 0.1}, horizon, granularity)
+    except ForecastScenarioError as e:
+        raise DecisionProblemError(str(e)) from e
+    grouped, fitted, recent, y, X = sim._fit(df, date_col, objective, chosen, granularity)
+    params = [float(v) for v in fitted.params]
+    pvalues = [float(v) for v in fitted.pvalues]
+    checks: list[dict] = []
+    decisions, constraints = [], []
+    for i, f in enumerate(chosen):
+        seen_lo, seen_hi = float(grouped[f].min()), float(grouped[f].max())
+        asked = (ranges or {}).get(f) if isinstance(ranges, dict) else None
+        lo, hi = seen_lo, seen_hi
+        if isinstance(asked, (list, tuple)) and len(asked) == 2 and all(v is not None for v in asked):
+            lo, hi = float(asked[0]), float(asked[1])
+        if not hi > lo:
+            raise DecisionProblemError(f"the range for '{f}' needs a highest level above its lowest")
+        decisions.append({"name": f, "type": "level", "per": granularity, "recent": round(recent[f], 4),
+                          "lower": round(lo, 4), "upper": round(hi, 4),
+                          "observed": [round(seen_lo, 4), round(seen_hi, 4)]})
+        constraints.append({"kind": "range", "column": f, "lower": round(lo, 4), "upper": round(hi, 4)})
+        if lo < seen_lo or hi > seen_hi:
+            # Outside anything seen: the model has no evidence there.
+            checks.append({"code": "beyond_observed", "column": f, "observed": [round(seen_lo, 4), round(seen_hi, 4)]})
+        if pvalues[2 + i] >= 0.05:
+            # The data cannot tell which way this factor moves the number.
+            checks.append({"code": "effect_unclear", "column": f, "p": round(pvalues[2 + i], 4)})
+        elif _only_volume(df, f, objective):
+            # Summed by period the two climb in step, yet row by row they do
+            # not move together: busier periods simply hold more of both.
+            checks.append({"code": "only_volume", "column": f})
+    r2 = float(single.get("r2", fitted.rsquared))
+    if r2 < sim.WEAK_FIT:
+        checks.append({"code": "weak_model", "r2": round(r2, 4)})
+    own = float(np.sqrt(max(float(fitted.scale), 0.0)))
+    unseen = sim._unseen_miss(y, X)
+    if unseen is not None and own > 0 and unseen > own * sim.WIDEN_FROM:
+        checks.append({"code": "misses_unseen", "times": round(unseen / own, 2)})
+    if sim._bends(y, X, fitted):
+        checks.append({"code": "bends"})
+    # A straight-line model is largest at an end of every range: what a solver
+    # returns is only as good as the ranges it was given.
+    checks.append({"code": "linear_optimum_at_bounds"})
+    checks.append({"code": "association_not_intervention"})
+    return {
+        "objective": {"direction": way, "column": objective, "aggregate": "total_over_horizon",
+                      "horizon": horizon, "per": granularity},
+        "model": {"form": "linear", "intercept": round(params[0], 6), "per_period": round(params[1], 6),
+                  "coefficients": {f: round(params[2 + i], 6) for i, f in enumerate(chosen)},
+                  "r2": round(r2, 4), "periods_fitted": int(len(grouped)),
+                  "next_period_index": int(len(grouped)),
+                  "noise": {"own": round(own, 4), "unseen": round(unseen, 4) if unseen is not None else None}},
+        "decisions": decisions,
+        "constraints": constraints,
+        "data": {"rows": int(len(df)), "columns": [date_col, objective, *chosen]},
+        "checks": checks,
+    }
 
 
 def _allocation(df: pd.DataFrame, key: str = "", objective: str = "", direction: str = "", limited: str = "",

@@ -67,7 +67,24 @@ def _best(fn, repeat: int) -> float:
     return round(best, 3)
 
 
-def one_size(rows: int, workdir: str, repeat: int) -> dict:
+def widen(df, extra_numbers: int, extra_text: int, text_chars: int):
+    """The seeded table made WIDER: more number columns, and columns of long
+    text that differs on every row -- the two things that move memory per row
+    most. The added values are seeded too."""
+    import numpy as np
+    rng = np.random.default_rng(7)
+    for i in range(extra_numbers):
+        df[f"extra_number_{i + 1}"] = rng.normal(100.0, 25.0, len(df)).round(3)
+    if extra_text:
+        alphabet = np.array(list("abcdefghijklmnopqrstuvwxyz "))
+        for i in range(extra_text):
+            letters = rng.integers(0, len(alphabet), size=(len(df), max(1, text_chars)))
+            df[f"extra_text_{i + 1}"] = ["".join(row) for row in alphabet[letters]]
+    return df
+
+
+def one_size(rows: int, workdir: str, repeat: int, extra_numbers: int = 0, extra_text: int = 0,
+             text_chars: int = 80) -> dict:
     """Run in a child process: everything for one size, then its peak memory."""
     from scripts.bench_common import seed_frame
     from app.services import analytics
@@ -77,7 +94,7 @@ def one_size(rows: int, workdir: str, repeat: int) -> dict:
     from app.services.widget_data import clear_widget_data_cache, get_widget_data
 
     path = os.path.join(workdir, f"import_{rows}.csv")
-    seed_frame(rows).to_csv(path, index=False)
+    widen(seed_frame(rows), extra_numbers, extra_text, text_chars).to_csv(path, index=False)
     out: dict = {"rows": rows, "csv_mb": round(os.path.getsize(path) / 1e6, 1)}
 
     def parse_csv():
@@ -138,11 +155,15 @@ def main() -> None:
     ap.add_argument("--repeat", type=int, default=2)
     ap.add_argument("--json", default="")
     ap.add_argument("--workdir", default="")
+    ap.add_argument("--extra-numbers", type=int, default=0, help="number columns added to the 20-column table")
+    ap.add_argument("--extra-text", type=int, default=0, help="long-text columns added (distinct on every row)")
+    ap.add_argument("--text-chars", type=int, default=80, help="characters in each added text value")
     ap.add_argument("--one", type=int, default=0, help=argparse.SUPPRESS)
     args = ap.parse_args()
 
     if args.one:                                             # the child: one size, as JSON on the last line
-        print("RESULT " + json.dumps(one_size(args.one, args.workdir, args.repeat)))
+        print("RESULT " + json.dumps(one_size(args.one, args.workdir, args.repeat, args.extra_numbers,
+                                              args.extra_text, args.text_chars)))
         return
 
     sizes = sorted(int(x) for x in args.rows.split(",") if x.strip())
@@ -153,7 +174,8 @@ def main() -> None:
         for n in sizes:
             print(f"-- {n:,} rows ...", flush=True)
             child = subprocess.run([sys.executable, os.path.abspath(__file__), "--one", str(n), "--workdir", workdir,
-                                    "--repeat", str(args.repeat)], capture_output=True, text=True)
+                                    "--repeat", str(args.repeat), "--extra-numbers", str(args.extra_numbers),
+                                    "--extra-text", str(args.extra_text), "--text-chars", str(args.text_chars)], capture_output=True, text=True)
             line = next((l for l in child.stdout.splitlines() if l.startswith("RESULT ")), None)
             if child.returncode != 0 or line is None:
                 # Running out of memory IS a result: this size is past what the host carries.

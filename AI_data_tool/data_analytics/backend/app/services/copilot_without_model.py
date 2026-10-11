@@ -85,10 +85,14 @@ def answer(message: str, columns_by_table: dict[str, dict[str, str]], cards: lis
                       "widget_type": action.get("widget_type"), "config": action["config"]})
         if len(ready) >= MAX_CHARTS:
             break
+    lead = "\n".join(lines + (["", w["ready"].format(for_them=w["for_them"] if named else "")] if ready else []))
     if ready:
         lines += ["", w["ready"].format(for_them=w["for_them"] if named else "")]
         lines += [f"- {r['title']}" + (f": {r['sentence']}" if r["sentence"] else "") for r in ready]
         lines += ["", w["add"]]
     else:
         lines += ["", w["drag"]]
-    return {"reply": "\n".join(lines), "suggestions": ready, "language": lang}
+    # `reply` is the whole answer as text; `lead` is the same words without the
+    # list, for a screen that shows each chart as a button to add it.
+    return {"reply": "\n".join(lines), "lead": lead if ready else "\n".join(lines),
+            "suggestions": ready, "language": lang}

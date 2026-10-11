@@ -8,7 +8,8 @@ import { formattingCapabilities } from './widgetCapabilities'
 import WidgetRenderer from './WidgetRenderer'
 import { CrossFilterProvider } from './CrossFilterContext'
 import { ArrowUpRight, Check, ChevronRight, EyeOff, Lightbulb, Plus, RefreshCw, Sparkles } from 'lucide-react'
-import { takeawayText } from '../../lib/readbackText'
+import { sayText, takeawayText } from '../../lib/readbackText'
+import { Link } from 'react-router-dom'
 import {
   axisNames, cap, familyOf, signature, takeaway, thumbnail, words,
   type SugFamily, type Takeaway,
@@ -315,9 +316,12 @@ export default function SuggestionsPane({ columns, analysis, onAdd, reportId, da
   const tr = useT()
   const heuristics = useMemo(() => suggestWidgets(columns, analysis, seed, columnMeta ?? {}, tr), [columns, analysis, seed, columnMeta, tr])
   const [insightSugs, setInsightSugs] = useState<WidgetSuggestion[] | null>(null)
+  const [decisions, setDecisions] = useState<{ title: string; sentence: string; title_i18n: unknown; sentence_i18n: unknown }[]>([])
   useEffect(() => {
     if (!reportId) return
     suggestApi.forReport(reportId).then(setInsightSugs).catch(() => setInsightSugs(null))
+    // Never in the way of the charts: a failure here is simply no decision offered.
+    Promise.resolve().then(() => suggestApi.decisionsForReport(reportId)).then(setDecisions).catch(() => setDecisions([]))
   }, [reportId])
 
   const [filter, setFilter] = useState<'all' | SugFamily>('all')
@@ -449,6 +453,15 @@ export default function SuggestionsPane({ columns, analysis, onAdd, reportId, da
   const n = live.length
   return (
     <div className="dl-sug">
+      {/* A decision the data has the shape of is set up on the dataset, not on
+          a page: it is offered here as a way in, never as a chart. */}
+      {decisions.map((d, i) => (
+        <div key={i} data-testid="suggest-decision" style={{ border: '1px dashed var(--border)', borderRadius: 10, padding: '8px 10px', margin: '0 0 8px', fontSize: 12 }}>
+          <b dir="auto">{sayText(tr, d.title, d.title_i18n as never)}</b>
+          <div dir="auto" style={{ color: 'var(--muted)', margin: '2px 0 6px' }}>{sayText(tr, d.sentence, d.sentence_i18n as never)}</div>
+          <Link to={`/datasets/${datasetId}#decide`} className="btn btn-secondary btn-sm">{tr('sug.decide.open')}</Link>
+        </div>
+      ))}
       <div className="dl-sug__top">
         <div className="dl-sug__head">
           <div className="dl-sug__heading">

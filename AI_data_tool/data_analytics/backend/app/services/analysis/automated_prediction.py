@@ -135,21 +135,19 @@ def automated_prediction(df: pd.DataFrame, target: str,
     from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 
     if target not in df.columns:
-        raise AutomatedPredictionError(f"Column '{target}' not found")
+        raise AutomatedPredictionError(_s("no.automated_prediction.1", "Column '{a}' not found", cap=False, a=target))
 
     if partition and partition not in df.columns:
-        raise AutomatedPredictionError(f"Partition column '{partition}' not found")
+        raise AutomatedPredictionError(_s("no.automated_prediction.2", "Partition column '{a}' not found", cap=False, a=partition))
     if partition and partition == target:
-        raise AutomatedPredictionError("The partition column cannot also be the outcome")
+        raise AutomatedPredictionError(_s("no.automated_prediction.3", "The partition column cannot also be the outcome", cap=False))
     used, skipped = _usable_predictors(df, target, [p for p in (predictors or []) if p != partition] or
                                        ([c for c in df.columns if c not in (target, partition)] if partition else None),
                                        allow_grouping=True)
     used = [c for c in used if c != partition]
     if not used:
         raise AutomatedPredictionError(
-            "No column can be used as a predictor here. Numeric columns and "
-            "categorical ones with a manageable number of values can be, "
-            "identifiers and dates cannot.")
+            _s("no.automated_prediction.4", "No column can be used as a predictor here. Numeric columns and categorical ones with a manageable number of values can be, identifiers and dates cannot.", cap=False))
 
     frame = df[[target, *used, *([partition] if partition else [])]].dropna(subset=[target])
     # A car's make (104 brands): its 19 commonest values, the rest as "(other)".
@@ -159,8 +157,7 @@ def automated_prediction(df: pd.DataFrame, target: str,
         frame = frame.sample(FRAME_SAMPLE_THRESHOLD, random_state=RANDOM_STATE)
     if len(frame) < MIN_ROWS:
         raise AutomatedPredictionError(
-            f"Only {len(frame)} usable rows; at least {MIN_ROWS} are needed to "
-            f"compare models on data none of them was fitted to.")
+            _s("no.automated_prediction.5", "Only {a} usable rows; at least {b} are needed to compare models on data none of them was fitted to.", cap=False, a=len(frame), b=MIN_ROWS))
 
     y = frame[target]
     classification = not (pd.api.types.is_numeric_dtype(y)
@@ -170,11 +167,10 @@ def automated_prediction(df: pd.DataFrame, target: str,
         classes = sorted(y.unique())
         if len(classes) < 2:
             raise AutomatedPredictionError(
-                f"'{target}' has only one value, so there is nothing to predict.")
+                _s("no.automated_prediction.6", "'{a}' has only one value, so there is nothing to predict.", cap=False, a=target))
         if len(classes) > MAX_CLASSES:
             raise AutomatedPredictionError(
-                f"'{target}' has {len(classes):,} distinct values -- that is an "
-                f"identifier, not an outcome.")
+                _s("no.automated_prediction.7", "'{a}' has {b} distinct values -- that is an identifier, not an outcome.", cap=False, a=target, b=f'{len(classes):,}'))
 
     X, _labels = _encode(frame, used)
     if partition:
@@ -185,8 +181,7 @@ def automated_prediction(df: pd.DataFrame, target: str,
         is_test = present & ~is_train
         if is_train.sum() < 10 or is_test.sum() < 5:
             raise AutomatedPredictionError(
-                f"Partition '{partition}' leaves {int(is_train.sum())} training and "
-                f"{int(is_test.sum())} validation rows; need at least 10 and 5.")
+                _s("no.automated_prediction.8", "Partition '{a}' leaves {b} training and {c} validation rows; need at least 10 and 5.", cap=False, a=partition, b=int(is_train.sum()), c=int(is_test.sum())))
         X_train, X_test = X[is_train], X[is_test]
         y_train, y_test = y[is_train], y[is_test]
     else:
@@ -244,7 +239,7 @@ def automated_prediction(df: pd.DataFrame, target: str,
     scored = [r for r in results if r["score"] is not None]
     if not scored:
         raise AutomatedPredictionError(
-            "No candidate model could be fitted to this data.")
+            _s("no.automated_prediction.9", "No candidate model could be fitted to this data.", cap=False))
 
     champion = max(scored, key=lambda r: r["score"])
     baseline = next((r for r in scored if r["is_baseline"]), None)

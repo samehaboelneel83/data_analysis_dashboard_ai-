@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from ..core.database import get_db
+from ..core.said_errors import refused
 from ..core.org_scope import check_org
 from ..core.rls import resolve_denied_columns, resolve_rls_expr
 from ..dependencies import get_current_user, ai_meter
@@ -443,7 +444,7 @@ async def run_compare_groups(
     try:
         res = await asyncio.to_thread(compare_groups, df, req.value_col, req.group_col)
     except StatisticalError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     return res.to_dict()
 
 
@@ -460,7 +461,7 @@ async def run_independence(
     try:
         res = await asyncio.to_thread(test_independence, df, req.col_a, req.col_b)
     except StatisticalError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     return res.to_dict()
 
 
@@ -478,7 +479,7 @@ async def run_correlation_test(
         res = await asyncio.to_thread(
             correlation_test, df, req.col_a, req.col_b, req.method)
     except StatisticalError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     return res.to_dict()
 
 
@@ -495,7 +496,7 @@ async def run_regression(
     try:
         res = await asyncio.to_thread(regression, df, req.target, req.predictors)
     except StatisticalError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     return res.to_dict()
 
 @router.post("/{dataset_id}/statistics/glm-logistic")
@@ -512,7 +513,7 @@ async def run_glm_logistic(
         res = await asyncio.to_thread(
             glm_logistic, df, req.target, req.predictors, req.target_value)
     except StatisticalError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     return res.to_dict()
 
 
@@ -533,7 +534,7 @@ async def run_mixed_model(
         res = await asyncio.to_thread(
             mixed_model, df, req.target, req.predictors, req.group_col)
     except StatisticalError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     return res.to_dict()
 
 
@@ -552,7 +553,7 @@ async def run_survival(
         res = await asyncio.to_thread(
             survival, df, req.duration_col, req.event_col, req.predictors)
     except StatisticalError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     return res.to_dict()
 
 
@@ -570,7 +571,7 @@ async def run_pairwise(
         res = await asyncio.to_thread(
             pairwise_comparisons, df, req.value_col, req.group_col, req.method)
     except StatisticalError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     return res.to_dict()
 
 
@@ -652,7 +653,7 @@ async def difference_check_endpoint(
     try:
         return await asyncio.to_thread(_run)
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
 
 
 @router.post("/{dataset_id}/analysis/run")
@@ -700,9 +701,9 @@ async def run_catalogued_analysis(
     except analysis_registry.UnknownAnalysisError:
         raise HTTPException(404, f"No analysis named '{req.name}'")
     except analysis_registry.NotRunnableError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     except (SegmentError, InfluencerError) as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     except TypeError as e:
         # Wrong or missing kwargs. `test_analysis_dispatch` pins every
         # handler's signature against its published schema, so this is a
@@ -712,7 +713,7 @@ async def run_catalogued_analysis(
         # Every analysis service refuses with a ValueError (GoalSeekError and
         # the inferential refusals both subclass it) and none raises
         # HTTPException, which is what keeps them callable off the HTTP path.
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     except KeyError as e:
         raise HTTPException(400, f"Column not found: {e}")
 

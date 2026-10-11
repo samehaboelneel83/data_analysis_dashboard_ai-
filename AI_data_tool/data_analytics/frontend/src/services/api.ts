@@ -3,7 +3,8 @@ import { sanitizeErrorDetail } from '../lib/friendlyError'
 import { canceledRequest } from '../lib/canceledRequest'
 import type { Report, ReportRelease, ReportPage, Widget, HierarchyNode, Bookmark, BookmarkState, WorkspaceTree, WorkspaceNode } from '../types/report'
 import type { DisplayRule } from '../lib/displayRules'
-import type { SaidI18n } from '../lib/readbackText'
+import { sayText, type SaidI18n } from '../lib/readbackText'
+import { translate } from '../i18n'
 
 /**
  * Where the API lives, in three cases:
@@ -62,9 +63,41 @@ export function setUnauthorizedHandler(handler: (() => void) | null): void {
   onUnauthorized = handler
 }
 
+/** A refusal the server also sent as a keyed sentence (`detail_i18n`, backend
+ *  core/said_errors.py) is put into the reader's language here, once, so every
+ *  page that shows `detail` shows it translated. English is left as sent. */
+function readerLanguage(): 'en' | 'ar' {
+  try { return localStorage.getItem('datalytics.language') === 'ar' ? 'ar' : 'en' } catch { return 'en' }
+}
+function sayErrorDetail(error: any): void {
+  const data = error?.response?.data
+  const said = data?.detail_i18n as SaidI18n | undefined
+  if (!said || typeof data.detail !== 'string') return
+  const language = readerLanguage()
+  if (language === 'en') return
+  data.detail = sayText((key, vars) => translate(language, key, vars), data.detail, said)
+}
+
+/** A background job stores its error as English text when it fails, with the
+ *  sentence's key in its progress record (backend services/jobs.py). Wherever
+ *  a job arrives -- alone, or in a list -- its error is put into the reader's
+ *  language here, so a job that failed last week reads in today's language. */
+export function sayJobErrors(data: unknown): void {
+  const language = readerLanguage()
+  if (language === 'en' || !data || typeof data !== 'object') return
+  const rows = Array.isArray(data) ? data : [data, ...Object.values(data as object).filter(Array.isArray).flat()]
+  for (const row of rows as { error?: unknown; progress?: { error_i18n?: SaidI18n } | null }[]) {
+    const said = row?.progress?.error_i18n
+    if (said && typeof row.error === 'string') {
+      row.error = sayText((key, vars) => translate(language, key, vars), row.error, said)
+    }
+  }
+}
+
 export function handleResponseError(error: any) {
   // Driver exceptions become sentences before any page toasts them.
   sanitizeErrorDetail(error)
+  sayErrorDetail(error)
   // `quiet401`: the start-up "am I logged in?" check. Every visitor makes it
   // now -- the session is a cookie script cannot see -- and a 401 there just
   // means "not logged in"; redirecting would bounce a share-link or embed
@@ -75,7 +108,7 @@ export function handleResponseError(error: any) {
   return Promise.reject(error)
 }
 
-api.interceptors.response.use(r => r, handleResponseError)
+api.interceptors.response.use(r => { sayJobErrors(r.data); return r }, handleResponseError)
 
 /** The person's LLM pick from the top bar (an endpoint id, or 'auto'). Kept in
  *  this browser and sent with every request as X-LLM-Endpoint, which the
@@ -135,6 +168,17 @@ export interface CalcPreview {
   summary?:
     | { kind: 'labels'; rows: number; empty: number; distinct: number; top: [string, number][] }
     | { kind: 'number'; rows: number; empty: number; infinite: number; min: number | null; mean: number | null; max: number | null }
+}
+
+/** A chart the copilot offers when no model may be used (it is already built
+ *  and checked on the data): its own words, keyed for the reader's language. */
+export interface CopilotSuggestion {
+  title: string
+  sentence?: string
+  title_i18n?: SaidI18n | null
+  sentence_i18n?: SaidI18n | null
+  widget_type: string
+  config: Record<string, unknown>
 }
 
 export interface DatasetColumn {
@@ -1363,7 +1407,7 @@ export const reportsApi = {
   get:    (id: number)                             => api.get<Report>(`/reports/${id}`).then(r => r.data),
   create: (data: { name: string; description?: string; dataset_id?: number }) =>
     api.post<Report>('/reports', data).then(r => r.data),
-  update: (id: number, data: Partial<{ name: string; description: string; dataset_id: number; additional_dataset_ids: number[]; theme: string; display_rules: DisplayRule[] }>) =>
+  update: (id: number, data: Partial<{ name: string; description: string; dataset_id: number; additional_dataset_ids: number[]; theme: string; display_rules: DisplayRule[]; style: import('../lib/dashboardStyle').DashboardStyle }>) =>
     api.patch<Report>(`/reports/${id}`, data).then(r => r.data),
   delete: (id: number) => api.delete(`/reports/${id}`),
   /** Publish/unpublish an authored dashboard: published = the whole org may
@@ -1407,7 +1451,14 @@ export const reportsApi = {
                evidence?: AnswerEvidence | null
                /** The version captured BEFORE the copilot's change (restoring it undoes the change). */
                before_version_id?: number | null
-               summary?: string | null }>(
+               summary?: string | null
+               /** True when no model was used: the page was changed by a plain
+                *  instruction, or not at all and `suggestions` are offered. */
+               without_ai?: boolean
+               /** `reply` without its list of charts, which `suggestions` carries. */
+               lead?: string
+               /** Charts the platform already built on this data, ready to add. */
+               suggestions?: CopilotSuggestion[] }>(
       `/reports/${reportId}/pages/${pageId}/copilot`, body).then(r => r.data),
   // Cheap poll target: just the counter, none of the page/widget eager loading
   // GET /reports/{id} does.
@@ -2114,18 +2165,24 @@ export interface DatasetHealth {
 export type DecisionShape =
   | { problem: 'allocation'; key: string; amounts: string[]; options: number }
   | { problem: 'assignment'; from: string; to: string; numbers: string[]; pairs: number; fill: number }
+  /** Levels to set, under the model a what-if fits (a dated table). */
+  | { problem: 'response'; date: string; dates: string[]; measures: string[]; factors: string[]; rows: number }
 export interface DecisionChoices {
-  problem: 'allocation' | 'assignment'; objective: string; direction: 'largest' | 'smallest'
+  problem: 'allocation' | 'assignment' | 'response'; objective: string; direction: 'largest' | 'smallest'
   key?: string; limited?: string; limit?: number; at_most?: number
   from_col?: string; to_col?: string; each_from?: 'exactly_one' | 'at_most_one'; each_to_at_most?: number
+  date_col?: string; factors?: string[]; ranges?: Record<string, [number, number]>; granularity?: string; periods?: number
 }
-export interface DecisionCheck { code: string; column?: string; rows?: number; options?: number; of?: number; pairs?: number; total?: number }
+export interface DecisionCheck { code: string; column?: string; rows?: number; options?: number; of?: number; pairs?: number; total?: number
+  observed?: [number, number]; p?: number; r2?: number; times?: number }
 /** `datalytics.decision-problem/1`: the problem as the person described it. Never solved here. */
 export interface DecisionSpecification {
-  schema: string; problem: 'allocation' | 'assignment'; solved: false; note: string
-  objective: { direction: 'maximize' | 'minimize'; column: string; aggregate: string }
-  decisions: Record<string, unknown> & { count: number }
-  constraints: ({ kind: string; column?: string; value?: number; rule?: string })[]
+  schema: string; problem: 'allocation' | 'assignment' | 'response'; solved: false; note: string
+  objective: { direction: 'maximize' | 'minimize'; column: string; aggregate: string; horizon?: number; per?: string }
+  /** A count of rows or pairs to choose among; for `response`, one entry per factor with its range. */
+  decisions: (Record<string, unknown> & { count: number }) | { name: string; recent: number; lower: number; upper: number; observed: [number, number] }[]
+  model?: { form: string; r2: number; periods_fitted: number; coefficients: Record<string, number> }
+  constraints: ({ kind: string; column?: string; value?: number; rule?: string; lower?: number; upper?: number })[]
   data: { rows: number; columns: string[] }
   checks: DecisionCheck[]
   dataset: { id?: number; name?: string; version?: string }
@@ -2538,6 +2595,12 @@ export const suggestApi = {
    *  shows (with evidence) and what it supports (a forecast, groups of
    *  similar rows, values that go together) -- every card one that can be
    *  added to the page. The same engine as every other door. */
+  /** The decisions the dashboard's dataset has the shape of: set up on the
+   *  dataset's Analysis tab, offered here so the builder leads to them too. */
+  decisionsForReport: (reportId: number) =>
+    api.get<Opportunities>(`/reports/${reportId}/opportunities`).then(r => r.data.cards
+      .filter(c => c.action.kind === 'decision_problem')
+      .map(c => ({ title: c.title, sentence: c.sentence, title_i18n: c.title_i18n ?? null, sentence_i18n: c.sentence_i18n ?? null }))),
   forReport: (reportId: number) =>
     api.get<Opportunities>(`/reports/${reportId}/opportunities`).then(r => r.data.cards
       // An analysis that can sit on a page is added as the tile that draws it.
@@ -2582,6 +2645,101 @@ export const schedulesApi = {
 
 export const deliveriesApi = {
   list: (reportId: number) => api.get<DeliveryRow[]>(`/reports/${reportId}/deliveries`).then(r => r.data),
+}
+
+// ── Dashboard templates (the gallery; backend routers/dashboard_templates.py) ──
+
+export type TemplateSlotKind = 'measure' | 'category' | 'date' | 'stage' | 'geography' | 'flag' | 'detail'
+export interface TemplateSlot { id: string; label: string; kind: TemplateSlotKind; required?: boolean; many?: boolean
+  /** The additional dataset this slot is filled from; absent = the dashboard's own. */
+  dataset?: string | null }
+export interface TemplateFit { usable: boolean; score: number; widgets: { kept: number; total: number }; missing: string[]
+  /** Charts that read an additional dataset: not this dataset's to draw. */
+  elsewhere?: { widgets: number; datasets: string[] } | null }
+export interface TemplateCard {
+  /** "builtin:<key>" or "t:<id>". */
+  ref: string
+  source: 'builtin' | 'org' | 'personal'
+  key?: string | null
+  name: string
+  description: string
+  category: string
+  tags: string[]
+  slots: TemplateSlot[]
+  /** The first page as boxes on the 12-column grid, for a preview without data. */
+  preview: { x: number; y: number; w: number; h: number; kind: string }[]
+  style: import('../lib/dashboardStyle').DashboardStyle
+  pages: number
+  widgets: number
+  metrics: number
+  version: number
+  uses: number | null
+  updated_at: string | null
+  favorite: boolean
+  mine: boolean
+  can_change: boolean
+  fit?: TemplateFit
+}
+export interface TemplateColumn {
+  name: string; label: string; kind: 'number' | 'date' | 'category' | 'text' | 'flag'
+  distinct: number | null; identifier: boolean; geo: string | null; ordered: boolean
+}
+export interface TemplateCheck {
+  ok: boolean
+  problems: { slot: string; code: 'unknown_column' | 'wrong_kind' | 'required_missing' | 'too_many'; column?: string }[]
+  missing: string[]
+  widgets: { kept: number; total: number }
+  dropped: string[]
+}
+export interface TemplateMatch {
+  columns: TemplateColumn[]
+  slots: TemplateSlot[]
+  /** The additional datasets the template reads, and the dataset given for each. */
+  datasets?: { key: string; label: string; dataset_id: number | null }[]
+  candidates: Record<string, string[]>
+  suggested: Record<string, string[]>
+  mapping: Record<string, string[]>
+  check: TemplateCheck
+  preview: null | {
+    pages: { name: string; widgets: { widget_type: string; title: string }[] }[]
+    measures: { name: string; expression: string }[]
+    dropped: { title: string; needs: string[] }[]
+    skipped_metrics: { id: string; why: 'unmapped' | 'column_name' | 'no_permission' }[]
+    filters: { column: string; mode: string }[]
+  }
+  can_define_measures: boolean
+}
+export interface TemplateLeftOut { filters?: number; rules?: number; unknown?: string[] }
+
+export const templatesApi = {
+  list: (datasetId?: number | null) =>
+    api.get<{ templates: TemplateCard[]; categories: string[] }>('/templates',
+      { params: datasetId ? { dataset_id: datasetId } : undefined }).then(r => r.data),
+  get: (ref: string) => api.get<TemplateCard & { spec: Record<string, unknown> }>(`/templates/${ref}`).then(r => r.data),
+  /** The template drawn on its own sample rows (no dataset is read). */
+  preview: (ref: string) =>
+    api.get<{ rows: number; style: import('../lib/dashboardStyle').DashboardStyle
+              pages: { name: string; widgets: (Widget & { data: unknown })[] }[] }>(`/templates/${ref}/preview`, { params: { lang: readerLanguage() } }).then(r => r.data),
+  match: (ref: string, datasetId: number, mapping?: Record<string, string[]>, datasets?: Record<string, number>) =>
+    // What a built-in template WRITES (titles, page and measure names) is written in the reader's language.
+    api.post<TemplateMatch>(`/templates/${ref}/match`, { dataset_id: datasetId, mapping, datasets, lang: readerLanguage() }).then(r => r.data),
+  use: (ref: string, body: { dataset_id: number; mapping?: Record<string, string[]>; name?: string; datasets?: Record<string, number> }) =>
+    api.post<{ report_id: number; name: string; dropped: { title: string }[]; refused: string[]; measures: string[]
+               skipped_metrics: { id: string; why: string }[] }>(`/templates/${ref}/use`, { ...body, lang: readerLanguage() }).then(r => r.data),
+  save: (body: { report_id?: number; copy_of?: string; name: string; description?: string; category?: string
+                 tags?: string[]; visibility?: 'personal' | 'org' }) =>
+    api.post<TemplateCard & { left_out: TemplateLeftOut }>('/templates', body).then(r => r.data),
+  edit: (id: number, body: { name?: string; description?: string; category?: string; tags?: string[]
+                             visibility?: 'personal' | 'org'; report_id?: number; note?: string
+                             style?: import('../lib/dashboardStyle').DashboardStyle }) =>
+    api.put<TemplateCard & { left_out: TemplateLeftOut }>(`/templates/${id}`, body).then(r => r.data),
+  versions: (id: number) =>
+    api.get<{ current: number; versions: { id: number; version: number; name: string; note: string | null
+                                           created_at: string | null; widgets: number }[] }>(`/templates/${id}/versions`).then(r => r.data),
+  restore: (id: number, versionId: number) =>
+    api.post<{ version: number; restored: number }>(`/templates/${id}/versions/${versionId}/restore`).then(r => r.data),
+  delete: (id: number) => api.delete(`/templates/${id}`),
+  favorite: (ref: string, on: boolean) => api.put<{ favorite: boolean }>(`/templates/${ref}/favorite`, { on }).then(r => r.data),
 }
 
 export const pageTemplatesApi = {

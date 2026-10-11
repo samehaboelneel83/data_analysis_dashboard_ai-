@@ -33,15 +33,17 @@ export default function DecisionProblemPanel({ datasetId }: { datasetId: number 
           <ul style={{ margin: '8px 0 0', paddingInlineStart: 18, color: 'var(--muted)', fontSize: 12 }}>
             <li>{t('dcp.shape.allocation')}</li>
             <li>{t('dcp.shape.assignment')}</li>
+            <li>{t('dcp.shape.response')}</li>
           </ul>
         </div>
       )}
-      {(shapes ?? []).map((s, i) => <Problem key={i} datasetId={datasetId} shape={s} />)}
+      {(shapes ?? []).map((s, i) => (s.problem === 'response'
+        ? <ResponseProblem key={i} datasetId={datasetId} shape={s} /> : <Problem key={i} datasetId={datasetId} shape={s} />))}
     </section>
   )
 }
 
-function Problem({ datasetId, shape }: { datasetId: number; shape: DecisionShape }) {
+function Problem({ datasetId, shape }: { datasetId: number; shape: Exclude<DecisionShape, { problem: 'response' }> }) {
   const t = useT()
   const numbers = shape.problem === 'allocation' ? shape.amounts : shape.numbers
   const [objective, setObjective] = useState(numbers[0] ?? '')
@@ -80,6 +82,7 @@ function Problem({ datasetId, shape }: { datasetId: number; shape: DecisionShape
   }
   const label = { display: 'block', fontSize: 12, color: 'var(--muted)', margin: '10px 0 2px' } as const
   const n = (v: number) => v.toLocaleString()
+  const count = spec && !Array.isArray(spec.decisions) ? spec.decisions.count : 0
   return (
     <div className="card" data-testid={`decision-${shape.problem}`} style={{ padding: 16, marginBottom: 14, maxWidth: 680 }}>
       <b style={{ fontSize: 14 }}>
@@ -134,7 +137,7 @@ function Problem({ datasetId, shape }: { datasetId: number; shape: DecisionShape
           <b>{t('dcp.written')}</b>
           <ul style={{ margin: '6px 0 0', paddingInlineStart: 18 }}>
             <li>{t(spec.objective.direction === 'maximize' ? 'dcp.say.max' : 'dcp.say.min', { c: spec.objective.column })}</li>
-            <li>{spec.problem === 'allocation' ? t('dcp.say.choose', { n: n(spec.decisions.count) }) : t('dcp.say.pairs', { n: n(spec.decisions.count) })}</li>
+            <li>{spec.problem === 'allocation' ? t('dcp.say.choose', { n: n(count) }) : t('dcp.say.pairs', { n: n(count) })}</li>
             {spec.constraints.map((c, i) => (
               <li key={i}>{t(`dcp.con.${c.kind}${c.rule ? `.${c.rule}` : ''}` as MessageKey,
                 { c: c.column ?? '', v: c.value != null ? n(c.value) : '' })}</li>
@@ -148,6 +151,130 @@ function Problem({ datasetId, shape }: { datasetId: number; shape: DecisionShape
               ))}
             </ul>
           )}
+          <p style={{ fontSize: 12, color: 'var(--muted)', margin: '8px 0 0' }}>{t('dcp.notSolved')}</p>
+          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+            <button type="button" className="btn btn-sm" onClick={download}>{t('dcp.download')}</button>
+            <button type="button" className="btn btn-ghost btn-sm" aria-expanded={open} onClick={() => setOpen(o => !o)}>
+              {open ? t('dcp.hide') : t('dcp.show')}
+            </button>
+          </div>
+          {open && <pre dir="ltr" data-testid="decision-json" style={{ fontSize: 11, background: 'var(--surface2)', padding: 10, borderRadius: 6,
+            overflow: 'auto', margin: '10px 0 0', maxHeight: 320 }}>{JSON.stringify(spec, null, 2)}</pre>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+/** Levels to set: which levels of some factors make a number largest or
+ *  smallest, under the model a what-if fits. The person names the number, the
+ *  factors and (if they wish) each one's range; what is written down is the
+ *  model with its doubts -- never the answer. */
+function ResponseProblem({ datasetId, shape }: { datasetId: number; shape: Extract<DecisionShape, { problem: 'response' }> }) {
+  const t = useT()
+  const [objective, setObjective] = useState(shape.measures[0] ?? '')
+  const [direction, setDirection] = useState<'largest' | 'smallest'>('largest')
+  const [dateCol, setDateCol] = useState(shape.date)
+  const [factors, setFactors] = useState<string[]>([])
+  const [ranges, setRanges] = useState<Record<string, [string, string]>>({})
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [spec, setSpec] = useState<DecisionSpecification | null>(null)
+  const [open, setOpen] = useState(false)
+  const n = (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 2 })
+  const label = { display: 'block', fontSize: 12, color: 'var(--muted)', margin: '10px 0 2px' } as const
+
+  const write = async () => {
+    setBusy(true); setError(null); setSpec(null)
+    const given: Record<string, [number, number]> = {}
+    for (const f of factors) {
+      const [lo, hi] = ranges[f] ?? ['', '']
+      if (lo !== '' && hi !== '') given[f] = [Number(lo), Number(hi)]
+    }
+    try {
+      setSpec(await decisionApi.specification(datasetId, { problem: 'response', objective, direction, date_col: dateCol, factors,
+        ...(Object.keys(given).length ? { ranges: given } : {}) }))
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      setError(typeof detail === 'string' ? detail : t('dcp.failed'))
+    } finally { setBusy(false) }
+  }
+  const download = () => {
+    if (!spec) return
+    const url = URL.createObjectURL(new Blob([JSON.stringify(spec, null, 2)], { type: 'application/json' }))
+    const a = document.createElement('a')
+    a.href = url; a.download = `decision-problem-${datasetId}.json`; a.click()
+    URL.revokeObjectURL(url)
+  }
+  const levels = Array.isArray(spec?.decisions) ? spec!.decisions : []
+  return (
+    <div className="card" data-testid="decision-response" style={{ padding: 16, marginBottom: 14, maxWidth: 680 }}>
+      <b style={{ fontSize: 14 }}>{t('dcp.resp.title')}</b>
+      <p style={{ fontSize: 12, color: 'var(--muted)', margin: '4px 0 0' }}>{t('dcp.resp.what')}</p>
+
+      <label style={label} htmlFor="dcp-resp-obj">{t('dcp.objective')}</label>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <select id="dcp-resp-obj" value={objective} onChange={e => { setObjective(e.target.value); setFactors(f => f.filter(x => x !== e.target.value)) }}>
+          {shape.measures.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select aria-label={t('dcp.direction')} value={direction} onChange={e => setDirection(e.target.value as 'largest' | 'smallest')}>
+          <option value="largest">{t('dcp.largest')}</option>
+          <option value="smallest">{t('dcp.smallest')}</option>
+        </select>
+      </div>
+      {shape.dates.length > 1 && (<>
+        <label style={label} htmlFor="dcp-resp-date">{t('dcp.resp.date')}</label>
+        <select id="dcp-resp-date" value={dateCol} onChange={e => setDateCol(e.target.value)}>
+          {shape.dates.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </>)}
+
+      <div style={label} id="dcp-resp-factors">{t('dcp.resp.factors')}</div>
+      <div role="group" aria-labelledby="dcp-resp-factors" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {shape.factors.filter(c => c !== objective).map(c => {
+          const on = factors.includes(c)
+          return (
+            <div key={c} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 13 }}>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 180 }}>
+                <input type="checkbox" checked={on} onChange={e => setFactors(f => (e.target.checked ? [...f, c] : f.filter(x => x !== c)))} />
+                <bdi>{c}</bdi>
+              </label>
+              {on && (<>
+                <input type="number" aria-label={t('dcp.resp.lowest', { c })} placeholder={t('dcp.resp.lowestPh')} style={{ width: 130 }}
+                  value={ranges[c]?.[0] ?? ''} onChange={e => setRanges(r => ({ ...r, [c]: [e.target.value, r[c]?.[1] ?? ''] }))} />
+                <input type="number" aria-label={t('dcp.resp.highest', { c })} placeholder={t('dcp.resp.highestPh')} style={{ width: 130 }}
+                  value={ranges[c]?.[1] ?? ''} onChange={e => setRanges(r => ({ ...r, [c]: [r[c]?.[0] ?? '', e.target.value] }))} />
+              </>)}
+            </div>
+          )
+        })}
+      </div>
+      <p style={{ fontSize: 11.5, color: 'var(--muted)', margin: '6px 0 0' }}>{t('dcp.resp.rangeHelp')}</p>
+
+      <div style={{ marginTop: 14 }}>
+        <button type="button" className="btn btn-primary btn-sm" disabled={busy || !objective || factors.length === 0} onClick={() => void write()}>
+          {busy ? t('dcp.writing') : t('dcp.write')}
+        </button>
+      </div>
+      {error && <p role="alert" dir="auto" style={{ fontSize: 12, color: 'var(--danger)', margin: '10px 0 0' }}>{error}</p>}
+
+      {spec && (
+        <div data-testid="decision-spec" style={{ marginTop: 14, borderTop: '1px solid var(--border)', paddingTop: 12, fontSize: 13 }}>
+          <b>{t('dcp.written')}</b>
+          <ul style={{ margin: '6px 0 0', paddingInlineStart: 18 }}>
+            <li>{t(spec.objective.direction === 'maximize' ? 'dcp.say.max' : 'dcp.say.min', { c: spec.objective.column })}</li>
+            {levels.map(d => (
+              <li key={d.name}>{t('dcp.say.level', { c: d.name, lo: n(d.lower), hi: n(d.upper), now: n(d.recent) })}</li>
+            ))}
+            {spec.model && <li>{t('dcp.say.model', { r2: `${Math.round(spec.model.r2 * 100)}%`, n: n(spec.model.periods_fitted) })}</li>}
+          </ul>
+          <ul data-testid="decision-checks" style={{ margin: '8px 0 0', paddingInlineStart: 18, fontSize: 12, color: 'var(--muted)' }}>
+            {spec.checks.map((c, i) => (
+              <li key={i}>{t(`dcp.chk.${c.code}` as MessageKey, { c: c.column ?? '', lo: n(c.observed?.[0] ?? 0), hi: n(c.observed?.[1] ?? 0),
+                r2: `${Math.round((c.r2 ?? 0) * 100)}%`, x: n(c.times ?? 0) })}</li>
+            ))}
+          </ul>
           <p style={{ fontSize: 12, color: 'var(--muted)', margin: '8px 0 0' }}>{t('dcp.notSolved')}</p>
           <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
             <button type="button" className="btn btn-sm" onClick={download}>{t('dcp.download')}</button>

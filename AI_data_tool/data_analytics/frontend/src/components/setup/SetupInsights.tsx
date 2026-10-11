@@ -8,6 +8,7 @@ import { Link } from 'react-router-dom'
 import { useT } from '../../i18n'
 import { setupApi, type SetupFindings } from '../../services/api'
 import PlainSummary from '../ui/PlainSummary'
+import { sayText } from '../../lib/readbackText'
 
 export default function SetupInsights({ datasetId }: { datasetId: number }) {
   const t = useT()
@@ -25,8 +26,8 @@ export default function SetupInsights({ datasetId }: { datasetId: number }) {
   return (
     <div style={{ marginBottom: 16 }}>
       <PlainSummary title={t('setup.p.fromSetup')}
-        items={found.findings.insights.map(i => ({ id: i.id, tone: 'insight' as const, what: i.what,
-                                                   why: i.why || undefined, todo: i.todo ?? undefined }))} />
+        items={found.findings.insights.map(i => ({ id: i.id, tone: 'insight' as const, what: sayText(t, i.what, (i as { what_i18n?: unknown }).what_i18n as never),
+                                                   why: sayText(t, i.why ?? '', (i as { why_i18n?: unknown }).why_i18n as never) || undefined, todo: i.todo ?? undefined }))} />
       <p style={{ margin: '8px 0 0', fontSize: 13 }}>
         <Link to={`/setup/${found.source}?step=check`}>{t('setup.p.openCheck')}</Link>
       </p>

@@ -27,6 +27,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.capability import require_dataset_capability, require_dataset_read
+from ..core.said_errors import refused
 from ..core.database import get_db
 from ..core.org_scope import check_org
 from ..core.rls import resolve_denied_columns, resolve_rls_expr
@@ -154,7 +155,7 @@ async def train_model(
                 db, ds, rls_filter_expr=await resolve_rls_expr(db, current_user, dataset_id),
                 denied=set(await resolve_denied_columns(db, current_user, dataset_id) or ()))
         except FrameUnavailable as e:
-            raise HTTPException(400, str(e))
+            raise refused(400, e)
         live_frame = got.frame
         if got.sampled:
             live_note = (f"Trained on a sample of {got.rows_analysed:,} of "
@@ -213,7 +214,7 @@ async def train_model(
     try:
         pkg = await asyncio.to_thread(_run)
     except ModelStoreError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     except FileNotFoundError:
         raise HTTPException(404, "Dataset file not found on server — please re-upload the file")
 
@@ -366,7 +367,7 @@ async def score_model(
     try:
         out = await asyncio.to_thread(score_frame, pkg, frame)
     except ModelStoreError as e:
-        raise HTTPException(400, str(e))
+        raise refused(400, e)
     return {**out, "model": {"id": model.id, "name": model.name, "version": model.version or 1,
                              "status": model.status or CHAMPION}}
 

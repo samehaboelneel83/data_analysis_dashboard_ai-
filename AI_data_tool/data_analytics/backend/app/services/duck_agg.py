@@ -128,8 +128,10 @@ class DuckPlan:
     #: ("01/02/2024"), so the aggregation only runs when every non-null
     #: value cast and at least one did. Otherwise: pandas.
     probe_sql: str | None
-    dimension: str
+    dimension: str | None
     measure: str | None
+    #: A single number that is a count: the frame carries the count itself.
+    scalar_count: bool = False
 
 
 #: `:r0`, `:r1` ... as `sql_expr._Translator._param` emits them. Anchored to
@@ -170,7 +172,11 @@ def plan(config: dict, columns: list[str], source: str,
     agg = (config.get("aggregation") or "sum").lower()
 
     if not dim:
-        raise Ineligible("no dimension (scalar/KPI shape)")
+        # ONE number over all the (filtered) rows: a headline number. Added
+        # 2026-10-11 for large data -- every dashboard leads with these, and
+        # on the pandas path each one loaded the whole file to answer with a
+        # single figure.
+        return _scalar_plan(config, columns, source, extra_where, meas, agg)
     if dim not in columns:
         raise Ineligible(f"dimension '{dim}' is not a real column")
     # No measure: "how many rows per value" -- the most common chart there is.
@@ -198,6 +204,42 @@ def plan(config: dict, columns: list[str], source: str,
     if sort_col and sort_col != dim:
         raise Ineligible("sort_col on a non-dimension column")
 
+    where, params = _where(config, columns, extra_where)
+
+    dim_i = _quote_ident(dim)
+    meas_i = _quote_ident(meas) if meas else None
+    return _grouped_plan(config, source, where, params, dim, meas, agg, count_mode, dim_i, meas_i)
+
+
+#: Aggregations of ONE number over all rows. The last two count, so the frame
+#: carries the count and the shaper is told to pass it through.
+_SCALAR_COUNTS = {"count": "COUNT({col})", "countd": "COUNT(DISTINCT {col})"}
+
+
+def _scalar_plan(config: dict, columns: list[str], source: str, extra_where, meas, agg) -> DuckPlan:
+    if not meas:
+        raise Ineligible("no dimension and no measure (a table of rows)")
+    if meas not in columns:
+        raise Ineligible(f"measure '{meas}' is not a real column")
+    counted = agg in _SCALAR_COUNTS
+    if not counted and (agg not in GRAIN_SAFE_AGGREGATIONS or agg not in _SQL_AGG):
+        raise Ineligible(f"aggregation '{agg}' is not grain-safe")
+    for key in ("dimension_granularity", "sort_col", "limit"):
+        if config.get(key):
+            raise Ineligible(f"'{key}' on a single number")
+    where, params = _where(config, columns, extra_where)
+    meas_i = _quote_ident(meas)
+    template = _SCALAR_COUNTS[agg] if counted else _SQL_AGG[agg]
+    agg_expr = template.format(col=meas_i) if "{col}" in template else f"{template}({meas_i})"
+    filtered = " AND ".join(where) if where else "TRUE"
+    return DuckPlan(sql=f"SELECT {agg_expr} AS __value__ FROM {source} WHERE {filtered}",
+                    count_sql=f"SELECT COUNT(*), 0 FROM {source} WHERE {filtered}", params=params,
+                    probe_sql=None, dimension=None, measure=meas, scalar_count=counted)
+
+
+def _where(config: dict, columns: list[str], extra_where) -> tuple[list[str], list]:
+    """The WHERE of a pushdown, and its parameters: translated predicates
+    first, then the widget's own filters."""
     where, params = [], []
     # Predicates translated elsewhere -- an RLS rule, a report filter
     # expression -- arrive as (sql, {name: value}) with `:rN` placeholders,
@@ -237,10 +279,11 @@ def plan(config: dict, columns: list[str], source: str,
         else:
             where.append(f"{ident} {_SQL_COMPARISON[op]} ?")
             params.append(f.get("value"))
+    return where, params
 
-    dim_i = _quote_ident(dim)
-    meas_i = _quote_ident(meas) if meas else None
 
+def _grouped_plan(config: dict, source: str, where: list[str], params: list, dim, meas, agg, count_mode,
+                  dim_i, meas_i) -> DuckPlan:
     granularity = str(config.get("dimension_granularity") or "").lower()
     probe_sql = None
     if granularity:
@@ -342,6 +385,18 @@ def aggregate(file_path: str, config: dict, columns: list[str],
     finally:
         con.close()
 
+    if p.dimension is None:
+        # One row, one number. A count travels in COUNT_COL so the shaper sums
+        # it (one row: the sum is the count) instead of counting one row.
+        frame = frame.rename(columns={"__value__": COUNT_COL if p.scalar_count else p.measure})
+        if not total:
+            # No row passed the filters: the shaper says "empty" of an empty
+            # frame, as it does on the pandas path -- not "0" of one row.
+            frame = frame.iloc[0:0]
+        frame.attrs["source_row_count"] = int(total)
+        frame.attrs["scalar"] = True
+        frame.attrs["scalar_count"] = p.scalar_count
+        return frame
     frame = frame.rename(columns={"__dim__": p.dimension, "__value__": p.measure})
     frame.attrs["source_row_count"] = int(total)
     frame.attrs["missing_dimension_rows"] = int(missing)

@@ -174,7 +174,8 @@ def _enforce_import_row_cap(df, file_path: str) -> None:
     """Reject a source frame above the configured ceiling.
 
     No-op when the cap is 0, which an operator with the memory to spare can
-    still set. It is NOT the default: that became 2,000,000 on 2026-08-29,
+    still set. It is NOT the default (2,000,000 from 2026-08-29, 200,000,000
+    from 2026-10-11),
     because uncapped, one oversized upload exhausts the container for every
     tenant on it and the failure arrives as an OOM kill with no attribution.
     """
@@ -2439,9 +2440,16 @@ def shape_gauge(df: pd.DataFrame, config: dict) -> dict:
     target_col = roles.get("target")
     agg = (config.get("aggregation") or "sum").lower()
     df = _apply_filters(df, filters)
-    if df.empty or not meas or meas not in df.columns:
+    # A defined measure ("reached as % of target") is a number like any other
+    # here: evaluated over all the rows, as a headline number evaluates it.
+    measure_def = (_measure_eval.resolve_measure(meas, config.get("measure_defs"))
+                   if meas and meas not in df.columns else None)
+    if df.empty or not meas or (meas not in df.columns and measure_def is None):
         return {"type": "empty", "rows": [], "total": 0}
-    value = _agg_series(df[meas], agg)
+    if measure_def is not None:
+        value = _safe(_measure_eval.evaluate_measure(measure_def["expression"], df, []))
+    else:
+        value = _agg_series(df[meas], agg)
     target = None
     if target_col and target_col in df.columns:
         try:
@@ -5183,6 +5191,37 @@ def get_widget_data(
     org_id: int | None = None, dataset_id: int | None = None,
     custom_functions: list[dict] | None = None,
 ) -> dict:
+    """`_get_widget_data`, once for everyone asking the same thing at the same
+    moment (services/single_flight.py). Several readers opening one dashboard
+    on a large dataset used to run each chart once per reader, all missing the
+    result cache together; now the first computes and the rest take its answer.
+    A pipeline that reads other frames handed in by the caller is never shared."""
+    from . import single_flight
+    key = None
+    if prep_aux_frames is None:
+        try:
+            st = os.stat(file_path)
+            stamp = (st.st_mtime_ns, st.st_size)
+        except OSError:
+            stamp = None
+        key = single_flight.key_of("file", file_path, stamp, config, widget_type, calculated_columns, filter_expr,
+                                   rls_filter_expr, use_cache, measures, sorted(drop_columns or []), prep_steps,
+                                   custom_functions)
+    return single_flight.run(key, lambda: _get_widget_data(
+        file_path, config, widget_type, calculated_columns, filter_expr, rls_filter_expr, use_cache, measures,
+        drop_columns, prep_steps, prep_aux_frames, org_id, dataset_id, custom_functions))
+
+
+def _get_widget_data(
+    file_path: str, config: dict, widget_type: str = "bar",
+    calculated_columns: list[dict] | None = None, filter_expr: str | None = None,
+    rls_filter_expr: str | None = None, use_cache: bool = True,
+    measures: list[dict] | None = None, drop_columns: list[str] | None = None,
+    prep_steps: list[dict] | None = None,
+    prep_aux_frames: dict | None = None,
+    org_id: int | None = None, dataset_id: int | None = None,
+    custom_functions: list[dict] | None = None,
+) -> dict:
     # T5: single choke point for the import/pandas widget path -- every render
     # (cache hit or miss) funnels through here, called via asyncio.to_thread from
     # the widget_data router, so log_query_run_sync's own event loop is safe to spin
@@ -5295,6 +5334,11 @@ def get_widget_data(
                 # fails closed (zero rows) and a broken report filter fails
                 # open (unfiltered) -- both unchanged from before.
                 _duck_agg.logger.info("DuckDB pushdown declined: %s", e)
+        # A config with no dimension is ONE number only for a headline number;
+        # any other widget reads such a config its own way (a table of rows, a
+        # histogram), so only the kpi takes the single-number path.
+        if cols and duck_ok and not config.get("dimension") and widget_type != "kpi":
+            duck_ok = False
         if cols and duck_ok:
             duck_df, _reason = _duck_agg.try_aggregate(
                 file_path, config, duck_visible, extra_where=duck_extra)
@@ -5311,7 +5355,22 @@ def get_widget_data(
                 # AGGREGATE -- "price 100-200" on SUM(price) kept only the months
                 # whose total fell in that range.
                 shaped = {**config, "filters": []}
-                if duck_df.attrs.get("count_mode"):
+                if duck_df.attrs.get("scalar_count"):
+                    # One number that is a count: DuckDB counted, the shaper
+                    # passes it through, and the result says what the pandas
+                    # path says -- a count of that column.
+                    name = config.get("measure")
+                    result = get_widget_data_from_df(
+                        duck_df, {**shaped, "measure": _duck_agg.COUNT_COL, "aggregation": "sum"},
+                        widget_type, flag_partial=False, check_fields=False)
+                    if result.get("type") == "scalar":
+                        result["measure"] = name
+                        result["aggregation"] = (config.get("aggregation") or "count").lower()
+                        for row in result.get("rows") or []:
+                            row["name"] = name
+                            if isinstance(row.get("value"), float) and float(row["value"]).is_integer():
+                                row["value"] = int(row["value"])
+                elif duck_df.attrs.get("count_mode"):
                     # Counted by DuckDB: the shaper sums the per-group counts,
                     # then the result says what the pandas path says (a count).
                     result = get_widget_data_from_df(

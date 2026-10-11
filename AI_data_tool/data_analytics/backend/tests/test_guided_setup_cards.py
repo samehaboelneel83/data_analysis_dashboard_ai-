@@ -117,3 +117,58 @@ def test_the_switch_is_its_own_and_free_unless_set(monkeypatch):
     assert answer.setup_selection_mode("both") == "both"
     monkeypatch.setattr(settings, "setup_ai_selection", "nonsense")
     assert answer.setup_selection_mode() == "free"
+
+
+# ── A ready chart on one part of the rows ────────────────────────────────────
+
+import pandas as pd
+
+PART_PROFILE = {"columns": [
+    {"name": "group", "role": "categorical"}, {"name": "kind", "role": "categorical"},
+    {"name": "code", "role": "categorical", "is_identifier": True}, {"name": "amount", "role": "numeric"}]}
+PART_ROWS = pd.DataFrame({"group": ["a"] * 60 + ["b"] * 35 + ["c"] * 5, "kind": ["x"] * 50 + ["y"] * 50,
+                     "code": [str(i) for i in range(100)], "amount": range(100)})
+PARTS = answer.parts_of(PART_PROFILE, PART_ROWS)
+
+
+def test_the_parts_offered_exist_and_are_large_enough():
+    assert {(p["column"], p["value"]) for p in PARTS} == {("group", "a"), ("group", "b"), ("kind", "x"), ("kind", "y")}
+    assert next(p for p in PARTS if p["value"] == "a")["rows"] == 60
+    # A column the page is already narrowed by offers none; neither does an identifier.
+    assert {p["column"] for p in answer.parts_of(PART_PROFILE, PART_ROWS, skip={"group"})} == {"kind"}
+
+
+def pick_part(picks):
+    client = Chooser({"pages": [{"title": "One part", "rationale": "r", "picks": picks}]})
+    return asyncio.run(answer.pick_pages(client, CARDS, DEMAND, [], 100, 2, "en", PARTS)), client
+
+
+def test_a_chart_is_drawn_on_one_listed_part_and_says_which():
+    k = next(i for i, p in enumerate(PARTS) if (p["column"], p["value"]) == ("kind", "x"))
+    pages, client = pick_part([{"id": 1, "question": "q1", "title": "Largest groups", "why": "w", "part": k}])
+    w = pages[0]["widgets"][0]
+    assert w["config"]["filters"] == [{"column": "kind", "op": "eq", "value": "x"}]
+    assert w["config"]["dimension"] == "group" and "(x)" in w["title"]
+    assert CARDS[1]["config"].get("filters") is None            # the listed chart itself is untouched
+    assert "THE PARTS" in client.calls[0][0][1]["content"]
+
+
+def test_a_part_that_is_not_listed_or_is_the_charts_own_split_is_ignored():
+    own = next(i for i, p in enumerate(PARTS) if p["column"] == "group")
+    pages, _ = pick_part([{"id": 1, "question": "q1", "why": "w", "part": own},
+                          {"id": 0, "question": "q1", "why": "w", "part": 99}])
+    assert [w["config"].get("filters") for w in pages[0]["widgets"]] == [None, None]
+
+
+def test_the_same_chart_may_be_used_for_two_parts_but_not_twice_for_one():
+    x = next(i for i, p in enumerate(PARTS) if (p["column"], p["value"]) == ("kind", "x"))
+    y = next(i for i, p in enumerate(PARTS) if (p["column"], p["value"]) == ("kind", "y"))
+    pages, _ = pick_part([{"id": 1, "question": "q1", "why": "w", "part": x},
+                          {"id": 1, "question": "q1", "why": "w", "part": y},
+                          {"id": 1, "question": "q1", "why": "w", "part": x}])
+    assert len(pages[0]["widgets"]) == 2
+
+
+def test_without_parts_nothing_about_them_is_said():
+    _pages, client = pick({"pages": []})
+    assert "THE PARTS" not in client.calls[0][0][1]["content"] and "part" not in client.calls[0][0][0]["content"]

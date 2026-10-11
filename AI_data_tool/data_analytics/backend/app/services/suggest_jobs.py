@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from ..models.models import Dataset
 from . import jobs
+from .readback import _s
 
 PANEL_JOB_KIND = "suggest.panel"
 
@@ -35,7 +36,7 @@ async def run_panel_job(ctx: jobs.JobContext) -> None:
                                 code="forbidden")
         ds = await db.get(Dataset, dataset_id)
         if ds is None or ds.org_id != ctx.org_id or not await can_read_dataset(db, user, dataset_id):
-            raise jobs.JobError("The dataset is gone, or no longer readable by you.", code="not_found")
+            raise jobs.JobError(_s("job.datasetGone", "The dataset is gone, or no longer readable by you."), code="not_found")
         try:
             inputs = await sug.prepare(db, user, ds)
         except sug.SuggestUnavailable as exc:

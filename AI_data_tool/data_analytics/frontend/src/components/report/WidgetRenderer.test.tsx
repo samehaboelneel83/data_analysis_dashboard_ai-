@@ -86,7 +86,8 @@ describe('WidgetRenderer element skins', () => {
   it('leaves the container unshadowed when no skin is set', () => {
     const { container } = renderWidget({ widget: barWidget({ config: { dimension: 'region' }, title: 'T' }) })
     const fig = container.querySelector('[role="figure"]') as HTMLElement
-    expect(fig.style.boxShadow === '' || fig.style.boxShadow === 'none').toBe(true)
+    // No skin: the dashboard's style may give a shadow (lib/dashboardStyle); with none set, there is none.
+    expect(['', 'none', 'var(--dl-s-shadow, none)']).toContain(fig.style.boxShadow)
   })
 })
 
@@ -1354,8 +1355,9 @@ describe('WidgetRenderer chrome styling', () => {
     // Check that unconfigured widget uses the default values
     expect(chrome.style.border).toContain('1px')
     expect(chrome.style.border).toContain('var(--border)')
-    expect(chrome.style.borderRadius).toBe('var(--radius)')
-    expect(chrome.style.background).toBe('var(--surface)')
+    // The app's default, behind the dashboard style's own value when it has one.
+    expect(chrome.style.borderRadius).toBe('var(--dl-s-radius, var(--radius))')
+    expect(chrome.style.background).toBe('var(--dl-s-card-bg, var(--surface))')
   })
 })
 

@@ -34,18 +34,18 @@ def compare_scenarios(df: pd.DataFrame, date_column: str, measure: str, factors:
     ({"spend": 0.1} is +10%). Names must differ; a scenario that moves nothing
     is the baseline and is refused, since the baseline is always shown."""
     if not isinstance(scenarios, list) or not (MIN_SCENARIOS <= len(scenarios) <= MAX_SCENARIOS):
-        raise CompareScenariosError(f"give {MIN_SCENARIOS} to {MAX_SCENARIOS} scenarios to set side by side")
+        raise CompareScenariosError(_s("no.compare_scenarios.1", "give {a} to {b} scenarios to set side by side", cap=False, a=MIN_SCENARIOS, b=MAX_SCENARIOS))
     seen: set[str] = set()
     cleaned = []
     for i, sc in enumerate(scenarios, start=1):
         if not isinstance(sc, dict):
-            raise CompareScenariosError("each scenario is a name and its adjustments")
+            raise CompareScenariosError(_s("no.compare_scenarios.2", "each scenario is a name and its adjustments", cap=False))
         name = str(sc.get("name") or f"Scenario {i}").strip()
         moves = {k: v for k, v in (sc.get("adjustments") or {}).items() if v}
         if name.casefold() in seen:
-            raise CompareScenariosError(f"two scenarios are both called '{name}'")
+            raise CompareScenariosError(_s("no.compare_scenarios.3", "two scenarios are both called '{a}'", cap=False, a=name))
         if not moves:
-            raise CompareScenariosError(f"'{name}' moves nothing: that is the baseline, which is always shown")
+            raise CompareScenariosError(_s("no.compare_scenarios.4", "'{a}' moves nothing: that is the baseline, which is always shown", cap=False, a=name))
         seen.add(name.casefold())
         cleaned.append((name, moves))
 

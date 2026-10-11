@@ -665,8 +665,8 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
     } catch (e: unknown) {
       if (signal.aborted || isCanceledRequest(e)) return
       setData(null)
-      // The backend's own message is the useful one -- "Dataset has 2,400,000
-      // rows, above the import row cap of 2,000,000. Raise `import_row_cap`, or
+      // The backend's own message is the useful one -- "Dataset has 240,000,000
+      // rows, above the import row cap of 200,000,000. Raise `import_row_cap`, or
       // use a DirectQuery data source..." names the limit, the actual size and
       // the two remedies. Discarding it left the widget rendering "Configure
       // widget to see data", which blames the author for a configuration
@@ -1334,21 +1334,26 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
           ? '2px solid var(--accent)'
           : cfg.transparent === true
             ? '0 solid transparent'
-            : `${cfg.widget_border_width ?? 1}px solid ${cfg.widget_border_color ?? 'var(--border)'}`,
-        borderRadius: cfg.widget_radius != null ? cfg.widget_radius : 'var(--radius)',
+            // The widget's own border, else the dashboard's style (lib/dashboardStyle), else the app's.
+            : cfg.widget_border_width != null || cfg.widget_border_color
+              ? `${cfg.widget_border_width ?? 1}px solid ${cfg.widget_border_color ?? 'var(--border)'}`
+              : 'var(--dl-s-border, 1px solid var(--border))',
+        borderRadius: cfg.widget_radius != null ? cfg.widget_radius : 'var(--dl-s-radius, var(--radius))',
+        fontFamily: 'var(--dl-s-font, inherit)',
         // A rule background beats a static one: the rule reacts to the data, which is
         // the entire point of phase 1's `background` target.
         background: ruleStyles?.widget?.background ?? cfg.widget_background
-          ?? (cfg.transparent === true ? 'transparent' : 'var(--surface)'),
+          ?? (cfg.transparent === true ? 'transparent' : 'var(--dl-s-card-bg, var(--surface))'),
         // QA3 B4: the header controls paint on the widget's own colour, not a
         // white (surface) box over a custom one. Transparent tiles keep surface.
         ['--dl-wbg' as string]: (() => { const bg = ruleStyles?.widget?.background ?? cfg.widget_background
-          return bg && bg !== 'transparent' ? bg : 'var(--surface)' })(),
+          return bg && bg !== 'transparent' ? bg : 'var(--dl-s-card-bg, var(--surface))' })(),
         // QA4 V1: text, icons, ticks and labels follow a custom background's
         // contrast, not the theme (white on #fde68a in the dark theme).
         ...contrastTokens(ruleStyles?.widget?.background ?? cfg.widget_background),
         overflow: 'hidden', cursor: 'default',
-        boxShadow: isDragging ? '0 8px 24px rgba(0,0,0,.25)' : selected ? '0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent)' : skinShadow(cfg.widget_skin),
+        boxShadow: isDragging ? '0 8px 24px rgba(0,0,0,.25)' : selected ? '0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent)'
+          : cfg.widget_skin || cfg.transparent === true ? skinShadow(cfg.widget_skin) : 'var(--dl-s-shadow, none)',
         outline: isMultiSelected ? '2px solid var(--success)' : undefined,
         opacity: isDragging ? 0.7 : 1,
         transition: isDragging ? 'none' : 'border-color .15s, box-shadow .15s',
@@ -1394,7 +1399,9 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
             below the fold of its own card. */}
         <span className="dl-whead__title" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
           <span role="heading" aria-level={3} title={title} dir="auto"
-            style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.3, color: 'var(--text)', minWidth: 0,
+            style={{ fontWeight: 'var(--dl-s-title-weight, 600)' as never, fontSize: 'var(--dl-s-title-size, 14px)',
+              lineHeight: 1.3, color: 'var(--dl-s-title-color, var(--text))', minWidth: 0,
+              textAlign: 'var(--dl-s-title-align, start)' as never,
               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{title}</span>
           {typeof cfg.subtitle === 'string' && cfg.subtitle && (
             <span data-testid="widget-subtitle" title={cfg.subtitle}

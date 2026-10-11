@@ -228,19 +228,34 @@ async def page_copilot(report_id: int, page_id: int, body: CopilotIn,
         except Exception:                                   # noqa: BLE001 -- suggestions, never a gate
             cards = []
         out = copilot_without_model.answer(body.message, await _page_columns(db, report, user), cards, reason)
-        return {"reply": out["reply"], "applied": [], "notes": [], "results": [],
+        return {"reply": out["reply"], "lead": out["lead"], "applied": [], "notes": [], "results": [],
                 "without_ai": True, "suggestions": out["suggestions"]}
-
-    if not await _ai_policy.enter(db, datasets=_read):
-        return await without_ai("AI is switched off for the data this dashboard reads")
-
-    # Same daily cap as the chat agent: both are one LLM call per message.
-    await quotas.enforce_agent_quota(db, user.org_id)
-    quotas.enforce_ai_budget(meter)
 
     widgets = (await db.execute(select(ReportWidget).where(
         ReportWidget.page_id == page_id).order_by(ReportWidget.id))).scalars().all()
     columns_by_table = await _page_columns(db, report, user)
+
+    def plain_instruction() -> dict | None:
+        """The message as a plain instruction that needs no model -- add,
+        remove, rename, change kind, top N, sort (services/copilot_commands.py)."""
+        from ..services import copilot_commands
+        selected = (body.selected_widget_id
+                    if any(w.id == body.selected_widget_id for w in widgets) else None)
+        return copilot_commands.parse(
+            body.message, [{"id": w.id, "widget_type": w.widget_type, "title": w.title} for w in widgets],
+            columns_by_table, selected)
+
+    resolved = None
+    ai_allowed = await _ai_policy.enter(db, datasets=_read)
+    if not ai_allowed:
+        resolved = plain_instruction()
+        if resolved is None:
+            return await without_ai("AI is switched off for the data this dashboard reads")
+    else:
+        # Same daily cap as the chat agent: both are one LLM call per message.
+        await quotas.enforce_agent_quota(db, user.org_id)
+        quotas.enforce_ai_budget(meter)
+
     calc_cols, dataset_mode = await _page_calculated_columns(db, report, user)
     measures = await _page_measures(db, report, user)
     page_ctx = {
@@ -261,8 +276,14 @@ async def page_copilot(report_id: int, page_id: int, body: CopilotIn,
     history = [{"role": h.get("role"), "content": h.get("content")}
                for h in (body.history or [])[-8:]]
 
-    resolved = await resolve_copilot(body.message, history, page_ctx,
-                                     llm_service.get_client())
+    without_model = resolved is not None
+    if resolved is None:
+        resolved = await resolve_copilot(body.message, history, page_ctx,
+                                         llm_service.get_client())
+    if resolved is None:
+        # No model answered: a plain instruction is still carried out.
+        resolved = plain_instruction()
+        without_model = resolved is not None
     if resolved is None:
         raise HTTPException(502, "the model endpoint could not answer")
 
@@ -445,4 +466,5 @@ async def page_copilot(report_id: int, page_id: int, body: CopilotIn,
         await _audit(db, user, "report.copilot_edit", "report", report_id, summary[:300])
     await db.commit()
     return {"reply": resolved["reply"], "applied": applied, "notes": notes,
-            "results": [], "before_version_id": before_version_id, "summary": summary}
+            "results": [], "before_version_id": before_version_id, "summary": summary,
+            **({"without_ai": True} if without_model else {})}

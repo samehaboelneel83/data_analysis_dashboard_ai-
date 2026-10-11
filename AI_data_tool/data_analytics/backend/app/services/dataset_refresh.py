@@ -31,9 +31,128 @@ def write_csv_atomic(df: pd.DataFrame, path) -> list[str]:
     converted = normalize_instants(df)
     path = Path(path)
     tmp = path.with_name(path.name + ".tmp")
-    df.to_csv(tmp, index=False)
+    if is_parquet(path):
+        # A dataset imported as a stream is a parquet file: CSV text written
+        # under that name would be unreadable.
+        df.to_parquet(tmp, index=False)
+    else:
+        df.to_csv(tmp, index=False)
     os.replace(tmp, path)
     return converted
+
+
+def is_parquet(path) -> bool:
+    return str(path).lower().endswith(".parquet")
+
+
+def rows_of(df: pd.DataFrame) -> int:
+    """How many rows the dataset now holds. A refresh that was written to disk
+    as it arrived hands back a SAMPLE of the rows, with the real count on it."""
+    return int(df.attrs.get("rows", len(df)))
+
+
+def missing_of(df: pd.DataFrame, column: str) -> float:
+    """How empty a column is, counted on every row either way."""
+    from .ingest import missing_pct
+    counted = df.attrs.get("missing")
+    return float(counted.get(column, 0.0)) if isinstance(counted, dict) else missing_pct(df[column])
+
+
+STAGE_PREFIX = "refresh_"
+
+
+def _stage_dir(path: Path) -> str:
+    """Where a large reload is written before it replaces the file. One per
+    dataset file: what an earlier attempt left behind (a reload cancelled
+    after the fetch) is removed first."""
+    import shutil
+    import tempfile
+    mine = f"{STAGE_PREFIX}{path.stem}_"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    for old in path.parent.glob(mine + "*"):
+        shutil.rmtree(old, ignore_errors=True)
+    return tempfile.mkdtemp(prefix=mine, dir=str(path.parent))
+
+
+def _drop_stage(stage: str | None) -> None:
+    import shutil
+    if stage:
+        shutil.rmtree(stage, ignore_errors=True)
+
+
+def _fetch_full(source_cfg: dict, table: str | None, query: str | None, path: Path | None,
+                required: set[str] | None, column_map: dict[str, str] | None,
+                cursor_column: str | None = None) -> tuple[pd.DataFrame, str | None, object]:
+    """The whole source, for a full reload: (frame, stage, cursor).
+
+    A dataset whose file is parquet may be far larger than memory, so its
+    reload is written to disk as it arrives, exactly as its import was. The
+    frame handed back is then a random SAMPLE of the rows, carrying
+    `attrs["rows"]` (the real count), `attrs["missing"]` (how empty each
+    column is, counted on every row) and `attrs["staged"]` (the finished file,
+    not yet swapped in); `cursor` is the highest cursor value in the file.
+    Anything else is fetched into memory as it always was (stage None)."""
+    from .connections import Streamed, import_to_dataframe
+    from .ingest import detect_types
+    from .timezones import normalize_instants
+    if path is None or not is_parquet(path):
+        return guard_schema(import_to_dataframe(source_cfg, table, query), required, column_map), None, None
+    rename = {new: old for new, old in (column_map or {}).items()}
+
+    def _prepare(chunk):
+        if rename:
+            chunk = chunk.rename(columns={n: o for n, o in rename.items() if n in chunk.columns})
+        normalize_instants(chunk)
+        detect_types(chunk)
+        return chunk
+
+    stage = _stage_dir(path)
+    try:
+        got = import_to_dataframe(source_cfg, table, query, stream_dir=stage, prepare=_prepare)
+        if not isinstance(got, Streamed):
+            _drop_stage(stage)
+            return guard_schema(got, required, column_map), None, None
+        sample = guard_schema(got.sample, required)
+        sample.attrs.update(rows=int(got.rows), missing=dict(got.missing), staged=str(got.path))
+        cursor = None
+        if cursor_column and cursor_column in sample.columns:
+            import duckdb
+            con = duckdb.connect()
+            try:
+                cursor = con.execute(
+                    'SELECT max("%s") FROM read_parquet(?)' % cursor_column.replace('"', '""'),
+                    [str(got.path)]).fetchone()[0]
+            finally:
+                con.close()
+        return sample, stage, cursor
+    except BaseException:
+        _drop_stage(stage)
+        raise
+
+
+def _swap_staged(df: pd.DataFrame, path: Path) -> None:
+    """Put a staged reload in the dataset's place, and clear its folder."""
+    import os
+    staged = Path(df.attrs.pop("staged"))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    os.replace(staged, path)
+    _drop_stage(str(staged.parent))
+
+
+def _staged_cursor(found, previous):
+    """`_max_cursor` for a value read off the staged file. The file holds
+    wall-clock time in the reference zone; the watermark goes back to the
+    source as an instant."""
+    if found is None or (not isinstance(found, str) and pd.isna(found)):
+        return previous
+    import datetime as _dt
+    if isinstance(found, (_dt.datetime, pd.Timestamp)):
+        stamp = pd.Timestamp(found)
+        if stamp.tzinfo is None:
+            from .timezones import reference_zone
+            stamp = stamp.tz_localize(reference_zone(), ambiguous=True, nonexistent="shift_forward")
+        return stamp.isoformat()
+    return str(found)
 
 
 class SchemaBreak(Exception):
@@ -89,12 +208,19 @@ def rewrite_dataset_file(
     raises (services/data_checks.ChecksBlocked) to keep the old file.
     """
     from .ingest import detect_types
-    from .connections import import_to_dataframe
 
-    df = guard_schema(import_to_dataframe(source_cfg, source_table, source_query), required_columns)
-    if validate is not None:
-        validate(df)
     path = Path(filename)
+    df, stage, _cursor = _fetch_full(source_cfg, source_table, source_query, path, required_columns, None)
+    try:
+        if validate is not None:
+            validate(df)
+    except BaseException:
+        _drop_stage(stage)
+        raise
+    if stage:
+        # Larger than memory: already on disk; `df` is a sample (see rows_of).
+        _swap_staged(df, path)
+        return df, detect_types(df)
     path.parent.mkdir(parents=True, exist_ok=True)
     write_csv_atomic(df, path)
     write_parquet_sidecar(str(path))  # synchronous like the rest; callers thread us
@@ -301,9 +427,21 @@ def _refresh_dataset_body(
     existing_df = None
     if effective_mode == "incremental" and path is not None and path.exists():
         try:
-            existing_df = pd.read_csv(path)
-        except Exception:  # noqa: BLE001 - unreadable cache: full refresh recovers it
+            if is_parquet(path):
+                # Appending means holding every row; a file too large for
+                # that is reloaded whole, written to disk as it arrives.
+                from . import memory_guard
+                with memory_guard.reserved(str(path)):
+                    existing_df = pd.read_parquet(path)
+            else:
+                existing_df = pd.read_csv(path)
+        except Exception as e:  # noqa: BLE001 - unreadable cache: full refresh recovers it
             existing_df = None
+            from .memory_guard import TooLargeToLoad
+            if isinstance(e, TooLargeToLoad):
+                effective_mode = "full"
+                warning = ("The dataset is too large to add rows to in memory — "
+                           "ran a full refresh instead.")
         if existing_df is not None and cursor_column not in existing_df.columns:
             effective_mode = "full"
             warning = f"Column '{cursor_column}' not found on the dataset — ran a full refresh instead."
@@ -388,10 +526,25 @@ def _refresh_dataset_body(
 
     # Full load: explicitly requested, the first incremental run (no baseline
     # cursor yet), or any of the fallbacks above.
-    df = guard_schema(import_to_dataframe(source_cfg, source_table, source_query),
-                      required_columns, column_map)
-    if validate is not None:
-        validate(df)
+    df, stage, staged_cursor = _fetch_full(source_cfg, source_table, source_query, path,
+                                           required_columns, column_map, cursor_column)
+    try:
+        if validate is not None:
+            validate(df)
+    except BaseException:
+        _drop_stage(stage)
+        raise
+    if stage:
+        # Larger than memory: the reload is a finished file beside the live
+        # one, and `df` a sample of it. Swapped in here, or by the caller's
+        # `write_dataset_files` when the write was left to it.
+        if write:
+            _swap_staged(df, path)
+        return {
+            "df": df, "type_map": detect_types(df), "mode": "full",
+            "cursor_value": _staged_cursor(staged_cursor, cursor_value) if cursor_column else cursor_value,
+            "warning": warning, "rows_added": rows_of(df),
+        }
     converted: list[str] = []
     if path is not None and write:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -436,6 +589,9 @@ def write_dataset_files(df: pd.DataFrame, filename: str) -> None:
     """The file write `refresh_dataset(write=False)` left to its caller: the
     CSV swapped in atomically, then its parquet sidecar. Blocking."""
     path = Path(filename)
+    if df.attrs.get("staged"):
+        _swap_staged(df, path)
+        return
     path.parent.mkdir(parents=True, exist_ok=True)
     write_csv_atomic(df, path)
     write_parquet_sidecar(str(path))

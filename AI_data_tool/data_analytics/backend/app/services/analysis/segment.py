@@ -118,8 +118,7 @@ def segment_dataframe(
                   and not is_identifier(c, column_meta)]
 
     if len(usable) < 2:
-        raise SegmentError("Segmentation needs at least 2 usable numeric columns "
-                           "(identifier columns such as IDs and numbers are skipped)")
+        raise SegmentError(_s("no.segment.1", "Segmentation needs at least 2 usable numeric columns (identifier columns such as IDs and numbers are skipped)", cap=False))
 
     sub = df[usable].apply(pd.to_numeric, errors="coerce").dropna()
     n = len(sub)
@@ -127,8 +126,7 @@ def segment_dataframe(
     max_k = min(MAX_K, n // 10)
     if max_k < 2:
         raise SegmentError(
-            f"Not enough complete rows to segment (need at least {MIN_ROWS // MAX_K * 2} "
-            f"rows with values in every selected column, found {n})"
+            _s("no.segment.2", "Not enough complete rows to segment (need at least {a} rows with values in every selected column, found {b})", cap=False, a=MIN_ROWS // MAX_K * 2, b=n)
         )
 
     scaler = StandardScaler()
@@ -158,7 +156,7 @@ def segment_dataframe(
                 best_k, best_score, best_labels, best_model = k, score, labels, model
 
     if best_k is None:
-        raise SegmentError("Could not find a stable clustering (every candidate k collapsed to one cluster)")
+        raise SegmentError(_s("no.segment.3", "Could not find a stable clustering (every candidate k collapsed to one cluster)", cap=False))
 
     rows: list[dict] = []
     rows_truncated = False

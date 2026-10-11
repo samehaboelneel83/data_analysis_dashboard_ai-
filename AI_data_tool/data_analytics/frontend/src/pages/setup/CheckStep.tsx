@@ -24,6 +24,7 @@ import FindingsSummary from '../../components/setup/FindingsSummary'
 import PlainSummary from '../../components/ui/PlainSummary'
 import LoadError from '../../components/ui/LoadError'
 import LoadingState from '../../components/ui/LoadingState'
+import { sayText } from '../../lib/readbackText'
 
 const POLL_MS = 4000
 const POLL_LIMIT = 60
@@ -246,7 +247,7 @@ function DatasetCheck({ d, language, gaveUp, busy, onRetry, onAgain, onFix, onUn
 
       {ready && f.insights.length > 0 && (
         <PlainSummary title={t('setup.c.insights')} items={f.insights.map(i => ({
-          id: i.id, tone: i.tone, what: i.what, why: i.why || undefined, todo: i.todo ?? undefined }))} />
+          id: i.id, tone: i.tone, what: sayText(t, i.what, (i as { what_i18n?: unknown }).what_i18n as never), why: sayText(t, i.why ?? '', (i as { why_i18n?: unknown }).why_i18n as never) || undefined, todo: i.todo ?? undefined }))} />
       )}
     </section>
   )

@@ -110,7 +110,7 @@ export default function InsightsPane({ datasetId, columnTypes, onAdd, reportId, 
         <>
           {/* The engine writes in English; dir="auto" keeps an English
               sentence in order inside the Arabic panel (QA2 T12). */}
-          <p dir="auto" style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>{isolateNumbers(result.narrative)}</p>
+          <p dir="auto" style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 10 }}>{isolateNumbers(sayText(t, result.narrative, (result as { narrative_i18n?: unknown }).narrative_i18n as never))}</p>
           {reportId != null && result.findings.length > 0 && (
             <button className="btn btn-primary" disabled={composing}
               onClick={() => void compose()}
@@ -140,7 +140,7 @@ export default function InsightsPane({ datasetId, columnTypes, onAdd, reportId, 
                     )}
                   </div>
                   <div dir="auto" style={{ fontSize: 12, fontWeight: 600 }}>{isolateNumbers(sayText(t, f.title, (f as { title_i18n?: { key: string; vars?: Record<string, unknown> } | null }).title_i18n as never))}</div>
-                  <div dir="auto" style={{ fontSize: 11, color: 'var(--muted)', margin: '2px 0 6px' }}>{isolateNumbers(f.detail)}</div>
+                  <div dir="auto" style={{ fontSize: 11, color: 'var(--muted)', margin: '2px 0 6px' }}>{isolateNumbers(sayText(t, f.detail, (f as { detail_i18n?: unknown }).detail_i18n as never))}</div>
                   {f.evidence && f.p_value != null && (
                     // The evidence chip: a tested claim carries its test, population
                     // and effect -- and the adjusted p when several were run.

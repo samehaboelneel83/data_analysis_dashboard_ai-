@@ -63,23 +63,22 @@ def compare_two_groups(df: pd.DataFrame, group_col: str, outcome: str, outcome_v
 
     for col in (group_col, outcome):
         if col not in df.columns:
-            raise TwoGroupsError(f"column '{col}' is not in this dataset")
+            raise TwoGroupsError(_s("no.change_drivers.1", "column '{a}' is not in this dataset", cap=False, a=col))
     if group_col == outcome:
-        raise TwoGroupsError("the groups and the outcome are the same column")
+        raise TwoGroupsError(_s("no.two_groups.1", "the groups and the outcome are the same column", cap=False))
     frame = df[df[group_col].notna() & df[outcome].notna()]
     sizes = frame[group_col].astype(str).value_counts()
     if len(sizes) != 2:
         raise TwoGroupsError(
-            f"'{group_col}' has {len(sizes)} values; this reading sets exactly two groups side by side. "
-            "Filter to two of them, or compare all the groups instead.")
+            _s("no.two_groups.2", "'{a}' has {b} values; this reading sets exactly two groups side by side. Filter to two of them, or compare all the groups instead.", cap=False, a=group_col, b=len(sizes)))
     names = list(sizes.index)
     base = str(baseline) if baseline is not None else names[0]
     if base not in names:
-        raise TwoGroupsError(f"'{baseline}' is not a value of '{group_col}'")
+        raise TwoGroupsError(_s("no.influencers.3", "'{a}' is not a value of '{b}'", cap=False, a=baseline, b=group_col))
     other = next(n for n in names if n != base)
     small = [n for n in names if sizes[n] < MIN_GROUP_ROWS]
     if small:
-        raise TwoGroupsError(f"group '{small[0]}' has {int(sizes[small[0]])} rows; each needs at least {MIN_GROUP_ROWS}")
+        raise TwoGroupsError(_s("no.two_groups.3", "group '{a}' has {b} rows; each needs at least {c}", cap=False, a=small[0], b=int(sizes[small[0]]), c=MIN_GROUP_ROWS))
 
     key = frame[group_col].astype(str)
     levels = frame[outcome].nunique()
@@ -93,7 +92,7 @@ def compare_two_groups(df: pd.DataFrame, group_col: str, outcome: str, outcome_v
         counts = frame[outcome].astype(str).value_counts()
         chosen = str(outcome_value) if outcome_value is not None else str(counts.index[-1])
         if chosen not in set(counts.index):
-            raise TwoGroupsError(f"'{outcome_value}' is not a value of '{outcome}'")
+            raise TwoGroupsError(_s("no.influencers.3", "'{a}' is not a value of '{b}'", cap=False, a=outcome_value, b=outcome))
         if levels > 2 and outcome_value is None:
             caveats.append(_s("an.rarest", "'{col}' has {n} values; the rarest ('{v}') is the one counted.",
                               col=outcome, n=levels, v=chosen))

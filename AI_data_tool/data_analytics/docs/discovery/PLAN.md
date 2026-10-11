@@ -1188,3 +1188,160 @@ Until now only the suites near each change had been run. The whole suite (7,862 
 * The copilot's no-AI suggestions are listed in words, not as buttons; the third decision shape (§AY); layout judged by eye in Arabic.
 * The scanner of §AI still does not read text built inside function calls and object literals in `.tsx` files; what it missed was found only by walking the screens.
 
+
+## BC. The import row limit — 200,000,000, one setting (2026-10-11)
+
+* **`import_row_cap` now defaults to 200,000,000** (was 2,000,000). It was already an administrator's setting (Admin → Settings → "Import row limit", or `IMPORT_ROW_CAP`; 0 = no limit); nothing stored in this installation overrides it, so the new default is in force here.
+* **One number instead of two.** A dataset saved from a pipeline, a join or an aggregate had its own fixed limit of 2,000,000 written in the code (`prep.MATERIALIZE_MAX_ROWS`). It now follows the same setting (`prep.materialize_limit()`), as the query builder's row limit already did.
+* Tests: the default's own test, and the suites of import, saved datasets, aggregates, settings and the query builder — 157 pass.
+
+**Not verified — and it matters at this size**
+* Nothing near 200,000,000 rows was imported. §AG measured up to 4,000,000: about **2.1 GB of memory per million rows** while importing and 0.67 GB per million once loaded, on a twenty-column table. On those figures this machine (62 GB) carries roughly 25–30 million rows of that shape in memory, not 200 million.
+* So the limit no longer protects the host: a file between what the memory holds and 200,000,000 rows is accepted and can end the server process instead of being refused with a sentence. A small or shared host should set the limit to what `backend/scripts/bench_import.py` reports there.
+* Very large tables are what a live (DirectQuery) source and the large-data work of phase 4 are for; that work is still at its first step (§AF).
+
+## BD. The open list, round 2 — refusals, insight details and the summary in the reader's language (2026-10-11)
+
+* **Analysis refusals.** Every refusal in the analysis services (151 places, 108 different sentences: "needs at least…", "column … is not in this dataset", "… has only one value") is now a keyed sentence. The English text is unchanged. The server sends the key beside it (`detail_i18n`; `core/said_errors.refused`), and the browser puts it into the reader's language once, where every response error passes (`services/api.ts`), so every screen that shows the message shows it translated — no screen was changed.
+* **An insight's detail sentence** (15 kinds, with their optional second and third sentences) and **the scan's summary paragraph** are keyed (`detail_i18n`, `narrative_i18n`) and rendered on the Insights page, the dataset's Insights tab and the builder's insights pane. A summary rewritten by the model drops its key and stays as the model wrote it.
+* **Analysis names.** The six without a plain name (the profile, the two forecasts, the three unusual-value detectors) have one, in both languages.
+* Checked: 5 new tests (a refusal keeps its English and carries its key; the HTTP form carries both; an ordinary error is untouched; every key used on the server is in both catalogues; a finding's detail and the summary carry keys); 719 tests of the analysis suites, 93 of the insight suites, the whole browser suite (4,395) pass. Live: a refused analysis and a scan on the 62,662-row table return their keys.
+
+**Not done in this round**
+* A refusal raised inside a **background job** is stored as text when it happens (the stored-text item below).
+* Refusals from services outside the analyses (formulas, parameters, connectors, aggregates) are still English.
+* One detail is left as data, not a sentence: the ordered-groups finding lists its values with arrows.
+* Not looked at on screen in Arabic.
+
+## BE. The open list, round 3 — stored text, a changed page, and ready charts on part of the rows (2026-10-11)
+
+**Text stored when it was written**
+* **A background job's error.** Its key is kept in the job's progress record beside the stored English (no new column). The platform's own four endings (stopped with the server, time limit, unexpected error, no handler), "the dataset is gone", and any analysis refusal are keyed; the browser words them where every job arrives. A job that failed before today has no key and stays as stored.
+* **The last status of an alert or a scheduled delivery** ("clear", "fired, emailed 2", "still firing", "no valid recipients"…) is a small fixed vocabulary: the browser translates it from the stored line (`lib/storedStatus.ts`), so lines stored before today are translated too. A reason after "evaluation failed:" and a mail server's own message stay as written. A server test pins the wording the browser expects.
+* **A guided-setup finding** keeps the key of its two sentences while they are the engine's own; reworded by the model, it stays in the language the run was made in (the owner's rule: ask once, keep the answer).
+* **Column profile facts** on the Columns tab were already translated (15 labels) — the earlier list was out of date. A suggested dashboard's description is written in the person's language when it is created and is theirs to edit afterwards; left as it is.
+
+**Dashboard design**
+* **"Change this page"** used to return the page without its buttons, filter controls and click-to-filter links (and offered the buttons to the model as if they were charts). Now (`dress.redress`): the page keeps its buttons; filters and links are worked out again for the charts it now has; a chart carried over keeps exactly the options it had; only a NEW chart gets a number's history or the marking above the average; and no chart is turned into another kind, because here a person has spoken.
+* **A ready chart on one part of the rows.** In `cards` mode the model may pair a chart from the list with one listed value of a column (`parts_of`: categories of 2–12 values, values with at least 20 rows, 40 at most). The chart is still the platform's; the value is from the list; the pair is drawn and checked like any other; the title names the part even if the model does not. A part that is not listed, or is the chart's own split, is ignored.
+* Live, on the 62,662-row table, three questions about one part: "month by month for the Same Day service only" and "among returned shipments, which branches" were answered correctly from ready charts. The third asked about something the data does not hold ("fragile parcels"): the model chose the right narrowing for the other half of the question (late ones) but kept the word in its title. **A title is the model's own wording and is not checked against the data** — in any mode.
+
+**Checked:** 4 tests for the changed page, 5 for the parts, 3 for stored text; 579 tests of the guided-setup, suggestion, job, alert and delivery suites pass; the browser type check passes and the new browser test (5) passes.
+
+**Not done**
+* The connection designer (before a dataset exists) still designs its own charts.
+* AI switched off: the copilot's suggestions as buttons, and page editing without AI.
+* `cards` with parts was measured on one table and three questions.
+
+## BF. The open list, round 4 — AI switched off, and a connection's charts chosen from a ready list (2026-10-11)
+
+**AI switched off**
+* **The copilot's ready charts are buttons.** With no model, the chat used to list the platform's ready charts as words and send the person to another pane. Each is now a card with **Add to page**, which adds it as the builder would; the words above it no longer repeat the list (`lead`).
+* **Real editing without AI** (`services/copilot_commands.py`). A short list of plain instructions is read by rules and carried out through the same checked path a model's edits take — the same column check, revision and undo:
+  add a chart of named columns (a number by a category is a bar, by a date a line; a number alone is a headline number; the kind asked for is the kind made; total, average, count, highest, lowest) · remove · rename to a quoted title · change the kind · top N · sort.
+  In English and Arabic (with or without vowel marks). A column counts only when every word of its name is in the message; an existing chart is the selected one, the one whose whole title is in the message, or the only chart on the page — otherwise nothing is guessed, and the person is told what else can be done without AI. The same instructions are carried out when AI is allowed but no model answers; anything else is the error it was.
+
+**Suggesting from a connection** (`settings.source_ai_selection`, free | cards, default free)
+* The query is the model's in both modes: there are no rows to make charts from until it has run. In `cards`, once it has, the platform makes the plain charts of the query's own result from its shape, keeps those that pass the same row check a designed chart must pass, and the model only chooses among them by id. Fewer than two chosen and the model's own charts stand, checked as before.
+* **Live, on the sample connection, one request:** three dashboards in 229 s, every chart from the ready list, none dropped. **What it cost:** the questions asked for rates ("which branches have the highest percentage of late shipments") and the ready list holds totals and averages of the result's columns — so they were answered with two counts side by side, not the rate. `free` designs the rate. That is why `free` stays the default; a ready chart for one column over another is the missing piece.
+* On the way: a column already named for its roll-up ("total shipments", "avg days") is no longer titled "Total total shipments".
+
+**Checked:** 10 tests of the instructions and 4 through the real route (a page changed with AI off and undoable; nothing changed for anything else; done when no model answers; the old error otherwise), 1 browser test of the buttons, 6 of the connection's cards mode; the whole browser suite (4,401 tests, 358 files) passes.
+
+**Not done**
+* `both` for a connection (choose first, design only what no ready chart answers); ready charts of one column over another (rates).
+* The instructions cover one chart at a time, the dashboard's own dataset, and no filters ("only Express") — those still need the model.
+* Neither change was looked at on screen.
+
+## BG. Large data, second step — and the three open points of phase 5 (2026-10-11)
+
+### Large data
+
+With the import limit at 200,000,000 rows (§BC) the limit no longer protects the host. What does now:
+
+* **A dataset that does not fit is refused, not loaded** (`services/memory_guard.py`, setting `load_memory_share`, default 0.6 of free memory; 0 = off). Before a whole file is read into memory its size is worked out from the file's own footer — no row read — against the memory that is free (the machine's, or the container's limit). Too large: HTTP 413 with a sentence that says what still works. Before, the server process ended for everyone.
+* **The same for rows arriving from a database.** An import (and a refresh) is read in chunks; after each, what has arrived is weighed against free memory, and the import stops with a sentence — "narrow it with a query, or connect it live" — while stopping is still cheap.
+* **Headline numbers no longer load the file.** Charts grouped by a column were already computed by DuckDB straight from the file; a single number over all rows (total, average, lowest, highest, typical, count, distinct count, with filters) was not, so every KPI loaded everything. It now takes the same path, for KPI widgets only, and is the in-memory answer exactly (9 parity cases).
+
+**Measured** (`backend/scripts/bench_large.py`, a table written by DuckDB so no row passes through pandas; 8 columns; cold cache; this machine):
+
+| | 50,000,000 rows | 200,000,000 rows |
+|---|---:|---:|
+| file | 747 MB | 2,987 MB |
+| headline: total / how many / average | 0.36 / 0.02 / 0.10 s | 0.60 / 0.02 / 0.35 s |
+| total by group (20 values) | 0.11 s | 0.36 s |
+| rows by kind | 0.07 s | 0.20 s |
+| total by month | 2.50 s | 9.79 s |
+| total by group, filtered to one place | 0.20 s | 0.70 s |
+| median by place | 0.83 s | 2.95 s |
+| peak memory of the process | 855 MB | 2,718 MB |
+
+So **a 200-million-row dataset already on disk draws its ordinary charts in under ten seconds on under 3 GB.** What it cannot do at that size is anything that needs every row in memory — a spread, an analysis, a chart with a second split — and those are now refused by the guard. The guard's estimate was checked against a real load at 20,000,000 rows (2.6 GB at peak; the estimate, 3.8 GB, errs on the safe side).
+
+**The other gaps of §AG's benchmark**
+* *A wider table*: `bench_import.py --extra-numbers --extra-text --text-chars`. At 1,000,000 rows, 54 columns of which 4 are 80-character text that differs on every row: file 739 MB, parse 4.3 s, peak **4.35 GB** — twice the 20-column table. Memory per row follows width and text, as expected; the "safe limit" the script reports is for the shape it was run on.
+* *A database import and a refresh* (`bench_source_import.py`, rows made up by the server over a real connection, no table created): 250,000 rows 1.5 s; 1,000,000 rows 6.0 s (fetch 2.8, file 1.7, copy 1.5), peak 1.4 GB; 2,000,000 rows 11.4 s, peak 2.65 GB. A full refresh costs the same as the import.
+
+**Still true, and the real limit:** an import is fetched, joined and written **in memory**. On the measured 2.1–4.4 GB per million rows this machine imports some 10–25 million rows of a file and no more — the guard now says so instead of failing. Importing 200 million rows needs the import itself to stream to disk (rows → parquet in chunks, types and profile from a sample), which is not built. Until then a table that large is for a **live connection**, or arrives already as a parquet file.
+
+Also not done: a headline number with its history, a count by month and a chart with a second split still load the file (the DuckDB path declines them); the analyses do not sample a file that is too large — they are refused.
+
+### Phase 5
+
+* **The simulation widens for a model of the wrong form.** For each of the last periods (up to 8) the model is fitted on what came before and asked for that period; when it misses those by more than 1.25 times what it expects of itself, every range is widened to that size, and the result says by how much. A separate check (the same model with each term squared, at the 1% level) says when the data **bends** where the model is straight. A line through a curve: widened and said to bend; a line through a line: left as it was.
+* **The third decision shape: levels to set.** A dated table with a number that adds up beside other numbers is offered "which levels of these factors make this number largest (or smallest)". The person names the number, the factors (up to 4) and, if they wish, each one's range — the observed range otherwise. Written down: the objective, the what-if's fitted model (level, trend, one straight-line effect per factor), the ranges, and the doubts — a range beyond anything observed, a factor whose direction the data cannot tell, a weak model, a model that misses unseen periods or bends, and always that a straight-line model is best at an end of every range and that association is not intervention. **Not solved**, like the other two.
+* **The decision card opens from the builder.** The suggestions pane of a dashboard lists a decision its dataset has the shape of, with a button that opens it on the dataset's Analysis tab — a decision belongs to the data, not to a page, so it is linked rather than added.
+
+**Checked:** 6 + 3 tests of the guard, 16 of the single number through DuckDB (with the existing parity suite, 133), 5 of the widening, 4 of the third shape (26 with the rest), 1 browser test of its form.
+
+**Found by the whole suite on the way (not part of the list):** one test of scheduled deliveries failed once in 8,060. It was not a flake of the test: "send only if something changed" compared the **bytes** of the workbook, and a workbook stamps the second it was built into itself — so two deliveries of the same data never matched unless both were built within the same second, and the option resent every time in real use. It now compares what the workbook says (each sheet's name and cells). The first delivery after this change is sent once more, because the remembered mark was of the old kind.
+
+## BH. Huge data in both modes, with many people at once (2026-10-11)
+
+Asked: do not forget the two kinds of dataset — connected live, and imported — and expect huge data used by many people at the same time. Step 1 of the proposal (an import that never holds the table), the volume check on the decision form, and what many simultaneous readers needed.
+
+### Imported datasets
+
+* **A large import is written to disk as it arrives** (`services/connections._stream_to_parquet`). The database is read through a server-side cursor in chunks of 100,000 rows; each chunk is typed and written as its own small file; at the end DuckDB joins them into the dataset's file, giving each column the widest type any chunk saw (a column that turns from numbers to text part-way keeps every value, as text). Memory stays at about one chunk whatever the size. It starts past `import_stream_rows` rows (admin setting, default 1,000,000; 0 = never) or sooner when memory is short. The dataset is then a parquet file with no CSV beside it. How empty each column is, is counted on every row; column types and the profile come from a random sample.
+* **Before this, the database driver itself held the whole result** — 11.9 GB for 50 million rows — whatever the application did with it. The server-side cursor is what removed that.
+* **A reload of such a dataset is streamed the same way** (`services/dataset_refresh._fetch_full`): written beside the live file and swapped in only when the saved checks pass and the columns in use are still there; a blocked or failed reload leaves the old data and nothing else on disk. By hand, queued or scheduled alike. The checks run on a random sample of the new rows, except the two about how many rows there are and the count of blanks, which use the whole file; each result says it was sampled.
+* **Found on the way and fixed:** a reload would have written CSV text into the parquet file of a streamed dataset, leaving it unreadable. Every writer now writes the kind of file the dataset is.
+* **Adding only new rows** (incremental) to a dataset too large for memory is not done in place: it reloads the whole table, streamed, and says so.
+
+### Connected live (DirectQuery)
+
+Nothing is copied, so size is the database's matter; what mattered here was many people at once:
+
+* **The same question asked at the same moment is answered once** (`services/single_flight.py`), for imported and live datasets alike: the first request computes, the others wait for it and get a copy. Twenty people opening one dashboard send each chart to the database once, not twenty times.
+* **A request no longer holds an application-database connection while its chart is computed** (`routers/widget_data.py`). It did, and fifteen slow charts at once exhausted the pool and every other page of the product failed with them.
+* **The pool is a setting** (`db_pool_size` 10, `db_pool_overflow` 20).
+
+### Many people on a large imported dataset
+
+* **Loads are weighed together** (`memory_guard.reserved`): two people opening two different large datasets at the same moment are counted as both, so the second is refused in words rather than the server running out of memory.
+* Charts that DuckDB answers from the file do not load it at all, so they do not compete for memory.
+
+### Measured (this machine; through the running product, not a script beside it)
+
+| | |
+|---|---|
+| import of 50,000,000 rows from a database | 231 s, backend peak **1.61 GB** (before: could not be done — 11.9 GB in the driver alone) |
+| import of 200,000,000 rows | 982 s (about 16 minutes), backend peak **2.4 GB**; afterwards total 0.4 s, by group 0.5 s, by month 9.6 s |
+| 50M-row imported dataset, cold, 1 / 5 / 20 people each asking 6 charts | 2.7 s / 2.9 s / 3.8 s for all of them; peak 0.31 GB |
+| the same with 50 people from ONE account | 251 of 300 answered in 10.5 s; the rest were turned away by the per-account request limit, which is doing its job — fifty real people have fifty accounts |
+| 5M-row table connected live, 1 / 5 / 20 people | 10.4 s / 9.5 s / 9.9 s — the database's own time, paid once |
+| reload of the 50M-row dataset through the product | 236 s, peak 1.85 GB; 42 charts asked meanwhile were all answered from the old data, slowest 0.33 s; nothing left on disk beside the file |
+
+### The decision form: "moves only with volume"
+
+The third decision shape (§BG) fits period totals, and two columns that merely both grow when a period holds more rows look strongly linked there — the form showed "explains 99%". It now applies the rule the engine already uses to withhold a what-if card: when, row by row, the factor and the number barely move together (below 0.30), the check **"they rise in step only because busier periods hold more of both; setting it may change nothing"** is listed for that factor, in English and Arabic.
+
+**Checked:** 9 tests of a streamed reload (every row counted, deferred write, a blocked or broken reload leaves the old file and nothing else, an abandoned one is cleared, a renamed column mapped back, small reloads, CSV datasets unchanged, the fallback for adding rows, checks on the real row count), 6 of the streamed import, 6 of one answer for many askers, 9 of the memory guard, 1 of the volume check.
+
+**Not done**
+* **CSV and Excel uploads are still parsed in memory.** Only imports from a database stream. A very large file should go into a database, or be converted, first.
+* **Adding new rows in place** to a dataset too large for memory (above). The whole table is re-read instead — correct, but as slow as the first import.
+* **Checks on a streamed reload look at a sample** for "no repeats" and "allowed values": a fault in rows outside the sample is not seen.
+* **Charts that still load every row**: a headline number with its history, a count by month, a second split, a spread. On a dataset too large for memory they are refused in words. The analyses likewise — they do not yet run on a sample.
+* **Dates by month are the slowest chart** (about 10 s at 200 million rows); storing the file sorted by date would cut it.
+* **Not looked at on screen**, and not tried with more than one server process: the "answer once" and the memory count are per process.
