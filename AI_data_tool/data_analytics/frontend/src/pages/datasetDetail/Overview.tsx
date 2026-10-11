@@ -13,6 +13,7 @@ import {
 import type { Tab } from './constants'
 import { typeName } from '../datasetsList/classify'
 import { typeTag, useColumnProfile, type Analysis } from './columnProfile'
+import { storedNumberUse } from '../../lib/dtypeName'
 import './overview.css'
 
 /**
@@ -378,7 +379,9 @@ function GlanceRow({ ds, name, dtype, missing, analysis, flagged }: {
   const { dist, sum } = useColumnProfile(ds, name, analysis)
   return (
     <tr data-flagged={flagged || undefined}>
-      <td><span className="dl-ov__colname" dir="auto">{name}</span><span className="dl-ov__tag">{typeTag(t, dtype)}</span></td>
+      <td><span className="dl-ov__colname" dir="auto">{name}</span><span className="dl-ov__tag">{typeTag(t, dtype)}</span>
+        {(() => { const u = storedNumberUse(t, name, dtype, (ds.column_meta as Record<string, { role?: string }> | undefined)?.[name]?.role)
+          return u && <span className="dl-ov__tag" title={u.tip}>{u.tag}</span> })()}</td>
       <td>{dist}</td>
       <td className="dl-ov__num">{localDigits(`${Math.round(missing)}%`)}</td>
       <td className="dl-ov__sum">{sum}</td>

@@ -12,12 +12,14 @@ import { useCrumbTitle } from '../lib/crumb'
 import NotFound from './NotFound'
 import { useDirection } from '../contexts/DirectionContext'
 import { useT, type MessageKey } from '../i18n'
+import { boundarySetName, packText } from '../i18n/pages/adminPlatform'
 import { authzApi, type AuthzDecision, measuresApi, relationshipsApi, translationsApi, columnMetaApi, parametersApi, themesApi, reportsApi, datasetsApi, hierarchyApi, analysisApi, widgetTemplatesApi, dataSourcesApi, columnFormatsApi } from '../services/api'
 import type { Dataset, DatasetColumn, CalcColumn, CalcColumnFormat, MeasureDef, ColumnMeta, WidgetTemplate } from '../services/api'
 import CalcColumnsPanel from '../components/report/CalcColumnsPanel'
 import ColumnFormatsPanel from '../components/report/ColumnFormatsPanel'
 import type { Report, ReportPage, Widget, WidgetType, PageType, Bookmark, BookmarkState } from '../types/report'
-import { WIDGET_CATALOG, ROLE_SPECS, configKeyFor, AGGREGATIONS } from '../types/report'
+import { WIDGET_CATALOG, ROLE_SPECS, configKeyFor, AGGREGATIONS, HIERARCHY_WIDGETS, HIER_MAX_DEPTH } from '../types/report'
+import { hierarchyChain } from '../lib/hierarchyUtils'
 import type { HierarchyNode, RoleField } from '../types/report'
 import WidgetRenderer from '../components/report/WidgetRenderer'
 import WidgetConfigPanel from '../components/report/WidgetConfigPanel'
@@ -82,7 +84,7 @@ import { useUndoStack, IdAliases, describeConfigChange, changedKeys } from './re
 import { ASSIGN_DATA_EVENT, ADD_DATASET_EVENT, missingRequiredRoles } from '../components/report/WidgetPlaceholder'
 import { PATCH_WIDGET_EVENT } from '../components/report/TruncationNote'
 import { CONVERT_WIDGET_EVENT } from '../components/report/ConvertToMenu'
-import { defaultSummary, nonAdditiveKind, SAFE_AGGREGATION } from '../lib/semanticGuard'
+import { defaultSummary, fieldUse, nonAdditiveKind, SAFE_AGGREGATION } from '../lib/semanticGuard'
 import { readPending, clearPending, type PendingEdit } from '../lib/pendingEdits'
 import DatasetPickerDialog from '../components/dataset/DatasetPickerDialog'
 import toast from 'react-hot-toast'
@@ -1122,7 +1124,27 @@ export default function ReportBuilder() {
     return child ?? hierarchy.find(n => n.id === folderId && n.column_name)
   }
 
+  /** QA6 B2: a hierarchy dropped on (or assigned to) a sunburst, tree or
+   *  any hierarchy widget becomes its levels, outer first -- it used to set a
+   *  `dimension` those widgets never read, or make a new bar chart. One
+   *  undoable step; parent-child keys go, since they would win over levels. */
+  const fillHierarchyLevels = (w: Widget, folderId: number): boolean => {
+    if (!(HIERARCHY_WIDGETS as readonly string[]).includes(w.widget_type)) return false
+    const levels = hierarchyChain(hierarchy, folderId, HIER_MAX_DEPTH)
+    if (!levels.length) return false
+    const folder = hierarchy.find(n => n.id === folderId)?.name ?? levels.join(' › ')
+    const role = roleLabel(language, 'Levels (outer first)')
+    // undefined, not omitted: the patch is merged into the config, and the
+    // config is sent as JSON, which drops an undefined key.
+    const patch = { levels, id_col: undefined, parent_col: undefined, label_col: undefined }
+    window.dispatchEvent(new CustomEvent(PATCH_WIDGET_EVENT, { detail: { widgetId: w.id, patch,
+      label: tr('bc.shell.u.setRole', { role, widget: w.title || w.widget_type, field: folder }) } }))
+    toast.success(tr('bc.shell.t.roleSet', { field: folder, role, widget: w.title || w.widget_type }))
+    return true
+  }
+
   const assignHierarchyToWidget = (folderId: number) => {
+    if (selectedW && fillHierarchyLevels(selectedW, folderId)) return
     const node = firstHierarchyNode(folderId)
     if (node) bindHierarchyNode(node)
   }
@@ -2283,7 +2305,9 @@ export default function ReportBuilder() {
     // never a text field in a numeric role; null makes a new chart instead.
     const target = roleForField(ROLE_SPECS[w.widget_type] ?? [], cfg, columnName, isNumericField)
     if (!target) return null
-    const next = { ...cfg, [configKeyFor(target.role)]: columnName }
+    // A multi role (a hierarchy's levels) takes the field as its next entry.
+    const key = configKeyFor(target.role)
+    const next = { ...cfg, [key]: target.multi ? [...(Array.isArray(cfg[key]) ? cfg[key] as string[] : []), columnName] : columnName }
     // The point of classifying a column as geography: a map built from it draws
     // the right shapes without the author choosing them again. Applied here,
     // beside the default aggregation, so the choice is visible and editable in
@@ -2689,12 +2713,9 @@ export default function ReportBuilder() {
   // Fields groups, the type icon, the per-field buttons, a click, a drop and
   // the automatic chart. `model_year` used to sit under Dimensions while a
   // click drew its histogram and offered "what moves model_year?".
-  const isNumericField = (c: DatasetColumn) => {
-    const role = columnMeta[c.name]?.role
-    if (role) return role === 'measure'
-    if (c.dtype === 'calculated') return true
-    return c.dtype === 'numeric' && nonAdditiveKind(c.name) == null
-  }
+  // QA6 B4: one rule for a field's use (lib/semanticGuard fieldUse), shared
+  // with Assign data and the Data view.
+  const isNumericField = (c: DatasetColumn) => fieldUse(c, columnMeta[c.name]?.role) === 'measure'
   const visibleColumns = columns.filter(c => !columnMeta[c.name]?.hidden)
   // Fields plan F7: report filters, as the canvas filter bar shows them.
   const reportFilterChips = (report.common_filters ?? []).map(f => ({
@@ -3134,7 +3155,9 @@ export default function ReportBuilder() {
                                       hintTitle(hints[c.name])].filter(Boolean).join(' — ')}
                               className="dl-bd-f__b">
                               <span className="dl-bd-f__ty" data-k={c.dtype === 'calculated' ? 'calc' : isNumericField(c) ? 'measure' : group === 'Dates' ? 'date' : group === 'Geography' ? 'geo' : 'dim'}>
-                                {c.dtype === 'calculated' ? 'ƒx' : isNumericField(c) ? '#' : 'Aa'}</span>{/* // i18n-ok: type glyphs, not words */}
+                                {/* QA6 B4: the glyph is how it is STORED (a year is "#"), the colour
+                                    how it is USED (data-k: a year is a dimension) -- "Aa" said text. */}
+                                {c.dtype === 'calculated' ? 'ƒx' : c.dtype === 'numeric' ? '#' : 'Aa'}</span>{/* // i18n-ok: type glyphs, not words */}
                               <span className="nm"><bdi>{columnMeta[c.name]?.label || c.name}</bdi></span>
                               {/* "Country - 47": how many distinct values this
                                   category holds, which is what decides whether
@@ -3190,7 +3213,7 @@ export default function ReportBuilder() {
                                         style={{ display: 'block', width: '100%', textAlign: 'start',
                                           background: 'none', border: 'none', cursor: 'pointer',
                                           padding: '4px 6px', fontSize: 11, color: 'var(--text)' }}>
-                                        {trx('bc.shell.f.geoSet', { name: <bdi>{bs.name}</bdi> })}
+                                        {trx('bc.shell.f.geoSet', { name: <bdi>{boundarySetName(tr as never, language, bs.name)}</bdi> })}
                                       </button>
                                     ))}
                                     {boundaryPacks.map(pk => (
@@ -3199,7 +3222,7 @@ export default function ReportBuilder() {
                                         style={{ display: 'block', width: '100%', textAlign: 'start',
                                           background: 'none', border: 'none', cursor: 'pointer',
                                           padding: '4px 6px', fontSize: 11, color: 'var(--text)' }}>
-                                        {trx('bc.shell.f.geoSet', { name: <bdi>{pk.name}</bdi> })} <span style={{ color: 'var(--muted)' }}>
+                                        {trx('bc.shell.f.geoSet', { name: <bdi>{packText(tr as never, language, pk.id, 'name', pk.name)}</bdi> })} <span style={{ color: 'var(--muted)' }}>
                                           {tr(pk.requires_acceptance ? 'bc.shell.f.packTerms' : 'bc.shell.f.pack')}</span>
                                       </button>
                                     ))}
@@ -4004,7 +4027,9 @@ export default function ReportBuilder() {
                 data-canvas
                 onDragOver={e => { if (e.dataTransfer.types.includes('application/x-fields') || e.dataTransfer.types.includes('application/x-field') || e.dataTransfer.types.includes('application/x-hierarchy')) {
                   e.preventDefault(); e.dataTransfer.dropEffect = 'copy'
-                  const single = e.dataTransfer.types.includes('application/x-field') && !e.dataTransfer.types.includes('application/x-fields')
+                  // A hierarchy is a target too: it fills a hierarchy widget's levels (QA6 B2).
+                  const single = (e.dataTransfer.types.includes('application/x-field') && !e.dataTransfer.types.includes('application/x-fields'))
+                    || e.dataTransfer.types.includes('application/x-hierarchy')
                   const wid = single ? widgetIdAtPoint(e.currentTarget, e.clientX, e.clientY) : null
                   if (wid !== dropTargetId) setDropTargetId(wid)
                 } }}
@@ -4044,7 +4069,13 @@ export default function ReportBuilder() {
                       void addWidgetFromField(field)
                     }
                   }
-                  else if (hier) { e.preventDefault(); void addWidgetFromHierarchy(Number(hier)) }
+                  else if (hier) {
+                    e.preventDefault()
+                    setDropTargetId(null)
+                    const wid = widgetIdAtPoint(e.currentTarget, e.clientX, e.clientY)
+                    const target = wid ? pageWidgets.find(w => w.id === wid) : undefined
+                    if (!(target && fillHierarchyLevels(target, Number(hier)))) void addWidgetFromHierarchy(Number(hier))
+                  }
                 }}
                 style={{ position:'relative', minHeight:canvasH(pageWidgets.map(w => ({ ...w, layout: localLayouts[w.id] ?? packedPreview[w.id] ?? w.layout }))),
                 // The page's own backdrop, with objects that opt into

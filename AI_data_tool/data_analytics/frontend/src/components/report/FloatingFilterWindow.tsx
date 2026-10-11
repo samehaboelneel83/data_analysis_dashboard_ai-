@@ -1,6 +1,7 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { useCrossFilter } from './CrossFilterContext'
 import { useT } from '../../i18n'
+import { useDirection } from '../../contexts/DirectionContext'
 
 /**
  * What is filtering this page, reachable from anywhere on it.
@@ -26,10 +27,38 @@ import { useT } from '../../i18n'
  *   does NOT clear the filters: they are still narrowing every number on the
  *   page, and a dismissed window that silently meant "unfiltered" would be a
  *   worse lie than no window.
+ *
+ *   **In the corner of the canvas, not of the window** (QA6 A9). Fixed to the
+ *   window's right edge, it sat over the sidebar in Arabic, where the sidebar
+ *   is on the right. It now measures the element it is rendered in (the
+ *   canvas column) and takes that box's inline-START corner: bottom-left in
+ *   English, bottom-right in Arabic. The inline-end corner is the floating
+ *   Ask AI button's, which it covered. Still `fixed`, so it never scrolls away.
  */
 export default function FloatingFilterWindow() {
   const tr = useT()
+  const { rtl } = useDirection()
   const { activeFilters, clearFilter, clearAllFilters } = useCrossFilter()
+  // The canvas box, in window coordinates; null until measured (or where
+  // nothing has a size, as in tests), and then the window's corner is used.
+  const anchorRef = useRef<HTMLSpanElement>(null)
+  const [box, setBox] = useState<{ left: number; right: number; bottom: number } | null>(null)
+  const filtering = activeFilters.length > 0
+  useLayoutEffect(() => {
+    const host = anchorRef.current?.parentElement
+    if (!host || !filtering) return
+    const measure = () => {
+      const r = host.getBoundingClientRect()
+      setBox(r.width ? { left: Math.max(0, r.left), right: Math.max(0, window.innerWidth - r.right),
+        bottom: Math.max(0, window.innerHeight - r.bottom) } : null)
+    }
+    measure()
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null
+    ro?.observe(host)
+    window.addEventListener('resize', measure)
+    window.addEventListener('scroll', measure, true)
+    return () => { ro?.disconnect(); window.removeEventListener('resize', measure); window.removeEventListener('scroll', measure, true) }
+  }, [filtering])
   const [open, setOpen] = useState(false)
   //: Offset from the default corner, in pixels. Session-only on purpose: a
   //: remembered position is a setting nobody asked to set.
@@ -44,8 +73,9 @@ export default function FloatingFilterWindow() {
     const move = (ev: MouseEvent) => {
       const d = drag.current
       if (!d) return
-      // Right/bottom anchored, so dragging left and up INCREASES the offsets.
-      setOffset({ x: d.ox + (d.x - ev.clientX), y: d.oy + (d.y - ev.clientY) })
+      // Anchored at the inline start and the bottom, so dragging toward the
+      // inline end (right in English, left in Arabic) and up INCREASES them.
+      setOffset({ x: d.ox + (rtl ? d.x - ev.clientX : ev.clientX - d.x), y: d.oy + (d.y - ev.clientY) })
     }
     const up = () => {
       drag.current = null
@@ -54,17 +84,19 @@ export default function FloatingFilterWindow() {
     }
     window.addEventListener('mousemove', move)
     window.addEventListener('mouseup', up)
-  }, [offset])
+  }, [offset, rtl])
 
-  if (activeFilters.length === 0) return null
+  const anchor = <span ref={anchorRef} hidden />
+  if (!filtering) return anchor
 
-  const count = activeFilters.length
-  const label = `${count} filter${count === 1 ? '' : 's'}`
+  const label = tr('bc.shell.flt.count', { n: activeFilters.length })
+  const inline = (box ? (rtl ? box.right : box.left) : 0) + 18 + offset.x
 
   return (
+    <>{anchor}
     <div data-testid="floating-filters" style={{
       position: 'fixed',
-      right: 18 + offset.x, bottom: 18 + offset.y,
+      ...(rtl ? { right: inline } : { left: inline }), bottom: (box?.bottom ?? 0) + 18 + offset.y,
       zIndex: 60, maxWidth: 320,
       background: 'var(--surface)', border: '1px solid var(--accent)',
       borderRadius: 10, boxShadow: '0 8px 28px rgba(0,0,0,.28)',
@@ -107,5 +139,6 @@ export default function FloatingFilterWindow() {
         </div>
       )}
     </div>
+    </>
   )
 }

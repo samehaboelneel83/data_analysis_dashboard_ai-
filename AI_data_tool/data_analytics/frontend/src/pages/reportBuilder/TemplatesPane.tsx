@@ -4,6 +4,8 @@ import { Plus, Trash2 } from 'lucide-react'
 import { pageTemplatesApi, reportsApi } from '../../services/api'
 import { useConfirm } from '../../components/ui/ConfirmDialog'
 import { useT } from '../../i18n'
+import { addBuiltinPage } from '../../lib/builtinTemplates'
+import { useDirection } from '../../contexts/DirectionContext'
 import { localDigits } from '../../lib/arabicFormats'
 import { TEMPLATE_NAMES, TemplateArt } from '../reports/dialogs'
 import Thumb from '../home/Thumb'
@@ -23,6 +25,7 @@ export default function TemplatesPane({ reportId, activePageId, onAdded, widgetT
   widgetTemplates?: ReactNode
 }) {
   const t = useT()
+  const { language } = useDirection()
   const confirm = useConfirm()
   const [builtins, setBuiltins] = useState<{ key: string; name: string; widgets: number }[] | null>(null)
   const [saved, setSaved] = useState<{ id: number; name: string; widgets: number }[]>([])
@@ -40,7 +43,7 @@ export default function TemplatesPane({ reportId, activePageId, onAdded, widgetT
 
   const add = async (src: Parameters<typeof pageTemplatesApi.addFrom>[1]) => {
     setBusy(true)
-    try { await pageTemplatesApi.addFrom(reportId, src); onAdded() }
+    try { await (src.builtin != null ? addBuiltinPage(reportId, src.builtin, language, t) : pageTemplatesApi.addFrom(reportId, src)); onAdded() }
     catch { toast.error(t('bd.tpl.addFailed')) }
     finally { setBusy(false) }
   }

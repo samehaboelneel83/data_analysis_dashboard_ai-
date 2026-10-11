@@ -97,13 +97,14 @@ describe('FloatingFilterWindow', () => {
     // button that is not covering anything worth moving it off.
     fireEvent.click(screen.getByRole('button', { name: /1 filter/i }))
     const win = screen.getByTestId('floating-filters')
-    const before = win.style.insetInlineEnd || win.style.right
+    // QA6 A9: anchored at the canvas's inline-start corner (left in English).
+    const before = win.style.left
 
     fireEvent.mouseDown(screen.getByTestId('floating-filters-grip'), { clientX: 500, clientY: 500 })
     fireEvent.mouseMove(window, { clientX: 400, clientY: 300 })
     fireEvent.mouseUp(window)
 
-    expect(win.style.right || win.style.insetInlineEnd).not.toBe(before)
+    expect(win.style.left).not.toBe(before)
   })
 
   it('closes back to the pill without clearing anything', () => {
@@ -116,5 +117,23 @@ describe('FloatingFilterWindow', () => {
 
     expect(screen.queryByText('region = North')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /1 filter/i })).toBeInTheDocument()
+  })
+})
+
+describe('FloatingFilterWindow in Arabic (QA6 A9)', () => {
+  it('counts in Arabic and sits at the canvas start (right), away from the Ask AI button', async () => {
+    localStorage.setItem('datalytics.language', 'ar')
+    localStorage.setItem('datalytics.direction', 'rtl')
+    const { DirectionProvider } = await import('../../contexts/DirectionContext')
+    try {
+      render(<DirectionProvider><CrossFilterProvider><Harness emit={ONE} /></CrossFilterProvider></DirectionProvider>)
+      fireEvent.click(screen.getByRole('button', { name: 'emit' }))
+      const win = screen.getByTestId('floating-filters')
+      expect(win.textContent).toContain('عامل تصفية واحد')
+      expect(win.style.right).toBe('18px')
+      expect(win.style.left).toBe('')
+    } finally {
+      localStorage.removeItem('datalytics.language'); localStorage.removeItem('datalytics.direction')
+    }
   })
 })

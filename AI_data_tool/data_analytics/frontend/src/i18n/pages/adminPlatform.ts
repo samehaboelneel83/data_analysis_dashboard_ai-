@@ -373,6 +373,16 @@ export const en = {
   'pg.adminPlatform.cf.password': 'Password',
   'pg.adminPlatform.cf.schema': 'Schema (optional)',
   'pg.adminPlatform.cf.ssl_mode': 'TLS',
+  // QA6 A6: a select's codes, named; the code itself is what is sent.
+  'pg.adminPlatform.co.ssl_mode.default': 'Default',
+  'pg.adminPlatform.co.ssl_mode.disable': 'Off',
+  'pg.adminPlatform.co.ssl_mode.require': 'Required',
+  'pg.adminPlatform.co.ssl_mode.verify-ca': 'Verify the issuer',
+  'pg.adminPlatform.co.ssl_mode.verify-full': 'Verify the issuer and host name',
+  'pg.adminPlatform.co.auth_type.none': 'None',
+  'pg.adminPlatform.co.auth_type.bearer': 'Bearer token',
+  'pg.adminPlatform.co.auth_type.api_key': 'API key',
+  'pg.adminPlatform.co.auth_type.basic': 'User name and password',
   'pg.adminPlatform.cf.ssl_root_cert': 'CA certificate file on the server (verify modes)',
   'pg.adminPlatform.cf.api_key': 'API key',
   'pg.adminPlatform.cf.auth_type': 'Auth',
@@ -750,6 +760,15 @@ export const ar: Record<keyof typeof en, string> = {
   'pg.adminPlatform.cf.password': 'كلمة المرور',
   'pg.adminPlatform.cf.schema': 'المخطط (اختياري)',
   'pg.adminPlatform.cf.ssl_mode': 'تشفير TLS',
+  'pg.adminPlatform.co.ssl_mode.default': 'الافتراضي',
+  'pg.adminPlatform.co.ssl_mode.disable': 'معطّل',
+  'pg.adminPlatform.co.ssl_mode.require': 'مطلوب',
+  'pg.adminPlatform.co.ssl_mode.verify-ca': 'التحقق من جهة الإصدار',
+  'pg.adminPlatform.co.ssl_mode.verify-full': 'التحقق من جهة الإصدار واسم الخادم',
+  'pg.adminPlatform.co.auth_type.none': 'بلا',
+  'pg.adminPlatform.co.auth_type.bearer': 'رمز Bearer',
+  'pg.adminPlatform.co.auth_type.api_key': 'مفتاح API',
+  'pg.adminPlatform.co.auth_type.basic': 'اسم المستخدم وكلمة المرور',
   'pg.adminPlatform.cf.ssl_root_cert': 'ملف شهادة جهة الإصدار (CA) على الخادم (لأوضاع التحقق)',
   'pg.adminPlatform.cf.api_key': 'مفتاح API',
   'pg.adminPlatform.cf.auth_type': 'المصادقة',
@@ -830,4 +849,32 @@ export function packText(t: Translate, language: string, id: string, field: 'nam
   const k = `pg.adminPlatform.maps.pack.${id}.${field}`
   if (!has(k)) return text
   return field === 'name' || en[k] === text ? t(k) : text
+}
+
+/**
+ * QA6 A5: an installed boundary set's name, as Admin → Maps names its pack. A
+ * set installed from a starter pack keeps the pack's English name on the
+ * server ("Egypt governorates"); in Arabic it reads as the pack does there
+ * («محافظات مصر»). A set the org uploaded under its own name stays as named.
+ */
+export function boundarySetName(t: Translate, language: string, name: string): string {
+  if (language === 'en') return name
+  const m = /^pg\.adminPlatform\.maps\.pack\.(.+)\.name$/
+  for (const k of Object.keys(en) as (keyof typeof en)[]) {
+    const id = m.exec(k)?.[1]
+    if (id && en[k] === name) return packText(t, language, id, 'name', name)
+  }
+  return name
+}
+
+/**
+ * QA6 A6: a connector select's option, named in Arabic with its code kept in
+ * view -- «مطلوب (require)» -- so it still matches the database's own
+ * documentation. English shows the code as sent; so does a code this client
+ * does not know. Only the label changes: the value sent stays the code.
+ */
+export function connectorOptionLabel(t: Translate, language: string, field: string, code: string): string {
+  if (language === 'en') return code
+  const k = `pg.adminPlatform.co.${field}.${code}`
+  return has(k) ? `${t(k)} (\u2066${code}\u2069)` : code
 }

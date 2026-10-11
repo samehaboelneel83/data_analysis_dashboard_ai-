@@ -7,6 +7,7 @@ import { countConditions, dropTable, fromModel, previewWhere, toModel, type Cond
 import { useConfirm } from './ui/ConfirmDialog'
 import { useModalDialog } from './ui/useModalDialog'
 import { useT } from '../i18n'
+import { formatCell } from '../lib/displayNumber'
 import ModeExplainer from '../pages/connections/ModeExplainer'
 
 // D3: the canvas cycles through a fixed subset of AGGS -- the click-badge is
@@ -621,7 +622,7 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
                   <thead><tr>{preview.columns.map(c => <th key={c}>{c}</th>)}</tr></thead>
                   <tbody>
                     {preview.rows.slice(0, 50).map((r, i) => (
-                      <tr key={i}>{r.map((v, j) => <td key={j}>{v == null ? '—' : String(v)}</td>)}</tr>
+                      <tr key={i}>{r.map((v, j) => <td key={j}>{v == null ? '—' : formatCell(v as string | number | boolean)}</td>)}</tr>
                     ))}
                   </tbody>
                 </table>

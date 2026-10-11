@@ -11,7 +11,7 @@ import { blankConfigFor } from './typeMaps'
 import { friendlyMessage } from '../../lib/friendlyError'
 import { useT } from '../../i18n'
 import { useDirection } from '../../contexts/DirectionContext'
-import { connectorFieldLabel } from '../../i18n/pages/adminPlatform'
+import { connectorFieldLabel, connectorOptionLabel } from '../../i18n/pages/adminPlatform'
 
 /* ── Connection Form Modal ─────────────────────────────── */
 export function ConnectionModal({ initial, catalog, onSave, onClose }: {
@@ -235,7 +235,7 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
               {f.kind === 'select' ? (
                 <select value={(cfg[f.name] as string) ?? (f.default as string) ?? ''}
                   onChange={e => setField(f.name, e.target.value)} {...inp}>
-                  {f.options.map(o => <option key={o} value={o}>{o}</option>)}
+                  {f.options.map(o => <option key={o} value={o}>{connectorOptionLabel(tr, language, f.name, o)}</option>)}
                 </select>
               ) : (
                 <input

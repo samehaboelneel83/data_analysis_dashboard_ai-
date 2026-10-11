@@ -131,6 +131,8 @@ Nothing is pushed.
   - These are counted by the same scanner (`src/test/hardcodedStrings.ts`); add each file to `BUILDER_FILES` once translated.
 - [x] 7-QA5 Fixes from the fifth QA report `/media/saeed/New Volume1/projects/redesign-captures/qa-5/QA_REPORT_5.md`: F1–F4, R1–R4, L1–L9. One GATE; then push and a short QA6 on these items only.
 - [x] 7-QA5b Small fixes before QA6 (S1–S6), one commit, no GATE: delete dialogs open on Cancel, the cross-filter tooltip, automatic chart titles, audit-trail action names, hierarchy and sensitivity labels in Arabic, the Welch evidence line in right-to-left.
+- [x] Merge `origin/main` (emad: guided setup, Fields panel fixes, SQL injection hardening, condition boxes, no-code formulas, hierarchies across widgets, pgAdmin) into `said`: a fast-forward to `fa573bd`, no conflicts; `36c3001` adds the new column-lineage route to the security inventory.
+- [x] 7-QA6 Fixes from QA round 6 (`redesign-captures/qa-6/`): A1–A10 (our leftovers) and B1–B4 (merged work). One GATE.
 - [ ] Then: Upload, Connections, Lineage, the AI button
 - [ ] FINAL Full regression: all tests, build, capture every screen, compare against all designs, final summary, fix the flaky `Lineage.test.tsx` (and watch `geoRenderers.test.tsx` and ReportBuilder's "report-level display rules" under load), and a clean-up list (test datasets 7 and 8, chat threads, the uncommitted init.sql edit). QA3 adds: dashboard "QA3-Builder" #16 (made 00:01; share link made and revoked 00:02–00:03; not made by the QA3 run, so the owner decides), and the cached insights QA3 may have saved on "Demo — Sales" and in the Builder AI panel. QA3 adds: stop the port-3002 Vite server ("before" captures) and remove its worktree (`git worktree remove` on the scratchpad `before` folder).
   - >> GATE F: stop, final report
@@ -187,6 +189,10 @@ Not part of the frontend steps (1–7); candidates for the handoff's section 7 p
 | 7-QA3-N3 (after the client fix) | Opening no longer writes. A layout edit still costs one version per widget it stores: the first edit of an old 4-widget page added 5 (the page + 4 widgets), its undo 5 more. | Still needed: a batch layout endpoint (one version per action), an atomic revision, and a way to clear `layout_mode` (PATCH drops a null, so undo writes `''`). The 50-version cap stays. |
 | 7-QA2 N3 | One automatic layout pass (Executive packing when a page is first edited) left 39 versions in half a second, with repeated revision numbers; the burst can also push older versions past the retention window | Every widget save snapshots a version and the revision is read-then-bumped without a lock. Needs one version per user action (a batch layout endpoint, or coalescing saves seconds apart) and an atomic revision increment. The history now shows such a burst as one entry. |
 | 7-QA2 T12 (seen again in QA3) | Insights narrative, finding titles and details are English in the Arabic UI | The insights endpoint takes no language; the engine writes English. Needs the UI language on the request (AP3). The pane's own words are translated. |
+| 7-QA6 B1 (merged guided setup) | A connection that was never synced waits forever on setup step 1: `guided_setup.py:320-324` reports `syncing` whenever `sync_status` is `pending`, but `pending` with no `SyncRun` means "never read". Only `create_data_source` starts a sync; the seeded demo source (`demo_content.seed_demo_directquery`) and any connection made before guided setup never get one. | The client now says so and offers "Read the database now" (admins, `POST /data-sources/{id}/sync`) and a way back. Backend (teammate): report `syncing` only while a run is active, else a `never_synced` status; start the sync when setup opens on a never-read source the caller can administer; have the demo seeder sync its source. |
+| 7-QA6 A7 | "Is this difference real?" `summary` and `tests[].business.sentence` are English prose | In Arabic the client now composes the gap from `business.absolute`/`percent` and `tests[].values`, and leaves out the summary. The server should send codes and numbers (with T12). |
+| 7-QA6 A10 | The built-in page templates (`services/page_templates.py`) carry English page and widget names | The client renames the page and the template's widget titles right after adding it in Arabic. The built-ins should carry message keys. |
+| 7-QA6 A6 | Connector select options (TLS modes, auth types) are bare codes | The client names them by `field.code` with the code kept in view. The connector catalog should send labels or keys. |
 | 7-QA B6 | Ask AI is slow (about 70 s for a simple answer, about 4 min before a clarification), with no timeout or cancel | Needs a server-side timeout and a cancel endpoint (AN2: stream progress + cancel). |
 
 ## Log
@@ -1101,3 +1107,46 @@ QA5 confirmed E0, E1, E2, V2–V6 and V8 from 7-QA4, and the 8-i18n pages (mostl
 - Re-pinned: the ConfirmDialog focus and Tab-order tests.
 - Full suite: 329 files / 4168 tests pass (4 workers). Type-check and build pass.
 - Captures: `e2e/capture/redesign/cap_qa5b.mjs` (S1, S3–S6) and `cap_qa5b_s2.mjs` (S2), EN light and AR light/dark. Before is :3002 at `7cba905` (S2 at `c235968`); after is in `redesign-captures/qa-5b-fixes/{before,after}/`. S1 before: focus on Delete, and Enter deleted the scratch dashboard; after: focus on Cancel, and it survives.
+
+### 7-QA6 Fixes from QA round 6 — the commit that adds this entry
+
+QA6 (Claude in Chrome, `redesign-captures/qa-6/`) confirmed F2, F4, R1, R3, L1–L5, L8, S1–S5 and the share plural («7 أيام»), and that the redesign still behaves after the merge (M4: Shift+click count, a field drop on an empty KPI, an Edit click does not cross-filter, the page does not scroll).
+
+**Part A, our leftovers:**
+- **A1 (F1)** A widget with a custom background now sets `color: var(--text)` on itself, so text a renderer leaves uncoloured inherits the widget's contrast. That covers the donut key's percentages, which were white on yellow in the dark theme. The custom keys' swatches (donut, ribbon) get the outline (`.dl-key-swatch`). Recharts legends (pie, funnel, treemap) were already covered.
+- **A2 (F3)** Every data-row table uses `formatCell`: the report Data view, the dataset Data grid (the edit box keeps the raw value), the Query builder preview and the dataflow preview. "-336.69000000000005" now shows as "-336.69".
+- **A3 (R2)** One CSS rule instead of a `dir` on each input. In RTL, every text-like input and textarea without its own `dir` is `unicode-bidi: plaintext`: "-5", "$-1,200" and a column name read LTR, and Arabic stays RTL. Checked in Chromium. This covers the Builder, rules, filters, condition boxes and the step editor.
+- **A4 (R4)** The map's "Loading map…", "Loading boundaries…", "Shift-drag to select an area", the hidden table ("Place / Value", "… and N more", the unplaced-rows caption), the screen-reader summary and the "did not match" notes are translated, with plurals. The notes sit at the inline start. `MapDataTable`, `GeoPointMapRenderer` and `GeoChoroplethRenderer` are in the guard.
+- **A5 (L7)** The Fields ⌖ pop-up, the geography check and the boundary-set picker name a starter pack's set as Admin → Maps does (`boundarySetName`, matched by the pack's English name). An uploaded set keeps its own name.
+- **A6 (L6)** TLS modes and auth types show as «مطلوب (require)» in Arabic (`connectorOptionLabel`); the value sent stays the code. English shows the code as before.
+- **A7 (S6)** In Arabic, the difference dialog composes the gap sentence from the server's numbers and leaves out the English summary, which the per-test verdict and gap already say. English is unchanged. The chip's brackets hold one LTR unit, "(Cohen's d -0.0119)". Server sentences with no Arabic version stay as sent (T12).
+- **A8** Every placeholder is `unicode-bidi: plaintext`, so the formula box's Arabic placeholder reads in order while typed formulas stay LTR.
+- **A9 (S2)** The floating "⌗ 1 filter" badge comes from the initial commit (`ffb94de`), not from our work or main's. It was `position: fixed; right: 18px`, so in Arabic it sat over the sidebar. It now measures the element it is rendered in (the canvas column) and takes its inline-START corner, still `fixed`. The inline end belongs to the floating Ask AI button, which it covered in both languages. The label and header are translated with plurals («عامل تصفية واحد»).
+- **A10 (S3)** A built-in page template added in Arabic gets its page name and title, and the widget titles the template set, renamed right after it is added (`lib/builtinTemplates`). Like automatic titles, they keep the language they were made in. Used by the new-dashboard dialog, the page template menu and the Templates pane.
+
+**Part B, the merged work:**
+- **B1, cause: merged code (`5662985`) plus the demo seed; not ours.** The demo connection was seeded without a sync run (`sync_runs` is empty), and nothing else starts one, so `guided_setup.py` reports `syncing` forever (backend row above). Step 1 now tells a never-read connection apart from a running sync. It offers "Read the database now" to admins and asks others to ask an admin, and always gives a way back.
+- **B2, cause: our E2 planner plus the original role table (`ffb94de`); the merge only made it visible.** The hierarchy types had only a Value role, our planner skipped multi roles, and a dropped hierarchy always made a new bar.
+  - Now `levels` is a role ("Levels (outer first)", multi) on the six hierarchy types, so Assign data shows it.
+  - A category field dropped on a sunburst goes on the end of its levels (up to 8; never a quantity; never in parent-child mode).
+  - A hierarchy dropped on, or assigned to, a hierarchy widget becomes its ordered levels (`hierarchyChain`).
+  - The Properties checkboxes and the role share one list.
+- **B3, cause: inside `HierarchyRenderer.tsx` (not touched by our commits), for the teammate.** The renderer draws plain SVG, so our tooltip, number and contrast work never reaches it.
+  - Every segment is `seriesColor(0)`, faded by depth (also icicle and circle pack).
+  - The sunburst draws no labels and no legend.
+  - The only tooltip is a native `<title>`.
+  - The grey bar is most likely a scrollbar: a fixed 260px SVG under the new ZoomTrail in an `overflow: auto` body.
+  - Suggested: colour by top-level branch, label arcs that fit, size the SVG to its box (viewBox or a ResizeObserver) with `overflow: hidden`, and add a legend and a chartUtils tooltip.
+- **B4, cause: the interaction.** The merge (`aefc389`) made the Fields panel treat `year` as a category, while the Data view (QA5 L3) showed the stored type and Assign data used the dtype alone.
+  - One rule now: `fieldUse` in `lib/semanticGuard`. It is used by the Fields panel (`isNumericField`), Assign data (`fieldKind`) and the Data view and Overview.
+  - The Fields glyph shows the storage ("#" for year) and its colour shows the use.
+  - The Data view adds a "CAT"/«فئة» badge, with an explanation, next to "NUM".
+
+**Notes (no change):** calculated columns belong to the dataset, so they appear in every report on it (a product question for the owner and the teammate). Deleting a widget has no confirmation (undo is there). The "DATE / NUM / TXT" badges and the server's audit "report:16" / "1d" are accepted as they are. Dataset 1 ("Demo — Sales") has a calculated column `profit` that A2 was seen on; it is not one of ours, so the owner decides.
+
+**Tests:**
+- New: planner levels (4), `fieldUse`/`storedNumberUse`/`hierarchyChain` (4), QA6 labels A5/A6/A10 (3), floating badge in Arabic (1), setup never-read (3), Data view rounding (1), Arabic average gap (1).
+- Re-pinned: the evidence chip isolates and the Arabic gap and summary (`differenceArabic`), and the badge drag (inline start).
+- Full suite: 346 files / 4333 tests pass. Type-check and build pass.
+- Captures: `e2e/capture/redesign/cap_qa6.mjs`, EN light and AR light/dark. Before is :3011 at `36c3001`; after is in `redesign-captures/qa-6-fixes/{before,after}/`, with each run's log.
+

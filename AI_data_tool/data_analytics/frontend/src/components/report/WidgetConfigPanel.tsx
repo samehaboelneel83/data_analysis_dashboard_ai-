@@ -26,7 +26,7 @@ import { AGGREGATIONS, DUAL_MEASURE_WIDGETS, MULTI_MEASURE_WIDGETS, PIVOT_WIDGET
 import { dtypeShort } from '../../lib/dtypeName'
 import { useT } from '../../i18n'
 import { ASSIGN_DATA_EVENT, ADD_DATASET_EVENT, emptyPickerReason } from './WidgetPlaceholder'
-import { semanticAggregationWarning, nonAdditiveKind, SAFE_AGGREGATION } from '../../lib/semanticGuard'
+import { fieldUse, semanticAggregationWarning, nonAdditiveKind, SAFE_AGGREGATION } from '../../lib/semanticGuard'
 import { savePending, clearPending } from '../../lib/pendingEdits'
 import type { DatasetColumn, Dataset } from '../../services/api'
 import InteractionSettings from './InteractionSettings'
@@ -380,7 +380,12 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
   // so reopening an existing widget lands on the mode it was authored in.
   const [hierMode, setHierMode] = useState<'levels' | 'parent_child'>(
     (cfg.id_col && cfg.parent_col) ? 'parent_child' : 'levels')
-  const [hierLevels,    setHierLevels]    = useState<string[]>((cfg.levels as string[]) ?? [])
+  // QA6 B2: the levels are also a role (Assign data, a field dropped on the
+  // widget), so the checkboxes below and that role are ONE list, not two that
+  // overwrite each other on save.
+  const hierLevels = multiRoleValues.levels ?? []
+  const setHierLevels = (next: (prev: string[]) => string[]) =>
+    setMultiRoleValues(prev => ({ ...prev, levels: next(prev.levels ?? []) }))
   const [hierIdCol,     setHierIdCol]     = useState<string>((cfg.id_col as string) ?? '')
   const [hierParentCol, setHierParentCol] = useState<string>((cfg.parent_col as string) ?? '')
   const [hierLabelCol,  setHierLabelCol]  = useState<string>((cfg.label_col as string) ?? '')
@@ -705,7 +710,8 @@ function WidgetConfigPanel({ widget, columns, datasets, primaryDatasetId, pages,
         const v = roleValues[rf.role]
         if (v) config[configKeyFor(rf.role)] = v
       }
-      for (const rf of (ROLE_SPECS[wt] ?? []).filter(rf => rf.multi)) {
+      // `levels` is written above with the hierarchy's mode, never in parent-child.
+      for (const rf of (ROLE_SPECS[wt] ?? []).filter(rf => rf.multi && rf.role !== 'levels')) {
         const vals = multiRoleValues[rf.role] ?? []
         if (vals.length > 0) config[rf.role] = vals
       }
@@ -1195,9 +1201,10 @@ const SORT_SEARCH_TERMS         = ['Sort order', 'Sort by', 'Sort column', 'Mult
     setRole(rf.role, values[0] ?? '')
   }
   const assignedFields: Record<string, string[]> = Object.fromEntries(roleSpecs.map(rf => [rf.role, fieldsOf(rf)]))
+  // QA6 B4: the Fields panel's rule (fieldUse), so "year" is a category here too.
   const fieldKind = (f: string): FieldKind => {
-    const dtype = effectiveCols.find(c => c.name === f)?.dtype
-    return dtype === 'datetime' ? 'date' : dtype === 'numeric' ? 'measure' : 'category'
+    const use = fieldUse({ name: f, dtype: effectiveCols.find(c => c.name === f)?.dtype })
+    return use === 'date' ? 'date' : use === 'measure' ? 'measure' : 'category'
   }
   const pageWidgets = (pages?.find(pg => pg.id === widget.page_id)?.widgets ?? [])
     .filter(w => (ROLE_SPECS[w.widget_type] ?? []).length > 0)

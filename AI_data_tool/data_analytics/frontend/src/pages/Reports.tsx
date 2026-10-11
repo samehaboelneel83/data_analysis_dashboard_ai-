@@ -11,7 +11,9 @@ import Loader from '../components/ui/Loader'
 import ActionMenu, { type ActionMenuItem } from '../components/ActionMenu'
 import { useBulkSelection } from '../lib/useBulkSelection'
 import { looksLikeTestData } from '../lib/testData'
-import { pageTemplatesApi, reportsApi, datasetsApi, workspaceApi } from '../services/api'
+import { reportsApi, datasetsApi, workspaceApi } from '../services/api'
+import { addBuiltinPage } from '../lib/builtinTemplates'
+import { useDirection } from '../contexts/DirectionContext'
 import type { ReportSummary, DatasetSummary } from '../services/api'
 import type { WorkspaceTree } from '../types/report'
 import { useConfirm } from '../components/ui/ConfirmDialog'
@@ -58,6 +60,7 @@ const detail = (e: unknown, fallback: string) => {
 
 export default function Reports() {
   const t = useT()
+  const { language } = useDirection()
   const navigate = useNavigate()
   const confirm = useConfirm()
   const prompt = usePrompt()
@@ -149,7 +152,7 @@ export default function Reports() {
       if (c.mode === 'tpl' && c.template) {
         // A template adds its page; the empty default page goes, so the new
         // dashboard opens on the template rather than on a blank first page.
-        await pageTemplatesApi.addFrom(r.id, { builtin: c.template })
+        await addBuiltinPage(r.id, c.template, language, t)
         const first = r.pages?.[0]?.id
         if (first != null) await reportsApi.deletePage(r.id, first).catch(() => {})
       }

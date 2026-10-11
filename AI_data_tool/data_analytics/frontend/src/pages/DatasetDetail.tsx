@@ -22,6 +22,8 @@ import NotFound from './NotFound'
 import { formatTimeAgo, useT, type MessageKey } from '../i18n'
 import ActionMenu from '../components/ActionMenu'
 import { localDigits } from '../lib/arabicFormats'
+import { formatCell } from '../lib/displayNumber'
+import { storedNumberUse } from '../lib/dtypeName'
 import Overview, { fmtBytes } from './datasetDetail/Overview'
 import { typeTag } from './datasetDetail/columnProfile'
 import AnalysisNav, { HASH_PICK, analysesFor, type AnalysisPick } from './datasetDetail/AnalysisNav'
@@ -1755,6 +1757,8 @@ export default function DatasetDetail() {
                               {calcColNames.has(c)
                                 ? <span className="dl-data3__type dl-data3__type--fx">ƒx</span>
                                 : <span className="dl-data3__type">{typeTag(tr, colTypes[c] ?? '')}</span>}
+                              {(() => { const u = storedNumberUse(tr, c, colTypes[c], (ds?.column_meta as Record<string, { role?: string }> | undefined)?.[c]?.role)
+                                return u && <span className="dl-data3__type" title={u.tip}>{u.tag}</span> })()}
                               {c}
                               <span aria-hidden="true" style={{ marginInlineStart: 4, color: isSorted ? 'var(--accent)' : 'var(--border)', fontSize: 11 }}>
                                 {isSorted ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}
@@ -1799,7 +1803,7 @@ export default function DatasetDetail() {
                                     padding: '1px 3px', background: 'var(--surface2)',
                                     border: '1px solid var(--accent)', borderRadius: 3,
                                     color: 'var(--text)' }} />
-                              ) : v == null ? <span style={{ color: 'var(--muted)' }}>—</span> : String(v)}
+                              ) : v == null ? <span style={{ color: 'var(--muted)' }}>—</span> : formatCell(v as string | number | boolean)}
                             </td>
                             )
                           })}

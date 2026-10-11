@@ -79,13 +79,34 @@ export default function UnderstandStep({ sourceId, onNext }: { sourceId: number;
   if (!data) return <LoadingState label={t('setup.u.loading')} />
 
   if (data.status !== 'ready') {
-    const key = data.status === 'syncing' ? 'setup.u.syncing' : data.status === 'failed' ? 'setup.u.syncFailed' : 'setup.u.empty'
+    // QA6 B1: a connection that was never read (no run started -- the seeded
+    // demo source, or one made before guided setup) reports "syncing" with
+    // nothing running, and the page waited forever. Once that is clear, or
+    // after the polling stops, it says so and offers to read it now (an
+    // admin's action) and a way back.
+    const neverRead = data.status === 'syncing' && data.sync?.status === 'pending' && !data.sync?.last_synced_at
+    const stuck = data.status === 'syncing' && (gaveUp || neverRead)
+    const key = stuck ? (neverRead ? 'setup.u.neverRead' : 'setup.u.slowSync')
+      : data.status === 'syncing' ? 'setup.u.syncing' : data.status === 'failed' ? 'setup.u.syncFailed' : 'setup.u.empty'
+    const readNow = async () => {
+      try { await metadataApi.sync(sourceId) } catch { /* 409: a run is already going -- just watch it */ }
+      polls.current = 0; setGaveUp(false); load()
+    }
     return (
       <section className="card setup-card" aria-live="polite">
         <p className="setup-card__lead">{t(key)}</p>
-        {data.status !== 'syncing' && (
-          <Link className="btn btn-sm" to={`/connections/${sourceId}/review`}>{t('setup.u.openReview')}</Link>
-        )}
+        {stuck && !data.can_edit && <p className="setup-section__sub">{t('setup.u.askAdmin')}</p>}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {stuck && data.can_edit && (
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => void readNow()}>
+              <RefreshCw size={13} aria-hidden /> {t('setup.u.readNow')}
+            </button>
+          )}
+          {(data.status !== 'syncing' || stuck) && (
+            <Link className="btn btn-sm" to={`/connections/${sourceId}/review`}>{t('setup.u.openReview')}</Link>
+          )}
+          {stuck && <Link className="btn btn-ghost btn-sm" to="/">{t('setup.u.backHome')}</Link>}
+        </div>
       </section>
     )
   }

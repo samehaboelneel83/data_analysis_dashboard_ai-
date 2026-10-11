@@ -3145,7 +3145,12 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--da
    widget's text colour (a yellow series named in yellow on a yellow card was
    invisible) and each swatch gets a thin outline so a series the colour of
    the card still shows its key. Every chart's legend is Recharts'. */
+/* QA6 A1: the widget itself writes in its own colour, so text a renderer
+   leaves uncoloured (the donut key's percentages) inherits the widget's
+   contrast, not the theme's white. Custom keys outline their swatches too. */
+.dl-widget[data-contrast] { color: var(--text); }
 .dl-widget[data-contrast] .recharts-legend-item-text { color: var(--text) !important; }
+.dl-widget[data-contrast] .dl-key-swatch { box-shadow: 0 0 0 1px var(--muted); }
 .dl-widget[data-contrast] .recharts-legend-item .recharts-surface path,
 .dl-widget[data-contrast] .recharts-legend-item .recharts-surface rect { stroke: var(--muted); stroke-width: 1px; }
 
@@ -3156,6 +3161,17 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--da
    tooltip's value is always a number, and is isolated left to right. */
 [dir="rtl"] td, [dir="rtl"] th { unicode-bidi: plaintext; }
 .recharts-tooltip-item-value { unicode-bidi: isolate; direction: ltr; }
+
+/* QA6 A3: a field takes the direction of what is typed in it. In a right-to-
+   left page "-5", "$-1,200" and a column name read left to right (they were
+   "5-"), while an Arabic word stays right to left -- one rule for every value
+   input (Builder, rules, filters, condition boxes, the step editor) instead
+   of a dir on each. Checkboxes and other non-text inputs are left alone.
+   A8: a box fixed left to right (a formula) keeps what is typed in it left to
+   right, but its Arabic placeholder reads in its own order. */
+[dir="rtl"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([dir]),
+[dir="rtl"] textarea:not([dir]) { unicode-bidi: plaintext; }
+input::placeholder, textarea::placeholder { unicode-bidi: plaintext; }
 
 /* Guided setup phase 5: "What you should know" on dataset pages */
 .dl-health { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }

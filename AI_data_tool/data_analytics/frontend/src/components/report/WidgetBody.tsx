@@ -5,6 +5,7 @@ import { Suspense, useEffect, useMemo, useState } from 'react'
 import { renderTextWithLinks } from '../../lib/inlineMarkup'
 import { useDirection, widgetIsRtl } from '../../contexts/DirectionContext'
 import { useT } from '../../i18n'
+import { MapLoading } from './geo/MapDataTable'
 import type { CalcColumnFormat } from '../../services/api'
 import type { Widget, WidgetType } from '../../types/report'
 import type { RuleStyles } from '../../lib/displayRules'
@@ -579,7 +580,7 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
       /* Boundary for the lazily-loaded renderers (the map family): while their chunk
          downloads, only this tile shows the placeholder -- without a boundary here the
          suspend would bubble to the route-level fallback and blank the whole page. */
-      <Suspense fallback={<EmptyState msg="Loading map…" />}>
+      <Suspense fallback={<MapLoading />}>
         <MeasuredChart>
           {(plotW, plotH) => (
             <ChartRenderer key={brushNonce ?? 0} onBrushChange={onBrushChange}

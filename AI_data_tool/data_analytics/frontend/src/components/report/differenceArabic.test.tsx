@@ -54,8 +54,8 @@ describe('the difference check body in Arabic (QA4 T5)', () => {
     expect(isolates).toEqual([
       [null, 'اختبار ذي الحدين الدقيق (تقسيم متساوٍ)'],
       ['ltr', 'p < 0.001'],
-      ['ltr', "Cohen's h"],
-      ['ltr', '0.07'],
+      // QA6 A7: the statistic and its value in ONE isolate -- "(Cohen's h 0.07)".
+      ['ltr', "Cohen's h 0.07"],
     ])
     expect(chip.textContent).toBe("اختبار ذي الحدين الدقيق (تقسيم متساوٍ) · p < 0.001 · أثر ضئيل (Cohen's h 0.07)")
   })
@@ -77,13 +77,26 @@ describe('the difference check body in Arabic (QA4 T5)', () => {
     const tested = [...result.querySelectorAll('li')].find(li => li.textContent?.startsWith('اختُبرت الصفوف'))
     expect(tested?.querySelector('bdi[dir="ltr"]')?.textContent).toBe('4,100')
     expect(result.textContent).not.toMatch(/Tested on|Significance at|An observed difference/)
-    // Server text (summary, gap sentence) is shown as sent, in its own direction.
+    // QA6 A7: the gap is composed in Arabic from the server's numbers, and the
+    // English summary (which the verdict and the gap already say) is not shown.
     const gap = screen.getByTestId('difference-business').querySelector('b')!
-    expect(gap.getAttribute('dir')).toBe('auto')
-    expect(gap.textContent).toBe('Development has 300 more rows than Sales (+15.8%).')
-    expect(gap.querySelector('bdi[dir="ltr"]')?.textContent).toBe('300')
-    const summary = [...result.querySelectorAll('div[dir="auto"]')].find(d => d.textContent === RESPONSE.summary)
-    expect(summary).toBeTruthy()
+    expect(gap.textContent).toBe('عدد صفوف Development يزيد على عدد صفوف Sales بمقدار 300 (+15.8%).')
+    expect([...gap.querySelectorAll('bdi[dir="ltr"]')].map(b => b.textContent)).toEqual(['300', '+15.8%'])
+    expect(result.textContent).not.toContain('Development has 300 more rows')
+    expect(result.textContent).not.toContain('Statistically significant difference')
+  })
+
+  it('composes an average gap in Arabic, lower and with its two values (QA6 A7)', async () => {
+    vi.mocked(differenceApi.check).mockResolvedValue({ ...RESPONSE,
+      population: { ...RESPONSE.population, measure: 'salary', aggregation: 'mean' },
+      tests: [{ ...RESPONSE.tests[0], question: 'typical row', test: "Welch's t-test", effect_name: 'cohens_d', effect_size: -0.0119,
+        values: { Development: 5120.4, Sales: 5400 },
+        business: { absolute: -279.6, percent: -5.18, sentence: 'Average salary: Development 5,120 vs Sales 5,400 -- 280 lower (−5.2%).' } }] })
+    open()
+    await screen.findByTestId('difference-result')
+    expect(screen.getByTestId('difference-business').querySelector('b')!.textContent)
+      .toBe('متوسط salary: Development 5,120 مقابل Sales 5,400، أقل بمقدار 280 (−5.2%).')
+    expect(screen.getByTestId('evidence-chip').textContent).toContain("(Cohen's d -0.0119)")
   })
 
   it('in English shows the server sentences exactly as sent', async () => {

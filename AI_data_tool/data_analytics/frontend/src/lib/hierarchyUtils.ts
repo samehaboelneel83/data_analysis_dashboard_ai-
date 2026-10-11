@@ -25,3 +25,18 @@ export function walkToDepth(nodes: HierarchyNode[], startId: number, steps: numb
   }
   return id
 }
+
+/** QA6 B2: a hierarchy folder as the ordered columns a sunburst (or any
+ *  hierarchy widget) nests by, outer level first: the folder's first level,
+ *  then each level's child. A column is listed once; at most `max` levels. */
+export function hierarchyChain(nodes: HierarchyNode[], folderId: number, max = 8): string[] {
+  let node = nodes.find(n => n.parent_id === folderId && n.column_name) ?? nodes.find(n => n.id === folderId && n.column_name)
+  const out: string[] = []
+  const seen = new Set<number>()
+  while (node && !seen.has(node.id) && out.length < max) {
+    seen.add(node.id)
+    if (node.column_name && !out.includes(node.column_name)) out.push(node.column_name)
+    node = getChildNode(nodes, node.id)
+  }
+  return out
+}

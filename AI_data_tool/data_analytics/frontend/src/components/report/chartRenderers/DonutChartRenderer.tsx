@@ -109,10 +109,10 @@ export default function DonutChartRenderer({ rows, cfg, rtl, broadcasts, localSe
                         onClick={broadcasts ? () => onClickPoint(r.name) : undefined}>
                         {/* Square key, name, then the share in the mono face so
                             the percentages line up as a column. */}
-                        <span aria-hidden style={{ inlineSize: 10, blockSize: 10, borderRadius: 3,
+                        <span aria-hidden className="dl-key-swatch" style={{ inlineSize: 10, blockSize: 10, borderRadius: 3,
                           background: getFill(r.name, i).fill }} />
                         <span style={{ color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{String(r.name)}</span>
-                        <span style={{ fontWeight: 500, textAlign: 'end', fontFamily: 'var(--mono)', fontVariantNumeric: 'tabular-nums', paddingInlineStart: 16 }}>{pct(r.value)}</span>
+                        <span style={{ color: 'var(--text)', fontWeight: 500, textAlign: 'end', fontFamily: 'var(--mono)', fontVariantNumeric: 'tabular-nums', paddingInlineStart: 16 }}>{pct(r.value)}</span>
                       </li>
                     ))}
                   </ul>

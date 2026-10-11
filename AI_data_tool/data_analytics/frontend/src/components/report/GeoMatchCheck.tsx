@@ -18,6 +18,8 @@ import { boundarySetsApi } from '../../services/api'
 import { geoMatchReport, geoMatchSentence, type GeoMatchReport } from '../../lib/geoMatch'
 import { useT } from '../../i18n'
 import { rich } from '../../i18n/pages/modelsMaps'
+import { boundarySetName } from '../../i18n/pages/adminPlatform'
+import { useDirection } from '../../contexts/DirectionContext'
 
 /** Distinct values of a column with their row counts, as the widget pipeline
  *  (row security included) sees them. The cap is disclosed, never silent. */
@@ -101,6 +103,8 @@ export default function GeoMatchCheck({ datasetId, column, setId, setName, onCom
   onClose: () => void
 }) {
   const t = useT()
+  const { language } = useDirection()
+  const setLabel = boundarySetName(t as never, language, setName)
   const ref = useModalDialog<HTMLDivElement>(onClose)
   const [version, setVersion] = useState(0)
   const { report, set, loading, error, truncated } = useGeoMatch(datasetId, column, setId, version)
@@ -125,12 +129,12 @@ export default function GeoMatchCheck({ datasetId, column, setId, setName, onCom
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.45)',
       display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div ref={ref} role="dialog" aria-modal="true" aria-label={t('pg.modelsMaps.gm.dialogAria', { column, set: setName })}
+      <div ref={ref} role="dialog" aria-modal="true" aria-label={t('pg.modelsMaps.gm.dialogAria', { column, set: setLabel })}
         onClick={e => e.stopPropagation()}
         style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)',
           padding: 18, width: 'min(440px, calc(100vw - 32px))', maxHeight: 'calc(100vh - 64px)', overflow: 'auto',
           display: 'flex', flexDirection: 'column', gap: 10, fontSize: 13 }}>
-        <div style={{ fontWeight: 700 }}>{rich(t, 'pg.modelsMaps.gm.title', { column: <bdi>{column}</bdi>, set: <bdi>{setName}</bdi> })}</div>
+        <div style={{ fontWeight: 700 }}>{rich(t, 'pg.modelsMaps.gm.title', { column: <bdi>{column}</bdi>, set: <bdi>{setLabel}</bdi> })}</div>
         {error && <div role="alert" style={{ color: 'var(--danger)', fontSize: 12 }}>{error}</div>}
         {loading && !error && <div style={{ color: 'var(--muted)', fontSize: 12 }}>{t('pg.modelsMaps.gm.checking')}</div>}
         {report && (
