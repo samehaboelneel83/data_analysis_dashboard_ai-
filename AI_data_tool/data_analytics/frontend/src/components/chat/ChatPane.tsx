@@ -69,6 +69,10 @@ export interface ChatPaneProps {
    *  Ask AI page's "What would you like to know?" hero and its suggestion
    *  cards. Handed the pane's own send, so a card is sent like a typed question. */
   startView?: (ask: (question: string) => void, busy: boolean) => ReactNode
+  /** Step 10: what the pane is doing, for the Ask AI page's robot -- a key in
+   *  the question box, a question sent, and how it came back. `rest` when the
+   *  pane goes away. */
+  onActivity?: (what: 'typing' | 'running' | 'answer' | 'error' | 'rest') => void
 }
 
 type MessageKind = 'answer' | 'clarify' | 'error' | 'limit'
@@ -142,7 +146,7 @@ function isProposals(p: unknown): p is DashboardProposalsPresentation {
 }
 
 export default function ChatPane({ dataSourceId, datasetIds, conversationId, onConversationCreated,
-  suggestions, datasetColumns, onAddToPage, initialInput, startView }: ChatPaneProps) {
+  suggestions, datasetColumns, onAddToPage, initialInput, startView, onActivity }: ChatPaneProps) {
   const t = useT()
   const { direction } = useDirection()
   // Model and server text: markup rendered, laid out by its majority script.
@@ -226,6 +230,9 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
       .finally(() => { if (seq === loadSeq.current) setLoading(false) })
   }, [owned, conversationId])
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => () => onActivity?.('rest'), [])
+
   const target = dataSourceId != null ? { dataSourceId } : { datasetIds }
 
   // Keep the newest turn in view as questions and answers arrive.
@@ -244,6 +251,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
     if (choice === undefined) setInput('')
     setBusy(true)
     setPending(question)
+    onActivity?.('running')
     setMessages(m => [...m, { id: nextId++, role: 'user', text: question }])
 
     try {
@@ -270,6 +278,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
       }
       const result = await agentApi.ask(cid, question)
       setMessages(m => [...m, fromAnswer(result)])
+      onActivity?.(result.status === 'failed' ? 'error' : 'answer')
     } catch (e) {
       // A limit is not a failure to answer: no "rephrase" advice, and the
       // reason in the open rather than under Technical details (E11).
@@ -277,6 +286,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
       setMessages(m => [...m, limit
         ? { id: nextId++, role: 'assistant', kind: 'limit', text: limit }
         : { id: nextId++, role: 'assistant', kind: 'error', text: t('chat.unreachable') }])
+      onActivity?.('error')
     } finally {
       setBusy(false)
       setPending(null)
@@ -576,7 +586,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
       </div>
       <div className="dl-chat__composer">
         {offline && <p role="status" className="dl-chat__note dl-chat__note--error dl-chat__offline" data-testid="ai-offline">{t('off.title')}</p>}
-        <Composer value={input} onChange={setInput} onSend={() => void send()} busy={busy}
+        <Composer value={input} onChange={v => { setInput(v); onActivity?.('typing') }} onSend={() => void send()} busy={busy}
           locked={offline} lockedHint={offline ? t('off.composer') : undefined} />
       </div>
     </div>

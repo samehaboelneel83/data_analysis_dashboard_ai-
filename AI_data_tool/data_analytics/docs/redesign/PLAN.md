@@ -1221,3 +1221,26 @@ The owner decided to build Ask AI from the new design (handoff `design-handoff-3
   - Full suite 348 files / 4351 tests pass; type-check and build pass.
 - Captures: `cap_10a.mjs` `empty` and `empty-1024`, EN/AR × light/dark. Before is :3011 at `70b38f2`; after is in `redesign-captures/10-askai/A2-{before,after}/`.
 
+
+### 10-A3 Ask AI: the new robot (owner's request, before Part B) — the commit that adds this entry
+
+- **The robot is redrawn** (`pages/ask/AskRobot.tsx`): an original full-body inline SVG, not a photo. A round helmet head, a large dark glossy visor with two round glowing eyes, ear pods with an accent ring, a small torso, jointed arms with mitten hands, short legs in rounded boots, soft shading.
+  - Colours are tokens only: the light body and dark visor through `--dl-bot-*` (now with `--dl-bot-joint`), the eyes, ear rings and chest light in `--accent` with a soft glow. The old antenna is gone.
+  - Separate groups: head, ears, visor, eyes (look / glance / each eye's blink), torso, each arm (with its forearm), legs. Each group has one job, so the motions add up.
+- **The cards stay** (bar chart, donut, chat bubble, table, typing bubble), placed again around the taller shape (the picture is 460×284), with the dotted lines re-routed.
+- **Idle loop:** a gentle float, a blink every 4.2s, a glance to each side in an 11s loop, a small wave every 8s (shoulder and elbow), ear rings and eye glow pulsing.
+- **Reactions** (`pages/ask/robotMood.ts`, a small store the picture reads, so the page does not re-render):
+  - typing: it looks at the box being typed in, for 1.6s after the last key. Down at the question box in step 2; across at the data chooser on the empty page, where the question box is locked.
+  - a question running: smaller eyes, up, drifting and taking turns to glow; faster rings.
+  - an answer: smiling eyes, arms up, two small hops; 3.2s.
+  - an error: the head tilts, one eye wide and one narrow, rings dim; 3.6s.
+  - `ChatPane` reports these through a new optional `onActivity` prop (typing, running, answer, error, rest); the builder mount passes none.
+- **Arabic:** the whole picture is mirrored (`.dl-ill__stage`), so the waving arm and the glance toward the chooser are on the right sides. The cards hold no text.
+- **Reduced motion:** every animation and transition is off and the pose does not change; only the eyes' shape follows the mood. Checked in the browser: two captures 2.5s apart are identical.
+- **Step 2:** the same robot, smaller (112×140), without the cards.
+- **Known limit, for Part B:** the hero leaves the page when a question is sent, so the running, answer and error reactions are wired and tested but cannot be seen yet. The typing reaction is live. Proposal for Part B: the same head as the avatar on the loading, answer and error cards, reading the same mood.
+
+**Tests:**
+- New: `askRobot.test.tsx` (11): the parts as separate groups, the small picture without cards, the moods and their timings, what `ChatPane` reports, and the CSS (keyframes use transform and opacity only, no literal colour, the Arabic mirror, reduced motion). `AskRobot.tsx` is in the Ask AI guard.
+- Full suite: 349 files / 4363 tests. Two failed in the full run, in files this step does not touch (`ReportBuilder.test.tsx` E09 and `SourceReview.live.test.tsx`), and both files pass alone (174/174). Type-check and build pass.
+- Captures: `cap_10a.mjs` `empty` and `picked` (EN/AR × light/dark, and at 1024px), and the new `cap_10robot.mjs`: the picture at 2×, each reaction, 30 frames of the idle loop (`idle-00…29.png`, `idle-sheet.png`, `idle-loop.gif`) and the reduced-motion pair. Before is :3001 at `c3e8b6e`, taken before the change; after is in `redesign-captures/10-askai/R-{before,after}/`. In the captures, thinking / happy / error are set on the robot directly (see the limit above), and the model endpoints are faked as up so the question box can be typed in.

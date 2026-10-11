@@ -1,30 +1,44 @@
+import AskRobot from './AskRobot'
+
 /**
- * The Ask AI hero picture (step 10, from the design handoff's `ill()`): a
- * small assistant -- a light rounded head with a dark glowing screen face,
- * an antenna and a torso -- with five floating cards around it (a bar chart,
- * a donut, a chat bubble, a table and a "typing" bubble), tied to it by
- * dotted lines.
+ * The Ask AI hero picture (step 10): the robot (`AskRobot`, a full-body
+ * inline SVG) with five floating cards around it -- a bar chart, a donut, a
+ * chat bubble, a table and a "typing" bubble -- tied to it by dotted lines.
+ * `small` is the dataset-picked hero: the same robot, smaller, without the
+ * cards.
  *
- * Built from boxes and two small SVGs, app tokens only (the robot's light
- * body and dark screen are tokens set in askLayout.css, the same in both
- * themes). The motion -- cards floating, the robot bobbing and blinking, the
- * antenna pulsing, the dots flowing, the bars regrowing -- is CSS, transform
- * and opacity only, and stops under prefers-reduced-motion.
+ * Built from boxes and small SVGs, app tokens only (the robot's light body
+ * and dark visor are tokens set in askLayout.css). The motion -- cards
+ * floating, the robot's idle loop and its reactions, the dots flowing, the
+ * bars regrowing -- is CSS, transform and opacity only, and stops under
+ * prefers-reduced-motion. In Arabic the whole picture is mirrored, so the
+ * waving arm and the glance toward the data chooser stay on the right sides.
+ *
+ * `look` is where the reader types: the question box under the picture
+ * (`down`) or the data chooser beside it (`side`).
  *
  * Purely decorative: the headline under it carries the meaning.
  */
-export default function AskIllustration({ small = false }: { small?: boolean }) {
+export default function AskIllustration({ small = false, look = 'down' }: { small?: boolean; look?: 'down' | 'side' }) {
+  if (small) {
+    return (
+      <div className="dl-ill dl-ill--sm" aria-hidden="true">
+        <div className="dl-ill__stage"><AskRobot look={look} /></div>
+      </div>
+    )
+  }
   return (
-    <div className={`dl-ill${small ? ' dl-ill--sm' : ''}`} aria-hidden="true">
+    <div className="dl-ill" aria-hidden="true">
+      <div className="dl-ill__stage">
       <div className="dl-ill__glow" />
-      <svg className="dl-ill__lines" viewBox="0 0 460 240" fill="none">
+      <svg className="dl-ill__lines" viewBox="0 0 460 284" fill="none">
         <g className="dl-ill__dash">
-          <path d="M156 70Q190 84 198 104" /><path d="M326 64Q290 76 262 100" />
-          <path d="M150 186Q176 182 196 164" /><path d="M314 180Q288 176 266 160" />
+          <path d="M140 84Q156 92 164 104" /><path d="M342 80Q320 86 302 100" />
+          <path d="M138 204Q160 204 180 194" /><path d="M318 214Q304 212 292 204" />
         </g>
         <g className="dl-ill__dots">
-          <circle cx="156" cy="70" r="3" /><circle cx="326" cy="64" r="3" />
-          <circle cx="150" cy="186" r="3" /><circle cx="314" cy="180" r="3" />
+          <circle cx="140" cy="84" r="3" /><circle cx="342" cy="80" r="3" />
+          <circle cx="138" cy="204" r="3" /><circle cx="318" cy="214" r="3" />
         </g>
       </svg>
       <div className="dl-ill__card dl-ill__c1">
@@ -56,20 +70,7 @@ export default function AskIllustration({ small = false }: { small?: boolean }) 
         ))}
       </div>
       <div className="dl-ill__card dl-ill__c5"><i /><i /><i /></div>
-      <div className="dl-ill__bot">
-        <div className="dl-ill__ant" />
-        <div className="dl-ill__head">
-          <span className="dl-ill__ear is-l" /><span className="dl-ill__ear is-r" />
-          <div className="dl-ill__face">
-            <svg viewBox="0 0 100 70">
-              <rect x="29" y="19" width="11" height="16" rx="5.5" />
-              <rect x="60" y="19" width="11" height="16" rx="5.5" />
-              <path d="M36 45Q50 56 64 45" />
-            </svg>
-          </div>
-        </div>
-        <div className="dl-ill__torso" />
-        <div className="dl-ill__shadow" />
+      <AskRobot look={look} />
       </div>
     </div>
   )

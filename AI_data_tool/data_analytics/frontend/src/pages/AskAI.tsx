@@ -11,6 +11,7 @@ import AskHero from './ask/AskHero'
 import SuggestionGrid from './ask/SuggestionGrid'
 import DataPicker, { useItemMeta, type PickerItem } from './ask/DataPicker'
 import HistoryPanel from './ask/HistoryPanel'
+import { signalRobot } from './ask/robotMood'
 import { useConfirm } from '../components/ui/ConfirmDialog'
 import { connectionSuggestionCards, datasetSuggestionCards } from './ask/suggestions'
 import './ask/ask.css'
@@ -254,7 +255,7 @@ export default function AskAI() {
                 // and the subtitle on the inline end. The page does not
                 // scroll: the chooser's list scrolls in its own column.
                 <div className="dl-ask__split">
-                  <div className="dl-ask__chooser">
+                  <div className="dl-ask__chooser" onInput={() => signalRobot('typing')}>
                     {pendingQ && (
                       <p className="dl-ask__pending" data-testid="ask-pending-q">
                         {t('ask2.pendingQ')} <q dir="auto">{pendingQ}</q>
@@ -263,7 +264,7 @@ export default function AskAI() {
                     <DataPicker items={items} value="" onChoose={choose} size="inline" loading={loading} />
                     <div className="dl-ask__filter"><DatasetListFilter state={clean} /></div>
                   </div>
-                  <AskHero id="dl-ask-title" title={t('ask2.hero.title')} sub={t('ask2.hero.sub')} />
+                  <AskHero id="dl-ask-title" title={t('ask2.hero.title')} sub={t('ask2.hero.sub')} look="side" />
                 </div>
               )}
             </div>
@@ -306,10 +307,10 @@ export default function AskAI() {
             )
             return sourceId != null
               ? <ChatPane key={scopeKey} dataSourceId={sourceId} conversationId={selected}
-                  onConversationCreated={created} suggestions={suggestions} initialInput={pendingQ} startView={startView} />
+                  onConversationCreated={created} suggestions={suggestions} initialInput={pendingQ} startView={startView} onActivity={signalRobot} />
               : <ChatPane key={scopeKey} datasetIds={[datasetId as number]} conversationId={selected}
                   onConversationCreated={created} suggestions={suggestions}
-                  datasetColumns={columns?.map(c => c.name)} initialInput={pendingQ} startView={startView} />
+                  datasetColumns={columns?.map(c => c.name)} initialInput={pendingQ} startView={startView} onActivity={signalRobot} />
           })()}
         </div>
       </section>

@@ -10,6 +10,7 @@ const FILES: string[] = [
   'pages/AskAI.tsx',
   'pages/ask/AskHero.tsx',
   'pages/ask/AskIllustration.tsx',
+  'pages/ask/AskRobot.tsx',
   'pages/ask/DataPicker.tsx',
   'pages/ask/SuggestionGrid.tsx',
 ]
