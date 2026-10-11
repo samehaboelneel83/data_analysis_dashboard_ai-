@@ -93,3 +93,89 @@ class TestScope:
         table = w("table", dimension="city", measure="fee", aggregation="avg", columns=["city", "fee"])
         assert answer._reading(bar) == answer._reading(table)
         assert answer._reading(w("table", columns=["a"])) != answer._reading(w("table", columns=["b"]))
+
+
+# ── retry-2 (2026-10-11): what the third round of the seven requests exposed ──
+class TestRowsStillOnTheirWay:
+    """A share of an outcome leaves out the rows whose outcome is not known yet."""
+
+    def gate(self, df):
+        from types import SimpleNamespace
+        return SimpleNamespace(inputs=SimpleNamespace(df=df), dates={"began"}, _open={}, open_notes={}, made=[])
+
+    def frame(self):
+        import numpy as np
+        import pandas as pd
+        rng = np.random.default_rng(0)
+        began = pd.date_range("2025-01-01", periods=12, freq="MS").repeat(200)
+        state = rng.choice(["done", "back"], len(began), p=[0.9, 0.1]).astype(object)
+        newest = began >= pd.Timestamp("2025-12-01")
+        state[newest & (rng.random(len(began)) < 0.3)] = "moving"       # only rows begun last month are still moving
+        return pd.DataFrame({"began": began, "state": state, "n": 1})
+
+    def test_a_value_held_only_by_the_newest_rows_is_still_open(self):
+        from app.services.guided_setup.answer import Gate
+        df = self.frame()
+        assert Gate.open_values(self.gate(df), "state") == ["moving"]
+        assert Gate.open_values(self.gate(df), "nothing") == []
+
+    def test_a_value_spread_over_the_whole_history_is_an_outcome(self):
+        from app.services.guided_setup.answer import Gate
+        df = self.frame()
+        df.loc[df["state"] == "moving", "state"] = "done"
+        assert Gate.open_values(self.gate(df), "state") == []
+
+    def test_the_share_gets_the_filter_and_the_page_says_so_once(self):
+        from app.services.guided_setup.answer import Gate
+        g = self.gate(self.frame())
+        g.made = [{"name": "state_done_pct", "expression": 'IF(state == "done", 100, 0)'}]
+        g._share_of = lambda m: Gate._share_of(g, m)
+        g.open_values = lambda c: Gate.open_values(g, c)
+        w = {"widget_type": "line", "config": {"dimension": "began", "measure": "state_done_pct", "aggregation": "avg"}}
+        got = Gate._known_outcomes(g, w)
+        assert got["config"]["filters"] == [{"column": "state", "op": "neq", "value": "moving"}]
+        assert g.open_notes == {"state": ["moving"]}
+        # A chart of something else, and one that already filters the column, are left as they are.
+        other = {"widget_type": "kpi", "config": {"measure": "n", "aggregation": "sum"}}
+        assert Gate._known_outcomes(g, other) is other
+        own = {**w, "config": {**w["config"], "filters": [{"column": "state", "op": "eq", "value": "back"}]}}
+        assert Gate._known_outcomes(g, own) is own
+
+
+class TestQuestionsTheScopeRulesOut:
+    DEM = {"questions": [
+        {"id": "q1", "text": "What share of first kind items were on time?", "asked": True},
+        {"id": "q2", "text": "How does the first kind compare to second kind and third kind?", "asked": False},
+        {"id": "q3", "text": "How do ratings compare across each kind?", "asked": False},
+        {"id": "q4", "text": "How long do they usually take?", "asked": False},
+        {"id": "q5", "text": "How does it compare to the second kind?", "asked": True},
+    ]}
+
+    def df(self):
+        import pandas as pd
+        return pd.DataFrame({"kind": ["first kind", "second kind", "third kind"] * 4, "days": range(12)})
+
+    def test_added_questions_that_compare_across_the_narrowed_column_are_dropped(self):
+        from app.services.guided_setup.answer import without_impossible
+        got = without_impossible(self.DEM, [{"column": "kind", "op": "in", "value": ["first kind"]}], self.df())
+        # q2 names other values, q3 names the column; q4 is fine; the person's own q5 is never touched.
+        assert [q["id"] for q in got["questions"]] == ["q1", "q4", "q5"]
+
+    def test_nothing_is_dropped_without_a_narrowing_to_one_value(self):
+        from app.services.guided_setup.answer import without_impossible
+        assert without_impossible(self.DEM, [], self.df()) is self.DEM
+        two = [{"column": "kind", "op": "in", "value": ["first kind", "second kind"]}]
+        assert without_impossible(self.DEM, two, self.df()) is self.DEM
+
+
+def test_the_answer_writer_is_given_a_share_with_its_sign():
+    from types import SimpleNamespace
+    from app.services.guided_setup import answer as a
+    w = {"widget_type": "bar", "title": "Share by group", "finding": "Highest: x (0.5%)",
+         "config": {"dimension": "g", "measure": "flag_pct", "aggregation": "avg"}}
+    result = {"type": "series", "rows": [{"name": "x", "value": 0.511}, {"name": "y", "value": 0.349}]}
+    gate = SimpleNamespace(results={a._key(w): result}, dates=set(), percent={"flag_pct"})
+    text, _allowed = a._digest({"widgets": [w]}, gate)
+    assert "x=0.511%" in text and "y=0.349%" in text
+    gate.percent = set()
+    assert "x=0.511%" not in a._digest({"widgets": [w]}, gate)[0]

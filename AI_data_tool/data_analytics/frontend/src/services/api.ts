@@ -717,6 +717,8 @@ export interface StatisticalTestResult {
   n: number
   detail: Record<string, unknown>
   interpretation: string
+  /** The same sentence as key + pieces, for the reader's language (server: readback._s). */
+  interpretation_i18n?: { key: string; vars?: Record<string, unknown> } | null
   caveats: string[]
 }
 

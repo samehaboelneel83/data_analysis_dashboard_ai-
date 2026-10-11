@@ -31,20 +31,45 @@ def _columns_of(config: dict) -> set[str]:
     return out
 
 
+_WORDS = {
+    "en": {"lead": "I could not use the AI model for this{why}, so the page was not changed. "
+                   "Here is what can be done without AI.",
+           "columns": "Columns your words point at: {cols}.",
+           "none": "None of your words matched a column name in this data; try the name of a column as it is written.",
+           "ready": "Charts the platform has already built and checked on this data{for_them}:",
+           "for_them": " for those columns",
+           "add": "Add any of them from Suggest in the builder, or drag the columns onto the page from Fields.",
+           "drag": "Drag the columns onto the page from Fields, or open Suggest for charts built from this data.",
+           "sep": ", "},
+    "ar": {"lead": "تعذّر استخدام نموذج الذكاء الاصطناعي لهذا{why}، فلم تتغيّر الصفحة. "
+                   "إليك ما يمكن فعله دون ذكاء اصطناعي.",
+           "columns": "الأعمدة التي تشير إليها كلماتك: {cols}.",
+           "none": "لم تطابق أيٌّ من كلماتك اسم عمود في هذه البيانات؛ جرّب اسم عمود كما هو مكتوب.",
+           "ready": "مخططات بنتها المنصة وتحققت منها على هذه البيانات{for_them}:",
+           "for_them": " لتلك الأعمدة",
+           "add": "أضف أيًّا منها من «اقترح» في المنشئ، أو اسحب الأعمدة إلى الصفحة من «الحقول».",
+           "drag": "اسحب الأعمدة إلى الصفحة من «الحقول»، أو افتح «اقترح» لمخططات مبنية من هذه البيانات.",
+           "sep": "، "},
+}
+#: The reasons the router gives, in Arabic.
+_REASONS_AR = {"AI is switched off for the data this dashboard reads": "الذكاء الاصطناعي موقوف للبيانات التي تقرؤها هذه اللوحة"}
+
+
 def answer(message: str, columns_by_table: dict[str, dict[str, str]], cards: list[dict] | None,
            reason: str | None = None) -> dict:
-    """{"reply": plain words, "suggestions": charts ready to add}."""
+    """{"reply": plain words in the language of the message, "suggestions": charts ready to add}."""
+    from .agent.without_model import language_of
+    from .readback import as_i18n
+    lang = language_of(message)
+    w = _WORDS[lang]
     why = (reason or "").strip()
-    lines = ["I could not use the AI model for this" + (f" ({why})" if why else "")
-             + ", so the page was not changed. Here is what can be done without AI."]
+    if lang == "ar":
+        why = _REASONS_AR.get(why, why)
+    lines = [w["lead"].format(why=f" ({why})" if why else "")]
     ctx = SimpleNamespace(objects={t: SimpleNamespace(columns=cols) for t, cols in (columns_by_table or {}).items()})
     hits = _mentioned(message, ctx)
     named = {c.casefold() for _t, c, _k in hits}
-    if hits:
-        lines += ["", "Columns your words point at: " + ", ".join(c for _t, c, _k in hits) + "."]
-    else:
-        lines += ["", "None of your words matched a column name in this data; "
-                      "try the name of a column as it is written."]
+    lines += ["", w["columns"].format(cols=w["sep"].join(c for _t, c, _k in hits)) if hits else w["none"]]
 
     ready = []
     for card in cards or []:
@@ -55,14 +80,15 @@ def answer(message: str, columns_by_table: dict[str, dict[str, str]], cards: lis
         if named and not (used & named):
             continue
         ready.append({"title": str(card.get("title") or ""), "sentence": str(card.get("sentence") or ""),
+                      # The card's own words as key + pieces, for a reader's language.
+                      "title_i18n": card.get("title_i18n"), "sentence_i18n": card.get("sentence_i18n"),
                       "widget_type": action.get("widget_type"), "config": action["config"]})
         if len(ready) >= MAX_CHARTS:
             break
     if ready:
-        lines += ["", "Charts the platform has already built and checked on this data"
-                      + (" for those columns" if named else "") + ":"]
+        lines += ["", w["ready"].format(for_them=w["for_them"] if named else "")]
         lines += [f"- {r['title']}" + (f": {r['sentence']}" if r["sentence"] else "") for r in ready]
-        lines += ["", "Add any of them from Suggest in the builder, or drag the columns onto the page from Fields."]
+        lines += ["", w["add"]]
     else:
-        lines += ["", "Drag the columns onto the page from Fields, or open Suggest for charts built from this data."]
-    return {"reply": "\n".join(lines), "suggestions": ready}
+        lines += ["", w["drag"]]
+    return {"reply": "\n".join(lines), "suggestions": ready, "language": lang}

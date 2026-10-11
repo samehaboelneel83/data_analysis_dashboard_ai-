@@ -1,3 +1,4 @@
+import { sayText } from '../../lib/readbackText'
 import { useState } from 'react'
 import toast from 'react-hot-toast'
 import { findingKey, insightsApi, pinsApi, suggestApi } from '../../services/api'
@@ -138,7 +139,7 @@ export default function InsightsPane({ datasetId, columnTypes, onAdd, reportId, 
                       </span>
                     )}
                   </div>
-                  <div dir="auto" style={{ fontSize: 12, fontWeight: 600 }}>{isolateNumbers(f.title)}</div>
+                  <div dir="auto" style={{ fontSize: 12, fontWeight: 600 }}>{isolateNumbers(sayText(t, f.title, (f as { title_i18n?: { key: string; vars?: Record<string, unknown> } | null }).title_i18n as never))}</div>
                   <div dir="auto" style={{ fontSize: 11, color: 'var(--muted)', margin: '2px 0 6px' }}>{isolateNumbers(f.detail)}</div>
                   {f.evidence && f.p_value != null && (
                     // The evidence chip: a tested claim carries its test, population

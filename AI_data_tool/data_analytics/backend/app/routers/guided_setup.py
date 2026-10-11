@@ -38,7 +38,7 @@ FLOW_STEPS = ("data", "check", "dashboard", "done")
 #: Longest answer kept per "About you" field: hints for a prompt, not documents.
 BRIEF_FIELD_MAX = 1000
 #: Most flows offered on one connection; older ones can be archived.
-MAX_FLOWS = 30
+MAX_FLOWS = 60          # the default of settings.setup_max_analyses
 
 
 class Brief(BaseModel):
@@ -268,7 +268,8 @@ async def start_flow(source_id: int, db: AsyncSession = Depends(get_db),
     source = await source_or_404(db, source_id, user)
     j = await _journey_or_start(db, user, source)
     flows = await _flows(db, j)
-    if len(flows) >= MAX_FLOWS:
+    from ..core.config import settings as _settings
+    if len(flows) >= int(getattr(_settings, "setup_max_analyses", MAX_FLOWS) or MAX_FLOWS):
         raise HTTPException(400, "Too many analyses on this connection; remove one first")
     # An empty flow already waiting is the new one: pressing twice makes one.
     f = next((x for x in flows if not x.proposals and not x.dataset_ids and x.step == "data"

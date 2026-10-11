@@ -114,6 +114,15 @@ class Settings(BaseSettings):
     # carries. Every chart is drawn and judged before it is offered in all
     # three modes.
     setup_ai_selection: Literal["cards", "free", "both"] = "free"
+    # How much the guided setup's dashboards use beyond a number, a bar and a
+    # line (services/guided_setup/dress.py): basic -- the simplest chart for
+    # each question, nothing added; balanced -- further chart kinds where the
+    # question calls for one, plus display rules, a number's history, filter
+    # controls, click-to-filter and buttons between pages; rich -- the same,
+    # with more of the further kinds per page.
+    setup_dashboard_richness: Literal["basic", "balanced", "rich"] = "balanced"
+    # Analyses (guided-setup runs) one connection may hold before one must be removed.
+    setup_max_analyses: int = Field(default=60, ge=1)
     # What each numeric column of a dataset IS (an amount to add up, a level to
     # average, a code...) is asked of the model ONCE per dataset and kept in
     # its column settings (services/column_classes.py). That is what lets the

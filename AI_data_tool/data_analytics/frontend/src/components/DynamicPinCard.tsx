@@ -1,3 +1,4 @@
+import { sayText } from '../lib/readbackText'
 import { useT } from '../i18n'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
@@ -140,7 +141,7 @@ export default function DynamicPinCard({ tile, refreshNonce }: {
       {/* Template-first: the deterministic sentence renders immediately; the
           guarded LLM rewrite replaces it only when it arrives. */}
       <p style={{ fontSize: 13, margin: 0, lineHeight: 1.45 }}>
-        {polished ?? finding.title}
+        {polished ?? sayText(t9, finding.title, (finding as { title_i18n?: { key: string; vars?: Record<string, unknown> } | null }).title_i18n as never)}
       </p>
       <div style={{ fontSize: 11, color: 'var(--muted)' }}>
         <Link to={`/datasets/${tile.dataset_id}`}

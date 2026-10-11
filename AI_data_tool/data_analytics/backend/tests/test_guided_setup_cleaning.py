@@ -64,3 +64,36 @@ def test_an_ai_rule_touching_many_rows_is_left_to_the_person():
     typo = item("rule", "a, b", {"kind": "exclude", "expression": "e2", "rule": "r2", "label": "x"}, rows=6)
     kinds = [a["rows"] for a in cleaning.plan([late, typo], "en", rows=7203)]
     assert kinds == [6]                    # 0.08% is applied; 4.3% may be real events
+
+
+# ── a nearly empty column that is the detail of some rows (retry-2, 2026-10-11) ──
+def _events_frame(n=2000, events=60, seed=0):
+    import numpy as np
+    import pandas as pd
+    rng = np.random.default_rng(seed)
+    has = np.zeros(n, dtype=bool)
+    has[rng.choice(n, events, replace=False)] = True
+    return pd.DataFrame({"id": range(n), "flag": has, "count": np.where(has, 1, 0),
+                         "hours": np.where(has, rng.uniform(1, 40, n), np.nan),
+                         "junk": np.where(rng.random(n) < 0.01, 1.0, np.nan)})
+
+
+def test_a_column_filled_only_where_a_flag_is_yes_is_a_detail_and_is_kept():
+    from app.services.data_quality import quality_report
+    from app.services.guided_setup import health
+    df = _events_frame()
+    assert health.detail_of(df, "hours") in ("flag", "count")
+    assert health.detail_of(df, "junk") is None                       # empty at random: nothing marks its rows
+    items = health.column_items(quality_report(df), df, "en")
+    useless = {i["column"] for i in items if i["kind"] == "useless"}
+    assert "hours" not in useless and "junk" in useless
+    planned = {a["column"] for a in cleaning.plan(items, "en") if a["kind"] == "useless"}
+    assert planned == {"junk"}
+
+
+def test_a_handful_of_values_is_still_too_little_and_a_flag_on_most_rows_marks_nothing():
+    from app.services.guided_setup import health
+    assert health.detail_of(_events_frame(events=8), "hours") is None  # fewer than 20 values
+    df = _events_frame()
+    df["most"] = True                                                   # a column that is "yes" everywhere marks nothing
+    assert health.detail_of(df.drop(columns=["flag", "count"]), "hours") is None

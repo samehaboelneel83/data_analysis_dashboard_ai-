@@ -100,6 +100,13 @@ SPECS: list[Spec] = [
        "charts the platform built (faster; questions about part of the rows may go unanswered). both: it chooses "
        "first and designs for the questions left.",
        options=("cards", "free", "both")),
+    _S("setup_dashboard_richness", "ai", "Guided setup: how rich the dashboards are",
+       "basic: the simplest chart for each question, nothing added. balanced: further chart kinds where a question "
+       "calls for one, with display rules, a number's history, filter controls, click-to-filter and buttons "
+       "between pages. rich: the same, with more of the further kinds per page.",
+       options=("basic", "balanced", "rich")),
+    _S("setup_max_analyses", "data", "Analyses per connection",
+       "How many guided-setup analyses one connection may hold before one must be removed.", minimum=1),
     _S("classify_columns_with_model", "ai", "Ask the model once what each column is",
        "Off: columns are classified from their values alone. The answer is kept and never asked twice."),
     _S("ai_for_uploads_default", "ai", "Allow AI on uploaded files by default",

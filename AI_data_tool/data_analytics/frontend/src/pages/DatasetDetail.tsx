@@ -1,3 +1,4 @@
+import { sayText } from '../lib/readbackText'
 import { useEffect, useLayoutEffect, useState, useCallback, useRef, useContext } from 'react'
 import KeyInfluencersResultView from '../components/analysis/KeyInfluencersResult'
 import { pickInfluencerOutcome } from './datasetDetail/influencerOutcome'
@@ -1315,7 +1316,7 @@ export default function DatasetDetail() {
                                 <span style={{ fontSize: 10.5, color: 'var(--muted)', marginInlineStart: 'auto' }}>{Math.round(f.score * 100)}</span>
                               </div>
                               {/* QA3 D5: own direction; numbers and ranges keep their order */}
-                              <div dir="auto" style={{ fontSize: 13, fontWeight: 600, marginBottom: 3 }}>{isolateNumbers(f.title)}</div>
+                              <div dir="auto" style={{ fontSize: 13, fontWeight: 600, marginBottom: 3 }}>{isolateNumbers(sayText(tr, f.title, (f as { title_i18n?: { key: string; vars?: Record<string, unknown> } | null }).title_i18n as never))}</div>
                               <div dir="auto" style={{ fontSize: 11, color: 'var(--muted)' }}>{isolateNumbers(f.detail)}</div>
                               <FindingChart datasetId={ds.id} finding={f}
                                 columnTypes={Object.fromEntries(ds.columns.map(c => [c.name, c.dtype ?? '']))} />

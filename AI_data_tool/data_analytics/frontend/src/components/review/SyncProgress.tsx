@@ -1,4 +1,4 @@
-import { useT } from '../../i18n'
+import { useT, type MessageKey, type TranslateFn } from '../../i18n'
 import type { SyncRun } from '../../services/api'
 import { useDirection } from '../../contexts/DirectionContext'
 import { friendlyMessage } from '../../lib/friendlyError'
@@ -12,14 +12,16 @@ import { friendlyMessage } from '../../lib/friendlyError'
  * that as a failure. The reader needs to know WHICH part did not run.
  */
 
-const STAGE_LABELS: Record<string, string> = {
-  discover: 'Discover tables',
-  profile: 'Profile columns',
-  sample: 'Sample rows',
-  infer_keys: 'Infer relationships',
-  infer_semantic: 'Infer meaning',
-  drift: 'Check for schema drift',
+const STAGE_LABELS: Record<string, MessageKey> = {
+  discover: 'syp.stage.discover', profile: 'syp.stage.profile', sample: 'syp.stage.sample',
+  infer_keys: 'syp.stage.inferKeys', infer_semantic: 'syp.stage.inferSemantic', drift: 'syp.stage.drift',
 }
+/** The server's status words (ok, failed, skipped, partial, running), in the reader's language. */
+const STATUS_LABELS: Record<string, MessageKey> = {
+  ok: 'syp.st.ok', failed: 'syp.st.failed', skipped: 'syp.st.skipped', partial: 'syp.st.partial',
+  running: 'syp.st.running', pending: 'syp.st.pending',
+}
+const status = (t: TranslateFn, s: string) => (STATUS_LABELS[s] ? t(STATUS_LABELS[s]) : s)
 
 const STATUS_COLOR: Record<string, string> = {
   ok: '#16785a',
@@ -27,23 +29,23 @@ const STATUS_COLOR: Record<string, string> = {
   skipped: '#64748b',
 }
 
-function stageDetail(name: string, detail?: Record<string, any>): string | null {
+function stageDetail(t: TranslateFn, name: string, detail?: Record<string, any>): string | null {
   if (!detail) return null
   if (name === 'infer_keys' && detail.proposed != null) {
-    return `${detail.proposed} proposed (${detail.high_confidence ?? 0} high confidence)`
+    return t('syp.d.proposed', { n: detail.proposed, k: detail.high_confidence ?? 0 })
   }
   if (name === 'profile' && detail.columns_profiled != null) {
-    return `${detail.columns_profiled} columns`
+    return t('syp.d.columns', { n: detail.columns_profiled })
   }
   if (name === 'infer_semantic') {
     const parts: string[] = []
-    if (detail.semantic_types) parts.push(`${detail.semantic_types} typed`)
-    if (detail.descriptions) parts.push(`${detail.descriptions} described`)
-    if (detail.llm_used === false) parts.push('model not used')
+    if (detail.semantic_types) parts.push(t('syp.d.typed', { n: detail.semantic_types }))
+    if (detail.descriptions) parts.push(t('syp.d.described', { n: detail.descriptions }))
+    if (detail.llm_used === false) parts.push(t('syp.d.noModel'))
     return parts.join(', ') || null
   }
   if (name === 'drift') {
-    if (detail.changed === false) return 'no change'
+    if (detail.changed === false) return t('syp.d.noChange')
     return detail.summary ?? null
   }
   if (detail.reason) return detail.reason
@@ -66,18 +68,18 @@ export default function SyncProgress({ run }: { run: SyncRun | null }) {
   return (
     <div>
       <div style={{ fontSize: 13, marginBottom: 8 }}>
-        {t9('syp.lastRun')} <strong>{run.status}</strong>
+        {t9('syp.lastRun')} <strong>{status(t9, run.status)}</strong>
         {run.finished_at && <> · {new Date(run.finished_at).toLocaleString(language, { dateStyle: 'medium', timeStyle: 'medium' })}</>}
       </div>
       <ol style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: 13 }}>
         {run.stages.map(stage => {
-          const detail = stageDetail(stage.name, stage.detail)
+          const detail = stageDetail(t9, stage.name, stage.detail)
           return (
             <li key={stage.name} style={{ display: 'flex', gap: 10, padding: '4px 0' }}>
               <span style={{ color: STATUS_COLOR[stage.status] ?? '#64748b', fontWeight: 600, minWidth: 62 }}>
-                {stage.status}
+                {status(t9, stage.status)}
               </span>
-              <span style={{ minWidth: 170 }}>{STAGE_LABELS[stage.name] ?? stage.name}</span>
+              <span style={{ minWidth: 170 }}>{STAGE_LABELS[stage.name] ? t9(STAGE_LABELS[stage.name]) : stage.name}</span>
               <span style={{ color: '#64748b' }}>
                 {stage.error ? <Friendly text={stage.error} /> : detail}
                 {stage.ms != null && stage.status !== 'skipped' && ` · ${stage.ms}ms`}

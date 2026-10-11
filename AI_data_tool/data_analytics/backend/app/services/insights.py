@@ -22,6 +22,7 @@ from __future__ import annotations
 import re
 
 import pandas as pd
+from .readback import Said, _s, as_i18n
 from .semantic_guard import (default_summary, direction_of, is_identifier, is_outcome, is_quantity,
                              value_order)
 
@@ -299,7 +300,7 @@ def _mean_standouts(v: pd.Series, levels: pd.Series, cat: str, m: str,
         out.append({
             "kind": "standout",
             "score": min((hi / overall - 1) * 2, 1.0) * (0.4 if weak else 1.0),
-            "title": f"{val_label(cat, hi_name)} has the highest average {col_label(m)}",
+            "title": _s("ins.highest", "{g} has the highest average {m}", cap=False, g=val_label(cat, hi_name), m=col_label(m)),
             "detail": (f"{_fmt(hi)} against {_fmt(overall)} overall, across "
                        f"{int(stats.loc[hi_name, 'count']):,} rows."
                        + (f" p = {p:.3g}." if p is not None else "")),
@@ -316,7 +317,7 @@ def _mean_standouts(v: pd.Series, levels: pd.Series, cat: str, m: str,
         out.append({
             "kind": "laggard",
             "score": min((1 - lo / overall) * 2, 0.9) * (0.4 if weak else 1.0),
-            "title": f"{val_label(cat, lo_name)} has the lowest average {col_label(m)}",
+            "title": _s("ins.lowest", "{g} has the lowest average {m}", cap=False, g=val_label(cat, lo_name), m=col_label(m)),
             "detail": (f"{_fmt(lo)} against {_fmt(overall)} overall, across "
                        f"{int(stats.loc[lo_name, 'count']):,} rows."),
             "columns": [cat, m],
@@ -444,6 +445,13 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
     def m_words(m: str) -> str:
         return f"average {col_label(m)}" if m in intensive else col_label(m)
 
+    def m_said(m: str, cap: bool = False):
+        """`m_words` as a piece of a keyed sentence: "average X" has a key, a bare name is itself."""
+        if m in intensive:
+            return _s("ins.w.Avg" if cap else "ins.w.avg", ("Average" if cap else "average") + " {c}", cap=False, c=col_label(m))
+        name = col_label(m)
+        return name[:1].upper() + name[1:] if cap else name
+
     # 5.21: the five detector families read the same frame and write nothing
     # but their own findings, so they run side by side on a large frame
     # (pandas releases the GIL in its heavy kernels). Each fills its OWN list
@@ -514,7 +522,8 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                 direction = "above" if change > 0 else "below"
                 findings.append({
                     "kind": "trend", "score": min(abs(change) / 100, 1.0) * (0.6 if volume_note else 1.0),
-                    "title": f"{m_words(m)[:1].upper() + m_words(m)[1:]} in {monthly.index[-1]} ran {abs(change):.0f}% {direction} its monthly average",
+                    "title": _s(f"ins.trend.{direction}", "{m} in {when} ran {pct}% " + direction + " its monthly average", cap=False,
+                                m=m_said(m, True), when=str(monthly.index[-1]), pct=f"{abs(change):.0f}"),
                     "detail": f"{_fmt(float(last))} against an average of {_fmt(float(prior))} over the prior {len(monthly) - 1} months.{volume_note}",
                     "columns": [m, dcol],
                     # The evidence boundary: the numbers as DATA. A consumer must
@@ -579,9 +588,11 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                         "kind": "standout",
                         "score": min((top_frac - uniform) * 2, 1.0) * (0.4 if weak else 1.0)
                                  * (0.3 if top_frac >= ONLY_ONE_SHARE else 1.0),
-                        "title": (f"Almost all {col_label(m)} is in {group_label(cat, top_name)}"
+                        "title": (_s("ins.almostAll", "Almost all {m} is in {g}", cap=False, m=col_label(m),
+                                     g=group_label(cat, top_name))
                                   if top_frac >= ONLY_ONE_SHARE else
-                                  f"{group_label(cat, top_name)} carries {top_frac * 100:.0f}% of {col_label(m)}"),
+                                  _s("ins.carries", "{g} carries {pct}% of {m}", cap=False, g=group_label(cat, top_name),
+                                     pct=f"{top_frac * 100:.0f}", m=col_label(m))),
                         "detail": detail,
                         "columns": [cat, m],
                         "figures": {"share_pct": round(top_frac * 100, 2),
@@ -601,7 +612,8 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                 if 0 < low_frac < uniform * 0.45 and n_levels <= 8 and not low_follows:
                     findings.append({
                         "kind": "laggard", "score": min((uniform - low_frac) * 2, 0.9),
-                        "title": f"{val_label(cat, low_name)} trails the other {col_label(cat)} values on {col_label(m)}",
+                        "title": _s("ins.trails", "{g} trails the other {c} values on {m}", cap=False,
+                                    g=val_label(cat, low_name), c=col_label(cat), m=col_label(m)),
                         "detail": f"{low_frac * 100:.0f}% of {m}, against an even share of {uniform * 100:.0f}%.",
                         "columns": [cat, m],
                         "figures": {"share_pct": round(low_frac * 100, 2),
@@ -637,7 +649,8 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                         findings.append({
                             "kind": "correlation",
                             "score": (abs(float(r)) - 0.3) * (0.4 if weak else 1.0),
-                            "title": f"{col_label(a)} {word} {col_label(b)} (r = {r:.2f})",
+                            "title": _s("ins.with" if r > 0 else "ins.against", "{a} " + word + " {b} (r = {r})", cap=False,
+                                        a=col_label(a), b=col_label(b), r=f"{r:.2f}"),
                             "detail": detail,
                             "columns": [a, b],
                             "figures": {"r": round(float(r), 4)},
@@ -676,7 +689,8 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                 if abs(shift) > 0.02:
                     findings.append({
                         "kind": "outlier_impact", "score": min(abs(shift) * 4, 0.9),
-                        "title": f"{count} outlying rows move the average {col_label(m)} by {abs(shift) * 100:.0f}%",
+                        "title": _s("ins.outMove", "{n} outlying rows move the average {m} by {pct}%", cap=False,
+                                    n=count, m=col_label(m), pct=f"{abs(shift) * 100:.0f}"),
                         "detail": (f"Average {_fmt(mean_all)} with them, {_fmt(mean_in)} without; "
                                    f"{count} of {len(v):,} rows sit beyond the 1.5×IQR fences."),
                         "columns": [m],
@@ -690,7 +704,8 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
             if count / len(v) > 0.005 and abs(share) > 0.05:
                 findings.append({
                     "kind": "outlier_impact", "score": min(abs(share) * 2, 0.95),
-                    "title": f"{count} outlying rows carry {share * 100:.0f}% of {col_label(m)}",
+                    "title": _s("ins.outCarry", "{n} outlying rows carry {pct}% of {m}", cap=False,
+                                n=count, pct=f"{share * 100:.0f}", m=col_label(m)),
                     "detail": f"{count} of {len(v):,} rows sit beyond the 1.5×IQR fences.",
                     "columns": [m],
                     "figures": {"share_pct": round(float(share) * 100, 2),
@@ -704,7 +719,7 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
             if miss > 0.2:
                 findings.append({
                     "kind": "data_quality", "score": min(miss, 0.85),
-                    "title": f"{col_label(c)} is {miss * 100:.0f}% missing",
+                    "title": _s("ins.missing", "{c} is {pct}% missing", cap=False, c=col_label(c), pct=f"{miss * 100:.0f}"),
                     "detail": "Aggregations over this column silently ignore the gaps.",
                     "columns": [c],
                     "figures": {"missing_pct": round(float(miss) * 100, 2)},
@@ -717,7 +732,9 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                     findings.append({
                         "kind": "data_quality", "score": 0.4,
                         "figures": {"gap_count": int(gaps)},
-                        "title": f"{col_label(dcol)} has {gaps} gap{'s' if gaps != 1 else ''} of more than two weeks",
+                        "title": (_s("ins.gaps", "{c} has {n} gaps of more than two weeks", cap=False, c=col_label(dcol), n=gaps)
+                                  if gaps != 1 else
+                                  _s("ins.gap", "{c} has 1 gap of more than two weeks", cap=False, c=col_label(dcol))),
                         "detail": "Trend lines bridge these gaps as if the time in between never happened.",
                         "columns": [dcol],
                     })
@@ -771,8 +788,8 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                     findings.append({
                         "kind": "rate",
                         "score": min((hi / overall - 1) * 1.2, 1.0) * (0.4 if weak else 1.0),
-                        "title": (f"{group_label(cat, hi_name)} has the highest share of {what}: "
-                                  f"{hi * 100:.1f}% against {overall * 100:.1f}% overall"),
+                        "title": _s("ins.rate", "{g} has the highest share of {what}: {hi}% against {all}% overall", cap=False,
+                                    g=group_label(cat, hi_name), what=what, hi=f"{hi * 100:.1f}", all=f"{overall * 100:.1f}"),
                         "detail": (f"{int(stats.loc[hi_name, 'sum']):,} of {int(stats.loc[hi_name, 'count']):,} rows; "
                                    f"the lowest {col_label(cat)} is at {lo * 100:.1f}%. Groups under "
                                    f"{RATE_MIN_BASE} rows are left out."
@@ -817,9 +834,9 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                 findings.append({
                     "kind": "gradient",
                     "score": min(abs(last - first) / abs(first), 1.0) * 0.9,
-                    "title": (f"Average {col_label(m)} {word} with every step of {col_label(cat)}: "
-                              f"{_fmt(first)} at {val_label(cat, stats.index[0])}, "
-                              f"{_fmt(last)} at {val_label(cat, stats.index[-1])}"),
+                    "title": _s(f"ins.gradient.{word}", "Average {m} " + word + " with every step of {c}: {a} at {ga}, {b} at {gb}",
+                                cap=False, m=col_label(m), c=col_label(cat), a=_fmt(first), ga=val_label(cat, stats.index[0]),
+                                b=_fmt(last), gb=val_label(cat, stats.index[-1])),
                     "detail": " → ".join(f"{val_label(cat, k)} {_fmt(x)}" for k, x in zip(stats.index, means)) + ".",
                     "columns": [cat, m],
                     "figures": {"first": round(float(first), 4), "last": round(float(last), 4),
@@ -860,8 +877,8 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                     a = max(out, key=lambda x: x["deviations"])
                     findings.append({
                         "kind": "anomaly", "score": min(0.4 + a["deviations"] / 20, 0.95),
-                        "title": (f"{what[:1].upper() + what[1:]} in {monthly.index[a['index']]} was far "
-                                  f"{a['side']} its usual range"),
+                        "title": _s(f"ins.anomaly.{a['side']}", "{m} in {when} was far " + str(a["side"]) + " its usual range",
+                                    cap=False, m=m_said(m, True), when=str(monthly.index[a["index"]])),
                         "detail": (f"{_fmt(a['value'])} against an expected {_fmt(a['lo'])} to {_fmt(a['hi'])}, "
                                    f"judged from the months before it."
                                    + (f" {len(out) - 1} other month{'s' if len(out) > 2 else ''} also fell outside."
@@ -875,8 +892,10 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                 if cp:
                     findings.append({
                         "kind": "change_point", "score": min(0.4 + abs(cp["shift_pct"]) / 100, 0.9),
-                        "title": (f"{what[:1].upper() + what[1:]} has run {abs(cp['shift_pct']):.0f}% "
-                                  f"{'higher' if cp['shift'] > 0 else 'lower'} since {monthly.index[cp['index']]}"),
+                        "title": _s("ins.shift.higher" if cp["shift"] > 0 else "ins.shift.lower",
+                                    "{m} has run {pct}% " + ("higher" if cp["shift"] > 0 else "lower") + " since {when}",
+                                    cap=False, m=m_said(m, True), pct=f"{abs(cp['shift_pct']):.0f}",
+                                    when=str(monthly.index[cp["index"]])),
                         "detail": (f"About {_fmt(cp['before'])} a month before, {_fmt(cp['after'])} from then on. "
                                    "The change is in the level, not in one month."),
                         "columns": [m, dcol], "p_value": cp["p_value"], "significant": True,
@@ -911,8 +930,8 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                 findings.append({
                     "kind": "pareto",
                     "score": min(0.35 + (PARETO_FEW - few / n_levels) / PARETO_FEW * 0.55, 0.9),
-                    "title": (f"{few} of {n_levels} {col_label(cat)} values carry "
-                              f"{running.iloc[few - 1] * 100:.0f}% of {col_label(m)}"),
+                    "title": _s("ins.pareto", "{k} of {n} {c} values carry {pct}% of {m}", cap=False, k=few, n=n_levels,
+                                c=col_label(cat), pct=f"{running.iloc[few - 1] * 100:.0f}", m=col_label(m)),
                     "detail": (f"Largest first: {', '.join(str(x) for x in names)}"
                                + ("..." if few > 3 else "") + f". The other {n_levels - few} share the rest."),
                     "columns": [cat, m],
@@ -958,6 +977,12 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
         if high or low:
             f["tone"] = "good" if (high and way == "higher_better") or (low and way == "higher_worse") else "bad"
 
+    # A title written with a key travels twice: as English, and as key + pieces
+    # for a reader in another language (readback._s; the browser's `rb.ins.*`).
+    for f in findings:
+        if isinstance(f.get("title"), Said):
+            f["title_i18n"] = as_i18n(f["title"])
+            f["title"] = str(f["title"])
     findings.sort(key=lambda f: f["score"], reverse=True)
     # A ranked list that is five "outlying rows" lines says one thing five
     # times: each kind keeps its strongest few, and the places go to the rest.

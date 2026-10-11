@@ -75,6 +75,20 @@ const PARAM_LABEL: Record<string, MessageKey> = {
   date_column: 'stat.param.dateColumn', measure: 'stat.param.measure', factors: 'stat.param.factors',
   granularity: 'stat.param.granularity', periods: 'stat.param.periods',
 }
+/** An analysis by the name a person would give it, and one plain line on what
+ *  it does -- from the catalogue when it knows the analysis, else the
+ *  registry's own words (a newly registered one still shows). */
+export function analysisName(name: string, t: (k: MessageKey) => string): string {
+  const key = `an.name.${name}` as MessageKey
+  const said = t(key)
+  return !said || said === key ? name.replace(/_/g, ' ') : said
+}
+export function analysisDescription(name: string, fallback: string, t: (k: MessageKey) => string): string {
+  const key = `an.desc.${name}` as MessageKey
+  const said = t(key)
+  return !said || said === key ? fallback : said
+}
+
 export function paramLabel(key: string, t: (k: MessageKey) => string): string {
   const k = PARAM_LABEL[key]
   if (k) return t(k)
@@ -183,7 +197,7 @@ export default function StatisticsPanel({ datasetId, columns, mode, only }: {
           style={{ width: '100%' }}>
           <option value="">{t('qbd.choose')}</option>
           {specs.map(s => (
-            <option key={s.name} value={s.name}>{s.name.replace(/_/g, ' ')}</option>
+            <option key={s.name} value={s.name}>{analysisName(s.name, t)}</option>
           ))}
         </select>
 
@@ -191,7 +205,7 @@ export default function StatisticsPanel({ datasetId, columns, mode, only }: {
             would ask, so they are used verbatim rather than paraphrased. */}
         {spec && (
           <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8 }}>
-            {spec.description}
+            {analysisDescription(spec.name, spec.description, t)}
           </p>
         )}
 
@@ -298,7 +312,7 @@ export default function StatisticsPanel({ datasetId, columns, mode, only }: {
               {specs.slice(0, 8).map(sp => (
                 <button key={sp.name} type="button" className="btn btn-sm" onClick={() => pick(sp.name)}
                   title={sp.description}>
-                  {sp.name.replace(/_/g, ' ')}
+                  {analysisName(sp.name, t)}
                 </button>
               ))}
             </div>

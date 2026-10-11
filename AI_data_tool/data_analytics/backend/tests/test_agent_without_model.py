@@ -30,4 +30,10 @@ def test_it_lists_only_analyses_the_data_can_support():
 def test_arabic_column_names_are_matched_too():
     c = ctx(t={"المبلغ": "numeric", "المنطقة": "text"})
     said = without_model.answer("ما هو المبلغ حسب المنطقة", c)
-    assert "المبلغ (in t): a number" in said and "المنطقة (in t): a category" in said
+    # Asked in Arabic, answered in Arabic (it used to answer in English whatever the question).
+    assert "المبلغ (في t): رقم" in said and "المنطقة (في t): فئة" in said
+    assert "تعذّر استخدام نموذج الذكاء الاصطناعي" in said and "I could not" not in said
+    # ...and the same question in English is still answered in English.
+    english = without_model.answer("the المبلغ by المنطقة", ctx(t={"amount": "numeric"}))
+    assert english.startswith("تعذّر")                     # Arabic letters in the question decide the language
+    assert without_model.answer("amount by group", ctx(t={"amount": "numeric"})).startswith("I could not")

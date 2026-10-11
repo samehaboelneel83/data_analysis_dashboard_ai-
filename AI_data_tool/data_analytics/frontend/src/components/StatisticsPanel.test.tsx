@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import StatisticsPanel from './StatisticsPanel'
+import { analysisDescription, analysisName } from './StatisticsPanel'
 import { analysisCatalogueApi } from '../services/api'
 import type { DatasetColumn } from '../services/api'
 
@@ -145,11 +146,15 @@ describe('the picker comes from the registry', () => {
     expect(values).not.toContain('forecast_ets')
   })
 
-  it('shows the registry’s own description as help text', async () => {
-    // Written as the question a user would ask, so it is used verbatim.
+  it('says in the reader’s language what an analysis does, and falls back to the registry’s own words', async () => {
+    // A known analysis has its plain line in the catalogue (so an Arabic
+    // reader is not handed the registry's English)...
     panel()
     fireEvent.change(await picker(), { target: { value: 'compare_groups' } })
-    expect(await screen.findByText(/genuinely different across groups/i)).toBeInTheDocument()
+    expect(await screen.findByText(/differs between groups by more than chance/i)).toBeInTheDocument()
+    // ...and one the catalogue has never heard of still shows, in the registry's words.
+    expect(analysisDescription('brand_new_analysis', 'Does something new.', k => k)).toBe('Does something new.')
+    expect(analysisName('brand_new_analysis', k => k)).toBe('brand new analysis')
   })
 
   it('reports a failure to load the catalogue instead of an empty picker', async () => {

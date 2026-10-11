@@ -30,3 +30,11 @@ def test_words_that_match_nothing_still_get_the_ready_charts():
 def test_with_no_cards_it_points_at_the_builder():
     got = cw.answer("fee", COLUMNS, None)
     assert got["suggestions"] == [] and "Fields" in got["reply"]
+
+
+def test_a_message_in_arabic_is_answered_in_arabic():
+    got = cw.answer("أضف مخططًا عن fee لكل region", COLUMNS, CARDS, "AI is switched off for the data this dashboard reads")
+    assert got["language"] == "ar"
+    assert "فلم تتغيّر الصفحة" in got["reply"] and "الذكاء الاصطناعي موقوف" in got["reply"]
+    assert "I could not" not in got["reply"] and "Columns your words" not in got["reply"]
+    assert [s["title"] for s in got["suggestions"]] == ["Fee by region"]       # the chart's own words stay the engine's

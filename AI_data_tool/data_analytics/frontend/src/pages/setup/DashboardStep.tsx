@@ -213,7 +213,12 @@ function DesignCard({ d, busy, multi, used, checked, onToggle, onChange }: {
   const t = useT()
   const [chat, setChat] = useState(false)
   const [message, setMessage] = useState('')
-  const charts = d.proposal.widgets.filter(w => w.widget_type !== 'slicer' && w.widget_type !== 'text')
+  const charts = d.proposal.widgets.filter(w => w.widget_type !== 'slicer' && w.widget_type !== 'text' && w.widget_type !== 'button')
+  const links = d.proposal.widgets.filter(w => w.widget_type === 'button').length
+  const clicks = (d.proposal.relations ?? []).length > 0
+  const drills = charts.filter(w => (w as { drill_to?: string }).drill_to === 'drill').length
+  const marked = charts.filter(w => Array.isArray((w.config as { display_rules?: unknown[] } | undefined)?.display_rules)).length
+  const history = charts.filter(w => !!(w.config as { sparkline_date?: string } | undefined)?.sparkline_date).length
   const filters = d.proposal.widgets.filter(w => w.widget_type === 'slicer').length
   const boxId = `setup-design-${d.id}`
   return (
@@ -249,6 +254,12 @@ function DesignCard({ d, busy, multi, used, checked, onToggle, onChange }: {
       <ul className="setup-facts">
         <li>{t('setup.b.chartsN', { n: localDigits(String(charts.length)) })}</li>
         {filters > 0 && <li>{t('setup.b.filtersN', { n: localDigits(String(filters)) })}</li>}
+        {clicks && <li>{t('setup.b.clicks')}</li>}
+        {marked > 0 && <li>{t('setup.b.marked', { n: localDigits(String(marked)) })}</li>}
+        {history > 0 && <li>{t('setup.b.history', { n: localDigits(String(history)) })}</li>}
+        {links > 0 && <li>{t('setup.b.links', { n: localDigits(String(links)) })}</li>}
+        {drills > 0 && <li>{t('setup.b.drills', { n: localDigits(String(drills)) })}</li>}
+        {d.proposal.page_type === 'drillthrough' && <li>{t('setup.b.drillPage')}</li>}
       </ul>
       {!used && (
         <div className="setup-table__actions">

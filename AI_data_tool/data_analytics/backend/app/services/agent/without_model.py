@@ -77,26 +77,78 @@ def _have(ctx) -> dict[str, int]:
     return have
 
 
+_ARABIC = re.compile(r"[\u0600-\u06FF]")
+#: The same plain lines for a question asked in Arabic.
+_PLAIN_AR = {
+    "full_profile": "لخّص كل عمود: مداه وقيمه المعتادة وما ينقصه.",
+    "statistical_test": "افحص هل الفرق بين المجموعات حقيقي أم قد يكون مصادفة.",
+    "explanation": "رتّب الأعمدة بحسب مقدار تحريكها لرقم.",
+    "key_influencers": "اعرف ما الذي يصاحب نتيجة معيّنة.",
+    "segment": "اجمع الصفوف المتشابهة.",
+    "association_rules": "اعرف القيم التي تميل إلى الظهور معًا.",
+    "anomaly": "اعرف القيم البعيدة عن المعتاد.",
+    "forecast": "أسقِط رقمًا على الفترات القادمة مع نطاق مرجّح.",
+    "forecast_goal": "قدّر متى يبلغ رقمٌ هدفًا.",
+    "forecast_scenario": "انظر كيف يتغيّر الإسقاط إذا تغيّر شيء آخر.",
+    "goal_seek": "احسب ما يجب أن يكون عليه رقم ليبلغ رقم آخر هدفًا.",
+    "decision_tree": "اعرف القواعد البسيطة التي تفصل نتيجة عن أخرى.",
+    "automated_prediction": "اختبر مدى إمكان التنبؤ بعمود من الأعمدة الأخرى.",
+    "text_topics": "اعرف الموضوعات التي يتناولها عمود نصي.",
+    "text_sentiment": "اقرأ هل عمود نصي إيجابي أم سلبي.",
+}
+_WORDS = {
+    "en": {
+        "lead": "I could not use the AI model for this question{why}, so no query was written. "
+                "Here is what the platform can compute from this data without AI.",
+        "columns": "Columns your question points at:",
+        "line": "- {column} (in {table}): a {kind}; {how}.",
+        "kind": {"number": "number", "date": "date", "category": "category"},
+        "how": {"number": "can be counted, totalled or averaged, and compared across groups",
+                "date": "can be used to see how things change over time",
+                "category": "can be used to split and compare groups"},
+        "none": "None of the question's words matched a column name in this data, "
+                "so try the name of a column or table as it is written.",
+        "analyses": "Analyses this data supports (run them from the dataset's Analysis tab):",
+        "charts": "Charts of these columns, with what each one shows, are in the dashboard builder under Suggest.",
+    },
+    "ar": {
+        "lead": "تعذّر استخدام نموذج الذكاء الاصطناعي لهذا السؤال{why}، فلم يُكتب أي استعلام. "
+                "إليك ما تستطيع المنصة حسابه من هذه البيانات دون ذكاء اصطناعي.",
+        "columns": "الأعمدة التي تشير إليها كلمات سؤالك:",
+        "line": "- {column} (في {table}): {kind}؛ {how}.",
+        "kind": {"number": "رقم", "date": "تاريخ", "category": "فئة"},
+        "how": {"number": "يمكن عدّه أو جمعه أو حساب متوسطه، ومقارنته بين المجموعات",
+                "date": "يمكن استخدامه لمعرفة كيف تتغير الأمور عبر الزمن",
+                "category": "يمكن استخدامه لتقسيم المجموعات ومقارنتها"},
+        "none": "لم تطابق أيٌّ من كلمات السؤال اسم عمود في هذه البيانات؛ "
+                "جرّب اسم عمود أو جدول كما هو مكتوب.",
+        "analyses": "التحليلات التي تدعمها هذه البيانات (شغّلها من تبويب التحليل في مجموعة البيانات):",
+        "charts": "مخططات هذه الأعمدة، مع ما يُظهره كل منها، موجودة في منشئ اللوحات تحت «اقترح».",
+    },
+}
+
+
+def language_of(text: str | None) -> str:
+    """The language to answer in: Arabic when the question was written in it."""
+    return "ar" if _ARABIC.search(text or "") else "en"
+
+
 def answer(question: str, ctx, reason: str | None = None) -> str:
-    """Plain words: what can be computed for this question without AI."""
+    """Plain words, in the language of the question: what can be computed for it without AI."""
+    lang = language_of(question)
+    w = _WORDS[lang]
     why = (reason or "").strip()
-    lines = ["I could not use the AI model for this question"
-             + (f" ({why})" if why else "") + ", so no query was written. "
-             "Here is what the platform can compute from this data without AI."]
+    lines = [w["lead"].format(why=f" ({why})" if why else "")]
 
     hits = _mentioned(question, ctx)
+    lines.append("")
     if hits:
-        lines.append("")
-        lines.append("Columns your question points at:")
+        lines.append(w["columns"])
         for table, column, kind in hits:
-            how = {"number": "can be counted, totalled or averaged, and compared across groups",
-                   "date": "can be used to see how things change over time",
-                   "category": "can be used to split and compare groups"}[kind]
-            lines.append(f"- {column} (in {table}): a {kind}; {how}.")
+            lines.append(w["line"].format(column=column, table=table, kind=w["kind"][kind], how=w["how"][kind])
+                         if lang == "ar" else f"- {column} (in {table}): a {kind}; {w['how'][kind]}.")
     else:
-        lines.append("")
-        lines.append("None of the question's words matched a column name in this data, "
-                     "so try the name of a column or table as it is written.")
+        lines.append(w["none"])
 
     have = _have(ctx)
     usable = []
@@ -111,10 +163,13 @@ def answer(question: str, ctx, reason: str | None = None) -> str:
             usable.append(spec)
     if usable:
         lines.append("")
-        lines.append("Analyses this data supports (run them from the dataset's Analysis tab):")
+        lines.append(w["analyses"])
         seen: set[str] = set()
         for spec in usable:
-            first = _PLAIN.get(spec.result_kind) or registry._opening_sentence(spec.description)
+            plain = (_PLAIN_AR if lang == "ar" else _PLAIN).get(spec.result_kind)
+            if plain is None and lang == "ar":
+                continue                       # no Arabic line for it: leave it out rather than switch language
+            first = plain or registry._opening_sentence(spec.description)
             if first in seen:
                 continue
             seen.add(first)
@@ -122,5 +177,5 @@ def answer(question: str, ctx, reason: str | None = None) -> str:
             if len(seen) >= MAX_LISTED:
                 break
     lines.append("")
-    lines.append("Charts of these columns, with what each one shows, are in the dashboard builder under Suggest.")
+    lines.append(w["charts"])
     return "\n".join(lines)

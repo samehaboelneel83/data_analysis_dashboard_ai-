@@ -9,6 +9,7 @@
  * number; this file only draws them, and draws the refusals in words.
  */
 import SaidItems, { saidOf } from '../../analysis/SaidItems'
+import { kiSentence } from '../../analysis/KeyInfluencersResult'
 import { sayText } from '../../../lib/readbackText'
 import { useState } from 'react'
 import { seriesColor } from '../chartUtils'
@@ -501,7 +502,7 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
             {fitName(tr, fit.name)}: <b style={{ color: 'var(--accent)' }}>{fmt(fit.value)}</b>{held ? '' : effect}
             {/* With a partition the headline is the held-out score; the
                 registry's sentence describes the TRAINING fit, so it says so. */}
-            {r.interpretation && <span style={{ color: 'var(--muted)' }}> — {held ? tr('pg.modelsMaps.mr.onTraining', { text: String(r.interpretation) }) : r.interpretation}</span>}
+            {r.interpretation && <span style={{ color: 'var(--muted)' }}> — {held ? tr('pg.modelsMaps.mr.onTraining', { text: sayText(tr, String(r.interpretation), r.interpretation_i18n) }) : sayText(tr, String(r.interpretation), r.interpretation_i18n)}</span>}
           </div>
         )}
         {kind === 'compare' && (
@@ -555,7 +556,7 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
         </>}
         {active === 'rocs' && <RocOverlay models={(data.models ?? []).filter((m: any) => Array.isArray(m.roc))} winner={data.winner} />}
         {active === 'infl' && <Influencers rows={data.influencers ?? []} percent={data.value_format === 'percent'} />}
-        {active === 'infl' && caveats[0] && <p role="note" style={{ fontSize: 10.5, color: 'var(--muted)', margin: '6px 0 0' }}>{caveats[0]}</p>}
+        {active === 'infl' && caveats[0] && <p role="note" style={{ fontSize: 10.5, color: 'var(--muted)', margin: '6px 0 0' }}>{kiSentence(caveats[0], tr)}</p>}
         {active === 'imp' && <Bars rows={(data.rows ?? []).map((x: any) => ({ name: x.name, value: x.value }))} />}
         {active === 'rules' && <TreeOutline node={r.tree} />}
         {active === 'pred' && <>

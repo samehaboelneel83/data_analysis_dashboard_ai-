@@ -49,6 +49,44 @@ ADVANCED = {
     "map_choropleth": "ONLY when a question asks WHERE, and a column holds country names",
 }
 MAX_ADVANCED_PER_PAGE = 1
+#: Further charts, each for the kind of question it answers better than a bar
+#: or a line (settings.setup_dashboard_richness: balanced or rich). The
+#: condition is about the SHAPE of the question, never about a subject.
+EXTRA = {
+    "treemap": "when a question asks how a whole splits across MORE than 5 parts",
+    "area": "when a question is about a TOTAL building up over time -- the volume, not only the direction",
+    "dot_plot": "when a handful of groups sit close together and the exact values matter",
+    "crosstab": "when a question needs the exact numbers across two categories",
+    "funnel": "ONLY when a category holds ordered stages that rows pass through, and a question asks how many "
+              "reach each stage",
+    "sankey": "ONLY when a question asks how one category flows into another (`dimension` to `dimension2`)",
+    "comparative_time_series": "ONLY when a question compares two numbers over the same periods",
+    "forecast": "ONLY when a question asks what comes NEXT for a number with at least a year of history",
+}
+#: Charts beyond the common ones a page may hold, by richness.
+ADVANCED_PER_PAGE = {"basic": 1, "balanced": 2, "rich": 3}
+RICHNESS = ("basic", "balanced", "rich")
+
+
+def richness_now(richness: str | None = None) -> str:
+    """basic | balanced | rich, as set now (settings.setup_dashboard_richness)."""
+    if richness in RICHNESS:
+        return richness
+    from ...core.config import settings
+    mode = str(getattr(settings, "setup_dashboard_richness", "balanced") or "balanced")
+    return mode if mode in RICHNESS else "balanced"
+
+
+def advanced_for(richness: str) -> dict[str, str]:
+    """The charts beyond the common ones, with the condition each is offered under."""
+    return dict(ADVANCED) if richness == "basic" else {**ADVANCED, **EXTRA}
+#: A value rows are only passing through: at least this share of its rows were
+#: begun in the newest periods, which hold at most this share of all rows.
+OPEN_INSIDE = 0.8
+OPEN_RECENT_PERIODS = 2
+OPEN_RECENT_MAX_SHARE = 0.25
+OPEN_MIN_PERIODS = 6
+OPEN_MIN_ROWS = 20
 #: Slices a donut can carry before a bar reads better; bars before a top list does.
 DONUT_MAX = 5
 BAR_MAX = 12
@@ -105,6 +143,8 @@ T = {
            "ratewhy": "The share within each group, so that big groups do not lead only because they are big.",
            "small": " Groups with fewer than {n} rows are left out.",
            "bysize": " (follows the size of each group)",
+           "same": "{x} — about the same for every {dim} ({lo} to {hi})",
+           "open": "Shares of “{col}” leave out the rows still at {values}: what becomes of them is not known yet.",
            "flat": "it shows the same value everywhere", "single": "it has only one group to show",
            "unknown": "most of it is “unknown”", "zero": "its number is exactly zero",
            "tied": "its top values are all the same", "empty": "it has nothing to show",
@@ -119,6 +159,8 @@ T = {
                      "{base} لمقارنة عادلة.",
            "rate": "{title} — النسبة داخل كل مجموعة (٪)",
            "ratewhy": "النسبة داخل كل مجموعة، حتى لا تتصدر المجموعات الكبيرة لمجرد أنها كبيرة.",
+           "same": "{x} — متقارب جدًا لكل {dim} (من {lo} إلى {hi})",
+           "open": "نِسَب «{col}» تستثني الصفوف التي ما زالت عند {values}: ما ستؤول إليه غير معروف بعد.",
            "small": " استُبعدت المجموعات التي تقل عن {n} صفًا.",
            "bysize": " (يتبع حجم كل مجموعة)",
            "flat": "it shows the same value everywhere", "single": "it has only one group to show",
@@ -355,8 +397,9 @@ def honest_text(text: str, allowed: list[float]) -> str:
 
 # ── the prompt ──────────────────────────────────────────────────────────────
 
-def menu(profile: dict) -> tuple[list[str], str]:
-    """(types that may be used, the menu text): simple first, advanced with its condition."""
+def menu(profile: dict, richness: str = "basic") -> tuple[list[str], str]:
+    """(types that may be used, the menu text): the common charts, then the
+    others, each with the kind of question it is for."""
     from ..suggest_dataset_dashboard import REQUIRED_ROLES, WIDGET_GUIDE, usable_widgets
     from ..widget_roles import config_key_for_role
     usable = set(usable_widgets(profile))
@@ -366,11 +409,21 @@ def menu(profile: dict) -> tuple[list[str], str]:
         return f"- {wt}: {WIDGET_GUIDE[wt]}{note}\n    requires: {keys}"
 
     simple = [wt for wt in SIMPLE if wt in usable]
-    advanced = [wt for wt in ADVANCED if wt in usable]
-    text = "SIMPLE CHARTS -- use these for almost everything:\n" + "\n".join(line(wt) for wt in simple)
+    others = advanced_for(richness)
+    advanced = [wt for wt in others if wt in usable and wt in WIDGET_GUIDE]
+    if richness == "basic":
+        text = "SIMPLE CHARTS -- use these for almost everything:\n" + "\n".join(line(wt) for wt in simple)
+        if advanced:
+            text += ("\n\nADVANCED CHARTS -- at most one per page, and only under its condition:\n"
+                     + "\n".join(line(wt, f" {others[wt]}.") for wt in advanced))
+        return simple + advanced, text
+    text = "COMMON CHARTS -- right for most questions:\n" + "\n".join(line(wt) for wt in simple)
     if advanced:
-        text += ("\n\nADVANCED CHARTS -- at most one per page, and only under its condition:\n"
-                 + "\n".join(line(wt, f" {ADVANCED[wt]}.") for wt in advanced))
+        text += (f"\n\nOTHER CHARTS -- at most {ADVANCED_PER_PAGE[richness]} per page. Use one when its condition "
+                 "holds: it then answers that kind of question better than a bar or a line. A dashboard that is "
+                 "all bars reads as one chart repeated -- when two charts answer a question equally well, take "
+                 "the kind the dashboard does not have yet.\n"
+                 + "\n".join(line(wt, f" {others[wt]}.") for wt in advanced))
     return simple + advanced, text
 
 
@@ -402,9 +455,10 @@ def _demand_text(dem: dict, scope: list[str], scoped_rows: int, lang: str) -> st
 
 def build_messages(profile: dict, dem: dict, scope: list[str], scoped_rows: int, notes: list[str],
                    count: int, lang: str, knowledge=None, facts: str | None = None,
-                   shares: list[dict] | None = None, reading: str = "") -> tuple[list[dict], list[str]]:
+                   shares: list[dict] | None = None, reading: str = "",
+                   richness: str = "basic") -> tuple[list[dict], list[str]]:
     from ..dataset_profile import describe_for_prompt
-    allowed, menu_text = menu(profile)
+    allowed, menu_text = menu(profile, richness)
     system = (
         "You build the pages of ONE dashboard for one person who said what they want. They do not know "
         "data or charts: the dashboard must hand them their answer, not a tool to look for it.\n\n"
@@ -421,7 +475,7 @@ def build_messages(profile: dict, dem: dict, scope: list[str], scoped_rows: int,
         "    a number over time -> line\n"
         "    parts of a whole, 5 parts or fewer -> donut; more parts -> bar\n"
         "    the records themselves, to look one up -> table\n"
-        "  An advanced chart only under the condition written beside it; when in doubt, simple.\n"
+        "  A chart from the second list only under the condition written beside it; when in doubt, simple.\n"
         "- 'How many are X' (late, returned, cancelled...) is answered by the COUNT and by its "
         "SHARE of the whole, shown as a kpi beside the count. And when comparing groups on X, "
         "compare the SHARE per group: the biggest group always has the biggest count, which tells "
@@ -494,7 +548,11 @@ class Gate:
     """Checks, draws and judges proposed widgets for one dataset."""
 
     def __init__(self, inputs, facts: dict, allowed: list[str], question_ids: set[str],
-                 scope_filters: list[dict], lang: str, given: set[str] | None = None):
+                 scope_filters: list[dict], lang: str, given: set[str] | None = None, richness: str = "basic"):
+        #: The charts beyond the common ones, and how many a page may hold.
+        self.richness = richness
+        self.advanced = advanced_for(richness)
+        self.max_advanced = ADVANCED_PER_PAGE.get(richness, 1)
         #: Values the dataset is ALREADY narrowed to by its own query.
         self.given = given or set()
         self.inputs, self.facts, self.allowed = inputs, facts, set(allowed)
@@ -513,6 +571,11 @@ class Gate:
         #: What is already on a page of this design: a chart, or the same
         #: numbers in another shape (a table of what a bar already shows).
         self.seen: set[str] = set()
+        #: Values rows only pass through, per column; and what was left out for them.
+        self._open: dict[str, list[str]] = {}
+        self.open_notes: dict[str, list[str]] = {}
+        #: A comparison that came out level, said as one number: its sentence.
+        self.level: dict[str, str] = {}
         self._sem = asyncio.Semaphore(PROBE_CONCURRENCY)
 
     def _check(self, widget: dict) -> tuple[dict | None, str]:
@@ -705,6 +768,82 @@ class Gate:
         again, _why = await self._draw(changed)
         return (changed, again) if again is not None else (widget, result)
 
+    def _share_of(self, measure) -> tuple[str, str] | None:
+        """(column, value) when `measure` is a share made here for "the rows where column is value"."""
+        for calc in self.made:
+            if calc.get("name") == measure:
+                m = re.match(r'^IF\((\w+) == "?(.*?)"?, 100, 0\)$', str(calc.get("expression") or ""))
+                return (m.group(1), m.group(2)) if m else None
+        return None
+
+    def open_values(self, column: str) -> list[str]:
+        """Values of `column` that rows are only PASSING THROUGH: nearly all of
+        the rows holding one were begun in the newest periods, where older rows
+        have moved on to something else. What becomes of such a row is not
+        known yet, so it belongs on neither side of a share of an outcome.
+        Read from the dates and the counts; no value's name is consulted."""
+        import pandas as pd
+        if column in self._open:
+            return self._open[column]
+        out: list[str] = []
+        df = self.inputs.df
+        from ..insights import order_event_dates
+        dates = [d for d in order_event_dates(sorted(self.dates)) if d in df.columns]
+        if dates and column in df.columns:
+            when = pd.to_datetime(df[dates[0]], errors="coerce").dt.to_period("M")
+            periods = sorted(when.dropna().unique())
+            if len(periods) >= OPEN_MIN_PERIODS:
+                recent = when.isin(periods[-OPEN_RECENT_PERIODS:])
+                if 0 < recent.mean() <= OPEN_RECENT_MAX_SHARE:
+                    values = df[column].astype(object)
+                    for value, n in values[when.notna()].value_counts().items():
+                        if n < OPEN_MIN_ROWS:
+                            continue
+                        inside = float((recent & (values == value)).sum()) / float(n)
+                        if inside >= OPEN_INSIDE:
+                            out.append(str(value))
+        self._open[column] = out
+        return out
+
+    def _known_outcomes(self, widget: dict) -> dict:
+        """A share of one outcome is over the rows whose outcome is known: rows
+        still passing through a temporary value are left out, or the newest
+        months read as a collapse ("delivered fell to 70%": the rest were on
+        their way). Said once under the page (`self.open_notes`)."""
+        cfg = widget.get("config") or {}
+        made = self._share_of(cfg.get("measure"))
+        if not made:
+            return widget
+        column, value = made
+        still = [v for v in self.open_values(column) if v != str(value)]
+        if not still or any(isinstance(f, dict) and f.get("column") == column for f in cfg.get("filters") or []):
+            return widget
+        self.open_notes[column] = still
+        return {**widget, "config": {**cfg, "filters": list(cfg.get("filters") or [])
+                                     + [{"column": column, "op": "neq", "value": v} for v in still]}}
+
+    async def _same_everywhere(self, widget: dict, result: dict) -> tuple[dict, dict] | None:
+        """A comparison of groups that comes out level IS an answer -- "it does
+        not differ" -- so it is said as the one number with its range, instead
+        of the chart being thrown away and the question left hanging."""
+        cfg = widget.get("config") or {}
+        series = _series(result) or []
+        if (widget.get("widget_type") != "bar" or not widget.get("question") or not cfg.get("dimension")
+                or is_time(widget, self.dates) or len(series) < 2):
+            return None
+        number = {"widget_type": "kpi", "title": widget.get("title"), "question": widget.get("question"),
+                  "why": widget.get("why"),
+                  "config": {k: v for k, v in cfg.items() if k not in ("dimension", "sort", "limit", "dimension2")}}
+        drawn, _why = await self._draw(number)
+        if drawn is None or not _series(drawn):
+            return None
+        share = cfg.get("measure") in self.percent
+        fmt = (lambda v: f"{float(v):.1f}%") if share else _fmt
+        values = [v for _n, v in series]
+        self.level[_key(number)] = _t(self.lang, "same", x=fmt(_series(drawn)[0][1]),
+                                      dim=str(cfg["dimension"]).replace("_", " "), lo=fmt(min(values)), hi=fmt(max(values)))
+        return number, drawn
+
     async def one(self, widget: dict) -> tuple[dict | None, str]:
         """(the widget ready to offer, '') or (None, why not)."""
         if not isinstance(widget, dict) or not isinstance(widget.get("config"), dict):
@@ -714,11 +853,17 @@ class Gate:
             checked, why = self._check(widget)
             if checked is None:
                 return None, why if why.startswith("'") else f"'{title}': {why}"
+            checked = self._known_outcomes(checked)
             result, why = await self._draw(checked)
             if result is None:
                 return None, f"'{title}': {why}"
             checked, result = await self._ladder(checked, result)
             bad = worth(checked, result, self.dates)
+            if bad == "flat":
+                level = await self._same_everywhere(checked, result)
+                if level is not None:
+                    checked, result = level
+                    bad = None
             if bad:
                 return None, f"'{title}': {_t(self.lang, bad)} -- answer the question another way or leave it out"
         except Exception as exc:                                    # noqa: BLE001
@@ -729,7 +874,8 @@ class Gate:
             # Under the number, a line for the reader instead of "avg(is_late_pct)".
             # (Not part of what the chart measures: added after it was drawn.)
             self.captions[_key(checked)] = str(widget["why"]).strip()[:90]
-        out = {**checked, "row_count": size or 1, "finding": finding(checked, result, self.dates, self.lang, self.percent),
+        said = self.level.get(_key(checked)) or finding(checked, result, self.dates, self.lang, self.percent)
+        out = {**checked, "row_count": size or 1, "finding": said,
                "preview": preview_of(checked, result, self.dates, self.lang,
                                      (checked.get("config") or {}).get("measure") in self.percent)}
         self.results[_key(out)] = result
@@ -750,9 +896,9 @@ class Gate:
                     continue
                 if _key(w) in seen or _reading(w) in seen:
                     continue
-                if w["widget_type"] in ADVANCED:
+                if w["widget_type"] in self.advanced:
                     advanced += 1
-                    if advanced > MAX_ADVANCED_PER_PAGE:
+                    if advanced > self.max_advanced:
                         whys.append(f"'{w.get('title')}': {_t(self.lang, 'advanced')}")
                         continue
                 seen.update((_key(w), _reading(w)))
@@ -774,7 +920,10 @@ def _digest(page: dict, gate: Gate) -> tuple[str, list[float]]:
         line = f"- {w.get('title')}: {w.get('finding') or ''}"
         series = _series(result)
         if series and w["widget_type"] not in ("kpi", "gauge"):
-            line += " | " + ", ".join(f"{n}={_fmt(v)}" for n, v in series[:8])
+            # As the chart shows them: a share carries its % sign, or 0.5%
+            # is copied into the sentence as "0.511" (retry-2, 2026-10-11).
+            share = (w.get("config") or {}).get("measure") in gate.percent
+            line += " | " + ", ".join(f"{n}={_fmt(v)}{'%' if share else ''}" for n, v in series[:8])
         lines.append(line)
     return "\n".join(lines), allowed
 
@@ -1047,10 +1196,13 @@ async def add_rates(pages: list[dict], gate: "Gate", lang: str) -> None:
             shares = [v for _n, v in (_series(gate.results.get(_key(rate)) or {}) or [])] if rate else []
             # Split by a column that only describes the outcome itself (the
             # reason of a return): every group is 100% or 0%, which says nothing.
-            if (rate is None or rc.get("measure") not in gate.percent or (rc.get("measure"), dim) in have
+            if (rate is None or rc.get("measure") not in gate.percent
                     or all(v >= 99.5 or v <= 0.5 for v in shares)):
                 out.append(w)
                 continue
+            # The rate may already be on the page (the designer drew it): the
+            # count beside it is still told apart from it, the same way.
+            already = (rc.get("measure"), dim) in have
             # Sizes: the rows of each group, whatever became of them.
             base = {**c, "aggregation": "count", "filters": [f for f in rc.get("filters") or []
                                                              if f.get("column") not in gate.flag_of.values()]}
@@ -1059,6 +1211,12 @@ async def add_rates(pages: list[dict], gate: "Gate", lang: str) -> None:
             drew, _n, _w = await _probe({"widget_type": "bar", "config": base}, gate.inputs.probe)
             if drew:
                 sizes = dict(_series(gate.inputs.drawn.get(drawn_key("bar", base)) or {}, lang) or [])
+            if already:
+                counts = dict(_series(gate.results.get(_key(w)) or {}, lang) or [])
+                marked = _t(lang, "bysize")
+                out.append({**w, "finding": (w.get("finding") or "") + marked}
+                           if follows(counts, sizes) and marked not in (w.get("finding") or "") else w)
+                continue
             small = [n for n, v in sizes.items() if v < meaning.MIN_BASE]
             if small and len(sizes) - len(small) >= 2:
                 raw = dict(_series(gate.inputs.drawn.get(drawn_key("bar", base)) or {}) or [])
@@ -1225,6 +1383,41 @@ def standard_cards(profile: dict, shares: list[dict] | None, column_meta: dict |
     return out[:MAX_STANDARD]
 
 
+def without_impossible(dem: dict, filters: list[dict], df) -> dict:
+    """The Demand without the questions the SETUP added that the page's own
+    scope rules out: once the page is narrowed to one value of a column, a
+    question that names that column, or another of its values, asks for a
+    comparison the page can no longer make. The person's own questions are
+    never touched -- those are answered or said to be unanswered."""
+    narrowed: dict[str, set[str]] = {}
+    for f in filters or []:
+        col, val = (f.get("column"), f.get("value")) if isinstance(f, dict) else (None, None)
+        if col is None or f.get("op") not in ("eq", "in"):
+            continue
+        kept = {str(v).casefold() for v in (val if isinstance(val, list) else [val])}
+        if len(kept) == 1:
+            narrowed[str(col)] = kept
+    if not narrowed:
+        return dem
+    out = []
+    for q in dem.get("questions") or []:
+        text = " " + re.sub(r"[^\w]+", " ", str(q.get("text") or "").casefold()) + " "
+        ruled_out = False
+        if not q.get("asked", True):
+            for col, kept in narrowed.items():
+                words = " " + col.replace("_", " ").casefold() + " "
+                others = set()
+                if col in getattr(df, "columns", []):
+                    others = {str(v).casefold() for v in df[col].dropna().unique().tolist()[:200]} - kept
+                if words in text or words.rstrip() + "s " in text or any(
+                        len(v) >= 3 and f" {re.sub(r'[^\w]+', ' ', v)} " in text for v in others):
+                    ruled_out = True
+                    break
+        if not ruled_out:
+            out.append(q)
+    return {**dem, "questions": out} if len(out) != len(dem.get("questions") or []) else dem
+
+
 def setup_selection_mode(selection: str | None = None) -> str:
     """cards | free | both, as set now (settings.setup_ai_selection)."""
     if selection in ("cards", "free", "both"):
@@ -1329,7 +1522,8 @@ async def pick_pages(client, cards: list[dict], dem: dict, scope: list[str], sco
 
 
 async def design(db, user, ds, dem: dict | None, entry: dict | None, lang: str, count: int, client,
-                 meaning_map=None, tables: list[str] | None = None, selection: str | None = None) -> dict:
+                 meaning_map=None, tables: list[str] | None = None, selection: str | None = None,
+                 richness: str | None = None) -> dict:
     """{"proposals": pages to choose from, "reason": why some ideas were dropped}.
 
     One generation and one repair round, like the app's designer: the refused
@@ -1339,13 +1533,15 @@ async def design(db, user, ds, dem: dict | None, entry: dict | None, lang: str, 
     inputs, facts, filters, words, scoped_rows, total = await prepare(db, user, ds, dem)
     if client is None or not getattr(client, "enabled", True):
         return {"proposals": [], "reason": "off"}
+    dem = without_impossible(dem, filters, inputs.df)
+    richness = richness_now(richness)
     know = inputs.knowledge
     reading = _reading_for(meaning_map, tables, {str(c) for c in inputs.df.columns})
     messages, allowed = build_messages(inputs.profile, dem, words, scoped_rows,
                                        _outcome_notes(dem, ds.id) + _notes(entry), count, lang,
-                                       know, facts.get("text"), inputs.shares, reading)
+                                       know, facts.get("text"), inputs.shares, reading, richness)
     ids = {q["id"] for q in dem.get("questions") or []}
-    gate = Gate(inputs, facts, allowed, ids, filters, lang, _given(dem, ds.id))
+    gate = Gate(inputs, facts, allowed, ids, filters, lang, _given(dem, ds.id), richness)
 
     # Where the charts come from (settings.setup_ai_selection, the guided
     # setup's own switch beside the one for "Suggest dashboards"): cards --
@@ -1396,8 +1592,8 @@ async def design(db, user, ds, dem: dict | None, entry: dict | None, lang: str, 
                     if (w is None or _key(w) in have or _reading(w) in have
                             or len(pages[i]["widgets"]) >= PAGE_WIDGETS[1] + 1):
                         continue
-                    if w["widget_type"] in ADVANCED and any(
-                            x["widget_type"] in ADVANCED for x in pages[i]["widgets"]):
+                    if w["widget_type"] in gate.advanced and sum(
+                            x["widget_type"] in gate.advanced for x in pages[i]["widgets"]) >= gate.max_advanced:
                         continue
                     have.update((_key(w), _reading(w)))
                     pages[i]["widgets"].append(w)
@@ -1412,7 +1608,17 @@ async def design(db, user, ds, dem: dict | None, entry: dict | None, lang: str, 
     made = derived_for(pages, inputs, gate.made)
     with_captions(pages, gate)
     note = scope_note(words, filters, scoped_rows, total, lang, dem, ds.id)
-    return {"proposals": _finish(pages, dem, note, lang, filters), "reason": "; ".join(refused[:6]),
+    for column, still in gate.open_notes.items():
+        said = _t(lang, "open", col=column.replace("_", " "), values=", ".join(f"“{v}”" for v in still))
+        note = f"{note} {said}" if note else said
+    proposals = _finish(pages, dem, note, lang, filters)
+    # Options, click-to-filter and navigation: plain code, after the charts are chosen (dress.py).
+    from . import dress
+    try:
+        await dress.apply(proposals, gate, inputs, lang)
+    except Exception:                                               # noqa: BLE001 -- the pages stand without it
+        logger.warning("guided setup: dressing the pages failed", exc_info=True)
+    return {"proposals": proposals, "reason": "; ".join(refused[:6]),
             "derived": made}
 
 

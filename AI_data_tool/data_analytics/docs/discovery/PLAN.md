@@ -1166,3 +1166,25 @@ Until now only the suites near each change had been run. The whole suite (7,862 
 * After the fixes, every affected suite was run again (1,173 tests) and the document tests with their files (107): all pass. The whole suite was **not** run a second time end to end.
 * Whole browser suite: 4,391 pass; type check clean.
 * **Afterwards:** the two settings tests and the model-endpoint test that failed only in this container now set aside the machine's own list of model servers, and pass. Nothing in the backend suite is known to fail.
+
+## BB. The open list of §AU, taken further (2026-10-11)
+
+| Was open | Done |
+|---|---|
+| The **headline sentence of a statistical test** and its "size of the gap" sentence were English | each is now composed of keyed pieces — the verdict, what was compared, the effect's size, the gap — carried as `interpretation_i18n` and `sentence_i18n` and said from the catalogue (38 keys under `rb.st.*`). The lists inside two of them ("which predictor multiplies the odds / the risk") are now written without words (`term ×1.4`), so they read in any language; the English of those two sentences changed accordingly |
+| **Insight titles** were English | all 15 title forms the scan writes carry keys (`rb.ins.*`); on the shipments table 12 of 12 findings came back keyed. Drawn from the catalogue on the Insights hub, the dataset's Insights, the builder's Insights pane and a pinned finding |
+| **Analysis names and descriptions** on the Analysis tab were the registry's English | 26 analyses have a plain name and one line on what they do, in both languages; one the catalogue has never heard of still shows, in the registry's words |
+| **Answers without AI** were English whatever the question | Ask AI and the page copilot answer in Arabic when asked in Arabic |
+| Pages not opened in Arabic | the guided setup, connection review, the print view and the dataset's Insights were walked the same way. Found and fixed: the **sync stages** on the review page (names, status words, counts) and the influencers' note on a dashboard, both built in places the scanner of §AI does not read |
+
+* Tests: three new ones hold it — every statistical headline, every gap sentence and every insight title renders from the catalogue to exactly what the server wrote, and has its Arabic. Affected backend suites: 1,456 pass. Whole browser suite: 4,391 pass; type check clean.
+* **The one Ask AI case still failing** (§AZ) is explained: the demo dataset has a defined measure for margin on totals, and the Arabic wording is read as naming it. It was left as it is; which answer the benchmark should expect is the owner's call.
+
+**Still open**
+* An insight's **detail** sentence (under its title) and the scan's one-paragraph narrative are English.
+* **Refusals** of analyses ("needs at least…", "column … is not in this dataset") are English.
+* The **column profile facts** of the Columns tab.
+* The **connection designer** still designs its own charts (§AV); ready charts filtered to one value, which would let the guided setup's `cards` mode answer questions about part of the rows, were not built.
+* The copilot's no-AI suggestions are listed in words, not as buttons; the third decision shape (§AY); layout judged by eye in Arabic.
+* The scanner of §AI still does not read text built inside function calls and object literals in `.tsx` files; what it missed was found only by walking the screens.
+

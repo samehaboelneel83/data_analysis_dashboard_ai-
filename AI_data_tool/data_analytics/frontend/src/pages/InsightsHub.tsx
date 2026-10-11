@@ -1,3 +1,4 @@
+import { sayText } from '../lib/readbackText'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { datasetsApi, insightsApi } from '../services/api'
@@ -206,7 +207,7 @@ export default function InsightsHub() {
                   {/* Top 3 -- the backend already returns findings sorted by score. */}
                   {strong.slice(0, 3).map((f, i) => (
                     <li key={i} dir="auto" style={{ fontSize: 12 }}>
-                      <strong>{isolateNumbers(f.title)}</strong>
+                      <strong>{isolateNumbers(sayText(t, f.title, (f as { title_i18n?: { key: string; vars?: Record<string, unknown> } | null }).title_i18n as never))}</strong>
                       {f.detail && <span style={{ color: 'var(--muted)' }}> — {isolateNumbers(f.detail)}</span>}
                       {current && (
                         <FindingChart datasetId={current.id} finding={f}

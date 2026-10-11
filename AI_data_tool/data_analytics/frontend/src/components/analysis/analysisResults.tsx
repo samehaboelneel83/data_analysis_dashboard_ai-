@@ -394,10 +394,12 @@ function ResultCard({ result }: { result: StatisticalTestResult }) {
   const { direction } = useDirection()
   const tStat = useT()
 
+  const tSaid = useT()
+  const said = sayText(tSaid, result.interpretation, result.interpretation_i18n as SaidI18n | null | undefined)
   return (
     <div className="card" style={{ padding: 18 }}>
       <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>{test}</div>
-      <p dir={majorityDir(result.interpretation, direction)} style={{ fontSize: 14, fontWeight: 500, marginTop: 0 }}>{result.interpretation}</p>
+      <p dir={majorityDir(said, direction)} style={{ fontSize: 14, fontWeight: 500, marginTop: 0 }}>{said}</p>
 
       <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', margin: '14px 0' }}>
         <Stat label={result.effect_name.replace(/_/g, ' ')}

@@ -193,6 +193,46 @@ def _number_of(col: str, column_meta: dict | None) -> str | None:
     return recorded_number(col, column_meta)
 
 
+#: A nearly empty column is a DETAIL of some rows when at least this many
+#: values are in it, this share of them sit on the rows another column marks,
+#: and it is filled on at least this share of those marked rows.
+DETAIL_MIN_VALUES = 20
+DETAIL_INSIDE = 0.95
+DETAIL_COVERS = 0.5
+#: The marking column must itself single out a minority of the rows.
+DETAIL_MARK_MAX_SHARE = 0.3
+
+
+def detail_of(df: pd.DataFrame, col: str) -> str | None:
+    """The column whose "yes" (or non-zero count) marks the rows `col` is
+    filled on, or None. Read from the rows alone: no column name is consulted."""
+    if col not in df.columns:
+        return None
+    filled = df[col].notna()
+    if pd.api.types.is_object_dtype(df[col]):
+        filled &= df[col].astype(str).str.strip() != ""
+    n = int(filled.sum())
+    if n < DETAIL_MIN_VALUES:
+        return None
+    for other in df.columns:
+        if other == col:
+            continue
+        s = df[other]
+        if s.dtype == bool or set(s.dropna().unique().tolist()[:3]) <= {True, False}:
+            mark = s.fillna(False).astype(bool)
+        elif pd.api.types.is_numeric_dtype(s):
+            mark = s.fillna(0) != 0
+        else:
+            continue
+        marked = int(mark.sum())
+        if not marked or marked / len(df) > DETAIL_MARK_MAX_SHARE:
+            continue
+        inside = int((filled & mark).sum())
+        if inside >= DETAIL_INSIDE * n and inside >= DETAIL_COVERS * marked:
+            return str(other)
+    return None
+
+
 def column_items(report: dict, df: pd.DataFrame, lang: str, column_meta: dict | None = None) -> list[dict]:
     """Plain lines from the quality report, worst first."""
     rows = int(report.get("rows") or len(df))
@@ -206,6 +246,12 @@ def column_items(report: dict, df: pd.DataFrame, lang: str, column_meta: dict | 
         col, pct = c["column"], float(c.get("missing_pct") or 0) / 100
         numeric = col in df.columns and pd.api.types.is_numeric_dtype(df[col]) and df[col].dtype != bool
         issues = " ".join(c.get("issues") or [])
+        if pct >= EMPTY_USELESS and detail_of(df, col) is not None:
+            # Empty on purpose: it is filled exactly where another column says
+            # "yes" (hours to resolve, on the rows that have a complaint). It is
+            # a detail of those rows, not a broken column -- leaving it out took
+            # away the answer to a question asked about it (retry-2, 2026-10-11).
+            continue
         if pct >= EMPTY_USELESS:
             out.append(_item(len(out), "warning", "useless", lang, column=col,
                              what=_t(lang, "useless.what", col=col, pct=_pct(pct)),

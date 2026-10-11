@@ -32,6 +32,8 @@ export function sizeFor(widget: SuggestedWidget): { w: number; h: number } {
   }
   // A filter control: the server puts these first, in one band.
   if (wt === 'slicer') return { w: 4, h: 3 }
+  // A link to another page (guided setup): one short row of them under the answer.
+  if (wt === 'button') return { w: 3, h: 1 }
   if (wt === 'card') {
     const measures = (widget.config?.measures as unknown[])?.length ?? 1
     return { w: 3, h: Math.max(3, 2 + measures) }
@@ -165,7 +167,7 @@ export function filledLayout(widgets: SuggestedWidget[]) {
     if (i < slots.length && slots[i].y === slots[start].y) continue
     const last = slots[i - 1]
     const type = widgets[i - 1].widget_type
-    if (type !== 'kpi' && type !== 'gauge' && type !== 'card') last.w = 12 - last.x
+    if (type !== 'kpi' && type !== 'gauge' && type !== 'card' && type !== 'button' && type !== 'slicer') last.w = 12 - last.x
     start = i
   }
   return slots
@@ -228,26 +230,70 @@ export async function buildPages(pages: DashboardPagePlan[], name: string, descr
     try { await reportsApi.addCommonFilter(rid, f) } catch { /* the charts still draw, unnarrowed */ }
   }
 
+  // A button to another page names it by TITLE (the server cannot know the
+  // page's id, nor which pages the person kept): one whose page is not being
+  // built is left out, and the rest are wired once every page exists.
+  const built = new Set(pages.map(p => p.proposal.title || name))
+  const target = (w: SuggestedWidget) => (w.config as { actionPageTitle?: string } | undefined)?.actionPageTitle
+  const pageIds = new Map<string, number>()
+  const buttons: { pageId: number; widgetId: number; config: Record<string, unknown>; to: string }[] = []
+  // Charts that open the drill-through page, wired once that page exists.
+  const drillers: { pageId: number; widgetId: number; config: Record<string, unknown> }[] = []
+  let drillPageId: number | null = null
   for (const p of pages) {
     const title = p.proposal.title || name
     let pageId: number
+    // A drill-through page: hidden from the tabs, opened from a chart with the
+    // clicked value as its filter (prompt_column).
+    const kind = p.proposal.page_type
+      ? { page_type: p.proposal.page_type, prompt_column: p.proposal.prompt_column, prompt_label: p.proposal.prompt_label }
+      : {}
     if (firstPageId != null) {
       pageId = firstPageId
       firstPageId = null
-      await reportsApi.updatePage(rid, pageId, { name: title } as never)
+      await reportsApi.updatePage(rid, pageId, { name: title, ...kind } as never)
     } else {
-      const made = await reportsApi.addPage(rid, { name: title, position })
+      const made = await reportsApi.addPage(rid, { name: title, position, ...kind } as never)
       pageId = (made as { id: number }).id
     }
+    if (p.proposal.page_type === 'drillthrough') drillPageId = pageId
     position += 1
-    const usable = withoutFields(p.proposal, missing.get(p.datasetId) ?? new Set())
+    pageIds.set(title, pageId)
+    const kept = p.proposal.widgets.filter(w => w.widget_type !== 'button' || !target(w) || built.has(target(w)!))
+    const reindex = new Map(p.proposal.widgets.map((w, i) => [i, kept.indexOf(w)]))
+    const linked: DashboardSuggestion = {
+      ...p.proposal, widgets: kept,
+      relations: (p.proposal.relations ?? [])
+        .map(r => ({ ...r, from: reindex.get(r.from) ?? -1, to: reindex.get(r.to) ?? -1 }))
+        .filter(r => r.from >= 0 && r.to >= 0),
+    }
+    const usable = withoutFields(linked, missing.get(p.datasetId) ?? new Set())
     const onPage = p.datasetId === primary ? usable : {
       ...usable,
       widgets: usable.widgets.map(w => w.widget_type === 'text' ? w
         : { ...w, config: { ...(w.config ?? {}), dataset_id: p.datasetId } }),
     }
     const slots = filledLayout(onPage.widgets)
-    await fillPage(rid, pageId, { ...onPage, widgets: onPage.widgets.map((w, i) => ({ ...w, layout: slots[i] })) })
+    const made = await fillPage(rid, pageId, { ...onPage, widgets: onPage.widgets.map((w, i) => ({ ...w, layout: slots[i] })) })
+    onPage.widgets.forEach((w, i) => {
+      if (w.widget_type === 'button' && target(w) && made.ids[i])
+        buttons.push({ pageId, widgetId: made.ids[i], config: made.configs[i], to: target(w)! })
+      if (w.drill_to === 'drill' && made.ids[i])
+        drillers.push({ pageId, widgetId: made.ids[i], config: made.configs[i] })
+    })
+  }
+  for (const b of buttons) {
+    const to = pageIds.get(b.to)
+    if (to == null) continue
+    try { await reportsApi.updateWidget(rid, b.pageId, b.widgetId, { config: { ...b.config, actionPageId: to } } as never) }
+    catch { /* the page still opens from its tab */ }
+  }
+  // Only when the person kept the drill-through page: a chart must not point at a page that was never made.
+  if (drillPageId != null) {
+    for (const d of drillers) {
+      try { await reportsApi.updateWidget(rid, d.pageId, d.widgetId, { config: { ...d.config, drillthroughPageId: drillPageId } } as never) }
+      catch { /* the chart still draws */ }
+    }
   }
   return rid
 }

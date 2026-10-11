@@ -28,7 +28,7 @@ is a meaningless one. Same stance as `influencers.MIN_ROWS`.
 """
 from __future__ import annotations
 
-from ..readback import _s, as_i18n
+from ..readback import Said, _s, as_i18n
 
 import math
 from dataclasses import dataclass, field
@@ -88,7 +88,8 @@ class TestResult:
             "alpha": ALPHA,
             "n": self.n,
             "detail": self.detail,
-            "interpretation": self.interpretation,
+            "interpretation": str(self.interpretation),
+            "interpretation_i18n": as_i18n(self.interpretation),
             "caveats": [str(c) for c in self.caveats],
             "caveats_i18n": [as_i18n(c) for c in self.caveats],
         }
@@ -154,29 +155,49 @@ def _p_text(p: float) -> str:
     return "p < 0.001" if p < 0.001 else f"p = {p:.4g}"
 
 
-def _verdict(p: float, effect_label: str, what: str) -> str:
+def _effect(label: str) -> Said:
+    """negligible | small | medium | large, as a piece of a sentence."""
+    return _s(f"st.e.{label}", label, cap=False)
+
+
+def _verdict(p: float, effect_label: str, what, inline: bool = False) -> Said:
     """One sentence naming BOTH numbers, because either alone misleads.
 
     A significant result with a negligible effect is the failure mode this text
     exists to prevent: at large n it is the normal outcome, and a reader who
     sees only 'p < 0.05' will act on nothing.
+
+    `what` is a phrase (a `Said` piece, so it can be said in the reader's
+    language); `inline` gives the same sentence for the inside of a bracket.
     """
+    def say(key: str, text: str, **vars) -> Said:
+        return _s(key + (".in" if inline else ""), text.lower() if inline else text, cap=not inline, **vars)
     if p >= ALPHA:
-        return (f"No statistically significant {what} ({_p_text(p)}). "
-                f"The data does not support a difference; it does not prove "
-                f"there is none.")
+        return say("st.v.none", "No statistically significant {what} ({p}). "
+                                "The data does not support a difference; it does not prove "
+                                "there is none.", what=what, p=_p_text(p))
     if effect_label == "negligible":
         # "Negligible" is the STATISTICAL effect -- how separable the two
         # groups are -- not how big the gap is. 3,300 more people (+15%) is a
         # negligible Cohen's h and a large business fact; telling an HR lead
         # it is "unlikely to matter" was wrong. The business size is stated
         # beside this sentence (see _business_gap), and the reader decides.
-        return (f"Statistically significant {what} ({_p_text(p)}), with a negligible "
-                f"statistical effect size. That measures how much the two groups "
-                f"overlap, not how big the gap is for the business -- see the size of "
-                f"the gap.")
-    return (f"Statistically significant {what} ({_p_text(p)}), with a "
-            f"{effect_label} effect.")
+        return say("st.v.negligible", "Statistically significant {what} ({p}), with a negligible "
+                                      "statistical effect size. That measures how much the two groups "
+                                      "overlap, not how big the gap is for the business -- see the size of "
+                                      "the gap.", what=what, p=_p_text(p))
+    return say("st.v.effect", "Statistically significant {what} ({p}), with a "
+                              "{effect} effect.", what=what, p=_p_text(p), effect=_effect(effect_label))
+
+
+def _said_again(text: str, i18n: dict | None):
+    """A sentence kept as text + key (in a result dict), as a `Said` again --
+    so it can be a piece of a longer one."""
+    if not i18n:
+        return text
+    out = Said(text)
+    out.key, out.vars = i18n["key"], dict(i18n.get("vars") or {})
+    return out
 
 
 def _business_gap(a_name: str, b_name: str, a_val: float, b_val: float, what: str) -> dict:
@@ -193,12 +214,22 @@ def _business_gap(a_name: str, b_name: str, a_val: float, b_val: float, what: st
     unit = " rows" if what == "rows" else ""
     pct_txt = f" ({'+' if diff >= 0 else '−'}{abs(pct):.1f}%)" if pct is not None else ""
     if what == "rows":
-        sentence = f"{a_name} has {num(abs(diff))} {word} rows than {b_name}{pct_txt}."
+        sentence = _s(f"st.gap.rows.{word}", "{a} has {n} " + word + " rows than {b}{pct}.", cap=False,
+                      a=a_name, b=b_name, n=num(abs(diff)), pct=pct_txt)
     else:
-        sentence = (f"{what}: {a_name} {num(a_val)} vs {b_name} {num(b_val)} -- "
-                    f"{num(abs(diff))} {word}{pct_txt}.")
+        # "Average fee", "Median fee", "Total fee": the statistic is a word of
+        # the sentence, the column's name a piece of it.
+        stat, _, column = str(what).partition(" ")
+        kind = {"Average": "avg", "Median": "median", "Total": "total"}.get(stat)
+        if kind and column:
+            sentence = _s(f"st.gap.{kind}.{word}", stat + " {m}: {a} {av} vs {b} {bv} -- {n} " + word + "{pct}.",
+                          cap=False, m=column, a=a_name, b=b_name, av=num(a_val), bv=num(b_val), n=num(abs(diff)),
+                          pct=pct_txt)
+        else:
+            sentence = (f"{what}: {a_name} {num(a_val)} vs {b_name} {num(b_val)} -- "
+                        f"{num(abs(diff))} {word}{pct_txt}.")
     return {"absolute": _round(diff), "percent": _round(pct) if pct is not None else None,
-            "sentence": sentence}
+            "sentence": str(sentence), "sentence_i18n": as_i18n(sentence)}
 
 
 # ── 1. Compare groups ────────────────────────────────────────────────────────
@@ -271,9 +302,10 @@ def compare_groups(df: pd.DataFrame, value_col: str, group_col: str) -> TestResu
             detail={"test": "Welch's t-test", "groups": summary,
                     "difference": _round(float(np.mean(a) - np.mean(b))),
                     "business": gap},
-            interpretation=_verdict(float(p), label,
-                                    f"difference in {value_col} between {n1} and {n2}")
-            + " " + gap["sentence"],
+            interpretation=_s("st.join", "{a} {b}",
+                              a=_verdict(float(p), label, _s("st.w.between", "difference in {v} between {a} and {b}",
+                                                             cap=False, v=value_col, a=n1, b=n2)),
+                              b=_said_again(gap["sentence"], gap.get("sentence_i18n"))),
             caveats=caveats + [
                 _s("st.welch", "Welch's t-test is used, which does not assume equal variances")],
         )
@@ -296,9 +328,10 @@ def compare_groups(df: pd.DataFrame, value_col: str, group_col: str) -> TestResu
         significant=bool(p < ALPHA), n=n,
         detail={"test": "One-way ANOVA", "groups": summary,
                 "group_count": len(groups), "business": gap},
-        interpretation=_verdict(float(p), label,
-                                f"difference in {value_col} across {group_col}")
-        + " Widest gap -- " + gap["sentence"],
+        interpretation=_s("st.join.widest", "{a} Widest gap -- {b}",
+                          a=_verdict(float(p), label, _s("st.w.across", "difference in {v} across {g}", cap=False,
+                                                         v=value_col, g=group_col)),
+                          b=_said_again(gap["sentence"], gap.get("sentence_i18n"))),
         caveats=caveats + [
             _s("st.anova", "ANOVA reports that SOME group differs, not which -- compare pairs "
                            "individually to find out which")],
@@ -360,8 +393,8 @@ def test_independence(df: pd.DataFrame, col_a: str, col_b: str) -> TestResult:
         detail={"test": "Chi-square test of independence",
                 "dof": int(dof), "shape": list(table.shape),
                 "table": table.to_dict()},
-        interpretation=_verdict(float(p), label,
-                                f"association between {col_a} and {col_b}"),
+        interpretation=_verdict(float(p), label, _s("st.w.association", "association between {a} and {b}", cap=False,
+                                                    a=col_a, b=col_b)),
         caveats=caveats,
     )
 
@@ -415,7 +448,8 @@ def correlation_test(df: pd.DataFrame, col_a: str, col_b: str,
         detail={"test": f"{method.capitalize()} correlation",
                 "r": _round(r), "direction": "positive" if r > 0 else "negative",
                 "r_squared": _round(r * r)},
-        interpretation=_verdict(p, label, f"relationship between {col_a} and {col_b}"),
+        interpretation=_verdict(p, label, _s("st.w.relationship", "relationship between {a} and {b}", cap=False,
+                                             a=col_a, b=col_b)),
         caveats=caveats,
     )
 
@@ -493,10 +527,10 @@ def regression(df: pd.DataFrame, target: str, predictors: list[str]) -> TestResu
                 "r_squared": _round(r2),
                 "adj_r_squared": _round(float(model.rsquared_adj))},
         interpretation=(
-            f"The model explains {r2 * 100:.1f}% of the variation in {target} "
-            f"({_verdict(p_model, label, 'overall fit').lower()}"
-            f")" if not math.isnan(p_model) else
-            f"The model explains {r2 * 100:.1f}% of the variation in {target}."),
+            _s("st.i.r2.fit", "The model explains {r2}% of the variation in {t} ({v})", r2=f"{r2 * 100:.1f}", t=target,
+               v=_verdict(p_model, label, _s("st.w.fit", "overall fit", cap=False), inline=True))
+            if not math.isnan(p_model) else
+            _s("st.i.r2", "The model explains {r2}% of the variation in {t}.", r2=f"{r2 * 100:.1f}", t=target)),
         caveats=caveats,
     )
 
@@ -622,10 +656,11 @@ def glm_logistic(df: pd.DataFrame, target: str, predictors: list[str],
                 "coefficients": coefficients,
                 "pseudo_r_squared": _round(pseudo_r2)},
         interpretation=(
-            f"Modelling the odds of '{positive}'. "
-            + (", ".join(f"{c['term']} multiplies the odds by {c['odds_ratio']}"
-                         for c in movers)
-               or "No predictor reaches significance.")),
+            # The list is written without words ("term ×1.4") so it reads in any language.
+            _s("st.i.odds", "Modelling the odds of '{v}'. What multiplies the odds, and by how much: {items}.",
+               v=positive, items=", ".join(f"{c['term']} ×{c['odds_ratio']}" for c in movers))
+            if movers else
+            _s("st.i.odds.none", "Modelling the odds of '{v}'. No predictor reaches significance.", v=positive)),
         caveats=caveats,
     )
 
@@ -734,10 +769,11 @@ def mixed_model(df: pd.DataFrame, target: str, predictors: list[str],
                 "group_variance": _round(group_var),
                 "residual_variance": _round(resid_var), "icc": _round(icc)},
         interpretation=(
-            f"{icc * 100:.0f}% of the variation in {target} is between "
-            f"{group_col} groups rather than within them ({label} grouping "
-            f"effect). Ordinary regression would have treated these "
-            f"{len(work)} rows as independent and overstated its confidence."),
+            _s("st.i.icc", "{pct}% of the variation in {t} is between "
+               "{g} groups rather than within them ({effect} grouping "
+               "effect). Ordinary regression would have treated these "
+               "{n} rows as independent and overstated its confidence.",
+               pct=f"{icc * 100:.0f}", t=target, g=group_col, effect=_effect(label), n=len(work))),
         caveats=caveats,
     )
 
@@ -840,9 +876,10 @@ def survival(df: pd.DataFrame, duration_col: str, event_col: str,
                 "events": events, "censored": censored,
                 "coefficients": coefficients},
         interpretation=(
-            ", ".join(f"a one-unit rise in {c['term']} multiplies the risk by "
-                      f"{c['hazard_ratio']}" for c in sig)
-            or "No predictor significantly changes the timing."),
+            _s("st.i.risk", "What multiplies the risk for each one-unit rise, and by how much: {items}.",
+               items=", ".join(f"{c['term']} ×{c['hazard_ratio']}" for c in sig))
+            if sig else
+            _s("st.i.risk.none", "No predictor significantly changes the timing.")),
         caveats=caveats,
     )
 
@@ -981,11 +1018,11 @@ def pairwise_comparisons(df: pd.DataFrame, value_col: str, group_col: str,
                 "comparisons": len(pairs), "significant_pairs": n_sig,
                 "pairs": pairs},
         interpretation=(
-            f"{n_sig} of {len(pairs)} pairs differ significantly after "
-            f"correcting for multiple comparisons."
+            _s("st.i.pairs", "{k} of {n} pairs differ significantly after "
+               "correcting for multiple comparisons.", k=n_sig, n=len(pairs))
             if n_sig else
-            f"No pair differs significantly once the {len(pairs)} comparisons "
-            f"are accounted for."),
+            _s("st.i.pairs.none", "No pair differs significantly once the {n} comparisons "
+               "are accounted for.", n=len(pairs))),
         caveats=caveats,
     )
 

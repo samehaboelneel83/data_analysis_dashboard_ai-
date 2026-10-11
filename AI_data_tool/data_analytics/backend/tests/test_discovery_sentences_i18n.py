@@ -244,3 +244,50 @@ def test_a_statistical_result_carries_its_footnotes_with_keys():
     en = _cat("en")
     for text, said in zip(out["caveats"], out["caveats_i18n"]):
         _same(en, text, said)
+
+
+def test_the_headline_of_every_statistical_test_can_be_said_from_the_catalogue():
+    """The first sentence a reader meets (§BB): composed of pieces -- the
+    verdict, what was compared, the size of the gap -- each with its key, and
+    in English the catalogue says exactly what the server wrote."""
+    from app.services.analysis import inferential as inf
+    rng = np.random.default_rng(5)
+    n = 300
+    df = pd.DataFrame({"g2": rng.choice(["a", "b"], n), "g3": rng.choice(["x", "y", "z"], n),
+                       "u": rng.normal(50, 10, n)})
+    df["v"] = df["u"] * 0.8 + np.where(df["g2"] == "a", 6.0, 0.0) + rng.normal(0, 5, n)
+    df["flat"] = rng.normal(0, 1, n)
+    en, ar = _cat("en"), _cat("ar")
+    results = [inf.compare_groups(df, "v", "g2"), inf.compare_groups(df, "v", "g3"), inf.compare_groups(df, "flat", "g2"),
+               inf.test_independence(df, "g2", "g3"), inf.correlation_test(df, "u", "v"), inf.correlation_test(df, "u", "flat"),
+               inf.regression(df, "v", ["u"]), inf.pairwise_comparisons(df, "v", "g3")]
+    for r in results:
+        out = r.to_dict()
+        _same(en, out["interpretation"], out["interpretation_i18n"])
+        assert _render(ar, out["interpretation_i18n"])                  # every piece has its Arabic
+    gap = results[0].to_dict()["detail"]["business"]
+    _same(en, gap["sentence"], gap["sentence_i18n"])
+
+
+def test_insight_titles_can_be_said_from_the_catalogue():
+    """What stands out, in the reader's language (§BB): every title the scan
+    writes with a key renders from the catalogue to exactly what it wrote."""
+    from app.services.insights import generate_insights
+    rng = np.random.default_rng(11)
+    n = 900
+    g = rng.choice(["north", "south", "east", "west"], n, p=[.55, .25, .15, .05])
+    df = pd.DataFrame({"g": g, "day": pd.date_range("2024-01-01", periods=n, freq="D").astype(str),
+                       "amount": rng.gamma(2, 100, n) * np.where(g == "north", 1.8, 1.0),
+                       "score": rng.normal(50, 10, n) + np.where(g == "west", 12, 0)})
+    df.loc[::9, "score"] = np.nan
+    df["twin"] = df["amount"] * 0.9 + rng.normal(0, 5, n)
+    types = {"g": "categorical", "day": "datetime", "amount": "numeric", "score": "numeric", "twin": "numeric"}
+    found = generate_insights(df, types, {"score": {"number": "score"}})["findings"]
+    keyed = [f for f in found if f.get("title_i18n")]
+    assert len(keyed) >= 4, [f["title"] for f in found]
+    en, ar = _cat("en"), _cat("ar")
+    for f in keyed:
+        # Exactly as written: a title starts with the group's own name, in its own case.
+        assert " ".join(_render(en, f["title_i18n"]).split()) == " ".join(f["title"].split()), f["title"]
+        assert _render(ar, f["title_i18n"])
+        assert type(f["title"]) is str                      # plain text travels; the key rides beside it
