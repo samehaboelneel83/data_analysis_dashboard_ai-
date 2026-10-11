@@ -1313,5 +1313,5 @@ The owner approved the robot port (10-A4, with its departures) and decided: the 
 **Tests:**
 - New: `askCards.test.tsx` (14): the bubble and the loading card (busy, the clock, no steps, the thinking head); the header, chip and live region; the duration (one read, after the answer, hidden on failure or no `ms`); the rows band (closed under a chart, open for a plain table); the SQL band (LTR, marked, Copy); Edit question; the head's states and that only the newest moves; a stored thread (no per-message reads); no timers after unmount; the compact look outside the page; the Arabic strings; the SQL tokens.
 - The Ask AI guard covers `RobotHead`, `CardSection`, `SqlBlock` and `Pending`.
-- Full suite: 350 files / 4391 tests pass. Type-check and build pass.
+- Full suite: 350 files / 4391 tests; one failed in the full run, `Reports.test.tsx` ("Blank with no data opens the builder…", not touched here), and that file passes alone (73/73). Type-check and build pass.
 - Captures: `e2e/capture/redesign/cap_10b.mjs` (browser-only data: the answer, the run's duration, model endpoints up), EN/AR × light/dark: loading, the answer landing (happy head), the answer, rows and SQL open, a line chart, a plain table, a new answer under a stored one, and the answer and loading at 1024px. Before is :3001 at `2f98a95`; after is in `redesign-captures/10-askai/B-{before,after}/`.
