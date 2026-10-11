@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import toast from 'react-hot-toast'
 import { usePrompt } from '../ui/PromptDialog'
-import { AlertTriangle, BarChart3, Code2, Copy, Database, Download, LineChart, Pencil, PieChart, RotateCcw, Sparkles, ThumbsDown, ThumbsUp, User } from 'lucide-react'
+import { AlertTriangle, BarChart3, ChevronDown, ChevronRight, Code2, CornerDownRight, Copy, Database, Download, LineChart, Pencil, PieChart, RotateCcw, Sparkles, ThumbsDown, ThumbsUp, User } from 'lucide-react'
 import { agentApi, dataSourcesApi } from '../../services/api'
 import type { AgentAnswer, AgentMessage, AgentPresentation, AgentResult, AnswerEvidence } from '../../services/api'
 import Pending, { LoadingCard } from './Pending'
@@ -22,6 +22,7 @@ import { useAiOffline } from '../../pages/ask/useAiOffline'
 import AddToDashboard from './AddToDashboard'
 import RobotHead, { type HeadState } from './RobotHead'
 import CardSection from './CardSection'
+import ActionMenu, { type ActionMenuItem } from '../ActionMenu'
 import SqlBlock from './SqlBlock'
 import { REACTION_MS } from '../../pages/ask/robotMood'
 import { localDigits } from '../../lib/arabicFormats'
@@ -107,6 +108,8 @@ interface ChatMessage {
   /** How long the run took, read once from the run after the answer arrived
    *  (step 10). Absent on a stored thread and when that read fails. */
   ms?: number | null
+  /** It arrived while the reader was watching (not loaded with a thread). */
+  fresh?: boolean
 }
 
 /** Same target as this pane's: same data source id, or the same set of
@@ -310,7 +313,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
         }
       }
       const result = await agentApi.ask(cid, question)
-      const reply = fromAnswer(result)
+      const reply: ChatMessage = { ...fromAnswer(result), fresh: true }
       setMessages(m => [...m, reply])
       onActivity?.(result.status === 'failed' ? 'error' : 'answer')
       if (card) {
@@ -333,7 +336,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
       const limit = aiLimitMessage(e, t)
       const failed: ChatMessage = limit
         ? { id: nextId++, role: 'assistant', kind: 'limit', text: limit }
-        : { id: nextId++, role: 'assistant', kind: 'error', text: t('chat.unreachable') }
+        : { id: nextId++, role: 'assistant', kind: 'error', text: t('chat.unreachable'), fresh: true }
       setMessages(m => [...m, failed])
       onActivity?.('error')
       if (card && !limit) react(failed.id, 'error')
@@ -543,6 +546,8 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
                         </p>
                         <p className="dl-answer-error__hint" dir={majorityDir(msg.text, direction)}>{modelText(msg.text)}</p>
                       </div>
+                    ) : msg.kind === 'error' && card ? (
+                      errorCard(msg, turn.question?.text)
                     ) : msg.kind === 'error' ? (
                       <div className="dl-answer-error">
                         <p className="dl-answer-error__title">
@@ -645,7 +650,9 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
       <div className="dl-chat__composer" onFocus={() => setComposerFocused(true)} onBlur={() => setComposerFocused(false)}>
         {offline && <p role="status" className="dl-chat__note dl-chat__note--error dl-chat__offline" data-testid="ai-offline">{t('off.title')}</p>}
         <Composer value={input} onChange={v => { setInput(v); onActivity?.('key') }} onSend={() => void send()} busy={busy}
-          locked={offline} lockedHint={offline ? t('off.composer') : undefined} />
+          locked={offline} lockedHint={offline ? t('off.composer') : undefined}
+          page={card ? { name: card.scopeName } : undefined} />
+        {card && <p className="dl-ask__disc">{t('ask2.disclaimer')}</p>}
       </div>
     </div>
   )
@@ -780,12 +787,16 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
       <div className="dl-ac__head">
         <RobotHead state={state} live={live} />
         <div className="dl-ac__id">
-          <div className="dl-ac__who">{t('ask2.ans.who')}</div>
-          <div className="dl-ac__meta" data-testid="answer-meta">
-            {card!.scopeName && <bdi>{card!.scopeName}</bdi>}
-            {took && <bdi data-testid="answer-took">{localDigits(took)}</bdi>}
-            {results.length > 0 && <span>{localDigits(t('ask2.pick.rows', { n: rows }))}</span>}
-          </div>
+          {msg.kind === 'error'
+            ? <h3 className="dl-ac__who dl-ac__who--error">{t('ask2.err.title')}</h3>
+            : <div className="dl-ac__who">{t('ask2.ans.who')}</div>}
+          {msg.kind !== 'error' && (
+            <div className="dl-ac__meta" data-testid="answer-meta">
+              {card!.scopeName && <bdi>{card!.scopeName}</bdi>}
+              {took && <bdi data-testid="answer-took">{localDigits(took)}</bdi>}
+              {results.length > 0 && <span>{localDigits(t('ask2.pick.rows', { n: rows }))}</span>}
+            </div>
+          )}
         </div>
         {chart && (
           <span className="dl-ac__chip" data-testid="answer-chart-chip">
@@ -793,6 +804,56 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
           </span>
         )}
       </div>
+    )
+  }
+
+  /** Step 10, Part C: what a failed question shows -- why, in words; the
+   *  dataset's own columns to start again from; the server's text under
+   *  "Technical details"; Edit question and Retry. The server sends one raw
+   *  string and no reason or rephrasings (backend row), so the sentence is
+   *  general and the suggestions are the page's, built from the columns. A
+   *  request that never reached the agent says only that. */
+  function errorCard(msg: ChatMessage, question?: string) {
+    const ran = msg.runId != null
+    const [before, after = ''] = t('ask2.err.why', { name: '\uE000' }).split('\uE000')
+    return (
+      <>
+        <div className="dl-err" role={msg.fresh ? 'alert' : undefined}>
+          <p className="dl-err__why">
+            {!ran ? msg.text
+              : card!.scopeName ? <>{before}<bdi><b>{card!.scopeName}</b></bdi>{after}</>
+              : t('ask2.err.whyPlain')}
+          </p>
+          {ran && rephrase.length > 0 && (
+            <div className="dl-err__try">
+              <div className="dl-err__try-l" id={`dl-err-try-${msg.id}`}>{t('ask2.err.tryColumns')}</div>
+              <div className="dl-err__chips" role="group" aria-labelledby={`dl-err-try-${msg.id}`}>
+                {rephrase.map(s => (
+                  <button key={s} type="button" className="dl-err__chip" disabled={busy || offline} onClick={() => void send(s)}>
+                    <CornerDownRight size={14} aria-hidden className="dl-flip" /> {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        {ran && (
+          <details className="dl-err__td">
+            <summary><ChevronRight size={15} aria-hidden className="dl-flip" /> {t('ask.err.details')}</summary>
+            <pre dir="ltr">{msg.text}</pre>
+          </details>
+        )}
+        {question && (
+          <div className="dl-ac__acts">
+            <button type="button" className="dl-act dl-act--primary" onClick={() => setInput(question)}>
+              <Pencil size={14} aria-hidden /> {t('err3.edit')}
+            </button>
+            <button type="button" className="dl-act" disabled={busy || offline} onClick={() => void send(question)}>
+              <RotateCcw size={14} aria-hidden /> {t('ask.retry')}
+            </button>
+          </div>
+        )}
+      </>
     )
   }
 
@@ -809,6 +870,22 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
       : null
     const answerTitle = question ?? msg.text.slice(0, 80)
     const open = openRun.has(runId)
+    // One menu for every way out of the page: the three files and, on a
+    // connection, a dataset. The same handlers as the compact bar's buttons.
+    const exports: ActionMenuItem[] = [
+      ...(msg.results && msg.results.some(r => r.total > 0) ? [
+        { key: 'csv', label: t('chat.dl.csv'), icon: <Download size={14} aria-hidden />,
+          onSelect: () => downloadCsv(msg.results!, `ask-ai-result-${runId}.csv`) },
+        { key: 'xlsx', label: t('chat.dl.xlsx'), icon: <Download size={14} aria-hidden />,
+          onSelect: () => void downloadFile(runId, 'xlsx') },
+        { key: 'pdf', label: t('chat.dl.pdf'), icon: <Download size={14} aria-hidden />,
+          onSelect: () => void downloadFile(runId, 'pdf') },
+      ] : []),
+      ...(sqlable && dataSourceId != null ? [
+        { key: 'dataset', label: saving === runId ? t('ans3.saving') : t('ask.saveDataset'), icon: <Database size={14} aria-hidden />,
+          onSelect: () => void saveAsDataset(msg), disabled: saving !== null, disabledReason: t('ans3.saving') },
+      ] : []),
+    ]
     return (
       <>
         {sqlable && (
@@ -839,7 +916,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
           {draft && !onAddToPage && datasetIds && (
             <AddToDashboard datasetId={datasetIds[0]} draft={draft} title={answerTitle} />
           )}
-          <button type="button" className="dl-act" onClick={() => void copyAnswer(msg)} aria-label={t('ask.copyAnswer')}>
+          <button type="button" className="dl-act" onClick={() => void copyAnswer(msg)} aria-label={t('ask.copyAnswer')} title={t('ask.copyAnswer')}>
             <Copy size={14} aria-hidden /> <span className="dl-act__text">{t('ask.copy')}</span>
           </button>
           <span className="dl-actions__sep" aria-hidden />
@@ -856,35 +933,16 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
             <ThumbsDown size={15} aria-hidden />
           </button>
           <span className="dl-actions__grow" />
-          {msg.results && msg.results.some(r => r.total > 0) && (
-            <>
-              <button type="button" aria-label={t('chat.dl.csv')} className="dl-act"
-                onClick={() => downloadCsv(msg.results!, `ask-ai-result-${runId}.csv`)}>
-                <Download size={14} aria-hidden /> CSV
-              </button>
-              <button type="button" aria-label={t('chat.dl.xlsx')} className="dl-act"
-                onClick={() => void downloadFile(runId, 'xlsx')}>
-                <Download size={14} aria-hidden /> Excel
-              </button>
-              <button type="button" aria-label={t('chat.dl.pdf')} className="dl-act"
-                onClick={() => void downloadFile(runId, 'pdf')}>
-                <Download size={14} aria-hidden /> PDF
-              </button>
-            </>
-          )}
-          {sqlable && dataSourceId != null && (
-            <button type="button" className="dl-act" onClick={() => void saveAsDataset(msg)}
-              aria-label={t('ask.saveDataset')} disabled={saving !== null}>
-              <Database size={14} aria-hidden />
-              {saving === runId ? t('ans3.saving') : t('ask.saveDataset')}
-            </button>
+          {exports.length > 0 && (
+            <ActionMenu items={exports} label={t('ask2.ans.export')} portal align="end" triggerClassName="dl-act"
+              trigger={<><Download size={14} aria-hidden /> <span className="dl-act__text">{t('ask2.ans.export')}</span> <ChevronDown size={13} aria-hidden /></>} />
           )}
           {question && (
             <>
-              <button type="button" className="dl-act" onClick={() => setInput(question)}>
+              <button type="button" className="dl-act" title={t('err3.edit')} onClick={() => setInput(question)}>
                 <Pencil size={14} aria-hidden /> <span className="dl-act__text">{t('err3.edit')}</span>
               </button>
-              <button type="button" className="dl-act" disabled={busy || offline} onClick={() => void send(question)}>
+              <button type="button" className="dl-act" title={t('ask.retry')} disabled={busy || offline} onClick={() => void send(question)}>
                 <RotateCcw size={14} aria-hidden /> <span className="dl-act__text">{t('ask.retry')}</span>
               </button>
             </>

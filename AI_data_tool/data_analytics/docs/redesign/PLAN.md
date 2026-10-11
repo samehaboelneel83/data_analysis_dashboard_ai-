@@ -146,10 +146,11 @@ Nothing is pushed.
     - >> GATE A; then A2, the owner's change to the empty page (two columns, chooser always open)
   - [x] B Loading and answer cards (after A3/A4: the robot, then the approved prototype ported; the robot's head is the cards' avatar)
     - >> GATE B
-  - [ ] C Error card and composer
+  - [x] C Error card and composer (with the two GATE B changes: grouped numbers in the answer's rows, the Export menu)
+    - >> GATE C
   - [ ] D History rail
 - [ ] Then: Upload, Connections, Lineage, the AI button
-- [ ] FINAL Full regression: all tests, build, capture every screen, compare against all designs, final summary, fix the flaky `Lineage.test.tsx` (and watch `geoRenderers.test.tsx`, `PrepPipelinePanel.test.tsx` ("shows the previewed shape…", failed once in a full run on 2026-10-11, passes alone) and ReportBuilder's "report-level display rules" under load), and a clean-up list (test datasets 7 and 8, chat threads, the uncommitted init.sql edit). QA3 adds: dashboard "QA3-Builder" #16 (made 00:01; share link made and revoked 00:02–00:03; not made by the QA3 run, so the owner decides), and the cached insights QA3 may have saved on "Demo — Sales" and in the Builder AI panel. QA3 adds: stop the port-3002 Vite server ("before" captures) and remove its worktree (`git worktree remove` on the scratchpad `before` folder).
+- [ ] FINAL Full regression: all tests, build, capture every screen, compare against all designs, final summary, fix the flaky `Lineage.test.tsx` (and watch `geoRenderers.test.tsx`, `PrepPipelinePanel.test.tsx` ("shows the previewed shape…", failed once in a full run on 2026-10-11, passes alone), `Reports.test.tsx` ("Blank with no data opens the builder…", the same) and ReportBuilder's "report-level display rules" under load), and a clean-up list (test datasets 7 and 8, chat threads, the uncommitted init.sql edit). QA3 adds: dashboard "QA3-Builder" #16 (made 00:01; share link made and revoked 00:02–00:03; not made by the QA3 run, so the owner decides), and the cached insights QA3 may have saved on "Demo — Sales" and in the Builder AI panel. QA3 adds: stop the port-3002 Vite server ("before" captures) and remove its worktree (`git worktree remove` on the scratchpad `before` folder).
   - >> GATE F: stop, final report
 
 ## Backend follow-ups (found during the frontend steps)
@@ -1315,3 +1316,40 @@ The owner approved the robot port (10-A4, with its departures) and decided: the 
 - The Ask AI guard covers `RobotHead`, `CardSection`, `SqlBlock` and `Pending`.
 - Full suite: 350 files / 4391 tests; one failed in the full run, `Reports.test.tsx` ("Blank with no data opens the builder…", not touched here), and that file passes alone (73/73). Type-check and build pass.
 - Captures: `e2e/capture/redesign/cap_10b.mjs` (browser-only data: the answer, the run's duration, model endpoints up), EN/AR × light/dark: loading, the answer landing (happy head), the answer, rows and SQL open, a line chart, a plain table, a new answer under a stored one, and the answer and loading at 1024px. Before is :3001 at `2f98a95`; after is in `redesign-captures/10-askai/B-{before,after}/`.
+
+### 10-C Ask AI: the error card and the question box, with the GATE B changes — the commit that adds this entry
+
+GATE B was approved with two changes; the owner accepted the app's chart renderer, the 48×37 head, the rows band open when there is no chart, the chip hidden below 1180px, the Good / Bad answer labels and no duration on reopened threads.
+
+**GATE B change 1, the rows' numbers.**
+- The rows already went through the shared `formatCell` (rounding, locale digits; the RTL table rule isolates a cell). What they lacked was thousands separators, and `formatCell` leaves those out on purpose: it formats every column a question returns, and "2,024" for a year or "104,233" for an id is wrong.
+- So the answer card's rows use a new `formatCellGrouped` (in `lib/displayNumber`, the same rounding and digits, with the thousands grouped) for quantity columns only. A column that `semanticGuard.nonAdditiveKind` reads as a year, an identifier or a coordinate keeps `formatCell`. A whole number that arrives as text is never grouped. Each number cell is held left-to-right (`<bdi dir="ltr">`).
+- No totals row. The other data tables and the builder's compact grid are unchanged (pinned by a test).
+- **For the owner:** if every data table should group thousands, that is a change to `formatCell` itself and needs the same year/id rule in each table; it was not done here.
+
+**GATE B change 2, the actions row.** Add to dashboard (primary), Copy, 👍 / 👎, **Export ▾**, Edit question, Retry. Export is the app's `ActionMenu` (portalled; arrows, Enter, Escape, focus back on the button) holding Download CSV / Excel / PDF and, on a connection, Save as dataset. Below 1100px the labels of Copy, Export, Edit question and Retry collapse to icons with tooltips (Add to dashboard keeps its words).
+
+**Part C, the error card** (design `.er`):
+- The robot's head (the error look for 3.5s, then calm) stands where the design has its "?" tile; the title is "I couldn't answer that one".
+- One sentence naming the data: "I couldn't match your question to **Demo — Sales**. Try rephrasing it, or start from its columns." It is general because the server sends one raw string and no reason (backend row).
+- "Try asking about these columns" with up to three chips: the page's own suggestions, built from the dataset's real columns (GATE 0). A chip asks it.
+- "Technical details", closed: the server's text, mono, left-to-right.
+- Edit question (primary; refills the box) and Retry.
+- A request that never reached the agent says only "Could not reach the agent. Try again.", with Edit question and Retry: no column advice and nothing under Technical details, because nothing was matched and nothing came back.
+- `role="alert"` only on a failure that arrives while the reader is there; a reopened thread's old failures are not announced.
+- The AI-limit and clarification replies keep their content in the same card (not in the design; unchanged).
+
+**Part C, the question box** (design `.cmp`; `Composer page`):
+- The field on top (16px, grows to 168px); inside the same frame, the key hint ("Enter to send · Shift + Enter for a new line", as keys), the count and Send. The placeholder names the data: "Ask about Demo — Sales…".
+- The limit stays 2000 and the count turns to the warning colour from 1801 (GATE 0), not the design's 500 / 450.
+- Locked before step 1: dashed, with the pill "Complete step 1 first". Paused while the model is down: dashed, with the existing sentence as its placeholder and the line above it.
+- Send is disabled while the box is empty. Enter sends, Shift+Enter is a new line, and an IME composition is left alone.
+- The disclaimer is under the box in the chat too.
+- Below 1100px the key hint is hidden and the count keeps the far side.
+- The builder's copilot keeps the compact box (pinned).
+
+**Tests:**
+- `askCards.test.tsx` grew to 27: the grouped rows (and never a year or id), the compact grid unchanged, the Export menu by keyboard and on a connection, the error card (sentence, chips, details, Edit / Retry, the unreachable case, no alert on a reopened thread, Arabic), and the question box (placeholder, keys, count, the 1800 warning, Enter / Shift+Enter / composition, the compact box elsewhere).
+- `Composer.tsx` is in the Ask AI guard.
+- Full suite: 350 files / 4405 tests. Three failed in the full run, none in a file this step touches: `ReportBuilder.test.tsx` (E03), `WidgetRenderer.test.tsx` (QA2 T14) and `geoRenderers.test.tsx` (the time map); the three files pass alone (407/407). Type-check and build pass.
+- Captures: `e2e/capture/redesign/cap_10c.mjs` (browser-only data), EN/AR × light/dark: the rows open, the Export menu open, the actions at 1024px, the error landing, the error, its details open, the error at 1024px, and the question box empty, with text, near the limit, locked, paused and at 1024px. Before is :3001 at `1bd7389`; after is in `redesign-captures/10-askai/C-{before,after}/`.

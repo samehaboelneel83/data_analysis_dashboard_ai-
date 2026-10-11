@@ -18,6 +18,8 @@ const FILES: string[] = [
   'components/chat/CardSection.tsx',
   'components/chat/SqlBlock.tsx',
   'components/chat/Pending.tsx',
+  // Part C
+  'components/chat/Composer.tsx',
 ]
 
 describe('no hard-coded English: Ask AI (step 10)', () => {

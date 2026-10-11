@@ -236,6 +236,8 @@ section has the details of every step), then `DATALYTICS_REDESIGN_HANDOFF.md`.
 - **`src/components/report/PrepPipelinePanel.test.tsx`**, "shows the previewed shape so the
   author knows what they are keeping": failed once in a full run (2026-10-11), passes
   alone. On the FINAL list.
+- **`src/pages/Reports.test.tsx`**, "Blank with no data opens the builder asking for data,
+  auto-named": the same (2026-10-11). On the FINAL list.
 - **If a full run fails only on these,** re-run the file alone before treating it as
   real.
 

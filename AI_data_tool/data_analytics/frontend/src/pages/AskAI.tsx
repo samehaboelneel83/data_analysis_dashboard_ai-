@@ -283,7 +283,8 @@ export default function AskAI() {
           {!noData && (
             <div className="dl-ask__foot">
               <div className="dl-ask__col">
-                <Composer value="" onChange={() => {}} onSend={() => {}} locked lockedHint={t('ask2.composer.chooseFirst')} />
+                <Composer value="" onChange={() => {}} onSend={() => {}} locked lockedHint={t('ask2.composer.chooseFirst')}
+                  page={{ pill: t('ask2.composer.lock') }} />
                 <p className="dl-ask__disc">{t('ask2.disclaimer')}</p>
               </div>
             </div>

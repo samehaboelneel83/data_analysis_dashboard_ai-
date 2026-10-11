@@ -159,6 +159,179 @@ describe('the answer card', () => {
   })
 })
 
+describe('the GATE B changes', () => {
+  it('groups thousands in the rows and holds numbers left-to-right, but never in a year or id column', async () => {
+    vi.spyOn(agentApi, 'ask').mockResolvedValue({ ...TABLE, results: [{ step: 'q1', columns: ['region', 'year', 'order_id', 'revenue', 'margin'],
+      total: 2, truncated: true, rows: [['Asia', 2026, 104233, 2348914, -1234.5678], ['Europe', 2025, 104234, 2219630.5, 0.04567]] }] } as unknown as AgentAnswer)
+    const { container } = pane()
+    await ask()
+    const cells = [...container.querySelectorAll('tbody tr')].map(tr => [...tr.querySelectorAll('td')].map(td => td.textContent))
+    expect(cells).toEqual([['Asia', '2026', '104233', '2,348,914', '-1,234.57'], ['Europe', '2025', '104234', '2,219,630.5', '0.0457']])
+    const revenue = container.querySelectorAll('tbody tr')[0].querySelectorAll('td')[3]
+    expect(revenue.querySelector('bdi')).toHaveAttribute('dir', 'ltr')
+    expect(container.querySelector('tfoot')).toBeNull()
+  })
+
+  it('keeps the compact grid as it was', async () => {
+    vi.spyOn(agentApi, 'ask').mockResolvedValue(BAR)
+    const { container } = render(<ChatPane datasetIds={[1]} conversationId={null} />)
+    await ask()
+    fireEvent.click(screen.getByRole('button', { name: /Show rows/ }))
+    expect(container.querySelector('tbody td:nth-child(2)')).toHaveTextContent('2348914')
+  })
+
+  it('puts the downloads under one Export menu, worked by keyboard', async () => {
+    vi.spyOn(agentApi, 'ask').mockResolvedValue(BAR)
+    const file = vi.spyOn(agentApi, 'downloadRunFile').mockResolvedValue(undefined as never)
+    const { container } = pane()
+    await ask()
+    const acts = container.querySelector('.dl-ac__acts') as HTMLElement
+    expect([...acts.querySelectorAll('button')].map(b => b.getAttribute('aria-label') ?? b.textContent?.trim()))
+      .toEqual(['Add to dashboard', 'Copy answer', 'Good answer', 'Bad answer', 'Export', 'Edit question', 'Retry'])
+    expect(screen.queryByRole('button', { name: 'Download CSV' })).toBeNull()
+    const trigger = screen.getByRole('button', { name: 'Export' })
+    expect(trigger).toHaveAttribute('aria-haspopup', 'menu')
+    fireEvent.click(trigger)
+    const menu = screen.getByRole('menu', { name: 'Export' })
+    expect(within(menu).getAllByRole('menuitem').map(i => i.textContent)).toEqual(['Download CSV', 'Download Excel', 'Download PDF'])
+    expect(within(menu).getAllByRole('menuitem')[0]).toHaveFocus()
+    fireEvent.keyDown(menu, { key: 'ArrowDown' })
+    expect(within(menu).getAllByRole('menuitem')[1]).toHaveFocus()
+    fireEvent.keyDown(menu, { key: 'Enter' })
+    expect(file).toHaveBeenCalledWith(701, 'xlsx')
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(trigger).toHaveFocus()
+    fireEvent.click(trigger)
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
+    expect(screen.queryByRole('menu')).toBeNull()
+  })
+
+  it('adds Save as dataset to the menu on a connection, and names the menu in Arabic', async () => {
+    vi.spyOn(agentApi, 'ask').mockResolvedValue(BAR)
+    render(<ChatPane dataSourceId={2} conversationId={null} card={{ scopeName: 'Live' }} />)
+    await ask()
+    fireEvent.click(screen.getByRole('button', { name: 'Export' }))
+    expect(screen.getAllByRole('menuitem').map(i => i.textContent)).toEqual(['Download CSV', 'Download Excel', 'Download PDF', 'Save as dataset'])
+    expect(translate('ar', 'ask2.ans.export')).toBe('تصدير')
+  })
+})
+
+describe('the error card', () => {
+  it('says why in words, offers the page’s column suggestions, hides the server text under Technical details', async () => {
+    vi.spyOn(agentApi, 'ask').mockResolvedValue(FAILED)
+    const { container } = pane({ suggestions: ['Total revenue by region', 'Top 5 region by revenue', 'How many rows per region?', 'A fourth'] })
+    await ask('which reps missed quota?')
+    const card = container.querySelector('.dl-ac--error') as HTMLElement
+    expect(within(card).getByRole('heading', { name: 'I couldn’t answer that one' })).toBeInTheDocument()
+    const why = within(card).getByRole('alert')
+    expect(why).toHaveTextContent('I couldn’t match your question to Demo — Sales. Try rephrasing it, or start from its columns.')
+    expect(why.querySelector('bdi b')).toHaveTextContent('Demo — Sales')
+    const chips = within(card).getByRole('group', { name: 'Try asking about these columns' })
+    expect(within(chips).getAllByRole('button').map(b => b.textContent?.trim())).toEqual(['Total revenue by region', 'Top 5 region by revenue', 'How many rows per region?'])
+    const details = card.querySelector('details') as HTMLDetailsElement
+    expect(details.open).toBe(false)
+    expect(details.querySelector('summary')).toHaveTextContent('Technical details')
+    expect(details.querySelector('pre')).toHaveAttribute('dir', 'ltr')
+    expect(details.querySelector('pre')).toHaveTextContent('Binder Error')
+    expect(why).not.toHaveTextContent('Binder Error')
+    expect(card.querySelector('[data-testid="answer-meta"]')).toBeNull()
+  })
+
+  it('Edit question refills the box; Retry and a suggestion ask again', async () => {
+    const asked = vi.spyOn(agentApi, 'ask').mockResolvedValue(FAILED)
+    const { container } = pane({ suggestions: ['Total revenue by region'] })
+    await ask('which reps missed quota?')
+    const acts = container.querySelector('.dl-ac--error .dl-ac__acts') as HTMLElement
+    expect([...acts.querySelectorAll('button')].map(b => b.textContent?.trim())).toEqual(['Edit question', 'Retry'])
+    expect(within(acts).getByRole('button', { name: 'Edit question' })).toHaveClass('dl-act--primary')
+    fireEvent.click(within(acts).getByRole('button', { name: 'Edit question' }))
+    expect(screen.getByPlaceholderText(/ask/i)).toHaveValue('which reps missed quota?')
+    fireEvent.click(within(acts).getByRole('button', { name: 'Retry' }))
+    await settle()
+    expect(asked).toHaveBeenLastCalledWith(7, 'which reps missed quota?')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Total revenue by region' })[0])
+    await settle()
+    expect(asked).toHaveBeenLastCalledWith(7, 'Total revenue by region')
+  })
+
+  it('a request that never reached the agent says only that: no column advice, nothing technical', async () => {
+    vi.spyOn(agentApi, 'ask').mockRejectedValue(new Error('down'))
+    const { container } = pane({ suggestions: ['Total revenue by region'] })
+    await ask()
+    const card = container.querySelector('.dl-ac--error') as HTMLElement
+    expect(within(card).getByRole('alert')).toHaveTextContent('Could not reach the agent. Try again.')
+    expect(card.querySelector('details, .dl-err__try')).toBeNull()
+    expect(within(card).getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+  })
+
+  it('does not announce the failures of a reopened thread', async () => {
+    vi.spyOn(agentApi, 'messages').mockResolvedValue([
+      { id: 1, role: 'user', content: 'q', created_at: null, run: null },
+      { id: 2, role: 'assistant', content: '', created_at: null, run: { id: 9, status: 'failed', intent: null, error: 'Binder Error', results: [], sql: [], presentation: null, context_objects: null } },
+    ] as AgentMessage[])
+    const { container } = pane({ conversationId: 9 })
+    await settle()
+    expect(container.querySelector('.dl-ac--error')).not.toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('is in Arabic', () => {
+    expect(translate('ar', 'ask2.err.title')).toBe('تعذّرت الإجابة عن هذا السؤال')
+    expect(translate('ar', 'ask2.err.tryColumns')).toBe('جرّب السؤال عن هذه الأعمدة')
+    expect(translate('ar', 'ask2.err.why', { name: 'X' })).toContain('X')
+  })
+})
+
+describe('the question box on the page', () => {
+  it('names the data, shows the keys and the count inside its frame, and a disclaimer under it', async () => {
+    const { container } = pane()
+    await settle()
+    const box = screen.getByRole('textbox', { name: 'Your question' })
+    expect(box).toHaveAttribute('placeholder', 'Ask about Demo — Sales…')
+    expect(box).toHaveAttribute('maxlength', '2000')
+    const foot = container.querySelector('.dl-composer--page .dl-composer__box .dl-composer__foot') as HTMLElement
+    expect(foot.querySelector('.dl-composer__keys')).toHaveTextContent('Enter to send · Shift + Enter for a new line')
+    expect(foot.querySelectorAll('kbd')).toHaveLength(3)
+    expect(foot.querySelector('.dl-composer__count')).toHaveTextContent('0 / 2000')
+    expect(screen.getByText('Answers are generated from your data. Check the SQL before you share them.')).toBeInTheDocument()
+  })
+
+  it('warns from 1800 characters, not before', async () => {
+    const { container } = pane()
+    await settle()
+    const box = screen.getByRole('textbox', { name: 'Your question' })
+    const count = () => container.querySelector('.dl-composer__count') as HTMLElement
+    fireEvent.change(box, { target: { value: 'x'.repeat(1800) } })
+    expect(count()).toHaveTextContent('1800 / 2000')
+    expect(count()).not.toHaveClass('dl-composer__count--warn')
+    fireEvent.change(box, { target: { value: 'x'.repeat(1801) } })
+    expect(count()).toHaveClass('dl-composer__count--warn')
+  })
+
+  it('sends on Enter, not on Shift+Enter or while composing; Send is off while empty', async () => {
+    const asked = vi.spyOn(agentApi, 'ask').mockResolvedValue(BAR)
+    pane()
+    await settle()
+    const box = screen.getByRole('textbox', { name: 'Your question' })
+    expect(screen.getByRole('button', { name: 'Send question' })).toBeDisabled()
+    fireEvent.change(box, { target: { value: 'total' } })
+    expect(screen.getByRole('button', { name: 'Send question' })).toBeEnabled()
+    fireEvent.keyDown(box, { key: 'Enter', shiftKey: true })
+    fireEvent.keyDown(box, { key: 'Enter', isComposing: true })
+    await settle()
+    expect(asked).not.toHaveBeenCalled()
+    fireEvent.keyDown(box, { key: 'Enter' })
+    await settle()
+    expect(asked).toHaveBeenCalledWith(7, 'total')
+  })
+
+  it('keeps the compact box outside the page', () => {
+    const { container } = render(<ChatPane datasetIds={[1]} conversationId={null} />)
+    expect(container.querySelector('.dl-composer--page, .dl-ask__disc')).toBeNull()
+    expect(screen.getByRole('textbox', { name: 'Your question' })).toHaveAttribute('placeholder', 'Ask a question about this data…')
+  })
+})
+
 describe("the robot's head on the cards", () => {
   it('is happy when the answer lands, then calm; only the newest head moves', async () => {
     vi.spyOn(agentApi, 'ask').mockResolvedValue(BAR)

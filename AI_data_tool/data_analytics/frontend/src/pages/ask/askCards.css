@@ -98,3 +98,75 @@
 @media (prefers-reduced-motion: reduce) {
   .dl-ac, .dl-ac__skel i, .dl-sect__chev { animation: none !important; transition: none !important; }
 }
+
+/* ── Part C: the error card ──────────────────────────────────────────────
+   (design `.er`, `.rph`, `.chip2`, `details.td`.) The robot's head stands
+   where the design has its "?" tile. */
+.dl-ac__who--error { margin: 0; font-size: 17px; font-weight: 600; }
+.dl-ac--error .dl-ac__head { align-items: flex-start; padding-top: 16px; }
+.dl-ac--error .dl-ac__body { padding-top: 4px; }
+.dl-ac__body > .dl-err { margin-bottom: 16px; }
+.dl-err__why { margin: 0; color: var(--muted); font-size: 14.5px; line-height: 1.55; text-wrap: pretty; }
+.dl-err__why b { color: var(--text); font-weight: 600; }
+.dl-err__try { margin-top: 14px; }
+.dl-err__try-l { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+.dl-err__chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.dl-err__chip {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 34px; padding: 4px 14px; border-radius: 999px;
+  border: 1px solid var(--mc-border-strong); background: var(--surface); color: var(--text);
+  font: inherit; font-size: 13px; font-weight: 500; text-align: start; cursor: pointer;
+}
+.dl-err__chip svg { color: var(--mc-accent-ink, var(--accent)); flex: none; }
+[data-theme="dark"] .dl-err__chip svg { color: var(--accent); }
+.dl-err__chip:hover:not(:disabled) { border-color: var(--accent); }
+.dl-err__chip:disabled { opacity: .5; cursor: not-allowed; }
+.dl-err__chip:focus-visible, .dl-err__td summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+[dir="rtl"] .dl-flip { transform: scaleX(-1); }
+.dl-ac__body > .dl-err__td { margin-inline: 0; border-top: 1px solid var(--border); }
+.dl-err__td summary {
+  list-style: none; display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 18px;
+  font-size: 13px; font-weight: 600; color: var(--muted); cursor: pointer;
+}
+.dl-err__td summary::-webkit-details-marker { display: none; }
+.dl-err__td[open] summary svg { transform: rotate(90deg); }
+.dl-err__td pre {
+  margin: 0 18px 14px; padding: 12px 14px; border-radius: 10px; background: var(--bg); border: 1px solid var(--border);
+  font: 12px/1.6 var(--font-mono, monospace); white-space: pre-wrap; overflow-wrap: anywhere; text-align: left; color: var(--muted);
+}
+
+/* ── Part C: the question box on the page ────────────────────────────────
+   (design `.cmp`.) The field on top; the hint, the count and Send inside
+   the same frame. */
+.dl-composer--page .dl-composer__box {
+  display: block; padding: 14px 12px 10px 18px; padding-inline: 18px 12px; border-radius: 18px;
+  border-color: var(--mc-border-strong); box-shadow: var(--dl-shadow-card);
+}
+.dl-composer--page .dl-composer__box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.dl-composer--page .dl-composer__input { display: block; width: 100%; padding: 0; font-size: 16px; min-height: 26px; max-height: 168px; }
+/* The frame is the field's focus ring; the field itself shows none. */
+.dl-composer--page .dl-composer__input:focus, .dl-composer--page .dl-composer__input:focus-visible { outline: none; box-shadow: none; border: 0; }
+.dl-composer--page.dl-composer--locked .dl-composer__box { background: var(--surface2); border-style: dashed; box-shadow: none; }
+.dl-composer__foot { display: flex; align-items: center; gap: 12px; margin-top: 10px; min-height: 38px; }
+.dl-composer__pill {
+  display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; flex: none; white-space: nowrap;
+  border-radius: 999px; background: var(--surface); border: 1px solid var(--border); font-size: 12px; font-weight: 600; color: var(--muted);
+}
+.dl-composer__keys { margin-inline-start: auto; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.dl-composer__keys kbd {
+  font: 500 11px var(--font-mono, monospace); padding: 1px 5px; border: 1px solid var(--border); border-bottom-width: 2px;
+  border-radius: 5px; background: var(--bg); color: var(--text);
+}
+.dl-composer--page .dl-composer__count { font: 500 12px var(--font-mono, monospace); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dl-composer--page .dl-composer__count--warn { color: var(--warning, var(--danger)); font-weight: 600; }
+.dl-composer--page .dl-composer__send { width: 38px; height: 38px; margin-inline-start: 0; }
+.dl-composer--page.dl-composer--locked .dl-composer__send { margin-inline-start: auto; }
+.dl-composer--page .dl-composer__send:disabled { opacity: 1; background: var(--surface2); color: var(--mc-faint, var(--muted)); }
+.dl-composer--page.dl-composer--locked .dl-composer__send:disabled { background: var(--surface); }
+
+/* Narrow: the actions keep their icons and lose their words (tooltips say
+   them); the key hint goes, the count keeps the far side. */
+@media (max-width: 1100px) {
+  .dl-ac__acts .dl-act__text { display: none; }
+  .dl-composer__keys { display: none; }
+  .dl-composer--page .dl-composer__count { margin-inline-start: auto; }
+}

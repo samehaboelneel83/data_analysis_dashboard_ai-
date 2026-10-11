@@ -63,6 +63,16 @@ export const en = {
   'ask2.chart.line': 'Line',
   'ask2.chart.pie': 'Pie',
   'ask2.ans.rowsBehind': 'Rows behind this answer',
+  'ask2.ans.export': 'Export',
+  // Error card and question box (Part C)
+  'ask2.err.title': 'I couldn’t answer that one',
+  'ask2.err.why': 'I couldn’t match your question to {name}. Try rephrasing it, or start from its columns.',
+  'ask2.err.whyPlain': 'I couldn’t match your question to the data. Try rephrasing it, or start from its columns.',
+  'ask2.err.tryColumns': 'Try asking about these columns',
+  'ask2.cmp.placeholder': 'Ask about {name}…',
+  'ask2.cmp.toSend': 'to send',
+  'ask2.cmp.newLine': 'for a new line',
+  'ask2.cmp.send': 'Send question',
 } as const
 
 export const ar: Record<keyof typeof en, string> = {
@@ -115,4 +125,14 @@ export const ar: Record<keyof typeof en, string> = {
   'ask2.chart.line': 'خطي',
   'ask2.chart.pie': 'دائري',
   'ask2.ans.rowsBehind': 'الصفوف التي بُنيت عليها الإجابة',
+  'ask2.ans.export': 'تصدير',
+  // Error card and question box (Part C)
+  'ask2.err.title': 'تعذّرت الإجابة عن هذا السؤال',
+  'ask2.err.why': 'تعذّر ربط سؤالك ببيانات {name}. جرّب إعادة صياغته، أو ابدأ من أعمدتها.',
+  'ask2.err.whyPlain': 'تعذّر ربط سؤالك بالبيانات. جرّب إعادة صياغته، أو ابدأ من أعمدتها.',
+  'ask2.err.tryColumns': 'جرّب السؤال عن هذه الأعمدة',
+  'ask2.cmp.placeholder': 'اسأل عن {name}…',
+  'ask2.cmp.toSend': 'للإرسال',
+  'ask2.cmp.newLine': 'لسطر جديد',
+  'ask2.cmp.send': 'إرسال السؤال',
 }

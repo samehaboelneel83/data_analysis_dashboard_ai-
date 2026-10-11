@@ -69,3 +69,22 @@ export function formatCell(v: string | number | boolean | null | undefined): str
   if (Number.isInteger(n)) return localDigits(String(v))
   return localDigits(Math.abs(n) >= 1 ? trimZeros(n.toFixed(2)) : sig3(n))
 }
+
+/**
+ * A cell of an answer's rows on the Ask AI card: `formatCell`, with the
+ * thousands grouped ("2,348,914"). Only for a column that holds a quantity:
+ * the caller leaves years, identifiers and coordinates to `formatCell`,
+ * where "2,024" would be its own wrong. A whole number that arrives as text
+ * (a code, a phone number) is never grouped.
+ */
+export function formatCellGrouped(v: string | number | boolean | null | undefined): string {
+  if (v == null) return ''
+  const n = typeof v === 'number' ? v
+    : typeof v === 'string' && /^[-+]?\d+\.\d+$/.test(v.trim()) ? Number(v) : null
+  if (n == null || !Number.isFinite(n)) return String(v)
+  const text = Number.isInteger(n) ? String(n) : Math.abs(n) >= 1 ? trimZeros(n.toFixed(2)) : sig3(n)
+  if (/e/i.test(text)) return localDigits(text)
+  const [whole, frac] = text.split('.')
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+  return localDigits(frac ? `${grouped}.${frac}` : grouped)
+}

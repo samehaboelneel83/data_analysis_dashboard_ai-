@@ -3,7 +3,8 @@ import { Table2 } from 'lucide-react'
 import { useDirection } from '../../contexts/DirectionContext'
 import { useT } from '../../i18n'
 import { localDigits } from '../../lib/arabicFormats'
-import { formatCell, readingValue } from '../../lib/displayNumber'
+import { formatCell, formatCellGrouped, readingValue } from '../../lib/displayNumber'
+import { nonAdditiveKind } from '../../lib/semanticGuard'
 import BarChartRenderer from '../report/chartRenderers/BarChartRenderer'
 import LineChartRenderer from '../report/chartRenderers/LineChartRenderer'
 import PieChartRenderer from '../report/chartRenderers/PieChartRenderer'
@@ -178,10 +179,14 @@ function NoRows() {
   return <span style={{ fontSize: 12, color: 'var(--muted)' }}>{t('res.none')}</span>
 }
 
-export function ResultGrid({ result, focus }: {
+export function ResultGrid({ result, focus, grouped }: {
   result: AgentResult
   focus?: Omit<EvidenceFocus, 'result'> | null
+  /** Step 10, the answer card: numbers are grouped by thousands and held
+   *  left-to-right, except in a year, identifier or coordinate column. */
+  grouped?: boolean
 }) {
+  const quantity = result.columns.map(c => !!grouped && !nonAdditiveKind(c))
   const box = useRef<HTMLDivElement>(null)
   const col = focus?.column != null ? result.columns.indexOf(focus.column) : -1
   const marked = (i: number, j: number) => !!focus && j === col
@@ -219,7 +224,9 @@ export function ResultGrid({ result, focus }: {
                     style={{ padding: '4px 8px', borderBottom: '1px solid var(--border)',
                     whiteSpace: 'nowrap', textAlign: typeof v === 'number' ? 'end' : 'start',
                     fontVariantNumeric: 'tabular-nums' }}>
-                    {cellText(v)}
+                    {!grouped ? cellText(v)
+                      : typeof v === 'number' ? <bdi dir="ltr">{quantity[j] ? formatCellGrouped(v) : cellText(v)}</bdi>
+                      : quantity[j] ? formatCellGrouped(v) : cellText(v)}
                   </td>
                 ))}
               </tr>
@@ -406,7 +413,7 @@ export default function ResultView({ results, presentation, focus, sectioned }: 
               {!kpi && (
                 <CardSection icon={Table2} label={t('ask2.ans.rowsBehind')} count={r.total} open={open}
                   onToggle={() => (showChart ? setRowsOpen(o => !o) : setGridClosed(c => !c))}>
-                  <ResultGrid result={r} focus={here} />
+                  <ResultGrid result={r} focus={here} grouped />
                 </CardSection>
               )}
             </div>
