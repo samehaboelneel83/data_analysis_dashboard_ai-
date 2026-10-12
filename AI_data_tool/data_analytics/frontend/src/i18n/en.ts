@@ -12,13 +12,14 @@ import { en as pgPanelsB } from './pages/panelsB'
 import { en as pgModelsMaps } from './pages/modelsMaps'
 import { en as pgTypes } from './pages/types'
 import { en as pgAskAi } from './pages/askAi'
+import { en as pgLineage } from './pages/lineage'
 
 /** English UI strings. Arabic lives in `ar.ts`; keep the two key sets identical. */
 export const en = {
   // QA3 Batch C: the builder's strings, one module per area (i18n/builder/).
   ...bcCanvas, ...bcPanes, ...bcRules, ...bcShell, ...bcStats, ...bcDialogs,
   // 8-i18n: the pages outside the Builder, one module per area (i18n/pages/).
-  ...pgAdminSecurity, ...pgAdminPlatform, ...pgDataPages, ...pgPanelsA, ...pgPanelsB, ...pgModelsMaps, ...pgTypes, ...pgAskAi,
+  ...pgAdminSecurity, ...pgAdminPlatform, ...pgDataPages, ...pgPanelsA, ...pgPanelsB, ...pgModelsMaps, ...pgTypes, ...pgAskAi, ...pgLineage,
   'nav.home': 'Home',
   'nav.askAi': 'Ask AI',
   'nav.datasets': 'Datasets',
