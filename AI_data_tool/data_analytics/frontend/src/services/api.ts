@@ -3257,9 +3257,12 @@ export const agentApi = {
       { title }).then(r => r.data),
   remove: (conversationId: number) =>
     api.delete(`/agent/conversations/${conversationId}`).then(() => undefined),
-  ask: (conversationId: number, question: string) =>
+  /** QAF M3: `signal` (optional) lets the reader stop waiting. Aborting drops
+   *  the client's request only; the server may still finish the run (a
+   *  server-side cancel is AN2). */
+  ask: (conversationId: number, question: string, signal?: AbortSignal) =>
     api.post<AgentAnswer>(`/agent/conversations/${conversationId}/ask`,
-      { question }).then(r => r.data),
+      { question }, signal ? { signal } : undefined).then(r => r.data),
   runDetail: (runId: number) =>
     api.get<{ steps: { sql: string | null; status: string; result_rows?: AgentResult | null }[]
               context_objects?: string[] | null

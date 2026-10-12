@@ -67,7 +67,7 @@ export default function DashboardsSection({ reports, isAdmin, loading, onRename,
 
   // Draft / Published as the list page reads them: a legacy (unowned) report
   // is neither, and the folder that may publish a draft is not visible here.
-  const badge = (r: Report) => r.created_by == null ? null
+  const badge = (r: Report) => r.created_by == null ? <span className="hm-bd open" title={t('qaf.st.openTitle')}>{t('qaf.st.open')}</span>
     : r.published ? <span className="hm-bd pub">{t('hm.badge.published')}</span>
     : <span className="hm-bd draft" title={t('home.draftTitle')}>{t('hm.badge.draft')}</span>
   const meta = (r: Report) => r.my_capability === 'view' ? t('home.viewOnly')

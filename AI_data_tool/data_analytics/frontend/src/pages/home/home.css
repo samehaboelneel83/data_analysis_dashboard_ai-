@@ -173,6 +173,7 @@
 .hm-bd::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .hm-bd.draft { background: var(--surface2); color: var(--muted); }
 .hm-bd.pub { background: var(--mc-success-soft); color: var(--success); }
+.hm-bd.open { background: transparent; color: var(--muted); box-shadow: inset 0 0 0 1px var(--border); }
 
 .hm-tbw { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
 .hm-tb { width: 100%; border-collapse: collapse; font-size: 13px; }

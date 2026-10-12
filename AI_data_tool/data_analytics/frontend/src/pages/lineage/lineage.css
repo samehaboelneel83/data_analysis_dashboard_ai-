@@ -155,6 +155,11 @@
   background: var(--surface); border: 1px solid var(--border); box-shadow: var(--dl-shadow-card); overflow: hidden; cursor: pointer;
 }
 .dl-ln-mini svg { width: 100%; height: 100%; display: block; }
+.dl-ln-mini__x { position: absolute; top: 4px; inset-inline-end: 4px; z-index: 1; width: 20px; height: 20px; display: grid; place-items: center;
+  border: 0; border-radius: 6px; background: var(--surface); color: var(--muted); cursor: pointer; }
+.dl-ln-mini__x:hover { color: var(--text); background: var(--surface2); }
+.dl-ln-mini__x:focus-visible, .dl-ln-mini-show:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dl-ln-mini-show { position: absolute; bottom: 14px; inset-inline-end: 14px; z-index: 6; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--dl-shadow-card); }
 .dl-ln-mini rect { fill: var(--mc-border-strong); }
 .dl-ln-mini rect.is-on { fill: var(--accent); }
 .dl-ln-mini rect.is-iss { fill: var(--warning); }
@@ -230,6 +235,8 @@
 .dl-ln-sdot--ok { background: var(--success); }
 .dl-ln-sdot--warn { background: var(--warning); }
 .dl-ln-sdot--err { background: var(--danger); }
+.dl-ln-sdot--none { background: var(--mc-border-strong); }
+.dl-ln-list tr.is-focus > td { background: var(--accent-soft); }
 .dl-ln-side__lst h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 [dir="rtl"] .dl-ln-side__lst h3 { letter-spacing: 0; font-size: 12px; }
 .dl-ln-side__lst h3 > span { font-size: 11px; background: var(--surface2); border-radius: 999px; padding: 0 7px; letter-spacing: 0; }

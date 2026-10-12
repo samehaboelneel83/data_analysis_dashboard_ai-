@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { ChevronsDown, ChevronsUp, Database, Files, LayoutDashboard, Minus, Plus, Scan, Table2, TriangleAlert, Unlink } from 'lucide-react'
+import { ChevronsDown, ChevronsUp, Database, Files, LayoutDashboard, Map as MapIcon, Minus, Plus, Scan, Table2, TriangleAlert, Unlink, X } from 'lucide-react'
 import { useT } from '../../i18n'
 import { localDigits } from '../../lib/arabicFormats'
 import { lineageSvg } from './exportPng'
@@ -29,6 +29,8 @@ export interface GraphHandle {
 }
 
 const Z_MIN = 0.35, Z_MAX = 2
+/** The minimap's height plus its margin (lineage.css .dl-ln-mini). */
+const MINI_ROOM = 148
 const headKeys = [['lineage.sources', Database], ['lineage.datasets', Table2], ['lineage.reports', LayoutDashboard]] as const
 
 export const KIND_KEY = ['lin2.kind.source', 'lin2.kind.dataset', 'lin2.kind.report'] as const
@@ -92,13 +94,20 @@ const Graph = forwardRef<GraphHandle, {
     setPct(Math.round(z * 100))
   }, [])
 
+  // QAF 18: the minimap sits over the Reports column's foot (inline end, in
+  // both directions), so Fit leaves its height free below the graph, and the
+  // reader can hide it.
+  const [miniOpen, setMiniOpen] = useState(true)
   const fit = useCallback(() => {
     const box = cv.current
     if (!box) return
-    const z = Math.max(Z_MIN, Math.min(1, (box.clientWidth - 40) / W, (box.clientHeight - 20) / H))
+    const room = miniOpen ? MINI_ROOM : 0
+    const z = Math.max(Z_MIN, Math.min(1, (box.clientWidth - 40) / W, (box.clientHeight - 20 - room) / H))
     view.current = { z, tx: (box.clientWidth - W * z) / 2, ty: 0 }
     apply()
-  }, [W, H, apply])
+  }, [W, H, apply, miniOpen])
+  // A minimap shown again draws its viewport box at once.
+  useEffect(() => { if (miniOpen) apply() }, [miniOpen, apply])
 
   const centerOn = useCallback((key: string) => {
     const box = cv.current
@@ -304,7 +313,13 @@ const Graph = forwardRef<GraphHandle, {
         <button type="button" className="dl-ln-ib" aria-label={t('lin2.zoomOut')} title={t('lin2.zoomOut')} onClick={() => zoomCentre(1 / 1.2)}><Minus size={16} aria-hidden /></button>
         <button type="button" className="dl-ln-ib" aria-label={t('lin2.fit')} title={t('lin2.fit')} onClick={fit}><Scan size={16} aria-hidden /></button>
       </div>
-      <div className="dl-ln-mini" title={t('lin2.minimap')}>
+      {!miniOpen && (
+        <button type="button" className="dl-ln-ib dl-ln-mini-show" onClick={() => setMiniOpen(true)}
+          aria-label={t('qaf.lin.showMini')} title={t('qaf.lin.showMini')}><MapIcon size={16} aria-hidden /></button>
+      )}
+      {miniOpen && <div className="dl-ln-mini" title={t('lin2.minimap')}>
+        <button type="button" className="dl-ln-mini__x" onClick={() => setMiniOpen(false)}
+          aria-label={t('qaf.lin.hideMini')} title={t('qaf.lin.hideMini')}><X size={12} aria-hidden /></button>
         <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" onClick={onMini} aria-label={t('lin2.minimap')} role="img">
           {cols.flat().filter(n => lay.visible[n.key]).map(n => (
             <rect key={n.key} x={lay.x(n.col)} y={lay.y[n.key]} width={CW} height={NH} rx={10}
@@ -313,7 +328,7 @@ const Graph = forwardRef<GraphHandle, {
           ))}
           <rect ref={vp} className="dl-ln-mini__vp" x={0} y={0} width={10} height={10} rx={8} />
         </svg>
-      </div>
+      </div>}
     </div>
   )
 })

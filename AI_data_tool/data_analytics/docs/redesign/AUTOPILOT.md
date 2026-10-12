@@ -225,3 +225,9 @@ Follow `docs/redesign/11-Lineage.md`.
 - **Regression:** `reg_final.mjs`, 13 pages × EN light / AR dark, 26/26 clean (no console or page errors, no 5xx, no sideways overflow). One existing behaviour noted, not changed: container children leave their grid slots empty in View/Present.
 - **Docs:** HANDOVER.md brought up to date (status, paths, code map, scripts, flaky tests, owner clean-up); PLAN.md ticked with a FINAL log entry. Backend follow-ups: PLAN.md's table is the full list.
 - **Owner clean-up (not done):** datasets 7 and 8, QA chats, dashboard #16, the "profit" column, the uncommitted init.sql / compose edits.
+
+### FIX-QAF: fixes from the final QA (2026-10-12)
+- **Majors:** M1 Connections rows share the header's grid (subgrid) · M2 legacy (unowned) dashboards are "Everyone", one `statusCounts` for tabs and Home · M3 same call as the panel; the 49 s was model retries (backend row); Stop added · M4 impact sentence leaves out a zero part · M5 previews keep only the rows they asked for (DirectQuery ignores the limit: backend row).
+- **Minors fixed:** 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 18, 19, 20, 21, 22, 23, 25, 26, 27. **Backend:** 14 (no model card), 24 (no column-rule update), plus rows for M3, M5, 16, 26. **Left:** 17 (the panel resumes the dataset's thread by design; the Arabic question is saved there).
+- **Tests:** M1 header/cell pairs, Stop and model-down card, M5 preview rows, `qaf.test.tsx` (status counts, impact 0/1/2/many EN+AR, names, audit details, string parity + guard); 17 existing assertions re-pinned (the `ask` signal, grouped compact grid per item 10, percentages). Full suite 360 files / 4506 pass; type-check and build pass.
+- **Captures:** `redesign-captures/qa-final/after/` (`cap_qaf.mjs`; before = the QA's own screenshots beside the report).

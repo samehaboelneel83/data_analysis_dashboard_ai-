@@ -224,6 +224,12 @@ Not part of the frontend steps (1–7); candidates for the handoff's section 7 p
 | AI button (autopilot 6) | A count of new insights for a dataset | The button's badge needs it without running a full scan (`POST /datasets/{id}/insights` computes them). |
 | Connections (autopilot 7) | A connection's stored status, last check and stability | Status is shown only from this session's test or the latest metadata sync; the design's "checked 8 min ago" and "Unstable: 3 of the last 5 checks" need stored test results. |
 | Connections (autopilot 7) | Table count per connection in the list | Only the schema call or a sync gives it; the list does not call either per row. |
+| FIX-QAF M3 | A simple question took 49 s on the Ask AI page: the model failed the JSON contract three times and the server retried each time (`LLM JSON contract not met… after 3 attempts`, run 33); the SQL step took 2 s. The page and the floating panel already make the same call | A retry budget / overall timeout for the agent's model calls, and a server-side cancel (AN2). The page's Stop only lets go of the request. |
+| FIX-QAF M5 | `POST /datasets/{id}/data-preview` ignores `limit` for a DirectQuery dataset: 10,000 rows (785 KB) came back for `limit: 4` | Push the limit (and offset) down for DirectQuery. The client now keeps only the rows it asked for, but the download is still the whole page. |
+| FIX-QAF 14 | A model trained before model cards (the seeded "Demo — Revenue model") has an empty `card`: no baseline, test size, training size or trainer | Backfill or compute the card for such models; the panel now leaves those facts out instead of showing dashes. |
+| FIX-QAF 16 | A run that failed because the model endpoint did not answer is stored as an ordinary failed run ("the model endpoint could not classify the question") | A reason code on failed runs (e.g. `model_unreachable`), with the error-reasons row above; the client matches the server's words for now. |
+| FIX-QAF 24 | Column-security rules can only be created and deleted | A `PATCH /admin/column-security-rules/{id}` so they can be edited like row-security rules. |
+| FIX-QAF 26 | Audit trail details are bare strings whose meaning depends on the action ("1d", "3", "?") | Structured details (named fields) per action; the client words the two shapes it knows (link expiry, link id). |
 | 7-QA B6 | Ask AI is slow (about 70 s for a simple answer, about 4 min before a clarification), with no timeout or cancel | Needs a server-side timeout and a cancel endpoint (AN2: stream progress + cancel). |
 
 ## Log

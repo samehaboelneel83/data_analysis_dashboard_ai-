@@ -277,7 +277,7 @@ export default function Lineage() {
           <Graph ref={g} model={model} cols={cols} lay={lay} lit={lit} selected={selected} hit={hit} filters={filters} rtl={rtl}
             onSelect={select} onMore={c => setExpanded(x => ({ ...x, [c]: !x[c] }))} tabKey={tabKey} onNodeKey={onNodeKey} />
         ) : (
-          <ListView model={model} onShow={showInGraph}
+          <ListView model={model} onShow={showInGraph} selected={selected}
             nodes={cols.flat().filter(n => !filtersOn(filters) || matches(model, n, filters))} />
         )}
         {sel && view === 'graph' && (

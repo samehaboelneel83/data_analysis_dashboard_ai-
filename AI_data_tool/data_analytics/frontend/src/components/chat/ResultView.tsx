@@ -432,10 +432,11 @@ export default function ResultView({ results, presentation, focus, sectioned }: 
                   onClick={() => setRowsOpen(o => !o)}>
                   {rowsOpen ? t('ask.hideRows') : t('ask.showRows', { n: localDigits(String(r.total)) })}
                 </button>
-                {rowsOpen && <ResultGrid result={r} focus={here} />}
+                {/* QAF 10: the answer card's number rule in the compact view too. */}
+                {rowsOpen && <ResultGrid result={r} focus={here} grouped />}
               </>
             ) : !presentationChart(presentation) && auto === 'kpi' ? null : (
-              <ResultGrid result={r} focus={here} />
+              <ResultGrid result={r} focus={here} grouped />
             )}
           </div>
         )

@@ -102,14 +102,14 @@ describe('the result, pointed at', () => {
   it('marks the cell a number came from', () => {
     render(<ResultView results={[RESULT]} focus={{ result: 0, rows: [1], column: 'revenue', seq: 1 }} />)
     const marked = document.querySelectorAll('td.dl-cell--evidence')
-    expect([...marked].map(td => td.textContent)).toEqual(['8200'])
+    expect([...marked].map(td => td.textContent)).toEqual(['8,200'])
   })
 
   it('marks a whole column for a total, and the row count for a count', () => {
     const { unmount } = render(<ResultView results={[RESULT]}
       focus={{ result: 0, rows: [], column: 'revenue', seq: 1 }} />)
     expect([...document.querySelectorAll('td.dl-cell--evidence')].map(td => td.textContent))
-      .toEqual(['12431', '8200', '4000'])
+      .toEqual(['12,431', '8,200', '4,000'])
     unmount()
     render(<ResultView results={[RESULT]} focus={{ result: 0, rows: [], column: null, seq: 1 }} />)
     expect(screen.getByText('3 rows').parentElement).toHaveClass('dl-cell--evidence')
@@ -119,7 +119,7 @@ describe('the result, pointed at', () => {
     render(<ResultView results={[RESULT]} presentation={{ format: 'bar', limit: null }}
       focus={{ result: 0, rows: [0], column: 'revenue', seq: 1 }} />)
     expect(screen.getByRole('button', { name: /hide rows/i })).toHaveAttribute('aria-expanded', 'true')
-    expect(document.querySelector('td.dl-cell--evidence')).toHaveTextContent('12431')
+    expect(document.querySelector('td.dl-cell--evidence')).toHaveTextContent('12,431')
   })
 })
 
@@ -144,7 +144,7 @@ describe('in the chat', () => {
     expect(document.querySelector('.dl-cell--evidence')).toBeNull()
     fireEvent.click(btn)
     await waitFor(() =>
-      expect(document.querySelector('td.dl-cell--evidence')).toHaveTextContent('12431'))
+      expect(document.querySelector('td.dl-cell--evidence')).toHaveTextContent('12,431'))
     expect(screen.getByRole('note')).toHaveTextContent(/not in the result rows/)
   })
 })
@@ -162,7 +162,7 @@ describe('in the dashboard copilot', () => {
     fireEvent.keyDown(screen.getByLabelText('Message to Ask AI'), { key: 'Enter' })
     fireEvent.click(await screen.findByRole('button', { name: /^12,431: From the result/ }))
     await waitFor(() =>
-      expect(document.querySelector('td.dl-cell--evidence')).toHaveTextContent('12431'))
+      expect(document.querySelector('td.dl-cell--evidence')).toHaveTextContent('12,431'))
     expect(screen.getByRole('note')).toHaveTextContent(/not in the result rows/)
   })
 })

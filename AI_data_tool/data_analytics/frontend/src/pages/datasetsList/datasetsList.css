@@ -70,7 +70,7 @@
 
 /* Body: table + preview */
 .dl-dsl__body { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
-.dl-dsl__main { min-block-size: max(420px, calc(100vh - 330px)); display: flex; flex-direction: column; }
+.dl-dsl__main { min-block-size: max(420px, calc(100vh - 330px)); display: flex; flex-direction: column; container: dslmain / inline-size; }
 .dl-dsl__main .dl-pager { margin-top: auto; }
 .dl-dsl__row { cursor: pointer; }
 .dl-dsl__row[data-previewed] > td { background: var(--mc-accent-soft, var(--surface2)); }
@@ -214,3 +214,16 @@
 .dl-dsl__ph--wide { width: 60%; }
 @keyframes dl-dsl-ph { 50% { opacity: .45; } }
 @media (prefers-reduced-motion: reduce) { .dl-dsl__ph { animation: none; } }
+
+/* QAF 12: beside the preview the table is narrow. Columns and Size (the least
+   used, and on the preview itself) fold to nothing -- their cells stay in
+   place so the fixed layout's columns keep their meaning -- and Name,
+   Freshness and Dashboards get the room. Names keep their full-text tooltip. */
+@container dslmain (max-width: 960px) {
+  .dl-dsl__table { min-inline-size: 640px; }
+  .dl-dsl__table col:nth-child(5), .dl-dsl__table col:nth-child(6) { inline-size: 0; }
+  .dl-dsl .dl-dsl__table :is(th, td):nth-child(5), .dl-dsl .dl-dsl__table :is(th, td):nth-child(6) {
+    padding-inline: 0; visibility: hidden; white-space: nowrap; }
+  .dl-dsl__table .dl-dsl__c-fresh { inline-size: 160px; }
+  .dl-dsl__table .dl-dsl__c-boards { inline-size: 108px; }
+}

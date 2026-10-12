@@ -7,6 +7,20 @@ import type { AdminAuditRow } from '../../services/api'
 import LoadError from '../../components/ui/LoadError'
 import LoadingState from '../../components/ui/LoadingState'
 import { formatDate } from '../../lib/dateFormat'
+import { localDigits } from '../../lib/arabicFormats'
+import type { TranslateFn } from '../../i18n'
+
+/** QAF 26: the server stores a bare string whose meaning depends on the
+ *  action. The shapes known here get words; anything else stays as sent,
+ *  with a tooltip saying so (structured details are a backend row). */
+export function auditDetail(r: Pick<AdminAuditRow, 'action' | 'detail'>, t: TranslateFn): React.ReactNode {
+  const d = r.detail
+  if (d == null || d === '') return '—'
+  const days = /^(\d+)d$/.exec(d)
+  if (r.action === 'share_link.create' && days) return localDigits(t('qaf.audit.expires', { n: Number(days[1]) }))
+  if (r.action === 'share_link.revoke' && /^\d+$/.test(d)) return localDigits(t('qaf.audit.link', { id: d }))
+  return <bdi dir="ltr" title={t('qaf.audit.raw')}>{d}</bdi>
+}
 
 /**
  * S5: read-only trail of security-relevant admin mutations -- row/column
@@ -103,7 +117,7 @@ export default function AdminAudit() {
                     : <span title={r.action}>{actionName(r.action)}</span>}
                 </td>
                 <td>{r.target ?? '—'}</td>
-                <td style={{ color: 'var(--muted)' }}>{r.detail ?? '—'}</td>
+                <td style={{ color: 'var(--muted)' }}>{auditDetail(r, t)}</td>
               </tr>
             ))}
           </tbody>

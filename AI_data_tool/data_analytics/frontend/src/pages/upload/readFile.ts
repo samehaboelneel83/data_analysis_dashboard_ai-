@@ -136,8 +136,10 @@ export async function readPreview(file: File): Promise<Preview | null> {
   return table.length ? previewOf(table, whole) : null
 }
 
-/** "enrolments_2025.csv" -> "Enrolments 2025": a name to start from. */
+/** "enrolments_2025.csv" -> "Enrolments 2025": a name to start from. Only
+ *  the extension goes and underscores become spaces; hyphens are part of the
+ *  name ("QAF-upload" stays "QAF-upload", QAF 21). */
 export function nameFromFile(file: string): string {
-  const stem = file.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim()
+  const stem = file.replace(/\.[^.]+$/, '').replace(/_+/g, ' ').replace(/\s+/g, ' ').trim()
   return stem.charAt(0).toUpperCase() + stem.slice(1)
 }

@@ -172,12 +172,14 @@ describe('the GATE B changes', () => {
     expect(container.querySelector('tfoot')).toBeNull()
   })
 
-  it('keeps the compact grid as it was', async () => {
+  // FIX-QAF 10 (owner): the compact view now uses the answer card's rule too,
+  // so the floating panel's table matches its sentence ("2,348,914").
+  it('groups quantities in the compact grid as on the card (QAF 10)', async () => {
     vi.spyOn(agentApi, 'ask').mockResolvedValue(BAR)
     const { container } = render(<ChatPane datasetIds={[1]} conversationId={null} />)
     await ask()
     fireEvent.click(screen.getByRole('button', { name: /Show rows/ }))
-    expect(container.querySelector('tbody td:nth-child(2)')).toHaveTextContent('2348914')
+    expect(container.querySelector('tbody td:nth-child(2)')).toHaveTextContent('2,348,914')
   })
 
   it('puts the downloads under one Export menu, worked by keyboard', async () => {
@@ -248,10 +250,10 @@ describe('the error card', () => {
     expect(screen.getByPlaceholderText(/ask/i)).toHaveValue('which reps missed quota?')
     fireEvent.click(within(acts).getByRole('button', { name: 'Retry' }))
     await settle()
-    expect(asked).toHaveBeenLastCalledWith(7, 'which reps missed quota?')
+    expect(asked).toHaveBeenLastCalledWith(7, 'which reps missed quota?', expect.any(AbortSignal))
     fireEvent.click(screen.getAllByRole('button', { name: 'Total revenue by region' })[0])
     await settle()
-    expect(asked).toHaveBeenLastCalledWith(7, 'Total revenue by region')
+    expect(asked).toHaveBeenLastCalledWith(7, 'Total revenue by region', expect.any(AbortSignal))
   })
 
   it('a request that never reached the agent says only that: no column advice, nothing technical', async () => {
@@ -322,7 +324,7 @@ describe('the question box on the page', () => {
     expect(asked).not.toHaveBeenCalled()
     fireEvent.keyDown(box, { key: 'Enter' })
     await settle()
-    expect(asked).toHaveBeenCalledWith(7, 'total')
+    expect(asked).toHaveBeenCalledWith(7, 'total', expect.any(AbortSignal))
   })
 
   it('keeps the compact box outside the page', () => {

@@ -218,6 +218,16 @@ describe('DatasetPreview (3a)', () => {
   const show = (meId: number | null) => render(
     <MemoryRouter><DatasetPreview ds={sales} graph={GRAPH} meId={meId} fmtBytes={b => `${b} B`} /></MemoryRouter>)
 
+  it('QAF M5: draws only the first rows even when the server sends them all', async () => {
+    vi.mocked(dataPreviewApi.query).mockResolvedValue({ columns: ['date', 'region', 'revenue'],
+      rows: Array.from({ length: 10000 }, (_, i) => ['2026-01-01', `R${i}`, i]), total: 12000 })
+    show(5)
+    expect(await screen.findByText('R0')).toBeInTheDocument()
+    expect(vi.mocked(dataPreviewApi.query).mock.calls[0][3]).toBe(4)
+    expect(screen.getByTestId('dataset-preview').querySelectorAll('tbody tr')).toHaveLength(4)
+    expect(screen.queryByText('R4')).toBeNull()
+  })
+
   it('shows its facts, columns, first rows, dashboards and the three next steps', async () => {
     show(5)
     expect(screen.getByText(/Created by you/)).toBeInTheDocument()

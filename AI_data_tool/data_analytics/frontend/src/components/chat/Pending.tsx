@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useT } from '../../i18n'
 import { localDigits } from '../../lib/arabicFormats'
 import RobotHead from './RobotHead'
+import { Square } from 'lucide-react'
 
 /** What the chat shows between pressing Send and the answer arriving.
  *
@@ -56,7 +57,18 @@ export function usePendingClock(question: string) {
   return { time, unusual, designing }
 }
 
-export default function Pending({ question }: { question: string }) {
+/** QAF M3: stop waiting. It lets go of the request in this page only; the
+ *  server may still finish the run. */
+function StopButton({ onStop }: { onStop: () => void }) {
+  const t = useT()
+  return (
+    <button type="button" className="btn btn-ghost btn-sm dl-stop" onClick={onStop} title={t('qaf.ask.stopTitle')}>
+      <Square size={12} aria-hidden fill="currentColor" /> {t('qaf.ask.stop')}
+    </button>
+  )
+}
+
+export default function Pending({ question, onStop }: { question: string; onStop?: () => void }) {
   const t = useT()
   const { time, unusual, designing } = usePendingClock(question)
 
@@ -71,6 +83,7 @@ export default function Pending({ question }: { question: string }) {
         <span className="dl-pending__pulse" aria-hidden />
         <span className="dl-pending__title">{designing ? t('pend.designing') : t('ask.analyzing')}</span>
         <span className="dl-pending__time">{time}</span>
+        {onStop && <StopButton onStop={onStop} />}
       </div>
       <div className="dl-pending__skeleton" aria-hidden>
         <span style={{ width: '72%' }} /><span style={{ width: '54%' }} />
@@ -89,7 +102,7 @@ export default function Pending({ question }: { question: string }) {
  *  head thinking, "Analyzing your data…", what is being asked about, the
  *  elapsed time, and a skeleton of the answer to come. No step list: the
  *  server does not report its stages (GATE 0). */
-export function LoadingCard({ question, scopeName }: { question: string; scopeName: string }) {
+export function LoadingCard({ question, scopeName, onStop }: { question: string; scopeName: string; onStop?: () => void }) {
   const t = useT()
   const { time, unusual, designing } = usePendingClock(question)
   return (
@@ -102,6 +115,7 @@ export function LoadingCard({ question, scopeName }: { question: string; scopeNa
         </div>
         {/* polite, and only the time: the title does not change. */}
         <span className="dl-ac__time" role="timer" aria-live="off">{time}</span>
+        {onStop && <StopButton onStop={onStop} />}
       </div>
       <div className="dl-ac__skel" aria-hidden="true">
         <i style={{ width: '92%' }} /><i style={{ width: '68%' }} />

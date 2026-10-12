@@ -116,7 +116,7 @@ describe('ChatPane — the redesigned turns', () => {
       run_id: 1, status: 'ok', answer: 'ok', intent: null, error: null })
     render(<ChatPane datasetIds={[1]} suggestions={['Total revenue by region', 'How many rows are there?']} />)
     fireEvent.click(screen.getByRole('button', { name: /Total revenue by region/ }))
-    await waitFor(() => expect(ask).toHaveBeenCalledWith(7, 'Total revenue by region'))
+    await waitFor(() => expect(ask).toHaveBeenCalledWith(7, 'Total revenue by region', expect.any(AbortSignal)))
   })
 
   it('a failure gets a friendly card, rephrasings, and the raw error folded away', async () => {

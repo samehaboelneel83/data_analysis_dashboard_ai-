@@ -18,8 +18,14 @@
 .dl-cn-count { font-size: 13px; color: var(--muted); }
 
 /* The list */
-.dl-cn-table { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--dl-shadow-card); overflow: hidden; }
-.dl-cn-row { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.6fr) minmax(0, .8fr) 90px auto; align-items: center; gap: 12px; padding: 12px 16px; border-top: 1px solid var(--border); min-height: 64px; }
+/* QAF M1: one grid for the whole table, each row a subgrid of it. Rows used to
+   be grids of their own with an `auto` actions column, so the header (no
+   actions) and a row (Setup, Open, menu) sized their columns differently and
+   the cells drifted from their headers. */
+.dl-cn-table { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--dl-shadow-card); overflow: hidden;
+  display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.6fr) minmax(0, .8fr) 90px auto; }
+.dl-cn-table.is-loading { display: block; }
+.dl-cn-row { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; gap: 12px; padding: 12px 16px; border-top: 1px solid var(--border); min-height: 64px; }
 .dl-cn-row--h { min-height: 0; padding-block: 9px; border-top: 0; background: var(--surface2); font-size: 12px; font-weight: 600; color: var(--muted); }
 .dl-cn-row .is-num { text-align: end; font-variant-numeric: tabular-nums; }
 .dl-cn-row:not(.dl-cn-row--h):hover { background: color-mix(in srgb, var(--surface2) 55%, var(--surface)); }
@@ -59,7 +65,7 @@
 .dl-cn-spin { animation: dl-cn-spin 1s linear infinite; }
 @keyframes dl-cn-spin { to { transform: rotate(360deg); } }
 @media (max-width: 1179px) {
-  .dl-cn-row { grid-template-columns: minmax(0, 2fr) minmax(0, 1.4fr) 70px auto; }
+  .dl-cn-table { grid-template-columns: minmax(0, 2fr) minmax(0, 1.4fr) 70px auto; }
   .dl-cn-row > :nth-child(3) { display: none; }
 }
 
@@ -88,6 +94,7 @@
 .dl-cn-drawer__bd > .dl-cn-search { margin-bottom: 14px; flex: none; }
 .dl-cn-drawer__f { position: sticky; bottom: -20px; margin: auto -20px -20px; padding: 12px 20px; display: flex; gap: 8px; background: var(--surface); border-top: 1px solid var(--border); }
 .dl-cn-drawer__f .btn { display: inline-flex; align-items: center; gap: 6px; }
+.dl-cn-drawer__f--form > .btn-primary { justify-content: center; }
 .dl-cn-steps { list-style: none; margin: 0; padding: 12px 20px; display: flex; align-items: center; gap: 0; font-size: 13px; font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--border); }
 .dl-cn-steps li { display: flex; align-items: center; gap: 8px; }
 .dl-cn-steps li + li::before { content: ""; width: 40px; height: 1px; margin-inline: 12px; background: var(--mc-border-strong); }

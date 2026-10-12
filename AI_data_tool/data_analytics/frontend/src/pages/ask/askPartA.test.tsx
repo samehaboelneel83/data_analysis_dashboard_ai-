@@ -119,7 +119,7 @@ describe('ChatPane start view', () => {
       startView={send => <button type="button" onClick={() => send('Total revenue by region')}>card</button>} />)
     expect(screen.queryByText('Try one of these to start')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'card' }))
-    await waitFor(() => expect(ask).toHaveBeenCalledWith(7, 'Total revenue by region'))
+    await waitFor(() => expect(ask).toHaveBeenCalledWith(7, 'Total revenue by region', expect.any(AbortSignal)))
     await waitFor(() => expect(screen.queryByRole('button', { name: 'card' })).not.toBeInTheDocument())
   })
 })

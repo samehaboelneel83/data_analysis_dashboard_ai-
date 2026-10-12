@@ -235,7 +235,8 @@ export default function DataPicker({ items, value, onChoose, size = 'hero', load
   // month), from the app's shared formatter. A connection has no such time.
   const updated = (i: PickerItem) => {
     const ago = i.kind === 'dataset' ? formatTimeAgo(i.updated ?? undefined, t) : null
-    return ago ? localDigits(ago) : ''
+    // QAF 15: named as the data's update time, so it is not read as "last used".
+    return ago ? localDigits(t('qaf.pick.updated', { ago })) : ''
   }
   const modeOf = (i: PickerItem) => (i.kind === 'source' ? 'live' : i.mode === 'directquery' ? 'direct' : 'import')
 

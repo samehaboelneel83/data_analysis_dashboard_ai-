@@ -3104,12 +3104,25 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--da
 .dl-llmep { container-type: inline-size; container-name: llmep; }
 @container llmep (max-width: 980px) {
   .dl-llmep thead { display: none; }
-  .dl-llmep tr { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px 12px; padding: 10px 0; }
-  .dl-llmep td { display: flex; flex-direction: column; justify-content: flex-end; gap: 3px; padding: 0 !important; text-align: start !important; }
+  /* QAF 27: a fixed card per endpoint instead of an auto-fill grid that put
+     the status dot in a cell of its own and squeezed the address: row 1 is
+     the dot, Name and a wide Address; row 2 Model, API key, Strength,
+     Context; row 3 On and the actions. Logical columns, so it mirrors. */
+  .dl-llmep tr { display: grid; grid-template-columns: 14px repeat(6, minmax(0, 1fr)); gap: 10px 12px; padding: 12px 0; align-items: end; }
+  .dl-llmep td:nth-child(1) { grid-column: 1; grid-row: 1; align-self: center; justify-content: center; padding-block-start: 16px !important; }
+  .dl-llmep td:nth-child(2) { grid-column: 2 / span 2; grid-row: 1; }
+  .dl-llmep td:nth-child(3) { grid-column: 4 / span 4; grid-row: 1; }
+  .dl-llmep td:nth-child(4) { grid-column: 2 / span 2; grid-row: 2; }
+  .dl-llmep td:nth-child(5) { grid-column: 4 / span 2; grid-row: 2; }
+  .dl-llmep td:nth-child(6) { grid-column: 6; grid-row: 2; }
+  .dl-llmep td:nth-child(7) { grid-column: 7; grid-row: 2; }
+  .dl-llmep td:nth-child(8) { grid-column: 2; grid-row: 3; flex-direction: row !important; align-items: center; justify-content: flex-start !important; gap: 6px !important; }
+  .dl-llmep td.acts { grid-row: 3; grid-column: 3 / -1 !important; justify-content: flex-end; }
+  .dl-llmep td { display: flex; flex-direction: column; justify-content: flex-end; gap: 3px; padding: 0 !important; text-align: start !important; border: 0 !important; }
   .dl-llmep td[data-label]::before { content: attr(data-label); font-size: 11px; font-weight: 600; color: var(--muted); }
   .dl-llmep td .dl-field__input { min-width: 0 !important; width: 100% !important; }
   .dl-llmep td input[type="checkbox"] { align-self: flex-start; }
-  .dl-llmep td.acts { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; gap: 6px; }
+  .dl-llmep td.acts { flex-direction: row; flex-wrap: wrap; gap: 6px; }
 }
 
 /* Chart tooltips (QA2 Visual 6): Recharts writes each item in its series

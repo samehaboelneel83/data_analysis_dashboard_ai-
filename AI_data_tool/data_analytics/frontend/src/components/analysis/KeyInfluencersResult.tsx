@@ -128,7 +128,8 @@ export default function KeyInfluencersResult({ result, leftOut = [] }: {
                 <td data-testid="influencer-lift" style={{ ...NUM, textAlign: 'end',
                   color: small ? 'var(--muted)' : 'var(--text)', whiteSpace: 'nowrap' }}>
                   <span aria-hidden style={{ color: 'var(--accent)' }}>{up ? '▲' : '▼'}</span>{' '}
-                  {r.lift.toFixed(2)}× {up ? tr('ki.more') : tr('ki.less')}
+                  {/* QAF 13: as a percentage ("22% lower"), not "0.78× less". */}
+                  {localDigits(tr(up ? 'qaf.ki.higher' : 'qaf.ki.lower', { p: Math.round(Math.abs(r.lift - 1) * 100) }))}
                 </td>
                 <td style={{ ...NUM, textAlign: 'end', whiteSpace: 'nowrap', color: small ? 'var(--muted)' : undefined }}>
                   {r.rows.toLocaleString()}

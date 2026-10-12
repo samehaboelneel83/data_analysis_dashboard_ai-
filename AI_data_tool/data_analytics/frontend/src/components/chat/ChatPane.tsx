@@ -15,6 +15,7 @@ import { useDirection } from '../../contexts/DirectionContext'
 import { majorityDir } from '../../lib/autoDir'
 import { renderTextWithLinks } from '../../lib/inlineMarkup'
 import { aiLimitMessage } from '../../lib/aiLimit'
+import { isCanceledRequest } from '../../lib/canceledRequest'
 import Composer from './Composer'
 import AnswerText from './AnswerText'
 import { columnsMentioned } from './clarifyColumns'
@@ -88,7 +89,10 @@ export interface ChatPaneProps {
   card?: { scopeName: string }
 }
 
-type MessageKind = 'answer' | 'clarify' | 'error' | 'limit'
+/** QAF 16: the server's words for a model endpoint that did not answer. */
+const MODEL_DOWN = /model endpoint could not|ConnectTimeout|ConnectError|connection refused|could not reach|timed out/i
+
+type MessageKind = 'answer' | 'clarify' | 'error' | 'limit' | 'stopped'
 
 interface ChatMessage {
   id: number
@@ -191,6 +195,8 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
    *  work. "Designing dashboards · 2m 14s" reads very differently from a
    *  greyed-out button when the wait is four minutes long. */
   const [pending, setPending] = useState<string | null>(null)
+  // QAF M3: the running ask's controller, so Stop can let go of it.
+  const askAbort = useRef<AbortController | null>(null)
   // Cache of fetched SQL per run id, for runs stored before the answer
   // carried its SQL -- "Show SQL" fetches once per message, not per click.
   const [sqlByRun, setSqlByRun] = useState<Record<number, string[]>>({})
@@ -312,7 +318,9 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
           setConvId(cid)
         }
       }
-      const result = await agentApi.ask(cid, question)
+      const ctl = new AbortController()
+      askAbort.current = ctl
+      const result = await agentApi.ask(cid, question, ctl.signal)
       const reply: ChatMessage = { ...fromAnswer(result), fresh: true }
       setMessages(m => [...m, reply])
       onActivity?.(result.status === 'failed' ? 'error' : 'answer')
@@ -333,6 +341,12 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
     } catch (e) {
       // A limit is not a failure to answer: no "rephrase" advice, and the
       // reason in the open rather than under Technical details (E11).
+      if (isCanceledRequest(e)) {
+        // Stopped by the reader: not a failure, no error card or rephrase advice.
+        setMessages(m => [...m, { id: nextId++, role: 'assistant', kind: 'stopped', text: t('qaf.ask.stopped') }])
+        onActivity?.('answer')
+        return
+      }
       const limit = aiLimitMessage(e, t)
       const failed: ChatMessage = limit
         ? { id: nextId++, role: 'assistant', kind: 'limit', text: limit }
@@ -341,10 +355,12 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
       onActivity?.('error')
       if (card && !limit) react(failed.id, 'error')
     } finally {
+      askAbort.current = null
       setBusy(false)
       setPending(null)
     }
   }
+  const stopAsking = () => askAbort.current?.abort()
 
   const rate = async (runId: number, rating: 'up' | 'down', comment?: string) => {
     setFeedbackByRun(m => ({ ...m, [runId]: rating })) // optimistic
@@ -485,7 +501,9 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
     }
   }
   const pendingTurn = pending !== null ? turns[turns.length - 1] : null
-  const rephrase = (suggestions ?? []).slice(0, 3)
+  // QAF 16: a suggestion that is the question just asked is no suggestion.
+  const same = (a: string, b?: string) => a.trim().toLowerCase() === (b ?? '').trim().toLowerCase()
+  const rephraseFor = (question?: string) => (suggestions ?? []).filter(s => !same(s, question)).slice(0, 3)
 
   return (
     <div className="dl-chat">
@@ -531,15 +549,17 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
                 </div>
               )}
               {isPending && (card
-                ? <LoadingCard question={turn.question?.text ?? ''} scopeName={card.scopeName} />
-                : <Pending question={turn.question?.text ?? ''} />)}
+                ? <LoadingCard question={turn.question?.text ?? ''} scopeName={card.scopeName} onStop={stopAsking} />
+                : <Pending question={turn.question?.text ?? ''} onStop={stopAsking} />)}
               {msg && (
                 <div className={card ? `dl-ac dl-ac--${msg.kind ?? 'answer'}` : 'dl-turn__a'}>
                   {card
                     ? cardHead(msg, newest && reaction?.msg === msg.id ? reaction.state : 'idle', newest)
                     : <span className="dl-turn__avatar dl-turn__avatar--ai" aria-hidden><Sparkles size={14} /></span>}
                   <div className={card ? 'dl-ac__body' : 'dl-turn__body'}>
-                    {msg.kind === 'limit' ? (
+                    {msg.kind === 'stopped' ? (
+                      <p className="dl-answer-stopped" role="status" data-testid="ai-stopped">{msg.text}</p>
+                    ) : msg.kind === 'limit' ? (
                       <div className="dl-answer-error" role="status" data-testid="ai-limit">
                         <p className="dl-answer-error__title">
                           <AlertTriangle size={16} aria-hidden /> {t('ai.limit.title')}
@@ -551,12 +571,12 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
                     ) : msg.kind === 'error' ? (
                       <div className="dl-answer-error">
                         <p className="dl-answer-error__title">
-                          <AlertTriangle size={16} aria-hidden /> {t('ask.err.title')}
+                          <AlertTriangle size={16} aria-hidden /> {MODEL_DOWN.test(msg.text) ? t('chat.unreachable') : t('ask.err.title')}
                         </p>
-                        <p className="dl-answer-error__hint">{t('ask.err.hint')}</p>
-                        {rephrase.length > 0 && (
+                        {!MODEL_DOWN.test(msg.text) && <p className="dl-answer-error__hint">{t('ask.err.hint')}</p>}
+                        {!MODEL_DOWN.test(msg.text) && rephraseFor(turn.question?.text).length > 0 && (
                           <div className="dl-chips dl-chips--small" role="group" aria-label={t('ask.err.tryInstead')}>
-                            {rephrase.map(s => (
+                            {rephraseFor(turn.question?.text).map(s => (
                               <button key={s} type="button" className="dl-chip" disabled={busy}
                                 onClick={() => void send(s)}>{s}</button>
                             ))}
@@ -814,21 +834,25 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
    *  general and the suggestions are the page's, built from the columns. A
    *  request that never reached the agent says only that. */
   function errorCard(msg: ChatMessage, question?: string) {
-    const ran = msg.runId != null
+    // QAF 16: a run that failed because the model endpoint did not answer is
+    // stored like any failed run; only its text tells. It gets the
+    // "could not reach" card, also when reopened from history, and no chips.
+    // (Matched on the server's words; a reason code is a backend row.)
+    const ran = msg.runId != null && !MODEL_DOWN.test(msg.text)
     const [before, after = ''] = t('ask2.err.why', { name: '\uE000' }).split('\uE000')
     return (
       <>
         <div className="dl-err" role={msg.fresh ? 'alert' : undefined}>
           <p className="dl-err__why">
-            {!ran ? msg.text
+            {!ran ? (msg.runId != null ? t('chat.unreachable') : msg.text)
               : card!.scopeName ? <>{before}<bdi><b>{card!.scopeName}</b></bdi>{after}</>
               : t('ask2.err.whyPlain')}
           </p>
-          {ran && rephrase.length > 0 && (
+          {ran && rephraseFor(question).length > 0 && (
             <div className="dl-err__try">
               <div className="dl-err__try-l" id={`dl-err-try-${msg.id}`}>{t('ask2.err.tryColumns')}</div>
               <div className="dl-err__chips" role="group" aria-labelledby={`dl-err-try-${msg.id}`}>
-                {rephrase.map(s => (
+                {rephraseFor(question).map(s => (
                   <button key={s} type="button" className="dl-err__chip" disabled={busy || offline} onClick={() => void send(s)}>
                     <CornerDownRight size={14} aria-hidden className="dl-flip" /> {s}
                   </button>
@@ -837,7 +861,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
             </div>
           )}
         </div>
-        {ran && (
+        {(ran || msg.runId != null) && (
           <details className="dl-err__td">
             <summary><ChevronRight size={15} aria-hidden className="dl-flip" /> {t('ask.err.details')}</summary>
             <pre dir="ltr">{msg.text}</pre>
@@ -970,7 +994,7 @@ export function answerSource(msg: Pick<ChatMessage, 'intent' | 'results' | 'sql'
 
 function AnswerSource({ msg }: { msg: ChatMessage }) {
   const t = useT()
-  if (msg.role !== 'assistant' || msg.kind === 'error' || msg.kind === 'clarify' || msg.kind === 'limit') return null
+  if (msg.role !== 'assistant' || msg.kind === 'error' || msg.kind === 'clarify' || msg.kind === 'limit' || msg.kind === 'stopped') return null
   return (
     <div data-testid="answer-source" style={{ marginTop: 6, fontSize: 10.5, color: 'var(--muted)' }}>
       <span aria-hidden>ⓘ </span>{answerSource(msg, t)}

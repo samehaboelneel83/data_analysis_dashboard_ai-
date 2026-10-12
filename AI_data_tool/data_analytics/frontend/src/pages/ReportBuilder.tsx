@@ -350,7 +350,9 @@ export default function ReportBuilder() {
   // clicked in View stayed outlined, with its settings open, in Edit.
   const wasEditing = useRef(editMode)
   useEffect(() => {
-    if (editMode && !wasEditing.current) { setSelectedW(null); setMultiSelectedIds(new Set()) }
+    // QAF 9: and leaving Edit (for View or Present) drops the selection too, so
+    // no widget keeps its edit outline where nothing can be edited.
+    if (editMode !== wasEditing.current) { setSelectedW(null); setMultiSelectedIds(new Set()) }
     wasEditing.current = editMode
   }, [editMode])
   useEffect(() => () => { window.dispatchEvent(new CustomEvent('datalytics:builder-compact', { detail: false })) }, [])
@@ -398,6 +400,8 @@ export default function ReportBuilder() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   // Kiosk playback: pages auto-advance on an interval; any key or click exits.
   const [kiosk, setKiosk] = useState(false)
+  // QAF 9: Present starts with nothing selected.
+  useEffect(() => { if (kiosk) { setSelectedW(null); setMultiSelectedIds(new Set()) } }, [kiosk])
   // Reading (redesign 7d): the reader's AI panel, a question handed to it
   // (remounts the chat with the question in its box, never sent), and the
   // widget shown full screen.
@@ -4222,8 +4226,8 @@ export default function ReportBuilder() {
                         calculatedColumns={calcCols}
                         columnFormats={columnFormats} geography={geography}
                         datasets={datasets} relationships={relationships}
-                        selected={selectedW?.id === widget.id}
-                        isMultiSelected={multiSelectedIds.has(widget.id)}
+                        selected={editMode && selectedW?.id === widget.id}
+                        isMultiSelected={editMode && multiSelectedIds.has(widget.id)}
                         onSelect={editMode ? perWidgetHandlers.get(widget.id)?.onSelect : undefined}
                         onDelete={editMode ? perWidgetHandlers.get(widget.id)?.onDelete : undefined}
                         onDuplicate={editMode ? perWidgetHandlers.get(widget.id)?.onDuplicate : undefined}

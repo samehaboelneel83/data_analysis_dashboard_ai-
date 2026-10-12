@@ -483,11 +483,13 @@ export default function PredictionModelsPanel({ datasetId, columns, mode, datase
               <aside className="dl-models__facts">
                 <dl>
                   <div><dt>{t('mdl3.approach')}</dt><dd>{familyLabel(t, m.model_family)}</dd></div>
-                  <div><dt>{t('mdl3.baseline')}</dt><dd>{c?.baseline_score != null ? `${scoreName(m.score_name)} ${fmt(c.baseline_score)}` : '—'}</dd></div>
-                  <div><dt>{t('mdl3.testedOn')}</dt><dd>{c?.n_test != null ? t('mdl3.heldOut', { n: c.n_test.toLocaleString() }) : '—'}</dd></div>
-                  <div><dt>{t('mdl3.trainedOn')}</dt><dd>{c?.n_fitted != null ? t('mdl3.rows', { n: c.n_fitted.toLocaleString() }) : '—'}</dd></div>
+                  {/* QAF 14: a fact the model has no record of is left out, not
+                      shown as a dash (a model trained before cards has none). */}
+                  {c?.baseline_score != null && <div><dt>{t('mdl3.baseline')}</dt><dd>{`${scoreName(m.score_name)} ${fmt(c.baseline_score)}`}</dd></div>}
+                  {c?.n_test != null && <div><dt>{t('mdl3.testedOn')}</dt><dd>{t('mdl3.heldOut', { n: c.n_test.toLocaleString() })}</dd></div>}
+                  {c?.n_fitted != null && <div><dt>{t('mdl3.trainedOn')}</dt><dd>{t('mdl3.rows', { n: c.n_fitted.toLocaleString() })}</dd></div>}
                   <div><dt>{t('mdl3.drift')}</dt><dd>{m.last_drift ? driftWord(t, m.last_drift.overall) : t('mdl3.notChecked')}</dd></div>
-                  <div><dt>{t('mdl3.trainedBy')}</dt><dd>{c?.trained_by ?? '—'}{c?.trained_at ? ` · ${formatDate(c.trained_at, 'date')}` : ''}</dd></div>
+                  {(c?.trained_by || c?.trained_at) && <div><dt>{t('mdl3.trainedBy')}</dt><dd>{c?.trained_by ?? ''}{c?.trained_by && c?.trained_at ? ' · ' : ''}{c?.trained_at ? formatDate(c.trained_at, 'date') : ''}</dd></div>}
                 </dl>
                 {(c?.candidates?.length ?? 0) > 1 && (
                   <p>{t('mdl3.alsoTried', { list: c!.candidates!.filter(k => k.model !== c!.model_family)

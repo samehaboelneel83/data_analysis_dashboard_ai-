@@ -314,8 +314,8 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
           </div>
         )}
 
-        {/* Buttons */}
-        <div style={{ display: 'flex', gap: 8, marginTop: 20 }}>
+        {/* Buttons: pinned to the drawer's foot like step 1's (QAF 23). */}
+        <footer className="dl-cn-drawer__f dl-cn-drawer__f--form">
           <button className="btn btn-primary" onClick={handleSave} disabled={saving} style={{ flex: 1 }}>
             {saving ? tr('pg.dataPages.saving') : isEdit ? tr('pg.dataPages.saveChanges') : tr('pg.dataPages.conn.create')}
           </button>
@@ -326,7 +326,7 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
             : tr('pg.dataPages.conn.testConnection')}
           </button>
           <button className="btn btn-ghost" onClick={onClose} style={{ fontSize: 12, padding: '6px 14px' }}>{tr('common.cancel')}</button>
-        </div>
+        </footer>
         </div>
         )}
       </div>

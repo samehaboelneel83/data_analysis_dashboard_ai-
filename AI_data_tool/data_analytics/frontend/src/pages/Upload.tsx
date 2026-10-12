@@ -339,7 +339,10 @@ export default function Upload() {
                           {pv.rows.map((r, i) => (
                             <tr key={i}>
                               <td className="dl-up-table__i" dir="ltr">{localDigits(String(i + 1))}</td>
-                              {r.map((v, j) => <td key={j} className={pv.types[j] === 'num' ? 'is-num' : undefined} dir={pv.types[j] === 'num' || pv.types[j] === 'date' ? 'ltr' : 'auto'}>{v}</td>)}
+                              {/* QAF 20: the cell keeps the page's direction (so a column
+                                  aligns as one); the value is isolated inside it. */}
+                              {r.map((v, j) => <td key={j} className={pv.types[j] === 'num' ? 'is-num' : undefined}>
+                                <bdi dir={pv.types[j] === 'num' || pv.types[j] === 'date' ? 'ltr' : 'auto'}>{v}</bdi></td>)}
                             </tr>
                           ))}
                         </tbody>

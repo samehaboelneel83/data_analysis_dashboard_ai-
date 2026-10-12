@@ -21,6 +21,7 @@ import DatasetsSection, { askable, recentDatasets } from './home/DatasetsSection
 import { ActivityCard, JobsCard } from './home/AdminCards'
 import { feedItems, handle, jobsDigest } from './home/feeds'
 import { firstPageWidgets } from './home/Thumb'
+import { statusCounts } from './reports/model'
 import './home/home.css'
 
 /**
@@ -140,7 +141,7 @@ export default function Home() {
   const name = (() => { const h = handle(user?.email); return h === '?' ? '' : h[0].toUpperCase() + h.slice(1) })()
 
   // ── tiles ──
-  const published = reports.filter(r => r.published).length
+  const status = statusCounts(reports)
   // The same total as the Datasets list: every row count the server reports,
   // a live dataset's included; one with no count adds nothing (QA B7).
   const rows = datasets.reduce((s, d) => s + (d.row_count ?? 0), 0)
@@ -162,7 +163,7 @@ export default function Home() {
   }
   const tiles: Tile[] = [
     { key: 'dashboards', icon: LayoutDashboard, label: t('nav.dashboards'), value: n(reports.length), to: '/reports',
-      sub: reports.length ? t('hm.tile.published', { n: n(published) }) : t('hm.tile.none') },
+      sub: reports.length ? t(status.open ? 'qaf.home.status' : 'qaf.home.status2', { pub: n(status.pub), draft: n(status.draft), open: n(status.open) }) : t('hm.tile.none') },
     { key: 'datasets', icon: Database, label: t('nav.datasets'), value: n(datasets.length), to: '/datasets',
       sub: datasets.length ? t('hm.tile.rows', { n: n(rows) }) : t('hm.tile.none') },
     sources.error

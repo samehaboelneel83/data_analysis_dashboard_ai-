@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import { ArrowLeftToLine, ArrowRightFromLine, ArrowUpRight, Info, Sparkles, TriangleAlert, X } from 'lucide-react'
-import { formatTimeAgo, useT } from '../../i18n'
+import { formatTimeAgo, useT, type TranslateFn } from '../../i18n'
 import { localDigits } from '../../lib/arabicFormats'
 import { NodeIcon, useNodeText } from './Graph'
 import { UPLOADS, downstream, sourceTypeName, type LNode, type Model } from './model'
@@ -21,6 +21,14 @@ function askLink(n: LNode): string | null {
  * then Open and Ask AI. Owner, creation date and row count are not in the
  * lineage graph, so they are not shown (backend row).
  */
+/** QAF M4: what a change would touch, with any zero part left out, so no
+ *  language can read "no datasets and 9 reports" as "nothing is affected". */
+export function impactText(t: TranslateFn, name: string, ds: number, rep: number): string {
+  if (ds && rep) return t('qaf.lin.impactBoth', { name, ds, rep })
+  if (ds) return t('qaf.lin.impactDs', { name, ds })
+  return t('qaf.lin.impactRep', { name, rep })
+}
+
 export default function SidePanel({ model, node, onSelect, onClose }: {
   model: Model
   node: LNode
@@ -36,12 +44,12 @@ export default function SidePanel({ model, node, onSelect, onClose }: {
 
   const type = node.col === 0 ? (node.sourceType === 'file' ? t('lin2.file') : sourceTypeName(node.sourceType))
     : node.col === 1 ? text.mode(node) : t('lin2.kind.report')
-  const refreshed = node.col !== 1 || (node.fromFile && !node.refreshed) ? null
+  const refreshed = node.col !== 1 || node.fromFile ? null
     : node.mode === 'directquery' ? t('lin2.live')
     : node.never || !node.refreshed ? t('lin2.never')
     : localDigits(formatTimeAgo(node.refreshed, t) ?? '')
-  const status = node.issue ? text.issue(node) : node.col === 0 ? t('lin2.st.connected') : t('lin2.st.ok')
-  const dot = node.issue === 'fail' || node.issue === 'broken' ? 'err' : node.issue ? 'warn' : 'ok'
+  const status = node.issue ? text.issue(node) : node.col === 0 ? t('qaf.lin.notChecked') : t('lin2.st.ok')
+  const dot = node.issue === 'fail' || node.issue === 'broken' ? 'err' : node.issue ? 'warn' : node.col === 0 ? 'none' : 'ok'
 
   const list = (nodes: LNode[], none: string) => nodes.length ? (
     <ul>
@@ -69,7 +77,7 @@ export default function SidePanel({ model, node, onSelect, onClose }: {
       <div className="dl-ln-side__bd">
         {down.length ? (
           <div className="dl-ln-imp" role="note"><TriangleAlert size={16} aria-hidden />
-            <p>{localDigits(t('lin2.impact', { name: node.name, ds: nDs, rep: nRep }))}</p></div>
+            <p>{localDigits(impactText(t, node.name, nDs, nRep))}</p></div>
         ) : (
           <div className="dl-ln-imp is-calm" role="note"><Info size={16} aria-hidden /><p>{t('lin2.impactNone')}</p></div>
         )}

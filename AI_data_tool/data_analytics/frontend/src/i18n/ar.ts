@@ -19,12 +19,13 @@ import { ar as pgConnections } from './pages/connections'
 import { ar as pgPolish } from './pages/polish'
 import { ar as pgI2d } from './pages/i18n2Dataset'
 import { ar as pgI2c } from './pages/i18n2Common'
+import { ar as pgQaf } from './pages/qaf'
 
 /** Arabic UI strings. Keys must match `en.ts` exactly. */
 export const ar: Record<MessageKey, string> = {
   ...bcCanvas, ...bcPanes, ...bcRules, ...bcShell, ...bcStats, ...bcDialogs,
   // 8-i18n: the pages outside the Builder, one module per area (i18n/pages/).
-  ...pgAdminSecurity, ...pgAdminPlatform, ...pgDataPages, ...pgPanelsA, ...pgPanelsB, ...pgModelsMaps, ...pgTypes, ...pgAskAi, ...pgLineage, ...pgUpload, ...pgConnections, ...pgPolish, ...pgI2d, ...pgI2c,
+  ...pgAdminSecurity, ...pgAdminPlatform, ...pgDataPages, ...pgPanelsA, ...pgPanelsB, ...pgModelsMaps, ...pgTypes, ...pgAskAi, ...pgLineage, ...pgUpload, ...pgConnections, ...pgPolish, ...pgI2d, ...pgI2c, ...pgQaf,
   'nav.home': 'الرئيسية',
   'nav.askAi': 'اسأل الذكاء الاصطناعي',
   'fab.tip': 'اسأل الذكاء الاصطناعي عن هذه اللوحة',
@@ -1465,10 +1466,10 @@ export const ar: Record<MessageKey, string> = {
   'hm.tile.rows': '{n} صف',
   'hm.tile.none': 'لا يوجد بعد',
   'hm.tile.failed': 'تعذّر التحميل',
-  'hm.tile.lastRefresh': 'آخر تحديث',
+  'hm.tile.lastRefresh': 'آخر تحديث للبيانات',
   'hm.tile.noRefreshes': 'لا توجد تحديثات بعد',
-  'hm.tile.noJobs': 'لا توجد مهام بعد',
-  'hm.tile.noJobs24': 'لا توجد مهام خلال آخر 24 ساعة',
+  'hm.tile.noJobs': 'التحديثات المجدولة: لا شيء بعد',
+  'hm.tile.noJobs24': 'التحديثات المجدولة: لا شيء خلال 24 ساعة',
   'hm.tile.jobsFailed': 'فشلت {n} من {of} مهمة',
   'hm.tile.jobsOk': '{of} مهمة، لم يفشل أيّ منها',
   'hm.tile.failing': 'يتعذّر تحديث {n} من مجموعات البيانات',
@@ -1910,8 +1911,8 @@ export const ar: Record<MessageKey, string> = {
   'chat.dl.csv': 'تنزيل CSV',
   'chat.dl.xlsx': 'تنزيل Excel',
   'chat.dl.pdf': 'تنزيل PDF',
-  'res.rows': '{n} صفًا',
-  'res.rowsShowing': '{n} صفًا، يُعرض {shown}',
+  'res.rows': '{n, plural, zero {# صف} one {صف واحد} two {صفّان} few {# صفوف} many {# صفًا} other {# صف}}',
+  'res.rowsShowing': '{n, plural, zero {# صف} one {صف واحد} two {صفّان} few {# صفوف} many {# صفًا} other {# صف}}، يُعرض {shown}',
   'res.catalog': 'من فهرس البيانات، وليس من استعلام',
   'res.none': 'لا توجد صفوف.',
   'ans3.tables': 'الجداول التي رُوجعت: {list}',

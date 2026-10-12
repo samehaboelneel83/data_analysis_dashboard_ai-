@@ -18,13 +18,14 @@ import { en as pgConnections } from './pages/connections'
 import { en as pgPolish } from './pages/polish'
 import { en as pgI2d } from './pages/i18n2Dataset'
 import { en as pgI2c } from './pages/i18n2Common'
+import { en as pgQaf } from './pages/qaf'
 
 /** English UI strings. Arabic lives in `ar.ts`; keep the two key sets identical. */
 export const en = {
   // QA3 Batch C: the builder's strings, one module per area (i18n/builder/).
   ...bcCanvas, ...bcPanes, ...bcRules, ...bcShell, ...bcStats, ...bcDialogs,
   // 8-i18n: the pages outside the Builder, one module per area (i18n/pages/).
-  ...pgAdminSecurity, ...pgAdminPlatform, ...pgDataPages, ...pgPanelsA, ...pgPanelsB, ...pgModelsMaps, ...pgTypes, ...pgAskAi, ...pgLineage, ...pgUpload, ...pgConnections, ...pgPolish, ...pgI2d, ...pgI2c,
+  ...pgAdminSecurity, ...pgAdminPlatform, ...pgDataPages, ...pgPanelsA, ...pgPanelsB, ...pgModelsMaps, ...pgTypes, ...pgAskAi, ...pgLineage, ...pgUpload, ...pgConnections, ...pgPolish, ...pgI2d, ...pgI2c, ...pgQaf,
   'nav.home': 'Home',
   'nav.askAi': 'Ask AI',
   'fab.tip': 'Ask AI about this dashboard',
@@ -1466,10 +1467,10 @@ export const en = {
   'hm.tile.rows': '{n} rows',
   'hm.tile.none': 'None yet',
   'hm.tile.failed': 'Couldn\'t load',
-  'hm.tile.lastRefresh': 'Last refresh',
+  'hm.tile.lastRefresh': 'Last data update',
   'hm.tile.noRefreshes': 'No refreshes yet',
-  'hm.tile.noJobs': 'No jobs yet',
-  'hm.tile.noJobs24': 'No jobs in the last 24 hours',
+  'hm.tile.noJobs': 'Scheduled refreshes: none yet',
+  'hm.tile.noJobs24': 'Scheduled refreshes: none in 24 hours',
   'hm.tile.jobsFailed': '{n} of {of} jobs failed',
   'hm.tile.jobsOk': '{of} jobs, none failed',
   'hm.tile.failing': '{n} datasets failing to refresh',
@@ -1911,8 +1912,8 @@ export const en = {
   'chat.dl.csv': 'Download CSV',
   'chat.dl.xlsx': 'Download Excel',
   'chat.dl.pdf': 'Download PDF',
-  'res.rows': '{n} rows',
-  'res.rowsShowing': '{n} rows, showing {shown}',
+  'res.rows': '{n, plural, one {# row} other {# rows}}',
+  'res.rowsShowing': '{n, plural, one {# row} other {# rows}}, showing {shown}',
   'res.catalog': 'from the data catalog, not a query',
   'res.none': 'No rows.',
   'ans3.tables': 'Tables considered: {list}',

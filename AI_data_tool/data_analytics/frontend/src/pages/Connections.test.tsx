@@ -212,3 +212,38 @@ describe('ConnectionModal custom preset resolution', () => {
     expect(dataSourcesApi.create).not.toHaveBeenCalled()
   })
 })
+
+describe('QAF M1: each value sits under its own header', () => {
+  it('a row has one cell per header, in the same order, and shares the header row grid', async () => {
+    vi.mocked(dataSourcesApi.connectors).mockResolvedValue([])
+    vi.mocked(dataSourcesApi.list).mockResolvedValue([DS])
+    const auth = {
+      user: { id: 1, email: 'admin@x.y', role: { id: 1, name: 'Admin', is_org_admin: true } },
+      login: vi.fn(), logout: vi.fn(), loading: false,
+    }
+    renderWithProviders(
+      <AuthContext.Provider value={auth as never}>
+        <MemoryRouter><Connections /></MemoryRouter>
+      </AuthContext.Provider>
+    )
+    await screen.findByRole('link', { name: 'Live DB' })
+    const table = screen.getByRole('table', { name: 'Connections' })
+    const [head, row] = Array.from(table.querySelectorAll('[role="row"]'))
+    const headers = Array.from(head.querySelectorAll('[role="columnheader"]')).map(h => h.textContent)
+    const cells = Array.from(row.querySelectorAll(':scope > [role="cell"]'))
+    expect(headers).toEqual(['Connection', 'Status', 'Last sync', 'Datasets', 'Actions'])
+    expect(cells).toHaveLength(headers.length)
+    expect(cells[0]).toHaveTextContent('Live DB')
+    expect(cells[1]).toHaveTextContent('Not tested')
+    expect(cells[2]).toHaveTextContent('—')
+    expect(cells[3]).toHaveTextContent(/^0$/)
+    expect(cells[4]).toHaveTextContent('Open')
+    // The drift came from each row sizing its own columns; rows now take the
+    // table's columns (CSS subgrid), the header row included.
+    const fs = await import('node:fs')
+    const path = await import('node:path')
+    const css = fs.readFileSync(path.join(__dirname, 'connections', 'connections.css'), 'utf8')
+    expect(css).toMatch(/\.dl-cn-row \{[^}]*grid-template-columns: subgrid/)
+    expect(css).toMatch(/\.dl-cn-table \{[^}]*display: grid; grid-template-columns:/)
+  })
+})

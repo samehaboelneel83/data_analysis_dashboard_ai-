@@ -26,7 +26,7 @@ import { localDigits } from '../lib/arabicFormats'
 import SuggestDashboardsDialog from '../components/dataset/SuggestDashboardsDialog'
 import ShareDashboardDialog from '../components/report/share/ShareDashboardDialog'
 import { loadCollapsed, saveCollapsed, sectionsFor, reportNodes, type FolderSection } from './reports/listParts'
-import { flatFolders, folderOf, reportsUnder, sharedWithMe, statusOf, type FlatFolder } from './reports/model'
+import { flatFolders, folderOf, reportsUnder, sharedWithMe, statusOf, statusCounts, type FlatFolder } from './reports/model'
 import FolderNav, { type View } from './reports/FolderNav'
 import { DashCard, DashRow } from './reports/DashCard'
 import { MoveDialog, NewDashboardDialog, type NewChoice, type NewMode } from './reports/dialogs'
@@ -83,7 +83,7 @@ export default function Reports() {
   const repFilter = useListFilter(reports, r => [r.name, r.description, dsName(r)], t('dsh.search'), { always: true })
 
   const [view, setView] = useState<View>('all')
-  const [status, setStatus] = useState<'all' | 'draft' | 'pub'>('all')
+  const [status, setStatus] = useState<'all' | 'draft' | 'pub' | 'open'>('all')
   const [dsFilter, setDsFilter] = useState<number | null>(null)
   const [sort, setSortState] = useState(() => read(SORT_KEY, ['recent', 'name'], 'recent') as 'recent' | 'name')
   const [layout, setLayoutState] = useState(() => read(LAYOUT_KEY, ['grid', 'list'], 'grid') as 'grid' | 'list')
@@ -350,7 +350,7 @@ export default function Reports() {
     recent: recentIds ? recentIds.filter(id => known.has(id)).length : null,
     shared: tree ? reports.filter(r => shared.has(r.id)).length : null,
   }
-  const statusCount = (s: 'all' | 'draft' | 'pub') => reports.filter(r => s === 'all' || statusOf(r) === s).length
+  const stCounts = useMemo(() => statusCounts(reports), [reports])
   const usedDatasets = (datasets ?? []).filter(d => reports.some(r => r.dataset_id === d.id))
 
   // Leaving a view that no longer exists (a deleted folder, a failed tree).
@@ -614,7 +614,7 @@ export default function Reports() {
         creating={newFolder} onStartFolder={() => setNewFolder(true)} onCreateFolder={name => void createFolder(name)}
         onCancelFolder={() => setNewFolder(false)} onSubfolder={f => void subfolder(f)} onRename={f => void renameFolder(f)}
         onDelete={f => void removeFolder(f)} dropFor={dropFor} overTarget={overTarget}
-        dragHint={reports.some(canEdit)} ready={!loading && !loadError} />
+        dragHint={reports.some(canEdit)} ready={!loading && !loadError} treeReady={tree != null} />
       <div className={`dsh-main${selectMode ? ' dsh-selmode' : ''}`}>
         <div className="dsh-page">
           <div className="dsh-hd">
@@ -646,10 +646,11 @@ export default function Reports() {
                 </label>
               )}
               <div className="dsh-seg" role="group" aria-label={t('dsh.col.status')}>
-                {(['all', 'draft', 'pub'] as const).map(s => (
+                {/* An "Everyone" tab only when such dashboards exist, so the tabs add up. */}
+                {(['all', 'draft', 'pub', ...(stCounts.open ? ['open'] as const : [])] as const).map(s => (
                   <button key={s} type="button" aria-pressed={status === s} onClick={() => setStatus(s)}>
-                    {t(s === 'all' ? 'dsh.st.all' : s === 'draft' ? 'dsh.st.drafts' : 'dsh.st.published')}
-                    <span className="n">{localDigits(String(statusCount(s)))}</span>
+                    {t(s === 'all' ? 'dsh.st.all' : s === 'draft' ? 'dsh.st.drafts' : s === 'pub' ? 'dsh.st.published' : 'qaf.st.open')}
+                    <span className="n">{localDigits(String(stCounts[s]))}</span>
                   </button>
                 ))}
               </div>
@@ -661,7 +662,7 @@ export default function Reports() {
               )}
               <span className="dsh-sp" />
               <ActionMenu label={t('dsh.sortIs', { sort: sortLabel })} align="end" triggerClassName="dsh-dd"
-                trigger={<><ArrowDownUp size={15} aria-hidden /><span className="v">{t('dsh.sort')}:</span> {sortLabel}<ChevronDown size={14} aria-hidden /></>}
+                trigger={<><ArrowDownUp size={15} aria-hidden /><span className="v">{t('dsh.sort')}:</span> <span className="val">{sortLabel}</span><ChevronDown size={14} aria-hidden /></>}
                 items={[{ key: 'recent', label: t('dsh.sort.recent'), onSelect: () => setSort('recent') },
                   { key: 'name', label: t('dsh.sort.name'), onSelect: () => setSort('name') }]} />
               <div className="dsh-seg ic" role="group" aria-label={t('dashboards.view')} data-testid="dashboards-layout">

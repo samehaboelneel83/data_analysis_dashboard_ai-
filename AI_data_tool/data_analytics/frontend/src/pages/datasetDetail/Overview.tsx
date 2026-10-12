@@ -112,7 +112,14 @@ export default function Overview(p: OverviewProps) {
         <aside className="dl-ov__side">
           <section className="dl-ov__card" data-testid="overview-used-by">
             <header className="dl-ov__card-head">
-              <h3>{t('ov3.usedBy')}</h3><span className="dl-ov__muted">{localDigits(String(usedBy.length))}</span>
+              <h3>{t('ov3.usedBy')}</h3>
+              {/* QAF 11: by kind, so the dashboards figure is the one the list and
+                  Lineage show; alerts and derived datasets are counted apart. */}
+              <span className="dl-ov__muted" data-testid="used-by-count">{localDigits([
+                dashboards.length ? t('qaf.ov.dash', { n: dashboards.length }) : null,
+                derived.length ? t('qaf.ov.ds', { n: derived.length }) : null,
+                alerts.length ? t('qaf.ov.alerts', { n: alerts.length }) : null,
+              ].filter(Boolean).join(' · '))}</span>
             </header>
             {usedBy.length === 0
               ? <p className="dl-ov__muted">{t('ov3.usedBy.none')}</p>

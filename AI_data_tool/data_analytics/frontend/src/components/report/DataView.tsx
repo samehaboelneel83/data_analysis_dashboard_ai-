@@ -31,7 +31,9 @@ export default function DataView({ datasetId, mode }: { datasetId: number; mode?
 
   const load = useCallback(() => {
     dataPreviewApi.query(datasetId, [], [], PAGE_SIZE, offset, sortBy, sortDir,
-      search || undefined).then(setData)
+      search || undefined)
+      // QAF M5: a DirectQuery dataset's preview may ignore the limit; one page only.
+      .then(d => setData({ ...d, rows: d.rows.slice(0, PAGE_SIZE) }))
   }, [datasetId, offset, sortBy, sortDir, search])
 
   useEffect(() => { load() }, [load, mode])

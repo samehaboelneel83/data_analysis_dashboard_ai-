@@ -326,7 +326,8 @@ export default function DatasetDetail() {
         // rather than silently sent and dropped server-side (see the note
         // rendered above the table for this same reason).
         const result = await dataPreviewApi.query(dsId, [], [], PAGE_SIZE, 0)
-        if (latest()) setPreview(result)
+        // QAF M5: the server ignores the limit here; draw one page only.
+        if (latest()) setPreview({ ...result, rows: result.rows.slice(0, PAGE_SIZE) })
         return
       }
       const activeFilters: DataPreviewFilter[] = frows
