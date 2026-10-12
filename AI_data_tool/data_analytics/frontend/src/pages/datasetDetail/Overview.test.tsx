@@ -199,6 +199,6 @@ describe('Used by: the count and the list agree (QA B7)', () => {
     const used = screen.getByTestId('overview-used-by')
     await within(used).findByRole('link', { name: 'Board 8' })
     expect(within(used).queryByRole('link', { name: 'Board 9' })).not.toBeInTheDocument()
-    expect(within(used).getByRole('link', { name: '+1 more' })).toHaveAttribute('href', '/lineage')
+    expect(within(used).getByRole('link', { name: '+1 more' })).toHaveAttribute('href', expect.stringMatching(/^\/lineage\?focus=ds:\d+$/))
   })
 })

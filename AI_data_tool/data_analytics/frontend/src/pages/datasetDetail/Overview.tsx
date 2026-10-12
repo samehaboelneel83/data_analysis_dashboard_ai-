@@ -130,7 +130,7 @@ export default function Overview(p: OverviewProps) {
                   {/* The count above covers all of them; past eight, say how
                       many more and where they are (QA B7). */}
                   {usedBy.length > 8 && (
-                    <li><Link to="/lineage" className="dl-ov__muted">{t('ov3.usedBy.more', { n: localDigits(String(usedBy.length - 8)) })}</Link></li>
+                    <li><Link to={`/lineage?focus=ds:${ds.id}`} className="dl-ov__muted">{t('ov3.usedBy.more', { n: localDigits(String(usedBy.length - 8)) })}</Link></li>
                   )}
                 </ul>
               )}
@@ -147,7 +147,7 @@ export default function Overview(p: OverviewProps) {
               <span className="dl-ov__node"><LayoutGrid size={14} aria-hidden />
                 {graph ? (dashboards.length ? t('ov3.lineage.boards', { n: localDigits(String(dashboards.length)) }) : t('ov3.lineage.noBoards')) : '…'}</span>
             </div>
-            <Link to="/lineage" className="dl-ov__link">{t('ov3.lineage.open')}</Link>
+            <Link to={`/lineage?focus=ds:${ds.id}`} className="dl-ov__link">{t('ov3.lineage.open')}</Link>
           </section>
 
           {!empty && (

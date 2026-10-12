@@ -216,6 +216,8 @@ Not part of the frontend steps (1–7); candidates for the handoff's section 7 p
 | 10 Ask AI (GATE 0) | Error reasons and rephrase suggestions | `error` is one raw string; no reason code and no suggested rephrasings (with AN1/B3). The error card shows a generic message, the raw text under Technical details, and column-based suggestions built by the client. |
 | 10 Ask AI (GATE 0) | A connection's sync status in the picker ("Synced 15 min ago") | `DataSourceOut` has no sync status or time; the picker says only the type. |
 | 10 Ask AI (GATE 0) | Recently used datasets per user | No endpoint (`RecentView` tracks reports only); the picker's Recent is this browser's own picks. |
+| 11 Lineage (autopilot 4) | Owner, creation date and row count per node | `GET /datasets/lineage/graph` has none of them, so there is no Owner filter and the side panel leaves them out. |
+| 11 Lineage (autopilot 4) | A connection's status on its lineage node | The graph lists sources by name and type only; the design's "Connected" / "Broken source" needs the last test result. |
 | 7-QA B6 | Ask AI is slow (about 70 s for a simple answer, about 4 min before a clarification), with no timeout or cancel | Needs a server-side timeout and a cancel endpoint (AN2: stream progress + cancel). |
 
 ## Log

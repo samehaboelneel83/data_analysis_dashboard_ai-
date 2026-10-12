@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { buildModel, downstream, layout, matches, orderColumns, reach, NO_FILTERS, SHOW, type LEdge } from './model'
+import { lineageSvg } from './exportPng'
 import type { LineageGraph } from '../../services/api'
 
 const ds = (id: number, over: Partial<LineageGraph['datasets'][number]> = {}): LineageGraph['datasets'][number] => ({
@@ -48,5 +49,20 @@ describe('lineage model', () => {
     expect(matches(m, m.byKey['ds:2'], f)).toBe(false)
     expect(matches(m, m.byKey['src:1'], f)).toBe(true)
     expect(matches(m, m.byKey['rep:1'], f)).toBe(true)
+  })
+})
+
+describe('Export PNG', () => {
+  it('draws every visible card, its name and the edges, with the theme colours', () => {
+    const m = buildModel({ sources: [{ id: 1, name: 'S & co', type: 'x' }], datasets: [ds(1)], reports: [{ id: 1, name: 'R', dataset_ids: [1] }] }, 'U')
+    const cols = orderColumns(m)
+    const lay = layout(cols, {}, new Set(), false)
+    const svg = lineageSvg(m, cols, lay, [{ d: 'M0 0L1 1', on: true, dim: false, dashed: false, bad: false }], new Set(['ds:1']),
+      { bg: '#fff', surface: '#fff', border: '#ddd', edge: '#ccc', accent: '#0a7', danger: '#d00', text: '#111', muted: '#666', font: 'Inter' }, ['Sources 1', 'Datasets 1', 'Reports 1'])
+    expect(svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg"')).toBe(true)
+    expect(svg).toContain('S &amp; co')
+    expect(svg.match(/<rect x=/g)).toHaveLength(3)
+    expect(svg).toContain('stroke="#0a7"')
+    expect(svg).toContain('Datasets 1')
   })
 })

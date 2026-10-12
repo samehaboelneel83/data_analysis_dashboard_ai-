@@ -4,7 +4,7 @@ import { hardcodedStrings } from './hardcodedStrings'
 import { en, ar } from '../i18n/pages/lineage'
 
 /** Step 11: no hard-coded English on the Lineage explorer. */
-const FILES = ['pages/Lineage.tsx', 'pages/lineage/Graph.tsx', 'pages/lineage/FilterChip.tsx']
+const FILES = ['pages/Lineage.tsx', 'pages/lineage/Graph.tsx', 'pages/lineage/FilterChip.tsx', 'pages/lineage/SidePanel.tsx', 'pages/lineage/ListView.tsx']
 
 describe('no hard-coded English: Lineage (step 11)', () => {
   it.each(FILES)('%s', f => {

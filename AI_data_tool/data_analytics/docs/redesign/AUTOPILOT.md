@@ -87,7 +87,7 @@ As planned in PLAN.md step 10. Restyle, and move the rail to the inline-end at 2
   - The sunburst accepts levels by drop.
 - Fix what's broken in one commit. Delete any scratch items you create.
 
-### [ ] 4. Lineage (step 11)
+### [x] 4. Lineage (step 11)
 Follow `docs/redesign/11-Lineage.md`.
 - Do Part 0 as a written table in the Progress log, without stopping.
 - Then build it in two parts, each with its own commit:
@@ -170,3 +170,11 @@ Follow `docs/redesign/11-Lineage.md`.
 - **7-QA6, re-run with `cap_qa6.mjs`:** A1 donut key dark-on-light in dark ✓, A2 Data view numbers ✓, A3 "-5" reads LTR in Arabic boxes ✓, A4 map strings in Arabic ✓, A6 TLS labels ✓, A10 template names in Arabic ✓, B2 sunburst levels by drop ✓. Its QA6- scratch dashboards were deleted by the script (checked: none left).
 - **Not real issues:** a 404 on 👍 in the faked thread (the fake conversation id does not exist on the server).
 - **Tests:** full suite 351 files / 4422 pass; type-check and build pass. **Captures:** `redesign-captures/ap3-selfqa/{ask,qa6}/`.
+
+### 4. Lineage, step 11 (2026-10-12)
+- **Part 0 (the brief `11-Lineage.md` is not on disk; from this file, the canvas and `redesign/lin.js`):** graph, cards, edges, search, filters, issues, pan/zoom/fit, mini-map, focus, side panel, list, keys, states, RTL, dark = **frontend only** (all from `GET /datasets/lineage/graph`). Owner filter and owner/created/rows in the panel = **needs backend** (not in the graph). A source's connection status (dot, "broken source") = **needs backend**. Export PNG = **frontend** (client SVG → canvas). Test connection in the panel = left out (exists on Connections).
+- **A (`e66ae7d`):** canvas that pans, zooms (wheel and buttons) and fits; column heads in view; legend; mini-map that moves the view; cards with type, mode chip, steps and issue icons; edges fanned per card, joins / derivations dashed, red out of a failing dataset, labels on hover; "+ N more" folding; search with results that centres and pulses; Node type / Source type / Mode / Issues only fade; the design's empty state. Uploaded datasets hang off one "Uploaded files" source.
+- **B:** focus bar (Upstream / Both / Downstream, 1 hop / All); side panel (impact, type, refresh, steps, status, feeds from, used by, Open, Ask AI); List view with chains; arrow-key moves; loading skeleton; `?focus=ds:5` deep link (Overview now links to it); Export PNG verified in Chromium. Route `/lineage` unchanged.
+- **Decisions:** reports have no "Ask AI about this" (Ask AI takes a dataset or connection). Upload datasets show no "Last refreshed". The old direction-flip test is gone with the measured layout (layout is computed now).
+- **Backend items added:** owner, creation date and row count per lineage node; a connection's status in the lineage graph.
+- **Tests:** Lineage page (19), model and export (5), string guard; full suite 353 files / 4439 pass; type-check and build pass. **Captures:** `redesign-captures/ap4-lineage/{before,after,design}/`.

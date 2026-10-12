@@ -2,6 +2,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffec
 import { ChevronsDown, ChevronsUp, Database, Files, LayoutDashboard, Minus, Plus, Scan, Table2, TriangleAlert, Unlink } from 'lucide-react'
 import { useT } from '../../i18n'
 import { localDigits } from '../../lib/arabicFormats'
+import { lineageSvg } from './exportPng'
 import { CW, NH, WIDTH, filtersOn, matches, sourceTypeName, type Col, type Filters, type LNode, type Layout, type Model } from './model'
 
 /**
@@ -23,11 +24,12 @@ export interface GraphHandle {
   fit: () => void
   centerOn: (key: string) => void
   focusNode: (key: string) => void
-  /** The drawing as it is, for Export PNG. */
-  world: () => HTMLDivElement | null
+  /** The drawing as it is, as one SVG with the theme's colours, for Export PNG. */
+  svg: () => string
 }
 
 const Z_MIN = 0.35, Z_MAX = 2
+const headKeys = [['lineage.sources', Database], ['lineage.datasets', Table2], ['lineage.reports', LayoutDashboard]] as const
 
 export const KIND_KEY = ['lin2.kind.source', 'lin2.kind.dataset', 'lin2.kind.report'] as const
 
@@ -109,9 +111,25 @@ const Graph = forwardRef<GraphHandle, {
 
   useImperativeHandle(ref, () => ({
     fit, centerOn,
-    focusNode: key => nodeEls.current[key]?.focus({ preventScroll: true }),
-    world: () => world.current,
-  }), [fit, centerOn])
+    focusNode: key => {
+      nodeEls.current[key]?.focus({ preventScroll: true })
+      // Keep the card in view as the keyboard moves through the graph.
+      const box = cv.current, n = model.byKey[key]
+      if (!box || !n || lay.y[key] == null) return
+      const { z, tx, ty } = view.current
+      const x = tx + lay.x(n.col) * z, y = ty + lay.y[key] * z
+      if (x < 0 || y < 40 || x + CW * z > box.clientWidth || y + NH * z > box.clientHeight) centerOn(key)
+    },
+    svg: () => {
+      const css = getComputedStyle(cv.current ?? document.documentElement)
+      const v = (name: string) => css.getPropertyValue(name).trim()
+      return lineageSvg(model, cols, lay, edges.map(x => ({ d: x.d, on: x.on, dim: x.dim, dashed: x.e.kind === 'join' || x.e.kind === 'derived', bad: x.e.bad })),
+        lit?.nodes ?? null,
+        { bg: v('--bg'), surface: v('--surface'), border: v('--border'), edge: v('--mc-border-strong'), accent: v('--accent'), danger: v('--danger'),
+          text: v('--text'), muted: v('--muted'), font: css.fontFamily },
+        headKeys.map(([k], c) => `${t(k)} ${cols[c].length}`))
+    },
+  }), [fit, centerOn, model, cols, lay, lit, t, filters, rtl])
 
   // Fit once the first drawing is there; later changes keep the reader's view.
   const fitted = useRef(false)
@@ -215,7 +233,6 @@ const Graph = forwardRef<GraphHandle, {
   }, [model, lay, lit, rtl, filters, fo])
 
   const countOf = (c: Col) => cols[c].length
-  const headKeys = [['lineage.sources', Database], ['lineage.datasets', Table2], ['lineage.reports', LayoutDashboard]] as const
 
   return (
     <div className="dl-ln-cv" ref={cv} aria-label={t('lin2.canvas')} role="region"

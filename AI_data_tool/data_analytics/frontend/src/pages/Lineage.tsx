@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { Database, LayoutDashboard, Plug, Search, Shapes, Table2, TriangleAlert, Upload, X, Zap } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Database, ImageDown, LayoutDashboard, List, Network, Plug, Search, Shapes, Table2, TriangleAlert, Upload, X, Zap } from 'lucide-react'
+import { Link, useSearchParams } from 'react-router-dom'
+import toast from 'react-hot-toast'
 import LoadError from '../components/ui/LoadError'
 import LoadingState from '../components/ui/LoadingState'
 import { lineageApi, type LineageGraph } from '../services/api'
@@ -9,7 +10,10 @@ import { useT } from '../i18n'
 import { localDigits } from '../lib/arabicFormats'
 import Graph, { NodeIcon, useNodeText, type GraphHandle } from './lineage/Graph'
 import FilterChip from './lineage/FilterChip'
-import { NO_FILTERS, buildModel, layout, orderColumns, reach, sourceTypeName, type Col, type Filters } from './lineage/model'
+import { NO_FILTERS, buildModel, filtersOn, layout, matches, orderColumns, reach, sourceTypeName, type Col, type Depth, type Direction, type Filters } from './lineage/model'
+import SidePanel from './lineage/SidePanel'
+import ListView from './lineage/ListView'
+import { downloadPng } from './lineage/exportPng'
 import './lineage/lineage.css'
 
 /**
@@ -21,6 +25,12 @@ import './lineage/lineage.css'
  * type, source type, mode and "issues only" -- filters fade what fails them,
  * so the layout stays put. Clicking a card lights its whole path and fades the
  * rest. The graph pans, zooms and fits; a mini-map moves the view.
+ *
+ * The focus (Part B) shows Upstream only, Both or Downstream only, one hop
+ * or all, and opens a side panel with what a change would touch. The same
+ * estate reads as a table in List view. Arrow keys move between cards: up and
+ * down in a column, across along the connections. Export as PNG draws the
+ * graph on the client. `?focus=ds:5` opens with a node focused.
  *
  * Built from `GET /datasets/lineage/graph` only (lineage/model.ts). There is
  * no owner in the graph, so there is no Owner filter (backend row).
@@ -39,6 +49,10 @@ export default function Lineage() {
   const [filters, setFilters] = useState<Filters>(NO_FILTERS)
   const [expanded, setExpanded] = useState<Partial<Record<Col, boolean>>>({})
   const [kb, setKb] = useState<string | null>(null)
+  const [view, setView] = useState<'graph' | 'list'>('graph')
+  const [dir, setDir] = useState<Direction>('both')
+  const [depth, setDepth] = useState<Depth>('all')
+  const [params] = useSearchParams()
   const g = useRef<GraphHandle>(null)
 
   // A failed load is said as such, never drawn as an empty estate.
@@ -52,7 +66,15 @@ export default function Lineage() {
   const cols = useMemo(() => (model ? orderColumns(model) : [[], [], []]), [model])
   const keep = useMemo(() => new Set([selected, hit].filter((k): k is string => !!k)), [selected, hit])
   const lay = useMemo(() => layout(cols, expanded, keep, rtl), [cols, expanded, keep, rtl])
-  const lit = useMemo(() => (model ? reach(model.edges, selected) : null), [model, selected])
+  const lit = useMemo(() => (model ? reach(model.edges, selected, dir, depth) : null), [model, selected, dir, depth])
+
+  // A link can open the page focused on a node (`?focus=ds:5`).
+  const linked = params.get('focus')
+  useEffect(() => {
+    if (!model || !linked || !model.byKey[linked]) return
+    setSelected(linked); setKb(linked)
+    requestAnimationFrame(() => g.current?.centerOn(linked))
+  }, [model, linked])
 
   // A search hit pulses for a moment.
   useEffect(() => {
@@ -62,7 +84,20 @@ export default function Lineage() {
   }, [hit])
 
   if (loadError) return <div className="dl-ln"><LoadError what={t('nav.lineage')} error={loadError} onRetry={load} /></div>
-  if (!graph || !model) return <div className="dl-ln"><LoadingState /></div>
+  if (!graph || !model) {
+    return (
+      <div className="dl-ln" aria-busy="true">
+        <header className="dl-ln__head">
+          <h1 className="dl-page-title">{t('nav.lineage')}</h1>
+          <p className="dl-page-head__sub">{t('lin2.sub')}</p>
+        </header>
+        <div className="dl-ln-skel" aria-hidden>
+          {[4, 7, 6].map((n, c) => <div key={c}>{Array.from({ length: n }, (_, i) => <i key={i} />)}</div>)}
+        </div>
+        <LoadingState label={t('lin2.loading')} />
+      </div>
+    )
+  }
 
   // Nothing connected or built yet: say what will appear, and how to start.
   if (model.nodes.length === 0) {
@@ -104,6 +139,39 @@ export default function Lineage() {
   }
 
   const select = (key: string) => { setSelected(s => (s === key ? null : key)); setKb(key) }
+  const showInGraph = (key: string) => {
+    setView('graph'); setSelected(key); setKb(key)
+    requestAnimationFrame(() => requestAnimationFrame(() => g.current?.centerOn(key)))
+  }
+
+  // Arrow keys: up and down within a column, across along the connections
+  // (the flow mirrors in right-to-left). Escape clears the focus.
+  const onNodeKey = (e: KeyboardEvent<HTMLButtonElement>, key: string) => {
+    const n = model.byKey[key]
+    let next: string | undefined
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      const col = cols[n.col].filter(x => lay.visible[x.key])
+      const i = col.findIndex(x => x.key === key)
+      next = col[i + (e.key === 'ArrowDown' ? 1 : -1)]?.key
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      const downward = (e.key === 'ArrowRight') !== rtl
+      const near = model.edges.filter(x => (downward ? x.from === key : x.to === key)).map(x => (downward ? x.to : x.from))
+        .filter(k => lay.visible[k]).sort((a, b) => lay.y[a] - lay.y[b])
+      next = near[0]
+    } else if (e.key === 'Escape') { setSelected(null); return }
+    if (!next) return
+    e.preventDefault()
+    setKb(next)
+    g.current?.focusNode(next)
+  }
+
+  const exportPng = async () => {
+    try {
+      await downloadPng(g.current?.svg() ?? '', 'lineage.png')
+      toast.success(t('lin2.exported'))
+    } catch { toast.error(t('lin2.exportFailed')) }
+  }
+  const sel = selected ? model.byKey[selected] : null
   const issues = model.nodes.filter(n => n.issue).length
   const sourceTypes = [...new Set(model.nodes.filter(n => n.col === 0).map(n => n.sourceType ?? ''))].filter(Boolean)
   const typeLabel = filters.types.size
@@ -167,8 +235,55 @@ export default function Lineage() {
         </button>
       </div>
 
-      <Graph ref={g} model={model} cols={cols} lay={lay} lit={lit} selected={selected} hit={hit} filters={filters} rtl={rtl}
-        onSelect={select} onMore={c => setExpanded(x => ({ ...x, [c]: !x[c] }))} tabKey={tabKey} />
+      <div className="dl-ln-row2">
+        <div className="dl-ln-seg" role="radiogroup" aria-label={t('lin2.view')}>
+          {(['graph', 'list'] as const).map(v => (
+            <button key={v} type="button" role="radio" aria-checked={view === v} onClick={() => setView(v)}>
+              {v === 'graph' ? <Network size={15} aria-hidden /> : <List size={15} aria-hidden />}{t(`lin2.view.${v}`)}
+            </button>
+          ))}
+        </div>
+        {view === 'graph' && (
+          <button type="button" className="dl-ln-chip" onClick={() => void exportPng()}>
+            <ImageDown size={15} aria-hidden /><span>{t('lin2.export')}</span>
+          </button>
+        )}
+      </div>
+
+      {sel && view === 'graph' && (
+        <div className="dl-ln-focus">
+          <span className="dl-ln-focus__l">{t('lin2.focused')}</span>
+          <span className="dl-ln-focus__chip">
+            <NodeIcon n={sel} size={22} /><b dir="auto">{sel.name}</b>
+            <button type="button" className="dl-ln-ib dl-ln-ib--sm" aria-label={t('lin2.clearFocus')} title={t('lin2.clearFocus')}
+              onClick={() => setSelected(null)}><X size={14} aria-hidden /></button>
+          </span>
+          <span className="dl-ln-grow" />
+          <div className="dl-ln-seg" role="radiogroup" aria-label={t('lin2.dir')}>
+            {(['up', 'both', 'down'] as const).map(d => (
+              <button key={d} type="button" role="radio" aria-checked={dir === d} onClick={() => setDir(d)}>{t(`lin2.dir.${d}`)}</button>
+            ))}
+          </div>
+          <div className="dl-ln-seg" role="radiogroup" aria-label={t('lin2.depth')}>
+            {(['one', 'all'] as const).map(d => (
+              <button key={d} type="button" role="radio" aria-checked={depth === d} onClick={() => setDepth(d)}>{t(`lin2.depth.${d}`)}</button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="dl-ln-body">
+        {view === 'graph' ? (
+          <Graph ref={g} model={model} cols={cols} lay={lay} lit={lit} selected={selected} hit={hit} filters={filters} rtl={rtl}
+            onSelect={select} onMore={c => setExpanded(x => ({ ...x, [c]: !x[c] }))} tabKey={tabKey} onNodeKey={onNodeKey} />
+        ) : (
+          <ListView model={model} onShow={showInGraph}
+            nodes={cols.flat().filter(n => !filtersOn(filters) || matches(model, n, filters))} />
+        )}
+        {sel && view === 'graph' && (
+          <SidePanel model={model} node={sel} onSelect={k => { setSelected(k); setKb(k); g.current?.centerOn(k) }} onClose={() => setSelected(null)} />
+        )}
+      </div>
     </div>
   )
 }

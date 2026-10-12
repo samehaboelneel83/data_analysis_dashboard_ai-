@@ -29,6 +29,7 @@ export interface LNode {
   steps?: number               // a dataset's active transform steps
   refreshed?: string | null    // a dataset's last refresh
   never?: boolean              // a dataset never refreshed
+  fromFile?: boolean           // a dataset uploaded as a file: refresh does not apply
   reads?: number               // how many datasets a report reads
   status: Status
   issue: Issue
@@ -49,6 +50,7 @@ export function buildModel(g: LineageGraph, uploadsName: string): Model {
     nodes.push({
       key: `ds:${d.id}`, col: 1, id: d.id, name: d.name, mode: d.mode === 'directquery' ? 'directquery' : 'import',
       steps: d.transform?.count ?? 0, refreshed: d.load?.last_refreshed_at ?? null, never: d.load?.staleness === 'never',
+      fromFile: fromFile.includes(d),
       status, issue: d.health === 'failing' ? 'fail' : status === 'warn' ? 'stale' : null,
     })
     if (d.source_id != null) edges.push({ from: `src:${d.source_id}`, to: `ds:${d.id}`, kind: 'extract', bad: false })
