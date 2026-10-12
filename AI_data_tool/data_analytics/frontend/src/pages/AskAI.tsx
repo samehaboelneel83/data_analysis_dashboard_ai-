@@ -290,6 +290,14 @@ export default function AskAI() {
             </div>
           )}
         </div>
+        {/* History is here before any data is chosen too, saying what it will
+            hold; folded away it is gone, as on the chat. */}
+        {!noData && (
+          <HistoryPanel conversations={[]} selected={undefined} scope="none"
+            onSelect={() => {}} onNew={() => {}} editing={null} onEdit={() => {}} onSave={() => {}}
+            onCancelEdit={() => {}} onDelete={() => {}}
+            collapsed={folded} onToggleCollapsed={toggleFold} mobileOpen={false} onCloseMobile={() => {}} />
+        )}
       </div>
     )
   }
@@ -335,7 +343,7 @@ export default function AskAI() {
         onNew={() => { setSelected(null); setEditing(null); setDrawer(false) }}
         editing={editing} onEdit={setEditing} onSave={() => void saveTitle()}
         onCancelEdit={() => setEditing(null)} onDelete={c => void remove(c)}
-        collapsed={folded} onToggleCollapsed={toggleFold}
+        collapsed={folded} onToggleCollapsed={toggleFold} scope={sourceId != null ? 'source' : 'dataset'}
         mobileOpen={drawer} onCloseMobile={() => setDrawer(false)} />
     </div>
   )

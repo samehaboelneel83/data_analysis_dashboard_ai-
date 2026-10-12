@@ -148,7 +148,7 @@ Nothing is pushed.
     - >> GATE B
   - [x] C Error card and composer (with the two GATE B changes: grouped numbers in the answer's rows, the Export menu)
     - >> GATE C
-  - [ ] D History rail
+  - [x] D History rail (from here on the work order and its log are in `AUTOPILOT.md`)
 - [ ] Then: Upload, Connections, Lineage, the AI button
 - [ ] FINAL Full regression: all tests, build, capture every screen, compare against all designs, final summary, fix the flaky `Lineage.test.tsx` (and watch `geoRenderers.test.tsx`, `PrepPipelinePanel.test.tsx` ("shows the previewed shape…", failed once in a full run on 2026-10-11, passes alone), `Reports.test.tsx` ("Blank with no data opens the builder…", the same) and ReportBuilder's "report-level display rules" under load), and a clean-up list (test datasets 7 and 8, chat threads, the uncommitted init.sql edit). QA3 adds: dashboard "QA3-Builder" #16 (made 00:01; share link made and revoked 00:02–00:03; not made by the QA3 run, so the owner decides), and the cached insights QA3 may have saved on "Demo — Sales" and in the Builder AI panel. QA3 adds: stop the port-3002 Vite server ("before" captures) and remove its worktree (`git worktree remove` on the scratchpad `before` folder).
   - >> GATE F: stop, final report

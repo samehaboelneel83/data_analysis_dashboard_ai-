@@ -20,6 +20,8 @@ const FILES: string[] = [
   'components/chat/Pending.tsx',
   // Part C
   'components/chat/Composer.tsx',
+  // Part D
+  'pages/ask/HistoryPanel.tsx',
 ]
 
 describe('no hard-coded English: Ask AI (step 10)', () => {

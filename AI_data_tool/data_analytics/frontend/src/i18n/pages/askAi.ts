@@ -73,6 +73,16 @@ export const en = {
   'ask2.cmp.toSend': 'to send',
   'ask2.cmp.newLine': 'for a new line',
   'ask2.cmp.send': 'Send question',
+  // History rail (Part D)
+  'ask2.hist.hide': 'Hide history',
+  'ask2.hist.pick': 'Pick a dataset to see its questions.',
+  'ask2.hist.none': 'No questions yet for this dataset.',
+  'ask2.hist.noneSource': 'No questions yet for this connection.',
+  'ask2.hist.foot': 'Questions are saved per dataset.',
+  'ask2.hist.footSource': 'Questions are saved per connection.',
+  'ask2.hist.rename': 'Rename {title}',
+  'ask2.hist.delete': 'Delete {title}',
+  'ask2.hist.titleField': 'Title',
 } as const
 
 export const ar: Record<keyof typeof en, string> = {
@@ -135,4 +145,14 @@ export const ar: Record<keyof typeof en, string> = {
   'ask2.cmp.toSend': 'للإرسال',
   'ask2.cmp.newLine': 'لسطر جديد',
   'ask2.cmp.send': 'إرسال السؤال',
+  // History rail (Part D)
+  'ask2.hist.hide': 'إخفاء السجل',
+  'ask2.hist.pick': 'اختر مجموعة بيانات لعرض أسئلتها.',
+  'ask2.hist.none': 'لا توجد أسئلة بعد لهذه المجموعة.',
+  'ask2.hist.noneSource': 'لا توجد أسئلة بعد لهذا الاتصال.',
+  'ask2.hist.foot': 'تُحفظ الأسئلة لكل مجموعة بيانات.',
+  'ask2.hist.footSource': 'تُحفظ الأسئلة لكل اتصال.',
+  'ask2.hist.rename': 'إعادة تسمية {title}',
+  'ask2.hist.delete': 'حذف {title}',
+  'ask2.hist.titleField': 'العنوان',
 }

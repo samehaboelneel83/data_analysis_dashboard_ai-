@@ -42,14 +42,48 @@
 .dl-ask--v2 .dl-chat__scroll { padding: 16px 32px 20px; }
 .dl-ask--v2 .dl-chat__composer { padding: 0 32px 16px; border-top: 0; background: transparent; }
 
-/* History: beside the chat on a wide screen, 288px, on the inline end. Folded
-   away, it is gone and the row's History button brings it back. */
+/* History (design `.hist`): beside the chat on a wide screen, 288px, on the
+   inline end. Folded away, it is gone and the row's History button brings it
+   back. */
 .dl-ask--v2 .dl-hist {
-  width: 288px; flex: none; border: 0; border-inline-start: 1px solid var(--border); border-radius: 0;
-  background: var(--surface); padding: 14px 10px 10px;
+  width: 288px; flex: none; min-height: 0; display: flex; flex-direction: column; gap: 0; padding: 0;
+  border: 0; border-inline-start: 1px solid var(--border); border-radius: 0; background: var(--surface);
 }
 .dl-ask--v2 .dl-hist--collapsed { display: none; }
 .dl-ask--v2 .dl-hist__close { display: none; }
+.dl-ask--v2 .dl-hist__head { display: flex; align-items: center; gap: 8px; padding-block: 14px 10px; padding-inline: 16px 12px; }
+.dl-ask--v2 .dl-hist__title { flex: 1; margin: 0; font-size: 14px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--text); }
+.dl-ask--v2 .dl-hist__icon { width: 30px; height: 30px; border-radius: 8px; flex: none; }
+.dl-ask--v2 .dl-hist__icon:hover { background: var(--surface2); color: var(--text); }
+.dl-hist__new-wrap { padding: 0 14px 4px; }
+.dl-ask--v2 .dl-hist__new {
+  width: 100%; height: 36px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--mc-border-strong);
+  background: none; color: var(--text); font-size: 13px; font-weight: 600;
+}
+.dl-ask--v2 .dl-hist__new:hover:not(:disabled) { background: var(--surface2); }
+.dl-ask--v2 .dl-hist__new:disabled { opacity: .5; cursor: not-allowed; }
+.dl-ask--v2 .dl-hist__list { flex: 1; min-height: 0; gap: 0; padding: 0 0 8px; }
+.dl-ask--v2 .dl-hist__group { padding: 16px 16px 6px; font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+[dir="rtl"] .dl-ask--v2 .dl-hist__group { letter-spacing: 0; font-size: 12px; }
+.dl-ask--v2 .dl-hist__empty { padding: 16px; font-size: 13px; color: var(--muted); }
+.dl-ask--v2 .dl-hist__item { margin: 0 6px; border-radius: 8px; }
+.dl-ask--v2 .dl-hist__item:hover, .dl-ask--v2 .dl-hist__item:focus-within { background: var(--surface2); }
+.dl-ask--v2 .dl-hist__item.is-current { background: var(--accent-soft); }
+.dl-ask--v2 .dl-hist__pick { align-items: center; gap: 10px; padding: 8px 10px; font-size: 13px; }
+.dl-ask--v2 .dl-hist__pick-icon { margin: 0; }
+.dl-ask--v2 .dl-hist__pick-title { flex: 1; min-width: 0; }
+.dl-ask--v2 .dl-hist__pick-when { flex: none; font-size: 11px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dl-ask--v2 .is-current .dl-hist__pick-icon, .dl-ask--v2 .is-current .dl-hist__pick-title { color: var(--mc-accent-ink, var(--accent)); }
+[data-theme="dark"] .dl-ask--v2 .is-current .dl-hist__pick-icon, [data-theme="dark"] .dl-ask--v2 .is-current .dl-hist__pick-title { color: var(--accent); }
+/* Rename and Delete take the time's place on the row in hand. */
+.dl-ask--v2 .dl-hist__tools { display: none; opacity: 1; padding-inline-end: 4px; }
+.dl-ask--v2 .dl-hist__item:hover .dl-hist__tools, .dl-ask--v2 .dl-hist__item:focus-within .dl-hist__tools { display: flex; }
+.dl-ask--v2 .dl-hist__item:hover .dl-hist__pick-when, .dl-ask--v2 .dl-hist__item:focus-within .dl-hist__pick-when { display: none; }
+.dl-ask--v2 .dl-hist__tools .dl-hist__icon { width: 26px; height: 26px; }
+.dl-ask--v2 .dl-hist__tools .dl-hist__icon:hover { background: var(--surface); }
+.dl-ask--v2 .dl-hist__input { margin: 3px 4px; padding: 6px 8px; border-radius: 6px; }
+.dl-hist__foot { display: flex; gap: 8px; align-items: center; margin: 0; padding: 12px 16px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+.dl-hist__foot svg { flex: none; }
 @media (min-width: 1180px) { .dl-ask__hist-btn--wide-hidden { display: none; } }
 
 /* Below 1180px: History is an overlay from the inline end, over a scrim. */
@@ -65,9 +99,12 @@
     visibility: visible; opacity: 1; transform: none;
     transition: transform var(--dl-dur, .2s) var(--dl-ease, ease), opacity var(--dl-dur, .2s);
   }
-  .dl-ask--v2 .dl-hist--collapsed .dl-hist__title, .dl-ask--v2 .dl-hist--collapsed .dl-hist__list,
-  .dl-ask--v2 .dl-hist--collapsed .dl-hist__new-text { display: revert; }
-  .dl-ask--v2 .dl-hist--collapsed .dl-hist__new { width: auto; height: auto; }
+  .dl-ask--v2 .dl-hist--collapsed .dl-hist__title, .dl-ask--v2 .dl-hist--collapsed .dl-hist__new-text { display: revert; }
+  .dl-ask--v2 .dl-hist--collapsed .dl-hist__list { display: flex; }
+  .dl-ask--v2 .dl-hist--collapsed .dl-hist__new { width: 100%; height: 36px; padding: 0 12px; }
+  .dl-ask--v2 .dl-hist--collapsed .dl-hist__head { padding-block: 14px 10px; padding-inline: 16px 12px; }
+  /* No data chosen yet: there is nothing to open it for. */
+  .dl-ask--empty .dl-hist { display: none; }
   .dl-ask--v2 .dl-hist__fold { display: none; }
   .dl-ask--v2 .dl-hist__close { display: inline-grid; }
   .dl-ask--v2 .dl-hist__scrim { display: block; position: absolute; inset: 0; z-index: 25; background: var(--dl-ask-scrim); }
