@@ -126,6 +126,8 @@ describe('ConnectionModal custom preset resolution', () => {
     renderPage()
 
     fireEvent.click(await screen.findByRole('button', { name: /New Connection/ }))
+    // Autopilot 7: the drawer starts on the type grid.
+    fireEvent.click(await screen.findByRole('button', { name: 'Next' }))
 
     const select = await screen.findByLabelText('Type') as HTMLSelectElement
     fireEvent.change(select, { target: { value: 'custom:7' } })
@@ -164,6 +166,7 @@ describe('ConnectionModal custom preset resolution', () => {
     )
     expect(await screen.findByRole('link', { name: 'Guided setup' })).toHaveAttribute('href', '/setup/1')
     fireEvent.click(screen.getByRole('button', { name: /New Connection/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Next' }))
     fireEvent.change(await screen.findByLabelText('Connection name *'), { target: { value: 'cars' } })
     fireEvent.click(screen.getByRole('button', { name: 'Create connection' }))
     expect(await screen.findByText('setup page')).toBeInTheDocument()
@@ -179,6 +182,8 @@ describe('ConnectionModal custom preset resolution', () => {
 
     renderPage()
     fireEvent.click(await screen.findByRole('button', { name: /New Connection/ }))
+    // Autopilot 7: the drawer starts on the type grid.
+    fireEvent.click(await screen.findByRole('button', { name: 'Next' }))
     const box = await screen.findByRole('checkbox', { name: /Let AI read a few sample rows/ })
     expect(box).toBeChecked()
     fireEvent.click(box)
@@ -198,6 +203,8 @@ describe('ConnectionModal custom preset resolution', () => {
 
     renderPage()
     fireEvent.click(await screen.findByRole('button', { name: /New Connection/ }))
+    // Autopilot 7: the drawer starts on the type grid.
+    fireEvent.click(await screen.findByRole('button', { name: 'Next' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Test connection' }))
 
     expect(await screen.findByRole('status')).toBeInTheDocument()
