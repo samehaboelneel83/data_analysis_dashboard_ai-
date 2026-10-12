@@ -1353,3 +1353,16 @@ GATE B was approved with two changes; the owner accepted the app's chart rendere
 - `Composer.tsx` is in the Ask AI guard.
 - Full suite: 350 files / 4405 tests. Three failed in the full run, none in a file this step touches: `ReportBuilder.test.tsx` (E03), `WidgetRenderer.test.tsx` (QA2 T14) and `geoRenderers.test.tsx` (the time map); the three files pass alone (407/407). Type-check and build pass.
 - Captures: `e2e/capture/redesign/cap_10c.mjs` (browser-only data), EN/AR × light/dark: the rows open, the Export menu open, the actions at 1024px, the error landing, the error, its details open, the error at 1024px, and the question box empty, with text, near the limit, locked, paused and at 1024px. Before is :3001 at `1bd7389`; after is in `redesign-captures/10-askai/C-{before,after}/`.
+
+### Step 10: where I stopped (2026-10-12)
+
+- **Done and committed on `said`:** Part 0, A, A2, the robot (A3, replaced by A4, the approved prototype), B (`9cfa530`) and C with the two GATE B changes (`6ad139d`). The working tree was clean when this note was written.
+- **Waiting at GATE C** for the owner's review. Nothing of Part D is started.
+- **Open questions for the owner at GATE C:**
+  - Should every data table group thousands? Today only the answer card's rows do, for quantity columns; the shared `formatCell` is unchanged.
+  - Should `WidgetRenderer.test.tsx` (QA2 T14) go on the FINAL flaky list? It failed once in a full run on 2026-10-11 and passes alone.
+- **Next:** Part D, the History rail, from what the server already stores (`GET /agent/conversations` has `created_at` only, with no last-activity time and no failed flag: backend rows above). Then GATE D.
+- **To pick this up in a new session:**
+  - The repo is on the drive that now mounts as "New Volume2"; the "New Volume1" paths in older notes are stale.
+  - The model server is unreachable on this machine, so every Ask AI capture uses browser-only data (`cap_10a.mjs`, `cap_10robot.mjs`, `cap_10b.mjs`, `cap_10c.mjs`).
+  - Captures are outside the repo, in `/media/saeed/New Volume2/projects/redesign-captures/10-askai/`.
