@@ -68,7 +68,7 @@ As planned in PLAN.md step 10. Restyle, and move the rail to the inline-end at 2
 - **From `Ask AI Redesign v2.html`:** add only these two robot reactions. The robot looks toward the chooser while the pointer is over it, and does a happy bounce with a small burst when a dataset is chosen.
 - Mark step 10 done in PLAN.md.
 
-### [ ] 3. Self-QA of Ask AI and the 7-QA6 fixes (Playwright, no code unless broken)
+### [x] 3. Self-QA of Ask AI and the 7-QA6 fixes (Playwright, no code unless broken)
 - **Ask AI** (with mocked AI responses in the browser): run each flow.
   - Empty state: chooser search, tabs, keyboard, and "Upload dataset".
   - Pick a dataset, then step 2.
@@ -163,3 +163,10 @@ Follow `docs/redesign/11-Lineage.md`.
 - **Robot (from Ask AI Redesign v2):** an idle robot looks toward the chooser while the pointer is over it; choosing data gives a short happy bounce with a spark burst (not confetti).
 - **Backend items:** none new. **Tests:** chooser polish (6), robot reactions (2); full suite 351 files / 4421 tests pass; type-check and build pass.
 - **Captures:** `redesign-captures/ap2-polish/{before,after}/` (`cap_10d.mjs` `no-data`, `polish-*`).
+
+### 3. Self-QA of Ask AI and 7-QA6 (2026-10-12)
+- **Ask AI:** `e2e/capture/redesign/qa_ap3_ask.mjs`, 39 checks with faked model answers: chooser (search, tabs, keys, "/", Upload), step 2, loading → answer (rows, SQL, Export, Copy, 👍, Edit question, Retry), error card and unreachable, the composer limit, History (switch, rename, delete a scratch chat through the real API; it is deleted), robot typing / thinking / happy / calm / sleep / wake. 39 / 39 after the fix.
+- **Broken and fixed:** the Export menu closed as soon as it opened when a smooth scroll was still settling (the shared `ActionMenu` closed on any scroll while portalled). It now follows its button and closes only when the button leaves the window (+1 test).
+- **7-QA6, re-run with `cap_qa6.mjs`:** A1 donut key dark-on-light in dark ✓, A2 Data view numbers ✓, A3 "-5" reads LTR in Arabic boxes ✓, A4 map strings in Arabic ✓, A6 TLS labels ✓, A10 template names in Arabic ✓, B2 sunburst levels by drop ✓. Its QA6- scratch dashboards were deleted by the script (checked: none left).
+- **Not real issues:** a 404 on 👍 in the faked thread (the fake conversation id does not exist on the server).
+- **Tests:** full suite 351 files / 4422 pass; type-check and build pass. **Captures:** `redesign-captures/ap3-selfqa/{ask,qa6}/`.
