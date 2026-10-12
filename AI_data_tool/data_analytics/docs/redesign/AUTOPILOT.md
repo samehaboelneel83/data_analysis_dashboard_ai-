@@ -95,7 +95,7 @@ Follow `docs/redesign/11-Lineage.md`.
   - **B:** focus mode (Upstream/Both/Downstream, 1 hop/All), side panel with impact, list view, keyboard navigation, empty/loading/error, dark, RTL mirrored, and Export PNG if it can be done on the client.
 - Keep existing routes and deep links working.
 
-### [ ] 5. Upload redesign
+### [x] 5. Upload redesign
 - Design: `datalytics-archive/Upload Redesign.html`, prototype `redesign/upload.html` (`up.js`, `up.css`).
 - Frames: landing, drag-over, review of one file (with a date warning), review of 3 files (combine on, one still uploading), import settings, importing, success, error.
 - Keep the existing upload API and flows. Do Part 0 in the log, then build. Leave out what the API can't do; for example, if combining files isn't supported, drop that frame and record it as a backend item.
@@ -178,3 +178,10 @@ Follow `docs/redesign/11-Lineage.md`.
 - **Decisions:** reports have no "Ask AI about this" (Ask AI takes a dataset or connection). Upload datasets show no "Last refreshed". The old direction-flip test is gone with the measured layout (layout is computed now).
 - **Backend items added:** owner, creation date and row count per lineage node; a connection's status in the lineage graph.
 - **Tests:** Lineage page (19), model and export (5), string guard; full suite 353 files / 4439 pass; type-check and build pass. **Captures:** `redesign-captures/ap4-lineage/{before,after,design}/`.
+
+### 5. Upload (2026-10-12)
+- **Part 0:** landing, drag-over, review, combine (batch "append"), sheet choice, importing, success, error = **frontend only** (existing `POST /datasets` and `/datasets/batch`). Preview before import = **frontend** for CSV/TSV/JSON (read in the browser from the reader's own file), **needs backend** for Excel/Parquet/XML/Access. Change a column's type, header/delimiter/encoding/date-format settings, "Try a sample dataset", per-file upload status, "Up to N MB" = **needs backend** (left out). Recent uploads = existing dataset list (datasets with a file).
+- **Changed:** three steps (Choose files → Review → Import); drop zone + Browse, database card, Recent uploads and Tips; review with file rows, a name from the file, description, Combine switch, first 20 rows with type hints, row / column / empty-cell counts and a day/month date warning; the real upload progress (two added API calls with `onUploadProgress`), then "Saving"; a success card (Open, Ask AI, Build a dashboard, Upload another) and an error card (per-file errors, Technical details, Try again, Choose another file).
+- **Decision:** after a single import the page shows the success card instead of jumping to the dataset (the design); Open keeps `?new=1`. "Keep this page open" instead of the design's "you can leave this page" (the upload runs in the page).
+- **Backend items added:** previews of Excel/Parquet/XML/Access before import; import settings (types, header, delimiter, encoding, date format); a sample dataset; per-file upload status in a batch.
+- **Tests:** Upload page (24), reader (4), string guard; full suite 355 files / 4442 pass; type-check and build pass. **Captures:** `redesign-captures/ap5-upload/{before,after,design}/` (`cap_ap5.mjs`, browser-only routes: nothing uploaded).
