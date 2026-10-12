@@ -113,7 +113,7 @@ def _fetch_full(source_cfg: dict, table: str | None, query: str | None, path: Pa
             _drop_stage(stage)
             return guard_schema(got, required, column_map), None, None
         sample = guard_schema(got.sample, required)
-        sample.attrs.update(rows=int(got.rows), missing=dict(got.missing), staged=str(got.path))
+        sample.attrs.update(rows=int(got.rows), missing=dict(got.missing), staged=str(got.path), file=str(got.path))
         cursor = None
         if cursor_column and cursor_column in sample.columns:
             import duckdb
@@ -128,6 +128,69 @@ def _fetch_full(source_cfg: dict, table: str | None, query: str | None, path: Pa
     except BaseException:
         _drop_stage(stage)
         raise
+
+
+def _incremental_on_disk(source_cfg, source_table, source_query, path: Path, stage: str, held: list[str],
+                         cursor_column, cursor_value, column_map, key_column, lookback_hours,
+                         reconcile_deletes, family) -> dict:
+    """An incremental load of a dataset too large for memory: the rows past
+    the cursor are fetched (to disk themselves when there are many) and merged
+    into the file by DuckDB (services/refresh_on_disk.py). The frame handed
+    back is a SAMPLE of the merged file, as `_fetch_full` describes."""
+    import os
+
+    from . import refresh_on_disk
+    from .connections import Streamed, _import_cap, _too_large, import_to_dataframe
+    from .ingest import detect_types
+    from .timezones import normalize_instants
+    warning = None
+    if key_column and key_column not in held:
+        warning = f"Key column '{key_column}' not found on the dataset — appended without merging."
+        key_column = None
+    fetch_from = lookback_cursor(cursor_value, lookback_hours) if key_column else cursor_value
+    rename = dict(column_map or {})
+
+    def _prepare(chunk):
+        if rename:
+            chunk = chunk.rename(columns={n: o for n, o in rename.items() if n in chunk.columns})
+        normalize_instants(chunk)
+        detect_types(chunk)
+        return chunk
+
+    incr_sql = build_incremental_query(source_table, source_query, cursor_column, cursor_value, set(held), family)
+    fetch_dir = os.path.join(stage, "fetch")
+    os.makedirs(fetch_dir, exist_ok=True)
+    got = import_to_dataframe(source_cfg, None, incr_sql, params={"cursor_val": fetch_from},
+                              stream_dir=fetch_dir, prepare=_prepare)
+    new = got.path if isinstance(got, Streamed) else _prepare(got)
+    alive = None
+    if reconcile_deletes and key_column:
+        try:
+            keys = import_to_dataframe(source_cfg, None, build_key_query(
+                source_table, source_query, key_column, set(held), family))
+            if rename:
+                keys = keys.rename(columns={n: o for n, o in rename.items() if n in keys.columns})
+            alive = keys[key_column] if key_column in keys.columns else keys.iloc[:, 0]
+            if not len(alive):
+                alive, warning = None, "The source returned no keys, so no rows were removed as deleted."
+        except Exception as e:  # noqa: BLE001 -- the merge stands; deletes wait for next run
+            alive, warning = None, f"Could not check for deleted rows ({e}); none were removed this time."
+    m = refresh_on_disk.merge(path, new, stage, key_column=key_column, alive_keys=alive,
+                              cursor_column=cursor_column)
+    import shutil
+    shutil.rmtree(fetch_dir, ignore_errors=True)
+    cap = _import_cap()
+    if cap and m["rows"] > cap:
+        raise _too_large(cap)
+    df = m["sample"]
+    # `file`: where the checks count on every row -- the merged file, or the
+    # live one when nothing changed (then there is nothing to swap in).
+    df.attrs.update(rows=int(m["rows"]), missing=dict(m["missing"]), file=str(m["path"] or path))
+    if m["path"]:
+        df.attrs["staged"] = str(m["path"])
+    return {"df": df, "cursor": m["cursor"], "warning": warning,
+            "rows_added": m["rows_new"] - m["rows_updated"], "rows_updated": m["rows_updated"],
+            "rows_deleted": m["rows_deleted"]}
 
 
 def _swap_staged(df: pd.DataFrame, path: Path) -> None:
@@ -425,6 +488,7 @@ def _refresh_dataset_body(
         warning = "No watermark column configured — ran a full refresh instead."
 
     existing_df = None
+    on_disk: list[str] | None = None      # the file's columns, when it is merged without being loaded
     if effective_mode == "incremental" and path is not None and path.exists():
         try:
             if is_parquet(path):
@@ -439,14 +503,46 @@ def _refresh_dataset_body(
             existing_df = None
             from .memory_guard import TooLargeToLoad
             if isinstance(e, TooLargeToLoad):
-                effective_mode = "full"
-                warning = ("The dataset is too large to add rows to in memory — "
-                           "ran a full refresh instead.")
+                # Too large to hold: the new rows are merged into it on disk.
+                try:
+                    from .refresh_on_disk import schema as _file_schema
+                    on_disk = [c for c, _ in _file_schema(path)]
+                except Exception:  # noqa: BLE001 - unreadable: the full reload recovers it
+                    on_disk = None
+        if on_disk is not None and cursor_column not in on_disk:
+            on_disk = None
+            effective_mode = "full"
+            warning = f"Column '{cursor_column}' not found on the dataset — ran a full refresh instead."
         if existing_df is not None and cursor_column not in existing_df.columns:
             effective_mode = "full"
             warning = f"Column '{cursor_column}' not found on the dataset — ran a full refresh instead."
 
-    if effective_mode == "incremental" and cursor_value not in (None, ""):
+    if effective_mode == "incremental" and cursor_value not in (None, "") and on_disk is not None:
+        stage = _stage_dir(path)
+        try:
+            out = _incremental_on_disk(source_cfg, source_table, source_query, path, stage, on_disk, cursor_column,
+                                       cursor_value, column_map, key_column, lookback_hours, reconcile_deletes, family)
+        except Exception as e:  # noqa: BLE001 - as below: a bad cursor or query falls back
+            _drop_stage(stage)
+            effective_mode = "full"
+            warning = f"Incremental query failed ({e}) — ran a full refresh instead."
+        else:
+            df = out.pop("df")
+            try:
+                if validate is not None:
+                    validate(df)
+            except BaseException:
+                _drop_stage(stage)
+                raise
+            if not df.attrs.get("staged"):
+                _drop_stage(stage)                          # nothing changed: the file stands
+            elif write:
+                _swap_staged(df, path)
+            return {"df": df, "type_map": detect_types(df), "mode": "incremental",
+                    "cursor_value": _staged_cursor(out.pop("cursor"), cursor_value),
+                    "warning": out.pop("warning") or warning, **out}
+
+    if effective_mode == "incremental" and cursor_value not in (None, "") and on_disk is None:
         # Allowlist for the identifier interpolated into the query below: the
         # cached file's own columns when we just read it, else whatever the
         # caller knows about the dataset's schema (e.g. its DatasetColumn
@@ -591,6 +687,10 @@ def write_dataset_files(df: pd.DataFrame, filename: str) -> None:
     path = Path(filename)
     if df.attrs.get("staged"):
         _swap_staged(df, path)
+        return
+    if "rows" in df.attrs:
+        # A sample of a file that is already in place (nothing changed): the
+        # sample must never be written over the dataset.
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     write_csv_atomic(df, path)

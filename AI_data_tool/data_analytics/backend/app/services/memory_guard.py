@@ -75,9 +75,10 @@ def free_bytes() -> int | None:
     return min(found) if found else None
 
 
-def estimate(path: str) -> tuple[int, int | None]:
+def estimate(path: str, columns: list[str] | None = None) -> tuple[int, int | None]:
     """(bytes a full load would take, rows when the file says) -- from the
-    file's size and footer; no row is read."""
+    file's size and footer; no row is read. With `columns` (a parquet file
+    only): what loading just those columns would take."""
     p = Path(path)
     if p.suffix.lower() == ".parquet":
         import pyarrow.parquet as pq
@@ -87,6 +88,8 @@ def estimate(path: str) -> tuple[int, int | None]:
             group = meta.row_group(g)
             for c in range(group.num_columns):
                 col = group.column(c)
+                if columns is not None and col.path_in_schema not in columns:
+                    continue
                 fixed = _FIXED.get(col.physical_type)
                 if fixed is not None:
                     total += fixed * group.num_rows
@@ -113,8 +116,60 @@ _LOCK = threading.Lock()
 _RESERVED = 0
 
 
+def _ledger_path() -> str:
+    import tempfile
+    shm = "/dev/shm"
+    return os.path.join(shm if os.path.isdir(shm) and os.access(shm, os.W_OK) else tempfile.gettempdir(),
+                        "datalytics_load_ledger.json")
+
+
+def _ledger(delta: int) -> int:
+    """Record `delta` bytes against this process in a small file every worker
+    on the machine shares, and return what the OTHER live processes have
+    promised. A process that died without giving its bytes back is dropped.
+    Any failure (no file locking on this platform, a read-only disk) returns 0:
+    the count is then per process, as it was."""
+    try:
+        import fcntl
+        import json
+        me = str(os.getpid())
+        with open(_ledger_path(), "a+") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            try:
+                f.seek(0)
+                try:
+                    held = json.loads(f.read() or "{}")
+                except ValueError:
+                    held = {}
+                alive = {}
+                for pid, n in held.items():
+                    if pid == me:
+                        continue
+                    try:
+                        os.kill(int(pid), 0)
+                    except ProcessLookupError:
+                        continue
+                    except (PermissionError, ValueError):
+                        pass
+                    if n > 0:
+                        alive[pid] = n
+                mine = max(int(held.get(me, 0)) + int(delta), 0)
+                if delta:
+                    out = dict(alive)
+                    if mine:
+                        out[me] = mine
+                    f.seek(0)
+                    f.truncate()
+                    f.write(json.dumps(out))
+                return int(sum(alive.values()))
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
+    except Exception:                                       # noqa: BLE001
+        return 0
+
+
 @contextlib.contextmanager
-def reserved(path: str):
+def reserved(path: str, columns: list[str] | None = None):
     """`check`, and the room kept for this load until it has finished:
 
         with memory_guard.reserved(path):
@@ -126,18 +181,24 @@ def reserved(path: str):
     needed, rows = 0, None
     if free is not None:
         try:
-            needed, rows = estimate(path)
+            needed, rows = estimate(path, columns)
         except Exception:                                   # noqa: BLE001 -- unreadable: the load reports it
             needed = 0
     with _LOCK:
-        if free is not None and needed and needed + _RESERVED > free * allowed:
-            raise TooLargeToLoad(needed, max(free - _RESERVED, 0), rows)
+        if free is not None and needed:
+            # What this process has promised, and what the server's OTHER
+            # processes have (production runs several workers on one machine).
+            promised = _RESERVED + _ledger(0)
+            if needed + promised > free * allowed:
+                raise TooLargeToLoad(needed, max(free - promised, 0), rows)
         _RESERVED += needed
+        _ledger(needed)
     try:
         yield
     finally:
         with _LOCK:
             _RESERVED -= needed
+            _ledger(-needed)
 
 
 def check(path: str) -> None:

@@ -182,7 +182,9 @@ def test_each_page_gets_slicers_for_what_its_charts_split_by():
     assert slicers_for([{"widget_type": "bar", "config": {"dimension": "student_id"}}], profile) == []
     # a headline page borrows the dataset's
     assert slicers_for([{"widget_type": "kpi", "config": {"measure": "final_score"}}], profile,
-                       fallback=["faculty"])[0]["config"] == {"dimension": "faculty"}
+                       fallback=["faculty"])[0]["config"]["dimension"] == "faculty"
+    # each is the control that suits how many values there are to choose from
+    assert {x["config"]["slicer_mode"] for x in s} <= {"buttons", "list", "dropdown"}
 
 
 def test_slicers_sit_above_the_page():
@@ -640,8 +642,10 @@ def test_data_with_nothing_to_group_by_gets_period_slicers():
     from app.services.widget_data import get_widget_data_from_df, infer_date_filter_grains
     df = _daily(700)
     got = slicers_for([], _profile(df))
-    assert [s["config"] for s in got] == [{"dimension": "day_date", "dimension_granularity": "year"},
-                                         {"dimension": "day_date", "dimension_granularity": "month"}]
+    assert [(s["config"]["dimension"], s["config"]["dimension_granularity"]) for s in got] == \
+        [("day_date", "year"), ("day_date", "month")]
+    # few years are buttons; the months of two years are a dropdown
+    assert [s["config"]["slicer_mode"] for s in got] == ["buttons", "dropdown"]
     years = [r["name"] for r in get_widget_data_from_df(df, got[0]["config"], "slicer")["rows"]]
     # a picked year is a bucket every engine filters by
     f = infer_date_filter_grains([{"column": "day_date", "op": "eq", "value": years[0]}], {"day_date"})

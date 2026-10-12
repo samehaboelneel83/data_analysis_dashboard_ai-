@@ -300,6 +300,16 @@ class Settings(BaseSettings):
     # at about one chunk of rows whatever the size, and the dataset is kept as
     # a parquet file. 0 = never stream.
     import_stream_rows: int = Field(default=1_000_000, ge=0)
+    #: A CSV upload of at least this many megabytes (or one that would not fit
+    #: in memory parsed whole) is written to disk a chunk at a time instead
+    #: (services/upload_stream.py). 0 = never. Only matters once
+    #: `max_upload_mb` allows files this large.
+    upload_stream_mb: int = Field(default=300, ge=0)
+    #: The suggestions panel of a dashboard: after the ideas the data argues
+    #: for, how many FURTHER widget types the data has the shape for are
+    #: offered, one of each (services/suggest_variety.catalogue_suggestions).
+    #: 0 = only the ideas with a finding or a basic behind them.
+    suggest_more_types: int = Field(default=12, ge=0, le=40)
     #: How many rows an ANALYSIS pulls from a live source. Between the two
     #: caps either side of it: the widget cap (10,000) sizes a scatter plot,
     #: the import cap sizes a file on disk. Statistics over 10,000 rows of a

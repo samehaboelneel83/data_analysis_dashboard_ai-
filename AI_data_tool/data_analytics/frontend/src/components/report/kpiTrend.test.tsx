@@ -22,6 +22,19 @@ describe('KPI with its history', () => {
     expect(screen.getByTestId('kpi-trend').getAttribute('title')).toContain('2024-07')
   })
 
+  it('lays the card out to be read at a glance: change as a pill, history filled across the card', () => {
+    kpi({ measure: 'amount', aggregation: 'sum', sparkline_date: 'when', trend_good: 'up' }, { trend })
+    const pill = screen.getByTestId('kpi-change')
+    expect(pill.style.borderRadius).toBe('999px')
+    const line = screen.getByRole('img', { name: 'trend sparkline' })
+    expect(line.getAttribute('width')).toBe('100%')                     // as wide as the card, whatever its size
+    expect(line.getAttribute('preserveAspectRatio')).toBe('none')
+    const fill = screen.getByTestId('sparkline-fill')
+    expect(fill.getAttribute('fill')).toMatch(/^url\(#spark/)           // a gradient, not a flat colour
+    expect(screen.getByTestId('kpi-trend').contains(line)).toBe(true)
+    expect(screen.getByTestId('kpi-trend').contains(pill)).toBe(false)  // the pill sits beside the number
+  })
+
   it('shows the same period a year before beside the previous period, when the server sent one', () => {
     kpi({ measure: 'amount', aggregation: 'sum', sparkline_date: 'when', trend_good: 'up' },
       { trend: { ...trend, year_ago: { period: '2023-08', value: 200, change: -50, change_pct: -25 } } })

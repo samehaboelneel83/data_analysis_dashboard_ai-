@@ -3202,6 +3202,8 @@ export interface User {
   id: number
   email: string
   is_active: boolean
+  /** What the person wrote about themselves (components/AboutMe). */
+  about?: string | null
   organization: Organization
   role: Role
   is_super_admin?: boolean
@@ -3215,6 +3217,8 @@ export const authApi = {
   /** `quiet`: a 401 means "not logged in", not "session expired". */
   me: (opts?: { quiet?: boolean }) =>
     api.get<User>('/auth/me', opts?.quiet ? ({ quiet401: true } as object) : undefined).then(r => r.data),
+  /** Change one's own profile: what the person says about themselves. */
+  updateMe: (body: { about: string }) => api.patch<User>('/auth/me', body).then(r => r.data),
   logout: () => api.post('/auth/logout').then(() => undefined),
   /** Move a pre-T6 localStorage token into the httpOnly cookie, once. */
   adoptSession: (token: string) =>

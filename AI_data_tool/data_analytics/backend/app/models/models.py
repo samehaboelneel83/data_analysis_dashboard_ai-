@@ -577,6 +577,10 @@ class User(Base):
     email         = Column(String(255), nullable=False, unique=True)
     password_hash = Column(String(255), nullable=False)
     is_active     = Column(Boolean, nullable=False, default=True)
+    #: What the person wrote about themselves: their work and what they look
+    #: at data for. Read by the designers that tailor a dashboard to them
+    #: (services/ai_context.py), and by nothing else.
+    about         = Column(Text, nullable=True)
     created_at    = Column(DateTime(timezone=True), default=datetime.utcnow)
     #: Login tokens issued before this instant are refused (migration 0038).
     #: Set when a password is reset, so a token minted with the old password

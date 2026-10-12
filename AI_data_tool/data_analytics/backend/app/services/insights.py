@@ -1490,7 +1490,7 @@ def suggest_widgets_from_findings(findings: list[dict], roles: dict[str, str],
                                   ineligible: set[str] | None = None,
                                   column_meta: dict | None = None,
                                   frame: pd.DataFrame | None = None,
-                                  per_type: int = 2) -> list[dict]:
+                                  per_type: int = 2, catalogue: int = 0) -> list[dict]:
     """Rank the engine's findings into one-click widget suggestions.
 
     Score = the finding's own interest score, plus a boost per column the
@@ -1647,6 +1647,24 @@ def suggest_widgets_from_findings(findings: list[dict], roles: dict[str, str],
                   if not mixes_units(x, mixed)
                   and (x.get("kind") == "rules" or draws(x["widget_type"], x["config"], probe))]
         chosen = diversify(ranked, limit, per_type=per_type)
+        if catalogue > 0:
+            # After the ideas the data argues for: up to `catalogue` further
+            # widget types it has the shape for, one of each, none already in
+            # the list (suggest_variety.catalogue_suggestions). They pass the
+            # same checks as everything above and below.
+            from .suggest_variety import _type_key, catalogue_suggestions
+            shown, more = {_type_key(x) for x in chosen}, []
+            for idea in catalogue_suggestions(prof):
+                kind = _type_key(idea) + ("|" + str(idea["config"].get("gauge_shape")) if idea["widget_type"] == "gauge" else "")
+                idea = one_unit(idea, mixed)
+                if kind in shown or _type_key(idea) in {_type_key(x) for x in chosen} or mixes_units(idea, mixed) \
+                        or not draws(idea["widget_type"], idea["config"], probe):
+                    continue
+                shown.add(kind)
+                more.append(idea)
+                if len(more) >= catalogue:
+                    break
+            chosen = chosen + more
         # What each one SHOWS, read from its result on every row (the probe
         # sample only had to prove it draws). The rules widget's reason
         # already states its mined numbers.

@@ -170,6 +170,150 @@ def load_file_columns(file_path: str) -> list[str]:
     return []
 
 
+#: Charts of how values are spread or relate, which a random sample of the
+#: rows estimates fairly (unlike a total). The analyses are sampled too.
+SAMPLED_WHEN_TOO_LARGE = frozenset({"histogram", "box_plot", "correlation_matrix", "scatter", "bubble",
+                                    "numeric_series", "parallel_coordinates"})
+
+
+def named_columns(names: list[str], *said) -> list[str]:
+    """The columns of `names` that anything in `said` (a chart's settings, a
+    row rule, a filter, calculated columns, measures) mentions. Deliberately
+    generous: a column whose name merely appears inside another word is
+    included, because one column too many costs memory and one too few would
+    cost a wrong chart."""
+    text = json.dumps(said, default=str, ensure_ascii=False)
+    return [c for c in names if json.dumps(str(c), ensure_ascii=False)[1:-1] in text]
+
+
+def _large_duck(file_path: str, config: dict, widget_type: str, filter_expr, rls_filter_expr,
+                drop_columns) -> dict | None:
+    """One of the shapes `duck_agg` answers only for a dataset too large to
+    load (see the note there), finished by the ordinary shaper. None when
+    this chart is not one of them."""
+    from . import duck_agg
+    from .sql_expr import ExpressionTranslationError, translate_filter_expr_null_safe
+    if not duck_agg.is_enabled() or SHAPERS.get(widget_type, shape_series) is not shape_series:
+        return None
+    if config.get("dimension2_granularity") or config.get("lattice_rows") or config.get("lattice_columns") \
+            or config.get("animate_by"):
+        return None
+    cols = list(load_file_columns(file_path))
+    visible = [c for c in cols if c not in set(drop_columns or [])]
+    extra = []
+    try:
+        if rls_filter_expr:
+            extra.append(translate_filter_expr_null_safe(rls_filter_expr, set(cols)))
+        if filter_expr:
+            extra.append(translate_filter_expr_null_safe(filter_expr, set(visible)))
+    except ExpressionTranslationError:
+        return None
+    shaped = {**config, "filters": []}
+    try:
+        if widget_type == "kpi" and config.get("sparkline_date") and not config.get("dimension"):
+            daily = duck_agg.daily_frame(file_path, config, visible, extra)
+            plain = {k: v for k, v in config.items() if k not in ("sparkline_date", "sparkline_granularity")}
+            one = duck_agg.aggregate(file_path, plain, visible, extra_where=extra)
+            counted = bool(one.attrs.get("scalar_count"))
+            name = config.get("measure")
+            as_sum = {"measure": duck_agg.COUNT_COL, "aggregation": "sum"} if counted else {}
+            result = get_widget_data_from_df(one, {**plain, "filters": [], **as_sum}, widget_type,
+                                             flag_partial=False, check_fields=False)
+            if counted and result.get("type") == "scalar":
+                result["measure"], result["aggregation"] = name, "count"
+                for row in result.get("rows") or []:
+                    row["name"] = name
+                    if isinstance(row.get("value"), float) and float(row["value"]).is_integer():
+                        row["value"] = int(row["value"])
+            if result.get("type") != "error":
+                trend = kpi_trend(daily, {**shaped, **as_sum}, True)
+                if trend:
+                    result["trend"] = trend
+            frame = one
+        else:
+            frame = duck_agg.large_aggregate(file_path, config, visible, extra)
+            shape = frame.attrs["shape"]
+            if frame.attrs.get("count_mode"):
+                result = get_widget_data_from_df(
+                    frame, {**shaped, "measure": duck_agg.COUNT_COL, "aggregation": "sum"}, widget_type,
+                    flag_partial=False, check_fields=False)
+                if "measure" in result:
+                    result["measure"] = "count"
+                if "aggregation" in result:
+                    result["aggregation"] = (config.get("aggregation") or "sum").lower() or "sum"
+            elif shape == "pass":
+                result = get_widget_data_from_df(
+                    frame, {**shaped, "measure": duck_agg.PASS_COL, "aggregation": "sum"}, widget_type,
+                    flag_partial=False, check_fields=False)
+                result["measure"] = config.get("measure")
+                result["aggregation"] = (config.get("aggregation") or "sum").lower()
+            else:
+                result = get_widget_data_from_df(frame, shaped, widget_type, flag_partial=False, check_fields=False)
+            if config.get("dimension_granularity") and not config.get("dimension2") \
+                    and isinstance(result, dict) and result.get("type") not in ("error", "empty"):
+                # The note a small dataset reads off its rows ("2025-05 is
+                # partial"), read off the distinct days instead.
+                try:
+                    from .relative_dates import partial_period
+                    days = duck_agg.days_frame(file_path, config["dimension"], config, visible, extra)
+                    partial = partial_period(days, config.get("dimension"), config.get("dimension_granularity"), result)
+                except Exception:  # noqa: BLE001 -- a flag must never break a render
+                    partial = None
+                if partial:
+                    result["partial_period"] = partial
+    except duck_agg.Ineligible:
+        return None
+    source_rows = frame.attrs.get("source_row_count")
+    if source_rows is not None and result.get("type") == "crosstab":
+        # A crosstab's `total` counts its grid; only the population is the file's.
+        if "rows_scanned" in result:
+            result["rows_scanned"] = source_rows
+    elif source_rows is not None and "total" in result:
+        result["total"] = source_rows
+        result["rows_scanned"] = source_rows
+    missing = frame.attrs.get("missing_dimension_rows")
+    if missing is not None and isinstance(result.get("missing_category"), dict):
+        result["missing_category"] = {**result["missing_category"], "rows": int(missing)}
+    return result
+
+
+def _load_file_named_columns(refusal, file_path: str, config: dict, widget_type: str, rls_filter_expr, filter_expr,
+                        calculated_columns, measures, custom_functions, prep_steps) -> pd.DataFrame:
+    """For a dataset too large to load whole: every row of only the columns
+    this chart, its filters and its rules name -- so a headline number with
+    its history, a count by month, a second split or a spread are drawn
+    exactly as on a small dataset. Raises the original refusal when that
+    cannot be done, or would not fit either."""
+    from .frame_cache import load_columns
+    # Preparation steps may read any column, and a chart that names neither a
+    # grouping nor a number shows whole rows: nothing can be left out.
+    if prep_steps or not (config.get("dimension") or config.get("measure")):
+        raise refusal
+    try:
+        names = list(load_file_columns(file_path))
+    except Exception:  # noqa: BLE001
+        names = []
+    wanted = named_columns(names, config, rls_filter_expr, filter_expr, calculated_columns, measures,
+                           custom_functions)
+    if not names or not wanted or len(wanted) == len(names):
+        raise refusal
+    from .memory_guard import TooLargeToLoad
+    try:
+        return load_columns(file_path, wanted)
+    except ValueError:
+        raise refusal
+    except TooLargeToLoad:
+        # Even those columns do not fit. A sum or a count must be of every
+        # row; an analysis, or a chart of how values are spread, is a fair
+        # estimate on a random sample -- and says it is one.
+        if widget_type not in _MODEL_SHAPERS and widget_type not in SAMPLED_WHEN_TOO_LARGE:
+            raise
+        from .frame_cache import load_sample
+        df, total = load_sample(file_path, int(settings.analysis_row_cap or 250_000), columns=wanted)
+        df.attrs["sampled_of"] = total
+        return df
+
+
 def _enforce_import_row_cap(df, file_path: str) -> None:
     """Reject a source frame above the configured ceiling.
 
@@ -1656,6 +1800,17 @@ def _slicer_range(df: pd.DataFrame, config: dict, *, chosen: bool) -> dict | Non
         return None
     s = df[column]
     numeric = pd.api.types.is_numeric_dtype(s) and not pd.api.types.is_bool_dtype(s)
+    if not numeric and chosen:
+        # A date as a from-to range: its first and last day, and the reader
+        # picks two dates (the filter is the engine's own `date_range`).
+        from .relative_dates import as_dates
+        try:
+            dt = as_dates(s).dropna() if (pd.api.types.is_datetime64_any_dtype(s) or s.dtype == object) else None
+        except Exception:  # noqa: BLE001 -- not dates: said below
+            dt = None
+        if dt is not None and len(dt) and len(dt) >= 0.8 * int(s.notna().sum()):
+            return {"type": "slicer_range", "rows": [], "total": 0, "column": column, "kind": "date",
+                    "min": dt.min().date().isoformat(), "max": dt.max().date().isoformat()}
     if not numeric:
         if not chosen:
             return None
@@ -5419,7 +5574,38 @@ def _get_widget_data(
     # dashboard with no error, while DirectQuery, the expression-parameter
     # path and every analysis surface answered correctly. A rule on a column
     # that does not exist at all still fails closed inside apply_rls_filter.
-    df = load_file(file_path)
+    from .memory_guard import TooLargeToLoad as _TooLarge
+    try:
+        df = load_file(file_path)
+    except _TooLarge as too_large:
+        # Too large to load whole. First the shapes DuckDB can answer from the
+        # file (a count by month, a number with its history, a second split,
+        # a spread): seconds instead of minutes.
+        result = None
+        if not (prep_steps or calculated_columns or measures):
+            try:
+                result = _large_duck(file_path, config, widget_type, filter_expr, rls_filter_expr, drop_columns)
+            except Exception as e:  # noqa: BLE001 -- never worse than the path below
+                _duck_agg.logger.info("DuckDB for a large dataset declined: %s", e)
+        if result is not None:
+            if use_cache:
+                try:
+                    entry_size = len(json.dumps(result, default=str))
+                except (TypeError, ValueError):
+                    entry_size = 0
+                if entry_size <= settings.widget_data_cache_max_entry_bytes:
+                    _widget_data_cache_set(key, copy.deepcopy(result))
+            log_query_run_sync(
+                org_id=org_id, source_kind="import", data_source_id=None, dataset_id=dataset_id, sql_hash=None,
+                rows_returned=len(result.get("rows") or []),
+                duration_ms=int((time.monotonic() - start) * 1000), executor="duckdb", cache_hit=False)
+            _record_widget_metrics("duckdb", False, int((time.monotonic() - start) * 1000))
+            return result
+        # Too large to load whole: the columns this chart names, and no others.
+        df = _load_file_named_columns(too_large, file_path, config, widget_type, rls_filter_expr, filter_expr,
+                                 calculated_columns, measures, custom_functions, prep_steps)
+    sampled_of = df.attrs.get("sampled_of")
+    sample_rows = len(df)
     _enforce_import_row_cap(df, file_path)
     df = apply_rls_filter(df, rls_filter_expr)
     if drop_columns:
@@ -5442,6 +5628,10 @@ def _get_widget_data(
     if calculated_columns:
         df = apply_calculated_columns(df, calculated_columns, custom_functions)
     result = get_widget_data_from_df(df, config, widget_type, measures=measures)
+    if sampled_of and isinstance(result, dict):
+        # The same three fields a sampled live source reports, so the same
+        # "sample" mark appears on the chart.
+        result["sampled"], result["sample_size"], result["total_rows"] = True, int(sample_rows), int(sampled_of)
 
     if use_cache:
         try:

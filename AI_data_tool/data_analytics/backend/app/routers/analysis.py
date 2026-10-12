@@ -77,6 +77,17 @@ NOT_READY = ("This analysis could not run on this dataset yet. Open Overview and
              "the analysis first, then try again.")
 
 
+def _load_file_for_analysis(path: str, steps) -> pd.DataFrame:
+    """The dataset for an analysis: whole, or a random sample when it is too
+    large to load (frame_cache.load_or_sample). With preparation steps the
+    whole file is needed -- a step that adds up or joins would be wrong on a
+    sample -- so such a dataset keeps its refusal."""
+    if steps:
+        return load_file(path)
+    from ..services.frame_cache import load_or_sample
+    return load_or_sample(path)
+
+
 async def _directquery_frame(db: AsyncSession, ds, current_user: User,
                              rls_expr: str | None):
     """Rows from a live source, sized for ANALYSIS rather than for a preview.
@@ -147,13 +158,18 @@ async def run_analysis(dataset_id: int, req: AnalysisRequest, db: AsyncSession =
     denied = await resolve_denied_columns(db, current_user, dataset_id)
 
     def _load_and_analyze():
-        df = load_file(ds.filename)
+        df = _load_file_for_analysis(ds.filename, _steps)
+        sampled_of, n = df.attrs.get("sampled_of"), len(df)
         df = apply_rls_filter(df, rls_expr)
         df = apply_prep_steps(df, _steps, _aux)
         present = [c for c in denied if c in df.columns]
         if present:
             df = df.drop(columns=present)
-        return run_full_analysis(df, ds.column_meta)
+        out = run_full_analysis(df, ds.column_meta)
+        if sampled_of and isinstance(out, dict):
+            # As for a live source: the analysis says it read a sample.
+            out["sampled"], out["sample_size"], out["total_rows"] = True, int(n), int(sampled_of)
+        return out
 
     result = await asyncio.to_thread(_load_and_analyze)
 
@@ -338,7 +354,7 @@ async def run_key_influencers(
         _aux = await resolve_join_frames(db, current_user, _steps) if _steps else {}
 
         def _load():
-            frame = load_file(ds.filename)
+            frame = _load_file_for_analysis(ds.filename, _steps)
             frame = apply_rls_filter(frame, rls_expr)
             frame = apply_prep_steps(frame, _steps, _aux)
             return frame
@@ -408,7 +424,7 @@ async def _secured_frame(dataset_id: int, db: AsyncSession, current_user: User
         _aux = await resolve_join_frames(db, current_user, _steps) if _steps else {}
 
         def _load():
-            frame = load_file(ds.filename)
+            frame = _load_file_for_analysis(ds.filename, _steps)
             frame = apply_rls_filter(frame, rls_expr)
             frame = apply_prep_steps(frame, _steps, _aux)
             return frame

@@ -33,12 +33,80 @@ class _Flight:
         self.ok = False
 
 
+#: Across server processes (production runs several workers), with the shared
+#: store configured: how long another process's computation is waited for, and
+#: how often it is looked at. The waiter then runs `fn` itself -- which finds
+#: the leader's answer in the shared result cache instead of computing again.
+ACROSS_WAIT_S = 120.0
+ACROSS_POLL_S = 0.05
+_client = None
+_client_for = None
+
+
+def _shared():
+    """The shared store's client, or None when there is none (one process, or
+    no VALKEY_URL): then duplicates are removed within this process only."""
+    global _client, _client_for
+    from ..core.config import settings
+    url = getattr(settings, "valkey_url", None) or None
+    if not url:
+        return None
+    if _client is None or _client_for != url:
+        try:
+            import redis
+            _client, _client_for = redis.Redis.from_url(url, socket_timeout=2, socket_connect_timeout=2), url
+        except Exception:                                   # noqa: BLE001
+            return None
+    return _client
+
+
+def _across(key: str, fn):
+    """`fn()`, but if another PROCESS is already computing `key`, wait for it
+    to finish first. Any trouble with the shared store means "just compute"."""
+    import os
+    import time
+    import uuid
+    client = _shared()
+    if client is None:
+        return fn()
+    name, mine = "sf:" + key, uuid.uuid4().hex + ":" + str(os.getpid())
+    try:
+        leader = bool(client.set(name, mine, nx=True, ex=int(WAIT_S)))
+    except Exception:                                       # noqa: BLE001
+        return fn()
+    if not leader:
+        global waited_across
+        with _LOCK:
+            waited_across += 1
+        deadline = time.monotonic() + ACROSS_WAIT_S
+        try:
+            while time.monotonic() < deadline and client.exists(name):
+                time.sleep(ACROSS_POLL_S)
+        except Exception:                                   # noqa: BLE001
+            pass
+        return fn()
+    try:
+        return fn()
+    finally:
+        try:
+            if (client.get(name) or b"").decode() == mine:
+                client.delete(name)
+        except Exception:                                   # noqa: BLE001
+            pass
+
+
+#: For tests and metrics: how many calls waited for another process's work.
+waited_across = 0
+
+
 def run(key, fn):
     """`fn()` -- or, when the same `key` is already being computed, a deep copy
     of that computation's result. `key` None means "never share"."""
     global shared_answers
     if key is None:
         return fn()
+    work = fn
+    fn = lambda: _across(key, work)                         # noqa: E731
     with _LOCK:
         flight = _FLIGHTS.get(key)
         leader = flight is None

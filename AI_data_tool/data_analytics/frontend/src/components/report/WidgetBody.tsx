@@ -1,14 +1,14 @@
 import { semanticAggregationWarning, nonAdditiveKind, SAFE_AGGREGATION } from '../../lib/semanticGuard'
 import { CellLink, isWebAddress } from '../../lib/cellLink'
 import PivotTable, { type PivotData } from './PivotTable'
-import { Suspense, useEffect, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState, useId } from 'react'
 import { renderTextWithLinks } from '../../lib/inlineMarkup'
 import { useDirection, widgetIsRtl } from '../../contexts/DirectionContext'
 import { useT, type MessageKey, type TranslateFn } from '../../i18n'
 import type { CalcColumnFormat } from '../../services/api'
 import type { Widget, WidgetType } from '../../types/report'
 import type { RuleStyles } from '../../lib/displayRules'
-import { fmtStr, formatValue, EmptyState } from './chartUtils'
+import { fmtStr, formatValue, EmptyState, seriesColor } from './chartUtils'
 import { CHART_RENDERERS } from './chartRenderers'
 import LatticeRenderer from './chartRenderers/LatticeRenderer'
 import AnimatedRenderer from './chartRenderers/AnimatedRenderer'
@@ -461,9 +461,23 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
     // Which way is good is the column's stored direction; with none, no colour.
     const good = cfg.trend_good === 'up' ? up : cfg.trend_good === 'down' ? !up : null
     const trendColor = flat || good == null ? 'var(--muted)' : good ? 'var(--ok, #16a34a)' : 'var(--danger, #dc2626)'
+    // With a history the card is laid out to be read at a glance: the number
+    // at the start, its change as a pill at the end, and the history as a
+    // filled line across the whole width underneath. Without one it stays
+    // centred, as it always was.
+    const withTrend = !!trend && trend.series.length >= 2
+    const pill = pct != null && (
+      <span data-testid="kpi-change" dir="ltr"
+        // A pill tinted with its own colour: the change is read before the line beside it.
+        style={{ fontSize: 12, fontWeight: 600, color: trendColor, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', flex: '0 0 auto',
+          padding: '2px 8px', borderRadius: 999, background: `color-mix(in srgb, ${trendColor} 14%, transparent)` }}>
+        {flat ? '→' : up ? '▲' : '▼'} {Math.abs(pct).toFixed(1)}%
+      </span>
+    )
     return (
-      <div dir={rtl ? 'rtl' : undefined} style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '0 10px', minWidth: 0, containerType: 'inline-size' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, maxWidth: '100%', minWidth: 0 }}>
+      <div dir={rtl ? 'rtl' : undefined} style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: withTrend ? 'stretch' : 'center', justifyContent: 'center', gap: 4, padding: withTrend ? '2px 12px 0' : '0 10px', minWidth: 0, containerType: 'inline-size' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: withTrend ? 'space-between' : 'center', gap: 8, maxWidth: '100%', minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
           {kpiIcon && <span aria-hidden="true" style={{ fontSize: 28, flex: '0 0 auto' }}>{kpiIcon}</span>}
           <div title={kpiText}
             // The dashboard's style may set the headline number's size (lib/dashboardStyle); else it is fitted to the text.
@@ -471,8 +485,10 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
               minWidth: 0, maxWidth: '100%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: 1.15 }}>
             {kpiText}
           </div>
+          </div>
+          {withTrend && pill}
         </div>
-        <div style={{ fontSize: 12, color: 'var(--muted)', maxWidth: '100%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        <div style={{ fontSize: 12, color: 'var(--muted)', maxWidth: '100%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textAlign: withTrend ? 'start' : 'center' }}>
           {/* A count or an average is not the column itself: "Records" read
               3,576 over the subtitle RATED_AMOUNT (live QA 2026-09-28). A sum
               keeps the column's name, as it always has. */}
@@ -482,19 +498,15 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
             : cfg.measure && cfg.aggregation && String(cfg.aggregation).toLowerCase() !== 'sum'
               ? seriesName(cfg) : (cfg.measure || cfg.dimension || 'Value')}
         </div>
-        {trend && trend.series.length >= 2 && (
-          <div data-testid="kpi-trend" style={{ display: 'flex', alignItems: 'center', gap: 8, maxWidth: '100%', minWidth: 0 }}
+        {trend && withTrend && (
+          <div data-testid="kpi-trend" style={{ flex: '1 1 auto', minHeight: 24, maxHeight: 72, display: 'flex', flexDirection: 'column', minWidth: 0, margin: '0 -12px' }}
             title={`${trend.period}: ${fmtStr(trend.current, measureFmt)} · ${trend.previous_period}: ${fmtStr(trend.previous, measureFmt)}`}>
-            {pct != null && (
-              <span data-testid="kpi-change" dir="ltr"
-                style={{ fontSize: 12, fontWeight: 600, color: trendColor, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-                {flat ? '→' : up ? '▲' : '▼'} {Math.abs(pct).toFixed(1)}%
-              </span>
-            )}
-            <Sparkline values={trend.series.map(p => p.value)} width={96} height={22} />
-            <span style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {trend.period}
-            </span>
+            <Sparkline values={trend.series.map(p => p.value)} fluid filled color={seriesColor(Number(widget.id) || 0)} />
+          </div>
+        )}
+        {withTrend && (
+          <div style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {trend!.period}
           </div>
         )}
         {/* Against the target its author stored (server: widget_data.kpi_target). */}
@@ -684,7 +696,12 @@ interface KpiTrend {
  *  crosstab columns, drawn as a mini trend line. Scaled to the row's OWN min/max
  *  so the shape reads at a glance -- a sparkline shows movement, not magnitude.
  *  Fewer than two points is not a trend, so it renders nothing. */
-function Sparkline({ values, width = 76, height = 20 }: { values: number[]; width?: number; height?: number }) {
+function Sparkline({ values, width = 76, height = 20, filled = false, fluid = false, color = 'var(--accent)' }: {
+  values: number[]; width?: number; height?: number; filled?: boolean
+  /** Fill whatever box it is given (a headline number's history across its card). */
+  fluid?: boolean; color?: string }) {
+  const gradient = `spark${useId().replace(/:/g, '')}`
+  if (fluid) { width = 100; height = 32 }
   const tw = useT()
   const nums = values.filter(v => typeof v === 'number' && isFinite(v))
   if (nums.length < 2) return null
@@ -694,10 +711,24 @@ function Sparkline({ values, width = 76, height = 20 }: { values: number[]; widt
   const y = (v: number) => (height - 2 - ((v - min) / span) * (height - 4))
   const pts = nums.map((v, i) => `${(i * stepX).toFixed(1)},${y(v).toFixed(1)}`).join(' ')
   return (
-    <svg width={width} height={height} style={{ display: 'block' }} role="img" aria-label={tw('wb.sparkline')}>
-      <polyline points={pts} fill="none" stroke="var(--accent)" strokeWidth={1.5}
-        strokeLinejoin="round" strokeLinecap="round" />
-      <circle cx={(nums.length - 1) * stepX} cy={y(nums[nums.length - 1])} r={1.8} fill="var(--accent)" />
+    <svg {...(fluid ? { width: '100%', height: '100%', viewBox: `0 0 ${width} ${height}`, preserveAspectRatio: 'none' } : { width, height })}
+      style={{ display: 'block', flex: fluid ? '1 1 auto' : undefined, minHeight: 0 }} role="img" aria-label={tw('wb.sparkline')}>
+      {filled && (
+        <>
+          <defs>
+            <linearGradient id={gradient} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={color} stopOpacity={0.34} />
+              <stop offset="100%" stopColor={color} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <polygon data-testid="sparkline-fill" points={`0,${height} ${pts} ${((nums.length - 1) * stepX).toFixed(1)},${height}`}
+            fill={`url(#${gradient})`} stroke="none" />
+        </>
+      )}
+      <polyline points={pts} fill="none" stroke={color} strokeWidth={fluid ? 2 : 1.5}
+        strokeLinejoin="round" strokeLinecap="round" vectorEffect={fluid ? 'non-scaling-stroke' : undefined} />
+      {/* The end dot would be stretched into an oval in a box of any shape. */}
+      {!fluid && <circle cx={(nums.length - 1) * stepX} cy={y(nums[nums.length - 1])} r={1.8} fill={color} />}
     </svg>
   )
 }

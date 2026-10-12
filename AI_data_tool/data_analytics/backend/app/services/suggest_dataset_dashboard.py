@@ -200,6 +200,8 @@ _SETTING_KEYS = ("aggregation", "aggregation2", "limit", "sort", "sort_by",
                  # A line that is read, a Pareto, a headline's history (discovery, phase 2-3).
                  "dimension2_granularity", "bridge_from", "difference_of", "timeline_notes", "anomaly_band", "change_point", "pareto", "trend_good", "sparkline_granularity",
                  "y2_axis_label",
+                 # How a gauge or a filter control is drawn (bullet, progress; buttons, dropdown).
+                 "gauge_shape", "slicer_mode",
                  # An ordinal axis's real order, and a reader's line under a number.
                  "category_order", "caption")
 

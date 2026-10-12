@@ -129,6 +129,11 @@ def validate_check(kind: str, column: str | None, params: dict | None, severity:
     return params
 
 
+#: Checks answered on every row of a reload that was written to disk, not on
+#: its sample: counted by DuckDB on the finished file, or carried on the frame.
+WHOLE_FILE_KINDS = frozenset({"not_null", "unique", "accepted_values", "row_count", "row_drop"})
+
+
 def _one(df: pd.DataFrame, check: dict, previous_rows: int | None,
          known: dict[str, str] | None = None) -> dict:
     kind, col, params = check["kind"], check.get("column"), check.get("params") or {}
@@ -138,7 +143,8 @@ def _one(df: pd.DataFrame, check: dict, previous_rows: int | None,
     # A reload larger than memory is checked on a random sample of its rows;
     # the row count, and how empty a column is, are the whole file's.
     total = int(df.attrs.get("rows", len(df)))
-    if "rows" in df.attrs:
+    whole = df.attrs.get("file") or df.attrs.get("staged")   # the file itself, when the frame is a sample of one
+    if "rows" in df.attrs and not (whole and kind in WHOLE_FILE_KINDS):
         res["sampled"] = int(len(df))
     if kind in COLUMN_KINDS and col not in df.columns:
         res.update(passed=False, detail=f"the data has no column '{col}'")
@@ -152,6 +158,18 @@ def _one(df: pd.DataFrame, check: dict, previous_rows: int | None,
             n = max(n, int(round(float(counted[col]) * total / 100.0)))
         if n:
             res.update(passed=False, failing=n, detail=f"{n:,} of {total:,} rows have no {col}")
+    elif kind == "unique" and whole:
+        from .refresh_on_disk import unique_faults
+        n, distinct = unique_faults(whole, col)
+        if n:
+            res.update(passed=False, failing=n,
+                       detail=f"{n:,} repeated {col} values ({distinct:,} distinct values repeat)")
+    elif kind == "accepted_values" and whole:
+        from .refresh_on_disk import outside_list
+        n, distinct = outside_list(whole, col, list(params.get("values") or []))
+        if n:
+            res.update(passed=False, failing=n,
+                       detail=f"{n:,} rows have values outside the list ({distinct:,} different values)")
     elif kind == "unique":
         s = df[col].dropna()
         dup = s[s.duplicated(keep=False)]

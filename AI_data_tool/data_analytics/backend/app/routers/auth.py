@@ -74,6 +74,23 @@ async def me(current_user: User = Depends(get_current_user)):
     return current_user
 
 
+class ProfileUpdate(BaseModel):
+    #: The person's own description of their work. Empty clears it.
+    about: str | None = Field(default=None, max_length=1000)
+
+
+@router.patch("/me", response_model=UserOut)
+async def update_me(body: ProfileUpdate, db: AsyncSession = Depends(get_db),
+                    current_user: User = Depends(get_current_user)):
+    """Change one's own profile. Only what a person says about themselves:
+    their email, role and organisation are an administrator's to set."""
+    from ..dependencies import is_super_admin
+    current_user.about = (body.about or "").strip() or None
+    await db.commit()
+    current_user.is_super_admin = is_super_admin(current_user)
+    return current_user
+
+
 # ── Machine API keys ──────────────────────────────────────────────────────────
 # A user issues durable keys for agents (e.g. the MCP server) that act as them. The
 # full key is returned once at creation; only its hash is stored. A key works anywhere

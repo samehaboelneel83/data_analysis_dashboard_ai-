@@ -100,3 +100,49 @@ def test_loads_in_progress_are_weighed_together(tmp_path, monkeypatch):
         with mg.reserved(str(path)):                       # one finished: there is room again
             pass
     assert mg._RESERVED == 0
+
+
+def test_across_processes_a_second_asker_waits_for_the_first_then_finds_its_answer(monkeypatch):
+    """Two server processes share no memory, only the shared store: the second
+    waits while the first holds the key, then runs -- by which time the first
+    has put its answer in the shared result cache."""
+    import threading
+    import time
+
+    import fakeredis
+
+    from app.services import single_flight as sf
+    store = fakeredis.FakeRedis()
+    monkeypatch.setattr(sf, "_shared", lambda: store)
+    cache, order, started = {}, [], threading.Event()
+
+    def work(who):
+        def fn():
+            if "answer" in cache:                      # the shared result cache
+                order.append(f"{who} read")
+                return cache["answer"]
+            order.append(f"{who} computes")
+            started.set()
+            time.sleep(0.3)
+            cache["answer"] = 42
+            return 42
+        return fn
+
+    before = sf.waited_across
+    first = threading.Thread(target=lambda: sf._across("k", work("first")))
+    first.start()
+    started.wait(2)
+    assert sf._across("k", work("second")) == 42      # "another process": straight to the shared store
+    first.join()
+    assert order == ["first computes", "second read"] and sf.waited_across == before + 1
+    assert not store.exists("sf:k")                    # the key is given back
+
+
+def test_a_shared_store_that_fails_never_stops_an_answer(monkeypatch):
+    from app.services import single_flight as sf
+
+    class Broken:
+        def set(self, *a, **k):
+            raise ConnectionError("down")
+    monkeypatch.setattr(sf, "_shared", lambda: Broken())
+    assert sf.run("k2", lambda: 7) == 7

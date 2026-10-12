@@ -144,6 +144,7 @@ import ConflictMergeDialog from '../components/report/ConflictMergeDialog'
 import { structuredDetail } from '../lib/friendlyError'
 import type { WidgetEdit } from '../lib/threeWayMerge'
 import { styleVars } from '../lib/dashboardStyle'
+import { useLookChrome } from '../lib/lookChrome'
 import type { DashboardStyle } from '../lib/dashboardStyle'
 // Lazy: the geography check matches against the bundled world geometry (~740 kB
 // raw), which an author who never maps a column should not download.
@@ -155,7 +156,7 @@ const EMPTY_RULES: DisplayRule[] = []
  *  stored all along; only the label a person picks from changes. */
 const PALETTE_NAME: Record<string, string> = {
   default: 'Datalytics', ocean: 'Ocean', sunset: 'Ember', forest: 'Forest',
-  mono: 'Graphite', contrast: 'High contrast',
+  mono: 'Graphite', contrast: 'High contrast', emerald: 'Emerald', aurora: 'Aurora', ember: 'Amber',
 }
 
 /** The top-most, then left-most, grid position where a w×h box fits without
@@ -239,6 +240,8 @@ export default function ReportBuilder() {
   const badId = !/^\d+$/.test(id ?? '')
 
   const [report,     setReport]     = useState<Report | null>(null)
+  // A dark (or light) look takes the app's frame with it while this dashboard is open (lib/lookChrome).
+  useLookChrome((report?.style as { mode?: string } | null | undefined)?.mode)
   useCrumbTitle(report?.name)
   const [activePage, setActivePage] = useState<ReportPage | null>(null)
   // The reader's own filters for the whole page (the bar above the page),
@@ -1105,12 +1108,17 @@ export default function ReportBuilder() {
   /** Change the dashboard's look (fonts, borders, corners...) as one undoable step. */
   const setStyleUndoable = async (next: DashboardStyle) => {
     const prev = (report?.style ?? {}) as DashboardStyle
+    // A look names its chart palette too: the two change together, as one step.
+    const prevTheme = report?.theme ?? 'default'
+    const theme = next.palette && next.palette !== prev.palette && next.palette !== prevTheme ? next.palette : null
+    const after = { style: next, ...(theme ? { theme } : {}) }
+    const before = { style: prev, ...(theme ? { theme: prevTheme } : {}) }
     try {
-      await reportsApi.update(reportId, { style: next })
+      await reportsApi.update(reportId, after)
     } catch { toast.error(tr('tpl.style.failed')); return }
     pushUndo({ label: tr('tpl.style.undo'),
-      undo: () => reportsApi.update(reportId, { style: prev }).then(() => {}),
-      redo: () => reportsApi.update(reportId, { style: next }).then(() => {}) })
+      undo: () => reportsApi.update(reportId, before).then(() => {}),
+      redo: () => reportsApi.update(reportId, after).then(() => {}) })
     await loadReport()
   }
 

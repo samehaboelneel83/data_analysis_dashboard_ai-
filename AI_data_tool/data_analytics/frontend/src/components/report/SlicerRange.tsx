@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useT } from '../../i18n'
 
-export type RangeValue = [number | null, number | null]
+/** Two numbers, or -- for a date column -- two ISO days (YYYY-MM-DD). An open end is null. */
+export type RangeValue = [number | string | null, number | string | null]
 
 /**
  * A number slicer as a from-to range (live check item 12). The server sends
@@ -10,7 +11,7 @@ export type RangeValue = [number | null, number | null]
  * An empty bound is open-ended; both empty clears the filter.
  */
 export default function SlicerRange({ data, value, rtl, onApply }: {
-  data: { column?: string; min?: number | null; max?: number | null; integer?: boolean; error?: string }
+  data: { column?: string; min?: number | string | null; max?: number | string | null; integer?: boolean; error?: string; kind?: string }
   value: RangeValue | null
   rtl?: boolean
   onApply?: (range: RangeValue | null, column: string) => void
@@ -31,33 +32,38 @@ export default function SlicerRange({ data, value, rtl, onApply }: {
     </div>
   }
 
-  const num = (s: string) => (s.trim() === '' ? null : Number(s))
+  // A date column: two days picked from a calendar, compared as text (ISO days sort as dates).
+  const dates = data.kind === 'date'
+  const num = (s: string) => (s.trim() === '' ? null : dates ? s.trim() : Number(s))
   const a = num(lo), b = num(hi)
-  const bad = (a != null && !Number.isFinite(a)) || (b != null && !Number.isFinite(b))
+  const bad = !dates && ((a != null && !Number.isFinite(a as number)) || (b != null && !Number.isFinite(b as number)))
   const reversed = a != null && b != null && a > b
-  const fmt = (v: number | null | undefined) => (v == null ? '—' : v.toLocaleString())
+  const fmt = (v: number | string | null | undefined) => (v == null ? '—' : typeof v === 'number' ? v.toLocaleString() : v)
   const step = data.integer ? 1 : 'any'
   const apply = () => {
     if (bad || reversed) return
     onApply?.(a == null && b == null ? null : [a, b], col)
   }
-  const box = { width: '100%', minWidth: 0, fontSize: 12, padding: '5px 8px', border: '1px solid var(--border)',
+  const box = { width: '100%', minWidth: 0, flex: dates ? '1 1 118px' : undefined, fontSize: 12, padding: '5px 8px', border: '1px solid var(--border)',
     borderRadius: 6, background: 'var(--surface)', color: 'var(--text)' } as const
 
   return (
     <form dir={rtl ? 'rtl' : undefined} data-testid="slicer-range"
       onSubmit={e => { e.preventDefault(); apply() }}
       style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-        <input type="number" step={step} aria-label={t('slicerRange.from', { col })} value={lo}
+      {/* Two dates need more room than two numbers: in a narrow tile they wrap rather than be cut. */}
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: dates ? 'wrap' : undefined }}>
+        <input type={dates ? 'date' : 'number'} step={dates ? undefined : step} aria-label={t('slicerRange.from', { col })} value={lo}
+          min={dates ? String(data.min ?? '') : undefined} max={dates ? String(data.max ?? '') : undefined}
           placeholder={fmt(data.min)} onChange={e => setLo(e.target.value)} style={box} />
         <span aria-hidden="true" style={{ color: 'var(--muted)' }}>–</span>
-        <input type="number" step={step} aria-label={t('slicerRange.to', { col })} value={hi}
+        <input type={dates ? 'date' : 'number'} step={dates ? undefined : step} aria-label={t('slicerRange.to', { col })} value={hi}
+          min={dates ? String(data.min ?? '') : undefined} max={dates ? String(data.max ?? '') : undefined}
           placeholder={fmt(data.max)} onChange={e => setHi(e.target.value)} style={box} />
         <button type="submit" className="btn btn-sm" disabled={bad || reversed}>{t('slicerRange.apply')}</button>
       </div>
       <span style={{ fontSize: 10, color: reversed ? 'var(--negative, #e2606c)' : 'var(--muted)' }}>
-        {reversed ? t('slicerRange.reversed') : t('slicerRange.hint', { min: fmt(data.min), max: fmt(data.max) })}
+        {reversed ? t(dates ? 'slicerRange.reversedDates' : 'slicerRange.reversed') : t('slicerRange.hint', { min: fmt(data.min), max: fmt(data.max) })}
       </span>
     </form>
   )
@@ -65,7 +71,7 @@ export default function SlicerRange({ data, value, rtl, onApply }: {
 
 /** The chip text for a range: "amount 10 – 50", "amount ≥ 10", "amount ≤ 50". */
 export function rangeLabel(col: string, [a, b]: RangeValue): string {
-  const f = (v: number) => v.toLocaleString()
+  const f = (v: number | string) => (typeof v === 'number' ? v.toLocaleString() : v)
   if (a != null && b != null) return `${col} ${f(a)} – ${f(b)}`
-  return a != null ? `${col} ≥ ${f(a)}` : `${col} ≤ ${f(b as number)}`
+  return a != null ? `${col} ≥ ${f(a)}` : `${col} ≤ ${f(b as number | string)}`
 }

@@ -99,3 +99,50 @@ Still seen and not changed, because they are the chart renderers' own and not th
 * Anyone may share their own template with the organisation; there is no approval step.
 * The builder's style editor and a dashboard made from a template were measured in the browser, not screenshotted at full size.
 * Not measured on a dataset with hundreds of columns.
+
+## Ready-made looks, and more chart types in the suggestions (2026-10-12)
+
+Asked, with four reference dashboards: offer in the suggestions panel the kinds of widget those dashboards use — and every widget type that can be added — and give dashboards a modern style like them.
+
+### Looks
+* **Six one-click looks** at the top of the dashboard style panel (`lib/dashboardLooks.ts`): Midnight (navy, green and blue charts), Deep space (near-black, outlined cards, blue and violet), Ember (near-black, one orange accent), Graphite (neutral dark), Clean (light, borderless, soft shadow), Outline (white, thin borders). A look is only a filled-in style: every control below it can still be changed, and the look in use is marked until one is.
+* **A look sets the chart palette too**, as one undoable step. Three palettes were added for dark canvases (Emerald, Aurora, Amber).
+* **A headline number's change is a tinted pill and its history line is filled** underneath — on every dashboard, not only the new looks.
+* **Fixed on the way:** on a dark dashboard inside a light app the chart grid lines were drawn in the app's light rule colour — bright white lines across every chart. They now follow the look.
+* Screenshots: `docs/templates/looks/`.
+
+### Suggestions
+The panel offered 6 chart types on the sample dashboard; it now offers 18. After the ideas the data argues for (unchanged, and still first), it adds one idea for each further widget type the data has the shape for (`suggest_variety.catalogue_suggestions`), each with the reason it fits in one sentence, each drawn on the reader's rows before it is offered:
+
+| offered | when |
+|---|---|
+| one amount against another (bullet bar) | two numbers that add up, of one size, that move together |
+| the same two back to back by a category; and over time | as above, plus a category / a date |
+| progress bar | an averaged number whose every value lies between 0 and 1 |
+| list of headline numbers | three or more numbers read the same way |
+| dot plot | an averaged number and a category |
+| two numbers by a category, two scales; and over time | two numbers and a category / a date |
+| filled area over time; stepped line over time | a date covering 90 days or more, with a number that adds up / one that is averaged |
+| ribbon (who leads, month by month) | a date, a category of 3–8 values, a number that adds up |
+| waterfall | a number that adds up and a category |
+| histogram; one number against another; correlation grid; parallel lines | one, two, three or more numbers |
+| cross table; flow (sankey) | two categories |
+| small multiples | a category and a second one of 2–6 values |
+| ranked list; word cloud | a category of many values |
+
+How many are added is an admin setting ("Suggestions panel: further chart types offered", default 12, 0 = none).
+
+**Checked:** 3 tests of the looks (complete, readable, one click), 3 of the catalogue (every idea draws and names real columns; a shape the data lacks is not offered; the panel's own ideas stay first and unchanged). On screen: a dashboard built from the new suggestions, in four looks.
+
+**Not done**
+* **Radar and a per-category progress list** — two widgets in the reference pictures — do not exist as widget types yet; the nearest that do (dot plot, progress bar for one number) are offered instead.
+* **Maps, hierarchies, funnels and schedules are not suggested this way**: whether they fit cannot be told from the columns alone (a place, a nesting, an order of stages, a start and an end).
+* The new ideas' titles and reasons are English only; the takeaway sentence under each is translated as before.
+* The looks do not restyle the app around the dashboard (side bar, top bar): only the dashboard's own area.
+* A gradient or glow on cards, as in two of the pictures, is not a style setting.
+
+### Gradient (same day, asked with a fifth picture)
+* **A headline number with a history is laid out as in the picture**: the number at the start, its change as a pill at the end, and the history as a line across the whole width of the card with a fill that fades downwards. Each card's line takes its own colour from the dashboard's palette. A number without a history is centred as before.
+* **Area charts fade towards the axis** instead of a flat tint, one gradient per series.
+* Screenshots: `docs/templates/looks/kpi-gradient-*.png`. 1 more browser test.
+* Seen on screen and left: in a narrow card a long number is cut with "…" because the pill shares its row.

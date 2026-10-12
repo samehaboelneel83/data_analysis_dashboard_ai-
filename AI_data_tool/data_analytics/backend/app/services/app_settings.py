@@ -95,6 +95,9 @@ SPECS: list[Spec] = [
        "cards: the AI chooses among charts already validated and drawn on the data. "
        "free: the AI proposes its own charts, each then checked. both: its proposals join the validated ones.",
        options=("cards", "free", "both")),
+    _S("suggest_more_types", "ai", "Suggestions panel: further chart types offered",
+       "After the ideas the data argues for, how many further chart types the data has the shape for are offered, "
+       "one of each, each with the reason it fits. 0 = none.", minimum=0, maximum=40),
     _S("source_ai_selection", "ai", "Suggesting from a connection: where charts come from",
        "free: the AI writes the query and designs the charts, each then checked on the rows. cards: the AI "
        "writes the query, the platform makes the plain charts of its result, and the AI only chooses among them.",
@@ -136,6 +139,10 @@ SPECS: list[Spec] = [
     _S("import_stream_rows", "data", "Write large imports straight to disk from (rows)",
        "An import from a database with more rows than this is written to disk as it arrives, so its size is "
        "not limited by the server's memory. 0 = always gather it in memory first."),
+    _S("upload_stream_mb", "data", "Write large CSV uploads straight to disk from (MB)",
+       "A CSV upload at least this large is written to disk a part at a time, so its size is not limited by the "
+       "server's memory. It only matters once the largest upload allowed is this big. 0 = always read it into "
+       "memory first."),
     _S("load_memory_share", "data", "Memory one dataset may take",
        "The share of the server's free memory (0 to 1) that loading one whole dataset may use. A dataset needing "
        "more is refused with a message instead of stopping the server. 0 = never refuse."),

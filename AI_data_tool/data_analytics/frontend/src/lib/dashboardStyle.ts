@@ -81,6 +81,9 @@ export function styleVars(style?: DashboardStyle | null): CSSProperties {
     out['--text'] = s.text_color ?? tokens.text
     out['--muted'] = tokens.muted
     out['--border'] = s.border_color ?? tokens.border
+    // Chart grid lines and table rules follow the look, not the app's own theme:
+    // a light app's rule colour drew bright white lines across a dark dashboard.
+    out['--dl-table-rule'] = out['--border']
     out.colorScheme = s.mode as string
   } else {
     set('--text', s.text_color)

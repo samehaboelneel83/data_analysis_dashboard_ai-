@@ -128,6 +128,9 @@ def render_page_context(page_ctx: dict) -> str:
     database -- authoritative, never trusted from the client."""
     lines = [f"Dashboard \"{page_ctx.get('report_name', '')}\", "
              f"page \"{page_ctx.get('page_name', '')}\".",
+             # What people wrote about the dashboard, its data and the person
+             # asking (services/ai_context.background): background, not a request.
+             *[f"Background: {line}" for line in (page_ctx.get("background") or [])],
              "Widgets on this page:"]
     widgets = page_ctx.get("widgets") or []
     selected = page_ctx.get("selected_widget_id")

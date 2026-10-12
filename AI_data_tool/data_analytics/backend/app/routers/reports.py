@@ -1863,9 +1863,12 @@ async def suggest_widgets(report_id: int, db: AsyncSession = Depends(get_db),
         meta, changed = column_classes.classified(df, ds.column_meta or {}, *_class_hints)
         result = generate_insights(df, type_map, meta)
         roles = effective_roles(type_map, meta)
+        from ..core.config import settings as _settings
+        _more_types = int(getattr(_settings, "suggest_more_types", 0) or 0)
         return {"suggestions": suggest_widgets_from_findings(
             result["findings"], roles, description, ineligible=_ineligible,
-            column_meta=meta, frame=df), "_classes": meta if changed else None}
+            column_meta=meta, frame=df, catalogue=_more_types),
+            "_classes": meta if changed else None}
 
     try:
         out = await asyncio.to_thread(_run)

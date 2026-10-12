@@ -1345,3 +1345,126 @@ The third decision shape (§BG) fits period totals, and two columns that merely 
 * **Charts that still load every row**: a headline number with its history, a count by month, a second split, a spread. On a dataset too large for memory they are refused in words. The analyses likewise — they do not yet run on a sample.
 * **Dates by month are the slowest chart** (about 10 s at 200 million rows); storing the file sorted by date would cut it.
 * **Not looked at on screen**, and not tried with more than one server process: the "answer once" and the memory count are per process.
+
+## BI. The five points §BH left open (2026-10-11)
+
+### 1. CSV uploads no longer have to fit in memory
+A CSV upload of at least `upload_stream_mb` megabytes (admin setting, default 300; 0 = never), or one that would not fit parsed whole, is written to the dataset's parquet file a chunk at a time by the same writer a large database import uses (`services/upload_stream.py`). The uploaded CSV is not kept. Separator, encoding and decimal commas are decided on the start of the file and its first chunk rather than on every row. It only comes into play once "Largest upload (MB)" — 100 by default — allows files that large. Excel is unchanged: a sheet cannot hold more than about a million rows.
+
+### 2. New rows are added to a huge dataset without reloading it
+An incremental refresh of a dataset too large for memory is merged **on disk** by DuckDB (`services/refresh_on_disk.py`): the rows past the cursor are fetched (to disk themselves when many), an incoming row replaces the held row with its key, the last of two incoming rows with one key stands, rows the source has deleted are removed when that is switched on, and the file keeps its own columns. Written beside the live file and swapped in after the checks. When nothing is new, the file is not rewritten at all. A new value that cannot be stored as the file's column type is not emptied: the run falls back to a full reload and says so.
+
+### 3. "No repeats" and "allowed values" are counted on every row
+On a reload or merge that was written to disk, these two checks are answered by DuckDB on the finished file, not on the sample (`data_checks.WHOLE_FILE_KINDS`). With the row count, the row drop and blanks, five of the check kinds now read every row; a custom rule and "values exist elsewhere" still read the sample and say so.
+
+### 4. Charts and analyses that needed every row
+Three steps, each tried only when the one before cannot answer, and only for a dataset that cannot be loaded:
+* **Answered by DuckDB from the file** (`duck_agg.large_aggregate`, `daily_frame`): a count by a date grain (with its "this month is partial" note, rebuilt from the distinct days), a headline number with its history (total, highest, lowest, how many), a second split (total, highest, lowest, count), and a spread, variance or count of different values by group. Each is tested to give exactly what the ordinary path gives on a dataset that fits (13 parity tests).
+* **Only the columns the chart names are read** (`widget_data._load_file_named_columns`) — exact, for any other chart that names its columns, when those columns fit.
+* **A random sample**, for an analysis or a chart of how values are spread (histogram, box plot, scatter, correlation), marked "sample" on the chart with both row counts, exactly as a sampled live source is. A total or a count is never sampled. The three analysis endpoints of the Analysis tab (overview, key influencers, the statistical tests) do the same.
+Still refused in words: a table of whole rows, a dataset with preparation steps, an average or median with a second split or a history.
+
+### 5. Several server processes
+* **Answer once** now holds across processes when the shared store (`VALKEY_URL`) is configured: a second process asked the same thing waits for the first, then finds its answer in the shared result cache.
+* **The memory count** is kept in a small file every worker on the machine reads (`memory_guard._ledger`), so two workers no longer each let a large load through alone. A worker that died is forgotten.
+
+### Measured on 200,000,000 rows (8.7 GB file, through the running product)
+
+| | before | now |
+|---|---:|---:|
+| import | — | 970 s, peak 2.7 GB |
+| count by month | refused (or 318 s and 17 GB reading two columns) | **10.3 s**, no extra memory |
+| headline number with its history | refused (323 s, 28 GB) | **1.6 s** |
+| total by group, split by kind | refused (43 s) | **0.7 s** |
+| spread by group | refused (14.5 s) | **0.6 s** |
+| histogram of a number | refused | 3.0 s, about 3 GB (one column read) |
+| add 1,000,000 rows, half of them updates of held rows | a full reload, about 16 minutes | **49 s**, peak 1.6 GB |
+| an incremental run that finds nothing new | a full reload | 9 s, file untouched |
+| "no repeats" / "allowed values" on every row | sample only | 1.4 s / 0.1 s |
+
+**Looked at on screen:** a dashboard of six charts on the 200-million-row dataset, in English and Arabic — all drew, with the history line and the partial-month note.
+
+**Checked:** 14 tests of streamed and on-disk refresh, 4 of streamed upload (one through the product), 10 of column reading and sampling, 13 of DuckDB parity for large shapes, 2 of sharing across processes, 1 of the shared memory count.
+
+**Not done**
+* A merge rewrites the whole file (49 s at 200 million rows); storing the dataset as several files would make an append touch only the new one.
+* An average or median with a second split or a history, and a table of whole rows, on a dataset too large to load.
+* A custom rule and "values exist elsewhere" checks read a sample on a streamed reload.
+* The other analysis screens (insights, outliers, data quality, explain a column) still refuse a dataset too large to load rather than sample it — for outliers and quality a sample would miss faults.
+* A count by month spends most of its 10 s turning dates into labels; grouping first and labelling after would cut it.
+* Across processes was tested with a stand-in for the shared store, not with two real server processes; the "sampled" mark on a chart was not looked at on screen (no dataset here is too large for one column).
+
+## BJ. Suggested dashboards: controls, widget types, and what the model is told (2026-10-12)
+
+Asked to check that a suggested dashboard — with a model and without — carries suitable filter controls and appropriate widgets, and that with a model on it is designed from the person's profile, the connection's description, the dataset's (and its columns') and the dashboard's.
+
+### What the check found (sample dataset, 62,662 rows, before any change)
+| | without a model | with a model |
+|---|---|---|
+| filters per page | 2, both lists of categories | the same |
+| control type | never chosen (left to the control's own default) | the same |
+| a filter by period | none, though the data has dates | none |
+| widget types across the pages | number, bar ×7, donut, box plot, histogram, line, grid, rules, table | the same set |
+| what the model was told about the person | — | only what was typed in the box at that moment |
+| profile description | did not exist | did not exist |
+| connection description | — | not passed |
+| dataset and column descriptions | — | passed (they already were) |
+| dashboard description | — | not passed to the page copilot |
+
+### What changed
+* **Each filter is the control that suits its column** (`analyst_panel.control_for`): buttons for up to 5 values, a list to tick for up to 12, a dropdown beyond. A column with more than 50 values is still never a filter.
+* **A period filter on every page** when the data has a date covering 60 days or more: by month, or by quarter for a long history, as a dropdown. So a page has up to two category filters and one period.
+* **More widget types in the pages**: the further types the data has the shape for (§ "Ready-made looks, and more chart types" in `docs/templates/PLAN.md`) now enter the panel's pool and pass its same drawing and evidence checks. On the sample: a list of headline numbers, back-to-back bars, two-scale bars, a dot plot, a stepped line and a ribbon joined the pages, with and without a model.
+* **A person can describe themselves once** ("About you", in the suggest-dashboards dialog; `users.about`, `PATCH /auth/me`). With a model on, an empty box now uses it — the dashboard is designed for them without typing each time. Cleared, an empty box goes back to charts picked without a model. With the model off it changes nothing.
+* **The model is told what has been written** (`services/ai_context.py`): after the person's own words, labelled as background — their profile description, the connection's description, the dataset's, and (for the page copilot) the dashboard's. Used by the dashboard suggester (both modes and the queued one), "suggest from a connection", and the page copilot. Each is cut to 500 characters. Column descriptions were already passed and still are.
+* Guided setup's quick first pass still never waits on a model: it does not use the profile.
+
+**Checked live, model on, box left empty, a profile description saved:** the suggester took the model path, wrote its questions from the description (which branches deliver late, whether to add capacity there), and returned nine pages with typed controls and the wider chart types. The description was removed again afterwards.
+
+**Checked by tests:** 5 of the context and the profile endpoint, 3 of the controls, 2 browser tests of the "About you" box.
+
+**Not done**
+* A date range control (from–to) does not exist for dates — the range control is for numbers only — so the period filter lists months or quarters.
+* The period filter uses the date the data's history is measured on, which on the sample is the promised date rather than the date each row was created.
+* "About you" can be edited only from the suggest-dashboards dialog; there is no profile page.
+* Ask AI (the chat) and guided setup's own model calls are not given this background.
+* What the model made of each description was judged from one run's questions, not measured.
+
+## BK. The six points §BJ and the looks left open — done, then checked (2026-10-12)
+
+| left open | now |
+|---|---|
+| no from–to control for dates | **The range control takes dates** (`widget_data._slicer_range`, `SlicerRange`): two days picked from a calendar, limited to the data's first and last day; either end may be left open. It sends the engine's own date filter, ending on the day after the last one picked so both ends are kept. Dates stored as text are read the same way. |
+| the period filter used the promised date | **Each suggested page's date control is on the date the rows happened** (`analyst_panel.date_range_control`, the first of the event dates), as a from–to range rather than a list of months. |
+| "About you" only in one dialog | **A "My profile" page** (user menu → My profile): email, role and organisation read-only, and "About you" open for editing. |
+| Ask AI and guided setup not given the background | **Both are**: the chat's dashboard designer gets the request followed by the profile and connection descriptions; guided setup's dataset proposer and demand writer get them as two extra labelled lines. Guided setup's saved brief is untouched, and its no-model word search still reads only what was typed. |
+| the looks stopped at the dashboard's edge | **The app follows an open dashboard's look** (`lib/lookChrome`): side bar and top bar go dark (or light) with it and return to the person's own theme on leaving. Their stored choice is never changed; pressing the theme switch while there puts them back in charge for that visit. |
+| whether a description helps was judged from one run | **Measured**, below. |
+
+### Is it good? What the checks showed
+
+**On screen** (a dashboard with the three control types, in a dark look, the app's theme light):
+* The whole app went dark with the dashboard and light again on leaving; the stored theme stayed "light".
+* Buttons (4 values), a list, and the date range all drew. Picking 1 Jan – 31 Mar 2025 took the headline count from 62,662 to 5,242 and every chart to those three months; the range appeared as one chip.
+* **A defect found and fixed:** a range control was covered by "No rows match these filters" as soon as its own range was applied — it has bounds, never rows, and was counted as empty. This affected the existing number range as well.
+* **A second, smaller one fixed:** two date boxes were cut off in a narrow tile; they now wrap.
+* The profile page was read in English and Arabic.
+
+**Measured: does a profile description change what the model asks?** The same vague request ("Show me how things are going") three times without a profile description and three times with one that names late deliveries, the services and branches they happen in, and their cost. Of the model's 21 questions each way:
+
+| a question that… | without | with |
+|---|---:|---:|
+| is about lateness | 61% | 71% |
+| names a branch, service or place | 52% | 76% |
+| asks about lateness BY place | 47% | 61% |
+| is about money | 14% | 9% |
+
+So the description **moves the questions towards what it names** — most clearly towards the places — but **modestly**, and its third part (cost) was not picked up at all. It is 21 questions on one dataset with one model: a direction, not a proof. The dataset's own shape already pulls a designer towards lateness, which is why "without" is not near zero.
+
+**By tests:** 2 more of the controls (the date range on the event date; the range answering for a date and keeping both ends), 3 browser tests of the date range, 1 of the shell following a look, 1 of guided setup's background. Frontend suite 4,43x tests pass; the whole backend suite's result is in the hand-over note for this section.
+
+**Not done**
+* A live (DirectQuery) dataset's date range control was not tried.
+* The model did not act on the "cost" part of the description; nothing was changed to make it.
+* Ask AI's ordinary questions (not its dashboard designer) do not use the background: a profile does not change how a question about data is answered.
+* The date range has no shortcuts ("last 30 days", "this quarter").

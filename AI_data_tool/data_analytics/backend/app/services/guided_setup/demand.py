@@ -111,7 +111,9 @@ def profile_text(df: pd.DataFrame) -> str:
 
 def _said(brief: dict | None, proposals: list[dict], edits: list[str]) -> str:
     """Everything the person typed, for the plain fallback's word search."""
-    parts = [str(v) for v in (brief or {}).values() if v]
+    # Not the background passed along with it (their profile, the connection's
+    # description): only what they typed in the setup narrows the data.
+    parts = [str(v) for k, v in (brief or {}).items() if v and k not in ("about", "connection")]
     for p in proposals:
         parts += [m.get("text", "") for m in p.get("history") or [] if m.get("role") == "user"]
     parts += edits
@@ -159,6 +161,7 @@ def build_prompt(brief: dict | None, datasets: list[dict], edits: list[str], lan
     b = brief or {}
     about = [f"- {label}: {b[key]}" for label, key in (
         ("Their work", "work"), ("What to focus on", "focus"),
+        ("About them, from their profile", "about"), ("The connection is described as", "connection"),
         ("What they need to know", "questions"), ("What to leave out", "exclude")) if b.get(key)]
     blocks = []
     for d in datasets:

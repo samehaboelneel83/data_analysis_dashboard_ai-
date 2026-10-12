@@ -1,4 +1,5 @@
 import { useState, useEffect, type CSSProperties } from 'react'
+import { LOOK_EVENT, type LookMode } from '../lib/lookChrome'
 import { useDirection } from '../contexts/DirectionContext'
 import { Outlet, NavLink, useLocation } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
@@ -76,8 +77,20 @@ export default function Layout() {
   const [folds, setFolds] = useState<Record<string, boolean>>(getInitialFolds)
   const { pathname } = useLocation()
 
+  // An open dashboard's look may ask for the other mode (lib/lookChrome):
+  // the shell follows it while the dashboard is open. Only the person's own
+  // choice is remembered.
+  const [lookMode, setLookMode] = useState<LookMode>(null)
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme)
+    const on = (e: Event) => setLookMode((e as CustomEvent<LookMode>).detail ?? null)
+    window.addEventListener(LOOK_EVENT, on)
+    return () => window.removeEventListener(LOOK_EVENT, on)
+  }, [])
+  const shown = lookMode ?? theme
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', shown)
+  }, [shown])
+  useEffect(() => {
     localStorage.setItem('theme', theme)
   }, [theme])
   useEffect(() => {
@@ -108,7 +121,12 @@ export default function Layout() {
   // enforces exactly this).
   const drawerRef = useModalDialog<HTMLElement>(() => setDrawerOpen(false))
 
-  const toggle = () => setTheme(t => t === 'dark' ? 'light' : 'dark')
+  // Pressed while a dashboard's look is in charge: the person takes over,
+  // going to the other of what they SEE, for the rest of this visit.
+  const toggle = () => {
+    if (lookMode) { setTheme(lookMode === 'dark' ? 'light' : 'dark'); setLookMode(null); return }
+    setTheme(t => t === 'dark' ? 'light' : 'dark')
+  }
   // The command palette's "Switch theme" command: the shell owns the theme,
   // so the palette asks rather than writing the attribute itself.
   useEffect(() => {
@@ -282,7 +300,7 @@ export default function Layout() {
 
       <div className="dl-shell__main">
         <TopBar onOpenNav={narrow ? () => setDrawerOpen(true) : undefined}
-          theme={theme} onToggleTheme={toggle} />
+          theme={shown} onToggleTheme={toggle} />
         {/* The padding is published as a custom property as well as applied,
             so a page that must bleed to the edges (the report builder) can
             cancel exactly THIS value instead of hard-coding a number that

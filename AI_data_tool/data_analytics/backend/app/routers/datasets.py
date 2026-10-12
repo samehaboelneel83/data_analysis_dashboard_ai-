@@ -421,6 +421,11 @@ async def _ingest_upload_file(
         file_path, content_sha256 = await asyncio.to_thread(
             _pick_sheet, file_path, org_id, sheet, content_sha256)
 
+    from ..services import upload_stream
+    if upload_stream.wanted(file_path, file_size):
+        return await _ingest_large_csv(db, org_id, file_path, name=name, description=description,
+                                       owner_id=owner_id, content_sha256=content_sha256)
+
     try:
         await asyncio.to_thread(_canonical_csv, file_path)
         df = await asyncio.to_thread(load_file, str(file_path))
@@ -464,6 +469,50 @@ async def _ingest_upload_file(
     except Exception:
         file_path.unlink(missing_ok=True)
         remove_parquet_sidecar(str(file_path))
+        raise
+
+
+async def _ingest_large_csv(db: AsyncSession, org_id: int, csv_path: Path, *, name: str, description: str,
+                            owner_id: int | None, content_sha256: str) -> Dataset:
+    """A CSV too large to parse in memory: written to the dataset's parquet
+    file a chunk at a time (services/upload_stream.py). The uploaded CSV is
+    not kept. Types and personal-data kinds come from a random sample of the
+    rows; how many rows there are and how empty each column is, from all."""
+    import os
+    import shutil
+    import tempfile
+    from ..services import upload_stream
+    stream_dir = tempfile.mkdtemp(prefix="import_", dir=str(csv_path.parent))
+    target = upload_store.allocate_path(org_id, "upload.parquet")
+    try:
+        try:
+            got = await asyncio.to_thread(upload_stream.csv_to_parquet, csv_path, stream_dir)
+        except Exception as e:
+            raise HTTPException(400, f"Could not read file: {e}")
+        problem = "The file has no data rows" if not got.rows else _frame_problem(got.sample)
+        if problem:
+            raise HTTPException(400, problem)
+        os.replace(got.path, target)
+    finally:
+        shutil.rmtree(stream_dir, ignore_errors=True)
+        csv_path.unlink(missing_ok=True)
+    try:
+        type_map = await asyncio.to_thread(detect_types, got.sample)
+        ds = Dataset(last_refreshed_at=datetime.utcnow(),
+                     name=name, description=description or None, filename=str(target),
+                     row_count=int(got.rows), col_count=len(got.columns), file_size=target.stat().st_size,
+                     org_id=org_id, created_by=owner_id, content_sha256=content_sha256)
+        db.add(ds)
+        await db.flush()
+        for col_name, dtype in type_map.items():
+            db.add(DatasetColumn(
+                dataset_id=ds.id, name=col_name, dtype=dtype,
+                missing_pct=float(got.missing.get(col_name, 0.0)), stats={},
+                semantic_type=_semantic_type_of(got.sample[col_name])))
+        await _apply_default_data_view(db, ds, org_id)
+        return ds
+    except Exception:
+        target.unlink(missing_ok=True)
         raise
 
 
@@ -2385,7 +2434,9 @@ async def suggest_dashboards(dataset_id: int, req: SuggestDashboardsRequest,
             raise HTTPException(400, "This dataset has no rows to suggest from yet")
         from ..services import jobs as job_service
         from ..services.suggest_jobs import PANEL_JOB_KIND
-        goal = (req.goal or "").strip()
+        from ..services import ai_context
+        goal = (await ai_context.for_dataset(db, current_user, ds, req.goal)
+                if (req.goal or "").strip() or req.use_profile else "")
         job, _ = await job_service.enqueue(
             db, user=current_user, kind=PANEL_JOB_KIND,
             inputs={"dataset_id": dataset_id, "goal": goal, "size": req.size, "fresh": req.fresh},
@@ -2399,7 +2450,11 @@ async def suggest_dashboards(dataset_id: int, req: SuggestDashboardsRequest,
     df, type_map, profile = inputs.df, inputs.type_map, inputs.profile
     probe, drawn, know = inputs.probe, inputs.drawn, inputs.knowledge
 
-    goal = (req.goal or "").strip()
+    # Their own words, then what they and others have written about them and
+    # this data (profile, connection, dataset) -- services/ai_context.py.
+    from ..services import ai_context
+    goal = (await ai_context.for_dataset(db, current_user, ds, req.goal)
+            if (req.goal or "").strip() or req.use_profile else "")
     if req.mode == "panel":
         return await sug.panel(inputs, goal, req.size, fresh=req.fresh)
     fields: dict = {"facts": []}

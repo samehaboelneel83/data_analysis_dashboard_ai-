@@ -48,6 +48,10 @@ class SuggestDashboardsRequest(BaseModel):
     #: "quick" is one designer call; "panel" asks several analyst lenses, draws
     #: every idea, and keeps the `size` best by what the data actually shows.
     mode: Literal["quick", "panel"] = "quick"
+    #: With the box left empty, let the person's profile description stand in
+    #: for it (services/ai_context.py). Off for callers that must not wait on
+    #: a model.
+    use_profile: bool = True
     size: int = Field(default=24, ge=6, le=60)
     #: Panel only: queue it as a job and answer with its id at once. The
     #: dialog polls the job and can be closed and reopened meanwhile.
@@ -756,6 +760,8 @@ class UserOut(BaseModel):
     id: int
     email: str
     is_active: bool
+    #: What the person wrote about themselves (services/ai_context.py).
+    about: Optional[str] = None
     organization: OrganizationOut
     role: RoleOut
     # Platform super-admin (config allowlist), set transiently by the read endpoint so

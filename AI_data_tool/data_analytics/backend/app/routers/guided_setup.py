@@ -58,6 +58,20 @@ class JourneyUpdate(BaseModel):
     report_id: int | None = None
 
 
+
+def _with_background(brief: dict | None, user, source) -> dict:
+    """The person's brief with what they wrote on their profile and what the
+    connection is described as, for the model calls that read it. Nothing is
+    stored: the saved brief stays what the person typed in the setup."""
+    from ..services.ai_context import _clean
+    out = dict(brief or {})
+    about, described = _clean(getattr(user, "about", None)), _clean(getattr(source, "description", None))
+    if about:
+        out["about"] = about
+    if described:
+        out["connection"] = described
+    return out
+
 async def source_or_404(db: AsyncSession, source_id: int, user: User) -> DataSource:
     """The connection if this user may SEE it (the Connections list's rule)."""
     source = await access.visible_source(db, source_id, user)
@@ -870,7 +884,8 @@ async def write_proposals(db: AsyncSession, flow_id: int, lang: str, attempt: st
         return
     words = await _flow_words(db, f, lang)
     try:
-        items, reason = await datasets.propose(db, user, source, f.brief, words, lang, get_client())
+        items, reason = await datasets.propose(db, user, source, _with_background(f.brief, user, source),
+                                               words, lang, get_client())
     except Exception:                                       # noqa: BLE001
         # Never leave the step "pending": a crash recorded as pending was
         # restarted by every visit, asking the model again each time. Offer
@@ -1151,7 +1166,7 @@ async def build_demand(db: AsyncSession, f: SetupFlow, user: User, lang: str, ed
         frames.append({"id": ds.id, "name": ds.name, "frame": frame, "proposal": made.get(ds.name)})
     await access.release(db)
     client = get_client() if source is not None and source.allow_llm_sampling else None
-    got = await demand.write(f.brief, frames, edits, lang, client, earlier)
+    got = await demand.write(_with_background(f.brief, user, source), frames, edits, lang, client, earlier)
     # A dataset that holds events but not what they are counted against can
     # show counts and never rates (docs/meaning-map/PLAN.md): said to the
     # person before a dashboard is designed on it.
@@ -1601,7 +1616,7 @@ async def _plain_design(db: AsyncSession, user: User, ds: Dataset, f: SetupFlow,
     from ..schemas.schemas import SuggestDashboardsRequest
     from ..services.guided_setup import answer, demand
     from .datasets import suggest_dashboards
-    got = await suggest_dashboards(ds.id, SuggestDashboardsRequest(goal=None, count=count, mode="quick"),
+    got = await suggest_dashboards(ds.id, SuggestDashboardsRequest(goal=None, count=count, mode="quick", use_profile=False),
                                    db, user, None)
     filters = demand.filters_for(f.demand, ds.id)
     out = []

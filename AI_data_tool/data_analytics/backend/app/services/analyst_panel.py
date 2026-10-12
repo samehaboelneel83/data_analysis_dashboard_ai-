@@ -397,8 +397,13 @@ def rule_candidates(df, roles: dict, column_meta: dict | None, ineligible: set[s
     import pandas as pd
     dates = {c for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c])}
     out = []
+    # ...and one idea for each further widget type the data has the shape for
+    # (suggest_variety.catalogue_suggestions), so a suggested dashboard is not
+    # limited to the handful of types the findings map to.
+    from ..core.config import settings
+    more = int(getattr(settings, "suggest_more_types", 0) or 0)
     for s in suggest_widgets_from_findings(findings, roles, None, limit=40, ineligible=ineligible,
-                                           column_meta=column_meta, frame=df, per_type=6):
+                                           column_meta=column_meta, frame=df, per_type=6, catalogue=more):
         value = _VALUE.get(s.get("kind"), 3 + (1 if float(s.get("score") or 0) > 0.6 else 0))
         out.append({"question": s["title"], "widget_type": s["widget_type"], "title": s["title"],
                     "why": s.get("reason", ""), "config": s["config"], "value": value,
@@ -1449,8 +1454,20 @@ def _filterable(profile: dict, ineligible: set[str] | frozenset = frozenset()) -
             and 2 <= (c.get("distinct") or 0) <= SLICER_MAX_VALUES}
 
 
+#: Up to this many values are buttons (all in view, one click); up to the
+#: next, a list to tick; beyond it a dropdown, which takes no room until opened.
+CONTROL_BUTTONS = 5
+CONTROL_LIST = 12
+
+
+def control_for(distinct: int) -> str:
+    """The filter control for a column with this many values (a `slicer_mode`)."""
+    return "buttons" if distinct <= CONTROL_BUTTONS else "list" if distinct <= CONTROL_LIST else "dropdown"
+
+
 def slicers_for(widgets: list[dict], profile: dict, ineligible: set[str] | frozenset = frozenset(),
-                fallback: list[str] | None = None, limit: int = MAX_SLICERS) -> list[dict]:
+                fallback: list[str] | None = None, limit: int = MAX_SLICERS, with_date: bool = False,
+                date: str | None = None) -> list[dict]:
     """Filter controls for one page: the categories its charts split by most.
 
     Every reference dashboard the five-dataset review drew (2026-10-02) put
@@ -1474,13 +1491,41 @@ def slicers_for(widgets: list[dict], profile: dict, ineligible: set[str] | froze
     if not ok:
         # Nothing in the data to filter by but its date.
         return date_slicers(profile, limit)
-    return [{"widget_type": "slicer", "title": f"Filter by {str(c).replace('_', ' ')}",
-             "config": {"dimension": c}, "source": "panel",
-             "why": f"Narrows every chart on this page to the {str(c).replace('_', ' ')} values you pick."}
-            for c in ranked[:limit]]
+    found = [{"widget_type": "slicer", "title": f"Filter by {str(c).replace('_', ' ')}",
+              # The control that suits how many values there are to choose from.
+              "config": {"dimension": c, "slicer_mode": control_for(ok[c].get("distinct") or 0)}, "source": "panel",
+              "why": f"Narrows every chart on this page to the {str(c).replace('_', ' ')} values you pick."}
+             for c in ranked[:limit]]
+    # A period beside them, when the data has a date: "which month" is asked
+    # of almost every page, and a category filter cannot answer it.
+    return found + (date_range_control(profile, date) if with_date else [])
 
 
-def date_slicers(profile: dict, limit: int = MAX_SLICERS) -> list[dict]:
+def date_range_control(profile: dict, date: str | None = None) -> list[dict]:
+    """One from-to control on the page's date: two dates picked, every chart
+    narrowed to the days between them. `date` is the column the rows are
+    dated by (when they happened); without one, the date the data's history
+    is measured on. Not offered for a date covering less than 60 days."""
+    span = ((profile.get("structure") or {}).get("date_range")) or {}
+    known = {c["name"]: c for c in profile.get("columns", []) if c.get("role") == "datetime"}
+    col = date if date in known else span.get("column")
+    if not col or col not in known:
+        return []
+    days = span.get("days") or 0
+    if col != span.get("column"):
+        try:
+            import pandas as pd
+            days = int((pd.Timestamp(known[col].get("max")) - pd.Timestamp(known[col].get("min"))).days)
+        except Exception:  # noqa: BLE001 -- no span known: judged by the widest date's
+            pass
+    if days < 60:
+        return []
+    return [{"widget_type": "slicer", "title": f"Filter by {str(col).replace('_', ' ')}",
+             "config": {"dimension": col, "slicer_mode": "range"}, "source": "panel",
+             "why": "Narrows every chart on this page to the dates you pick, from one day to another."}]
+
+
+def date_slicers(profile: dict, limit: int = MAX_SLICERS, finest: bool = False) -> list[dict]:
     """Period controls for data with nothing else to filter by.
 
     Daily ops (one row per day, numbers only) got no filter at all: a slicer
@@ -1492,9 +1537,14 @@ def date_slicers(profile: dict, limit: int = MAX_SLICERS) -> list[dict]:
     if not col or days < 60:
         return []
     grains = (["year"] if days >= 365 else []) + (["month"] if days <= 3 * 366 else ["quarter"])
+    if finest:
+        grains = grains[-1:]              # one control: the months, or the quarters of a long history
     words = {"year": "year", "quarter": "quarter", "month": "month"}
+    # Periods are many and in order: a dropdown, never a wall of buttons.
     return [{"widget_type": "slicer", "title": f"Filter by {words[g]}",
-             "config": {"dimension": col, "dimension_granularity": g}, "source": "panel",
+             "config": {"dimension": col, "dimension_granularity": g,
+                        "slicer_mode": "dropdown" if g != "year" else control_for(max(1, round(days / 365)))},
+             "source": "panel",
              "why": f"Narrows every chart on this page to the {words[g]}s you pick."}
             for g in grains][:limit]
 
@@ -2192,7 +2242,11 @@ async def run_panel(*, df, profile: dict, roles: dict, column_meta: dict | None,
         # A page that splits by nothing filterable (a trend, a model) still
         # takes the dataset's own: "pay over time, for Sales" is a question.
         # The quality page is about the rows as they are: no filters.
-        controls = [] if sec == "quality" else slicers_for(widgets, profile, ineligible, fallback=overall)
+        # The period is asked of the date the rows HAPPENED on (the first of
+        # the event dates), not whichever date column spans the longest.
+        event = next(iter(order_event_dates(sorted(dates), df)), None)
+        controls = [] if sec == "quality" else slicers_for(widgets, profile, ineligible, fallback=overall,
+                                                           with_date=True, date=event)
         keys = ("widget_type", "title", "why", "config", "row_count", "takeaway", "takeaway_i18n",
                 "question", "value", "audience", "evidence", "source")
         proposals.append({

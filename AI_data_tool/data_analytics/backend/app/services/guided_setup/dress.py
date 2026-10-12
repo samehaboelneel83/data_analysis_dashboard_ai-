@@ -159,7 +159,8 @@ def slicers(widgets: list[dict], profile: dict, ineligible: set[str], skip: set[
     found = [s for s in slicers_for(widgets, profile, ineligible, limit=MAX_SLICERS + len(skip))
              if s["config"].get("dimension") in known and s["config"]["dimension"] not in skip][:MAX_SLICERS]
     return [{"widget_type": "slicer", "title": _t(lang, "filter", c=str(s["config"]["dimension"]).replace("_", " ")),
-             "config": {"dimension": s["config"]["dimension"]}} for s in found]
+             # The control the panel chose for how many values there are (analyst_panel.control_for).
+             "config": {k: v for k, v in s["config"].items() if k in ("dimension", "slicer_mode")}} for s in found]
 
 
 def navigation(titles: list[str], here: int, lang: str) -> list[dict]:

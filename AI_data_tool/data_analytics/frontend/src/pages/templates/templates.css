@@ -70,3 +70,16 @@
 .dl-style .color { display: flex; align-items: center; gap: 6px; }
 .dl-style .color input[type="color"] { width: 34px; height: 26px; padding: 0; border: 1px solid var(--border); border-radius: 6px; background: none; }
 .dl-style .color button { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 2px; display: grid; }
+
+/* Ready-made looks in the dashboard style panel (lib/dashboardLooks). */
+.dl-looks { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.dl-look { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 4px 4px 5px; cursor: pointer;
+  display: grid; gap: 4px; color: var(--text); font: inherit; text-align: center; }
+.dl-look:hover { border-color: var(--accent); }
+.dl-look[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); }
+.dl-look__page { display: block; border-radius: 7px; padding: 7px; height: 52px; }
+.dl-look__card { display: flex; flex-direction: column; gap: 4px; height: 100%; padding: 5px; box-sizing: border-box; }
+.dl-look__n { display: block; width: 45%; height: 4px; border-radius: 2px; opacity: .9; }
+.dl-look__bars { display: flex; align-items: flex-end; gap: 3px; flex: 1; }
+.dl-look__bars span { flex: 1; border-radius: 2px 2px 0 0; }
+.dl-look__name { font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

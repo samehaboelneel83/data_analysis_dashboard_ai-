@@ -306,6 +306,172 @@ def _split_trend(p: _Profile) -> list[dict]:
                   8.2, "trend_split")]
 
 
+# ── the rest of the catalogue ────────────────────────────────────
+
+#: Two numbers are "the same kind of amount" when their totals are within
+#: this factor of each other and they move together row by row at least this much.
+SAME_SIZE = 2.0
+SAME_MOVE = 0.5
+#: A date must cover at least this many days before a chart over time is offered.
+MIN_DAYS = 90
+
+
+def _alike(p: _Profile) -> tuple[str, str] | None:
+    """Two numbers that add up, of one size, that move together: one can be
+    read against the other (an amount and the amount it was meant to be)."""
+    sums = [m for m in p.nums if p.summary[m] == "sum"]
+    for i, a in enumerate(sums):
+        for b in sums[i + 1:]:
+            x, y = pd.to_numeric(p.df[a], errors="coerce"), pd.to_numeric(p.df[b], errors="coerce")
+            ta, tb = float(x.sum()), float(y.sum())
+            if ta <= 0 or tb <= 0 or max(ta, tb) / min(ta, tb) > SAME_SIZE:
+                continue
+            ok = x.notna() & y.notna()
+            if ok.sum() < 30 or not x[ok].std() or not y[ok].std():
+                continue
+            r = float(np.corrcoef(x[ok], y[ok])[0, 1])
+            if np.isfinite(r) and r >= SAME_MOVE:
+                return a, b
+    return None
+
+
+def _share_like(p: _Profile) -> str | None:
+    """A number that is a share: averaged, and every value between 0 and 1.
+    (0 to 100 is not taken as one: a score or an age lies there too.)"""
+    for m in p.nums:
+        if p.summary[m] == "sum":
+            continue
+        v = pd.to_numeric(p.df[m], errors="coerce").dropna()
+        if len(v) >= 20 and float(v.min()) >= 0 and 0 < float(v.max()) <= 1:
+            return m
+    return None
+
+
+def catalogue_suggestions(p: _Profile) -> list[dict]:
+    """One idea for each further widget type this data has the shape for, so
+    the panel is not limited to the handful of types the findings map to.
+    Each states, in its reason, what in the data makes it fit; the caller
+    still draws every one before offering it. Types whose fit cannot be told
+    from the columns alone (a map, a hierarchy, a funnel's order) are left to
+    the person."""
+    df, out = p.df, []
+    word = {"avg": "Average", "median": "Median", "sum": "Total"}
+    sums = [m for m in p.nums if p.summary[m] == "sum"]
+    levels = [m for m in p.nums if p.summary[m] != "sum"]
+    small = [c for c in p.cats if 2 <= p.card[c] <= 6]
+    mid = [c for c in p.cats if 3 <= p.card[c] <= 12]
+    many = [c for c in p.cats if 7 <= p.card[c] <= 50]
+    date = None
+    if p.dates:
+        dt = pd.to_datetime(df[p.dates[0]], errors="coerce")
+        if dt.notna().any() and (dt.max() - dt.min()).days >= MIN_DAYS:
+            date = p.dates[0]
+    main = (sums or p.nums or [None])[0]
+
+    def named(m):
+        return f"{word[p.summary[m]]} {_h(m)}"
+
+    def add(wt, title, reason, config, score):
+        out.append(_item(wt, title, reason, config, score, "catalogue"))
+
+    pair = _alike(p)
+    if pair:
+        a, b = pair
+        add("gauge", f"{_h(a)} against {_h(b)}",
+            f"{_cap(_h(a))} and {_h(b)} are the same kind of amount and move together, so one is read against the other.",
+            {"measure": a, "aggregation": "sum", "target": b, "gauge_shape": "bullet"}, 7.9)
+        if mid:
+            add("butterfly", f"{_h(a)} and {_h(b)} by {_h(mid[0])}",
+                f"The two amounts back to back for each {_h(mid[0])}.",
+                {"dimension": mid[0], "measure": a, "measure2": b, "aggregation": "sum", "aggregation2": "sum"}, 7.3)
+        if date:
+            add("comparative_time_series", f"{_h(a)} and {_h(b)} over time",
+                "The two amounts on one scale, period by period.",
+                {"start": date, "measure": a, "measure2": b, "aggregation": "sum", "aggregation2": "sum",
+                 "dimension_granularity": "month"}, 7.2)
+    share = _share_like(p)
+    if share:
+        top = 1
+        add("gauge", f"Average {_h(share)}",
+            f"{_cap(_h(share))} is a share (it runs from 0 to {top}), so it is shown as how far along it is.",
+            {"measure": share, "aggregation": "avg", "gauge_shape": "progress", "target_value": top}, 7.8)
+    if len(p.nums) >= 3:
+        kind = max(("sum", "avg", "median"), key=lambda k: sum(1 for m in p.nums if p.summary[m] == k))
+        same = [m for m in p.nums if p.summary[m] == kind][:5]
+        if len(same) >= 3:
+            add("card", f"{word[kind]} of {len(same)} numbers",
+                f"{len(same)} numbers that are each read as one figure, in one list.",
+                {"measures": same, "aggregation": kind}, 7.7)
+    if levels and mid:
+        m, c = levels[0], mid[0]
+        add("dot_plot", f"{named(m)} by {_h(c)}",
+            f"{_cap(_h(m))} is averaged, not added up, so each {_h(c)} is a point on one scale rather than a bar from zero.",
+            {"dimension": c, "measure": m, "aggregation": p.summary[m], "sort": "desc", "sort_by": "value"}, 7.6)
+    if len(p.nums) >= 2 and mid:
+        a, b, c = p.nums[0], p.nums[1], mid[0]
+        add("dual_axis_bar", f"{named(a)} and {named(b).lower()} by {_h(c)}",
+            f"Two numbers for each {_h(c)}, each on its own scale.",
+            {"dimension": c, "measure": a, "measure2": b, "aggregation": p.summary[a], "aggregation2": p.summary[b]}, 7.5)
+    if date and main:
+        if sums:
+            add("area", f"Total {_h(sums[0])} over time",
+                f"{_cap(_h(sums[0]))} adds up, so the filled area is the amount in each month of {_h(date)}.",
+                {"dimension": date, "dimension_granularity": "month", "measure": sums[0], "aggregation": "sum"}, 7.45)
+        if levels:
+            add("step", f"{named(levels[0])} over time",
+                f"{_cap(_h(levels[0]))} is a level: it holds through each month and changes at the next.",
+                {"dimension": date, "dimension_granularity": "month", "measure": levels[0],
+                 "aggregation": p.summary[levels[0]]}, 7.1)
+        if len(p.nums) >= 2:
+            a, b = p.nums[0], p.nums[1]
+            add("dual_axis_time_series", f"{named(a)} and {named(b).lower()} over time",
+                "Two numbers month by month, each on its own scale, to see whether they rise and fall together.",
+                {"start": date, "measure": a, "measure2": b, "aggregation": p.summary[a],
+                 "aggregation2": p.summary[b], "dimension_granularity": "month"}, 7.0)
+        ranked = [c for c in p.cats if 3 <= p.card[c] <= 8]
+        if ranked and sums:
+            add("ribbon", f"Total {_h(sums[0])} by {_h(ranked[0])} over time",
+                f"Which {_h(ranked[0])} leads in each month, and when the order changes.",
+                {"dimension": date, "dimension_granularity": "month", "dimension2": ranked[0],
+                 "measure": sums[0], "aggregation": "sum"}, 6.9)
+    if sums and mid:
+        add("waterfall", f"How {_h(mid[0])} adds up to total {_h(sums[0])}",
+            f"Each {_h(mid[0])} as a step towards the total.",
+            {"dimension": mid[0], "measure": sums[0], "aggregation": "sum", "sort": "desc", "sort_by": "value"}, 7.05)
+    if p.nums:
+        add("histogram", f"How {_h(p.nums[0])} is spread",
+            f"How many rows fall in each range of {_h(p.nums[0])}.", {"measure": p.nums[0], "bins": 20}, 6.95)
+    if len(p.nums) >= 2:
+        add("numeric_series", f"{_h(p.nums[1])} against {_h(p.nums[0])}",
+            "One number against another, to see whether they move together.",
+            {"measure": p.nums[0], "measure2": p.nums[1]}, 6.8)
+    if len(p.nums) >= 3:
+        add("correlation_matrix", "Which numbers move together",
+            f"Every pair of {min(len(p.nums), 8)} numbers at once.", {"measures": p.nums[:8]}, 6.85)
+        add("parallel_coordinates", f"{min(len(p.nums), 6)} numbers side by side",
+            "Each row drawn across all the numbers, to see which go high or low together.",
+            {"measures": p.nums[:6], **({"color": small[0]} if small else {})}, 6.5)
+    two = [c for c in p.cats if 2 <= p.card[c] <= 15]
+    if len(two) >= 2:
+        a, b = two[0], two[1]
+        add("crosstab", f"{p.count_word} by {_h(a)} and {_h(b)}",
+            f"A table of every {_h(a)} against every {_h(b)}.", {"dimension": a, "dimension2": b, **p.count(a)}, 6.75)
+        add("sankey", f"{_h(a)} to {_h(b)}", f"How the rows of each {_h(a)} divide among {_h(b)}.",
+            {"dimension": a, "dimension2": b, **p.count(a)}, 6.6)
+    if mid and small and main and mid[0] != small[0]:
+        add("small_multiples", f"{named(main)} by {_h(mid[0])}, one panel per {_h(small[0])}",
+            f"The same chart repeated for each {_h(small[0])}, on one scale.",
+            {"dimension": mid[0], "measure": main, "aggregation": p.summary[main], "facet_by": small[0]}, 6.7)
+    if many:
+        c = many[0]
+        add("list", f"Top {_h(c)} by {p.count_word.lower()}", f"The {_h(c)} values with the most {p.entity}, as a ranked list.",
+            {"dimension": c, **p.count(c), "sort": "desc", "sort_by": "value", "limit": 10}, 6.65)
+        add("word_cloud", f"{_h(c)} sized by {p.count_word.lower()}",
+            f"All {p.card[c]} values of {_h(c)} at once; the larger the word, the more {p.entity}.",
+            {"dimension": c, **p.count(c), "limit": 50}, 6.4)
+    return out
+
+
 def variety_suggestions(df: pd.DataFrame | None, roles: dict[str, str],
                         column_meta: dict | None = None,
                         ineligible: set[str] | None = None) -> list[dict]:
@@ -347,6 +513,10 @@ def draws(widget_type: str, config: dict, df: pd.DataFrame) -> bool:
         return False
     if r.get("type") == "model":
         return r.get("status") == "ok"
+    if r.get("type") == "sankey":
+        return bool(r.get("links"))
+    if r.get("type") == "small_multiples":
+        return len(r.get("panels") or []) > 1
     if isinstance(r.get("rows"), list):
         return len(r["rows"]) > 0
     if r.get("value") is not None:

@@ -92,3 +92,27 @@ class TestAnImportFromADatabase:
         monkeypatch.setattr(settings, "load_memory_share", 0.0, raising=False)
         monkeypatch.setattr(mg, "free_bytes", lambda: 1)
         assert len(connections._capped_read("SELECT * FROM t", self._engine(tmp_path), None, 0)) == 2500
+
+
+def test_what_another_server_process_has_promised_counts_too(tmp_path, monkeypatch):
+    """Two workers on one machine each saw the same free memory and each let a
+    large load through alone. The promise is now written where both read it."""
+    import json
+    import os
+
+    from app.services import memory_guard as mg
+    ledger = tmp_path / "ledger.json"
+    monkeypatch.setattr(mg, "_ledger_path", lambda: str(ledger))
+    monkeypatch.setattr(mg, "free_bytes", lambda: 1000)
+    monkeypatch.setattr(mg, "share", lambda: 1.0)
+    monkeypatch.setattr(mg, "estimate", lambda p, columns=None: (600, 10))
+    other = os.getppid()                                   # a live process that is not this one
+    ledger.write_text(json.dumps({str(other): 600}))
+    with pytest.raises(mg.TooLargeToLoad):
+        with mg.reserved("x"):
+            pass
+    # A process that died without giving its bytes back is forgotten.
+    ledger.write_text(json.dumps({"999999999": 600}))
+    with mg.reserved("x"):
+        assert json.loads(ledger.read_text()) == {str(os.getpid()): 600}
+    assert json.loads(ledger.read_text()) == {}

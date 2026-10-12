@@ -258,8 +258,20 @@ async def page_copilot(report_id: int, page_id: int, body: CopilotIn,
 
     calc_cols, dataset_mode = await _page_calculated_columns(db, report, user)
     measures = await _page_measures(db, report, user)
+    # What has been written about this dashboard, its dataset, its
+    # connection and the person asking -- all things this reader already sees.
+    from ..services import ai_context
+    _ds = await db.get(Dataset, report.dataset_id) if report.dataset_id else None
+    _src = (await db.get(DataSource, _ds.data_source_id)
+            if _ds is not None and _ds.data_source_id else None)
+    if _src is not None and _src.org_id != user.org_id:
+        _src = None
     page_ctx = {
         "report_name": report.name, "page_name": page.name,
+        "background": ai_context.background(
+            about=getattr(user, "about", None), dashboard=report.description,
+            connection=getattr(_src, "description", None), connection_name=getattr(_src, "name", None),
+            dataset=getattr(_ds, "description", None), dataset_name=getattr(_ds, "name", None)),
         "widgets": [{"id": w.id, "widget_type": w.widget_type, "title": w.title,
                      "config": w.config or {}, "layout": w.layout or {}}
                     for w in widgets],

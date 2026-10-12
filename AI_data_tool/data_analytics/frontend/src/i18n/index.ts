@@ -16,6 +16,7 @@ export const PATH_MESSAGE: [string, MessageKey][] = [
   ['/datasets', 'nav.datasets'],
   ['/reports', 'nav.dashboards'],
   ['/templates', 'tpl.nav'],
+  ['/profile', 'top.profile'],
   ['/dashboards', 'nav.dashboards'],
   ['/connections', 'nav.connections'],
   ['/setup', 'setup.title'],

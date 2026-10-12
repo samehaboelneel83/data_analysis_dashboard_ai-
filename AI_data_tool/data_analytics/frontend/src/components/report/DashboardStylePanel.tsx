@@ -1,6 +1,8 @@
 import { X } from 'lucide-react'
 import { useT, type MessageKey } from '../../i18n'
 import { BORDERS, FONTS, tidyStyle, type DashboardStyle } from '../../lib/dashboardStyle'
+import { LOOKS, lookOf } from '../../lib/dashboardLooks'
+import { THEMES } from './themes'
 import '../../pages/templates/templates.css'
 
 const WEIGHTS = [300, 400, 500, 600, 700, 800] as const
@@ -17,6 +19,7 @@ export default function DashboardStylePanel({ style, onChange }: {
   onChange: (next: DashboardStyle) => void
 }) {
   const t = useT()
+  const current = lookOf(style)
   const set = <K extends keyof DashboardStyle>(key: K, value: DashboardStyle[K] | undefined) =>
     onChange(tidyStyle({ ...style, [key]: value }))
 
@@ -58,6 +61,29 @@ export default function DashboardStylePanel({ style, onChange }: {
   return (
     <div data-testid="dashboard-style">
       <div style={{ fontSize: 10.5, color: 'var(--muted)', marginBottom: 8 }}>{t('tpl.style.help')}</div>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{t('tpl.style.looks')}</div>
+      <div className="dl-looks" role="group" aria-label={t('tpl.style.looks')}>
+        {LOOKS.map(l => (
+          <button key={l.key} type="button" className="dl-look" data-testid={`look-${l.key}`}
+            aria-pressed={current === l.key} title={t(`tpl.style.look.${l.key}.help` as MessageKey)}
+            onClick={() => onChange(tidyStyle({ ...l.style }))}>
+            <span className="dl-look__page" style={{ background: l.style.page_background }}>
+              <span className="dl-look__card" style={{
+                background: l.style.card_background, borderRadius: Math.min(l.style.radius ?? 8, 8),
+                border: l.style.border_style === 'none' ? '0' : `1px solid ${l.style.border_color}`,
+                boxShadow: l.style.shadow && l.style.shadow !== 'none' ? '0 2px 6px rgba(0,0,0,.25)' : 'none' }}>
+                <span className="dl-look__n" style={{ background: l.style.title_color ?? l.style.text_color ?? '#0f172a' }} />
+                <span className="dl-look__bars">
+                  {(THEMES[l.style.palette ?? 'default'] ?? THEMES.default).slice(0, 4).map((c, i) => (
+                    <span key={c} style={{ background: c, height: `${[55, 90, 70, 100][i]}%` }} />
+                  ))}
+                </span>
+              </span>
+            </span>
+            <span className="dl-look__name">{t(`tpl.style.look.${l.key}` as MessageKey)}</span>
+          </button>
+        ))}
+      </div>
       <div className="dl-style">
         {select('mode', 'tpl.style.mode', [
           { value: 'light', label: t('tpl.style.mode.light') }, { value: 'dark', label: t('tpl.style.mode.dark') }], 'tpl.style.mode.auto')}

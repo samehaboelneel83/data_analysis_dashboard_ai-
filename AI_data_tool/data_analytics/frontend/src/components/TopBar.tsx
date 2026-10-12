@@ -7,7 +7,7 @@ import LanguageSwitcher from './LanguageSwitcher'
 import LlmPicker from './LlmPicker'
 import { messageForPath, SECTION_MESSAGE, useT } from '../i18n'
 import { sectionForPath } from './navigation'
-import { ChevronDown, ChevronRight, ListTree, LogOut, Menu, Moon, Search, Sun } from 'lucide-react'
+import { ChevronDown, ChevronRight, ListTree, LogOut, Menu, Moon, Search, Sun, UserRound } from 'lucide-react'
 import { useAlwaysShowDetails } from '../lib/detailsPreference'
 import { MOBILE_QUERY, useMediaQuery } from '../hooks/useMediaQuery'
 
@@ -222,6 +222,11 @@ export default function TopBar({ onOpenNav, theme, onToggleTheme }: {
                   {alwaysDetails ? '✓' : ''}
                 </span>
               </button>
+              <Link role="menuitem" to="/profile" onClick={() => setMenuOpen(false)}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textDecoration: 'none',
+                  padding: '8px 10px', borderRadius: 7, fontSize: 12.5, color: 'var(--text)', fontFamily: 'var(--sans)' }}>
+                <span aria-hidden style={{ display: 'inline-flex' }}><UserRound size={13} /></span> {t('top.profile')}
+              </Link>
               <button role="menuitem" onClick={() => { setMenuOpen(false); logout() }}
                 style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%',
                   background: 'none', border: 'none', cursor: 'pointer', textAlign: 'start',

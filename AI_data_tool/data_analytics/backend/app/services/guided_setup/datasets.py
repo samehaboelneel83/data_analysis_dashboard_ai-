@@ -197,7 +197,10 @@ def _describe(facts: list[dict], words: dict | None) -> str:
 def _brief_text(brief: dict | None) -> str:
     b = brief or {}
     parts = [("Their work", b.get("work")), ("What to focus on", b.get("focus")),
-             ("What they need to know", b.get("questions")), ("What to leave out", b.get("exclude"))]
+             ("What they need to know", b.get("questions")), ("What to leave out", b.get("exclude")),
+             # Written elsewhere and passed along as background (services/ai_context.py).
+             ("About them, from their profile", b.get("about")),
+             ("The connection is described as", b.get("connection"))]
     said = [f"- {k}: {v}" for k, v in parts if v]
     return "\n".join(said) if said else "- They did not say. Propose what most people would need."
 

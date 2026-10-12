@@ -1053,9 +1053,15 @@ async def _suggest_dashboards(db, run: AgentRun, started: float, source, user,
     role_name = (said if isinstance(said, str) and said else None) or role_fallback
     brief = None
     try:
+        # Their request, then what they wrote about themselves and what the
+        # connection is described as (services/ai_context.py).
+        from ..ai_context import compose as _compose
+        asked = _compose(question, llm_on=True, about=getattr(user, "about", None),
+                         connection=getattr(source, "description", None),
+                         connection_name=getattr(source, "name", None)) or question
         proposals, brief, why = await design(
             client=client or _get_llm(), catalog=facts_catalog, persona=role_name,
-            request=question, joins=joins, run_query=run_query, count=3,
+            request=asked, joins=joins, run_query=run_query, count=3,
             quote=_quote, enriched=True)
         if isinstance(brief, dict) and isinstance(brief.get("_timings"), dict):
             brief["_timings"]["facts_s"] = facts_s

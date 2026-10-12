@@ -391,7 +391,18 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
         return [{ column: translate(f.column), op: 'paths',
           value: { paths: tree.paths, columns: tree.columns.map(translate), granularities: tree.granularities ?? [] } }]
       }
-      const between = (f.value as { between?: [number | null, number | null] } | null)?.between
+      const between = (f.value as { between?: [number | string | null, number | string | null] } | null)?.between
+      // Two DAYS (a date range control): the engine's own date filter, which
+      // keeps [start, end) -- so the last day picked is included by ending
+      // on the day after it. An open end reaches as far as dates go.
+      if (Array.isArray(between) && between.length === 2 && between.some(v => typeof v === 'string')) {
+        const dayAfter = (iso: string) => {
+          const d = new Date(`${iso}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1)
+          return d.toISOString().slice(0, 10)
+        }
+        return [{ column: translate(f.column), op: 'date_range',
+          value: [between[0] ?? '1700-01-01', between[1] != null ? dayAfter(String(between[1])) : '2200-01-01'] }]
+      }
       // A map area arrives as a range on each coordinate axis.
       if (Array.isArray(between) && between.length === 2) {
         // An open end (a range slicer with one bound) is null: no predicate.
@@ -658,6 +669,9 @@ function WidgetRenderer({ widget, datasetId, calculatedColumns, columnFormats, g
           || result?.nodes?.length || result?.root?.children?.length
           || result?.matrix?.length || result?.cells?.length || result?.bars?.length
           || result?.links?.length || result?.forecast?.length
+          // A range control has two bounds and never any rows: with its own
+          // range applied it was covered by "no rows match these filters".
+          || (result?.type === 'slicer_range' && (result?.min != null || result?.max != null) ? 1 : 0)
           || (result?.value != null ? 1 : 0) || 0,
         sampled: !!result?.sampled,
         ruleErrors: result?.rule_errors,
