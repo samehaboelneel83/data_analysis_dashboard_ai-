@@ -6,7 +6,7 @@ import AskRobot, { SLEEP_AFTER_MS } from './AskRobot'
 import AskIllustration from './AskIllustration'
 import ChatPane from '../../components/chat/ChatPane'
 import { agentApi } from '../../services/api'
-import { signalRobot, REACTION_MS } from './robotMood'
+import { signalRobot, REACTION_MS, CHEER_MS } from './robotMood'
 import { translate } from '../../i18n'
 
 /** Step 10: the robot -- its parts, what the page tells it, and its own life
@@ -17,7 +17,7 @@ const shown = (c: HTMLElement) => bot(c).getAttribute('data-state')
 /** Let the awaits inside ChatPane's send settle, without moving the clock. */
 const settle = () => act(async () => { for (let i = 0; i < 20; i++) await Promise.resolve() })
 
-beforeEach(() => { vi.useFakeTimers(); signalRobot('rest') })
+beforeEach(() => { vi.useFakeTimers(); signalRobot('answer'); signalRobot('rest') })
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('the robot picture', () => {
@@ -135,6 +135,31 @@ describe('what the page tells the robot', () => {
     expect(shown(container)).toBe('typing')
     rerender(<AskIllustration />)
     expect(shown(container)).toBe('idle')
+  })
+})
+
+describe('the chooser and the robot (autopilot step 2)', () => {
+  it('an idle robot looks toward the chooser while the pointer is over it', () => {
+    const { container } = render(<AskIllustration />)
+    expect(bot(container)).not.toHaveAttribute('data-look')
+    act(() => signalRobot('look-on'))
+    expect(bot(container)).toHaveAttribute('data-look')
+    act(() => signalRobot('look-off'))
+    expect(bot(container)).not.toHaveAttribute('data-look')
+  })
+
+  it('cheers when the data is chosen: happy with a few sparks, not confetti, and the old chat going away does not cut it short', () => {
+    const { container } = render(<AskIllustration small />)
+    act(() => signalRobot('chosen'))
+    expect(shown(container)).toBe('happy')
+    expect(container.querySelectorAll('.dl-ill__fx b')).toHaveLength(12)
+    expect(container.querySelector('.dl-ill__fx i')).toBeNull()
+    act(() => signalRobot('rest'))
+    expect(shown(container)).toBe('happy')
+    act(() => { vi.advanceTimersByTime(CHEER_MS) })
+    expect(shown(container)).toBe('idle')
+    act(() => { signalRobot('answer') })
+    expect(container.querySelectorAll('.dl-ill__fx i')).toHaveLength(28)
   })
 })
 

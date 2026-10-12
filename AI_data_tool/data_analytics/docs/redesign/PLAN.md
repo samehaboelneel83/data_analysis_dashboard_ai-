@@ -140,7 +140,7 @@ Nothing is pushed.
 - [x] 7-QA5b Small fixes before QA6 (S1–S6), one commit, no GATE: delete dialogs open on Cancel, the cross-filter tooltip, automatic chart titles, audit-trail action names, hierarchy and sensitivity labels in Arabic, the Welch evidence line in right-to-left.
 - [x] Merge `origin/main` (emad: guided setup, Fields panel fixes, SQL injection hardening, condition boxes, no-code formulas, hierarchies across widgets, pgAdmin) into `said`: a fast-forward to `fa573bd`, no conflicts; `36c3001` adds the new column-lineage route to the security inventory.
 - [x] 7-QA6 Fixes from QA round 6 (`redesign-captures/qa-6/`): A1–A10 (our leftovers) and B1–B4 (merged work). One GATE.
-- [ ] 10 Ask AI redesign (design handoff `design-handoff-3/ask-ai/`). Reference captures: `redesign-captures/10-askai/design/`.
+- [x] 10 Ask AI redesign (design handoff `design-handoff-3/ask-ai/`; closed 2026-10-12, see AUTOPILOT.md steps 1–2). Reference captures: `redesign-captures/10-askai/design/`.
   - [x] Part 0 Inventory — GATE 0 approved 2026-10-11 with decisions: duration from one `GET /agent/runs/{id}` after each answer (never delays it; nothing shown if it fails); Edit question on answers too (secondary); composer limit stays 2000 (warning from 1800); error chips kept, labelled as column-based suggestions; picker keeps Connections, no "Synced" line, a fixed hint with the last pick; loading shows elapsed time and a skeleton only.
   - [x] A Layout, hero, picker, step 2 and suggestion cards
     - >> GATE A; then A2, the owner's change to the empty page (two columns, chooser always open)

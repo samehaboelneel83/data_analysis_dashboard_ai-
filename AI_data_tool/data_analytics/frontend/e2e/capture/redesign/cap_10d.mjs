@@ -41,6 +41,10 @@ const scenes = [
   { id: 'overlay-1024', url: '/ask?dataset=1', convs: CONVS, view: { width: 1024, height: 768 }, act: async p => {
     await p.getByRole('button', { name: /^(History|Show history|السجل|إظهار السجل)$/ }).first().click(); await sleep(700) } },
   { id: 'no-data-1024', url: '/ask', convs: CONVS, view: { width: 1024, height: 768 } },
+  // Autopilot step 2: the polished empty page, and the robot's two reactions to the chooser.
+  { id: 'polish-look', url: '/ask', convs: CONVS, act: async p => { await p.locator('.dl-pick__opt').nth(1).hover(); await sleep(900) } },
+  { id: 'polish-search', url: '/ask', convs: CONVS, act: async p => { await p.keyboard.press('/'); await p.keyboard.type('dem'); await sleep(600) } },
+  { id: 'polish-chosen', url: '/ask', convs: [], act: async p => { await p.locator('.dl-pick__opt').filter({ hasText: 'Demo — Sales' }).first().click(); await sleep(450) } },
 ].filter(s => !only || s.id.startsWith(only))
 
 const browser = await chromium.launch()

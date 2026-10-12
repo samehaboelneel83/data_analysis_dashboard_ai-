@@ -83,6 +83,17 @@ export const en = {
   'ask2.hist.rename': 'Rename {title}',
   'ask2.hist.delete': 'Delete {title}',
   'ask2.hist.titleField': 'Title',
+  // Empty-state polish
+  'ask2.pick.mine': 'Mine',
+  'ask2.pick.test': 'Test data ({n})',
+  'ask2.pick.mode.import': 'Import',
+  'ask2.pick.mode.direct': 'DirectQuery',
+  'ask2.pick.mode.live': 'Live',
+  'ask2.pick.clearShort': 'to clear',
+  'ask2.hero.eyebrow': 'AI data assistant',
+  'ask2.hero.fact1': 'Ask in plain language, in English or Arabic',
+  'ask2.hero.fact2': 'Get a chart and the rows behind it',
+  'ask2.hero.fact3': 'See the SQL behind every answer',
 } as const
 
 export const ar: Record<keyof typeof en, string> = {
@@ -155,4 +166,15 @@ export const ar: Record<keyof typeof en, string> = {
   'ask2.hist.rename': 'إعادة تسمية {title}',
   'ask2.hist.delete': 'حذف {title}',
   'ask2.hist.titleField': 'العنوان',
+  // Empty-state polish
+  'ask2.pick.mine': 'الخاصة بي',
+  'ask2.pick.test': 'بيانات الاختبار ({n})',
+  'ask2.pick.mode.import': 'استيراد',
+  'ask2.pick.mode.direct': 'استعلام مباشر',
+  'ask2.pick.mode.live': 'مباشر',
+  'ask2.pick.clearShort': 'للمسح',
+  'ask2.hero.eyebrow': 'مساعد بيانات بالذكاء الاصطناعي',
+  'ask2.hero.fact1': 'اسأل بلغتك اليومية، بالعربية أو الإنجليزية',
+  'ask2.hero.fact2': 'احصل على مخطط والصفوف التي بُني عليها',
+  'ask2.hero.fact3': 'اطّلع على استعلام SQL وراء كل إجابة',
 }

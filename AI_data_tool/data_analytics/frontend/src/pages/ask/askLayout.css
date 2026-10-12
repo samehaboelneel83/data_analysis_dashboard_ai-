@@ -25,7 +25,6 @@
 .dl-ask__error { margin-bottom: 12px; color: var(--danger); font-size: 13px; }
 .dl-ask__pending { margin: 0 0 12px; font-size: 14px; color: var(--text); }
 .dl-ask__pending q { font-weight: 600; unicode-bidi: isolate; }
-.dl-ask__filter { margin-top: 8px; }
 
 /* The "Asking about" row, then the chat pane, both in the 880px column. */
 .dl-ask__ctx {
@@ -121,7 +120,7 @@
 }
 .dl-ask--empty .dl-ask__foot .dl-ask__col { max-width: 1120px; }
 .dl-ask__split {
-  flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+  flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
   gap: 40px; align-items: stretch;
 }
 .dl-ask__split > .dl-hero { align-self: center; min-width: 0; }
@@ -134,12 +133,16 @@
 }
 .dl-pick__panel:focus-within { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft), var(--dl-shadow-card); }
 .dl-pick__panel .dl-pick__list { flex: 1; min-height: 0; max-height: none; }
-/* The search takes its whole line; the tabs sit under it. */
-.dl-pick__panel .dl-pick__search input { flex-basis: calc(100% - 30px); }
+.dl-pick__panel:focus-within { border-color: var(--mc-border-strong); box-shadow: var(--dl-shadow-card); }
+/* The empty page's picture leaves room for the eyebrow, the 40px headline and the facts. */
+.dl-ask__split .dl-ill { width: min(470px, 100%); }
+.dl-ask__split .dl-hero__title { font-size: 40px; }
 /* Narrower screens: the picture is as wide as its column; the type steps down. */
 @media (max-width: 1279px) {
   .dl-ask__split { gap: 28px; }
-  .dl-ask__split .dl-hero__title { font-size: 28px; }
+  .dl-ask__split .dl-hero__title { font-size: 30px; }
+  .dl-ask__split .dl-hero__facts { margin-top: 12px; gap: 6px; }
+  .dl-ask__split .dl-hero__facts li { font-size: 13px; }
   .dl-ask__split .dl-hero__sub { font-size: 15px; }
 }
 
@@ -150,6 +153,15 @@
 [data-theme="dark"] .dl-hero__accent { color: var(--accent); }
 .dl-hero__sub { margin: 10px auto 0; max-width: 540px; color: var(--muted); font-size: 16px; line-height: 1.5; text-wrap: pretty; }
 .dl-hero__sub b { color: var(--text); font-weight: 600; }
+.dl-hero__eyebrow {
+  display: inline-flex; align-items: center; flex-wrap: wrap; justify-content: center; gap: 6px; margin: 0 0 10px; padding: 4px 12px;
+  border-radius: 999px; background: var(--accent-soft); color: var(--mc-accent-ink, var(--accent)); font-size: 12px; font-weight: 600;
+}
+[data-theme="dark"] .dl-hero__eyebrow { color: var(--accent); }
+.dl-hero__facts { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 8px; text-align: start; }
+.dl-hero__facts li { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--text); }
+.dl-hero__fact-ic { width: 26px; height: 26px; flex: none; border-radius: 8px; display: grid; place-items: center; background: var(--accent-soft); color: var(--mc-accent-ink, var(--accent)); }
+[data-theme="dark"] .dl-hero__fact-ic { color: var(--accent); }
 .dl-hero__step { display: flex; align-items: center; gap: 10px; margin: 28px 0 12px; font-size: 14px; font-weight: 600; }
 .dl-hero__stn { font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: var(--accent); color: var(--mc-accent-fg, var(--surface)); }
 .dl-hero--sm .dl-hero__title { font-size: 28px; }
@@ -415,6 +427,10 @@
 @keyframes dl-bot-spin-y { 0% { transform: scaleX(1); } 25% { transform: scaleX(0) translateY(-18px); } 50% { transform: scaleX(-1) translateY(-26px); } 75% { transform: scaleX(0) translateY(-18px); } 100% { transform: scaleX(1); } }
 .dl-bot[data-hover]:not([data-state="sleep"]) .dl-bot__eyes { transform: scale(1.12); }
 .dl-bot[data-hover]:not([data-state="sleep"]) .dl-bot__chest { fill: var(--dl-series-2); }
+/* The pointer is over the data chooser (on the stage's inline start): an
+   idle robot turns its head and eyes that way. */
+.dl-bot[data-state="idle"][data-look]:not([data-act]) .dl-bot__tilt { transform: rotate(-7deg); }
+.dl-bot[data-state="idle"][data-look]:not([data-act]) .dl-bot__look { transform: translate(-8px, 2px); }
 
 /* The head alone, as the assistant's avatar on a chat card (RobotHead.tsx).
    Only the newest card's head moves: thinking, happy or shaken for a moment,
@@ -472,24 +488,55 @@
 .dl-pick__pop--up { animation-name: dl-pick-in-up; }
 @keyframes dl-pick-in { from { opacity: 0; transform: translateY(-4px); } }
 @keyframes dl-pick-in-up { from { opacity: 0; transform: translateY(4px); } }
-.dl-pick__search { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding-block: 8px; padding-inline: 14px 8px; border-bottom: 1px solid var(--border); }
-.dl-pick__search > svg { color: var(--muted); flex: none; }
-.dl-pick__search input { flex: 1; min-width: 160px; height: 34px; border: 0; outline: 0; background: none; color: var(--text); font: inherit; font-size: 15px; }
-.dl-pick__search input::placeholder { color: var(--muted); }
-/* The search box is the popup's own field: the popup's border is its focus. */
-.dl-pick__search input:focus, .dl-pick__search input:focus-visible { outline: none; box-shadow: none; border: 0; }
+/* The search: a bordered field with its own focus ring (and "/" on the
+   always-open chooser); under it one tools row -- the tabs with their counts,
+   then the page's toggles. */
+.dl-pick__search { display: flex; flex-direction: column; gap: 10px; padding: 12px 12px 10px; border-bottom: 1px solid var(--border); }
+.dl-pick__field {
+  display: flex; align-items: center; gap: 10px; height: 40px; padding-inline: 12px 8px; border-radius: 10px;
+  border: 1px solid var(--mc-border-strong); background: var(--surface); cursor: text;
+}
+.dl-pick__field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.dl-pick__field > svg { color: var(--muted); flex: none; }
+.dl-pick__field input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: none; color: var(--text); font: inherit; font-size: 15px; }
+.dl-pick__field input::placeholder { color: var(--muted); }
+/* The field's frame is the focus ring; the input itself shows none. */
+.dl-pick__field input:focus, .dl-pick__field input:focus-visible { outline: none; box-shadow: none; border: 0; }
+.dl-pick__field kbd, .dl-pick__foot kbd {
+  font: 500 11px var(--font-mono, monospace); padding: 1px 6px; border: 1px solid var(--border); border-bottom-width: 2px;
+  border-radius: 5px; background: var(--bg); color: var(--muted);
+}
+.dl-pick__tools { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .dl-pick__seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 9px; background: var(--surface2); }
 .dl-pick__seg button {
-  height: 26px; padding: 0 10px; border: 0; border-radius: 6px; background: none; color: var(--muted);
-  font: inherit; font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 8px; border: 0; border-radius: 6px; background: none;
+  color: var(--muted); font: inherit; font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer;
 }
 .dl-pick__seg button[aria-selected="true"] { background: var(--surface); color: var(--text); box-shadow: var(--dl-shadow-card); }
+.dl-pick__seg-n { font-size: 11px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+.dl-pick__toggle {
+  height: 28px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--mc-border-strong); background: none; color: var(--muted);
+  font: inherit; font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer;
+}
+.dl-pick__toggle:first-of-type { margin-inline-start: auto; }
+.dl-pick__toggle:hover { color: var(--text); }
+.dl-pick__toggle[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--mc-accent-ink, var(--accent)); }
+[data-theme="dark"] .dl-pick__toggle[aria-pressed="true"] { color: var(--accent); }
+.dl-pick__seg button:focus-visible, .dl-pick__toggle:focus-visible, .dl-pick__upload:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .dl-pick__list { max-height: var(--dl-pick-list-max, 340px); overflow-y: auto; padding: 4px 6px 6px; }
 .dl-pick__group { padding: 10px 10px 4px; font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
 [dir="rtl"] .dl-pick__group { letter-spacing: 0; font-size: 12px; }
-.dl-pick__opt { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 10px; cursor: pointer; }
+.dl-pick__opt { position: relative; display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 10px; cursor: pointer; }
 .dl-pick__opt:hover { background: var(--surface2); }
-.dl-pick__opt--active { background: var(--surface2); box-shadow: inset 0 0 0 1px var(--mc-border-strong); }
+.dl-pick__opt--active { background: var(--surface2); }
+/* The row in hand: an accent bar on its inline start. */
+.dl-pick__opt--active::before { content: ""; position: absolute; inset-block: 8px; inset-inline-start: 0; width: 3px; border-radius: 2px; background: var(--accent); }
+.dl-pick__tile--direct { background: color-mix(in srgb, var(--dl-series-4) 16%, transparent); color: var(--dl-series-4); }
+.dl-pick__opt-end { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.dl-pick__mode { font-size: 11px; font-weight: 600; line-height: 1; padding: 4px 8px; border-radius: 999px; background: var(--surface2); color: var(--muted); white-space: nowrap; }
+.dl-pick__opt--active .dl-pick__mode { background: var(--surface); }
+.dl-pick__mode--direct { color: var(--dl-series-4); }
+.dl-pick__mode--live { color: var(--dl-series-3); }
 .dl-pick__opt-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .dl-pick__opt-name { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: match-parent; }
 .dl-pick__opt-name b { color: var(--accent); }
@@ -497,11 +544,15 @@
 .dl-pick__opt-meta { overflow: hidden; text-overflow: ellipsis; }
 .dl-pick__check { color: var(--accent); flex: none; }
 .dl-pick__none { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 28px 12px; color: var(--muted); font-size: 13px; }
-.dl-pick__foot { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 9px 14px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
-.dl-pick__foot > * { white-space: nowrap; }
-.dl-pick__foot kbd { font: 500 11px var(--font-mono, monospace); padding: 1px 5px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 5px; background: var(--bg); color: var(--text); }
-.dl-pick__upload { margin-inline-start: auto; display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--accent); text-decoration: none; }
-.dl-pick__upload:hover { text-decoration: underline; }
+/* The foot, on one line: the key hints, then Upload dataset. */
+.dl-pick__foot { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+.dl-pick__keys { flex: 1; min-width: 0; display: flex; gap: 12px; overflow: hidden; white-space: nowrap; }
+.dl-pick__upload {
+  flex: none; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 8px;
+  border: 1px solid var(--mc-border-strong); font-weight: 600; color: var(--text); text-decoration: none; white-space: nowrap;
+}
+.dl-pick__upload:hover { border-color: var(--accent); color: var(--mc-accent-ink, var(--accent)); }
+[data-theme="dark"] .dl-pick__upload:hover { color: var(--accent); }
 
 /* ── Suggestion cards ───────────────────────────────────────────────────── */
 .dl-sug { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; width: 100%; }

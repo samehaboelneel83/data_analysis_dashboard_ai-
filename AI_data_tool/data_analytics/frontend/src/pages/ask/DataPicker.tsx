@@ -1,10 +1,9 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
-import { Check, ChevronDown, ChevronsUpDown, Database, Plug, Search, SearchX, Upload } from 'lucide-react'
-import { useT } from '../../i18n'
+import { Check, ChevronDown, ChevronsUpDown, Database, Plug, Search, SearchX, Upload, Zap } from 'lucide-react'
+import { formatTimeAgo, useT } from '../../i18n'
 import { localDigits } from '../../lib/arabicFormats'
-import { fmtDate } from './dates'
 
 /**
  * Step 1 of Ask AI: choose the data (step 10 design: `picker()` / `list()`).
@@ -34,6 +33,15 @@ export interface PickerItem {
   cols?: number | null
   sourceType?: string | null
   updated?: string | null
+  /** How a dataset holds its data; a connection is always live. */
+  mode?: 'import' | 'directquery'
+}
+
+/** The page's own filters, shown in the chooser's one tools row beside the
+ *  tabs: only my datasets, and the test-looking ones (hidden by default). */
+export interface PickerTools {
+  mine?: { on: boolean; set: (on: boolean) => void }
+  test?: { on: boolean; set: (on: boolean) => void; n: number }
 }
 
 const RECENT_KEY = 'datalytics.ask.recent'
@@ -73,12 +81,6 @@ export function placePopup(trigger: DOMRect, bounds: { top: number; bottom: numb
   return { up, listMax: Math.max(LIST_MIN, Math.min(LIST_MAX, Math.floor(room))) }
 }
 
-function shortDate(iso?: string | null): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  return isNaN(d.getTime()) ? '' : fmtDate(d, { month: 'short', day: 'numeric', year: 'numeric' })
-}
-
 /** The typed part of a name, in the accent (the design's search highlight). */
 function marked(name: string, q: string): ReactNode {
   const i = q ? name.toLowerCase().indexOf(q) : -1
@@ -88,12 +90,13 @@ function marked(name: string, q: string): ReactNode {
 
 type Tab = 'all' | 'dataset' | 'source'
 
-export default function DataPicker({ items, value, onChoose, size = 'hero', loading }: {
+export default function DataPicker({ items, value, onChoose, size = 'hero', loading, tools }: {
   items: PickerItem[]
   value: string
   onChoose: (key: string) => void
   size?: 'hero' | 'compact' | 'inline'
   loading?: boolean
+  tools?: PickerTools
 }) {
   const t = useT()
   const inline = size === 'inline'
@@ -185,6 +188,21 @@ export default function DataPicker({ items, value, onChoose, size = 'hero', load
     document.getElementById(`${uid}-opt-${active}`)?.scrollIntoView?.({ block: 'nearest' })
   }, [active, uid])
 
+  // "/" goes to the always-open chooser's search, from anywhere that is not
+  // already a text box.
+  useEffect(() => {
+    if (!inline) return
+    const onSlash = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return
+      const el = e.target as HTMLElement | null
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return
+      e.preventDefault()
+      inputRef.current?.focus()
+    }
+    window.addEventListener('keydown', onSlash)
+    return () => window.removeEventListener('keydown', onSlash)
+  }, [inline])
+
   const close = () => {
     // Inline, Escape only clears the search: there is nothing to close.
     if (inline) { setQuery(''); return }
@@ -213,16 +231,24 @@ export default function DataPicker({ items, value, onChoose, size = 'hero', load
     if (i.cols != null) parts.push(t('ask2.pick.cols', { n: num(i.cols) }))
     return parts.join(' · ')
   }
+  // When a dataset was last updated, in words ("3 days ago"; a date after a
+  // month), from the app's shared formatter. A connection has no such time.
   const updated = (i: PickerItem) => {
-    const d = i.kind === 'dataset' ? shortDate(i.updated) : ''
-    return d ? t('ask2.pick.updated', { date: localDigits(d) }) : ''
+    const ago = i.kind === 'dataset' ? formatTimeAgo(i.updated ?? undefined, t) : null
+    return ago ? localDigits(ago) : ''
   }
+  const modeOf = (i: PickerItem) => (i.kind === 'source' ? 'live' : i.mode === 'directquery' ? 'direct' : 'import')
 
-  const Tile = ({ item, xs }: { item: PickerItem; xs?: boolean }) => (
-    <span className={`dl-pick__tile dl-pick__tile--${item.kind}${xs ? ' dl-pick__tile--xs' : ''}`} aria-hidden>
-      {item.kind === 'dataset' ? <Database size={xs ? 13 : 16} /> : <Plug size={xs ? 13 : 16} />}
-    </span>
-  )
+  const Tile = ({ item, xs }: { item: PickerItem; xs?: boolean }) => {
+    const mode = modeOf(item)
+    const Icon = mode === 'live' ? Plug : mode === 'direct' ? Zap : Database
+    return (
+      <span className={`dl-pick__tile dl-pick__tile--${item.kind} dl-pick__tile--${mode}${xs ? ' dl-pick__tile--xs' : ''}`} aria-hidden>
+        <Icon size={xs ? 13 : 16} />
+      </span>
+    )
+  }
+  const tabCount = { all: items.length, dataset: nDatasets, source: nSources }
 
   const counts = [
     nDatasets ? t('ask2.pick.datasets', { n: num(nDatasets) }) : '',
@@ -238,20 +264,41 @@ export default function DataPicker({ items, value, onChoose, size = 'hero', load
       data-placement={inline ? undefined : pos.up ? 'top' : 'bottom'}
       style={inline ? undefined : { ...pos.style, '--dl-pick-list-max': `${pos.listMax}px` } as CSSProperties}>
       <div className="dl-pick__search">
-        <Search size={16} aria-hidden />
-        <input ref={inputRef} value={query} onChange={e => setQuery(e.target.value)} onKeyDown={onKey}
-          role="combobox" aria-expanded="true" aria-autocomplete="list"
-          aria-controls={`${uid}-list`} aria-label={t('ask2.pick.search')}
-          aria-activedescendant={flat[active] ? `${uid}-opt-${active}` : undefined}
-          placeholder={t('ask2.pick.search')} autoComplete="off" />
-        {nSources > 0 && nDatasets > 0 && (
-          <div className="dl-pick__seg" role="tablist" aria-label={t('ask2.pick.dialog')}>
-            {(['all', 'dataset', 'source'] as const).map(k => (
-              <button key={k} type="button" role="tab" aria-selected={tab === k}
-                onMouseDown={e => e.preventDefault()} onClick={() => { setTab(k); inputRef.current?.focus() }}>
-                {t(k === 'all' ? 'ask2.pick.all' : k === 'dataset' ? 'ask2.pick.tabDatasets' : 'ask2.pick.tabConnections')}
+        <label className="dl-pick__field">
+          <Search size={16} aria-hidden />
+          <input ref={inputRef} value={query} onChange={e => setQuery(e.target.value)} onKeyDown={onKey}
+            role="combobox" aria-expanded="true" aria-autocomplete="list"
+            aria-controls={`${uid}-list`} aria-label={t('ask2.pick.search')}
+            aria-activedescendant={flat[active] ? `${uid}-opt-${active}` : undefined}
+            aria-keyshortcuts={inline ? '/' : undefined}
+            placeholder={t('ask2.pick.search')} autoComplete="off" />
+          {inline && <kbd aria-hidden>/</kbd>}
+        </label>
+        {((nSources > 0 && nDatasets > 0) || tools?.mine || tools?.test) && (
+          <div className="dl-pick__tools">
+            {nSources > 0 && nDatasets > 0 && (
+              <div className="dl-pick__seg" role="tablist" aria-label={t('ask2.pick.dialog')}>
+                {(['all', 'dataset', 'source'] as const).map(k => (
+                  <button key={k} type="button" role="tab" aria-selected={tab === k}
+                    onMouseDown={e => e.preventDefault()} onClick={() => { setTab(k); inputRef.current?.focus() }}>
+                    {t(k === 'all' ? 'ask2.pick.all' : k === 'dataset' ? 'ask2.pick.tabDatasets' : 'ask2.pick.tabConnections')}
+                    {' '}<span className="dl-pick__seg-n" dir="ltr">{num(tabCount[k])}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {tools?.mine && (
+              <button type="button" className="dl-pick__toggle" aria-pressed={tools.mine.on}
+                onMouseDown={e => e.preventDefault()} onClick={() => tools.mine!.set(!tools.mine!.on)}>
+                {t('ask2.pick.mine')}
               </button>
-            ))}
+            )}
+            {tools?.test && (
+              <button type="button" className="dl-pick__toggle" aria-pressed={tools.test.on}
+                onMouseDown={e => e.preventDefault()} onClick={() => tools.test!.set(!tools.test!.on)}>
+                {t('ask2.pick.test', { n: num(tools.test.n) })}
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -280,7 +327,10 @@ export default function DataPicker({ items, value, onChoose, size = 'hero', load
                     <span className="dl-pick__opt-name" dir="auto">{marked(item.name, q)}</span>
                     <span className="dl-pick__opt-meta">{meta(item)}</span>
                   </span>
-                  {up && <span className="dl-pick__opt-up">{up}</span>}
+                  <span className="dl-pick__opt-end">
+                    <span className={`dl-pick__mode dl-pick__mode--${modeOf(item)}`}>{t(`ask2.pick.mode.${modeOf(item)}`)}</span>
+                    {up && <span className="dl-pick__opt-up">{up}</span>}
+                  </span>
                   {item.key === value && <Check size={15} className="dl-pick__check" aria-hidden />}
                 </div>
               )
@@ -289,9 +339,11 @@ export default function DataPicker({ items, value, onChoose, size = 'hero', load
         ))}
       </div>
       <div className="dl-pick__foot">
-        <span aria-hidden><kbd>↑</kbd> <kbd>↓</kbd> {t('ask2.pick.move')}</span>
-        <span aria-hidden><kbd>Enter</kbd> {t('ask2.pick.select')}</span>
-        <span aria-hidden><kbd>Esc</kbd> {t(inline ? 'ask2.pick.clear' : 'ask2.pick.close')}</span>
+        <span className="dl-pick__keys" aria-hidden>
+          <span><kbd>↑</kbd> <kbd>↓</kbd> {t('ask2.pick.move')}</span>
+          <span><kbd>Enter</kbd> {t('ask2.pick.select')}</span>
+          <span><kbd>Esc</kbd> {t(inline ? 'ask2.pick.clearShort' : 'ask2.pick.close')}</span>
+        </span>
         <Link to="/upload" className="dl-pick__upload"><Upload size={14} aria-hidden /> {t('ask2.pick.upload')}</Link>
       </div>
     </div>

@@ -74,9 +74,9 @@ describe('the picker (step 10)', () => {
   it('tabs narrow the list to datasets or to connections', () => {
     render(<MemoryRouter><DataPicker items={ITEMS} value="" onChoose={() => {}} /></MemoryRouter>)
     open()
-    fireEvent.click(screen.getByRole('tab', { name: 'Connections' }))
+    fireEvent.click(screen.getByRole('tab', { name: /^Connections/ }))
     expect(screen.getAllByRole('option').map(o => o.getAttribute('data-value'))).toEqual(['s:3'])
-    fireEvent.click(screen.getByRole('tab', { name: 'Datasets' }))
+    fireEvent.click(screen.getByRole('tab', { name: /^Datasets/ }))
     expect(screen.getAllByRole('option').map(o => o.getAttribute('data-value'))).toEqual(['d:1', 'd:2'])
   })
 
@@ -150,5 +150,72 @@ describe('the inline chooser (empty page, owner\'s change)', () => {
     fireEvent.keyDown(search, { key: 'ArrowDown' })
     fireEvent.keyDown(search, { key: 'Enter' })
     expect(onChoose).toHaveBeenCalledWith('s:3')
+  })
+})
+
+describe('the chooser, polished (autopilot step 2)', () => {
+  const ITEMS2 = [
+    { key: 'd:1', kind: 'dataset' as const, name: 'Demo — Sales', rows: 2000, cols: 13, updated: new Date(Date.now() - 3 * 86400_000).toISOString(), mode: 'import' as const },
+    { key: 'd:2', kind: 'dataset' as const, name: 'Live Orders', rows: 12000, cols: 8, updated: new Date(Date.now() - 2 * 3600_000).toISOString(), mode: 'directquery' as const },
+    { key: 's:3', kind: 'source' as const, name: 'Warehouse', sourceType: 'postgresql', updated: '2026-01-01T00:00:00' },
+  ]
+  const open = (extra: Partial<Parameters<typeof DataPicker>[0]> = {}) =>
+    render(<MemoryRouter><DataPicker items={ITEMS2} value="" onChoose={vi.fn()} size="inline" {...extra} /></MemoryRouter>)
+
+  it('says how each row holds its data, and when a dataset was updated, in words', () => {
+    open()
+    const row = (name: string) => screen.getAllByRole('option').find(o => o.textContent?.includes(name))!
+    expect(row('Demo — Sales').querySelector('.dl-pick__mode')).toHaveTextContent('Import')
+    expect(row('Demo — Sales').querySelector('.dl-pick__opt-up')).toHaveTextContent('3 days ago')
+    expect(row('Live Orders').querySelector('.dl-pick__mode')).toHaveTextContent('DirectQuery')
+    expect(row('Live Orders').querySelector('.dl-pick__opt-up')).toHaveTextContent('2 hours ago')
+    expect(row('Warehouse').querySelector('.dl-pick__mode')).toHaveTextContent('Live')
+    expect(row('Warehouse').querySelector('.dl-pick__opt-up')).toBeNull()
+  })
+
+  it('counts each tab, and holds the page’s toggles in the same row', () => {
+    const mine = { on: false, set: vi.fn() }
+    const test = { on: true, set: vi.fn(), n: 2 }
+    const { container } = open({ tools: { mine, test } })
+    expect(screen.getAllByRole('tab').map(b => b.textContent)).toEqual(['All 3', 'Datasets 2', 'Connections 1'])
+    const tools = container.querySelector('.dl-pick__tools') as HTMLElement
+    const mineBtn = within(tools).getByRole('button', { name: 'Mine' })
+    expect(mineBtn).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.click(mineBtn)
+    expect(mine.set).toHaveBeenCalledWith(true)
+    const testBtn = within(tools).getByRole('button', { name: 'Test data (2)' })
+    expect(testBtn).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(testBtn)
+    expect(test.set).toHaveBeenCalledWith(false)
+  })
+
+  it('"/" goes to the search, but not from inside a text box', () => {
+    render(<MemoryRouter><input aria-label="other" /><DataPicker items={ITEMS2} value="" onChoose={vi.fn()} size="inline" /></MemoryRouter>)
+    const search = screen.getByRole('combobox')
+    expect(search).toHaveAttribute('aria-keyshortcuts', '/')
+    fireEvent.keyDown(screen.getByLabelText('other'), { key: '/' })
+    expect(search).not.toHaveFocus()
+    fireEvent.keyDown(document.body, { key: '/' })
+    expect(search).toHaveFocus()
+  })
+
+  it('ends with the key hints and Upload dataset on one line', () => {
+    const { container } = open()
+    const foot = container.querySelector('.dl-pick__foot') as HTMLElement
+    expect(foot.querySelector('.dl-pick__keys')).toHaveTextContent('to move')
+    expect(within(foot).getByRole('link', { name: 'Upload dataset' })).toHaveAttribute('href', '/upload')
+  })
+
+  it('the hero has an eyebrow and facts when given', () => {
+    render(<AskHero id="h2" title="Ask your data anything" sub="sub" eyebrow="AI data assistant · 8 datasets"
+      facts={[{ icon: () => null, text: 'One' }, { icon: () => null, text: 'Two' }, { icon: () => null, text: 'Three' }] as never} />)
+    expect(screen.getByText('AI data assistant · 8 datasets')).toHaveClass('dl-hero__eyebrow')
+    expect(screen.getAllByRole('listitem').map(l => l.textContent)).toEqual(['One', 'Two', 'Three'])
+  })
+
+  it('the new strings are in Arabic', () => {
+    for (const k of ['ask2.pick.mine', 'ask2.pick.mode.import', 'ask2.pick.mode.direct', 'ask2.pick.mode.live', 'ask2.hero.eyebrow', 'ask2.hero.fact1', 'ask2.hero.fact2', 'ask2.hero.fact3'] as const) {
+      expect(translate('ar', k), k).not.toBe(translate('en', k))
+    }
   })
 })

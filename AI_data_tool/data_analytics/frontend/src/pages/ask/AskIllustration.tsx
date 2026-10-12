@@ -7,6 +7,6 @@ import { useRobotMood } from './robotMood'
  * alone, smaller.
  */
 export default function AskIllustration({ small = false }: { small?: boolean }) {
-  const { state, nod } = useRobotMood()
-  return <AskRobot state={state} nod={nod} bare={small} />
+  const { state, nod, look, cheer } = useRobotMood()
+  return <AskRobot state={state} nod={nod} bare={small} look={look} cheer={cheer} />
 }

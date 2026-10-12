@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type FocusEvent, type FormEvent } from 'react'
+import { useContext, useEffect, useMemo, useRef, useState, type FocusEvent, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Bot, History } from 'lucide-react'
+import { BarChart3, Bot, Code2, History, MessageSquareText, Sparkles } from 'lucide-react'
 import EmptyState from '../components/ui/EmptyState'
 import ChatPane from '../components/chat/ChatPane'
 import Composer from '../components/chat/Composer'
@@ -17,8 +17,9 @@ import { connectionSuggestionCards, datasetSuggestionCards } from './ask/suggest
 import './ask/ask.css'
 import './ask/askLayout.css'
 import './ask/askCards.css'
-import DatasetListFilter, { useCleanDatasets } from '../components/dataset/DatasetListFilter'
-import { isCertified } from '../lib/cleanDatasets'
+import { AuthContext } from '../contexts/AuthContext'
+import { cleanDatasets, isCertified } from '../lib/cleanDatasets'
+import { localDigits } from '../lib/arabicFormats'
 
 /**
  * The agent's own page (step 10 design). Two states:
@@ -63,7 +64,18 @@ export default function AskAI() {
   const [sourceItems, setSourceItems] = useState<PickerItem[]>([])
   // 4.7: certified first, test-looking leftovers out of sight -- in the
   // picker a newcomer sees first.
-  const clean = useCleanDatasets(usableDatasets)
+  // Two toggles in the chooser's tools row: only mine, and the test-looking
+  // ones. This page's own (not the shared All / Certified / Mine choice other
+  // pickers remember), so nothing here is filtered by a control it lacks.
+  const userId = useContext(AuthContext)?.user?.id ?? null
+  const [mineOnly, setMineOnly] = useState(false)
+  const [showTest, setShowTest] = useState(false)
+  const clean = useMemo(() => {
+    const got = cleanDatasets(usableDatasets, mineOnly ? 'mine' : 'all', userId, showTest)
+    // "Mine" with nothing of mine would be an empty chooser: show all instead.
+    const shown = got.visible.length === 0 && mineOnly ? cleanDatasets(usableDatasets, 'all', userId, showTest) : got
+    return { ...shown, testCount: cleanDatasets(usableDatasets, mineOnly ? 'mine' : 'all', userId, false).hiddenTest }
+  }, [usableDatasets, mineOnly, userId, showTest])
   // The dataset the URL is about is always listed, even one hidden as
   // test-looking: a link (Home's Ask AI, a starter) can open it, and the
   // picker must then name it rather than say "Choose a dataset" (QA B2).
@@ -75,6 +87,7 @@ export default function AskAI() {
       ...[...linked, ...clean.visible].map(d => ({
         key: `d:${d.id}`, kind: 'dataset' as const, name: isCertified(d) ? `✓ ${d.name}` : d.name,
         rows: d.row_count ?? null, cols: d.col_count ?? null, updated: d.updated_at ?? null,
+        mode: d.mode === 'directquery' ? 'directquery' as const : 'import' as const,
       })),
       ...sourceItems,
     ]
@@ -162,7 +175,7 @@ export default function AskAI() {
   const choose = (value: string) => {
     // "d:32" or "s:3" -- one picker, two scope kinds, because the question
     // "what am I asking about?" has one answer, not two fields.
-    signalRobot('rest')
+    signalRobot(value ? 'chosen' : 'rest')
     if (!value) { setParams({}, { replace: true }); return }
     const [kind, id] = value.split(':')
     setParams(kind === 's' ? { source: id } : { dataset: id }, { replace: true })
@@ -249,6 +262,11 @@ export default function AskAI() {
     else if (folded) toggleFold()
   }
   const noData = !loading && !error && items.length === 0
+  const nSets = items.filter(i => i.kind === 'dataset').length
+  const heroCounts = [
+    nSets ? t('ask2.pick.datasets', { n: localDigits(String(nSets)) }) : '',
+    items.length - nSets ? t('ask2.pick.connections', { n: localDigits(String(items.length - nSets)) }) : '',
+  ].filter(Boolean)
 
   if (!scoped) {
     return (
@@ -266,16 +284,26 @@ export default function AskAI() {
                 // and the subtitle on the inline end. The page does not
                 // scroll: the chooser's list scrolls in its own column.
                 <div className="dl-ask__split">
-                  <div className="dl-ask__chooser" onFocus={searchBox} onBlur={searchBox} onInput={searchBox}>
+                  <div className="dl-ask__chooser" onFocus={searchBox} onBlur={searchBox} onInput={searchBox}
+                    onPointerEnter={() => signalRobot('look-on')} onPointerLeave={() => signalRobot('look-off')}>
                     {pendingQ && (
                       <p className="dl-ask__pending" data-testid="ask-pending-q">
                         {t('ask2.pendingQ')} <q dir="auto">{pendingQ}</q>
                       </p>
                     )}
-                    <DataPicker items={items} value="" onChoose={choose} size="inline" loading={loading} />
-                    <div className="dl-ask__filter"><DatasetListFilter state={clean} /></div>
+                    <DataPicker items={items} value="" onChoose={choose} size="inline" loading={loading}
+                      tools={{
+                        mine: clean.mine > 0 ? { on: mineOnly, set: setMineOnly } : undefined,
+                        test: clean.testCount > 0 ? { on: showTest, set: setShowTest, n: clean.testCount } : undefined,
+                      }} />
                   </div>
-                  <AskHero id="dl-ask-title" title={t('ask2.hero.title')} sub={t('ask2.hero.sub')} />
+                  <AskHero id="dl-ask-title" title={t('ask2.hero.title')} sub={t('ask2.hero.sub')}
+                    eyebrow={<><Sparkles size={13} aria-hidden /> {[t('ask2.hero.eyebrow'), ...heroCounts].join(' · ')}</>}
+                    facts={[
+                      { icon: MessageSquareText, text: t('ask2.hero.fact1') },
+                      { icon: BarChart3, text: t('ask2.hero.fact2') },
+                      { icon: Code2, text: t('ask2.hero.fact3') },
+                    ]} />
                 </div>
               )}
             </div>

@@ -58,7 +58,7 @@ Everything else: decide using the defaults below, record the decision in the Pro
 ### [x] 1. Ask AI Part D: history rail
 As planned in PLAN.md step 10. Restyle, and move the rail to the inline-end at 288px; it becomes an overlay below 1180px. Today / Earlier groups, New chat, rename, delete, collapse, filtered to the chosen data, and empty states ("Pick a dataset to see its questions." / "No questions yet for this dataset."). Show creation time only; failed flags and updated time are backend items.
 
-### [ ] 2. Ask AI polish and close step 10
+### [x] 2. Ask AI polish and close step 10
 - **Empty state:** match `ask-ai/empty-polish/ask-ai-empty-preview.html`.
   - One tools row inside the chooser: All / Datasets / Connections with counts, plus a "Mine" toggle. Remove the second filter row (Certified / Mine / test-looking). If "hide test-looking" must stay, make it a toggle in the same row.
   - Type tiles and a mode chip per row: Import, DirectQuery, Live. Under the chip, a relative updated time from the shared date formatter.
@@ -156,3 +156,10 @@ Follow `docs/redesign/11-Lineage.md`.
 - **Missing inputs noted:** `ask-ai/empty-polish/ask-ai-empty-preview.html` and `docs/redesign/11-Lineage.md` are not on disk. Steps 2 and 4 will follow this file's own text and the prototypes that exist (`redesign/ask2.*`, `hero2.*`, `lineage/`, `redesign/lin.*`).
 - **Tests:** `askHistory.test.tsx` (7). Full suite 351 files / 4413 tests, one failure: the known flaky `Lineage.test.tsx`. Type-check and build pass.
 - **Captures:** `redesign-captures/ap1-history/{before,after}/` (`cap_10d.mjs`, EN light and AR dark, 1440 and 1024).
+
+### 2. Ask AI polish, step 10 closed (2026-10-12)
+- **Changed (from this file's list; the preview file is not on disk):** one tools row in the chooser: All / Datasets / Connections with counts, then "Mine" and "Test data (n)" toggles; the old second filter row (Certified / Mine / test-looking) is gone from Ask AI. Rows: a tile and a mode chip per row (Import, DirectQuery, Live) with the relative updated time from the shared `formatTimeAgo` under it; an accent bar on the active row. A bordered search with its own focus ring and a "/" shortcut; a one-line footer (key hints, outlined Upload dataset). The hero: an eyebrow with counts, a 40px title, three translated facts. Send was already neutral when disabled.
+- **Decision:** "Certified" is dropped from the Ask AI chooser (not in the list); certified datasets still sort first. The Mine / test toggles are page state, not the shared remembered filter.
+- **Robot (from Ask AI Redesign v2):** an idle robot looks toward the chooser while the pointer is over it; choosing data gives a short happy bounce with a spark burst (not confetti).
+- **Backend items:** none new. **Tests:** chooser polish (6), robot reactions (2); full suite 351 files / 4421 tests pass; type-check and build pass.
+- **Captures:** `redesign-captures/ap2-polish/{before,after}/` (`cap_10d.mjs` `no-data`, `polish-*`).

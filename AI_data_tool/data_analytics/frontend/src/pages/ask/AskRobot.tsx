@@ -117,10 +117,15 @@ export function RobotHeadArt({ uid, gaze }: { uid: string; gaze?: Ref<SVGGElemen
   )
 }
 
-export default function AskRobot({ state = 'idle', nod = 0, bare = false }: {
+export default function AskRobot({ state = 'idle', nod = 0, bare = false, look = false, cheer = false }: {
   state?: RobotState
   nod?: number
   bare?: boolean
+  /** The pointer is over the data chooser: while idle, it looks that way. */
+  look?: boolean
+  /** Its happy state is the cheer at choosing the data: a few sparks, not an
+   *  answer's confetti. */
+  cheer?: boolean
 }) {
   const t = useT()
   const uid = useId().replace(/:/g, '')
@@ -239,8 +244,9 @@ export default function AskRobot({ state = 'idle', nod = 0, bare = false }: {
   useEffect(() => {
     engine.current?.clearAct()
     if (shown !== 'idle' && gaze.current) gaze.current.style.transform = ''
-    if (shown === 'happy') engine.current?.burst('confetti')
+    if (shown === 'happy') engine.current?.burst(cheer ? 'spark' : 'confetti')
     if (shown === 'idle') engine.current?.arm()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shown])
 
   // A nod on each keystroke.
@@ -369,9 +375,9 @@ export default function AskRobot({ state = 'idle', nod = 0, bare = false }: {
         <div className="dl-ill__fx" ref={fx} aria-hidden="true" />
 
         {reduced ? (
-          <div className="dl-bot" data-state={shown} aria-hidden="true" ref={el => { robot.current = el }}>{drawing}</div>
+          <div className="dl-bot" data-state={shown} data-look={look ? '' : undefined} aria-hidden="true" ref={el => { robot.current = el }}>{drawing}</div>
         ) : (
-          <button type="button" className="dl-bot" data-state={shown} aria-label={t('ask2.robot.label')}
+          <button type="button" className="dl-bot" data-state={shown} data-look={look ? '' : undefined} aria-label={t('ask2.robot.label')}
             ref={el => { robot.current = el }} onClick={press}
             onPointerEnter={() => hover(true)} onPointerLeave={() => hover(false)}>
             {drawing}
