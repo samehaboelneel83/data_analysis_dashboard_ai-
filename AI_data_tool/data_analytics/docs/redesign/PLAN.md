@@ -222,6 +222,8 @@ Not part of the frontend steps (1–7); candidates for the handoff's section 7 p
 | Upload (autopilot 5) | Import settings: column types, header row, delimiter, encoding, date format | `POST /datasets` takes only file, name, description and sheet. |
 | Upload (autopilot 5) | A sample dataset to try, and per-file status within a batch | No endpoint for one sample; a batch is one request with no per-file progress. |
 | AI button (autopilot 6) | A count of new insights for a dataset | The button's badge needs it without running a full scan (`POST /datasets/{id}/insights` computes them). |
+| Connections (autopilot 7) | A connection's stored status, last check and stability | Status is shown only from this session's test or the latest metadata sync; the design's "checked 8 min ago" and "Unstable: 3 of the last 5 checks" need stored test results. |
+| Connections (autopilot 7) | Table count per connection in the list | Only the schema call or a sync gives it; the list does not call either per row. |
 | 7-QA B6 | Ask AI is slow (about 70 s for a simple answer, about 4 min before a clarification), with no timeout or cancel | Needs a server-side timeout and a cancel endpoint (AN2: stream progress + cancel). |
 
 ## Log

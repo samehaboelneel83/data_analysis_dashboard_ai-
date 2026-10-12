@@ -108,7 +108,7 @@ Follow `docs/redesign/11-Lineage.md`.
   - RTL at the bottom-left.
 - It is the existing copilot button; keep its behaviour (in Edit it's the page copilot) and the constraint that it never covers panels.
 
-### [ ] 7. Connections redesign
+### [x] 7. Connections redesign
 - Design: `datalytics-archive/Connections Redesign.html`, prototype `redesign/connections.html` (`cn-core.js`, `cn-review.js`, `cn.css`).
 - Frames:
   - List: default with failing and unstable rows, row ⋮ menu, empty, loading.
@@ -191,3 +191,11 @@ Follow `docs/redesign/11-Lineage.md`.
 - **Kept:** it opens the page's existing AI panel beside the dashboard (never over other panels); Ctrl+/ toggles it (the page's handler); hidden in Present (checked) and in Edit, where the page copilot is used.
 - **Left out:** the "new insight" badge (knowing whether new insights exist needs a scan; backend row: an insight count). The design's own pop-over panel states (suggestions, thinking, mini chart) are the existing panel's, unchanged.
 - **Tests:** AskFab (3) plus the builder's existing button tests; full suite 356 files / 4445 pass; type-check and build pass. **Captures:** `redesign-captures/ap6-ai-button/{before,after}/` (`cap_ap6.mjs`).
+
+### 7. Connections (2026-10-12)
+- **Part 0:** list, row menu, empty, loading, new/edit drawer with a type grid, test result and Fix = **frontend only**. "Last checked" and stored health / "unstable" (needs past test results), table counts per connection, Duplicate = **needs backend** (left out). Review screens (preview, columns, query, relationships, entities, business terms) already exist; restyled.
+- **A (`f15c78b`):** the list as the design's table: type tile, name, `type · host/db`; a status pill from this session's test, else the latest metadata sync (`GET /sync/latest` per connection) with its error; last sync time; datasets that read from it; Open, hover Test / Browse / Query builder, ⋮ (Metadata, Edit, Delete); Fix on a failed test opens Edit. Loading skeleton and the design's empty state. New / Edit is a drawer; a new connection starts on a searchable type grid. Kept: the shared list search (now always shown), Guided setup on every row (the teammate's flow), `/setup/:id` after create, the 7-QA5 F4 autofill rules, Combine, imports queue.
+- **B:** the review page: breadcrumb, the source as the heading with its sync status, type and stats, Run sync / Guided setup / ⋮ (Quick suggestion); the description beside the sync summary; a sticky tab strip with icons, counts and the search. Content of the tabs unchanged.
+- **For step 9:** `SyncProgress` ("This source has not been synced yet…") and the join graph's "No tables yet…" are English in Arabic (pre-existing).
+- **Backend items added:** a connection's stored status and last check; table count per connection.
+- **Tests:** list and drawer (6); existing tests updated for the type step and new labels; full suite 357 files / 4451 pass; type-check and build pass. **Captures:** `redesign-captures/ap7-connections/{before,after,design}/` (`cap_ap7.mjs`).
