@@ -17,12 +17,14 @@ import { ar as pgLineage } from './pages/lineage'
 import { ar as pgUpload } from './pages/upload'
 import { ar as pgConnections } from './pages/connections'
 import { ar as pgPolish } from './pages/polish'
+import { ar as pgI2d } from './pages/i18n2Dataset'
+import { ar as pgI2c } from './pages/i18n2Common'
 
 /** Arabic UI strings. Keys must match `en.ts` exactly. */
 export const ar: Record<MessageKey, string> = {
   ...bcCanvas, ...bcPanes, ...bcRules, ...bcShell, ...bcStats, ...bcDialogs,
   // 8-i18n: the pages outside the Builder, one module per area (i18n/pages/).
-  ...pgAdminSecurity, ...pgAdminPlatform, ...pgDataPages, ...pgPanelsA, ...pgPanelsB, ...pgModelsMaps, ...pgTypes, ...pgAskAi, ...pgLineage, ...pgUpload, ...pgConnections, ...pgPolish,
+  ...pgAdminSecurity, ...pgAdminPlatform, ...pgDataPages, ...pgPanelsA, ...pgPanelsB, ...pgModelsMaps, ...pgTypes, ...pgAskAi, ...pgLineage, ...pgUpload, ...pgConnections, ...pgPolish, ...pgI2d, ...pgI2c,
   'nav.home': 'الرئيسية',
   'nav.askAi': 'اسأل الذكاء الاصطناعي',
   'fab.tip': 'اسأل الذكاء الاصطناعي عن هذه اللوحة',

@@ -19,26 +19,14 @@ import ColumnLineage from './ColumnLineage'
  * `categorical` was charted as one bar per distinct comment; an id column was
  * summed into a total with no referent.
  */
-const ROLES: { value: NonNullable<ColumnMeta['role']>; label: string; why: string }[] = [
-  { value: 'measure',    label: 'Measure',    why: 'a number worth summing or averaging' },
-  { value: 'category',   label: 'Category',   why: 'something to group or break down by' },
-  { value: 'temporal',   label: 'Date/time',  why: 'can carry a trend or a forecast' },
-  { value: 'geography',  label: 'Geography',  why: 'can be drawn on a map' },
-  { value: 'freetext',   label: 'Free text',  why: 'prose - never a chart axis; topic analysis reads it' },
-  { value: 'identifier', label: 'Identifier', why: 'counted, never summed' },
-]
+const ROLES: NonNullable<ColumnMeta['role']>[] = ['measure', 'category', 'temporal', 'geography', 'freetext', 'identifier']
 
 /** How a measure rolls up when a chart, an insight or an alert does not say.
  *  "Average" for a salary is what keeps "M has 60% of salary" off the page. */
-const SUMMARIES: { value: string; label: string }[] = [
-  { value: 'sum', label: 'Sum' },
-  { value: 'avg', label: 'Average' },
-  { value: 'median', label: 'Median' },
-  { value: 'min', label: 'Minimum' },
-  { value: 'max', label: 'Maximum' },
-  { value: 'countd', label: 'Count distinct' },
-]
-const SUMMARY_LABEL: Record<string, string> = Object.fromEntries(SUMMARIES.map(x => [x.value, x.label]))
+const SUMMARIES = ['sum', 'avg', 'median', 'min', 'max', 'countd']
+const isSummary = (v: string) => SUMMARIES.includes(v)
+/** The summary as a lower-case word ("average"), for a sentence. */
+const summaryWord = (v: string, t: ReturnType<typeof useT>) => (isSummary(v) ? t(`cols3.agg.${v}` as MessageKey) : v)
 
 /** A short code that needs a gloss ("d001", "M", "CS") -- not a value already
  *  written in words. Mirrors `is_code_like` in services/insights.py. */
@@ -88,7 +76,7 @@ function useAs(name: string, dtype: string, meta: ColumnMeta | undefined, t: Ret
   const role = meta?.role
   if (role === 'measure' || (!role && dtype === 'numeric' && nonAdditiveKind(name) === null)) {
     const agg = meta?.aggregation ?? defaultSummary(name)
-    const aggWord = SUMMARY_LABEL[agg] ? t(`cols3.agg.${agg}` as MessageKey) : agg
+    const aggWord = summaryWord(agg, t)
     return { label: t('cols3.use.measure', { agg: aggWord }), measure: true }
   }
   if (role === 'temporal' || (!role && dtype === 'datetime')) return { label: t('cols3.use.time'), measure: false }
@@ -152,7 +140,7 @@ export default function ColumnMeaningPanel(
       toast.success(note)
       onSaved?.()
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail ?? 'Could not save')
+      toast.error(e?.response?.data?.detail ?? t('i2d.cm.saveFailed'))
     } finally { setBusy(false) }
   }
 
@@ -168,17 +156,17 @@ export default function ColumnMeaningPanel(
       // Said plainly, because it is the surprising half: the sentence just
       // became the answer for every dataset built from that table.
       toast.success(r.shared
-        ? `Saved. ${r.object}.${r.column} now reads this way in every dataset built from it.`
-        : 'Saved for this dataset.')
+        ? t('i2d.cm.savedShared', { source: `${r.object}.${r.column}` })
+        : t('i2d.cm.savedHere'))
       setEditing(null)
       onSaved?.()
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail ?? 'Could not save the description')
+      toast.error(e?.response?.data?.detail ?? t('i2d.cm.descFailed'))
     } finally { setBusy(false) }
   }
 
   return (
-    <section className="dl-cols" aria-label="What the columns mean">
+    <section className="dl-cols" aria-label={t('i2d.cm.section')}>
       {dataset.grain && (
         <p className="dl-cols__grain">
           <strong>{dataset.business_name || dataset.name}</strong>{' — '}{dataset.grain}
@@ -256,21 +244,21 @@ function ColumnRow(p: {
         <td className="dl-cols__means">
           {p.editing ? (
             <div className="dl-cols__edit">
-              <input value={p.draft} autoFocus disabled={p.busy} placeholder="What is this column for?"
+              <input value={p.draft} autoFocus disabled={p.busy} placeholder={t('i2d.cm.descPh')}
                 onChange={e => p.setDraft(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') p.onSave(); if (e.key === 'Escape') p.onCancel() }} />
               <button type="button" className="btn btn-primary btn-sm" onClick={p.onSave} disabled={p.busy}>
-                {p.busy ? 'Saving…' : 'Save'}
+                {p.busy ? t('i2d.c.saving') : t('i2d.c.save')}
               </button>
-              <button type="button" className="btn btn-sm" onClick={p.onCancel} disabled={p.busy}>Cancel</button>
+              <button type="button" className="btn btn-sm" onClick={p.onCancel} disabled={p.busy}>{t('common.cancel')}</button>
             </div>
           ) : p.canEdit ? (
             <button type="button" className={`dl-cols__desc${p.description ? '' : ' dl-cols__desc--empty'}`}
-              aria-label={`Describe ${p.name}`} onClick={p.onStart} dir="auto">
+              aria-label={t('i2d.cm.describe', { col: p.name })} onClick={p.onStart} dir="auto">
               {p.description || t('cols3.addDescription')} <Pencil size={11} aria-hidden />
             </button>
           ) : (
-            <span className={p.description ? '' : 'dl-cols__muted'} dir="auto">{p.description || 'Not described yet'}</span>
+            <span className={p.description ? '' : 'dl-cols__muted'} dir="auto">{p.description || t('i2d.cm.notDescribed')}</span>
           )}
           {useful.length > 0 && (
             <div className="dl-cols__gloss">{useful.slice(0, 8).map(([raw, label]) => `${raw} = ${label}`).join(', ')}</div>
@@ -295,45 +283,45 @@ function ColumnRow(p: {
           <td colSpan={6}>
             <div>
               <label>
-                Treat as
-                <select disabled={p.busy} value={p.meta?.role ?? ''} aria-label={`Role for ${c.name}`}
+                {t('i2d.cm.treatAs')}
+                <select disabled={p.busy} value={p.meta?.role ?? ''} aria-label={t('i2d.cm.roleFor', { col: c.name })}
                   onChange={e => void p.patchMeta(c.name, { role: (e.target.value || undefined) as ColumnMeta['role'] },
                     e.target.value ? t(`meaning.now.${e.target.value}` as MessageKey, { col: c.name }) : t('meaning.now.detected', { col: c.name }))}>
-                  <option value="">detected</option>
-                  {ROLES.map(r => <option key={r.value} value={r.value} title={r.why}>{r.label}</option>)}
+                  <option value="">{t('i2d.cm.detected')}</option>
+                  {ROLES.map(r => <option key={r} value={r} title={t(`i2d.cm.why.${r}` as MessageKey)}>{t(`i2d.cm.role.${r}` as MessageKey)}</option>)}
                 </select>
               </label>
               {(c.dtype === 'numeric' || p.meta?.role === 'measure') && p.meta?.role !== 'identifier' && p.meta?.role !== 'category' && (
-                <label title="How this number is rolled up when a chart, an insight or an alert does not say. Salaries, prices and rates read best as an average.">
-                  Summarise as
-                  <select disabled={p.busy} value={p.meta?.aggregation ?? ''} aria-label={`Summary for ${c.name}`}
+                <label title={t('i2d.cm.summaryTitle')}>
+                  {t('i2d.cm.summariseAs')}
+                  <select disabled={p.busy} value={p.meta?.aggregation ?? ''} aria-label={t('i2d.cm.summaryFor', { col: c.name })}
                     onChange={e => void p.patchMeta(c.name, { aggregation: e.target.value || undefined },
                       e.target.value
-                        ? t('meaning.summaryNow', { col: c.name, how: (SUMMARY_LABEL[e.target.value] ?? e.target.value).toLowerCase() })
+                        ? t('meaning.summaryNow', { col: c.name, how: summaryWord(e.target.value, t) })
                         : t('meaning.summaryAuto', { col: c.name }))}>
-                    <option value="">auto ({(SUMMARY_LABEL[defaultSummary(c.name)] ?? 'Sum').toLowerCase()})</option>
-                    {SUMMARIES.map(x => <option key={x.value} value={x.value}>{x.label}</option>)}
+                    <option value="">{t('i2d.cm.auto', { how: isSummary(defaultSummary(c.name)) ? summaryWord(defaultSummary(c.name), t) : t('cols3.agg.sum') })}</option>
+                    {SUMMARIES.map(x => <option key={x} value={x}>{t(`i2d.cm.sum.${x}` as MessageKey)}</option>)}
                   </select>
                 </label>
               )}
               {/* An OUTCOME worth explaining: what lets the "what drives X"
                   analyses run without being told what X is. */}
               <label>
-                <input type="checkbox" disabled={p.busy} aria-label={`Explain ${c.name}`} checked={p.target !== undefined}
+                <input type="checkbox" disabled={p.busy} aria-label={t('i2d.cm.explain', { col: c.name })} checked={p.target !== undefined}
                   onChange={e => void p.patchMeta(c.name, { target_candidate_priority: e.target.checked ? 10 : undefined },
                     e.target.checked ? t('meaning.outcomeOn', { col: c.name }) : t('meaning.outcomeOff', { col: c.name }))} />
-                Worth explaining{p.target !== undefined && <span className="dl-cols__muted"> ({p.target})</span>}
+                {t('i2d.cm.worth')}{p.target !== undefined && <span className="dl-cols__muted"> ({localDigits(String(p.target))})</span>}
               </label>
               {/* Not the same as hiding it, and the tooltip has to say so or
                   the two controls read as duplicates. */}
-              <label title="Still usable by anyone who asks for it. This only stops the platform offering charts of it unprompted.">
-                <input type="checkbox" disabled={p.busy} aria-label={`Suggest ${c.name}`} checked={p.eligible}
+              <label title={t('i2d.cm.suggestTitle')}>
+                <input type="checkbox" disabled={p.busy} aria-label={t('i2d.cm.suggest', { col: c.name })} checked={p.eligible}
                   onChange={e => void p.patchMeta(c.name, { eligible_for_suggestion: e.target.checked ? undefined : false },
                     e.target.checked ? t('meaning.suggestOn', { col: c.name }) : t('meaning.suggestOff', { col: c.name }))} />
-                May be suggested
+                {t('i2d.cm.maySuggest')}
               </label>
               <label title={t('cols3.hideTitle')}>
-                <input type="checkbox" disabled={p.busy} aria-label={`Hide ${c.name}`} checked={!!p.meta?.hidden}
+                <input type="checkbox" disabled={p.busy} aria-label={t('i2d.cm.hide', { col: c.name })} checked={!!p.meta?.hidden}
                   onChange={e => void p.patchMeta(c.name, { hidden: e.target.checked ? true : undefined },
                     e.target.checked ? t('cols3.hiddenNow', { col: c.name }) : t('cols3.shownNow', { col: c.name }))} />
                 {t('cols3.hide')}

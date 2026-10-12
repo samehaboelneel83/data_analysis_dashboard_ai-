@@ -5,6 +5,8 @@ import ReactFlow, {
 } from 'reactflow'
 import 'reactflow/dist/style.css'
 import type { ReviewQueue, ReviewRelationship } from '../../services/api'
+import { useT } from '../../i18n'
+import { localDigits } from '../../lib/arabicFormats'
 
 /**
  * The join graph, for confirming what inference proposed.
@@ -67,6 +69,7 @@ export interface JoinGraphProps {
 }
 
 export default function JoinGraph({ queue, selectedIds, onToggle, filter }: JoinGraphProps) {
+  const t = useT()
   const [focusId, setFocusId] = useState<number | null>(null)
   const [showViews, setShowViews] = useState(false)
   const [showAll, setShowAll] = useState(false)
@@ -148,8 +151,8 @@ export default function JoinGraph({ queue, selectedIds, onToggle, filter }: Join
         id: String(id),
         position,
         data: {
-          label: `${object.name}${object.kind === 'view' ? ' (view)' : ''}`
-            + (isCentre ? '' : `  ·  ${degree.get(id) ?? 0}`),
+          label: object.name + (object.kind === 'view' ? ` ${t('i2c.jg.viewTag')}` : '')
+            + (isCentre ? '' : `  ·  ${localDigits(String(degree.get(id) ?? 0))}`),
         },
         style: {
           padding: isCentre ? '10px 16px' : '7px 12px',
@@ -164,7 +167,7 @@ export default function JoinGraph({ queue, selectedIds, onToggle, filter }: Join
         },
       }
     })
-  }, [model])
+  }, [model, t])
 
   const edges: Edge[] = useMemo(() => model.visibleEdges.map(r => {
     const selected = selectedIds.has(r.id)
@@ -193,7 +196,7 @@ export default function JoinGraph({ queue, selectedIds, onToggle, filter }: Join
   if (!queue.datasets.length) {
     return (
       <div style={{ padding: 32, color: '#64748b', fontSize: 14 }}>
-        No tables yet. Run a sync to read this connection&apos;s schema.
+        {t('i2c.jg.noTables')}
       </div>
     )
   }
@@ -206,20 +209,20 @@ export default function JoinGraph({ queue, selectedIds, onToggle, filter }: Join
                     fontSize: 12, color: '#64748b', margin: '0 0 8px' }}>
         {model.centre != null && !showAll && (
           <span>
-            Showing <strong style={{ color: '#101822' }}>{centreName}</strong> and what
-            it joins to. Click another table to centre on it.
+            {t('i2c.jg.showingA')} <strong style={{ color: '#101822' }}><bdi>{centreName}</bdi></strong>{' '}
+            {t('i2c.jg.showingB')}
           </span>
         )}
         <span style={{ flex: 1 }} />
         <label style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           <input type="checkbox" checked={showViews}
                  onChange={e => setShowViews(e.target.checked)} />
-          Include views
+          {t('i2c.jg.includeViews')}
         </label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           <input type="checkbox" checked={showAll}
                  onChange={e => setShowAll(e.target.checked)} />
-          Show every table at once
+          {t('i2c.jg.showAll')}
         </label>
       </div>
 
@@ -227,11 +230,8 @@ export default function JoinGraph({ queue, selectedIds, onToggle, filter }: Join
         <div style={{ padding: 28, border: '1px solid #e2e8f0', borderRadius: 6,
                       color: '#64748b', fontSize: 13 }}>
           {filter
-            ? `No relationships involve a table matching “${filter}”.`
-            : showViews
-              ? 'No relationships found between these objects yet.'
-              : 'No relationships between tables. Tick “Include views” to see '
-                + 'relationships involving views.'}
+            ? t('i2c.jg.noMatch', { q: filter })
+            : showViews ? t('i2c.jg.noRelViews') : t('i2c.jg.noRelTables')}
         </div>
       ) : (
         <div style={{ height: 460, border: '1px solid #e2e8f0', borderRadius: 6 }}>
@@ -252,11 +252,12 @@ export default function JoinGraph({ queue, selectedIds, onToggle, filter }: Join
 
       <p style={{ fontSize: 12, color: '#64748b', margin: '6px 0 0' }}>
         {showAll
-          ? `All ${model.totalConnected} connected objects, ${model.totalEdges} relationships.`
-          : `${nodes.length} of ${model.totalConnected} connected objects shown, `
-            + `${edges.length} of ${model.totalEdges} relationships.`}
-        {' '}Dashed edges are proposals; solid ones are already settled.
-        {' '}Click an edge to select it.
+          ? t('i2c.jg.allSummary', { n: localDigits(String(model.totalConnected)), m: localDigits(String(model.totalEdges)) })
+          : t('i2c.jg.partSummary', {
+              shown: localDigits(String(nodes.length)), n: localDigits(String(model.totalConnected)),
+              e: localDigits(String(edges.length)), m: localDigits(String(model.totalEdges)) })}
+        {' '}{t('i2c.jg.dashed')}
+        {' '}{t('i2c.jg.clickEdge')}
       </p>
     </>
   )

@@ -3,6 +3,7 @@ import { adminRolesApi, adminUsersApi, datasetSharesApi, lineageApi, orgUnitsApi
 import { Shield, X } from 'lucide-react'
 import '../pages/datasetDetail/share.css'
 import { useT } from '../i18n'
+import { localDigits } from '../lib/arabicFormats'
 import type { DatasetShare, User } from '../services/api'
 import toast from 'react-hot-toast'
 import { useConfirm } from './ui/ConfirmDialog'
@@ -46,7 +47,7 @@ export default function DatasetShareDialog({ datasetId, onClose, datasetName, cr
   useEffect(() => {
     Promise.all([datasetSharesApi.list(datasetId), adminUsersApi.list()])
       .then(([s, u]) => { setShares(s); setOrgUsers(u) })
-      .catch(() => toast.error('Failed to load shares'))
+      .catch(() => toast.error(t('i2c.dsd.loadFail')))
       .finally(() => setLoading(false))
     // Roles and units are optional extras: a failure leaves user sharing working.
     adminRolesApi?.list?.().then(r => setRoles(r as never)).catch(() => {})
@@ -81,9 +82,9 @@ export default function DatasetShareDialog({ datasetId, onClose, datasetName, cr
             ...(kind === 'role' ? { role_id: picked as number } : { org_unit_id: picked as number }), level })
       setShares(prev => [share, ...prev])
       setPicked('')
-      toast.success('Dataset shared')
+      toast.success(t('i2c.dsd.shared'))
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail ?? 'Failed to share dataset')
+      toast.error(e?.response?.data?.detail ?? t('i2c.dsd.shareFail'))
     } finally {
       setSaving(false)
     }
@@ -93,19 +94,17 @@ export default function DatasetShareDialog({ datasetId, onClose, datasetName, cr
     // Naming who loses access: the row is one of several, and a mis-click here
     // silently cuts off a colleague rather than the person intended.
     if (!await confirm({
-      title: `Stop sharing with ${nameOf(share)}?`,
-      body: kindOf(share) === 'user'
-        ? 'They lose access to this dataset immediately. You can share it with them again later.'
-        : 'Everyone who had access only through this share loses it immediately.',
-      confirmLabel: 'Remove access',
+      title: t('i2c.dsd.stopQ', { name: nameOf(share) }),
+      body: kindOf(share) === 'user' ? t('i2c.dsd.stopUserBody') : t('i2c.dsd.stopGroupBody'),
+      confirmLabel: t('i2c.dsd.removeAccess'),
     })) return
     try {
       if (kindOf(share) === 'user') await datasetSharesApi.delete(datasetId, share.id)
       else await datasetSharesApi.deleteGroup(datasetId, share.id)
       setShares(prev => prev.filter(s => !(s.id === share.id && kindOf(s) === kindOf(share))))
-      toast.success('Share removed')
+      toast.success(t('i2c.dsd.removed'))
     } catch {
-      toast.error('Failed to remove share')
+      toast.error(t('i2c.dsd.removeFail'))
     }
   }
 
@@ -116,11 +115,11 @@ export default function DatasetShareDialog({ datasetId, onClose, datasetName, cr
 
   return (
     <div onClick={onClose} className="dl-share__backdrop">
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Share dataset"
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={t('share3.titlePlain')}
         onClick={e => e.stopPropagation()} className="dl-share">
         <header className="dl-share__head">
           <h2>{datasetName ? t('share3.title', { name: datasetName }) : t('share3.titlePlain')}</h2>
-          <button onClick={onClose} aria-label="Close" className="dl-share__close"><X size={16} aria-hidden /></button>
+          <button onClick={onClose} aria-label={t('i2c.dsd.close')} className="dl-share__close"><X size={16} aria-hidden /></button>
         </header>
 
         {loading ? (
@@ -128,7 +127,7 @@ export default function DatasetShareDialog({ datasetId, onClose, datasetName, cr
         ) : (
           <>
             <div className="dl-share__add">
-              <span role="radiogroup" aria-label="Share with" className="dl-share__seg">
+              <span role="radiogroup" aria-label={t('i2c.dsd.shareWith')} className="dl-share__seg">
                 {(['user', 'role', 'org_unit'] as Kind[]).map(k => (
                   <button key={k} type="button" role="radio" aria-checked={kind === k}
                     onClick={() => { setKind(k); setPicked(''); setTaQuery('') }}>{KIND_LABEL[k]}</button>
@@ -160,13 +159,13 @@ export default function DatasetShareDialog({ datasetId, onClose, datasetName, cr
                   </ul>
                 )}
               </div>
-              <select aria-label="Access level" value={level} className="dl-share__level"
+              <select aria-label={t('i2c.dsd.level')} value={level} className="dl-share__level"
                 onChange={e => setLevel(e.target.value as Level)}>
                 <option value="view">{t('share3.view')}</option>
                 <option value="edit">{t('share3.edit')}</option>
               </select>
               <button className="btn btn-primary btn-sm" onClick={handleShare} disabled={picked === '' || saving}
-                title={picked === '' ? 'Choose who to share with first' : undefined}>
+                title={picked === '' ? t('i2c.dsd.chooseFirst') : undefined}>
                 {saving ? t('share3.sharing') : t('share3.share')}
               </button>
             </div>
@@ -181,7 +180,7 @@ export default function DatasetShareDialog({ datasetId, onClose, datasetName, cr
                     <span className={`dl-share__avatar dl-share__avatar--${kindOf(s)}`} aria-hidden>{initials(nameOf(s))}</span>
                     <span className="dl-share__who"><strong dir="auto">{nameOf(s)}</strong><span>{subOf(s)}</span></span>
                     <span className="dl-share__lvl">{(s.level ?? 'edit') === 'view' ? t('share3.view') : t('share3.edit')}</span>
-                    <button aria-label={`Remove share for ${nameOf(s)}`} className="dl-share__remove"
+                    <button aria-label={t('i2c.dsd.removeFor', { name: nameOf(s) })} className="dl-share__remove"
                       onClick={() => handleRemove(s)}><X size={14} aria-hidden /></button>
                   </li>
                 ))}
@@ -205,8 +204,8 @@ export default function DatasetShareDialog({ datasetId, onClose, datasetName, cr
               </li>
               {boards != null && boards > 0 && (
                 <li>
-                  <span className="dl-share__avatar dl-share__avatar--role" aria-hidden>{boards}</span>
-                  <span className="dl-share__who"><strong>{t(boards === 1 ? 'share3.boardsOne' : 'share3.boards', { n: boards })}</strong>
+                  <span className="dl-share__avatar dl-share__avatar--role" aria-hidden>{localDigits(String(boards))}</span>
+                  <span className="dl-share__who"><strong>{t(boards === 1 ? 'share3.boardsOne' : 'share3.boards', { n: localDigits(String(boards)) })}</strong>
                     <span>{t('share3.boardsBody')}</span></span>
                   <span className="dl-share__lvl dl-share__muted">{t('share3.viaBoards')}</span>
                 </li>

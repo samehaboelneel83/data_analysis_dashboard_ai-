@@ -7,6 +7,7 @@ import { datasetsApi, type CheckResult, type DataCheck, type DataCheckInput, typ
 import { useT, type MessageKey } from '../../i18n'
 import EmptyState from '../ui/EmptyState'
 import { formatDate } from '../../lib/dateFormat'
+import { localDigits } from '../../lib/arabicFormats'
 
 /**
  * Pipeline plan, phase 3, on the dataset page: the checks every refresh runs
@@ -232,7 +233,7 @@ export default function ChecksPanel({ datasetId, columns, canEdit, children }: {
               {kind === 'accepted_values' && (
                 <label style={{ flex: 1, minWidth: 200 }}>{t('checks.values')}<br />
                   <input className="input" dir="auto" value={values} onChange={e => setValues(e.target.value)}
-                    placeholder="open, closed" style={{ fontSize: 12, width: '100%' }} />
+                    placeholder={t('i2d.checks.valuesExample')} style={{ fontSize: 12, width: '100%' }} />
                 </label>
               )}
               {kind === 'row_count' && (<>
@@ -273,7 +274,8 @@ export default function ChecksPanel({ datasetId, columns, canEdit, children }: {
               {kind === 'rule' && (
                 <label style={{ flex: 1, minWidth: 220 }}>{t('checks.rule')}<br />
                   <input className="input" dir="ltr" value={expr} onChange={e => setExpr(e.target.value)}
-                    placeholder="amount >= 0" style={{ fontSize: 12, width: '100%', fontFamily: 'var(--mono)' }} />
+                    placeholder="amount >= 0" // i18n-ok: a code sample
+                    style={{ fontSize: 12, width: '100%', fontFamily: 'var(--mono)' }} />
                 </label>
               )}
               <label>{t('checks.col.ifFails')}<br />
@@ -317,7 +319,7 @@ export default function ChecksPanel({ datasetId, columns, canEdit, children }: {
                 </td>
                 {/* How fast it went, and (2026-10-10) a run far slower than usual. */}
                 <td style={{ textAlign: 'end', verticalAlign: 'top', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-                  {r.duration_ms != null ? `${(r.duration_ms / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 })} s` : '—'}
+                  {r.duration_ms != null ? t('i2d.checks.seconds', { n: localDigits((r.duration_ms / 1000).toLocaleString('en-US', { maximumFractionDigits: 1 })) }) : '—'}
                   {r.metrics?.rows_per_sec != null && (
                     <div style={{ fontSize: 11, color: 'var(--muted)' }}>{t('checks.rowsPerSec', { n: r.metrics.rows_per_sec.toLocaleString() })}</div>
                   )}

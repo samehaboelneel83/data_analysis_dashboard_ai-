@@ -58,7 +58,7 @@ describe('SchemaBrowser dataset-mode toggle', () => {
 
     renderBrowser()
     fireEvent.click(await screen.findByText('sales'))
-    await screen.findByText(/1 rows preview/)
+    await screen.findByText(/1 row preview/)
 
     fireEvent.click(screen.getByText(/Import as Dataset/))
 
@@ -78,7 +78,7 @@ describe('SchemaBrowser dataset-mode toggle', () => {
 
     renderBrowser()
     fireEvent.click(await screen.findByText('sales'))
-    await screen.findByText(/1 rows preview/)
+    await screen.findByText(/1 row preview/)
 
     fireEvent.click(screen.getByText('DirectQuery'))
     fireEvent.click(screen.getByText(/Import as Dataset|Create DirectQuery Dataset/))

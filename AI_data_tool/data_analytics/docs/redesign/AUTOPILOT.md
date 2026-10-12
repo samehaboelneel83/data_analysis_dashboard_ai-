@@ -128,7 +128,7 @@ Follow `docs/redesign/11-Lineage.md`.
 - Dataset pages: a Models count on the overview, currency cell formats on the Data tab, Retrain on the Models tab, and type-ahead in the Share dialog.
 - Quantity-column thousands grouping in the dataset grid, the Data view and the other data tables.
 
-### [ ] 9. i18n-2: remaining English
+### [x] 9. i18n-2: remaining English
 - Pages and components: the dataset detail page, command palette, workspace tree, query builder, share dialogs, dataset side panels, and the guest page (SharedReport).
 - Strings: any missing Setup strings, the measureTemplates names, the DashboardProposals language ternary, the HierarchyRenderer aria-label, and the ChecksPanel/TestResult units.
 - Also any English that the new pages from steps 4–7 left behind.
@@ -209,3 +209,12 @@ Follow `docs/redesign/11-Lineage.md`.
 - **Dataset pages:** Models count in the Overview facts (one per name, linked to the tab); currency / number / percent column formats on the Data tab; **Retrain** on each model (same name, target and predictors = the next version; GATE A had no Retrain, this work order asks for it); a type-ahead in Share (its English labels translated).
 - **Thousands grouping:** `formatTableCell` (column format, else grouped quantities; never years, ids, coordinates, or whole numbers stored as text) in the dataset grid, the report Data view, the dataset preview, the query-builder and prep previews. Two tests re-pinned to grouped values.
 - **Tests:** formatter (2), Home error (1), rail and grip (3), share type-ahead (3 re-pinned); full suite 358 files / 4458 pass; type-check and build pass. **Captures:** `redesign-captures/ap8-polish/after/` (`cap_ap8.mjs`).
+
+### 9. i18n-2: remaining English (2026-10-12)
+- **Translated:** the dataset page and its panels (Alerts, Column meaning, Aggregates, Statistics, Checks), command palette, workspace tree, query builder, Suggest from source, dataset Share, the guest page (SharedReport), join graph, DashboardProposals (labels follow the interface language now, not the brief's), HierarchyRenderer (aria-labels and text only), Schema browser, Sync progress, SQL editor, and the sign-in "Loading…" every page shows first. 186 `i2d.*` and 208 `i2c.*` keys in two new files; counts are plurals with Arabic forms and local digits.
+- **Measure templates:** default names come from `mt2.*` keys (an optional `t` in the teammate's builders; no invisible marks saved in names).
+- **Kept English on purpose (`// i18n-ok`):** code samples (`SUM(col)`, `amount >= 0`, SQL `WHERE`), example emails/URLs, column names, "DirectQuery". The two descriptions saved with an AI-proposed dashboard follow the interface language.
+- **English wording fixed:** "2 roles" (was "2 role(s)"), "1 row preview", the query builder's hand-edited SQL note.
+- **Setup strings:** none missing. **Still English, not in this list:** FolderShareDialog and the embed page (no translation hook yet).
+- **Tests:** `strings.i18n2.test.ts` (19 files + key/placeholder parity of both new files), measure template names in Arabic (1); three assertions re-pinned to the new wording. Full suite 359 files / 4480 pass; type-check and build pass.
+- **Captures:** `redesign-captures/ap9-i18n/{before,after}/` (`cap_ap9.mjs`).

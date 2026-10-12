@@ -5,6 +5,7 @@
  */
 import { useMemo, useRef, useState } from 'react'
 import { applySuggestion, mentionedTables, suggest } from '../../lib/sqlSuggest'
+import { useT } from '../../i18n'
 
 export default function SqlEditor({ value, onChange, onRun, tables, columnsByTable, onNeedColumns, placeholder, label }: {
   value: string
@@ -17,6 +18,7 @@ export default function SqlEditor({ value, onChange, onRun, tables, columnsByTab
   placeholder?: string
   label: string
 }) {
+  const t = useT()
   const ref = useRef<HTMLTextAreaElement>(null)
   const [caret, setCaret] = useState(0)
   const [active, setActive] = useState(0)
@@ -72,7 +74,7 @@ export default function SqlEditor({ value, onChange, onRun, tables, columnsByTab
           background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, minHeight: 130,
           color: 'var(--text)', resize: 'vertical', boxSizing: 'border-box' }} />
       {items.length > 0 && (
-        <ul role="listbox" aria-label="Suggestions"
+        <ul role="listbox" aria-label={t('sug.title')}
           style={{ position: 'absolute', insetInlineStart: 8, top: '100%', zIndex: 5, margin: 0, padding: 4,
             listStyle: 'none', minWidth: 220, background: 'var(--surface)', border: '1px solid var(--border)',
             borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,.18)', fontSize: 12 }}>

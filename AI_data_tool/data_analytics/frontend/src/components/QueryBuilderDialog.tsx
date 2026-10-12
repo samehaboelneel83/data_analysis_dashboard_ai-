@@ -7,6 +7,7 @@ import { countConditions, dropTable, fromModel, previewWhere, toModel, type Cond
 import { useConfirm } from './ui/ConfirmDialog'
 import { useModalDialog } from './ui/useModalDialog'
 import { useT } from '../i18n'
+import { localDigits } from '../lib/arabicFormats'
 import { formatTableCell } from '../lib/displayNumber'
 import { nonAdditiveKind } from '../lib/semanticGuard'
 import ModeExplainer from '../pages/connections/ModeExplainer'
@@ -22,6 +23,7 @@ interface ColRow { table: string; column: string; aggregation: string; alias: st
  *  before grouping. */
 interface HavingRow { table: string; column: string; aggregation: string; op: string; value: string }
 
+const SQL_WHERE = 'WHERE'   // i18n-ok: SQL keyword, the preview below is SQL
 const AGGS = ['', 'sum', 'avg', 'min', 'max', 'count', 'count_distinct']
 
 const label = { display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--muted)',
@@ -55,6 +57,8 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
   existing?: { id: number; name: string; query_model: Record<string, unknown> }
 }) {
   const tr = useT()
+  // A row's position as the reader counts it (1-based, in their digits).
+  const nth = (i: number) => localDigits(String(i + 1))
   const confirm = useConfirm()
   const dialogRef = useModalDialog<HTMLDivElement>(onClose)
   const [tables, setTables] = useState<string[]>([])
@@ -244,7 +248,7 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
       const r = await dataSourcesApi.import(
         ds.id, dsName.trim(), undefined, displaySql, mode,
         scriptMode ? undefined : model(), existing?.id)
-      toast.success(existing ? `Dataset "${r.name}" updated` : `Dataset "${r.name}" created`)
+      toast.success(existing ? tr('i2c.qb.updated', { name: r.name }) : tr('i2c.qb.created', { name: r.name }))
       onCreated?.(r.id)
       onClose()
     } catch (e) {
@@ -278,7 +282,7 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
 
   const colSelect = (table: string, value: string, onChange: (v: string) => void, aria: string) => (
     <select aria-label={aria} value={value} onChange={e => onChange(e.target.value)} style={{ fontSize: 11 }}>
-      <option value="">— column —</option>
+      <option value="">{tr('i2c.qb.pickColumn')}</option>
       {(effectiveColumns[table] ?? []).map(c => <option key={c} value={c}>{c}</option>)}
     </select>
   )
@@ -332,12 +336,12 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
                 setJoins(p => [...p, { left_table: base, table: t, left_column: '', right_column: '', how: 'left' }])
               }}
               style={{ fontSize: 11 }}>
-              <option value="">+ add table…</option>
+              <option value="">{tr('i2c.qb.addTable')}</option>
               {tables.filter(t => t !== base && !joins.some(j => j.table === t)).map(t =>
                 <option key={t} value={t}>{t}</option>)}
             </select>
             <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-              Click a column, then a column in another table, to draw a join.
+              {tr('i2c.qb.drawHint')}
             </span>
           </div>
         )}
@@ -400,7 +404,7 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
             <select aria-label={tr('qb.base')} value={base}
               onChange={e => { setBase(e.target.value); ensureColumns(e.target.value) }}
               style={{ width: '100%', fontSize: 12 }}>
-              <option value="">— choose —</option>
+              <option value="">{tr('i2c.qb.choose')}</option>
               {tables.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
 
@@ -420,20 +424,20 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
                     if (on) { setHierTable(base || ''); ensureColumns(base) }
                     else if (hierTable) setBase(hierTable)
                   }} />
-                Walk a hierarchy (id → parent)
+                {tr('i2c.qb.walkHier')}
               </label>
               {hierOn && (
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
                   <select aria-label={tr('qb.hierTable')} value={hierTable}
                     onChange={e => { setHierTable(e.target.value); ensureColumns(e.target.value) }}
                     style={{ fontSize: 11 }}>
-                    <option value="">— table —</option>
+                    <option value="">{tr('i2c.qb.pickTable')}</option>
                     {tables.map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
                   {colSelect(hierTable, hierId, setHierId, tr('qb.hierId'))}
                   {colSelect(hierTable, hierParent, setHierParent, tr('qb.hierParent'))}
                   <span style={{ fontSize: 11, color: 'var(--muted)', alignSelf: 'center' }}>
-                    adds __level, __path, __root_id
+                    {tr('i2c.qb.adds')} <bdi dir="ltr">{HIER_COLUMNS.join(', ')}</bdi>
                   </span>
                 </div>
               )}
@@ -465,13 +469,13 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
             <label style={{ ...label, marginTop: 12 }}>{tr('qb.joins')}</label>
             {joins.map((j, i) => (
               <div key={i} style={{ display: 'flex', gap: 4, marginBottom: 4, flexWrap: 'wrap' }}>
-                <select aria-label={`Join table ${i + 1}`} value={j.table}
+                <select aria-label={tr('i2c.qb.joinTable', { i: nth(i) })} value={j.table}
                   onChange={e => { const t = e.target.value; ensureColumns(t); setJoins(p => p.map((x, k) => k === i ? { ...x, table: t } : x)) }}
                   style={{ fontSize: 11 }}>
-                  <option value="">— table —</option>
+                  <option value="">{tr('i2c.qb.pickTable')}</option>
                   {tables.filter(t => t !== base).map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
-                <select aria-label={`Join type ${i + 1}`} value={j.how}
+                <select aria-label={tr('i2c.qb.joinType', { i: nth(i) })} value={j.how}
                   onChange={e => setJoins(p => p.map((x, k) => k === i ? { ...x, how: e.target.value } : x))} style={{ fontSize: 11 }}>
                   {JOIN_TYPES.map(t => <option key={t.how} value={t.how} title={t.hint}>{t.label}</option>)}
                 </select>
@@ -479,50 +483,50 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
                     query -- the base or a table joined above this row -- so
                     salaries can join titles on emp_no, not only the base. */}
                 {i > 0 && (
-                  <select aria-label={`Join ${i + 1} from table`} value={j.left_table || base}
+                  <select aria-label={tr('i2c.qb.joinFrom', { i: nth(i) })} value={j.left_table || base}
                     onChange={e => setJoins(p => p.map((x, k) => k === i ? { ...x, left_table: e.target.value, left_column: '' } : x))}
                     style={{ fontSize: 11 }}>
                     {[base, ...joins.slice(0, i).map(x => x.table)].filter(Boolean).map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
                 )}
-                {colSelect(j.left_table || base, j.left_column, v => setJoins(p => p.map((x, k) => k === i ? { ...x, left_column: v } : x)), `Join ${i + 1} base key`)}
+                {colSelect(j.left_table || base, j.left_column, v => setJoins(p => p.map((x, k) => k === i ? { ...x, left_column: v } : x)), tr('i2c.qb.joinBaseKey', { i: nth(i) }))}
                 <span style={{ fontSize: 11, alignSelf: 'center' }}>=</span>
-                {colSelect(j.table, j.right_column, v => setJoins(p => p.map((x, k) => k === i ? { ...x, right_column: v } : x)), `Join ${i + 1} joined key`)}
-                <button aria-label={`Remove join ${i + 1}`} onClick={() => setJoins(p => p.filter((_, k) => k !== i))}
+                {colSelect(j.table, j.right_column, v => setJoins(p => p.map((x, k) => k === i ? { ...x, right_column: v } : x)), tr('i2c.qb.joinJoinedKey', { i: nth(i) }))}
+                <button aria-label={tr('i2c.qb.removeJoin', { i: nth(i) })} onClick={() => setJoins(p => p.filter((_, k) => k !== i))}
                   style={{ border: 'none', background: 'none', color: 'var(--danger)', cursor: 'pointer' }}>✕</button>
               </div>
             ))}
             <button className="btn" style={{ fontSize: 11 }} disabled={!base} title={!base ? tr('qb.chooseBase') : undefined}
-              onClick={() => setJoins(p => [...p, { left_table: base, table: '', left_column: '', right_column: '', how: 'left' }])}>+ Add join</button>
+              onClick={() => setJoins(p => [...p, { left_table: base, table: '', left_column: '', right_column: '', how: 'left' }])}>{tr('i2c.qb.addJoin')}</button>
 
             <label style={{ ...label, marginTop: 12 }}>{tr('qb.columns')}</label>
             {cols.map((c, i) => (
               <div key={i} style={{ display: 'flex', gap: 4, marginBottom: 4, flexWrap: 'wrap' }}>
-                <select aria-label={`Column table ${i + 1}`} value={c.table || base}
+                <select aria-label={tr('i2c.qb.colTable', { i: nth(i) })} value={c.table || base}
                   onChange={e => setCols(p => p.map((x, k) => k === i ? { ...x, table: e.target.value, column: '' } : x))} style={{ fontSize: 11 }}>
                   {activeTables.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
-                {colSelect(c.table || base, c.column, v => setCols(p => p.map((x, k) => k === i ? { ...x, column: v } : x)), `Column ${i + 1}`)}
+                {colSelect(c.table || base, c.column, v => setCols(p => p.map((x, k) => k === i ? { ...x, column: v } : x)), tr('i2c.qb.col', { i: nth(i) }))}
                 {functions.length > 0 && (
-                  <select aria-label={`Function ${i + 1}`} value={c.func}
+                  <select aria-label={tr('i2c.qb.func', { i: nth(i) })} value={c.func}
                     onChange={e => setCols(p => p.map((x, k) => k === i ? { ...x, func: e.target.value } : x))} style={{ fontSize: 11 }}>
                     <option value="">— ƒ —</option>
                     {functions.map(f => <option key={f.name} value={f.name}>{f.name}</option>)}
                   </select>
                 )}
-                <select aria-label={`Aggregation ${i + 1}`} value={c.aggregation}
+                <select aria-label={tr('i2c.qb.agg', { i: nth(i) })} value={c.aggregation}
                   onChange={e => setCols(p => p.map((x, k) => k === i ? { ...x, aggregation: e.target.value } : x))} style={{ fontSize: 11 }}>
-                  {AGGS.map(a => <option key={a} value={a}>{a || '— raw —'}</option>)}
+                  {AGGS.map(a => <option key={a} value={a}>{a || tr('i2c.qb.raw')}</option>)}
                 </select>
-                <input aria-label={`Alias ${i + 1}`} value={c.alias} placeholder="alias"
+                <input aria-label={tr('i2c.qb.alias', { i: nth(i) })} value={c.alias} placeholder={tr('i2c.qb.aliasPh')}
                   onChange={e => setCols(p => p.map((x, k) => k === i ? { ...x, alias: e.target.value } : x))}
                   style={{ fontSize: 11, width: 80 }} />
-                <button aria-label={`Remove column ${i + 1}`} onClick={() => setCols(p => p.filter((_, k) => k !== i))}
+                <button aria-label={tr('i2c.qb.removeCol', { i: nth(i) })} onClick={() => setCols(p => p.filter((_, k) => k !== i))}
                   style={{ border: 'none', background: 'none', color: 'var(--danger)', cursor: 'pointer' }}>✕</button>
               </div>
             ))}
             <button className="btn" style={{ fontSize: 11 }} disabled={!base} title={!base ? tr('qb.chooseBase') : undefined}
-              onClick={() => setCols(p => [...p, { table: base, column: '', aggregation: '', alias: '', func: '' }])}>+ Add column</button>
+              onClick={() => setCols(p => [...p, { table: base, column: '', aggregation: '', alias: '', func: '' }])}>{tr('i2c.qb.addCol')}</button>
 
             <div style={{ marginTop: 12 }}>
               <label style={label}>{tr('qb.filters')}</label>
@@ -530,7 +534,7 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
                 tables={activeTables} base={base} columnsOf={t => effectiveColumns[t] ?? []} />
               {countConditions(conds) > 0 && (
                 <div data-testid="qb-where-preview" dir="ltr" style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-                  WHERE {previewWhere(conds, filtersJoiner)}
+                  {SQL_WHERE} {previewWhere(conds, filtersJoiner)}
                 </div>
               )}
             </div>
@@ -544,30 +548,30 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
                 <label style={label}>{tr('qb.having')}</label>
                 {having.map((h, i) => (
                   <div key={i} style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center' }}>
-                    <select aria-label={`Having aggregation ${i + 1}`} value={h.aggregation}
+                    <select aria-label={tr('i2c.qb.havingAgg', { i: nth(i) })} value={h.aggregation}
                       onChange={e => setHaving(p => p.map((x, k) => k === i ? { ...x, aggregation: e.target.value } : x))}
                       style={{ fontSize: 11 }}>
                       {AGGS.filter(Boolean).map(a => <option key={a} value={a}>{a}</option>)}
                     </select>
                     {colSelect(h.table || base, h.column,
                       v => setHaving(p => p.map((x, k) => k === i ? { ...x, column: v } : x)),
-                      `Having column ${i + 1}`)}
-                    <select aria-label={`Having operator ${i + 1}`} value={h.op}
+                      tr('i2c.qb.havingCol', { i: nth(i) }))}
+                    <select aria-label={tr('i2c.qb.havingOp', { i: nth(i) })} value={h.op}
                       onChange={e => setHaving(p => p.map((x, k) => k === i ? { ...x, op: e.target.value } : x))}
                       style={{ fontSize: 11 }}>
                       {['gt', 'gte', 'lt', 'lte', 'eq', 'ne'].map(o => <option key={o} value={o}>{o}</option>)}
                     </select>
-                    <input aria-label={`Having value ${i + 1}`} value={h.value}
+                    <input aria-label={tr('i2c.qb.havingVal', { i: nth(i) })} value={h.value}
                       onChange={e => setHaving(p => p.map((x, k) => k === i ? { ...x, value: e.target.value } : x))}
-                      placeholder="e.g. 1000" style={{ fontSize: 11, width: 80 }} />
-                    <button aria-label={`Remove having ${i + 1}`}
+                      placeholder={tr('i2c.qb.havingPh')} style={{ fontSize: 11, width: 80 }} />
+                    <button aria-label={tr('i2c.qb.removeHaving', { i: nth(i) })}
                       onClick={() => setHaving(p => p.filter((_, k) => k !== i))}
                       style={{ border: 'none', background: 'none', color: 'var(--danger)', cursor: 'pointer' }}>✕</button>
                   </div>
                 ))}
                 <button className="btn" style={{ fontSize: 11 }}
                   onClick={() => setHaving(p => [...p, { table: base, column: '', aggregation: 'sum', op: 'gt', value: '' }])}>
-                  + Add having
+                  {tr('i2c.qb.addHaving')}
                 </button>
               </div>
             )}
@@ -576,16 +580,16 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
               <div>
                 <label style={label}>{tr('qb.sort')}</label>
                 <input aria-label={tr('qb.sortAlias')} value={sortAlias} onChange={e => setSortAlias(e.target.value)}
-                  placeholder="e.g. total" style={{ fontSize: 11, width: 100 }} />
+                  placeholder={tr('i2c.qb.sortPh')} style={{ fontSize: 11, width: 100 }} />
               </div>
               <select aria-label={tr('qb.sortDir')} value={sortDir} onChange={e => setSortDir(e.target.value as 'asc' | 'desc')} style={{ fontSize: 11 }}>
-                <option value="desc">desc</option><option value="asc">asc</option>
+                <option value="desc">{tr('i2c.qb.desc')}</option><option value="asc">{tr('i2c.qb.asc')}</option>
               </select>
               <div>
                 <label style={label}>{tr('qb.limit')}</label>
                 {mode === 'directquery' ? (
                   <div data-testid="qb-limit-live" style={{ fontSize: 11, color: 'var(--muted)', maxWidth: 220 }}>
-                    None — a live dataset always reads every row
+                    {tr('i2c.qb.liveLimit')}
                   </div>
                 ) : (
                   <input aria-label={tr('qb.rowLimit')} type="number" min={1} value={limit} onChange={e => setLimit(e.target.value)}
@@ -600,13 +604,13 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
             <label style={label}>{tr('qb.sqlHead')}</label>
             <pre data-testid="qb-sql" style={{ fontSize: 11, background: 'var(--surface2)', border: '1px solid var(--border)',
               borderRadius: 6, padding: 10, whiteSpace: 'pre-wrap', minHeight: 80, margin: 0 }}>
-              {sqlError ? '' : sql || '— pick a base table and columns —'}
+              {sqlError ? '' : sql || tr('i2c.qb.sqlEmpty')}
             </pre>
             {sqlError && <div role="alert" style={{ fontSize: 11, color: 'var(--danger)', marginTop: 4 }}>{sqlError}</div>}
             {functions.length > 0 && (
               <details style={{ marginTop: 8 }}>
                 <summary style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', cursor: 'pointer' }}>
-                  ƒ Database functions ({functions.length})
+                  {tr('i2c.qb.dbFuncs', { n: localDigits(String(functions.length)) })}
                 </summary>
                 <ul style={{ listStyle: 'none', fontSize: 11, color: 'var(--muted)', maxHeight: 100, overflowY: 'auto', marginTop: 4 }}>
                   {functions.map(f => <li key={f.name}>{f.name}() → {f.returns}</li>)}
@@ -636,7 +640,7 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
         {tab === 'sql' && (
           <div>
             <label style={label}>
-              SQL {scriptMode ? '(hand-edited — SQL edited by hand — Design view no longer reflects it)' : '(compiled live, identifiers schema-checked)'}
+              {scriptMode ? tr('i2c.qb.sqlHand') : tr('i2c.qb.sqlCompiled')}
             </label>
             <textarea aria-label={tr('qb.sqlEditor')} value={displaySql} readOnly={!sqlUnlocked}
               onChange={e => { setManualSql(e.target.value); setScriptMode(true) }}
@@ -651,7 +655,7 @@ export default function QueryBuilderDialog({ ds, onClose, onCreated, existing }:
             )}
             {scriptMode && (
               <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>
-                This dataset will save from the SQL above only — the design is no longer editable visually once saved this way.{' '}
+                {tr('i2c.qb.scriptNote')}{' '}
                 <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }} onClick={revertToDesign}>{tr('qb.return')}</button>
               </div>
             )}
