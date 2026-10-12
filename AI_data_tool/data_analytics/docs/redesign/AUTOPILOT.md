@@ -134,7 +134,7 @@ Follow `docs/redesign/11-Lineage.md`.
 - Also any English that the new pages from steps 4–7 left behind.
 - Extend the guards.
 
-### [ ] 10. FINAL
+### [x] 10. FINAL
 1. **Flaky tests:** six files fail only in the full run (Lineage, PrepPipelinePanel, Reports, ReportBuilder, WidgetRenderer, geoRenderers). Find the shared cause (workers, timeouts under load, leaked timers/mocks/DOM) and fix it. The full suite must pass 3 runs in a row.
 2. **Clean-up you may do:** remove all extra git worktrees, and stop any server you started on :3002.
 3. **Clean-up that needs the owner (STOP and list, don't do):** QA test datasets 7 and 8, QA chats, dashboard #16, the "profit" column, and the uncommitted init.sql change.
@@ -218,3 +218,10 @@ Follow `docs/redesign/11-Lineage.md`.
 - **Setup strings:** none missing. **Still English, not in this list:** FolderShareDialog and the embed page (no translation hook yet).
 - **Tests:** `strings.i18n2.test.ts` (19 files + key/placeholder parity of both new files), measure template names in Arabic (1); three assertions re-pinned to the new wording. Full suite 359 files / 4480 pass; type-check and build pass.
 - **Captures:** `redesign-captures/ap9-i18n/{before,after}/` (`cap_ap9.mjs`).
+
+### 10. FINAL (2026-10-12)
+- **Flaky tests (`42149f0`):** one cause, the default 1s `findBy`/`waitFor` running out on heavy renders while a full run keeps every core busy; now 5s (found elements still return at once) and 20s per test. Four URL-line checks that read once now retry. 359 files / 4480 tests, three full runs in a row green, no slower.
+- **Clean-up done:** scratch worktrees removed (`git worktree prune`, only the main one left); the dev servers I started (:3011, :3012) stopped; nothing on :3002.
+- **Regression:** `reg_final.mjs`, 13 pages × EN light / AR dark, 26/26 clean (no console or page errors, no 5xx, no sideways overflow). One existing behaviour noted, not changed: container children leave their grid slots empty in View/Present.
+- **Docs:** HANDOVER.md brought up to date (status, paths, code map, scripts, flaky tests, owner clean-up); PLAN.md ticked with a FINAL log entry. Backend follow-ups: PLAN.md's table is the full list.
+- **Owner clean-up (not done):** datasets 7 and 8, QA chats, dashboard #16, the "profit" column, the uncommitted init.sql / compose edits.
