@@ -23,6 +23,7 @@ export const ar: Record<MessageKey, string> = {
   ...pgAdminSecurity, ...pgAdminPlatform, ...pgDataPages, ...pgPanelsA, ...pgPanelsB, ...pgModelsMaps, ...pgTypes, ...pgAskAi, ...pgLineage, ...pgUpload,
   'nav.home': 'الرئيسية',
   'nav.askAi': 'اسأل الذكاء الاصطناعي',
+  'fab.tip': 'اسأل الذكاء الاصطناعي عن هذه اللوحة',
   'nav.datasets': 'مجموعات البيانات',
   'nav.glossary': 'المسرد',
   'glossary.subtitle': 'المصطلحات التي تستخدمها شركتك والقواعد التي تحكمها. يقرؤها «اسأل الذكاء الاصطناعي» والرؤى ومصمم اللوحات — والقاعدة المعلَّمة «دائمًا» (مثل: الموظفون الحاليون هم الصفوف التي تاريخ نهايتها 9999-01-01) تُطبَّق على كل سؤال في ذلك الاتصال.',

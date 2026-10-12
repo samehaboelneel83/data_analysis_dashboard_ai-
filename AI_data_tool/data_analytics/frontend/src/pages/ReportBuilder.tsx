@@ -93,6 +93,7 @@ import SubscribeButton from '../components/report/SubscribeButton'
 import ToolbarMenu from '../components/report/ToolbarMenu'
 import ActionMenu from '../components/ActionMenu'
 import AiMascot from '../components/ai/AiMascot'
+import AskFab from '../components/ai/AskFab'
 import ViewAssist, { type AssistTab } from './reportBuilder/ViewAssist'
 import FocusView from './reportBuilder/FocusView'
 import PresentControls from './reportBuilder/PresentControls'
@@ -3928,7 +3929,7 @@ export default function ReportBuilder() {
         <div className={kiosk ? 'dl-pr-stage' : undefined} style={{ display:'flex', flex:1, gap:10, padding:'10px 16px', overflow:'hidden', minHeight:0, position:'relative' }}>
 
           {/* Canvas */}
-          <div key={refreshNonce} data-canvas-scroll ref={attachColumn} style={{ flex:1, overflowY:'auto', overflowX:'auto' }}>
+          <div key={refreshNonce} data-canvas-scroll ref={attachColumn} style={{ flex:1, overflowY:'auto', overflowX:'auto', ...(modern ? { paddingBottom: 88 } : {}) }}>
             {/* Report (h1) > page (h2) > widget titles (level 3), the outline
                 ReportPrint draws too; without it the widgets skip a level. */}
             {activePage && <h2 className="dl-sr-only">{activePage.title || activePage.name}</h2>}
@@ -4292,9 +4293,7 @@ export default function ReportBuilder() {
               ) : undefined} />
           )}
           {modern && !aiOpen && (
-            <button type="button" className="dl-vw-fab" onClick={() => setAiOpen(true)} aria-keyshortcuts="Control+/" data-testid="view-ai-open">
-              <span className="dl-vw-av lg" aria-hidden><AiMascot size={24} alive={!aiOffline} /></span>{tr('nav.askAi')}
-            </button>
+            <AskFab onOpen={() => setAiOpen(true)} alive={!aiOffline} />
           )}
 
           {/* Pinned Properties beside the open rail panel (7e3). */}

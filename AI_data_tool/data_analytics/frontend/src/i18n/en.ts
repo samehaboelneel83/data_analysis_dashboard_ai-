@@ -23,6 +23,7 @@ export const en = {
   ...pgAdminSecurity, ...pgAdminPlatform, ...pgDataPages, ...pgPanelsA, ...pgPanelsB, ...pgModelsMaps, ...pgTypes, ...pgAskAi, ...pgLineage, ...pgUpload,
   'nav.home': 'Home',
   'nav.askAi': 'Ask AI',
+  'fab.tip': 'Ask AI about this dashboard',
   'nav.datasets': 'Datasets',
   'nav.glossary': 'Glossary',
   'glossary.subtitle': 'The words your company uses and the rules behind them. Ask AI, Insights and the dashboard designer read these — a rule marked “Always” (for example, current employees are rows whose to_date is 9999-01-01) is applied to every question on that connection.',

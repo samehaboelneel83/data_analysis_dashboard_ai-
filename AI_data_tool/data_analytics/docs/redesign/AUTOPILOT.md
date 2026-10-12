@@ -100,7 +100,7 @@ Follow `docs/redesign/11-Lineage.md`.
 - Frames: landing, drag-over, review of one file (with a date warning), review of 3 files (combine on, one still uploading), import settings, importing, success, error.
 - Keep the existing upload API and flows. Do Part 0 in the log, then build. Leave out what the API can't do; for example, if combining files isn't supported, drop that frame and record it as a backend item.
 
-### [ ] 6. AI button redesign
+### [x] 6. AI button redesign
 - Design: `datalytics-archive/AI Button Redesign.html`, prototype `redesign/assist.html` (`assist.js`, `assist.css`).
 - What it shows:
   - The floating Ask AI button on dashboards: idle with an insight badge (only if real insights exist), hover pill with a tooltip, shrunk and semi-transparent while scrolling, open with suggestions, thinking, answer with a mini chart.
@@ -185,3 +185,9 @@ Follow `docs/redesign/11-Lineage.md`.
 - **Decision:** after a single import the page shows the success card instead of jumping to the dataset (the design); Open keeps `?new=1`. "Keep this page open" instead of the design's "you can leave this page" (the upload runs in the page).
 - **Backend items added:** previews of Excel/Parquet/XML/Access before import; import settings (types, header, delimiter, encoding, date format); a sample dataset; per-file upload status in a batch.
 - **Tests:** Upload page (24), reader (4), string guard; full suite 355 files / 4442 pass; type-check and build pass. **Captures:** `redesign-captures/ap5-upload/{before,after,design}/` (`cap_ap5.mjs`, browser-only routes: nothing uploaded).
+
+### 6. AI button (2026-10-12)
+- **Changed:** the View-mode Ask AI button is `components/ai/AskFab`: the mascot on a round accent button that breathes (a ring that grows and fades) and blinks; on hover or keyboard focus it opens into an "Ask AI" pill with a tooltip "Ask AI about this dashboard Ctrl /"; it shrinks and fades while the canvas scrolls; it can be dragged to any of the four corners, remembered per user in this browser. Arabic puts it bottom-left (logical corners). The View canvas gets 88px of bottom room so no widget has to stay under it.
+- **Kept:** it opens the page's existing AI panel beside the dashboard (never over other panels); Ctrl+/ toggles it (the page's handler); hidden in Present (checked) and in Edit, where the page copilot is used.
+- **Left out:** the "new insight" badge (knowing whether new insights exist needs a scan; backend row: an insight count). The design's own pop-over panel states (suggestions, thinking, mini chart) are the existing panel's, unchanged.
+- **Tests:** AskFab (3) plus the builder's existing button tests; full suite 356 files / 4445 pass; type-check and build pass. **Captures:** `redesign-captures/ap6-ai-button/{before,after}/` (`cap_ap6.mjs`).

@@ -221,6 +221,7 @@ Not part of the frontend steps (1–7); candidates for the handoff's section 7 p
 | Upload (autopilot 5) | Preview of Excel, Parquet, XML and Access files before import | The page reads CSV/TSV/JSON in the browser; the others need a server-side dry run. |
 | Upload (autopilot 5) | Import settings: column types, header row, delimiter, encoding, date format | `POST /datasets` takes only file, name, description and sheet. |
 | Upload (autopilot 5) | A sample dataset to try, and per-file status within a batch | No endpoint for one sample; a batch is one request with no per-file progress. |
+| AI button (autopilot 6) | A count of new insights for a dataset | The button's badge needs it without running a full scan (`POST /datasets/{id}/insights` computes them). |
 | 7-QA B6 | Ask AI is slow (about 70 s for a simple answer, about 4 min before a clarification), with no timeout or cancel | Needs a server-side timeout and a cancel endpoint (AN2: stream progress + cancel). |
 
 ## Log
