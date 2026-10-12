@@ -227,7 +227,7 @@ describe('DatasetPreview (3a)', () => {
     expect(screen.getByText('3 columns')).toBeInTheDocument()
     expect(await screen.findByText('Internal')).toBeInTheDocument()
     expect(await screen.findByText('Asia Pacific')).toBeInTheDocument()
-    expect(screen.getByText('3382.23')).toBeInTheDocument()
+    expect(screen.getByText('3,382.23')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /Sales Overview/ })).toHaveAttribute('href', '/reports/10')
   })
 

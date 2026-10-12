@@ -119,7 +119,7 @@ Follow `docs/redesign/11-Lineage.md`.
   - **B:** review screens.
 - Respect the teammate's flow: a new connection goes to `/setup/:id`. Keep the credential autofill protections from 7-QA5 F4.
 
-### [ ] 8. 9-polish (small frontend items)
+### [x] 8. 9-polish (small frontend items)
 - Dashboards list: "Open in edit mode" in the ⋯ menu, and undo after a move.
 - View hover menu: Drill down and Copy image, reusing the widget ⋮ actions.
 - Home: a redesigned whole-page error state.
@@ -199,3 +199,13 @@ Follow `docs/redesign/11-Lineage.md`.
 - **For step 9:** `SyncProgress` ("This source has not been synced yet…") and the join graph's "No tables yet…" are English in Arabic (pre-existing).
 - **Backend items added:** a connection's stored status and last check; table count per connection.
 - **Tests:** list and drawer (6); existing tests updated for the type step and new labels; full suite 357 files / 4451 pass; type-check and build pass. **Captures:** `redesign-captures/ap7-connections/{before,after,design}/` (`cap_ap7.mjs`).
+
+### 8. 9-polish (2026-10-12)
+- **Dashboards list:** "Open in edit mode" in the ⋯ menu (`?edit=1`, for those who can edit); a move's toast has Undo, which moves each dashboard back to its previous folder.
+- **View hover menu:** Copy image, through the existing "Export as image" picture (`lib/widgetImage`: `copyChartImage` added; charts and maps, not tables/KPIs/text). **Drill down left out:** the widget ⋮ menu has no drill action to reuse; drilling is clicking a value in a hierarchy.
+- **Home:** a whole-page error card (what happened, the server's words, Try again, links to Datasets / Dashboards / Ask AI).
+- **Builder:** a grip on the quick toolbar that starts the widget's move; the rail's Review item shows the count of open findings (errors and warnings from the same `reviewReport`).
+- **Datasets list:** the health strip's shape while loading (no figures).
+- **Dataset pages:** Models count in the Overview facts (one per name, linked to the tab); currency / number / percent column formats on the Data tab; **Retrain** on each model (same name, target and predictors = the next version; GATE A had no Retrain, this work order asks for it); a type-ahead in Share (its English labels translated).
+- **Thousands grouping:** `formatTableCell` (column format, else grouped quantities; never years, ids, coordinates, or whole numbers stored as text) in the dataset grid, the report Data view, the dataset preview, the query-builder and prep previews. Two tests re-pinned to grouped values.
+- **Tests:** formatter (2), Home error (1), rail and grip (3), share type-ahead (3 re-pinned); full suite 358 files / 4458 pass; type-check and build pass. **Captures:** `redesign-captures/ap8-polish/after/` (`cap_ap8.mjs`).

@@ -6,7 +6,7 @@ import { formatTimeAgo, useT, type MessageKey } from '../../i18n'
 import { localDigits } from '../../lib/arabicFormats'
 import { certificationOf, isCertified } from '../../lib/cleanDatasets'
 import { summary as checkSummary } from '../../components/dataset/ChecksPanel'
-import {
+import { predictionModelsApi,
   adminAuditApi, datasetsApi, lineageApi, monitoringApi,
   type CheckResult, type DataAlert, type DataCheck, type Dataset, type LineageGraph, type PipelineHealth,
 } from '../../services/api'
@@ -193,6 +193,16 @@ function Facts({ ds }: { ds: Dataset }) {
   const kind = (ds as { catalog?: { kind?: string } }).catalog?.kind
   const when = new Date(ds.created_at)
   const lang = useDirection().language === 'ar' ? 'ar-u-nu-latn' : 'en-GB'
+  const [models, setModels] = useState<number | null>(null)
+  useEffect(() => {
+    let alive = true
+    // Optional: without the list the fact is simply not shown.
+    let ask: Promise<unknown> = Promise.resolve(null)
+    try { ask = Promise.resolve(predictionModelsApi.list(ds.id)) } catch { /* no models API here */ }
+    ask.then(list => { if (alive && Array.isArray(list)) setModels(new Set(list.map((m: { name: string }) => m.name)).size) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [ds.id])
   return (
     <section className="dl-ov__facts" aria-label={t('ov3.facts')}>
       <div><span>{t('dsl.pv.rows')}</span><strong>{live && !ds.row_count ? '—' : localDigits(ds.row_count.toLocaleString('en-US'))}</strong></div>
@@ -200,6 +210,12 @@ function Facts({ ds }: { ds: Dataset }) {
       <div><span>{kind === 'upload' || (!ds.data_source_id && !kind) ? t('dsl.pv.uploaded') : t('dsl.pv.created')}</span>
         <strong>{localDigits(when.toLocaleString(lang, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }))}</strong></div>
       <div><span>{t('datasets.col.size')}</span><strong>{live ? '—' : fmtBytes(ds.file_size)}</strong></div>
+      {/* 9-polish: the prediction models trained on it, one per name (the
+          champion), linked to the Models tab. Hidden until known. */}
+      {models != null && (
+        <div data-testid="overview-models"><span>{t('pol.models')}</span>
+          <strong><Link to={`/datasets/${ds.id}?tab=models`} className="dl-ov__link">{localDigits(String(models))}</Link></strong></div>
+      )}
     </section>
   )
 }

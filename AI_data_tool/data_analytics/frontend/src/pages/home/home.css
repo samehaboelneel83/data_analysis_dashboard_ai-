@@ -304,3 +304,17 @@
 }
 .hm-setup__item > svg { color: var(--accent); flex: none; }
 .hm-setup__text { flex: 1; min-width: 0; font-size: 14px; }
+
+/* 9-polish: the whole page could not be read. */
+.dl-home-err { min-height: 70vh; display: grid; place-items: center; padding: 24px; }
+.dl-home-err__card { max-width: 520px; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; padding: 32px 28px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--dl-shadow-card); }
+.dl-home-err__ic { width: 56px; height: 56px; border-radius: 16px; display: grid; place-items: center; background: color-mix(in srgb, var(--warning) 14%, transparent); color: var(--warning); }
+.dl-home-err__card h2 { margin: 4px 0 0; font-size: 20px; font-weight: 700; }
+.dl-home-err__card p { margin: 0; color: var(--muted); text-wrap: pretty; }
+.dl-home-err__said { font-size: 13px; padding: 8px 12px; border-radius: 8px; background: var(--surface2); color: var(--text) !important; }
+.dl-home-err__card .btn { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; }
+.dl-home-err__go { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: center; margin-top: 8px; padding-top: 14px; border-top: 1px solid var(--border); width: 100%; font-size: 13px; color: var(--muted); }
+.dl-home-err__go a { display: inline-flex; align-items: center; gap: 5px; color: var(--mc-accent-ink, var(--accent)); font-weight: 600; text-decoration: none; }
+[data-theme="dark"] .dl-home-err__go a { color: var(--accent); }
+.dl-home-err__go a:hover { text-decoration: underline; }

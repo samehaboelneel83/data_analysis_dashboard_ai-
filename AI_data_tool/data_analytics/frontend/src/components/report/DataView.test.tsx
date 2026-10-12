@@ -27,7 +27,7 @@ describe('DataView', () => {
     })
     render(<DataView datasetId={10} />)
     expect(await screen.findByText('-336.69')).toBeInTheDocument()
-    expect(screen.getByText('2024')).toBeInTheDocument()
+    expect(screen.getByText('2,024')).toBeInTheDocument()
     expect(screen.queryByText(/336\.6900/)).not.toBeInTheDocument()
   })
 

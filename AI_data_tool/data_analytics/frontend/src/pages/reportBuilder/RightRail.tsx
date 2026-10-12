@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import AiMascot from '../../components/ai/AiMascot'
 import { useT, type MessageKey } from '../../i18n'
+import { localDigits } from '../../lib/arabicFormats'
 
 /** Every panel the builder's right side can show (v1's RightPanelMode). */
 export type RailMode = 'default' | 'mobile' | 'selection' | 'sync' | 'bookmarks' | 'taborder' | 'performance' | 'reportrules'
@@ -53,7 +54,11 @@ export const railIcon = (mode: RailMode): LucideIcon | 'ai' =>
  * the prototype. v1 kept eight of these as words in a toolbar and the rest
  * behind "More panels". A press opens the panel; the open one is pressed.
  */
-export function RightRail({ mode, pinned, onPick }: { mode: RailMode; pinned: boolean; onPick: (m: RailMode) => void }) {
+export function RightRail({ mode, pinned, onPick, counts }: {
+  mode: RailMode; pinned: boolean; onPick: (m: RailMode) => void
+  /** 9-polish: a count on a rail item (open review findings). */
+  counts?: Partial<Record<RailMode, number>>
+}) {
   const t = useT()
   const on = (m: RailMode) => m === 'ask' ? AI_MODES.includes(mode) : m === 'default' ? mode === 'default' || pinned : mode === m
   return (
@@ -61,9 +66,11 @@ export function RightRail({ mode, pinned, onPick }: { mode: RailMode; pinned: bo
       {RAIL.map((x, i) => typeof x === 'string'
         ? <span key={i} className="gl" role="separator" aria-label={t(x)} />
         : (
-          <button key={x.mode} type="button" className="dl-bd-ri" aria-pressed={on(x.mode)} aria-label={t(x.label)} title={t(x.label)}
+          <button key={x.mode} type="button" className="dl-bd-ri" aria-pressed={on(x.mode)}
+            aria-label={counts?.[x.mode] ? t('pol.railCount', { label: t(x.label), n: localDigits(String(counts[x.mode])) }) : t(x.label)} title={t(x.label)}
             onClick={() => onPick(x.mode)}>
             {x.icon === 'ai' ? <span className="av" aria-hidden><AiMascot size={18} /></span> : <x.icon size={18} aria-hidden />}
+            {!!counts?.[x.mode] && <span className="dl-bd-ri__n" aria-hidden dir="ltr">{localDigits(String(Math.min(counts[x.mode]!, 99)))}</span>}
           </button>
         ))}
     </nav>

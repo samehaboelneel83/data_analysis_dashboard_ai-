@@ -296,6 +296,15 @@ export default function Dashboard() {
           memory -- nothing here can disagree with the table below it. Hidden
           while loading, on failure and when there is nothing: totals of
           nothing would be noise, or a lie. */}
+      {/* 9-polish: while loading, the strip's shape, with no figures (a figure
+          before the list is in would be a guess). */}
+      {loading && (
+        <div aria-hidden="true" className="card dl-dsl__health dl-dsl__health--loading" data-testid="health-loading">
+          <div className="dl-dsl__health-count"><i className="dl-dsl__ph dl-dsl__ph--big" /><i className="dl-dsl__ph" /></div>
+          <div className="dl-dsl__health-mid"><i className="dl-dsl__ph dl-dsl__ph--bar" /><i className="dl-dsl__ph dl-dsl__ph--wide" /></div>
+          <div className="dl-dsl__health-end"><i className="dl-dsl__ph" /><i className="dl-dsl__ph" /></div>
+        </div>
+      )}
       {!loading && !loadError && datasets.length > 0 && (
         <section aria-label={t('datasets.summary')} className="card dl-dsl__health">
           <div data-testid="stat-datasets" className="dl-dsl__health-count">

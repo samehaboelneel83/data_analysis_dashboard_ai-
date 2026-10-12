@@ -3176,3 +3176,6 @@ input::placeholder, textarea::placeholder { unicode-bidi: plaintext; }
 /* Guided setup phase 5: "What you should know" on dataset pages */
 .dl-health { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
 .dl-health__more { margin: 0; font-size: 13px; }
+
+/* A toast that can be taken back (9-polish). */
+.dl-toast-undo { display: inline-flex; align-items: center; gap: 10px; }

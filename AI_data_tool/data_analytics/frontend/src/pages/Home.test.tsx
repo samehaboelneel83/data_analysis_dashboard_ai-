@@ -312,6 +312,19 @@ describe('outage and first run', () => {
     expect(screen.queryByText(/No dashboards yet/)).not.toBeInTheDocument()
   })
 
+  it('9-polish: the whole-page error says so plainly, with the server’s words, Try again and where else to go', async () => {
+    vi.mocked(reportsApi.list).mockRejectedValue({ response: { data: { detail: 'database is starting up' } } })
+    renderHome()
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Home could not be loaded')
+    expect(alert).toHaveTextContent('database is starting up')
+    expect(within(alert).getByRole('link', { name: /Datasets/ })).toHaveAttribute('href', '/datasets')
+    vi.mocked(reportsApi.list).mockResolvedValue([] as never)
+    vi.mocked(datasetsApi.list).mockResolvedValue([] as never)
+    fireEvent.click(within(alert).getByRole('button', { name: /Try again/ }))
+    await waitFor(() => expect(screen.queryByText('Home could not be loaded')).toBeNull())
+  })
+
   it('an empty workspace gets the setup steps, and the question box says why it is locked', async () => {
     vi.mocked(reportsApi.list).mockResolvedValue([] as never)
     vi.mocked(datasetsApi.list).mockResolvedValue([] as never)

@@ -305,3 +305,9 @@
 /* QA4 V7: only the numbers of the col · row tag are monospace; its words
    ("عمود", "صف") are in the text font, so Arabic letters join. */
 .dl-bd-coord bdi { font-family: var(--mono); }
+
+/* 9-polish: a count on a rail item, and the quick toolbar's grip. */
+.dl-bd-ri__n { position: absolute; top: 1px; inset-inline-end: 0; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px;
+  display: grid; place-items: center; font-size: 10px; font-weight: 700; background: var(--warning); color: var(--mc-accent-fg, var(--surface)); box-shadow: 0 0 0 2px var(--surface); }
+.dl-bd-wt__grip { display: inline-grid; place-items: center; width: 22px; height: 28px; color: var(--muted); cursor: grab; }
+.dl-bd-wt__grip:active { cursor: grabbing; }

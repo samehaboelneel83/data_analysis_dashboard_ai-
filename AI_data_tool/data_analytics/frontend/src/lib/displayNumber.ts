@@ -88,3 +88,34 @@ export function formatCellGrouped(v: string | number | boolean | null | undefine
   const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
   return localDigits(frac ? `${grouped}.${frac}` : grouped)
 }
+
+/** What a data table needs to know about a column to show its cells. */
+export interface CellFormat { type?: string; decimals?: number; symbol?: string; symbol_position?: 'before' | 'after'; prefix?: string; suffix?: string }
+
+/**
+ * A cell of a data table (9-polish): the column's own number format when the
+ * dataset has one -- a currency with its symbol, a fixed number of decimals,
+ * a percent -- and otherwise `formatCell` with the thousands grouped for a
+ * quantity column. A year, an identifier or a coordinate is never grouped
+ * (the caller passes `quantity` false for those, from `nonAdditiveKind`).
+ * Display only: edits, exports and the stored value are unchanged.
+ */
+export function formatTableCell(v: string | number | boolean | null | undefined, quantity: boolean, fmt?: CellFormat | null): string {
+  if (v == null) return ''
+  const n = typeof v === 'number' ? v : typeof v === 'string' && /^[-+]?\d+(\.\d+)?$/.test(v.trim()) ? Number(v) : null
+  if (n != null && Number.isFinite(n) && fmt && ['number', 'integer', 'currency', 'percent'].includes(fmt.type ?? '')) {
+    const d = fmt.type === 'integer' ? 0 : fmt.decimals ?? 2
+    const fixed = n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d, useGrouping: fmt.type !== 'percent' })
+    const pre = fmt.prefix ?? '', suf = fmt.suffix ?? ''
+    if (fmt.type === 'percent') return localDigits(`${pre}${fixed}%${suf}`)
+    if (fmt.type === 'currency') {
+      const sym = fmt.symbol ?? '$'
+      const after = fmt.symbol_position ? fmt.symbol_position === 'after' : /[؀-ۿ]/.test(sym)
+      return localDigits(after ? `${pre}${fixed} ${sym}${suf}` : `${pre}${sym} ${fixed}${suf}`)
+    }
+    return localDigits(`${pre}${fixed}${suf}`)
+  }
+  // A whole number written as text (a code, a phone number) is not grouped.
+  if (quantity && (typeof v === 'number' || (typeof v === 'string' && /^[-+]?\d+\.\d+$/.test(v.trim())))) return formatCellGrouped(v)
+  return formatCell(v)
+}

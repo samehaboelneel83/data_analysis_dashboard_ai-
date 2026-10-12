@@ -1,0 +1,51 @@
+/**
+ * Autopilot step 8 (9-polish): small additions across pages, in English and
+ * Arabic. Spread into en.ts / ar.ts. Keys start with "pol.".
+ */
+export const en = {
+  'pol.openEdit': 'Open in edit mode',
+  'pol.moveUndone': 'Move undone',
+  'pol.copyImage': 'Copy {title} as an image',
+  'pol.copyImageShort': 'Copy image',
+  'pol.imageCopied': 'Image copied',
+  'pol.imageFailed': 'Could not copy the image',
+  'pol.homeErr.title': 'Home could not be loaded',
+  'pol.homeErr.body': 'We could not read your datasets and dashboards just now. Nothing has been lost; try again in a moment.',
+  'pol.homeErr.retry': 'Try again',
+  'pol.homeErr.elsewhere': 'Or go to',
+  'pol.railCount': '{label} ({n} open)',
+  'pol.dragHandle': 'Drag to move',
+  'pol.models': 'Models',
+  'pol.retrain': 'Retrain',
+  'pol.retraining': 'Retraining…',
+  'pol.retrainTitle': 'Train again on today’s rows, with the same target and predictors. It becomes the next version; the champion stays until you change it.',
+  'pol.retrained': '{name}: version {v} trained',
+  'pol.share.findUser': 'Person to share with',
+  'pol.share.findRole': 'Role to share with',
+  'pol.share.findUnit': 'Org unit to share with',
+  'pol.share.none': 'No one matches.',
+}
+
+export const ar: Record<keyof typeof en, string> = {
+  'pol.openEdit': 'فتح في وضع التحرير',
+  'pol.moveUndone': 'تم التراجع عن النقل',
+  'pol.copyImage': 'نسخ {title} كصورة',
+  'pol.copyImageShort': 'نسخ كصورة',
+  'pol.imageCopied': 'تم نسخ الصورة',
+  'pol.imageFailed': 'تعذّر نسخ الصورة',
+  'pol.homeErr.title': 'تعذّر تحميل الصفحة الرئيسية',
+  'pol.homeErr.body': 'تعذّرت قراءة مجموعات بياناتك ولوحاتك الآن. لم يُفقد شيء؛ أعد المحاولة بعد قليل.',
+  'pol.homeErr.retry': 'إعادة المحاولة',
+  'pol.homeErr.elsewhere': 'أو انتقل إلى',
+  'pol.railCount': '{label} ({n} مفتوحة)',
+  'pol.dragHandle': 'اسحب للنقل',
+  'pol.models': 'النماذج',
+  'pol.retrain': 'إعادة التدريب',
+  'pol.retraining': 'جارٍ إعادة التدريب…',
+  'pol.retrainTitle': 'درّبه من جديد على صفوف اليوم بالهدف والمتنبئات نفسها. يصبح الإصدار التالي؛ ويبقى البطل حتى تغيّره.',
+  'pol.retrained': '{name}: تم تدريب الإصدار {v}',
+  'pol.share.findUser': 'الشخص الذي تشارك معه',
+  'pol.share.findRole': 'الدور الذي تشارك معه',
+  'pol.share.findUnit': 'الوحدة التنظيمية التي تشارك معها',
+  'pol.share.none': 'لا أحد يطابق.',
+}

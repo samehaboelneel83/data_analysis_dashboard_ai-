@@ -205,3 +205,12 @@
   .dl-dsl__source { overflow: hidden; text-overflow: ellipsis; }
   .dl-dsl__fresh { display: block; overflow: hidden; text-overflow: ellipsis; }
 }
+
+/* 9-polish: the health strip while the list loads. */
+.dl-dsl__health--loading .dl-dsl__health-count, .dl-dsl__health--loading .dl-dsl__health-mid, .dl-dsl__health--loading .dl-dsl__health-end { display: flex; flex-direction: column; gap: 8px; }
+.dl-dsl__ph { display: block; height: 12px; width: 80px; border-radius: 6px; background: var(--surface2); animation: dl-dsl-ph 1.4s ease-in-out infinite; }
+.dl-dsl__ph--big { height: 26px; width: 48px; }
+.dl-dsl__ph--bar { height: 10px; width: 100%; border-radius: 999px; }
+.dl-dsl__ph--wide { width: 60%; }
+@keyframes dl-dsl-ph { 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .dl-dsl__ph { animation: none; } }

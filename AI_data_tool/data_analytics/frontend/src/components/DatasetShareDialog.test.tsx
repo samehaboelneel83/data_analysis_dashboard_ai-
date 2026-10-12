@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderWithProviders as render, screen, fireEvent, waitFor } from '../test/renderWithProviders'
+import { renderWithProviders as render, screen, fireEvent, waitFor, within } from '../test/renderWithProviders'
 import DatasetShareDialog from './DatasetShareDialog'
 import { DirectionProvider } from '../contexts/DirectionContext'
 import { adminUsersApi, datasetSharesApi, lineageApi } from '../services/api'
@@ -35,8 +35,9 @@ describe('DatasetShareDialog', () => {
     render(<DatasetShareDialog datasetId={5} onClose={() => {}} />)
     expect(await screen.findByText('bob@example.com')).toBeInTheDocument()
 
-    const picker = screen.getByLabelText('User to share with') as HTMLSelectElement
-    const optionValues = Array.from(picker.options).map(o => o.textContent)
+    // 9-polish: a type-ahead; its list shows who can still be added.
+    fireEvent.focus(screen.getByRole('combobox', { name: 'Person to share with' }))
+    const optionValues = within(screen.getByRole('listbox')).getAllByRole('option').map(o => o.textContent)
     expect(optionValues).toContain('alice@example.com')
     expect(optionValues).not.toContain('bob@example.com')
   })
@@ -45,7 +46,11 @@ describe('DatasetShareDialog', () => {
     render(<DatasetShareDialog datasetId={5} onClose={() => {}} />)
     await screen.findByText('bob@example.com')
 
-    fireEvent.change(screen.getByLabelText('User to share with'), { target: { value: '1' } })
+    const box = screen.getByRole('combobox', { name: 'Person to share with' })
+    fireEvent.change(box, { target: { value: 'ali' } })
+    expect(within(screen.getByRole('listbox')).getAllByRole('option').map(o => o.textContent)).toEqual(['alice@example.com'])
+    fireEvent.keyDown(box, { key: 'Enter' })
+    expect(box).toHaveValue('alice@example.com')
     fireEvent.click(screen.getByRole('button', { name: 'Share' }))
 
     await waitFor(() => expect(datasetSharesApi.create).toHaveBeenCalledWith(5, 1, 'view'))
@@ -81,8 +86,10 @@ describe('DatasetShareDialog', () => {
     render(<DatasetShareDialog datasetId={5} onClose={() => {}} />)
     await screen.findByText('bob@example.com')
     fireEvent.click(screen.getByRole('radio', { name: 'Role' }))
-    await waitFor(() => expect((screen.getByLabelText('Role to share with') as HTMLSelectElement).options.length).toBe(2))
-    fireEvent.change(screen.getByLabelText('Role to share with'), { target: { value: '3' } })
+    const roleBox = screen.getByRole('combobox', { name: 'Role to share with' })
+    fireEvent.focus(roleBox)
+    await waitFor(() => expect(within(screen.getByRole('listbox')).getAllByRole('option')).toHaveLength(1))
+    fireEvent.mouseDown(screen.getByRole('option', { name: 'HR managers' }))
     fireEvent.click(screen.getByRole('button', { name: 'Share' }))
     await waitFor(() => expect(datasetSharesApi.createGroup).toHaveBeenCalledWith(5, { role_id: 3, level: 'view' }))
     expect(await screen.findByText('HR managers')).toBeInTheDocument()

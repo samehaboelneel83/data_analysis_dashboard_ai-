@@ -7,7 +7,8 @@ import { useT, type MessageKey } from '../../i18n'
 import { dtypeShort } from '../../lib/dtypeName'
 import { localDigits } from '../../lib/arabicFormats'
 import { isCertified } from '../../lib/cleanDatasets'
-import { formatCell } from '../../lib/displayNumber'
+import { formatTableCell } from '../../lib/displayNumber'
+import { nonAdditiveKind } from '../../lib/semanticGuard'
 import { dataPreviewApi, reportsApi, sensitivityApi, type DatasetSummary, type LineageGraph } from '../../services/api'
 import { dashboardsOf, sourceKind } from './classify'
 
@@ -118,7 +119,7 @@ export default function DatasetPreview({ ds, graph, meId, fmtBytes }: {
                 <tr key={i}>{shownCols.map((_, j) => {
                   const v = r[j]
                   return <td key={j} dir="auto" className={typeof v === 'number' ? 'dl-dsl__num' : undefined}>
-                    {formatCell(v as string | number | boolean | null)}
+                    {formatTableCell(v as string | number | boolean | null, !nonAdditiveKind(shownCols[j]))}
                   </td>
                 })}</tr>
               ))}

@@ -73,10 +73,10 @@ import { fieldHints, hintTitle } from '../lib/fieldHints'
 import { PRE_AGGREGATED_HINT } from '../lib/aggregateDisclosure'
 import { CrossFilterProvider, useCrossFilter } from '../components/report/CrossFilterContext'
 import CollapsibleSide from '../components/report/CollapsibleSide'
-import ReviewPane from '../components/report/ReviewPane'
+import ReviewPane, { reviewReport } from '../components/report/ReviewPane'
 import PopupOverlay from '../components/report/PopupOverlay'
 import TooltipPageOverlay from '../components/report/TooltipPageOverlay'
-import { ArrowLeft, Plus, Eye, Undo2, Redo2, KeyRound, ShieldCheck, Pause, Play, FileDown, Share2, Maximize2, EllipsisVertical, SlidersHorizontal, Printer, FileText, Package, Pencil, RefreshCw, ChevronUp, ChevronDown, Database, Search, X, Settings2 } from 'lucide-react'
+import { ArrowLeft, Plus, Eye, Undo2, Redo2, KeyRound, ShieldCheck, Pause, Play, FileDown, Share2, Maximize2, Image as ImageIcon, EllipsisVertical, SlidersHorizontal, Printer, FileText, Package, Pencil, RefreshCw, ChevronUp, ChevronDown, Database, Search, X, Settings2 } from 'lucide-react'
 import { updatedAgo } from '../lib/viewStyle'
 import { columnKind, usePageFilters } from '../lib/pageFilters'
 import PageFilterBar, { type PageFilterColumn } from '../components/report/PageFilterBar'
@@ -94,6 +94,11 @@ import ToolbarMenu from '../components/report/ToolbarMenu'
 import ActionMenu from '../components/ActionMenu'
 import AiMascot from '../components/ai/AiMascot'
 import AskFab from '../components/ai/AskFab'
+import { copyChartImage } from '../lib/widgetImage'
+
+/** Widgets with no chart drawing to copy as an image: tables, numbers, text
+ *  and controls. Charts and maps draw SVG ("Export as image" uses the same). */
+const NO_CHART_IMAGE = /^(table|matrix|crosstab|kpi|card|text|image|slicer|filter|button|shape|iframe|grid)/
 import ViewAssist, { type AssistTab } from './reportBuilder/ViewAssist'
 import FocusView from './reportBuilder/FocusView'
 import PresentControls from './reportBuilder/PresentControls'
@@ -2661,6 +2666,12 @@ export default function ReportBuilder() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [activePage?.id, activePage?.prompt_column, promptValues])
 
+  // Before the early returns below: a hook. 9-polish: the rail's count of open review findings (errors and warnings),
+  // from the same check the Review panel runs. Edit mode only.
+  const openFindings = useMemo(() => {
+    if (!editMode || !report) return 0
+    try { return reviewReport(report, perfStats, { datasets, relationships }).filter(f => f.severity !== 'info').length } catch { return 0 }
+  }, [editMode, report, perfStats, datasets, relationships])
   if (badId) return <NotFound />
   if (loadError) {
     return (
@@ -4170,6 +4181,18 @@ export default function ReportBuilder() {
                             aria-label={tr('vw.wt.focus', { title: widget.title || widget.widget_type })} title={tr('vw.wt.focusShort')}>
                             <Maximize2 size={15} aria-hidden />
                           </button>
+                          {/* 9-polish: the chart as a picture, for a chart drawn as SVG. */}
+                          {!NO_CHART_IMAGE.test(widget.widget_type) && (
+                            <button type="button" aria-label={tr('pol.copyImage', { title: widget.title || widget.widget_type })} title={tr('pol.copyImageShort')}
+                              onClick={e => {
+                                const el = (e.currentTarget as HTMLElement).closest('[data-widget-id]')
+                                copyChartImage(el)
+                                  .then(dropped => toast.success(dropped ? tr('bc.canvas.mapTilesDropped') : tr('pol.imageCopied')))
+                                  .catch(() => toast.error(tr('pol.imageFailed')))
+                              }}>
+                              <ImageIcon size={15} aria-hidden />
+                            </button>
+                          )}
                         </div>
                       )}
                       {/* Building (7e4): the prototype's quick actions over the
@@ -4179,6 +4202,7 @@ export default function ReportBuilder() {
                           sat on top of this one. */}
                       {editMode && multiSelectedIds.size < 2 && (
                         <EditToolbar title={widget.title || widget.widget_type}
+                          onDragStart={perWidgetHandlers.get(widget.id)?.onDragStart}
                           onDuplicate={perWidgetHandlers.get(widget.id)?.onDuplicate}
                           onAssign={() => {
                             setSelectedW(widget); setRightPanelMode('default'); setPropSection('data'); setRightOpenSignal(n => n + 1)
@@ -4573,7 +4597,7 @@ export default function ReportBuilder() {
           )}
           {/* The right rail (7e3): every panel, one icon each. */}
           {editMode && (
-            <RightRail mode={rightPanelMode} pinned={pinProps}
+            <RightRail mode={rightPanelMode} pinned={pinProps} counts={{ review: openFindings }}
               onPick={m => {
                 // Pressing the open panel again returns to Properties, as v1's
                 // toggles did; AI counts as open on any of its three tabs.

@@ -287,6 +287,22 @@ export default function PredictionModelsPanel({ datasetId, columns, mode, datase
     }
   }
 
+  /** 9-polish: train this model again on today's rows -- the same name,
+   *  target and predictors, which the server keeps as the name's next
+   *  version (a candidate beside the champion). */
+  const [retraining, setRetraining] = useState<number | null>(null)
+  const retrain = async (m: PredictionModelSummary) => {
+    setRetraining(m.id)
+    try {
+      const made = await predictionModelsApi.train(datasetId, { name: m.name, target: m.target, predictors: m.features })
+      toast.success(t('pol.retrained', { name: made.name, v: String(made.version ?? '') }))
+      await load()
+    } catch (e) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      toast.error(detail || t('pg.modelsMaps.pm.trainFailed'))
+    } finally { setRetraining(null) }
+  }
+
   const score = async (m: PredictionModelSummary) => {
     setScoringId(m.id)
     setResult(null)
@@ -444,6 +460,10 @@ export default function PredictionModelsPanel({ datasetId, columns, mode, datase
                       {t('mdl3.savePredictions')}
                     </button>
                   )}
+                  <button onClick={() => void retrain(m)} disabled={retraining !== null} className="btn btn-sm"
+                    title={t('pol.retrainTitle')}>
+                    {retraining === m.id ? t('pol.retraining') : t('pol.retrain')}
+                  </button>
                   {m.status !== 'champion' && (
                     <button onClick={() => void promote(m)} className="btn btn-sm"
                       title={t('pg.modelsMaps.pm.championTitle')}>

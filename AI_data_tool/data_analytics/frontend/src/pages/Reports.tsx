@@ -4,6 +4,7 @@ import {
   ArrowDownUp, ArrowRight, ChevronDown, Database, Download, Folder, FolderInput, FolderOpen, FolderPlus, LayoutDashboard,
   LayoutGrid, LayoutTemplate, Link2, List, Pencil, Plus, Search, SearchX, Share2, Sparkles, SquareDashedBottom, Trash2, X,
   Globe, GlobeLock, Users, Clock,
+  PencilRuler,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import LoadError from '../components/ui/LoadError'
@@ -216,11 +217,27 @@ export default function Reports() {
   }
   const moveMany = async (rs: ReportSummary[], parentId: number | null, targetName: string | null) => {
     let moved = 0
+    // Where each one was, so the move can be taken back (9-polish).
+    const before = rs.map(r => [r, nodes.get(r.id)?.parent_id ?? null] as const)
     try {
       for (const r of rs) if (await moveOne(r, parentId)) moved++
-      if (moved) toast.success(rs.length === 1
+      const said = rs.length === 1
         ? t('dsh.toast.moved', { name: rs[0].name, to: targetName ?? t('dsh.notInFolder') })
-        : t('dsh.toast.movedMany', { n: localDigits(String(moved)), to: targetName ?? t('dsh.notInFolder') }))
+        : t('dsh.toast.movedMany', { n: localDigits(String(moved)), to: targetName ?? t('dsh.notInFolder') })
+      if (moved) toast.success(tt => (
+        <span className="dl-toast-undo">
+          {said}
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => {
+            toast.dismiss(tt.id)
+            void (async () => {
+              try {
+                for (const [r, from] of before) if (await moveOne(r, from)) { /* moved back */ }
+                toast.success(t('pol.moveUndone'))
+              } catch (e) { toast.error(detail(e, t('dsh.toast.moveRefused'))) } finally { await loadTree() }
+            })()
+          }}>{t('bd.keys.undo')}</button>
+        </span>
+      ), { duration: 8000 })
     } catch (e) {
       // The server's answer is the answer: a folder this viewer cannot manage,
       // the cycle guard. Shown as given, never pre-empted.
@@ -294,6 +311,7 @@ export default function Reports() {
     const edit = canEdit(r)
     return [
       { key: 'open', label: t('dsh.open'), icon: <ArrowRight size={14} />, onSelect: () => openReport(`/reports/${r.id}`) },
+      ...(edit ? [{ key: 'openEdit', label: t('pol.openEdit'), icon: <PencilRuler size={14} />, onSelect: () => openReport(`/reports/${r.id}?edit=1`) }] : []),
       ...(canAdminister(r) ? [{ key: 'share', label: t('dsh.shareDots'), icon: <Share2 size={14} />, onSelect: () => setSharing(r) }] : []),
       { key: 'link', label: t('dsh.copyLink'), icon: <Link2 size={14} />, onSelect: () => void copyLink(r) },
       ...(edit && tree ? [{ key: 'move', label: t('dsh.moveDots'), icon: <FolderInput size={14} />, onSelect: () => setMoving([r]) }] : []),

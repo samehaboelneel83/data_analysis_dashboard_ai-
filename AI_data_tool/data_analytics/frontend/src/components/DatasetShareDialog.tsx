@@ -65,6 +65,11 @@ export default function DatasetShareDialog({ datasetId, onClose, datasetName, cr
       ? roles.filter(r => !r.is_org_admin && !taken.has(`role:${r.id}`)).map(r => ({ id: r.id, label: r.name }))
       : units.filter(u => !taken.has(`org_unit:${u.id}`)).map(u => ({ id: u.id, label: u.name }))
   const nameOf = (s: DatasetShare) => s.name ?? s.email ?? ''
+  const [taQuery, setTaQuery] = useState('')
+  const [taOpen, setTaOpen] = useState(false)
+  const [taAt, setTaAt] = useState(0)
+  const found = options.filter(o => o.label.toLowerCase().includes(taQuery.trim().toLowerCase())).slice(0, 8)
+  const choose = (o: { id: number; label: string }) => { setPicked(o.id); setTaQuery(o.label); setTaOpen(false) }
 
   const handleShare = async () => {
     if (picked === '') return
@@ -126,15 +131,35 @@ export default function DatasetShareDialog({ datasetId, onClose, datasetName, cr
               <span role="radiogroup" aria-label="Share with" className="dl-share__seg">
                 {(['user', 'role', 'org_unit'] as Kind[]).map(k => (
                   <button key={k} type="button" role="radio" aria-checked={kind === k}
-                    onClick={() => { setKind(k); setPicked('') }}>{KIND_LABEL[k]}</button>
+                    onClick={() => { setKind(k); setPicked(''); setTaQuery('') }}>{KIND_LABEL[k]}</button>
                 ))}
               </span>
-              <select aria-label={kind === 'user' ? 'User to share with' : kind === 'role' ? 'Role to share with' : 'Org unit to share with'}
-                value={picked} className="dl-share__pick"
-                onChange={e => setPicked(e.target.value ? Number(e.target.value) : '')}>
-                <option value="">{kind === 'user' ? t('share3.addPerson') : kind === 'role' ? t('share3.addRole') : t('share3.addUnit')}</option>
-                {options.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
-              </select>
+              {/* 9-polish: type to find who to share with. */}
+              <div className="dl-share__ta">
+                <input role="combobox" aria-expanded={taOpen} aria-controls="dl-share-ta" aria-autocomplete="list"
+                  aria-activedescendant={taOpen && found[taAt] ? `dl-share-ta-${found[taAt].id}` : undefined}
+                  aria-label={t(kind === 'user' ? 'pol.share.findUser' : kind === 'role' ? 'pol.share.findRole' : 'pol.share.findUnit')}
+                  placeholder={kind === 'user' ? t('share3.addPerson') : kind === 'role' ? t('share3.addRole') : t('share3.addUnit')}
+                  className="dl-share__pick" value={taQuery} autoComplete="off" name="share-find" dir="auto"
+                  onChange={e => { setTaQuery(e.target.value); setPicked(''); setTaOpen(true); setTaAt(0) }}
+                  onFocus={() => setTaOpen(true)} onBlur={() => setTimeout(() => setTaOpen(false), 120)}
+                  onKeyDown={e => {
+                    if (e.key === 'ArrowDown') { e.preventDefault(); setTaOpen(true); setTaAt(a => Math.min(a + 1, found.length - 1)) }
+                    else if (e.key === 'ArrowUp') { e.preventDefault(); setTaAt(a => Math.max(a - 1, 0)) }
+                    else if (e.key === 'Enter' && taOpen && found[taAt]) { e.preventDefault(); choose(found[taAt]) }
+                    else if (e.key === 'Escape') setTaOpen(false)
+                  }} />
+                {taOpen && (
+                  <ul id="dl-share-ta" role="listbox" className="dl-share__ta-list"
+                    aria-label={t(kind === 'user' ? 'pol.share.findUser' : kind === 'role' ? 'pol.share.findRole' : 'pol.share.findUnit')}>
+                    {found.length ? found.map((o, i) => (
+                      <li key={o.id} id={`dl-share-ta-${o.id}`} role="option" aria-selected={i === taAt}
+                        className={i === taAt ? 'is-act' : undefined} dir="auto"
+                        onMouseDown={e => { e.preventDefault(); choose(o) }} onMouseEnter={() => setTaAt(i)}>{o.label}</li>
+                    )) : <li className="dl-share__ta-none" role="presentation">{t('pol.share.none')}</li>}
+                  </ul>
+                )}
+              </div>
               <select aria-label="Access level" value={level} className="dl-share__level"
                 onChange={e => setLevel(e.target.value as Level)}>
                 <option value="view">{t('share3.view')}</option>

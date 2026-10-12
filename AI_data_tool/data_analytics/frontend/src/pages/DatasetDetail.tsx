@@ -22,7 +22,8 @@ import NotFound from './NotFound'
 import { formatTimeAgo, useT, type MessageKey } from '../i18n'
 import ActionMenu from '../components/ActionMenu'
 import { localDigits } from '../lib/arabicFormats'
-import { formatCell } from '../lib/displayNumber'
+import { formatTableCell, type CellFormat } from '../lib/displayNumber'
+import { nonAdditiveKind } from '../lib/semanticGuard'
 import { storedNumberUse } from '../lib/dtypeName'
 import Overview, { fmtBytes } from './datasetDetail/Overview'
 import { typeTag } from './datasetDetail/columnProfile'
@@ -1803,7 +1804,7 @@ export default function DatasetDetail() {
                                     padding: '1px 3px', background: 'var(--surface2)',
                                     border: '1px solid var(--accent)', borderRadius: 3,
                                     color: 'var(--text)' }} />
-                              ) : v == null ? <span style={{ color: 'var(--muted)' }}>—</span> : formatCell(v as string | number | boolean)}
+                              ) : v == null ? <span style={{ color: 'var(--muted)' }}>—</span> : formatTableCell(v as string | number | boolean, !nonAdditiveKind(column), (ds?.column_formats as Record<string, CellFormat> | undefined)?.[column])}
                             </td>
                             )
                           })}
