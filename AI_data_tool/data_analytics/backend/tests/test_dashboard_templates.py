@@ -425,3 +425,32 @@ def test_charts_of_an_additional_dataset_are_counted_apart_from_the_fit():
     assert fit["usable"] and fit["widgets"] == {"kept": 8, "total": 8}
     assert fit["elsewhere"] == {"widgets": 1, "datasets": ["costs"]} and "cost" not in fit["missing"]
     assert mapping.fit(builtin.BUILTIN["overview"], COLUMNS)["elsewhere"] is None
+
+
+def test_an_optional_column_in_a_list_is_left_out_and_the_chart_keeps_the_rest():
+    tpl = builtin.BUILTIN["correlation"]
+    out = res.resolve(tpl, {"value": ["x"], "other": ["y"]})
+    grid = next(w for w in out["pages"][0]["widgets"] if w["widget_type"] == "correlation_matrix")
+    assert grid["config"]["measures"] == ["x", "y"]
+    out = res.resolve(tpl, {"value": ["x"], "other": ["y"], "d": ["z"]})
+    assert next(w for w in out["pages"][0]["widgets"] if w["widget_type"] == "correlation_matrix")["config"]["measures"] == ["x", "y", "z"]
+
+
+def test_a_network_draws_when_some_rows_have_no_other_end():
+    import pandas as pd
+    from app.services.widget_data import shape_network
+    df = pd.DataFrame({"a": ["p", "q", None, "p", "r"], "b": ["x", None, "y", "x", "y"], "n": [1, 2, 3, 4, 5]})
+    got = shape_network(df, {"dimension": "a", "dimension2": "b", "measure": "n", "aggregation": "sum"})
+    assert got.get("type") != "error" and got.get("edges") or got.get("links") or got.get("rows")
+
+
+def test_two_numbers_as_points_are_a_sample_of_the_whole_range_not_the_left_edge():
+    import numpy as np
+    import pandas as pd
+    from app.services.widget_data import shape_xy_numeric
+    df = pd.DataFrame({"x": np.arange(10_000.0), "y": np.arange(10_000.0) * 2})
+    first = shape_xy_numeric(df, {"measure": "x", "measure2": "y", "limit": 100})
+    cloud = shape_xy_numeric(df, {"measure": "x", "measure2": "y", "limit": 100, "points": True})
+    assert max(r["x"] for r in first["rows"]) == 99                 # as before: the hundred smallest
+    assert len(cloud["rows"]) == 100 and max(r["x"] for r in cloud["rows"]) > 9000 and cloud["truncation"]
+    assert cloud["rows"] == shape_xy_numeric(df, {"measure": "x", "measure2": "y", "limit": 100, "points": True})["rows"]

@@ -2068,7 +2068,15 @@ def shape_xy_numeric(df: pd.DataFrame, config: dict) -> dict:
         sub, _truncation = _cut(df[[x]].dropna().sort_values(x), limit, "points")
         rows = [{"x": _safe(r[x]), "y": _safe(r[x])} for _, r in sub.iterrows()]
         return {"type": "xy_series", "x": x, "y": y, "rows": rows, "total": len(df), "truncation": _truncation}
-    sub, _truncation = _cut(df[[x, y]].dropna().sort_values(x), limit, "points")
+    both = df[[x, y]].dropna()
+    if config.get("points") and len(both) > limit:
+        # As a cloud of points: a random sample across the whole range (the
+        # same one every time), not the `limit` rows with the smallest x --
+        # which on a large table is one sliver at the left edge.
+        sub = both.sample(limit, random_state=7).sort_values(x)
+        _truncation = _cut(both, limit, "points")[1]
+    else:
+        sub, _truncation = _cut(both.sort_values(x), limit, "points")
     rows = [{"x": _safe(r[x]), "y": _safe(r[y])} for _, r in sub.iterrows()]
     return {"type": "xy_series", "x": x, "y": y, "rows": rows, "total": len(df), "truncation": _truncation}
 
@@ -3323,7 +3331,10 @@ def shape_network(df: pd.DataFrame, config: dict) -> dict:
 
     pairs = df[[src, dst]].dropna()
     if meas and meas in df.columns:
-        w = pd.to_numeric(df[meas][pairs.index.isin(df.index)], errors="coerce").reindex(pairs.index).fillna(1.0)
+        # The weight of each pair that has both ends. (This indexed the column
+        # with a mask as long as the PAIRS: with any row missing an end the two
+        # lengths differed and the chart failed with a server error.)
+        w = pd.to_numeric(df[meas], errors="coerce").reindex(pairs.index).fillna(1.0)
     else:
         w = pd.Series(1.0, index=pairs.index)
     agg = pd.DataFrame({"s": pairs[src].astype(str), "t": pairs[dst].astype(str), "w": w})

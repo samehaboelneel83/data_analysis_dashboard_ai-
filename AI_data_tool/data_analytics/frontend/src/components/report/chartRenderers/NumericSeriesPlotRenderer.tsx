@@ -9,6 +9,9 @@ export default function NumericSeriesPlotRenderer({ rows, cfg, rtl, measureFmt, 
   const titles = axisTitles(cfg)
   const grid = gridProps(cfg)
   const labels = labelListProps(cfg, measure2Fmt, 'y', rows.length)
+  // `points`: a cloud of dots, no line through them -- two numbers set against
+  // each other are not a sequence, and a line joining them invents one.
+  const points = !!(cfg as { points?: boolean }).points
   return (
     <ResponsiveContainer width="100%" height="100%">
       <LineChart data={rows} margin={chartMargin(rtl, { top: 4, right: 8, bottom: 4, left: 0 })}>
@@ -28,12 +31,12 @@ export default function NumericSeriesPlotRenderer({ rows, cfg, rtl, measureFmt, 
             renderer) rather than hardcoded, so an unruled dot keeps the same ring the
             old `{ fill, r }` object form got for free -- dropping them left every
             unruled dot's stroke missing. */}
-        <Line type="monotone" dataKey="y" stroke={seriesColor(0)} strokeWidth={2}
+        <Line type="monotone" dataKey="y" stroke={seriesColor(0)} strokeWidth={points ? 0 : 2} isAnimationActive={!points}
           dot={(props: any) => {
             const { key, cx, cy, index, stroke, strokeWidth } = props
             return (
-              <Dot key={key ?? index} cx={cx} cy={cy} r={3} stroke={stroke} strokeWidth={strokeWidth}
-                fill={ruleStyles?.rows?.[index]?.fill ?? seriesColor(0)} />
+              <Dot key={key ?? index} cx={cx} cy={cy} r={points ? 2.5 : 3} stroke={stroke} strokeWidth={strokeWidth}
+                fillOpacity={points ? 0.55 : 1} fill={ruleStyles?.rows?.[index]?.fill ?? seriesColor(0)} />
             )
           }}
         >

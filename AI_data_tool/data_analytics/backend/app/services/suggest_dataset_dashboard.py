@@ -202,6 +202,8 @@ _SETTING_KEYS = ("aggregation", "aggregation2", "limit", "sort", "sort_by",
                  "y2_axis_label",
                  # How a gauge or a filter control is drawn (bullet, progress; buttons, dropdown).
                  "gauge_shape", "slicer_mode",
+                 "influencer_style", "influencer_direction", "influencer_limit", "influencer_details",
+                 "influencer_format", "influencer_decimals", "rules_view", "rules_items", "model_tab", "points",
                  # An ordinal axis's real order, and a reader's line under a number.
                  "category_order", "caption")
 

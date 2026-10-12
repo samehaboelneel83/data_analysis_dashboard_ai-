@@ -45,6 +45,8 @@ export const PANEL_KEYS: ReadonlySet<string> = new Set([
   'dataset_id', 'drillthroughPageId', 'tooltipPageId', 'hierarchyNodeId', 'hierarchyNodeId2',
   'dimension_granularity', 'fiscal_start_month', 'aggregation2', 'bar_mode', 'centrality_metric', 'method',
   'event_value', 'max_depth', 'compare', 'prediction_model_id', 'model_follows', 'forecast_target',
+  'rules_view', 'rules_items', 'model_tab',
+  'influencer_style', 'influencer_direction', 'influencer_limit', 'influencer_details', 'influencer_format', 'influencer_decimals',
   'display_rules', 'analytics', 'container_mode', 'background_url', 'container_id', 'z',
   // formatting
   'x_axis_label', 'y_axis_label', 'axis_tick_size', 'axis_tick_color', 'x_axis_angle',

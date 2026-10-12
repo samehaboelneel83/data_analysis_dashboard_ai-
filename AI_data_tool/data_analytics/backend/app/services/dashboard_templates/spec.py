@@ -31,7 +31,7 @@ SCHEMA = "datalytics.dashboard-template/1"
 #: (or are few); `detail` is any column, for a table of rows.
 SLOT_KINDS = ("measure", "category", "date", "stage", "geography", "flag", "detail")
 CATEGORIES = ("overview", "trend", "comparison", "stages", "target", "monitoring", "geography",
-              "distribution", "detail")
+              "distribution", "detail", "analysis")
 FILTER_MODES = ("auto", "dropdown", "buttons", "list", "search", "range")
 
 #: A dashboard's look. Every key is optional; a missing one is the app's own.

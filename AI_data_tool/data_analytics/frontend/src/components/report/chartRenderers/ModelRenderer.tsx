@@ -13,6 +13,7 @@ import { kiSentence } from '../../analysis/KeyInfluencersResult'
 import { sayText } from '../../../lib/readbackText'
 import { useState } from 'react'
 import { seriesColor } from '../chartUtils'
+import RuleRoles, { RULE_VIEWS, type RuleView } from './RuleRoles'
 import { useT, type MessageKey, type TranslateFn } from '../../../i18n'
 import { useDirection, navArrows } from '../../../contexts/DirectionContext'
 import type { ChartRendererProps } from './types'
@@ -307,7 +308,67 @@ function TreeOutline({ node, depth = 0 }: { node: any; depth?: number }) {
 }
 
 /** Key influencers: each group, what it shows, and how far that is from usual. */
-function Influencers({ rows, percent }: { rows: { factor: string; group: string; value: number; lift: number; rows: number }[]; percent: boolean }) {
+type Influencer = { factor: string; group: string; value: number; lift: number; rows: number }
+type InflDirection = 'both' | 'higher' | 'lower'
+
+/** Which influencers to show: those that go with a higher value, a lower one, or both; then the first `limit`. */
+export function chosenInfluencers(rows: Influencer[], direction: InflDirection, limit?: number): Influencer[] {
+  const kept = rows.filter(r => direction === 'both' || (direction === 'higher' ? r.lift >= 1 : r.lift < 1))
+  return limit && limit > 0 ? kept.slice(0, limit) : kept
+}
+
+type InflFormat = 'change' | 'times' | 'value'
+
+/** An influencer's figure as the author asked for it: how far from usual
+ *  ("+23.5%"), how many times the usual ("1.24×"), or the group's own value. */
+export function influencerFigure(r: Influencer, percent: boolean, format: InflFormat, decimals?: number): string {
+  if (format === 'times') return `${r.lift.toFixed(decimals ?? 2)}×`
+  if (format === 'value') {
+    return percent ? `${(r.value * 100).toFixed(decimals ?? 1)}%` : fmt(r.value, decimals ?? (Math.abs(r.value) >= 100 ? 0 : 2))
+  }
+  const diff = (r.lift - 1) * 100
+  return `${diff >= 0 ? '+' : '−'}${Math.abs(diff).toFixed(decimals ?? (Math.abs(diff) >= 100 ? 0 : 1))}%`
+}
+
+/** Key influencers as a line to a bubble: the further from usual, the longer
+ *  the line and the larger the bubble, which says how far ("+23.5%"). The
+ *  same figures as the bars; the value itself is in the tooltip. */
+function InfluencerBubbles({ rows, percent, format = 'change', decimals }: { rows: Influencer[]; percent: boolean; format?: InflFormat; decimals?: number }) {
+  const tr = useT()
+  const far = Math.max(...rows.map(r => Math.abs(r.lift - 1)), 0) || 1
+  const show = (v: number) => percent ? `${(v * 100).toFixed(1)}%` : fmt(v, Math.abs(v) >= 100 ? 0 : 2)
+  return (
+    <div data-testid="influencers" data-style="bubbles" style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '4px 2px' }}>
+      {rows.map((r, i) => {
+        const share = Math.abs(r.lift - 1) / far
+        const up = r.lift >= 1
+        const said = influencerFigure(r, percent, format, decimals)
+        // Room for what it says: a long figure gets a wider bubble, never a cut one.
+        const size = Math.max(Math.round(34 + share * 18), said.length * 7 + 14)
+        // The dashboard's palette: its first colour for what goes with a higher value, its second for a lower one.
+        const tone = seriesColor(up ? 0 : 1)
+        return (
+          <div key={i} data-testid="influencer" title={`${r.factor}: ${r.group} — ${show(r.value)} · ${tr('mdl.infl.rows', { n: r.rows.toLocaleString() })}`}
+            style={{ display: 'grid', gridTemplateColumns: 'minmax(96px, 46%) 1fr max-content', gap: 8, alignItems: 'center', fontSize: 12.5 }}>
+            <span style={{ minWidth: 0, lineHeight: 1.25 }}>
+              <span style={{ color: 'var(--muted)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.factor}</span>
+              <bdi style={{ fontWeight: 600, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.group}</bdi>
+            </span>
+            <span aria-hidden style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+              <span style={{ height: 3, borderRadius: 2, background: tone, width: `${Math.max(8, share * 100)}%` }} />
+            </span>
+            <span data-testid="influencer-bubble" dir="ltr" style={{ width: size, height: size, borderRadius: '50%', background: tone, color: '#fff',
+              display: 'grid', placeItems: 'center', fontSize: size >= 44 ? 11.5 : 10.5, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+              {said}
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function Influencers({ rows, percent, format, decimals }: { rows: Influencer[]; percent: boolean; format?: InflFormat; decimals?: number }) {
   const tr = useT()
   const far = Math.max(...rows.map(r => Math.abs(r.lift - 1)), 0) || 1
   return (
@@ -323,8 +384,11 @@ function Influencers({ rows, percent }: { rows: { factor: string; group: string;
           </div>
           <span style={{ textAlign: 'end', fontVariantNumeric: 'tabular-nums' }}
             title={tr('mdl.infl.rows', { n: r.rows.toLocaleString() })}>
-            {percent ? `${(r.value * 100).toFixed(1)}%` : fmt(r.value, Math.abs(r.value) >= 100 ? 0 : 2)}
-            <span style={{ color: 'var(--muted)' }}> · {tr(r.lift >= 1 ? 'mdl.infl.above' : 'mdl.infl.below', { x: fmt(r.lift, 2) })}</span>
+            {/* By default the value and, beside it, how many times the usual; a chosen format shows that one figure. */}
+            {format ? influencerFigure(r, percent, format, decimals) : <>
+              {influencerFigure(r, percent, 'value', decimals)}
+              <span style={{ color: 'var(--muted)' }}> · {tr(r.lift >= 1 ? 'mdl.infl.above' : 'mdl.infl.below', { x: fmt(r.lift, 2) })}</span>
+            </>}
           </span>
         </div>
       ))}
@@ -428,8 +492,12 @@ function fitName(tr: TranslateFn, name: string): string {
   return key ? tr(key) : name
 }
 
-export default function ModelRenderer({ data }: ChartRendererProps) {
+export default function ModelRenderer({ data, cfg }: ChartRendererProps) {
   const [tab, setTab] = useState<string | null>(null)
+  // Key influencers: which way to look, chosen in the settings and changeable by the reader.
+  const opts = (cfg ?? {}) as { influencer_style?: string; influencer_direction?: InflDirection; influencer_limit?: number; influencer_details?: boolean
+    influencer_format?: InflFormat; influencer_decimals?: number; rules_view?: string; rules_items?: number; model_tab?: string }
+  const [direction, setDirection] = useState<InflDirection | null>(null)
   const tr = useT()
   const { rtl } = useDirection()
   if (!data || data.type !== 'model') return null
@@ -466,7 +534,16 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
     : (data.models ?? []).some((m: any) => Array.isArray(m.roc))
       ? [{ key: 'verdict', label: tr('mdl.tab.verdict') }, { key: 'rocs', label: 'ROC' }] // i18n-ok
       : [{ key: 'verdict', label: tr('mdl.tab.verdict') }]
-  const active = tab && tabs.some(t => t.key === tab) ? tab : tabs[0].key
+  // One of the model's views as a tile of its own (`model_tab`): a page can
+  // then lay a confusion matrix beside its ROC curve, or residuals beside
+  // actual-against-predicted, instead of hiding all but one behind tabs.
+  const fixedTab = opts.model_tab && tabs.some(t => t.key === opts.model_tab) ? opts.model_tab : null
+  const active = fixedTab ?? (tab && tabs.some(t => t.key === tab) ? tab : tabs[0].key)
+  // Only the influencers, when the author switched the model's own lines off.
+  // The rules read one way only -- by the role each value plays (RuleRoles): a
+  // tile of a page of such views, with no model line and no tabs.
+  const ruleView = kind === 'rules' && RULE_VIEWS.includes(opts.rules_view as RuleView) ? (opts.rules_view as RuleView) : null
+  const compact = (kind === 'influencers' && opts.influencer_details === false) || ruleView != null || fixedTab != null
   const formula = kind === 'cluster' ? (data.variables ?? []).join(', ')
     : kind === 'rules' ? <>
         {data.focus && <>{tr('mdl.r.about')} <bdi><b>{data.focus}</b></bdi> · </>}
@@ -485,7 +562,7 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
 
   return (
     <div data-testid="model-widget" style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 6, padding: '2px 4px', overflow: 'hidden' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <div data-testid="model-header" style={{ display: compact ? 'none' : 'flex', flexDirection: 'column', gap: 2 }}>
         <div style={{ fontSize: 12 }}>
           <b>{MODEL_NAMES[kind] ? tr(MODEL_NAMES[kind]) : tr('mdl.model')}</b> <span style={{ color: 'var(--muted)' }}>· {formula}</span>
         </div>
@@ -523,7 +600,7 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
         ))}
       </div>
 
-      {tabs.length > 1 && (
+      {tabs.length > 1 && !compact && (
         <div role="tablist" aria-label={tr('pg.modelsMaps.mr.views')} style={{ display: 'flex', gap: 2, flexWrap: 'wrap', borderBottom: '1px solid var(--border)' }}>
           {tabs.map(t => (
             <button key={t.key} type="button" role="tab" aria-selected={active === t.key}
@@ -539,7 +616,12 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
       )}
 
       {/* Focusable: it scrolls, and a keyboard user must be able to (E10). */}
-      <div role="tabpanel" tabIndex={0} style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+      {ruleView && (
+        <div data-testid="rule-roles" tabIndex={0} style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+          <RuleRoles rules={data.rules ?? []} view={ruleView} limit={opts.rules_items} />
+        </div>
+      )}
+      <div role="tabpanel" tabIndex={0} style={{ flex: 1, minHeight: 0, overflow: 'auto', display: ruleView ? 'none' : undefined }}>
         {active === 'coef' && <Coefficients coefs={r.detail?.coefficients ?? []} odds={kind === 'logistic'} />}
         {active === 'coef' && data.encodings && Object.keys(data.encodings).length > 0 && (
           <p style={{ fontSize: 10, color: 'var(--muted)', margin: '4px 0 0' }}>
@@ -555,7 +637,29 @@ export default function ModelRenderer({ data }: ChartRendererProps) {
           <p style={{ fontSize: 10, color: 'var(--muted)' }}>{tr('pg.modelsMaps.mr.coinToss')}</p>
         </>}
         {active === 'rocs' && <RocOverlay models={(data.models ?? []).filter((m: any) => Array.isArray(m.roc))} winner={data.winner} />}
-        {active === 'infl' && <Influencers rows={data.influencers ?? []} percent={data.value_format === 'percent'} />}
+        {active === 'infl' && (() => {
+          const way: InflDirection = direction ?? opts.influencer_direction ?? 'both'
+          const shown = chosenInfluencers(data.influencers ?? [], way, opts.influencer_limit)
+          const percent = data.value_format === 'percent'
+          return (
+            <>
+              <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 11.5, color: 'var(--muted)', margin: '2px 0 6px' }}>
+                {tr('mdl.infl.o.show')}
+                <select data-testid="influencer-direction" value={way} onMouseDown={e => e.stopPropagation()}
+                  onChange={e => setDirection(e.target.value as InflDirection)} style={{ fontSize: 11.5, padding: '1px 4px' }}>
+                  <option value="both">{tr('mdl.infl.o.both')}</option>
+                  <option value="higher">{tr('mdl.infl.o.higher')}</option>
+                  <option value="lower">{tr('mdl.infl.o.lower')}</option>
+                </select>
+              </label>
+              {shown.length === 0
+                ? <p style={{ fontSize: 12, color: 'var(--muted)' }}>{tr('mdl.infl.o.none')}</p>
+                : opts.influencer_style === 'bubbles'
+                  ? <InfluencerBubbles rows={shown} percent={percent} format={opts.influencer_format ?? 'change'} decimals={opts.influencer_decimals} />
+                  : <Influencers rows={shown} percent={percent} format={opts.influencer_format} decimals={opts.influencer_decimals} />}
+            </>
+          )
+        })()}
         {active === 'infl' && caveats[0] && <p role="note" style={{ fontSize: 10.5, color: 'var(--muted)', margin: '6px 0 0' }}>{kiSentence(caveats[0], tr)}</p>}
         {active === 'imp' && <Bars rows={(data.rows ?? []).map((x: any) => ({ name: x.name, value: x.value }))} />}
         {active === 'rules' && <TreeOutline node={r.tree} />}

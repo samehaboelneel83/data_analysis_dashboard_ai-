@@ -146,3 +146,91 @@ How many are added is an admin setting ("Suggestions panel: further chart types 
 * **Area charts fade towards the axis** instead of a flat tint, one gradient per series.
 * Screenshots: `docs/templates/looks/kpi-gradient-*.png`. 1 more browser test.
 * Seen on screen and left: in a narrow card a long number is cut with "…" because the pill shares its row.
+
+## "Executive summary": a reference dashboard as a template (2026-10-12)
+
+Asked, with a picture of an executive dashboard: can the platform make the same dashboard on other data?
+
+* **A built-in template, "Executive summary"** (`builtin.BUILTIN["executive"]`), laid out as the picture: three headline numbers each with its change on the period before and on the year before; the main number over time beside them; its months with a forecast; what goes with a higher value of it (key influencers); a map; a ranked bar; quarters — and three more pages as tabs (Trends, Groups, Detail). Filters across the top: a from–to date range, a dropdown and buttons.
+* **It asks for a number and a date; everything else is optional** (two more numbers, two ways to split, a place). A chart whose column is not mapped is left out and the rest move up, as with every template.
+* **Its own look**: white cards on a pale page, one family of blues.
+* **Bars can lie down** (`orientation: "horizontal"`, `BarChartRenderer`): each name on its own line, read whole. New for this; a single series only.
+* **A narrow headline card no longer cuts its number**: the change drops under it.
+
+**Checked:** made on two unrelated datasets (62,662 shipments; 14,269 car listings) — every chart on all four pages drew on both. Screenshots: `docs/templates/looks/executive-summary-template*.png`. The template passes the tests every built-in passes (valid, resolves, draws every chart on its sample, every word has its Arabic); 2 browser tests of horizontal bars.
+
+**Not as the picture**
+* **The map depends on the place names matching a known boundary set.** On the first dataset (governorates of one country) it did not draw the regions; on the second it drew the country as one shape. The template is right; the map data for sub-national regions is what is missing.
+* **The forecast is drawn in the trend chart itself**, not as a separate "next six months" bar chart: the third box of the bottom row shows quarters instead.
+* **Horizontal bars are set by the template; the chart settings panel has no switch for them yet.**
+* The automatic mapping takes the first suitable number; in the gallery's "Use" dialog the person chooses which number is followed.
+
+### Key influencers: options for how they are shown (same day)
+The widget drew one way only: the model's line, the row counts, tabs, then a bar per influencer. Its settings now hold six display choices (the figures behind them are unchanged):
+
+| option | choices | default |
+|---|---|---|
+| Drawn as | bars · bubbles (a line to a circle, longer and larger the further from usual) | bars |
+| Show what goes with | higher and lower · a higher value · a lower value — and the reader can switch it on the chart | both |
+| How many to show | 1 to 50 | all |
+| Number shown | automatic · how far from usual (+23.5%) · times the usual (1.24×) · the group's own value | automatic |
+| Decimal places | automatic · 0 to 3 | automatic |
+| Show the model's own lines | on · off (only the influencers: no model line, row counts or tabs) | on |
+
+The "Executive summary" template uses bubbles, "a higher value", the first six, and the model lines off — which is what the reference picture shows. 6 browser tests.
+
+## "What goes together": association rules read by role (2026-10-12)
+
+Asked, with a picture of five "association roles" widgets: can the platform make the same dashboard on other data?
+
+* **Five new views of the rules widget** (`chartRenderers/RuleRoles.tsx`; setting "Show as" on a "what goes together" widget): a **network** coloured by role with an arrow where a link is one-way; a **roles matrix** (the row's value towards the column's: A, C, B or none); a **role summary** (for each value, how many others it points to, is pointed to by, or both); the **rules table** with each value tagged by its role in that rule, with support, confidence and lift; and a **chord diagram** (values as arcs of a ring, a ribbon per linked pair, thicker with more rules). All five are counted from the rules the server already mines — nothing new is computed on the data.
+* **A built-in template, "What goes together"**, lays the five out as the picture. It asks for two columns of labels and takes up to four.
+* **What "role" means here.** A value is an antecedent where rules start from it and a consequent where they conclude it. The miner reports most links in both directions (the lift is the same either way), which on a first try made every value "both" — true and useless. So a link counts as one-way when one direction's confidence is at least 1.2 times the other's, and as both ways when they are closer. The matrix says so under it.
+* A long list is cut to the 10 most connected values (a setting, 2 to 30), and says "the 10 most connected of 15".
+
+**Checked:** made on two unrelated datasets — every view drew on both; on the first, 2 values came out antecedent, 2 consequent, 6 both. 7 browser tests; the template passes the tests every built-in passes. Screenshot: `docs/templates/looks/what-goes-together-template.png`.
+
+**Not as the picture**
+* The network puts the values on a circle; the picture puts one chosen value in the middle with the others around it.
+* The chord's ribbons are curved bands of one width each, not the tapered ribbons of a full chord diagram.
+* The picture's "items" are things bought together (one row per basket and item). The widget does that too when given a group column and an item column, but the template maps columns of labels in ordinary rows; a basket version of the template is not made.
+* The 1.2 threshold is fixed in the code, not a setting.
+
+## One dashboard per analysis technique (2026-10-12)
+
+Asked, with two pictures of "dashboard templates for data analysis techniques" (16 and 9 of them): can the platform make the same dashboards, to show insights and analytics?
+
+**A new group in the gallery, "Analysis"**, with a template for each technique the platform already computes. Each is named for the question it answers, asks for the few columns it needs, and works on any table.
+
+| picture | template | what it lays out |
+|---|---|---|
+| Descriptive | What is in the data | rows, average, lowest, highest; how a number is spread; rows by a column; the number within each group |
+| Correlation | Which numbers move together | every pair of up to five numbers; the first against the others as point clouds; each row across them |
+| Association rules | What goes together | the five role views (section above) |
+| Clustering | Natural groups | the groups as a picture; what each is like; how well they hold apart |
+| Classification | Which outcome a row will have | how well it predicts; right and wrong (confusion matrix); against a coin toss (ROC); what matters most; odds |
+| Regression | What a number depends on | how well it is explained; actual against predicted; where it misses (residuals); what each factor adds |
+| Time series, Predictive | A number through time | headline with history; months and a forecast; month of the year; day of the week |
+| Anomaly, Outlier | What is out of the ordinary | months outside their usual range and where the level changed; spread within groups; distribution |
+| Text | What a column of text says | cloud; ranked list; by group |
+| Network | What is connected to what | network; most-linked ends; flow; grid |
+| Diagnostic | Where a number comes from | contribution of each group (waterfall); the few that carry it; groups over time |
+| Geospatial | Places (existing) | |
+| Executive | Executive summary (section above) | |
+
+**What had to be added for them**
+* **Any view of a fitted model as a tile of its own** ("Show only" on a model widget; `model_tab`): a page can put the confusion matrix beside the ROC curve, or residuals beside actual-against-predicted, instead of behind tabs.
+* **Two numbers as a cloud of points** (`points` on the number-against-number chart): a random sample across the whole range, drawn as dots. It drew a line through the 500 rows with the smallest x — on 62,662 rows, one sliver at the left edge.
+* **An optional column inside a list** (`"$?c"`): the chart keeps the columns the dataset has instead of being left out whole.
+* **Fixed on the way:** the network chart failed with a server error whenever some rows had one end of a link empty.
+
+**Checked:** all ten made on two unrelated datasets (62,662 shipments; 14,269 car listings): every chart drew on both after the fixes. They pass the tests every built-in passes; 3 more tests (optional columns, the network fix, the point cloud). Screenshots of three: `docs/templates/looks/analysis-*.png`.
+
+**No template, because the platform does not have the technique as a chart**
+* **Survival analysis** (survival curves, median time) — not in the platform.
+* **Dimensionality reduction** (PCA with explained variance) — the groups picture uses a two-dimensional projection, but there is no explained-variance chart.
+* **Optimization / what-if** — the decision problems and simulations exist as analyses on the dataset's Analysis tab, not as dashboard charts.
+* **Data quality** (completeness, validity, uniqueness as charts) — the checks exist on the dataset; there is no chart of them.
+* **Classification metrics as four separate numbers** (accuracy, precision, recall, F1) and **a comparison of several models' ROC curves** — the page shows one model's fit text, matrix and curve; precision, recall and F1 are not computed.
+* **Time-series decomposition** (trend, seasonal and residual as stacked panels) and a **seasonal radar** — month of the year and day of the week are bars instead.
+* The pictures' top rows of filter dropdowns for the method itself (model type, number of clusters, threshold, minimum support) — those are settings of the widget, not page filters.

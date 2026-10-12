@@ -476,7 +476,8 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
     )
     return (
       <div dir={rtl ? 'rtl' : undefined} style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: withTrend ? 'stretch' : 'center', justifyContent: 'center', gap: 4, padding: withTrend ? '2px 12px 0' : '0 10px', minWidth: 0, containerType: 'inline-size' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: withTrend ? 'space-between' : 'center', gap: 8, maxWidth: '100%', minWidth: 0 }}>
+        {/* In a narrow card the change drops under the number instead of cutting it short. */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: withTrend ? 'space-between' : 'center', gap: withTrend ? '2px 8px' : 8, maxWidth: '100%', minWidth: 0, flexWrap: withTrend ? 'wrap' : undefined }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
           {kpiIcon && <span aria-hidden="true" style={{ fontSize: 28, flex: '0 0 auto' }}>{kpiIcon}</span>}
           <div title={kpiText}

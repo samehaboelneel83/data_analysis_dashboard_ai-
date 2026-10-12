@@ -42,6 +42,11 @@ def _value(v, chosen: dict[str, list[str]], measure_names: dict[str, str], key: 
     if isinstance(v, list):
         out: list = []
         for item in v:
+            if isinstance(item, str) and item.startswith("$?"):
+                # An optional column in a list: there when its slot is filled,
+                # simply absent when it is not -- the chart keeps the others.
+                out.extend(chosen.get(item[2:]) or [])
+                continue
             got = _value(item, chosen, measure_names, key)
             # A `many` slot inside a list takes its place with all its columns.
             if isinstance(item, str) and item.startswith("$") and not item.startswith("$m:") and isinstance(got, list):
