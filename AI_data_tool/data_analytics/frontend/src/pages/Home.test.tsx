@@ -200,7 +200,7 @@ describe('the question box', () => {
     const box = await screen.findByRole('textbox', { name: /Ask a question about your data/ })
     fireEvent.change(box, { target: { value: 'Which region grew?' } })
     fireEvent.submit(box.closest('form')!)
-    expect(await screen.findByTestId('where')).toHaveTextContent('/ask?q=Which%20region%20grew%3F')
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/ask?q=Which%20region%20grew%3F'))
   })
 
   it('offers starters from the newest dataset it can ask about, scoped to it', async () => {
@@ -209,7 +209,7 @@ describe('the question box', () => {
     renderHome()
     const group = await screen.findByRole('group', { name: 'Suggested questions about Sales' })
     fireEvent.click(within(group).getAllByRole('button')[0])
-    expect(await screen.findByTestId('where')).toHaveTextContent('/ask?dataset=4&q=')
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/ask?dataset=4&q='))
   })
 
   it('is locked, saying why, while the model server is unreachable', async () => {
