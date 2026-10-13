@@ -116,10 +116,14 @@ async def load_facts(db: AsyncSession, source: DataSource) -> list[dict]:
         SourceRelationship.from_object_id.in_(ids)))).scalars().all()
     names = {o.id: o.name for o in objects}
     related: dict[int, set[str]] = {i: set() for i in ids}
+    links: dict[int, list[dict]] = {i: [] for i in ids}
     for r in rels:
         if r.to_object_id in names:
             related[r.from_object_id].add(names[r.to_object_id])
             related[r.to_object_id].add(names[r.from_object_id])
+            if getattr(r, "source", "declared") in ("declared", "confirmed"):
+                links[r.from_object_id].append({"column": r.from_column, "table": names[r.to_object_id],
+                                                "to_column": r.to_column})
 
     by_obj: dict[int, list[SourceColumn]] = {}
     for c in cols:
@@ -143,6 +147,8 @@ async def load_facts(db: AsyncSession, source: DataSource) -> list[dict]:
             # Ranges from the sync's sample are approximate; the page says so.
             "dates_exact": bool(dates) and all(c.id in stats and stats[c.id].exact for c in dates),
             "related": sorted(related[o.id]),
+            # Outgoing keys (declared or confirmed): column -> table.to_column.
+            "links": links[o.id],
             "canonical": bool(o.is_canonical), "deprecated": bool(o.is_deprecated),
             "technical": bool(_TECHNICAL.search(o.name or "")),
             "description": o.comment or o.description,
@@ -387,6 +393,9 @@ def totals(facts: list[dict]) -> dict:
         "tables": sum(1 for t in facts if t["kind"] != "view"),
         "views": sum(1 for t in facts if t["kind"] == "view"),
         "rows": sum(t["rows"] or 0 for t in facts if t["kind"] != "view"),
+        # False when no table has a row estimate (a SQLite file keeps none):
+        # the page then says "not counted", never "0 rows".
+        "rows_known": any(t["rows"] is not None for t in facts if t["kind"] != "view"),
         "date_from": min(lo) if lo else None, "date_to": max(hi) if hi else None,
         "dates_exact": all(t["dates_exact"] for t in facts if t["date_from"] and t["group"] != "technical"),
     }

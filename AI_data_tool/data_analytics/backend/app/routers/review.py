@@ -117,7 +117,10 @@ async def evaluate_performance(report_id: int, db: AsyncSession = Depends(get_db
 @router.get("/review-settings")
 async def get_review_settings(db: AsyncSession = Depends(get_db),
                               current_user: User = Depends(get_current_user)):
-    return {"publish_gate": await gate_on(db, current_user.org_id)}
+    row = (await db.execute(select(OrgReviewSettings)
+                            .where(OrgReviewSettings.org_id == current_user.org_id))).scalar_one_or_none()
+    return {"publish_gate": bool(row and row.publish_gate),
+            "require_approval": bool(row and row.require_approval)}
 
 
 @router.put("/review-settings")
@@ -128,9 +131,15 @@ async def put_review_settings(body: dict, db: AsyncSession = Depends(get_db),
     if row is None:
         row = OrgReviewSettings(org_id=current_user.org_id)
         db.add(row)
-    row.publish_gate = bool(body.get("publish_gate"))
+    # Each switch is changed only when it is sent: a client that knows one of
+    # them must not turn the other off by leaving it out.
+    if "publish_gate" in body:
+        row.publish_gate = bool(body.get("publish_gate"))
+    if "require_approval" in body:
+        row.require_approval = bool(body.get("require_approval"))
     row.updated_by = current_user.id
     await audit(db, current_user, "org.review_gate", "org", current_user.org_id,
-                "on" if row.publish_gate else "off")
+                f"review errors block: {'on' if row.publish_gate else 'off'}; "
+                f"approval needed: {'on' if row.require_approval else 'off'}")
     await db.commit()
-    return {"publish_gate": row.publish_gate}
+    return {"publish_gate": bool(row.publish_gate), "require_approval": bool(row.require_approval)}

@@ -114,6 +114,13 @@ SPECS: list[Spec] = [
        options=("basic", "balanced", "rich")),
     _S("setup_max_analyses", "data", "Analyses per connection",
        "How many guided-setup analyses one connection may hold before one must be removed.", minimum=1),
+    _S("min_group_rows", "data", "Fewest rows behind a group in a ranking of averages",
+       "A chart that ranks groups by an average, a median or an extreme leaves out groups with fewer rows than "
+       "this, so a group of two rows does not top the list. Totals and counts keep every group. 0 = keep all."),
+    _S("setup_ai_rule_auto_share", "data", "Guided setup: largest share an AI rule removes by itself",
+       "Rows that break a rule the AI proposed are left out automatically only when they are at most this "
+       "share of the dataset (0 to 1). A rule whose rows are one group's own rows is never applied by itself. "
+       "0 = always ask."),
     _S("classify_columns_with_model", "ai", "Ask the model once what each column is",
        "Off: columns are classified from their values alone. The answer is kept and never asked twice."),
     _S("ai_for_uploads_default", "ai", "Allow AI on uploaded files by default",
@@ -192,6 +199,9 @@ SPECS: list[Spec] = [
     _S("directquery_engine_pool_maxsize", "performance", "Open database connections kept"),
     _S("valkey_cache_ttl_s", "performance", "Shared cache lifetime (seconds)"),
     # -- Security -------------------------------------------------------------
+    _S("guest_links_enabled", "security", "Allow links that open without signing in",
+       "On: someone who can edit a dashboard may make a link that shows it to anyone who holds the link, as the "
+       "maker sees it, until it expires. Off: no such link can be made, and none that exists opens."),
     _S("access_token_expire_hours", "security", "Sign-in lasts (hours)", "Applies to new sign-ins."),
     # -- Rate limits ----------------------------------------------------------
     _S("rate_limit_enabled", "rate_limits", "Rate limiting on"),

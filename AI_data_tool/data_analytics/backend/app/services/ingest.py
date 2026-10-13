@@ -18,6 +18,7 @@ Nothing here computes a statistic. Nothing here imports scipy.
 from pathlib import Path  # noqa: F401  (kept: SUPPORTED consumers type-check paths)
 
 import numpy as np  # noqa: F401  (re-exported for callers that did `from analytics import np`)
+import datetime as _dt
 import warnings
 
 import pandas as pd
@@ -180,7 +181,42 @@ def _parse_dates(s: pd.Series) -> pd.Series:
 _CLOCK_FORMATS = ("%I:%M:%S %p", "%I:%M %p", "%H:%M:%S", "%H:%M", "%H:%M:%S.%f")
 
 
+#: The unit a duration column's own name asks for ("hours_open" -> hours).
+_DURATION_UNITS = (("second", "s", 1.0), ("sec", "s", 1.0), ("minute", "min", 60.0), ("min", "min", 60.0),
+                   ("hour", "h", 3600.0), ("hr", "h", 3600.0), ("day", "D", 86400.0))
+
+
+def _is_duration(s: pd.Series) -> bool:
+    if pd.api.types.is_timedelta64_dtype(s):
+        return True
+    if s.dtype != object:
+        return False
+    sample = s.dropna().head(200)
+    return bool(len(sample)) and all(isinstance(v, (_dt.timedelta, pd.Timedelta)) for v in sample)
+
+
+def durations_to_numbers(df: pd.DataFrame) -> list[str]:
+    """A duration (a database INTERVAL, a date minus a date) becomes a number
+    of days -- or of the unit its name says ("hours_open" -> hours). Persona
+    test 2026-10-12: "days late" arrived as text ('0 days 18:17:31') and no
+    late-delivery number could be computed. The unit comes from the name, not
+    the values, so every chunk of a streamed import gets the same one; the name
+    is kept, because a live table's columns must keep their source names.
+    Returns the columns converted."""
+    done: list[str] = []
+    for col in list(df.columns):
+        s = df[col]
+        if not _is_duration(s):
+            continue
+        name = str(col).lower()
+        seconds = next((sec for w, _u, sec in _DURATION_UNITS if w in name), 86400.0)
+        df[col] = pd.to_timedelta(s, errors="coerce").dt.total_seconds() / seconds
+        done.append(col)
+    return done
+
+
 def detect_types(df: pd.DataFrame) -> dict[str, str]:
+    durations_to_numbers(df)
     type_map = {}
     for col in df.columns:
         s = df[col]

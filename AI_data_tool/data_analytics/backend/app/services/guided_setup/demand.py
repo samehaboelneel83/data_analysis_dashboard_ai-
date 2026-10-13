@@ -38,9 +38,13 @@ SEARCH_VALUES_UP_TO = 2000
 CANDIDATE_COLUMNS = 4
 CANDIDATE_VALUES = 12
 
-OPS = ("in", "gt", "gte", "lt", "lte")
+OPS = ("in", "gt", "gte", "lt", "lte", "between")
 
 _LANGUAGE = {"ar": "Arabic (Modern Standard, simple words)", "en": "English"}
+
+#: What kind of number a question's answer rests on -- the same words a
+#: chart declares in `shows` (answer.SHOWS), so the two can be matched.
+WANTS = ("share", "average", "total", "count", "distinct", "change", "level", "list", "other")
 
 DEMAND_SCHEMA = {
     "type": "object",
@@ -50,8 +54,10 @@ DEMAND_SCHEMA = {
         "subject": {"type": "string"},
         "questions": {"type": "array", "items": {
             "type": "object",
-            "properties": {"text": {"type": "string"}, "asked": {"type": "boolean"}},
-            "required": ["text", "asked"]}},
+            "properties": {"text": {"type": "string"}, "asked": {"type": "boolean"},
+                           "wants": {"type": "string", "enum": list(WANTS)},
+                           "about": {"type": "array", "items": {"type": "string"}}},
+            "required": ["text", "asked", "wants"]}},
         "exclude": {"type": "array", "items": {"type": "string"}},
         "not_in_data": {"type": "array", "items": {"type": "string"}},
         "scope": {"type": "array", "items": {
@@ -71,8 +77,51 @@ def _is_number(s: pd.Series) -> bool:
     return pd.api.types.is_numeric_dtype(s) and s.dtype != bool
 
 
+#: Share of a text column's values that must read as dates for it to be one.
+DATE_TEXT_SHARE = 0.95
+_DATE_TEXT = re.compile(r"^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2}(:\d{2}(\.\d+)?)?)?$")
+
+
 def _is_date(s: pd.Series) -> bool:
-    return pd.api.types.is_datetime64_any_dtype(s)
+    """A column of dates, whatever form they arrived in. Persona test
+    2026-10-12: a database DATE column arrives as Python `date` objects
+    (dtype object); read as text, "the year 2023" became `in` six of its
+    example dates and the dashboard showed six days."""
+    if pd.api.types.is_datetime64_any_dtype(s):
+        return True
+    if s.dtype != object:
+        return False
+    sample = s.dropna().head(200)
+    if not len(sample):
+        return False
+    import datetime as _dt
+    if all(isinstance(v, (_dt.date, _dt.datetime, pd.Timestamp)) for v in sample):
+        return True
+    text = sample.astype(str).str.strip()
+    return float(text.str.match(_DATE_TEXT).mean()) >= DATE_TEXT_SHARE
+
+
+def _as_dates(s: pd.Series) -> pd.Series:
+    out = pd.to_datetime(s, errors="coerce")
+    if getattr(out.dt, "tz", None) is not None:
+        out = out.dt.tz_localize(None)
+    return out
+
+
+#: A four-digit year in what the person said ("2023", "2015 to 2018").
+_YEAR = re.compile(r"(?<!\d)(1[89]\d{2}|20\d{2}|21\d{2})(?!\d)")
+
+
+def _years(said: str) -> list[int]:
+    return sorted({int(y) for y in _YEAR.findall(said or "")})
+
+
+def _bound(v) -> str:
+    """A range end as people write it: a year stays 2015, a date stays a date."""
+    f = _number(v)
+    if f is not None and f == int(f) and 1800 <= f <= 2200:
+        return str(int(f))
+    return _fmt(v)
 
 
 def _fmt(v) -> str:
@@ -93,7 +142,7 @@ def profile_text(df: pd.DataFrame) -> str:
             desc = (f"number, {_fmt(q.min())} to {_fmt(q.max())}, typical {_fmt(q.median())}"
                     if len(q) else "number, empty")
         elif _is_date(s):
-            q = s.dropna()
+            q = _as_dates(s).dropna()
             desc = f"date, {str(q.min())[:10]} to {str(q.max())[:10]}" if len(q) else "date, empty"
         else:
             q = s.dropna().astype(str)
@@ -137,16 +186,25 @@ def build_prompt(brief: dict | None, datasets: list[dict], edits: list[str], lan
         "answer, most important first. Use what they asked for; when they asked for little, add "
         "what a person doing their work would ask next about the same subject. Each is one short "
         "question a chart or a number can answer; `asked` is true when the person asked it "
-        "themselves (in any wording) and false when you added it. Never a question about the "
+        "themselves (in any wording) and false when you added it. A question they asked keeps what they "
+        "asked for: a count stays a count, a share stays a share -- add the other as a question of your own "
+        "if it helps. `wants` is the kind of number its "
+        "answer rests on: share (a part of the whole, as a percentage), average, total, count, distinct, "
+        "change (how much something went up or down), level (a value at one moment), list (the records "
+        "themselves) or other -- for 'which X is highest in Y', the kind of Y. `about` lists the columns its "
+        "answer rests on, exactly as named in the data (the measure first). Never a question about the "
         "data's quality, and never one these columns cannot answer.\n"
         "- exclude: what they asked to leave out, as short items; [] when nothing.\n"
         "- scope: ONLY when they asked for a PART of the data -- one kind, one place, one "
         "period, a range ('only ...', 'I need ...', 'under ...', 'since ...'). One item per "
         "restriction: dataset = the dataset's name; said = the two or three words that name it "
         "('online orders', 'since 2024', 'the north region'), not their whole sentence; column = the "
-        "column that holds it; op = 'in' with the matching values copied EXACTLY from the "
-        "column's listed values, or gt / gte / lt / lte with ONE number, or gte / lte with one "
-        "date as YYYY-MM-DD on a date column. If no listed column holds what they asked for, "
+        "column that holds it; op = 'in' with the matching values copied EXACTLY from a column "
+        "whose values are ALL listed (never from a column shown only with examples), or gt / gte / "
+        "lt / lte with ONE number, or gte / lte with one date as YYYY-MM-DD on a date column, or "
+        "'between' with TWO values, first and last included -- a period ('the year 2023' -> "
+        "['2023-01-01', '2023-12-31'] on a date column) or a range of numbers ('2015 to 2018'). "
+        "If no listed column holds what they asked for, "
         "still return the item with column '' and values [] -- never drop a restriction they "
         "stated, and never invent one they did not. [] when they want all of it. NEVER put a scope "
         "on a yes/no column (has_..., is_...): it says what HAPPENED to a row, and narrowing to 'yes' "
@@ -260,6 +318,21 @@ def candidates(df: pd.DataFrame) -> list[dict]:
     return out
 
 
+def describes_dataset(item: dict, dataset_name: str | None) -> bool:
+    """Whether a comparison scope (a date or number cut) is only the dataset's
+    own subject in words: the phrase states no figure, and shares a word with
+    the dataset's name (by prefix, so a word and its ending are one). Then it
+    is what every row already is -- not a cut for the model to invent."""
+    if str(item.get("op") or "").lower() in ("", "in") or not dataset_name:
+        return False
+    said = str(item.get("said") or "")
+    if re.search(r"\d", said):
+        return False
+    stems = lambda t: {w[:5] for w in re.findall(r"\w+", t.casefold()) if len(w) >= 4}   # noqa: E731
+    name = stems(dataset_name)
+    return any(n.startswith(w) or w.startswith(n) for w in stems(said) for n in name)
+
+
 def resolve_scope(df: pd.DataFrame, item: dict, named_only: bool = False) -> dict:
     """One restriction, as the rows answer it.
 
@@ -281,14 +354,39 @@ def resolve_scope(df: pd.DataFrame, item: dict, named_only: bool = False) -> dic
         return {**out, "column": column, "values": values, "matched_rows": n,
                 "status": "unmatched" if n == 0 else "in_data" if n == total else "in_dashboard"}
 
-    if col in df.columns and op != "in":
+    # A period on a date column, however it was written: "in" a list of dates
+    # (the model copied examples) or years in their words become one range.
+    if col in df.columns and _is_date(df[col]) and op == "in":
+        years = _years(said) or _years(" ".join(wanted))
+        if years:
+            op, wanted = "between", [f"{years[0]}-01-01", f"{years[-1]}-12-31"]
+        else:
+            dates = [d for d in (pd.to_datetime(w, errors="coerce") for w in wanted) if not pd.isna(d)]
+            if dates:
+                op, wanted = "between", [str(min(dates).date()), str(max(dates).date())]
+        out["op"] = op
+    if col in df.columns and op == "between" and len(wanted) >= 2:
+        s = df[col]
+        if _is_date(s):
+            try:
+                lo, hi = pd.Timestamp(wanted[0]), pd.Timestamp(wanted[1])
+                lo, hi = min(lo, hi), max(lo, hi)
+                series = _as_dates(s)
+                mask = (series >= lo) & (series < hi.normalize() + pd.Timedelta(days=1))
+                return done(col, [str(lo.date()), str(hi.date())], mask.fillna(False))
+            except Exception:                                       # noqa: BLE001
+                pass
+        lo, hi = _number(wanted[0]), _number(wanted[1])
+        if _is_number(s) and lo is not None and hi is not None:
+            lo, hi = min(lo, hi), max(lo, hi)
+            return done(col, [lo, hi], ((s >= lo) & (s <= hi)).fillna(False))
+        return {**out, "op": "between", "candidates": candidates(df)}
+    if col in df.columns and op not in ("in", "between"):
         s = df[col]
         if _is_date(s) and wanted:
             try:
                 when = pd.Timestamp(wanted[0])
-                series = pd.to_datetime(s, errors="coerce")
-                if getattr(series.dt, "tz", None) is not None:
-                    series = series.dt.tz_localize(None)
+                series = _as_dates(s)
                 mask = {"gt": series > when, "gte": series >= when, "lt": series < when, "lte": series <= when}[op]
                 return done(col, [str(when.date())], mask.fillna(False))
             except Exception:                                       # noqa: BLE001
@@ -298,6 +396,15 @@ def resolve_scope(df: pd.DataFrame, item: dict, named_only: bool = False) -> dic
             mask = {"gt": s > num, "gte": s >= num, "lt": s < num, "lte": s <= num}[op]
             return done(col, [num], mask.fillna(False))
         return {**out, "candidates": candidates(df)}
+    # A number range said in words on the column the model named ("2015 to 2018").
+    if col in df.columns and _is_number(df[col]) and op == "between":
+        return {**out, "candidates": candidates(df)}
+    if col in df.columns and col and not _is_number(df[col]) and wanted \
+            and int(df[col].nunique(dropna=True)) > LIST_VALUES_UP_TO:
+        # The model saw only examples of this column: a value counts only when
+        # the person's own words hold it, never because it was an example.
+        heard = _norm(said)
+        wanted = [w for w in wanted if _norm(w) and _norm(w) in heard]
 
     out["op"] = "in"
     # The named column first; then any text column that holds their words.
@@ -329,16 +436,35 @@ def made_for(sql: str | None, item: dict) -> list[str]:
         tree = sqlglot.parse_one(sql)
     except Exception:                                               # noqa: BLE001
         return []
-    literals = {str(lit.this) for where in tree.find_all(exp.Where)
-                for lit in where.find_all(exp.Literal) if lit.is_string}
+    wheres = list(tree.find_all(exp.Where))
+    literals = {str(lit.this) for where in wheres for lit in where.find_all(exp.Literal) if lit.is_string}
     said = _norm(item.get("said"))
     wanted = {_norm(v) for v in item.get("values") or []}
+    years = set(_years(said))
     out = []
     for lit in literals:
         key = _norm(lit).strip("%")
         if len(key) >= 2 and (key in wanted or re.search(rf"(?<!\w){re.escape(key)}(?!\w)", said)):
             out.append(lit.strip("%"))
-    return sorted(out)
+        elif years and _DATE_TEXT.match(key) and int(key[:4]) in years:
+            out.append(lit)                     # "since 2021" in a dataset made `date >= '2021-01-01'`
+    # Numbers in their words that the query already compares with ("2015 to
+    # 2018" in a dataset made `model_year BETWEEN 2015 AND 2018`).
+    numbers = {str(lit.this) for where in wheres for lit in where.find_all(exp.Literal) if not lit.is_string}
+    heard = set(re.findall(r"\d+(?:\.\d+)?", said))
+    out += sorted(n for n in numbers if n in heard)
+    # A yes/no condition on a column their words name ("not cancelled orders"
+    # in a dataset made `is_cancellation = FALSE`): words are compared by stem.
+    stems = {w[:5] for w in re.findall(r"\w+", said) if len(w) >= 4}
+    for where in wheres:
+        for cond in where.find_all(exp.EQ, exp.NEQ, exp.Is):
+            col = cond.find(exp.Column)
+            if col is None or not cond.find(exp.Boolean):
+                continue
+            parts = [p for p in re.split(r"[_\W]+", _norm(col.name)) if len(p) >= 4]
+            if any(p[:5] in stems for p in parts):
+                out.append(cond.sql())
+    return sorted(dict.fromkeys(out))
 
 
 def plain_scope(df: pd.DataFrame, said: str) -> list[dict]:
@@ -369,6 +495,9 @@ def filters_for(demand: dict | None, dataset_id: int) -> list[dict]:
             continue
         if s["op"] == "in":
             out.append({"column": s["column"], "op": "in", "value": list(s["values"])})
+        elif s["op"] == "between" and len(s.get("values") or []) >= 2:
+            out.append({"column": s["column"], "op": "gte", "value": s["values"][0]})
+            out.append({"column": s["column"], "op": "lte", "value": s["values"][1]})
         elif s.get("values"):
             out.append({"column": s["column"], "op": s["op"], "value": s["values"][0]})
     return out
@@ -380,6 +509,14 @@ def missing_words(demand: dict | None) -> list[str]:
                               if s.get("status") == "unmatched" and s.get("said")))
 
 
+#: "only" said around a restriction; the sentence that shows it says "only" itself.
+_ONLY = re.compile(r"^\s*(only|just|فقط)\s+|\s+(only|فقط)\s*$", re.I)
+
+
+def _unonly(said: str) -> str:
+    return _ONLY.sub("", said).strip()
+
+
 def scope_words(demand: dict | None, dataset_id: int) -> list[str]:
     """How each applied restriction reads, for titles and notes: 'body type: SUV'."""
     signs = {"gt": ">", "gte": "≥", "lt": "<", "lte": "≤"}
@@ -389,11 +526,13 @@ def scope_words(demand: dict | None, dataset_id: int) -> list[str]:
             continue
         if not s.get("column"):
             # Narrowed by the dataset's own query: their own words say it best.
-            out.append(str(s.get("said") or "") or ", ".join(str(v) for v in s.get("values") or []))
+            out.append(_unonly(str(s.get("said") or "")) or ", ".join(str(v) for v in s.get("values") or []))
             continue
         name = str(s["column"]).replace("_", " ")
         if s["op"] == "in":
             out.append(f"{name}: " + ", ".join(str(v) for v in s["values"][:6]))
+        elif s["op"] == "between" and len(s.get("values") or []) >= 2:
+            out.append(f"{name}: {_bound(s['values'][0])} – {_bound(s['values'][1])}")
         elif s.get("values"):
             out.append(f"{name} {signs.get(s['op'], s['op'])} {_fmt(s['values'][0])}")
     return out
@@ -443,6 +582,14 @@ async def write(brief: dict | None, datasets: list[dict], edits: list[str], lang
             continue
         targets = [by_name[_norm(item.get("dataset"))]] if _norm(item.get("dataset")) in by_name else datasets
         for d in targets:
+            if describes_dataset(item, d.get("name")):
+                # "current staff" on "Current employees ...": what the dataset
+                # already is, never a date the model made up (persona benchmark:
+                # "from_date >= 2002-08-01" kept 673 of 240,124 employees).
+                n = int(len(d["frame"]))
+                scope.append({"said": str(item.get("said")), "column": None, "op": "in", "values": [],
+                              "matched_rows": n, "of_rows": n, "status": "in_data", "dataset_id": d["id"]})
+                continue
             # The column they named first; then what the dataset's own query
             # already narrowed to; only then a look through the other columns.
             found = resolve_scope(d["frame"], item, named_only=True)
@@ -484,7 +631,11 @@ async def write(brief: dict | None, datasets: list[dict], edits: list[str], lang
     for q in (got.get("questions") or [])[:MAX_QUESTIONS]:
         text = str(q.get("text") if isinstance(q, dict) else q or "").strip()
         if text:
-            questions.append({"text": text, "asked": bool(q.get("asked", True)) if isinstance(q, dict) else True})
+            wants = str(q.get("wants") or "").lower() if isinstance(q, dict) else ""
+            about = [str(c) for c in (q.get("about") or [])[:6] if isinstance(c, str) and c.strip()] \
+                if isinstance(q, dict) else []
+            questions.append({"text": text, "asked": bool(q.get("asked", True)) if isinstance(q, dict) else True,
+                              **({"wants": wants} if wants in WANTS else {}), **({"about": about} if about else {})})
     return {
         "sentence": str(got.get("sentence") or "").strip()[:400],
         "who": str(got.get("who") or "").strip()[:160],

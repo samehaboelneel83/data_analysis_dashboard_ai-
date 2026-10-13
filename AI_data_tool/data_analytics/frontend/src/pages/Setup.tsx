@@ -16,7 +16,7 @@ import toast from 'react-hot-toast'
 import { Check, Plus } from 'lucide-react'
 import { useT } from '../i18n'
 import { localDigits } from '../lib/arabicFormats'
-import { setupApi, type SetupFlow, type SetupJourney, type SetupStep } from '../services/api'
+import { dataSourcesApi, setupApi, type SetupFlow, type SetupJourney, type SetupStep } from '../services/api'
 import LoadError from '../components/ui/LoadError'
 import LoadingState from '../components/ui/LoadingState'
 import SetupProgress, { STEPS } from './setup/SetupProgress'
@@ -35,6 +35,18 @@ export default function Setup() {
   const [params, setParams] = useSearchParams()
   const [journey, setJourney] = useState<SetupJourney | null>(null)
   const [error, setError] = useState<unknown>(null)
+  // The connection's reachability: tested afresh when the page opens (allowed
+  // to those who may test it), else the last test kept with it.
+  const [fresh, setFresh] = useState<{ ok: boolean; error: string | null } | null>(null)
+  useEffect(() => {
+    let alive = true
+    if (!Number.isFinite(sourceId) || typeof dataSourcesApi.test !== 'function') return
+    dataSourcesApi.test(sourceId)
+      .then(r => { if (alive) setFresh({ ok: !!r.ok, error: r.error ?? null }) })
+      .catch(() => { /* not allowed to test: the kept result stands */ })
+    return () => { alive = false }
+  }, [sourceId])
+  const reach = fresh ?? journey?.source.health ?? null
   const asked = params.get('flow')
   const askedFlow = asked && Number.isFinite(Number(asked)) ? Number(asked) : undefined
 
@@ -103,6 +115,18 @@ export default function Setup() {
           </p>
         </div>
       </header>
+
+      {/* A connection that does not answer is said first: what follows was read
+          earlier (persona test 2026-10-12: a missing database file showed a
+          confident description and let the person carry on). */}
+      {reach && !reach.ok && (
+        <div role="alert" className="setup-card card" data-testid="setup-unreachable"
+          style={{ borderInlineStart: '3px solid var(--danger)', padding: '10px 14px', marginBottom: 12 }}>
+          <strong>{t('setup.unreachable')}</strong>{' '}
+          {reach.error && <span>{reach.error.split('\n')[0].replace(/\s*\(Background on this error.*$/, '').slice(0, 240)}</span>}
+          {' '}<a href="/connections">{t('setup.unreachableFix')}</a>
+        </div>
+      )}
 
       {pastUnderstand && (
         <nav className="setup-flows" aria-label={t('setup.f.label')}>

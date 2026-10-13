@@ -154,7 +154,9 @@ export default function UnderstandStep({ sourceId, onNext }: { sourceId: number;
         </button>
       </div>
       <p className="setup-footnote">
-        {t('setup.u.factsFootnote', { tables: num(totals.tables), rows: num(totals.rows) })}
+        {totals.rows_known === false
+          ? t('setup.u.factsFootnoteNoRows', { tables: num(totals.tables) })
+          : t('setup.u.factsFootnote', { tables: num(totals.tables), rows: num(totals.rows) })}
       </p>
     </div>
   )
@@ -224,7 +226,7 @@ function Overview({ data, sourceId, slow, onChanged, onAskAgain, onCheckAgain }:
       <ul className="setup-facts" aria-label={t('setup.u.factsLabel')}>
         <li>{t('setup.u.tablesN', { n: num(totals.tables) })}</li>
         {totals.views > 0 && <li>{t('setup.u.viewsN', { n: num(totals.views) })}</li>}
-        <li>{t('setup.u.rowsN', { n: num(totals.rows) })}</li>
+        <li>{totals.rows_known === false ? t('setup.u.rowsUnknown') : t('setup.u.rowsN', { n: num(totals.rows) })}</li>
         {when && <li>{when}</li>}
       </ul>
 
@@ -317,7 +319,7 @@ function TableCard({ table: x, rank, sourceId, canEdit, onChanged }: {
       )}
 
       <ul className="setup-facts">
-        <li>{t('setup.u.rowsN', { n: num(x.rows) })}</li>
+        <li>{x.rows == null ? t('setup.u.rowsUnknown') : t('setup.u.rowsN', { n: num(x.rows) })}</li>
         {x.measures.length > 0 && <li>{t('setup.u.numbers', { cols: x.measures.slice(0, 4).join(sep) })}</li>}
         {when && <li>{when}</li>}
         {x.related.length > 0 && <li>{t('setup.u.linksTo', { tables: x.related.join(sep) })}</li>}

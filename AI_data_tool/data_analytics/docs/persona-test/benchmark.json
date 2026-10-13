@@ -1,0 +1,779 @@
+{
+  "version": 1,
+  "about": "Machine-readable benchmark of the 2026-10-12 persona test: 10 connections, one persona each, 32 questions scored against the ground-truth answers in docs/persona-test/ground-truth/.",
+  "scenarios": [
+    {
+      "id": "S1",
+      "connection": "UK online retailer",
+      "connection_id": 48,
+      "language": "en",
+      "persona": {
+        "work": "Marketing analyst, new in the job",
+        "focus": "real sales, not cancelled orders",
+        "questions": "Which countries outside the UK should we market to, which products sell best, and is there a busy season?",
+        "leave_out": ""
+      },
+      "questions": [
+        {
+          "id": "S1.1",
+          "question": "Which countries outside the UK should we market to?",
+          "checks": [
+            {
+              "type": "name",
+              "any_of": [
+                "EIRE",
+                "Ireland"
+              ]
+            },
+            {
+              "type": "number",
+              "value": 664431.78,
+              "rel_tol": 0.05
+            }
+          ],
+          "truth_note": "Top non-UK country is EIRE, clean gross 664,431.78 (naive net 615,519.55); then Netherlands 554,232.34, Germany 431,262.46. online_retail.md §4 Persona A, A1."
+        },
+        {
+          "id": "S1.2",
+          "question": "Which products sell best?",
+          "checks": [
+            {
+              "type": "name",
+              "any_of": [
+                "REGENCY CAKESTAND 3 TIER",
+                "22423"
+              ]
+            },
+            {
+              "type": "none_of",
+              "values": [
+                "Manual",
+                "DOTCOM POSTAGE",
+                "POSTAGE"
+              ]
+            }
+          ],
+          "truth_note": "Top product by clean revenue (non-product codes excluded) is 22423 REGENCY CAKESTAND 3 TIER 344,563.25; Manual/POSTAGE/DOTCOM POSTAGE are fee codes, not products. No number check because the persona may rank by units or revenue. online_retail.md §4 Persona B, B1."
+        },
+        {
+          "id": "S1.3",
+          "question": "Is there a busy season?",
+          "checks": [
+            {
+              "type": "name",
+              "any_of": [
+                "November",
+                "Nov",
+                "2011-11"
+              ]
+            },
+            {
+              "type": "number",
+              "value": 1509496.33,
+              "rel_tol": 0.05
+            },
+            {
+              "type": "none_of",
+              "values": [
+                "+83%",
+                "83% growth"
+              ]
+            }
+          ],
+          "truth_note": "Peak month 2011-11 at 1,509,496.33 (2010-11 1,470,272.48); Oct-Dec strongest. The November peak is seasonal, not growth: 2011 was -4.47% vs 2010 like-for-like. online_retail.md §4 Persona A, A3 and Persona C, C1; §2 Seasonality."
+        }
+      ]
+    },
+    {
+      "id": "S2",
+      "connection": "Taxi",
+      "connection_id": 47,
+      "language": "en",
+      "persona": {
+        "work": "I drive a yellow taxi in New York",
+        "focus": "",
+        "questions": "Which hours of the day and which pickup areas earn me the most per trip, is airport work worth it, and how much do people usually tip?",
+        "leave_out": ""
+      },
+      "questions": [
+        {
+          "id": "S2.1",
+          "question": "Which hours of the day earn me the most per trip?",
+          "checks": [
+            {
+              "type": "name",
+              "any_of": [
+                "5 AM",
+                "5am",
+                "5 a.m.",
+                "05:00",
+                "5:00",
+                "hour 5"
+              ]
+            }
+          ],
+          "truth_note": "Name check only: nyc_taxi.md §4 gives trip counts by hour (busiest 18:00) but no average total per trip by hour. FINDINGS_LOG.md S2 (Ask AI) records hour 5 as the highest average total per trip (raw 36.23, cleaned 37.60), with a low-volume caveat (about 18.7k trips)."
+        },
+        {
+          "id": "S2.2",
+          "question": "Which pickup areas earn me the most per trip?",
+          "checks": [
+            {
+              "type": "name",
+              "any_of": [
+                "JFK",
+                "JFK Airport"
+              ]
+            },
+            {
+              "type": "number",
+              "value": 80.89,
+              "rel_tol": 0.03
+            },
+            {
+              "type": "none_of",
+              "values": [
+                "Charleston",
+                "Tottenville"
+              ]
+            }
+          ],
+          "truth_note": "Among pickup zones with >=1000 clean trips, highest average total is JFK Airport 80.89 (138,314 trips), then LaGuardia 66.37. Tiny-sample zones must not win. nyc_taxi.md §4 Persona 2, Q3."
+        },
+        {
+          "id": "S2.3",
+          "question": "Is airport work worth it?",
+          "checks": [
+            {
+              "type": "name",
+              "any_of": [
+                "LaGuardia",
+                "LGA"
+              ]
+            },
+            {
+              "type": "number",
+              "value": 80.89,
+              "rel_tol": 0.03
+            },
+            {
+              "type": "number",
+              "value": 66.37,
+              "rel_tol": 0.03
+            }
+          ],
+          "truth_note": "Airports earn the most per trip: JFK 80.89 and LaGuardia 66.37 average total (vs typical trip far lower; avg clean total 27.35). nyc_taxi.md §4 Persona 2, Q3 and §5 KPIs."
+        },
+        {
+          "id": "S2.4",
+          "question": "How much do people usually tip?",
+          "checks": [
+            {
+              "type": "number",
+              "value": 4.156,
+              "rel_tol": 0.05
+            },
+            {
+              "type": "none_of",
+              "values": [
+                "3.41",
+                "3.34"
+              ]
+            }
+          ],
+          "truth_note": "Card trips only (cash tips are not recorded): avg tip 4.156, 22.62% of fare. Averaging all payments understates it (3.336 naive). nyc_taxi.md §4 Persona 2, Q1."
+        }
+      ]
+    },
+    {
+      "id": "S3",
+      "connection": "Olist Brazilian E-Commerce",
+      "connection_id": 22,
+      "language": "en",
+      "persona": {
+        "work": "Customer experience lead at an online marketplace",
+        "focus": "",
+        "questions": "Do late deliveries cause bad reviews? How often are we late, and which states suffer most?",
+        "leave_out": ""
+      },
+      "questions": [
+        {
+          "id": "S3.1",
+          "question": "Do late deliveries cause bad reviews?",
+          "checks": [
+            {
+              "type": "number",
+              "value": 2.55,
+              "rel_tol": 0.03
+            },
+            {
+              "type": "number",
+              "value": 4.28,
+              "rel_tol": 0.03
+            },
+            {
+              "type": "direction",
+              "value": "down"
+            },
+            {
+              "type": "none_of",
+              "values": [
+                "4.14"
+              ]
+            }
+          ],
+          "truth_note": "Late orders average review 2.55 vs 4.28 on time: lateness lowers reviews. 4.14 is the wrong figure shown in the test. olist.md §4 Persona C, C2."
+        },
+        {
+          "id": "S3.2",
+          "question": "How often are we late?",
+          "checks": [
+            {
+              "type": "number",
+              "value": 8.11,
+              "rel_tol": 0.05,
+              "percent": true
+            }
+          ],
+          "truth_note": "8.11% of orders with a delivery date arrive late (7,827 of 96,476). olist.md §4 Persona B, B1."
+        },
+        {
+          "id": "S3.3",
+          "question": "Which states suffer most?",
+          "checks": [
+            {
+              "type": "name",
+              "any_of": [
+                "AL",
+                "Alagoas"
+              ]
+            },
+            {
+              "type": "number",
+              "value": 23.93,
+              "rel_tol": 0.05,
+              "percent": true
+            }
+          ],
+          "truth_note": "Worst late rate among states with >=100 delivered orders: AL 23.93% (397 orders), then MA 19.67%. olist.md §4 Persona B, B2."
+        }
+      ]
+    },
+    {
+      "id": "S4",
+      "connection": "Employees (HR sample)",
+      "connection_id": 23,
+      "language": "en",
+      "persona": {
+        "work": "HR business partner",
+        "focus": "",
+        "questions": "How many people work here now, which department pays most today, is there a gender pay gap, and in which years did most people leave?",
+        "leave_out": "employee names and birth dates"
+      },
+      "questions": [
+        {
+          "id": "S4.1",
+          "question": "How many people work here now?",
+          "checks": [
+            {
+              "type": "number",
+              "value": 240124.0,
+              "rel_tol": 0.02
+            },
+            {
+              "type": "none_of",
+              "values": [
+                "300,024",
+                "300024"
+              ]
+            }
+          ],
+          "truth_note": "240,124 current employees of 300,024 ever (59,900 left). employees.md §4 Persona A, A1."
+        },
+        {
+          "id": "S4.2",
+          "question": "Which department pays most today?",
+          "checks": [
+            {
+              "type": "name",
+              "any_of": [
+                "Sales"
+              ]
+            },
+            {
+              "type": "number",
+              "value": 88853.0,
+              "rel_tol": 0.02
+            },
+            {
+              "type": "none_of",
+              "values": [
+                "d007"
+              ]
+            }
+          ],
+          "truth_note": "Sales, current average salary 88,853 (then Marketing 80,059). Must be named, not shown as code d007. employees.md §4 Persona B, B2."
+        },
+        {
+          "id": "S4.3",
+          "question": "Is there a gender pay gap?",
+          "checks": [
+            {
+              "type": "number",
+              "value": 72045.0,
+              "rel_tol": 0.02
+            },
+            {
+              "type": "number",
+              "value": 71964.0,
+              "rel_tol": 0.02
+            }
+          ],
+          "truth_note": "Current average salary M 72,045 vs F 71,964: gap 81 (0.11%), effectively none. employees.md §4 Persona C, C1."
+        },
+        {
+          "id": "S4.4",
+          "question": "In which years did most people leave?",
+          "checks": [
+            {
+              "type": "name",
+              "any_of": [
+                "2000"
+              ]
+            },
+            {
+              "type": "number",
+              "value": 7610.0,
+              "rel_tol": 0.05
+            },
+            {
+              "type": "none_of",
+              "values": [
+                "1986"
+              ]
+            }
+          ],
+          "truth_note": "Peak year of real leavers (last departure, transfers excluded) is 2000 with 7,610; 2001 7,241. employees.md §4 Persona A, A3."
+        }
+      ]
+    },
+    {
+      "id": "S5",
+      "connection": "Nile Express",
+      "connection_id": 43,
+      "language": "en",
+      "persona": {
+        "work": "New operations supervisor at a delivery company",
+        "focus": "",
+        "questions": "What share of our deliveries are late, which service type is the worst, and how many shipments are returned?",
+        "leave_out": ""
+      },
+      "questions": [
+        {
+          "id": "S5.1",
+          "question": "What share of our deliveries are late?",
+          "checks": [
+            {
+              "type": "number",
+              "value": 17.69,
+              "rel_tol": 0.03,
+              "percent": true
+            }
+          ],
+          "truth_note": "17.69% of delivered shipments were late (9,917 of 56,050, deduplicated). nile_express.md §4 Persona A, A1."
+        },
+        {
+          "id": "S5.2",
+          "question": "Which service type is the worst?",
+          "checks": [
+            {
+              "type": "name",
+              "any_of": [
+                "Same Day",
+                "Same-day"
+              ]
+            },
+            {
+              "type": "number",
+              "value": 31.39,
+              "rel_tol": 0.03,
+              "percent": true
+            }
+          ],
+          "truth_note": "Same Day is latest at 31.39% late (International 23.34%). nile_express.md §4 Persona A, A2."
+        },
+        {
+          "id": "S5.3",
+          "question": "How many shipments are returned?",
+          "checks": [
+            {
+              "type": "number",
+              "value": 7154.0,
+              "rel_tol": 0.02
+            }
+          ],
+          "truth_note": "Returned 7,154 of 64,000 deduplicated shipments (11.18%). Not in §4; taken from nile_express.md §2 Status mix (and §5 KPIs return % 11.18%)."
+        }
+      ]
+    },
+    {
+      "id": "S6",
+      "connection": "Cars DB",
+      "connection_id": 38,
+      "language": "en",
+      "persona": {
+        "work": "I want to buy a used car for my family",
+        "focus": "used cars only",
+        "questions": "What is a fair price for a 2015 to 2018 Toyota Corolla, how fast do prices drop with age, and in which governorate are used cars cheapest?",
+        "leave_out": ""
+      },
+      "questions": [
+        {
+          "id": "S6.1",
+          "question": "What is a fair price for a 2015 to 2018 Toyota Corolla?",
+          "checks": [
+            {
+              "type": "number",
+              "value": 850000.0,
+              "rel_tol": 0.05
+            }
+          ],
+          "truth_note": "29 used listings, median 850,000 EGP (mean 872,483; range 750,000-1,250,000). cars.md §4 Persona A, A1."
+        },
+        {
+          "id": "S6.2",
+          "question": "How fast do prices drop with age?",
+          "checks": [
+            {
+              "type": "direction",
+              "value": "down"
+            }
+          ],
+          "truth_note": "Direction check only: medians by age are non-monotonic early (age 2 2,250,000; age 4 1,000,000) because of luxury mix, then fall steadily (age 10 640,000; age 15 450,000). No single per-year rate in the ground truth. cars.md §4 Persona A, A3."
+        },
+        {
+          "id": "S6.3",
+          "question": "In which governorate are used cars cheapest?",
+          "checks": [
+            {
+              "type": "none_of",
+              "values": [
+                "Aswan",
+                "El Mansoura"
+              ]
+            }
+          ],
+          "truth_note": "Wrong-answer check only: cars.md §4 Persona B, B3 gives medians only for the three largest governorates (Cairo 745,000, Giza 650,000, Alexandria 590,000), not a full ranking, so no name can be required. Answers from 1-2 listings (Aswan, El Mansoura) are wrong. A read-only query suggests a smaller governorate (Beheira) is cheapest when only governorates with >=100 used listings count; add it to the ground truth before using it as a check."
+        }
+      ]
+    },
+    {
+      "id": "S7",
+      "connection": "EGX Stocks",
+      "connection_id": 39,
+      "language": "en",
+      "persona": {
+        "work": "Small private investor in the stock market",
+        "focus": "the year 2023",
+        "questions": "Which companies had the most money traded, how much did COMI go up, and how did the whole market index do?",
+        "leave_out": ""
+      },
+      "questions": [
+        {
+          "id": "S7.1",
+          "question": "Which companies had the most money traded (2023)?",
+          "checks": [
+            {
+              "type": "name",
+              "any_of": [
+                "COMI"
+              ]
+            },
+            {
+              "type": "number",
+              "value": 74550000000.0,
+              "rel_tol": 0.05
+            },
+            {
+              "type": "none_of",
+              "values": [
+                "EGX 30 Capped",
+                "EGX 30"
+              ]
+            }
+          ],
+          "truth_note": "Stocks only (index tickers excluded): COMI 74.55 bn EGP, BTFH 43.55 bn, HRHO 27.49 bn. Index tickers must not rank as companies. egx.md §4 Persona A, A1."
+        },
+        {
+          "id": "S7.2",
+          "question": "How much did COMI go up in 2023?",
+          "checks": [
+            {
+              "type": "number",
+              "value": 79.9,
+              "rel_tol": 0.03,
+              "percent": true
+            },
+            {
+              "type": "direction",
+              "value": "up"
+            },
+            {
+              "type": "none_of",
+              "values": [
+                "0.992"
+              ]
+            }
+          ],
+          "truth_note": "COMI close 42.75 -> 76.89 = +79.9% (first to last 2023 close; data stops 2023-12-11). egx.md §4 Persona A, A2."
+        },
+        {
+          "id": "S7.3",
+          "question": "How did the whole market index do in 2023?",
+          "checks": [
+            {
+              "type": "number",
+              "value": 66.8,
+              "rel_tol": 0.05,
+              "percent": true
+            },
+            {
+              "type": "direction",
+              "value": "up"
+            },
+            {
+              "type": "none_of",
+              "values": [
+                "0.239"
+              ]
+            }
+          ],
+          "truth_note": "EGX 30 +66.8% (last close 2022 14,598.53 -> last close 2023 24,351.12). A dataset limited to 2023 rows cannot reach the 2022 base exactly. egx.md §4 Persona B, B1."
+        }
+      ]
+    },
+    {
+      "id": "S8",
+      "connection": "food",
+      "connection_id": 36,
+      "language": "en",
+      "persona": {
+        "work": "Journalist writing about the cost of living",
+        "focus": "",
+        "questions": "How much have sugar and rice prices gone up since 2021, and how many refugees live in Egypt now compared with 2022?",
+        "leave_out": ""
+      },
+      "questions": [
+        {
+          "id": "S8.1",
+          "question": "How much have sugar and rice prices gone up since 2021?",
+          "checks": [
+            {
+              "type": "number",
+              "value": 13.49,
+              "rel_tol": 0.05
+            },
+            {
+              "type": "number",
+              "value": 41.9,
+              "rel_tol": 0.05
+            },
+            {
+              "type": "number",
+              "value": 9.27,
+              "rel_tol": 0.05
+            },
+            {
+              "type": "number",
+              "value": 29.22,
+              "rel_tol": 0.05
+            },
+            {
+              "type": "direction",
+              "value": "up"
+            }
+          ],
+          "truth_note": "Average WFP price EGP/kg 2021 -> 2025: sugar 13.49 -> 41.90 (3.1x), rice 9.27 -> 29.22; the two commodities must not be averaged together. egypt_stats.md §4 Persona A, A3."
+        },
+        {
+          "id": "S8.2",
+          "question": "How many refugees live in Egypt now compared with 2022?",
+          "checks": [
+            {
+              "type": "number",
+              "value": 1175943.0,
+              "rel_tol": 0.03
+            },
+            {
+              "type": "number",
+              "value": 410894.0,
+              "rel_tol": 0.03
+            },
+            {
+              "type": "direction",
+              "value": "up"
+            },
+            {
+              "type": "none_of",
+              "values": [
+                "318,539",
+                "243,580"
+              ]
+            }
+          ],
+          "truth_note": "All population groups (gender='all', age_range='all'): 2022 410,894 -> 2025 1,175,943 (+186%). Counting REF only (318,539 -> 243,580) reverses the story. egypt_stats.md §4 Persona B, B1 and B2."
+        }
+      ]
+    },
+    {
+      "id": "S9",
+      "connection": "sh2on_zobat",
+      "connection_id": 46,
+      "language": "ar",
+      "persona": {
+        "work": "قائد وحدة يراجع تقارير تقييم الضباط",
+        "focus": "",
+        "questions": "ما متوسط درجات التقييم، وأي سلاح أعلى، وما أضعف معيار، وهل تغيرت الدرجات عبر السنين؟",
+        "leave_out": "الأسماء والأرقام العسكرية والبيانات الطبية"
+      },
+      "questions": [
+        {
+          "id": "S9.1",
+          "question": "ما متوسط درجات التقييم؟",
+          "checks": [
+            {
+              "type": "number",
+              "value": 4.251,
+              "rel_tol": 0.03
+            }
+          ],
+          "truth_note": "Overall mean of the 20 criterion scores is 4.251 (scale 3-7). The appraiser percentage percent_a (mean about 85) is a different measure, not checked here. ai_data.md §4 Persona B, B1 and §3."
+        },
+        {
+          "id": "S9.2",
+          "question": "أي سلاح أعلى؟",
+          "checks": [
+            {
+              "type": "name",
+              "any_of": [
+                "naval",
+                "Navy",
+                "ق.بحرية",
+                "بحرية"
+              ]
+            }
+          ],
+          "truth_note": "Naval scores best (4.349, 29 officers); artillery lowest (4.176); spread only 0.17. Arabic spelling ق.بحرية is the corp_name value in ai_officer (ground truth gives the English label). ai_data.md §4 Persona B, B1."
+        },
+        {
+          "id": "S9.3",
+          "question": "ما أضعف معيار؟",
+          "checks": [
+            {
+              "type": "name",
+              "any_of": [
+                "s3_7",
+                "الاعتماد عليه فى الاعمال الاضافية",
+                "الاعتماد عليه في الأعمال الإضافية",
+                "reliance on him for additional work"
+              ]
+            },
+            {
+              "type": "number",
+              "value": 4.16,
+              "rel_tol": 0.02
+            }
+          ],
+          "truth_note": "Weakest criterion s3_7 = 4.160 (sub-item 17, 'reliance on him for additional work'); next s3_8 4.165. Arabic name as stored in eval_rep_sub_item. ai_data.md §4 Persona B, B2."
+        },
+        {
+          "id": "S9.4",
+          "question": "هل تغيرت الدرجات عبر السنين؟",
+          "checks": [
+            {
+              "type": "number",
+              "value": 4.253,
+              "rel_tol": 0.02
+            },
+            {
+              "type": "number",
+              "value": 4.255,
+              "rel_tol": 0.02
+            }
+          ],
+          "truth_note": "Flat: mean item score 2022 4.253, 2023 4.253, 2024 4.244, 2025 4.255 (2021 has 2 rows only). No direction check because there is no real change; the answer must give the yearly levels. ai_data.md §4 Persona B, B3."
+        }
+      ]
+    },
+    {
+      "id": "S10",
+      "connection": "Demo — Live SQLite",
+      "connection_id": 16,
+      "language": "en",
+      "persona": {
+        "work": "Owner of a small shop that sells online and wholesale",
+        "focus": "",
+        "questions": "Which sales channel brings more money, which is my best month, and which city buys the most?",
+        "leave_out": ""
+      },
+      "questions": [
+        {
+          "id": "S10.1",
+          "question": "Which sales channel brings more money?",
+          "checks": [
+            {
+              "type": "name",
+              "any_of": [
+                "Online"
+              ]
+            },
+            {
+              "type": "number",
+              "value": 2789665.32,
+              "rel_tol": 0.03
+            }
+          ],
+          "truth_note": "Online 2,789,665.32, narrowly ahead of Wholesale 2,741,479.78 (differences are small; Wholesale has the best order value 915.66). demo_sqlite.md §4 Persona A, A3."
+        },
+        {
+          "id": "S10.2",
+          "question": "Which is my best month?",
+          "checks": [
+            {
+              "type": "name",
+              "any_of": [
+                "October",
+                "Oct",
+                "2025-10"
+              ]
+            },
+            {
+              "type": "number",
+              "value": 964178.03,
+              "rel_tol": 0.02
+            }
+          ],
+          "truth_note": "Best month 2025-10 at 964,178.03 (then 2025-01 955,644.66). demo_sqlite.md §4 Persona A, A2."
+        },
+        {
+          "id": "S10.3",
+          "question": "Which city buys the most?",
+          "checks": [
+            {
+              "type": "name",
+              "any_of": [
+                "Singapore"
+              ]
+            },
+            {
+              "type": "number",
+              "value": 481462.25,
+              "rel_tol": 0.03
+            }
+          ],
+          "truth_note": "Singapore 481,462.25 (530 orders), then Vienna 463,970.29. demo_sqlite.md §4 Persona B, B1."
+        }
+      ]
+    }
+  ]
+}

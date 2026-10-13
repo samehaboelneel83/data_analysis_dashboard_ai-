@@ -12,6 +12,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { Check, LayoutDashboard, MessageSquare, Plus, RefreshCw, Sparkles } from 'lucide-react'
+import WaitTime from './WaitTime'
+import { answersCard } from '../../lib/answersCard'
 import { useT } from '../../i18n'
 import { useDirection } from '../../contexts/DirectionContext'
 import { localDigits } from '../../lib/arabicFormats'
@@ -61,8 +63,11 @@ export default function DashboardStep({ sourceId, flow, onBack, onNewFlow }: {
 
   const used = new Set(data?.designs.used ?? [])
   const fresh = (data?.designs.items ?? []).filter(d => !used.has(d.id))
-  // The first suggestion answers the main question: ticked to begin with.
-  const chosen = picked ?? new Set(fresh.slice(0, 1).map(d => d.id))
+  // Every suggestion is ticked to begin with: each answers part of what was
+  // asked, and the detail pages are what its charts open. Only the first was
+  // ticked, so most people made a one-page dashboard (persona test 2026-10-12).
+  // Adding to a dashboard already made, only the first is offered ticked.
+  const chosen = picked ?? new Set((data?.designs.report_id ? fresh.slice(0, 1) : fresh).map(d => d.id))
   const selected = fresh.filter(d => chosen.has(d.id))
 
   function toggle(id: string) {
@@ -78,9 +83,15 @@ export default function DashboardStep({ sourceId, flow, onBack, onNewFlow }: {
       const demand = data.demand
       const name = (demand?.subject || demand?.sentence || selected[0].proposal.title || '').slice(0, NAME_MAX)
         || t('setup.b.blankName', { name: selected[0].dataset_name })
+      // "Your questions" heads the first page: every asked question, answered
+      // from whichever chosen page holds it, or why not.
+      const card = answersCard(selected, demand?.questions ?? [],
+        { title: t('setup.b.answersTitle'), notOnPages: t('setup.b.notOnPages') })
       const id = await buildPages(
-        selected.map(d => ({
-          datasetId: d.dataset_id, proposal: d.proposal, scope: d.proposal.scope_filters ?? [],
+        selected.map((d, i) => ({
+          datasetId: d.dataset_id,
+          proposal: i === 0 && card ? { ...d.proposal, widgets: [card, ...(d.proposal.widgets ?? [])] } : d.proposal,
+          scope: d.proposal.scope_filters ?? [],
           derived: { measures: d.derived.measures ?? [], calculated_columns: d.derived.calculated_columns ?? [] },
         })),
         name, demand?.sentence || selected[0].proposal.rationale || t('setup.b.madeBy'), data.designs.report_id)
@@ -161,7 +172,7 @@ export default function DashboardStep({ sourceId, flow, onBack, onNewFlow }: {
         <p className="setup-section__sub">{t('setup.a.sub')}</p>
         <div aria-live="polite">
           {designs.pending && !gaveUp && (
-            <p className="setup-ai setup-ai--pending"><Sparkles size={13} aria-hidden="true" /> {t('setup.a.designing')}</p>
+            <p className="setup-ai setup-ai--pending"><Sparkles size={13} aria-hidden="true" /> {t('setup.a.designing')}<WaitTime since={designs.since} usual={data.usual?.designs} /></p>
           )}
           {designs.pending && gaveUp && (
             <p className="setup-ai">{t('setup.u.aiSlow')}{' '}

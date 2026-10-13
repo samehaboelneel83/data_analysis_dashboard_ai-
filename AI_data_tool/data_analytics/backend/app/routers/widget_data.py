@@ -18,7 +18,8 @@ from ..services.display_rules import result_frame
 from ..services.parameters import ParameterError, apply_report_parameters
 from ..services import quotas
 from ..services.semantic_guard import config_refusal
-from ..services.multi_measure import measure_list, merge_measure_series
+from ..services.period_change import change_over, resolve_async as resolve_change_async
+from ..services.multi_measure import bars_of_measures, headline_value, measure_list, measures_as_bars, merge_measure_series
 
 _EXPORT_FORMATS = {"csv": "csv", "tsv": "tsv", "xlsx": "xlsx"}
 
@@ -426,6 +427,28 @@ async def _resolve_widget_data(
     # Several measures on one axis: each resolved through THIS function (so
     # security, engines, parameters and caching are the single-measure ones),
     # then merged into the split-series shape the renderers already draw.
+    # A bar of several measures and no category: each measure resolved here
+    # as a headline number (same security and engines), one bar each.
+    # How much a level changed over the period: four headline numbers, each
+    # through this same path (services/period_change.py).
+    if change_over(req.widget_type, req.config):
+        async def one(cfg: dict) -> dict:
+            return await _resolve_widget_data(
+                dataset_id, req.model_copy(update={"widget_type": "kpi", "config": cfg}), db, current_user,
+                email_override=email_override, org_id_override=org_id_override, via_report_id=via_report_id,
+                redact_columns=redact_columns, request=request)
+        return await resolve_change_async(req.config, one)
+    bars = measures_as_bars(req.widget_type, req.config)
+    if bars is not None:
+        base = {k: v for k, v in (req.config or {}).items() if k not in ("measures", "sort", "limit")}
+        values = []
+        for m in bars:
+            one = req.model_copy(update={"widget_type": "kpi", "config": {**base, "measure": m}})
+            values.append((m, headline_value(await _resolve_widget_data(
+                dataset_id, one, db, current_user, email_override=email_override,
+                org_id_override=org_id_override, via_report_id=via_report_id,
+                redact_columns=redact_columns, request=request))))
+        return bars_of_measures(values, req.config)
     measures = measure_list(req.widget_type, req.config)
     if measures is not None:
         parts = []

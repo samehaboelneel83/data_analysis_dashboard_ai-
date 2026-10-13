@@ -25,6 +25,7 @@ function scopeText(s: SetupScope): string {
   // Narrowed by the dataset's own query: there is no column to name.
   if (!column) return s.said || s.values.slice(0, 6).join(', ')
   if (s.op === 'in') return `${column}: ${s.values.slice(0, 6).join(', ')}`
+  if (s.op === 'between') return `${column}: ${s.values[0] ?? ''} – ${s.values[1] ?? ''}`
   return `${column} ${SIGN[s.op] ?? s.op} ${s.values[0] ?? ''}`
 }
 
@@ -67,7 +68,9 @@ export default function DemandCard({ sourceId, flow, demand, onChanged, onChoose
   if (!demand.written) return null
 
   const unmatched = demand.scope.filter(s => s.status === 'unmatched')
+  // One line per restriction: the same range on three datasets is said once.
   const applied = demand.scope.filter(s => s.status !== 'unmatched')
+    .filter((s, i, all) => all.findIndex(o => scopeText(o) === scopeText(s)) === i)
   const hasDetails = demand.questions.length > 0 || applied.length > 0 || demand.exclude.length > 0
 
   return (

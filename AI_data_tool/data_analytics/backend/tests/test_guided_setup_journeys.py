@@ -173,11 +173,13 @@ async def test_home_offers_each_unfinished_analysis_and_can_rename_or_remove_one
     h = auth_headers["a"]
     src = await _source(db_session, two_orgs["a"]["org"].id)
     first = await _past_understand(client, src, h)
-    await client.patch(f"/api/v1/setup/{src.id}", headers=h, json={"brief": {"focus": "Express only"}})
+    # What they need to know names an analysis; a focus ("Express only") never does.
+    await client.patch(f"/api/v1/setup/{src.id}", headers=h,
+                       json={"brief": {"focus": "Express only", "questions": "How late is Express?"}})
     second = (await client.post(f"/api/v1/setup/{src.id}/flows", headers=h)).json()
     await client.patch(f"/api/v1/setup/{src.id}/flows/{second['flow_id']}", headers=h, json={"name": "Returns"})
     mine = (await client.get("/api/v1/setup/journeys", headers=h)).json()
-    assert {(m["flow_id"], m["flow_name"]) for m in mine} == {(first["flow_id"], "Express only"),
+    assert {(m["flow_id"], m["flow_name"]) for m in mine} == {(first["flow_id"], "How late is Express?"),
                                                                (second["flow_id"], "Returns")}
     # A finished analysis is no longer offered to continue.
     await client.patch(f"/api/v1/setup/{src.id}", headers=h, params={"flow": first["flow_id"]}, json={"step": "done"})

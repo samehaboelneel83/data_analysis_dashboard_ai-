@@ -50,8 +50,10 @@ _DEPRECATED_PATTERNS = (
 _NAME_SEMANTICS = (
     # Money, in the words any organisation's books use (the note on neutral
     # vocabulary is in services/semantic_guard.py).
-    ("currency", re.compile(r"(price|amount|cost|revenue|fee|charge|payment|balance|مبلغ|سعر|تكلفة|رسوم)", re.I)),
+    # A rate or a ratio is the more specific reading: "fee_rate" is a
+    # percentage, not money -- so it is tested first.
     ("percentage", re.compile(r"(pct|percent|rate|ratio)", re.I)),
+    ("currency", re.compile(r"(price|amount|cost|revenue|fee|charge|payment|balance|مبلغ|سعر|تكلفة|رسوم)", re.I)),
 )
 
 #: A column this unique is an identifier regardless of what it is called.

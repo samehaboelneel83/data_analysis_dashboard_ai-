@@ -165,3 +165,12 @@ describe('Connections: a failed test says why, and keeps saying it (role tour, 2
       .toHaveTextContent('could not translate host name "qa-db.invalid"')
   })
 })
+
+describe('Connections, their last test (persona test, plan 3.1)', () => {
+  it('shows a connection whose last test failed as failed, with why, before anyone tests it again', async () => {
+    vi.mocked(dataSourcesApi.list).mockResolvedValue([{ ...SOURCES[0],
+      config: { __health__: { ok: false, at: '2026-10-12T10:00:00Z', error: 'Database file not found at /x.db' } } }] as never)
+    renderAs(false)
+    expect(await screen.findByTestId('conn-test-error')).toHaveTextContent('Database file not found at /x.db')
+  })
+})

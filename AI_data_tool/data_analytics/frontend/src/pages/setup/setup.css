@@ -242,3 +242,6 @@
   font-size: 12px;
 }
 .setup-counts-only { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
+
+/* How long an AI step has run, and its usual time (persona test 3.6). */
+.setup-wait { color: var(--muted); font-variant-numeric: tabular-nums; }

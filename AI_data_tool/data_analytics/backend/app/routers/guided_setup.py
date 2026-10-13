@@ -10,6 +10,7 @@ visibility (decision D1): a connection hidden from them is a 404.
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from typing import Literal
 
@@ -162,8 +163,20 @@ def _flow_name(f: SetupFlow) -> str | None:
     if f.name:
         return f.name
     b = f.brief or {}
-    said = (f.demand or {}).get("subject") or (f.demand or {}).get("sentence") or b.get("focus") or b.get("questions")
-    return (str(said).strip()[:70] or None) if said else None
+    # Never "What to focus on": that is a restriction ("real sales, not
+    # cancelled orders"), not what the analysis is about (persona test 2026-10-12).
+    said = str((f.demand or {}).get("subject") or (f.demand or {}).get("sentence")
+               or b.get("questions") or "").strip()
+    if not said:
+        return None
+    if len(said) <= FLOW_NAME_CHARS:
+        return said
+    cut = said[:FLOW_NAME_CHARS].rsplit(" ", 1)[0].rstrip(" ,;:،")
+    return cut + "…"
+
+
+#: Longest analysis name shown before it is cut at a word.
+FLOW_NAME_CHARS = 60
 
 
 def _flow_out(f: SetupFlow) -> dict:
@@ -180,7 +193,8 @@ def _out(j: SetupJourney, source: DataSource, flows: list[SetupFlow], f: SetupFl
     position = STEPS.index(step) + 1 if step in STEPS else len(STEPS)
     return {
         "id": j.id,
-        "source": {"id": source.id, "name": source.name, "type": source.type},
+        "source": {"id": source.id, "name": source.name, "type": source.type,
+                   "health": (source.config or {}).get("__health__")},
         "step": step,
         "position": position,
         "total": len(STEPS),
@@ -477,6 +491,43 @@ def _pending_is_stale(cached: dict) -> bool:
     except ValueError:
         return True
     return (datetime.utcnow() - started).total_seconds() > PENDING_STALE_SECONDS
+
+
+def _took(started: str | None) -> float | None:
+    """Seconds since a step's start (its pending state's `at`), kept on the
+    finished state so the next person can be told how long it usually takes."""
+    try:
+        return round((datetime.utcnow() - datetime.fromisoformat(started or "")).total_seconds(), 1)
+    except ValueError:
+        return None
+
+
+#: How many recent analyses the usual wait of a step is read from.
+USUAL_WAIT_FLOWS = 40
+
+
+async def _usual_waits(db: AsyncSession, org_id: int) -> dict:
+    """The median time each AI step took over this organization's recent
+    analyses: {"proposals", "check", "designs"} -> seconds (absent when never
+    measured). Read from the kept states; nothing else is stored."""
+    import statistics
+    rows = (await db.execute(select(SetupFlow.proposals, SetupFlow.findings, SetupFlow.designs)
+                             .where(SetupFlow.org_id == org_id)
+                             .order_by(SetupFlow.id.desc()).limit(USUAL_WAIT_FLOWS))).all()
+    seen: dict[str, list[float]] = {"proposals": [], "check": [], "designs": []}
+    for proposals, findings, designs in rows:
+        for kind, state in (("proposals", proposals), ("designs", designs)):
+            if isinstance((state or {}).get("took"), (int, float)):
+                seen[kind].append(float(state["took"]))
+        for entry in (findings or {}).values():
+            if isinstance(entry, dict) and isinstance(entry.get("took"), (int, float)):
+                seen["check"].append(float(entry["took"]))
+    return {k: round(statistics.median(v)) for k, v in seen.items() if v}
+
+
+def _since(state: dict) -> str | None:
+    """When a running step started (for the "working for 0:42" line)."""
+    return state.get("at") if state.get("pending") else None
 
 
 async def _summary(db: AsyncSession, user: User, source: DataSource, lang: str,
@@ -897,7 +948,7 @@ async def write_proposals(db: AsyncSession, flow_id: int, lang: str, attempt: st
     if state.get("attempt") != attempt:
         return
     f.proposals = {"lang": lang, "attempt": attempt, "items": items,
-                   "failed": reason, "at": datetime.utcnow().isoformat()}
+                   "failed": reason, "at": datetime.utcnow().isoformat(), "took": _took(state.get("at"))}
     await db.commit()
 
 
@@ -926,8 +977,29 @@ async def _existing_datasets(db: AsyncSession, user: User, source: DataSource) -
     if readable is not None:
         q = q.where(Dataset.id.in_(readable or {-1}))
     rows = (await db.execute(q.order_by(Dataset.created_at.desc()))).scalars().all()
-    return [{"id": d.id, "name": d.name, "rows": getattr(d, "row_count", None),
-             "mode": getattr(d, "mode", None)} for d in rows[:20]]
+    used = await _dashboards_using(db, user, [d.id for d in rows])
+    out = [{"id": d.id, "name": d.name, "rows": getattr(d, "row_count", None),
+            "mode": getattr(d, "mode", None), "used": used.get(d.id, 0),
+            "mine": d.created_by == user.id} for d in rows]
+    # Datasets in use come first, then the person's own; a dataset nobody uses
+    # that someone else made (a leftover trial, say) is kept but listed last,
+    # where the screen folds it away. Judged by use, never by the name.
+    out.sort(key=lambda d: (d["used"] == 0, not d["mine"]))
+    return out[:20]
+
+
+async def _dashboards_using(db: AsyncSession, user: User, ids: list[int]) -> dict[int, int]:
+    """How many dashboards of the organization read each dataset."""
+    if not ids:
+        return {}
+    wanted = set(ids)
+    found = (await db.execute(select(Report.dataset_id, Report.additional_dataset_ids)
+                              .where(Report.org_id == user.org_id, Report.archived_at.is_(None)))).all()
+    count: dict[int, int] = {}
+    for main, extra in found:
+        for i in {main, *(extra or [])} & wanted:
+            count[i] = count.get(i, 0) + 1
+    return count
 
 
 def _proposals_out(f: SetupFlow) -> dict:
@@ -937,7 +1009,7 @@ def _proposals_out(f: SetupFlow) -> dict:
             "failed": state.get("failed"),
             "items": state.get("items") or [],
             "language": state.get("lang"),
-            "asked": bool(state)}
+            "asked": bool(state), "since": _since(state)}
 
 
 async def _start_proposals(db: AsyncSession, user: User, f: SetupFlow, lang: str) -> None:
@@ -978,7 +1050,8 @@ async def get_datasets_step(source_id: int, lang: str = "en", flow: int | None =
             "existing": await _existing_datasets(db, user, source),
             "chosen": list(f.dataset_ids or []),
             "can_create": _may_create(user),
-            "allow_ai": bool(source.allow_llm_sampling)}
+            "allow_ai": bool(source.allow_llm_sampling),
+            "usual": await _usual_waits(db, user.org_id)}
 
 
 @router.post("/{source_id}/datasets/suggest")
@@ -1361,7 +1434,7 @@ async def _check_one(db: AsyncSession, user: User, ds: Dataset, f: SetupFlow, la
         kinds = {str(c): recorded_number(str(c), classes) for c in df.columns}
         found = [x for x in scan.get("findings") or []
                  if health.beyond_size(x, df) and health.totals_mean_something(x, df, kinds)]
-        insights = await health.plain_insights(found, brief, lang, client)
+        insights = await health.plain_insights(found, brief, lang, client, kinds)
     except Exception:                                       # noqa: BLE001
         logger.exception("guided setup: insights failed for dataset %s", ds.id)
     return ({"health": items, "insights": insights, "rows": int(len(df)), "columns": int(len(df.columns))},
@@ -1392,7 +1465,7 @@ async def write_findings(db: AsyncSession, flow_id: int, dataset_id: int, lang: 
         f.cleaning = {**dict(f.cleaning or {}), str(dataset_id): cleaned}
     if entry.get("attempt") == attempt:
         state[str(dataset_id)] = {"attempt": attempt, "lang": lang, **result, "failed": failed,
-                                  "fixed": [], "at": datetime.utcnow().isoformat()}
+                                  "fixed": [], "at": datetime.utcnow().isoformat(), "took": _took(entry.get("at"))}
         f.findings = state
     await db.commit()
 
@@ -1423,6 +1496,7 @@ def _finding_out(entry: dict, cleaned: dict | None = None) -> dict:
             "health": health_items, "insights": entry.get("insights") or [],
             "rows": entry.get("rows"), "columns": entry.get("columns"),
             "fixed": entry.get("fixed") or [], "language": entry.get("lang"), "checked": bool(entry),
+            "since": _since(entry),
             "cleaning": {**cleaning.summary(cleaned, health_items),
                          "actions": [{k: a.get(k) for k in ("id", "said", "ai", "state", "kind", "column", "rows")}
                                      for a in (cleaned or {}).get("actions") or []]}}
@@ -1463,7 +1537,7 @@ async def get_check_step(source_id: int, lang: str = "en", flow: int | None = No
     done = bool(out) and all(d["findings"]["checked"] and not d["findings"]["pending"] for d in out)
     if done and (f.demand or {}).get("sentence") and not (f.demand or {}).get("pending") and not f.designs:
         await _start_designs(db, user, f, lang)
-    return {"datasets": out, "demand": _demand_out(f)}
+    return {"datasets": out, "demand": _demand_out(f), "usual": await _usual_waits(db, user.org_id)}
 
 
 @router.post("/{source_id}/check/{dataset_id}/run")
@@ -1655,35 +1729,76 @@ async def write_designs(db: AsyncSession, flow_id: int, lang: str, attempt: str)
     m = await meaning.load(db, f.data_source_id)
     tables_of = {p.get("made_as"): p.get("tables") for p in (f.proposals or {}).get("items") or [] if p.get("made_as")}
     items, failed = [], None
-    for ds in datasets_[:3]:
-        entry = (f.findings or {}).get(str(ds.id))
-        proposals: list[dict] = []
-        derived: dict = {}
-        try:
-            await access.release(db)
-            got = await answer.design(db, user, ds, dem, entry, lang, count, client,
-                                      meaning_map=m, tables=tables_of.get(ds.name))
-            proposals, derived = got["proposals"], got.get("derived") or {}
-        except HTTPException as e:
-            failed = str(e.detail)
-        except Exception:                                   # noqa: BLE001
-            logger.exception("guided setup: designing for dataset %s failed", ds.id)
-            failed = "failed"
-        if not proposals:
+    from ..models.models import DatasetColumn
+    from ..services.guided_setup import datasets as _datasets
+    dialect = getattr(source, "type", None) if source is not None else None
+    kept_to = {p.get("made_as"): _datasets.narrowed_to(p.get("sql"), dialect)
+               for p in (f.proposals or {}).get("items") or [] if p.get("made_as")}
+    # A summary dataset's column saying how many rows each of its rows stands for.
+    from ..services.guided_setup.access import _family as _family_of
+    family = _family_of(source) if source is not None else ""
+    size_of = {p.get("made_as"): _datasets.with_group_size(str(p.get("sql") or ""), family)[1]
+               for p in (f.proposals or {}).get("items") or [] if p.get("made_as") and p.get("sql")}
+    names_of: dict[int, set[str]] = {}
+    for dsid, name in (await db.execute(select(DatasetColumn.dataset_id, DatasetColumn.name)
+                                        .where(DatasetColumn.dataset_id.in_([d.id for d in datasets_] or [-1])))).all():
+        names_of.setdefault(dsid, set()).add(name)
+    findings = dict(f.findings or {})
+
+    async def one_dataset(ds_id: int) -> tuple[list[dict], str | None]:
+        """One dataset's pages, in a session of its own so the datasets of an
+        analysis are designed at the same time (each design waits mostly on
+        the model): reloaded there exactly as above."""
+        # On the same engine as the step's own session (the app's pool; a test's database).
+        async with AsyncSession(bind=db.bind, expire_on_commit=False) as s:
+            f2 = await s.get(SetupFlow, flow_id)
+            _src, owner = await _owner(s, f2)
+            ds = next((d for d in await _journey_datasets(s, owner, f2) if d.id == ds_id), None)
+            if ds is None or owner is None:
+                return [], None
+            entry = findings.get(str(ds.id))
+            # Columns only the analysis's other datasets hold: a chart here titled
+            # after one of them is about that dataset, not this one.
+            elsewhere = set().union(*(v for k, v in names_of.items() if k != ds.id)) - names_of.get(ds.id, set()) \
+                if len(names_of) > 1 else set()
+            # Values only ANOTHER dataset's query keeps it to ("WHERE ticker =
+            # 'COMI'"): a question naming one is not answered by a chart here.
+            foreign = set().union(*(v for k, v in kept_to.items() if k != ds.name)) - kept_to.get(ds.name, set()) \
+                if len(kept_to) > 1 else set()
+            proposals: list[dict] = []
+            derived: dict = {}
+            failed_here = None
             try:
-                await access.release(db)
-                proposals = await _plain_design(db, user, ds, f, count)
-            except Exception:                               # noqa: BLE001
-                logger.exception("guided setup: the plain design for dataset %s failed", ds.id)
-        for p in proposals:
-            items.append({"id": uuid.uuid4().hex[:10], "dataset_id": ds.id, "dataset_name": ds.name,
-                          "proposal": p, "derived": derived, "history": []})
+                await access.release(s)
+                got = await answer.design(s, owner, ds, dem, entry, lang, count, client,
+                                          meaning_map=m, tables=tables_of.get(ds.name), elsewhere=elsewhere,
+                                          foreign=foreign, group_size=size_of.get(ds.name))
+                proposals, derived = got["proposals"], got.get("derived") or {}
+            except HTTPException as e:
+                failed_here = str(e.detail)
+            except Exception:                                   # noqa: BLE001
+                logger.exception("guided setup: designing for dataset %s failed", ds.id)
+                failed_here = "failed"
+            if not proposals:
+                try:
+                    await access.release(s)
+                    proposals = await _plain_design(s, owner, ds, f2, count)
+                except Exception:                               # noqa: BLE001
+                    logger.exception("guided setup: the plain design for dataset %s failed", ds.id)
+            return ([{"id": uuid.uuid4().hex[:10], "dataset_id": ds.id, "dataset_name": ds.name,
+                      "proposal": p, "derived": derived, "history": []} for p in proposals], failed_here)
+
+    await access.release(db)
+    for got_items, failed_here in await asyncio.gather(*(one_dataset(d.id) for d in datasets_[:3])):
+        items += got_items
+        failed = failed or failed_here
     await db.refresh(f)
     state = dict(f.designs or {})
     if state.get("attempt") != attempt:
         return
     f.designs = {"lang": lang, "attempt": attempt, "items": items, "used": [],
-                 "failed": None if items else (failed or "none"), "at": datetime.utcnow().isoformat()}
+                 "failed": None if items else (failed or "none"), "at": datetime.utcnow().isoformat(),
+                 "took": _took(state.get("at"))}
     await db.commit()
 
 
@@ -1692,7 +1807,7 @@ def _designs_out(f: SetupFlow) -> dict:
     stale = state.get("pending") and _pending_is_stale(state)
     return {"pending": bool(state.get("pending")) and not stale, "failed": state.get("failed"),
             "items": state.get("items") or [], "asked": bool(state), "report_id": f.report_id,
-            "used": state.get("used") or [], "language": state.get("lang")}
+            "used": state.get("used") or [], "language": state.get("lang"), "since": _since(state)}
 
 
 async def _start_designs(db: AsyncSession, user: User, f: SetupFlow, lang: str) -> None:
@@ -1730,7 +1845,8 @@ async def get_dashboard_step(source_id: int, lang: str = "en", flow: int | None 
     if demand_pending and not state:
         out["pending"] = True             # the request is being rewritten; the design follows it
     return {"designs": out, "has_data": bool(datasets_), "demand": _demand_out(f),
-            "datasets": [{"id": d.id, "name": d.name} for d in datasets_]}
+            "datasets": [{"id": d.id, "name": d.name} for d in datasets_],
+            "usual": await _usual_waits(db, user.org_id)}
 
 
 @router.post("/{source_id}/dashboard/suggest")
@@ -1868,7 +1984,10 @@ async def dataset_health(dataset_id: int, lang: str = "en", db: AsyncSession = D
         raise HTTPException(400, "This dataset could not be read")
     report = await asyncio.to_thread(quality_report, df)
     items = health.column_items(report, df, lang)
-    items += health.generic_rules(df, lang, skip={i["column"] for i in items if i["kind"] == "placeholder"})
+    # The dataset's stored classes decide what may not be negative; names only
+    # for a column nobody classified (same as the setup's own check).
+    items += health.generic_rules(df, lang, skip={i["column"] for i in items if i["kind"] == "placeholder"},
+                                  column_meta=ds.column_meta or {})
     if not items:
         items = [health.good_item(df, lang)]
     return {"health": items, "insights": [], "rows": int(len(df)), "columns": int(len(df.columns)),

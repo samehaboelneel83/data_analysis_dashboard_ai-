@@ -86,6 +86,34 @@ RATE_MIN_BASE = 30
 RATE_MIN_GAP = 0.02
 
 
+def _filled_only_for(levels: pd.Series, hit: pd.Series, share: float = 0.95) -> bool:
+    """Whether a category is only filled in on the rows WITH the outcome: the
+    rows without it all hold one value (empty or a stand-in), which the rows
+    with it almost never hold. Its rates are then 100% by construction
+    (persona test 2026-10-12: "Changed mind -> 100% returned")."""
+    rest = levels[~hit.reindex(levels.index).fillna(False).astype(bool)]
+    if rest.empty:
+        return False
+    top = rest.value_counts(normalize=True)
+    if float(top.iloc[0]) < share:
+        return False
+    with_it = levels[hit.reindex(levels.index).fillna(False).astype(bool)]
+    return bool(len(with_it)) and float((with_it == top.index[0]).mean()) < 1 - share
+
+
+#: Columns this correlated, on the same scale, are one quantity read twice.
+SAME_QUANTITY_R = 0.99
+SAME_SCALE_RATIO = 1.25
+
+
+def _same_scale(a: pd.Series, b: pd.Series) -> bool:
+    """Medians within SAME_SCALE_RATIO of each other (and of one sign)."""
+    ma, mb = float(a.median()), float(b.median())
+    if not ma or not mb or (ma > 0) != (mb > 0):
+        return False
+    return max(abs(ma), abs(mb)) / min(abs(ma), abs(mb)) <= SAME_SCALE_RATIO
+
+
 def _month_is_partial(dt: pd.Series, month) -> bool:
     """Whether the data ends partway through `month`."""
     from .relative_dates import cadence_days
@@ -479,6 +507,11 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
             dt = pd.to_datetime(df[dcol], errors="coerce")
             if dt.notna().sum() < MIN_ROWS:
                 continue
+            # Stray dates far outside the data's period are not months to compare with.
+            from .relative_dates import stray_dates
+            stray = stray_dates(dt)
+            if stray:
+                dt = dt.mask(stray["mask"])
             for m in measures[:3]:
                 v = pd.to_numeric(df[m], errors="coerce")
                 grouped = v.groupby(dt.dt.to_period("M"))
@@ -538,6 +571,27 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                                              " so this is the month's volume rather than a change per row.",
                                              pct=f"{volume_change:+.0f}")
                 direction = "above" if change > 0 else "below"
+                # A last month that repeats its own month a year before is
+                # compared with THAT month: "84% above its average" is the
+                # season; "3% above last November" is the news.
+                from .analysis import timeline as _tl
+                if len(monthly) > 12 and _tl.repeats_a_year_before(monthly, len(monthly) - 1):
+                    then = monthly.index[-1] - 12
+                    was = float(monthly[then])
+                    if was:
+                        yoy = (float(last) - was) / abs(was) * 100
+                        side = "above" if yoy > 0 else "below"
+                        findings.append({
+                            "kind": "trend", "score": min(abs(yoy) / 100, 1.0) * 0.8,
+                            "title": _s(f"ins.trend.yoy.{side}", "{m} in {when} ran {pct}% " + side + " the same month a year before",
+                                        cap=False, m=m_said(m, True), when=str(monthly.index[-1]), pct=f"{abs(yoy):.0f}"),
+                            "detail": _d("vsYearBefore", "{v} against {was} in {then}.",
+                                         v=_fmt(float(last)), was=_fmt(was), then=str(then)),
+                            "columns": [m, dcol],
+                            "figures": {"delta_pct": round(float(yoy), 2), "value": round(float(last), 4),
+                                        "direction": "up" if yoy > 0 else "down", "year_before": round(was, 4)},
+                        })
+                        continue
                 findings.append({
                     "kind": "trend", "score": min(abs(change) / 100, 1.0) * (0.6 if volume_note else 1.0),
                     "title": _s(f"ins.trend.{direction}", "{m} in {when} ran {pct}% " + direction + " its monthly average", cap=False,
@@ -645,6 +699,11 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
             for i, a in enumerate(measures):
                 for b in measures[i + 1:]:
                     r = corr.loc[a, b]
+                    if pd.notna(r) and r >= SAME_QUANTITY_R and _same_scale(nums[a], nums[b]):
+                        # Two readings of one quantity (a day's opening and
+                        # closing price): moving together is what they are, not
+                        # news (persona test 2026-10-12: eight such findings).
+                        continue
                     if pd.notna(r) and abs(r) >= 0.7:
                         word = "moves with" if r > 0 else "moves against"
                         # An r of 0.7 on 12 rows is not the same claim as an r of
@@ -783,6 +842,8 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                     levels = df.loc[known, cat].astype(str)
                     if not (2 <= levels.nunique() <= MAX_LEVELS):
                         continue
+                    if _filled_only_for(levels, hit):
+                        continue        # e.g. a reason given only when the thing happened: true by definition
                     stats = hit.groupby(levels).agg(["mean", "count", "sum"])
                     stats = stats[stats["count"] >= RATE_MIN_BASE]
                     if len(stats) < 2:
@@ -886,6 +947,25 @@ def generate_insights(df: pd.DataFrame, type_map: dict[str, str],
                 what = m_words(m)
                 band = timeline.expected_band(values, timeline.season_of("month", len(values)))
                 out = timeline.anomalies(values, band)
+                # The same month a year before was as far out: that is the
+                # season, not a one-off (persona test 2026-10-12: the November
+                # peak a shop owner asked about was "far above its usual range").
+                seasonal = [a for a in out if timeline.repeats_a_year_before(monthly, a["index"])]
+                out = [a for a in out if a not in seasonal]
+                if seasonal:
+                    a = max(seasonal, key=lambda x: x["deviations"])
+                    now, before = monthly.index[a["index"]], monthly.index[a["index"]] - 12
+                    findings.append({
+                        "kind": "season", "score": min(0.45 + a["deviations"] / 25, 0.9),
+                        "title": _s(f"ins.season.{'peak' if a['side'] == 'above' else 'low'}",
+                                    "{m} " + ("peaks" if a["side"] == "above" else "dips") + " every {month}",
+                                    cap=False, m=m_said(m, True), month=now.strftime("%B")),
+                        "detail": _d("season", "{a}: {x}; {b}: {y}. The same month stands out each year, so it is the season, not a one-off.",
+                                     a=str(before), x=_fmt(float(monthly[before])), b=str(now), y=_fmt(a["value"])),
+                        "columns": [m, dcol],
+                        "figures": {"period": str(now), "value": round(a["value"], 4),
+                                    "year_before": round(float(monthly[before]), 4), "side": a["side"]},
+                    })
                 if out:
                     a = max(out, key=lambda x: x["deviations"])
                     findings.append({

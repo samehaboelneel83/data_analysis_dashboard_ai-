@@ -74,7 +74,7 @@ import CollapsibleSide from '../components/report/CollapsibleSide'
 import ReviewPane from '../components/report/ReviewPane'
 import PopupOverlay from '../components/report/PopupOverlay'
 import TooltipPageOverlay from '../components/report/TooltipPageOverlay'
-import { ArrowLeft, Plus, Eye, Undo2, Redo2, KeyRound, ShieldCheck, Pause, Play, FileDown, Share2, Maximize2, EllipsisVertical, SlidersHorizontal, Printer, FileText, Package, Pencil, RefreshCw, ChevronUp, ChevronDown, Database, Search, X, Settings2 } from 'lucide-react'
+import { ArrowLeft, Plus, Eye, Undo2, Redo2, KeyRound, ShieldCheck, ShieldAlert, Pause, Play, FileDown, Share2, Maximize2, EllipsisVertical, SlidersHorizontal, Printer, FileText, Package, Pencil, RefreshCw, ChevronUp, ChevronDown, Database, Search, X, Settings2 } from 'lucide-react'
 import { updatedAgo } from '../lib/viewStyle'
 import { columnKind, usePageFilters } from '../lib/pageFilters'
 import PageFilterBar, { type PageFilterColumn } from '../components/report/PageFilterBar'
@@ -96,7 +96,7 @@ import PageTakeaways from './reportBuilder/PageTakeaways'
 import FocusView from './reportBuilder/FocusView'
 import PresentControls from './reportBuilder/PresentControls'
 import { useAiOffline } from './ask/useAiOffline'
-import { datasetSuggestions } from './ask/suggestions'
+import { datasetSuggestions, type ColumnClasses } from './ask/suggestions'
 import './reportBuilder/viewMode.css'
 import './reportBuilder/builder.css'
 import PageTabs from './reportBuilder/PageTabs'
@@ -3169,6 +3169,12 @@ export default function ReportBuilder() {
                               {hints[c.name]?.related && (
                                 <span title={hintTitle(hints[c.name])} style={{ color: 'var(--accent)', fontSize: 11 }}>≈</span>
                               )}
+                              {/* Persona test 3.7: a column holding personal data says so. */}
+                              {(c as { personal?: string | null }).personal && (
+                                <span className="dl-bd-f__personal" data-testid="field-personal" title={tr('fp.personal')}>
+                                  <ShieldAlert size={11} aria-hidden="true" /><span className="dl-sr-only">{tr('fp.personal')}</span>
+                                </span>
+                              )}
                             </button>
                             <span className="dl-bd-f__acts">
                             {/* Classification, the way SAS's data pane offers it:
@@ -3551,8 +3557,10 @@ export default function ReportBuilder() {
                 fontSize: 11, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase',
                 color: '#fff', padding: '2px 7px', borderRadius: 4,
                 background: CLASSIFICATION_COLORS[shown] ?? '#666' }}>
-                {(['Public', 'Internal', 'Confidential', 'Restricted'].includes(shown)
-                  ? tr(`sens.${shown}` as 'sens.Public') : shown)}{inherited ? ' ⤴' : ''}
+                {/* "Data: Public" -- the label is the data's sensitivity; "PUBLIC" alone beside
+                    Share read as "this dashboard is public" (persona test 2026-10-12). */}
+                {tr('sens.badge', { label: (['Public', 'Internal', 'Confidential', 'Restricted'].includes(shown)
+                  ? tr(`sens.${shown}` as 'sens.Public') : shown) })}{inherited ? ' ⤴' : ''}
               </span>
             )
           })()}
@@ -4266,7 +4274,7 @@ export default function ReportBuilder() {
                 <ChatPane key={`ask-view-${reportId}-${askSeed?.n ?? 0}`} datasetIds={chatDatasetIds}
                   conversationId={reportChatId} onConversationCreated={c => rememberReportChat(c.id)}
                   datasetColumns={columns.map(c => c.name)} initialInput={askSeed?.q}
-                  suggestions={datasetSuggestions(columns, tr)}
+                  suggestions={datasetSuggestions(columns, tr, columnMeta as ColumnClasses)}
                   onAddToPage={canEdit ? (draft, title) => addSuggestedWidget({
                     widget_type: draft.widget_type, title, reason: 'from Ask', config: draft.config }) : undefined} />
               ) : dataset?.data_source_id != null ? (

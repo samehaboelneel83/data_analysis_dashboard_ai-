@@ -232,6 +232,29 @@ class Report(Base):
     #: rather than a second column.
     origin                 = Column(String(20), nullable=False, default="user",
                                     server_default="user", index=True)
+    # ── Publication details (docs/publishing/PLAN.md) ────────────────────────
+    #: How a reader finds it in the portal: one category, any number of tags.
+    category               = Column(String(60), nullable=True, index=True)
+    tags                   = Column(JSON, default=list)
+    #: When it last went out, and who sent it (publish or release).
+    published_at           = Column(DateTime(timezone=True), nullable=True)
+    published_by           = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    #: Set = archived: kept, restorable, but closed to everyone except its
+    #: owner and administrators; its guest links and schedules stop.
+    archived_at            = Column(DateTime(timezone=True), nullable=True, index=True)
+    #: May someone who can only VIEW it take the data away (PDF, Excel, CSV,
+    #: a scheduled copy)? True keeps what the product always did. A grant can
+    #: narrow it for one person or team (ReportUserGrant.can_export).
+    viewers_may_export     = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    #: Approval, where the organisation asks for one (OrgReviewSettings.
+    #: require_approval): none | requested | approved | rejected, the revision
+    #: it was asked or decided at (an edit after approval needs a new one),
+    #: who asked, who decided, and the reviewer's note.
+    review_state           = Column(String(12), nullable=False, default="none", server_default="none")
+    review_revision        = Column(Integer, nullable=True)
+    review_requested_by    = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    review_decided_by      = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    review_note            = Column(String(500), nullable=True)
     org_id                 = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True)
     created_at             = Column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at             = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -520,6 +543,9 @@ class OrgReviewSettings(Base):
     id           = Column(Integer, primary_key=True)
     org_id       = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
     publish_gate = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    #: Publishing (and releasing changes to something already published) needs
+    #: an administrator's approval of that exact revision. Off = as before.
+    require_approval = Column(Boolean, nullable=False, default=False, server_default=text("false"))
     updated_by   = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     updated_at   = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -1014,16 +1040,44 @@ class ReportUserGrant(Base):
 
     Levels reuse the capability vocabulary: 'view' (see a draft), 'edit'
     (design: move widgets, add pages), 'data' (edit plus dataset authoring).
+
+    Since the publishing work (docs/publishing/PLAN.md) a grant may name a
+    ROLE or a TEAM (org unit) instead of a person -- exactly one of the three,
+    router-enforced like WorkspaceFolderGrant -- and carries what a level
+    alone cannot say: when it ends, whether its holder may take the data
+    away, and whether they may pass the dashboard on. It stays ONE table: a
+    second one for teams would be a second place for the same permission.
     """
     __tablename__ = "report_user_grants"
     id         = Column(Integer, primary_key=True)
     report_id  = Column(Integer, ForeignKey("reports.id", ondelete="CASCADE"), nullable=False, index=True)
-    user_id    = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id    = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    role_id    = Column(Integer, ForeignKey("roles.id", ondelete="CASCADE"), nullable=True, index=True)
+    org_unit_id = Column(Integer, ForeignKey("org_units.id", ondelete="CASCADE"), nullable=True, index=True)
     level      = Column(String(5), nullable=False, default="edit")
+    #: After this moment the grant gives nothing (kept, so its owner sees it lapsed).
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    #: May the holder download or schedule what they can see? Only narrows:
+    #: never more than the dataset's own export policy and sensitivity allow.
+    can_export = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    #: May the holder share it on -- to people, view-only, never above their own level?
+    can_share  = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     __table_args__ = (
         UniqueConstraint("report_id", "user_id", name="uq_report_user_grant"),
     )
+
+
+class ReportFavorite(Base):
+    """A dashboard one person marked to find again (the portal's Favourites).
+    One row per (user, report); gone with either."""
+    __tablename__ = "report_favorites"
+    __table_args__ = (UniqueConstraint("user_id", "report_id", name="uq_report_favorite"),)
+    id         = Column(Integer, primary_key=True)
+    user_id    = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    report_id  = Column(Integer, ForeignKey("reports.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
 
 
 class ReportCapability(Base):

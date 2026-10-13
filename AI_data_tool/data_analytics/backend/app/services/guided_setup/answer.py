@@ -95,6 +95,8 @@ TOP_N = 10
 TIME_POINTS_MAX = 80
 #: Values closer together than this share of their size say "the same everywhere".
 FLAT_SHARE = 0.03
+#: Groups whose highest and lowest differ by at most this share are "about the same".
+CLOSE_SHARE = 0.10
 #: A chart mostly made of "unknown" describes the gap, not the subject.
 UNKNOWN_SHARE = 0.6
 PROBE_CONCURRENCY = 4
@@ -103,6 +105,13 @@ PAGE_WIDGETS = (3, 6)
 _UNKNOWN = {"", "unknown", "none", "nan", "null", "n/a", "na", "غير معروف", "(blank)", "other"}
 _CHANGE = re.compile(r"(change|chg|growth|delta|diff|return|pct|percent)", re.I)
 _LANGUAGE = {"ar": "Arabic (Modern Standard, simple words)", "en": "English"}
+
+#: What a chart's number IS, declared by the model beside its title and checked
+#: against the chart's query -- in any language, with no list of title words.
+SHOWS = ("share", "average", "total", "count", "distinct", "change", "level", "list", "other")
+#: The summaries each declared kind accepts (kinds not listed are not checked).
+_SHOWS_AGGS = {"average": {"avg", "mean", "median"}, "total": {"sum", "count", "countd"},
+               "count": {"count", "countd", "sum"}, "distinct": {"countd"}}
 
 PAGES_SCHEMA = {
     "type": "object",
@@ -115,10 +124,13 @@ PAGES_SCHEMA = {
                 "type": "object",
                 "properties": {"question": {"type": "string"}, "widget_type": {"type": "string"},
                                "title": {"type": "string"}, "why": {"type": "string"},
+                               "shows": {"type": "string", "enum": list(SHOWS)},
                                "config": {"type": "object"}},
-                "required": ["question", "widget_type", "title", "why", "config"]}},
+                "required": ["question", "widget_type", "title", "why", "shows", "config"]}},
         },
-        "required": ["title", "rationale", "widgets"]}}},
+        "required": ["title", "rationale", "widgets"]}},
+        # Each column the pages use, named for a reader in the person's language.
+        "names": {"type": "object", "additionalProperties": {"type": "string"}}},
     "required": ["pages"],
 }
 ANSWER_SCHEMA = {
@@ -133,8 +145,15 @@ ANSWER_SCHEMA = {
 T = {
     "en": {"high": "Highest: {a} ({x}); lowest: {b} ({y})", "one": "{a}: {x}",
            "trend": "{a}: {x} → {b}: {y} ({pct})", "rows": "{n} records",
+           "latest": "{b}: {y} ({pct} on {ref}); highest: {p} ({pv})",
            "scope": "Showing only {what} — {n} of {total} rows. Remove the dashboard's filter to see everything.", "scoped": "This data holds only {what}.",
+           "apart": "Left out: {what} in “{col}” — unlike the rest of that column. Remove the dashboard's filter to bring them back.",
+           "change": "{pct} (from {a} on {x} to {b} on {y})",
+           "fewrank": "{n} groups, most with fewer than {min} rows each: too few to say which is highest or lowest",
+           "onerow": "— one single row gives {pct} of the leader's total",
            "unanswered": "This data could not answer: {q}",
+           "unansweredWhy": "This data could not answer: {q} -- the chart for it was left out: {why}",
+           "unansweredNone": "This data could not answer: {q} -- no chart of these columns answers it",
            "nomatch": "This data has nothing called “{what}”, so this page shows everything it holds.",
            "nobase": "These are counts of {events}, not rates: this data does not hold the {base} they are counted "
                      "against, and a bigger group has more of everything. Go back to Choose data and take the "
@@ -144,6 +163,9 @@ T = {
            "small": " Groups with fewer than {n} rows are left out.",
            "bysize": " (follows the size of each group)",
            "same": "{x} — about the same for every {dim} ({lo} to {hi})",
+           "sameExact": "{x} for every {dim}",
+           "sameRange": "About the same for every {dim}: {lo} to {hi}",
+           "close": "Highest: {a} ({x}); lowest: {b} ({y}) -- only {pct} apart, so about the same",
            "open": "Shares of “{col}” leave out the rows still at {values}: what becomes of them is not known yet.",
            "flat": "it shows the same value everywhere", "single": "it has only one group to show",
            "unknown": "most of it is “unknown”", "zero": "its number is exactly zero",
@@ -151,8 +173,15 @@ T = {
            "advanced": "a simpler chart answers this", "noq": "it does not say which question it answers"},
     "ar": {"high": "الأعلى: {a} ({x})؛ الأدنى: {b} ({y})", "one": "{a}: {x}",
            "trend": "{a}: {x} ← {b}: {y} ({pct})", "rows": "{n} سجل",
+           "latest": "{b}: {y} ({pct} مقارنة بـ {ref})؛ الأعلى: {p} ({pv})",
            "scope": "المعروض فقط: {what} — {n} من {total} صف. احذف فلتر اللوحة لعرض كل شيء.", "scoped": "هذه البيانات تحتوي فقط على {what}.",
+           "apart": "مستبعد: {what} في «{col}» — لا تشبه بقية العمود. احذف فلتر اللوحة لإعادتها.",
+           "change": "{pct} (من {a} في {x} إلى {b} في {y})",
+           "fewrank": "{n} مجموعة، معظمها أقل من {min} صفًا: عدد قليل لا يكفي للقول أيها الأعلى أو الأدنى",
+           "onerow": "— صف واحد فقط يعطي {pct} من مجموع الأول",
            "unanswered": "تعذّر على هذه البيانات الإجابة عن: {q}",
+           "unansweredWhy": "تعذّر على هذه البيانات الإجابة عن: {q} -- استُبعد الرسم الخاص به: {why}",
+           "unansweredNone": "تعذّر على هذه البيانات الإجابة عن: {q} -- لا يجيب عنه أي رسم من هذه الأعمدة",
            "nomatch": "لا يوجد في هذه البيانات ما يسمى «{what}»، لذلك تعرض هذه الصفحة كل ما فيها.",
            "nobase": "هذه أعداد {events} وليست نسبًا: هذه البيانات لا تحتوي على {base} التي تُحسب نسبةً إليها، "
                      "والمجموعة الأكبر لديها أكثر من كل شيء. ارجع إلى «اختيار البيانات» واختر الاقتراح الذي يتضمن "
@@ -160,6 +189,9 @@ T = {
            "rate": "{title} — النسبة داخل كل مجموعة (٪)",
            "ratewhy": "النسبة داخل كل مجموعة، حتى لا تتصدر المجموعات الكبيرة لمجرد أنها كبيرة.",
            "same": "{x} — متقارب جدًا لكل {dim} (من {lo} إلى {hi})",
+           "sameExact": "{x} لكل {dim}",
+           "sameRange": "متقارب جدًا لكل {dim}: من {lo} إلى {hi}",
+           "close": "الأعلى: {a} ({x})؛ الأدنى: {b} ({y}) -- الفرق {pct} فقط، فهي متقاربة",
            "open": "نِسَب «{col}» تستثني الصفوف التي ما زالت عند {values}: ما ستؤول إليه غير معروف بعد.",
            "small": " استُبعدت المجموعات التي تقل عن {n} صفًا.",
            "bysize": " (يتبع حجم كل مجموعة)",
@@ -276,7 +308,16 @@ def finding(widget: dict, result: dict, dates: set[str], lang: str, percent: set
         return _t(lang, "rows", n=f"{n:,}") if n else ""
     if not series:
         return ""
+    small = result.get("small_groups") if isinstance(result.get("small_groups"), dict) else {}
+    if small.get("too_few") and wt not in ("kpi", "gauge", "card"):
+        # Every group is under the floor (the data is small): the bars are
+        # drawn, but no group is called the highest or the lowest.
+        return _t(lang, "fewrank", n=f"{len(series):,}", min=f"{small.get('min_rows', 0):,}")
     if wt in ("kpi", "gauge"):
+        ch = result.get("change") if isinstance(result.get("change"), dict) else None
+        if ch:                                   # a level's change over the period shown
+            return _t(lang, "change", pct=f"{float(ch['pct']):+.1f}%", a=_fmt(ch["from"]), b=_fmt(ch["to"]),
+                      x=str(ch["first"])[:10], y=str(ch["last"])[:10])
         return fmt(series[0][1])
     if wt == "card":
         return "; ".join(_t(lang, "one", a=n.replace("_", " "), x=fmt(v)) for n, v in series[:4])
@@ -284,11 +325,39 @@ def finding(widget: dict, result: dict, dates: set[str], lang: str, percent: set
         # A last period still filling up is not where the trend ends.
         if result.get("partial_period") and len(series) > 2:
             series = series[:-1]
-        (a, x), (b, y) = series[0], series[-1]
-        pct = f"{(y - x) / abs(x) * 100:+.0f}%" if x else "—"
-        return _t(lang, "trend", a=a, x=fmt(x), b=b, y=fmt(y), pct=pct)
+        if len(series) <= 2:
+            (a, x), (b, y) = series[0], series[-1]
+            pct = f"{(y - x) / abs(x) * 100:+.0f}%" if x else "—"
+            return _t(lang, "trend", a=a, x=fmt(x), b=b, y=fmt(y), pct=pct)
+        # Like with like: the latest period against the same one a year before
+        # when the history has it, else against the period before -- never the
+        # first period of the data (persona test 2026-10-12: "+83%" from the
+        # first month to a seasonal peak; the year itself was 4.5% down).
+        b, y = series[-1]
+        ref, was = series[-2]
+        year_ago = _year_before_label(str(b))
+        if year_ago is not None:
+            hit = next(((n, v) for n, v in series if str(n) == year_ago), None)
+            if hit is not None:
+                ref, was = hit
+        pct = f"{(y - was) / abs(was) * 100:+.0f}%" if was else "—"
+        p, pv = max(series, key=lambda t: t[1])
+        return _t(lang, "latest", b=b, y=fmt(y), pct=pct, ref=ref, p=p, pv=fmt(pv))
     hi, lo = max(series, key=lambda p: p[1]), min(series, key=lambda p: p[1])
+    if hi[1] > 0 and lo[1] > 0 and (hi[1] - lo[1]) / hi[1] <= CLOSE_SHARE and len(series) >= 2:
+        # "Online leads" when four channels are within 5% of each other is not
+        # an answer; "about the same" is (persona test 2026-10-12, plan 2.3).
+        return _t(lang, "close", a=hi[0], x=fmt(hi[1]), b=lo[0], y=fmt(lo[1]),
+                  pct=f"{(hi[1] - lo[1]) / hi[1] * 100:.0f}%")
     return _t(lang, "high", a=hi[0], x=fmt(hi[1]), b=lo[0], y=fmt(lo[1]))
+
+
+def _year_before_label(label: str) -> str | None:
+    """'2011-11' -> '2010-11', '2011-Q3' -> '2010-Q3', '2011' -> '2010'; else None."""
+    m = re.fullmatch(r"(\d{4})(-(?:\d{2}|Q[1-4]|W\d{2}))?", label.strip())
+    if not m:
+        return None
+    return f"{int(m.group(1)) - 1}{m.group(2) or ''}"
 
 
 PREVIEW_BARS = 12
@@ -397,6 +466,16 @@ def honest_text(text: str, allowed: list[float]) -> str:
 
 # ── the prompt ──────────────────────────────────────────────────────────────
 
+#: Options a chart takes only when the question calls for them.
+OPTIONS = {"kpi": "\n    option: `change_over`: a date column -- the number becomes the percent change of the measure "
+                  "(a level: a value at one moment, such as a price or a balance) from the first date to the last; for "
+                  "'how much did it go up or down'. Never the average of a column of daily changes for that",
+           "bar": "\n    option: \"pareto\": true adds the running share of the whole -- only when the person asks how "
+                  "concentrated a total is (how few groups carry most of it); never on a plain ranking"
+                  "\n    option: NO dimension and `measures` listing 2+ columns on one scale (with one `aggregation`) "
+                  "draws one bar per column -- to compare items such as the columns of a score group"}
+
+
 def menu(profile: dict, richness: str = "basic") -> tuple[list[str], str]:
     """(types that may be used, the menu text): the common charts, then the
     others, each with the kind of question it is for."""
@@ -406,7 +485,7 @@ def menu(profile: dict, richness: str = "basic") -> tuple[list[str], str]:
 
     def line(wt: str, note: str = "") -> str:
         keys = ", ".join(config_key_for_role(r) for r in REQUIRED_ROLES.get(wt, ())) or "no required fields"
-        return f"- {wt}: {WIDGET_GUIDE[wt]}{note}\n    requires: {keys}"
+        return f"- {wt}: {WIDGET_GUIDE[wt]}{note}\n    requires: {keys}{OPTIONS.get(wt, '')}"
 
     simple = [wt for wt in SIMPLE if wt in usable]
     others = advanced_for(richness)
@@ -453,10 +532,15 @@ def _demand_text(dem: dict, scope: list[str], scoped_rows: int, lang: str) -> st
     return "\n".join(lines)
 
 
+def _groups_note(groups: list[dict]) -> str:
+    from .groups import describe
+    return describe(groups)
+
+
 def build_messages(profile: dict, dem: dict, scope: list[str], scoped_rows: int, notes: list[str],
                    count: int, lang: str, knowledge=None, facts: str | None = None,
                    shares: list[dict] | None = None, reading: str = "",
-                   richness: str = "basic") -> tuple[list[dict], list[str]]:
+                   richness: str = "basic", groups: list[dict] | None = None) -> tuple[list[dict], list[str]]:
     from ..dataset_profile import describe_for_prompt
     allowed, menu_text = menu(profile, richness)
     system = (
@@ -484,6 +568,12 @@ def build_messages(profile: dict, dem: dict, scope: list[str], scoped_rows: int,
         "otherwise the `avg` of the yes/no column.\n"
         "- Titles say what the chart shows in the person's own vocabulary, never column names. "
         "`why` is one short sentence: what they learn from it.\n"
+        "- `names`: for every column the pages use, the name a reader of this language would give it, in a few "
+        "plain words (the column's meaning, never its spelling).\n"
+        "- `shows` says what the chart's NUMBER is: share (a part of the whole, as a percentage), average, "
+        "total, count, distinct (how many different ones), change (a difference or a percent change), level "
+        "(a value at one moment, such as a balance), list (the records themselves) or other. Build the query "
+        "that gives that number.\n"
         "- Prefer the typical value (median) to the average when the notes say values are extreme.\n"
         "- Never a chart of how many rows there are unless counting is what they asked.\n\n"
         + _hard_rules())
@@ -499,12 +589,14 @@ def build_messages(profile: dict, dem: dict, scope: list[str], scoped_rows: int,
         + (f"\nMEASURED FACTS (exact, computed on these rows)\n{facts}\n" if facts else "")
         + ("\nSHARES (percent columns; use only with `avg`)\n" + "\n".join(
             f"- `{c['name']}`: its avg is the share of rows where `{c['of']}` is "
-            + ("TRUE" if c.get("is") == "yes" else "FALSE") + ", in percent."
+            + (f"“{c.get('value')}”" if c.get("is") == "value" else "TRUE" if c.get("is") == "yes" else "FALSE")
+            + ", in percent."
             for c in shares if c.get("is") != "label")
            + "\nPick the column for what the TITLE says: a title about the outcome being true (late, "
              "returned, active) takes the TRUE column; a title about the opposite (on time, kept, "
              "inactive) takes the FALSE column. A title must never promise the opposite of its column.\n"
            if shares else "")
+        + ("\nSCORE GROUPS (found from the values)\n" + _groups_note(groups) + "\n" if groups else "")
         + f"\nWIDGETS YOU MAY USE\n{menu_text}\n\n"
         f"Propose {count} pages. Each page is a different ANGLE on the same request -- for example the "
         "overview (the headline numbers and the main comparison), the comparison in depth, how it changed "
@@ -544,6 +636,169 @@ def _reading(widget: dict) -> str:
                                     c.get("dimension2"), c.get("filters")], sort_keys=True, default=str)
 
 
+#: A title word and a column-name part are the same word when they share this many first letters.
+_STEM = 5
+_NAME_NOISE = {"is", "has", "was", "flag", "count", "total", "value", "amount", "date", "time", "name", "type"}
+
+
+def _stems(text: str) -> set[str]:
+    return {w[:_STEM] for w in re.findall(r"\w+", str(text or "").casefold()) if len(w) >= 4}
+
+
+def _config_columns(config, df_columns: set[str]) -> set[str]:
+    """Every column a widget's config names, wherever it names it."""
+    out: set[str] = set()
+    if isinstance(config, dict):
+        for v in config.values():
+            out |= _config_columns(v, df_columns)
+    elif isinstance(config, (list, tuple)):
+        for v in config:
+            out |= _config_columns(v, df_columns)
+    elif isinstance(config, str) and config in df_columns:
+        out.add(config)
+    return out
+
+
+#: Quick calculations and modes that show each part as a share of the whole.
+_SHARE_CALCS = {"percent_of_total", "percent_of_column", "percent_of_row", "percent_change"}
+
+
+def _one_to_one(df, a: str, b: str) -> bool:
+    """Whether two columns are one fact written twice (each value of one
+    always comes with one value of the other, and back): "Late" / 1."""
+    try:
+        pair = df[[a, b]].dropna()
+        return bool(len(pair)) and int(pair.groupby(a)[b].nunique().max()) == 1 \
+            and int(pair.groupby(b)[a].nunique().max()) == 1
+    except Exception:                                               # noqa: BLE001
+        return False
+
+
+def _gives_share(config: dict, df, percent: set[str] | None = None, column_meta: dict | None = None) -> bool:
+    """Whether a chart's number is a share: the average of a yes/no column,
+    a column that holds shares (measured, or classified as one), or parts
+    shown as a share of their whole."""
+    import pandas as pd
+    from ..semantic_guard import recorded_number
+    if config.get("quick_calc") in _SHARE_CALCS or config.get("bar_mode") == "stacked100":
+        return True
+    measures = [config.get("measure")] + list(config.get("measures") or [])
+    for m in [x for x in measures if isinstance(x, str)]:
+        if m in (percent or set()) or recorded_number(m, column_meta) == "share":
+            return True
+        if m in df.columns and str(config.get("aggregation") or "").lower() in ("avg", "mean"):
+            vals = pd.to_numeric(df[m], errors="coerce").dropna()
+            if len(vals) and set(vals.unique().tolist()) <= {0, 1}:
+                return True
+    return False
+
+
+def _keeps_everything(f, df) -> bool:
+    """Whether an `in` filter lists every value its column holds."""
+    if not isinstance(f, dict) or f.get("op") != "in" or f.get("column") not in getattr(df, "columns", []):
+        return False
+    try:
+        held = {str(v) for v in df[f["column"]].dropna().unique()[:1000]}
+        wanted = {str(v) for v in (f.get("value") if isinstance(f.get("value"), list) else [f.get("value")])}
+        return bool(held) and held <= wanted
+    except Exception:                                               # noqa: BLE001
+        return False
+
+
+def title_promises(widget: dict, df, aliases: dict | None = None,
+                   elsewhere: set[str] | None = None, percent: set[str] | None = None,
+                   context: str | None = None) -> str | None:
+    """What a chart's title promises that its query does not do, or None.
+
+    Persona test 2026-10-12: "Review score: late orders" showed the average of
+    ALL orders -- the number was real, the title was not. A title that names a
+    yes/no column, a number column or a value of a category must be about a
+    chart that uses that column (as its measure, its split or its filter).
+    Words that also name a column the chart uses never count, nor do columns
+    that are one fact with a column it uses (`delivery_performance` "Late" and
+    `is_late` 1). A title naming a column that only another dataset of the
+    analysis holds is about that one
+    (named by two words or more: "review score", never "trip" alone). Words of
+    the dataset's own name (`context`: "All deliveries with ...") describe
+    every row, so a title repeating them promises nothing."""
+    import pandas as pd
+    title = str(widget.get("title") or "")
+    if not title.strip() or df is None:
+        return None
+    cols = {str(c) for c in df.columns}
+    # A filter that keeps every value of its column ("is_late in [0, 1]")
+    # narrows nothing: it does not "use" the column (Olist: a one-number card
+    # titled "Late vs. On Time" over every row).
+    cfg_used = dict(widget.get("config") or {})
+    if cfg_used.get("filters"):
+        cfg_used["filters"] = [f for f in cfg_used["filters"] if not _keeps_everything(f, df)]
+    used = _config_columns(cfg_used, cols | set((aliases or {}).keys()))
+    used |= {aliases[u] for u in list(used) if aliases and u in aliases}
+    # Words of the dataset's own name, compared by prefix so "trip" and
+    # "trips" (or any word and its ending) are the same word.
+    ctx = _stems(context or "")
+    words = {w for w in _stems(title) if not any(c.startswith(w) or w.startswith(c) for c in ctx)}
+    taken = set().union(*(_stems(u.replace("_", " ")) for u in used)) if used else set()
+    heard = re.sub(r"\s+", " ", title.casefold())
+    for c in sorted((elsewhere or set()) - cols):
+        parts = {p for p in _stems(c.replace("_", " ")) if p not in {w[:_STEM] for w in _NAME_NOISE}}
+        if len(parts) >= 2 and parts <= words - taken:
+            return f"the title names “{c}”, which another dataset of this analysis holds, not this one"
+    computes_change = bool(cfg_used.get("change_over")) or cfg_used.get("quick_calc") in ("percent_change", "difference")
+    for c in cols - used:
+        if any(_one_to_one(df, c, u) for u in used if u in cols):
+            continue
+        s = df[c]
+        try:
+            distinct = int(s.nunique(dropna=True))
+        except TypeError:
+            continue
+        numeric = pd.api.types.is_numeric_dtype(s) and s.dtype != bool
+        if numeric and computes_change:
+            # The chart computes a change itself (a level's change over the
+            # period, a percent change): a title saying "change" is its own,
+            # not a promise of a change column (EGX: "COMI price change" over
+            # `close` was refused for naming `change_pct`).
+            continue
+        if distinct <= 2 or numeric:
+            parts = {p for p in _stems(c.replace("_", " ")) if p not in {w[:_STEM] for w in _NAME_NOISE}} - taken
+            hit = parts & words
+            if hit and not (numeric and str(c).casefold().endswith("_id")):
+                return f"the title names “{c}” but the chart does not use it"
+        elif 3 <= distinct <= 60:
+            for v in s.dropna().unique().tolist():
+                key = re.sub(r"\s+", " ", str(v).casefold()).strip()
+                if len(key) >= 4 and _stems(key) - taken and re.search(rf"(?<!\w){re.escape(key)}(?!\w)", heard):
+                    return f"the title names “{v}” (a value of “{c}”) but the chart does not use that column"
+    return None
+
+
+def shows_mismatch(widget: dict, df, percent: set[str] | None = None,
+                   column_meta: dict | None = None) -> str | None:
+    """Why a chart's query does not give the number its `shows` declares, or
+    None. Fresh benchmark run 2026-10-13: "Share of late deliveries" was the
+    average days late and read "9.55%". Checked from the declaration, so a
+    title in any language is held to what its number is."""
+    shows = str(widget.get("shows") or "").lower()
+    cfg = widget.get("config") or {}
+    measure = cfg.get("measure") or ", ".join(m for m in cfg.get("measures") or [] if isinstance(m, str))
+    if not measure or shows not in SHOWS or df is None:
+        return None
+    agg = str(cfg.get("aggregation") or cfg.get("agg") or "").lower()
+    if shows == "share":
+        ok = _gives_share(cfg, df, percent, column_meta)
+    elif shows in _SHOWS_AGGS and agg:
+        ok = agg in _SHOWS_AGGS[shows]
+    else:
+        return None
+    return None if ok else f"it is meant to show {shows_word(shows)}, but its query gives the {agg or 'sum'} of “{measure}”"
+
+
+def shows_word(shows: str) -> str:
+    return {"share": "a share of the whole", "average": "an average", "total": "a total", "count": "a count",
+            "distinct": "how many different ones"}.get(shows, shows)
+
+
 class Gate:
     """Checks, draws and judges proposed widgets for one dataset."""
 
@@ -551,6 +806,22 @@ class Gate:
                  scope_filters: list[dict], lang: str, given: set[str] | None = None, richness: str = "basic"):
         #: The charts beyond the common ones, and how many a page may hold.
         self.richness = richness
+        #: Columns only the analysis's OTHER datasets hold, and the dataset's
+        #: own name (set by design()).
+        self.elsewhere: set[str] = set()
+        self.context: str = ""
+        #: Each column's display name in the person's language (set by design()).
+        self.names: dict[str, str] = {}
+        #: Values only another dataset of the analysis is kept to, and each
+        #: question's text (set by design()).
+        self.foreign: set[str] = set()
+        self.asked_text: dict[str, str] = {}
+        #: The kind of number each question's answer rests on (demand `wants`),
+        #: and the columns it rests on (demand `about`).
+        self.wants: dict[str, str] = {}
+        self.about: dict[str, list[str]] = {}
+        #: On a summary dataset, the column saying how many rows each row stands for.
+        self.group_size: str | None = None
         self.advanced = advanced_for(richness)
         self.max_advanced = ADVANCED_PER_PAGE.get(richness, 1)
         #: Values the dataset is ALREADY narrowed to by its own query.
@@ -561,6 +832,8 @@ class Gate:
         shares = getattr(inputs, "shares", None) or []
         self.percent = {c["name"] for c in shares if c.get("is") != "label"}
         self.twins = {c["of"]: c["name"] for c in shares if c.get("is") == "yes"}
+        #: A 0/1 number's percent twin: its average is drawn as that percentage.
+        self.ones = {c["of"]: c["name"] for c in shares if c.get("is") == "value" and c.get("value") == 1}
         self.labels = {c["of"]: c["name"] for c in shares if c.get("is") == "label"}
         self.flag_of = {c["name"]: c["of"] for c in shares if c.get("is") != "label"}
         self.scoped = {f.get("column") for f in scope_filters}
@@ -577,6 +850,8 @@ class Gate:
         #: A comparison that came out level, said as one number: its sentence.
         self.level: dict[str, str] = {}
         self._sem = asyncio.Semaphore(PROBE_CONCURRENCY)
+        #: Why each asked question's chart was refused (question id -> reason), for the page.
+        self.refusals: dict[str, str] = {}
 
     def _check(self, widget: dict) -> tuple[dict | None, str]:
         from ..analyst_panel import repair_and_check
@@ -594,7 +869,7 @@ class Gate:
             wt = "bar"
         if wt not in self.allowed:
             return None, f"'{title}': {wt} is not on the menu -- {_t(self.lang, 'advanced')}"
-        if self.question_ids and widget.get("question") not in self.question_ids:
+        if self.question_ids and widget.get("question") not in self.question_ids and not widget.get("_unlinked"):
             return None, f"'{title}': {_t(self.lang, 'noq')}"
         cfg1 = widget.get("config") or {}
         if cfg1.get("filters") and self.twins:
@@ -618,6 +893,8 @@ class Gate:
                                                        else [f.get("value")])} <= self.given)]
             if len(kept) != len(cfg1["filters"]):
                 widget = {**widget, "config": {**cfg1, "filters": kept}}
+        widget = self._retarget_filters(widget)
+        widget, compared = self._set_aside_comparisons(widget)
         bad = self._bad_filter(widget.get("config") or {})
         if bad:
             return None, f"'{title}': {bad}"
@@ -632,18 +909,26 @@ class Gate:
             cfg = {**cfg, "measure": self.twins[flag], "aggregation": "avg",
                    "filters": known + [{"column": flag, "op": "in", "value": [True, False]}]}
             widget = {**widget, "config": cfg}
+        elif cfg.get("measure") in getattr(self, "ones", {}) and averaged:
+            cfg = {**cfg, "measure": self.ones[cfg["measure"]], "aggregation": "avg"}
+            widget = {**widget, "config": cfg}
         elif cfg.get("measure") in self.percent and not averaged:
             cfg = {**cfg, "aggregation": "avg"}
             widget = {**widget, "config": cfg}
         flag = self.flag_of.get(cfg.get("measure"))
+        # A text column's share (one twin per value) has no "unknown" side: the
+        # known-rows filter below is for yes/no columns only -- on text it
+        # kept no row at all.
         if flag:
             # A share of an outcome is over ALL rows where the outcome is known:
-            # a filter to "yes" (or "no") would make it 100% (or 0%). Rows where
-            # it is not known yet count for neither side.
+            # a filter to "yes" (or "no") would make it 100% (or 0%) -- for any
+            # share (Olist: "average days late" drawn as is_late_pct over the
+            # late rows read 100%). Rows where a yes/no outcome is not known
+            # yet count for neither side.
             same = {flag, self.labels.get(flag), self.twins.get(flag), f"{flag}{NOT_SUFFIX}"}
             rest = [f for f in cfg.get("filters") or [] if not (isinstance(f, dict) and f.get("column") in same)]
-            widget = {**widget, "config": {**cfg, "filters": rest
-                                           + [{"column": flag, "op": "in", "value": [True, False]}]}}
+            known = [{"column": flag, "op": "in", "value": [True, False]}] if flag in self.twins else []
+            widget = {**widget, "config": {**cfg, "filters": rest + known}}
         keep = {k: widget.get(k) for k in ("question", "why")}
         fixed, ok, why = repair_and_check(
             {**widget, "source": "model"}, self.inputs.profile, self.inputs.column_meta,
@@ -652,6 +937,10 @@ class Gate:
         if not ok:
             return None, str(why)
         fixed = polish_widget({k: v for k, v in fixed.items() if k != "source"}, self.inputs.profile)
+        if compared:
+            fixed = self._compare_columns({**fixed, "config": {**(fixed.get("config") or {}),
+                                           "filters": list((fixed.get("config") or {}).get("filters") or [])
+                                           + compared}})
         fixed = self._as_share(fixed)
         cfg = fixed.get("config") or {}
         of_label = {v: k for k, v in self.labels.items()}
@@ -667,13 +956,18 @@ class Gate:
         return {**fixed, **keep, "config": with_scope(fixed.get("config") or {}, self.scope_filters)}, ""
 
     def _as_share(self, widget: dict) -> dict:
-        """A title that promises a share over a COUNT of the rows where a
+        """A chart meant as a share drawn as a COUNT of the rows where a
         column holds one value ("Share returned": count, status = Returned)
         shows a count. Drawn instead as what it says: the average of a
         percent column that is 100 on those rows -- made here, created on the
         dataset when the page is built."""
         cfg = widget.get("config") or {}
-        if not _SHARE_WORD.search(str(widget.get("title") or "")) or cfg.get("measure") in self.percent \
+        # Whether a share is meant is what the chart DECLARES (`shows`); the
+        # title's words decide only for a chart that declares nothing (a
+        # design kept from before `shows`, or a platform-built card).
+        shows = str(widget.get("shows") or "").lower()
+        meant = shows == "share" if shows else bool(_SHARE_WORD.search(str(widget.get("title") or "")))
+        if not meant or cfg.get("measure") in self.percent \
                 or not str(cfg.get("aggregation") or "").startswith("count"):
             return widget
         df = self.inputs.df
@@ -681,17 +975,16 @@ class Gate:
             col, op, val = (f.get("column"), f.get("op"), f.get("value")) if isinstance(f, dict) else (None,) * 3
             val = val[0] if isinstance(val, list) and len(val) == 1 else val
             if (op not in ("eq", "in") or isinstance(val, (list, dict)) or col not in df.columns
-                    or col == cfg.get("dimension") or not _IDENT.match(str(col)) or '"' in str(val)):
+                    or col == cfg.get("dimension") or "`" in str(col) or '"' in str(val)):
                 continue
             if col in self.twins and str(val).casefold() in ("true", "false"):
                 name = self.twins[col] if str(val).casefold() == "true" else f"{col}{NOT_SUFFIX}"
             else:
-                slug = re.sub(r"[^A-Za-z0-9]+", "_", str(val)).strip("_").lower() or "value"
-                name = f"{col}_{slug}{SHARE_SUFFIX}"
+                name = f"{col}_{_slug(val)}{SHARE_SUFFIX}"
                 if name not in df.columns:
                     from ..widget_data import apply_calculated_columns
                     literal = str(val) if isinstance(val, (int, float)) and not isinstance(val, bool) else f'"{val}"'
-                    calc = {"name": name, "expression": f"IF({col} == {literal}, 100, 0)", "dtype": "numeric",
+                    calc = {"name": name, "expression": f"IF(`{col}` == {literal}, 100, 0)", "dtype": "numeric",
                             "format": {"type": "percent", "decimals": 1}}
                     made = apply_calculated_columns(df, [calc])
                     if name not in made.columns:
@@ -702,6 +995,149 @@ class Gate:
             rest = [x for x in cfg["filters"] if x is not f]
             return {**widget, "config": {**cfg, "measure": name, "aggregation": "avg", "filters": rest}}
         return widget
+
+    def _count_whom(self, widget: dict) -> dict:
+        """A question that wants a COUNT of something its columns name (people:
+        `emp_no`), on rows where that column repeats (one person per
+        assignment), is counted by distinct values, never by rows (persona
+        benchmark: "the current workforce is 489,903" counted assignment rows
+        of 240,124 people)."""
+        qid = str(widget.get("question") or "")
+        cfg = widget.get("config") or {}
+        df = getattr(self.inputs, "df", None)
+        if df is None or getattr(self, "wants", {}).get(qid) != "count" or str(cfg.get("aggregation") or "") != "count":
+            return widget
+        about = [c for c in getattr(self, "about", {}).get(qid, []) if c in df.columns]
+        if not about:
+            return widget
+        who = about[0]
+        try:
+            distinct, filled = int(df[who].nunique(dropna=True)), int(df[who].notna().sum())
+        except TypeError:
+            return widget
+        # Only a column that names the things counted (most values its own: an
+        # employee number), never a category (a status: its distinct values
+        # are its few kinds).
+        if not filled or distinct >= filled or distinct < IDENTIFIES_SHARE * filled or cfg.get("dimension") == who:
+            return widget
+        return {**widget, "config": {**cfg, "measure": who, "aggregation": "countd"}}
+
+    def _about_question(self, widget: dict) -> bool:
+        """Whether the chart uses a column its question rests on (demand
+        `about`), directly or through a column made from it (a share, a group
+        average, a comparison). Not judged when the question names none of
+        this dataset's columns. Persona benchmark (Olist): days late over time
+        stood under "do late deliveries get lower review SCORES"."""
+        df = getattr(self.inputs, "df", None)
+        about = [c for c in getattr(self, "about", {}).get(str(widget.get("question") or ""), [])
+                 if df is not None and c in df.columns]
+        if not about:
+            return True
+        cols = {str(c) for c in df.columns}
+        used = _config_columns(widget.get("config") or {}, cols | set(getattr(self, "percent", set()) or set()))
+        made = list(getattr(self.inputs, "shares", None) or []) + list(getattr(self.inputs, "groups", None) or []) \
+            + list(getattr(self, "made", None) or [])
+        sources = set(used)
+        for m in made:
+            if m.get("name") in used:
+                sources |= {c for c in about if c == m.get("of") or c in (m.get("columns") or [])
+                            or f"`{c}`" in str(m.get("expression") or "")}
+        return bool(sources & set(about))
+
+    def _data_only(self):
+        """The rows without the columns the setup made itself (shares, a score
+        group's average, comparisons): their names are the platform's words,
+        not the data's, so a title cannot "name" them."""
+        df = getattr(self.inputs, "df", None)
+        if df is None:
+            return None
+        made = {c.get("name") for c in list(getattr(self.inputs, "shares", None) or [])
+                + list(getattr(self.inputs, "groups", None) or []) + list(self.made or [])}
+        drop = [c for c in df.columns if c in made]
+        return df.drop(columns=drop) if drop else df
+
+    _COMPARE = {"gt": ">", "lt": "<", "gte": ">=", "lte": "<=", "eq": "==", "neq": "!="}
+
+    def _retarget_filters(self, widget: dict) -> dict:
+        """An `eq`/`in` filter on a column that never holds its value, when
+        exactly ONE other text column holds every value of it, moves to that
+        column ("branch = Returned" -> "status = Returned"). Decided from the
+        values alone, in any language; with no such column, or several, the
+        filter stays and is refused as before."""
+        import pandas as pd
+        cfg = widget.get("config") or {}
+        df = self.inputs.df
+        changed, out = False, []
+        holds: dict[str, set[str]] = {}
+
+        def held(c: str) -> set[str]:
+            if c not in holds:
+                s = df[c]
+                holds[c] = ({str(v).strip().casefold() for v in s.dropna().unique()[:5000]}
+                            if not (pd.api.types.is_numeric_dtype(s) or pd.api.types.is_datetime64_any_dtype(s))
+                            else set())
+            return holds[c]
+        for f in cfg.get("filters") or []:
+            col, op, val = (f.get("column"), f.get("op"), f.get("value")) if isinstance(f, dict) else (None,) * 3
+            values = [str(v).strip().casefold() for v in (val if isinstance(val, list) else [val]) if v is not None]
+            if (op in ("eq", "in") and values and col in df.columns and not (set(values) & held(col))
+                    and not any(v in df.columns for v in values)):
+                owners = [c for c in df.columns if c != col and set(values) <= held(c)]
+                if len(owners) == 1:
+                    out.append({**f, "column": owners[0]})
+                    changed = True
+                    continue
+            out.append(f)
+        return {**widget, "config": {**cfg, "filters": out}} if changed else widget
+
+    def _set_aside_comparisons(self, widget: dict) -> tuple[dict, list[dict]]:
+        """(the widget without its column-against-column filters, those filters):
+        they are applied after the checks, as a derived column (`_compare_columns`)."""
+        cfg = widget.get("config") or {}
+        df = self.inputs.df
+        aside, keep = [], []
+        for f in cfg.get("filters") or []:
+            other = f.get("value") if isinstance(f, dict) else None
+            other = other[0] if isinstance(other, list) and len(other) == 1 else other
+            if (isinstance(f, dict) and f.get("op") in self._COMPARE and isinstance(other, str)
+                    and other in df.columns and other != f.get("column") and f.get("column") in df.columns):
+                aside.append(f)
+            else:
+                keep.append(f)
+        return ({**widget, "config": {**cfg, "filters": keep}}, aside) if aside else (widget, [])
+
+    def _compare_columns(self, widget: dict) -> dict:
+        """A filter comparing a column with ANOTHER column ("delivery days >
+        promised days") cannot be applied by any engine: it becomes a derived
+        1/0 column -- made here, created on the dataset when a page uses it --
+        and a filter `= 1` on it. Held-out benchmark 2026-10-13: "how many
+        shipments were late" was refused for exactly this."""
+        import pandas as pd
+        cfg = widget.get("config") or {}
+        df = self.inputs.df
+        changed, filters = False, []
+        for f in cfg.get("filters") or []:
+            col, op, other = (f.get("column"), f.get("op"), f.get("value")) if isinstance(f, dict) else (None,) * 3
+            other = other[0] if isinstance(other, list) and len(other) == 1 else other
+            if (op in self._COMPARE and isinstance(other, str) and other != col and col in df.columns
+                    and other in df.columns and pd.api.types.is_numeric_dtype(df[col])
+                    and pd.api.types.is_numeric_dtype(df[other]) and "`" not in col + other):
+                name = f"{col}_{op}_{other}"
+                if name not in df.columns:
+                    from ..widget_data import apply_calculated_columns
+                    calc = {"name": name, "dtype": "numeric",
+                            "expression": f"IF(`{col}` {self._COMPARE[op]} `{other}`, 1, 0)"}
+                    made = apply_calculated_columns(df, [calc])
+                    if name not in made.columns:
+                        filters.append(f)
+                        continue
+                    self.inputs.df = df = made
+                    self.made.append(calc)
+                filters.append({"column": name, "op": "eq", "value": 1})
+                changed = True
+            else:
+                filters.append(f)
+        return {**widget, "config": {**cfg, "filters": filters}} if changed else widget
 
     def _bad_filter(self, config: dict) -> str | None:
         """A filter the engine would silently skip: an unknown column, another
@@ -734,6 +1170,8 @@ class Gate:
                 have = {str(v).strip().casefold() for v in s.dropna().unique()[:5000]}
                 if len(have) < 5000 and not any(str(v).strip().casefold() in have for v in values):
                     shown = ", ".join(sorted(str(v) for v in s.dropna().unique()[:8]))
+                    logger.info("guided setup: filter refused, %r never holds %r (columns: %s)",
+                                col, values, ", ".join(map(str, df.columns))[:400])
                     return f"'{col}' never holds {values!r}; it holds: {shown}"
         return None
 
@@ -840,8 +1278,17 @@ class Gate:
         share = cfg.get("measure") in self.percent
         fmt = (lambda v: f"{float(v):.1f}%") if share else _fmt
         values = [v for _n, v in series]
-        self.level[_key(number)] = _t(self.lang, "same", x=fmt(_series(drawn)[0][1]),
-                                      dim=str(cfg["dimension"]).replace("_", " "), lo=fmt(min(values)), hi=fmt(max(values)))
+        overall = _series(drawn)[0][1]
+        dim = display_name(cfg["dimension"], getattr(self, "names", None))
+        # The number over every row can fall outside the groups' range (rows
+        # with no group): then the range alone is said, never "907 -- about the
+        # same for every city (913 to 934)" (persona test 2026-10-12).
+        # Equal at the shown precision: "1 for every state", never "1 to 1".
+        self.level[_key(number)] = (
+            _t(self.lang, "sameExact", x=fmt(min(values)), dim=dim) if fmt(min(values)) == fmt(max(values))
+            else _t(self.lang, "same", x=fmt(overall), dim=dim, lo=fmt(min(values)), hi=fmt(max(values)))
+            if min(values) <= overall <= max(values)
+            else _t(self.lang, "sameRange", dim=dim, lo=fmt(min(values)), hi=fmt(max(values))))
         return number, drawn
 
     async def one(self, widget: dict) -> tuple[dict | None, str]:
@@ -849,11 +1296,36 @@ class Gate:
         if not isinstance(widget, dict) or not isinstance(widget.get("config"), dict):
             return None, "not a widget"
         title = widget.get("title") or widget.get("widget_type")
+        # A title naming a value only ANOTHER dataset of the analysis is kept to
+        # ("COMI total gain" drawn on the index's rows read the index's +62.8%).
+        foreign_title = names_foreign(str(widget.get("title") or ""), getattr(self, "foreign", set()))
+        if foreign_title:
+            return None, (f"'{title}': the title names “{foreign_title}”, which another dataset of this analysis "
+                          "is kept to, not this one")
+        named = names_foreign(self.asked_text.get(str(widget.get("question") or ""), ""), self.foreign) \
+            or not answers_kind(widget.get("shows"), self.wants.get(str(widget.get("question") or ""))) \
+            or not self._about_question(widget)
+        if not named:
+            widget = self._count_whom(widget)
+        if named:
+            # Not this dataset's question ("How much did COMI go up?" on the
+            # index's rows): the chart may stay, but never as its answer.
+            widget = {**widget, "question": "", "_unlinked": True}
         try:
             checked, why = self._check(widget)
             if checked is None:
                 return None, why if why.startswith("'") else f"'{title}': {why}"
+            promise = title_promises(checked, self._data_only(), self.flag_of,
+                                     self.elsewhere, self.percent, self.context)
+            if promise:
+                return None, f"'{title}': {promise} -- filter or split by it, or retitle the chart"
+            declared = shows_mismatch({**checked, "shows": widget.get("shows")}, getattr(self.inputs, "df", None),
+                                      self.percent, getattr(self.inputs, "column_meta", None))
+            if declared:
+                return None, f"'{title}': {declared} -- build the query that gives that number"
             checked = self._known_outcomes(checked)
+            if self.group_size and (checked.get("config") or {}).get("min_group_rows"):
+                checked = {**checked, "config": {**checked["config"], "size_column": self.group_size}}
             result, why = await self._draw(checked)
             if result is None:
                 return None, f"'{title}': {why}"
@@ -875,6 +1347,10 @@ class Gate:
             # (Not part of what the chart measures: added after it was drawn.)
             self.captions[_key(checked)] = str(widget["why"]).strip()[:90]
         said = self.level.get(_key(checked)) or finding(checked, result, self.dates, self.lang, self.percent)
+        one = one_row_leader(checked, result, getattr(self.inputs, "df", None), self.dates)
+        if one is not None and said:
+            said = f"{said} {_t(self.lang, 'onerow', pct=f'{one:.0f}%')}"
+        checked = {k: v for k, v in checked.items() if k != "_unlinked"}
         out = {**checked, "row_count": size or 1, "finding": said,
                "preview": preview_of(checked, result, self.dates, self.lang,
                                      (checked.get("config") or {}).get("measure") in self.percent)}
@@ -890,9 +1366,11 @@ class Gate:
             widgets = [w for w in (page or {}).get("widgets") or [] if isinstance(w, dict)]
             got = await asyncio.gather(*(self.one(w) for w in widgets)) if widgets else []
             kept, whys, advanced = [], [], 0
-            for w, why in got:
+            for asked_w, (w, why) in zip(widgets, got):
                 if w is None:
                     whys.append(why)
+                    if asked_w.get("question"):
+                        self.refusals.setdefault(str(asked_w["question"]), why)
                     continue
                 if _key(w) in seen or _reading(w) in seen:
                     continue
@@ -968,7 +1446,36 @@ async def write_answers(pages: list[dict], gate: Gate, dem: dict, lang: str, cli
                 logger.info("guided setup: answer dropped by the number check: %s", said[i + 1][:300])
             charts = [w for w in p["widgets"] if w.get("finding") and w["widget_type"] not in ("table", "list")]
             text = " ".join(f"{w.get('title')}: {w['finding']}." for w in charts[:3])
-        p["answer"] = text
+        p["answer"] = "\n".join(x for x in [text, *answer_lines(p, dem, text)] if x)
+
+
+#: At most this many per-question lines under a page's summary.
+ANSWER_LINES_MAX = 4
+_FIGURE_IN_TEXT = re.compile(r"\d[\d,.]*")
+
+
+def answer_lines(page: dict, dem: dict, said: str) -> list[str]:
+    """One line per question the person ASKED that this page answers, made from
+    its chart's own measured finding (plan 2.1): the summary is written by the
+    model and may leave a question out ("weakest criterion: s3_7 4.15" was on
+    the chart and missing from the page). A finding whose numbers the summary
+    already gives adds nothing."""
+    asked = {q["id"]: q.get("text") or "" for q in (dem or {}).get("questions") or []
+             if isinstance(q, dict) and q.get("asked") and q.get("id")}
+    out, seen = [], set()
+    for w in page.get("widgets") or []:
+        qid, found = w.get("question"), str(w.get("finding") or "")
+        if qid not in asked or qid in seen or not found or w.get("widget_type") in ("table", "list"):
+            continue
+        figures = _FIGURE_IN_TEXT.findall(found)
+        if figures and all(f.rstrip(".,") in said for f in figures):
+            seen.add(qid)
+            continue
+        seen.add(qid)
+        out.append(f"• {asked[qid].rstrip('?؟ ')}: {found}")
+        if len(out) >= ANSWER_LINES_MAX:
+            break
+    return out
 
 
 def answer_widget(page: dict, note: str | None) -> dict | None:
@@ -990,24 +1497,97 @@ _SHARE_WORD = re.compile(r"(share|percent|percentage|proportion|\brate\b|ratio|%
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
+#: The longest display name kept from the model for one column.
+NAME_MAX = 40
+
+
+#: A column names the things counted when at least this share of its values
+#: are different (an employee number over assignment rows), not a category.
+IDENTIFIES_SHARE = 0.2
+
+#: A leader whose total rests this much on ONE row is said to: one record is
+#: not a pattern (persona test: a single order of 80,995 units made a product
+#: "the best seller").
+ONE_ROW_SHARE = 0.5
+
+
+def one_row_leader(widget: dict, result: dict, df, dates: set[str]) -> float | None:
+    """The percent of the leading group's total that one row gives, when it is
+    at least ONE_ROW_SHARE -- for a ranking that adds a measure up; else None."""
+    import pandas as pd
+    cfg = widget.get("config") or {}
+    dim, measure = cfg.get("dimension"), cfg.get("measure")
+    series = _series(result) or []
+    if (widget.get("widget_type") not in ("bar", "donut", "treemap") or df is None or not series
+            or str(cfg.get("aggregation") or "sum").lower() != "sum" or dim in (dates or set())
+            or dim not in df.columns or measure not in df.columns or cfg.get("dimension2")):
+        return None
+    top, total = max(series, key=lambda t: t[1])
+    try:
+        rows = pd.to_numeric(df.loc[df[dim].astype(str) == str(top), measure], errors="coerce").dropna()
+    except Exception:                                               # noqa: BLE001
+        return None
+    if len(rows) < 2 or not total or float(total) <= 0:
+        return None
+    share = float(rows.max()) / float(total)
+    return share * 100 if share >= ONE_ROW_SHARE else None
+
+
+def display_name(col, names: dict | None = None) -> str:
+    """A column as a reader sees it: the display name the design gave it in
+    the person's language, else its own name with spaces."""
+    return str((names or {}).get(col) or str(col).replace("_", " "))
+
+
+def clean_names(got: dict | None, columns) -> dict[str, str]:
+    """The model's display names, kept only for real columns and short text."""
+    cols = {str(c) for c in columns}
+    raw = (got or {}).get("names") if isinstance(got, dict) else None
+    return {str(k): str(v).strip() for k, v in (raw or {}).items()
+            if str(k) in cols and isinstance(v, str) and 0 < len(v.strip()) <= NAME_MAX} if isinstance(raw, dict) else {}
+
+
+def _slug(value) -> str:
+    """A column-name piece from a value, in any script ("مرتجع", "In transit" -> "in_transit")."""
+    return re.sub(r"\W+", "_", str(value)).strip("_").lower() or "value"
+
+
 def share_columns(df) -> list[dict]:
     """A percent twin for each yes/no column: 100 where yes, else 0 -- so its
     average over the rows where the answer is known is the share of yes, in
-    percent (the gate adds that "known" filter)."""
+    percent (the gate adds that "known" filter). A column of exactly two text
+    values, in any language ("مرتجع" / "تم التسليم"), gets one twin per value
+    (held-out benchmark 2026-10-13: Arabic statuses had no share at all)."""
     import pandas as pd
     out = []
     for col in df.columns:
         s = df[col]
         name = f"{col}{SHARE_SUFFIX}"
-        if (not _IDENT.match(str(col)) or name in df.columns or f"{col}{NOT_SUFFIX}" in df.columns
+        if ("`" in str(col) or name in df.columns or f"{col}{NOT_SUFFIX}" in df.columns
                 or pd.api.types.is_datetime64_any_dtype(s)):
             continue
         values = set(s.dropna().unique().tolist()[:5])
+        if (len(values) == 2 and all(isinstance(v, str) for v in values)
+                and not any('"' in v for v in values)):
+            for v in sorted(values):
+                twin = f"{col}_{_slug(v)}{SHARE_SUFFIX}"
+                if twin not in df.columns:
+                    out.append({"name": twin, "expression": f'IF(`{col}` == "{v}", 100, 0)', "dtype": "numeric",
+                                "format": {"type": "percent", "decimals": 1}, "of": str(col), "is": "value",
+                                "value": v})
+            continue
+        if (len(values) == 2 and pd.api.types.is_numeric_dtype(s) and s.dtype != bool
+                and {float(v) for v in values} == {0.0, 1.0} and f"{col}{SHARE_SUFFIX}" not in df.columns):
+            # A 0/1 number ("is_late" stored as 1/0): its share, in percent --
+            # "0.0811" read as a rate was 8.1% (persona benchmark, Olist).
+            out.append({"name": f"{col}{SHARE_SUFFIX}", "expression": f"IF(`{col}` == 1, 100, 0)", "dtype": "numeric",
+                        "format": {"type": "percent", "decimals": 1}, "of": str(col), "is": "value", "value": 1})
+            continue
         if len(values) == 2 and values <= {True, False} and all(isinstance(v, (bool,)) or type(v).__name__ == "bool_"
                                                                 for v in values):
-            out.append({"name": name, "expression": f"IF({col} == True, 100, 0)", "dtype": "numeric",
+            out.append({"name": name, "expression": f"IF(`{col}` == True, 100, 0)", "dtype": "numeric",
                         "format": {"type": "percent", "decimals": 1}, "of": str(col), "is": "yes"})
-            out.append({"name": f"{col}{NOT_SUFFIX}", "expression": f"IF({col} == False, 100, 0)",
+            out.append({"name": f"{col}{NOT_SUFFIX}", "expression": f"IF(`{col}` == False, 100, 0)",
                         "dtype": "numeric", "format": {"type": "percent", "decimals": 1},
                         "of": str(col), "is": "no"})
             # Its two groups in words: a chart split by "True / False" makes the
@@ -1016,8 +1596,8 @@ def share_columns(df) -> list[dict]:
             word = re.sub(r"^(is|has|was|are)_", "", str(col)).replace("_", " ").strip() or str(col)
             if f"{col}{LABEL_SUFFIX}" not in df.columns and '"' not in word:
                 out.append({"name": f"{col}{LABEL_SUFFIX}", "of": str(col), "is": "label",
-                            "expression": f'IF({col} == True, "{word.capitalize()}", '
-                                          f'IF({col} == False, "Not {word}", "Unknown"))'})
+                            "expression": f'IF(`{col}` == True, "{word.capitalize()}", '
+                                          f'IF(`{col}` == False, "Not {word}", "Unknown"))'})
     return out
 
 
@@ -1051,6 +1631,20 @@ async def prepare(db, user, ds, dem: dict | None):
         inputs.df = await asyncio.to_thread(apply_calculated_columns, inputs.df,
                                             [c for c in shares if c.get("is") == "label"])
     inputs.shares = shares
+    # Columns that hold one kind of score, one per item: their row average
+    # is made like a share (groups.py), so "the average score" is one number.
+    from .groups import score_groups
+    groups = score_groups(inputs.df) if not inputs.live else []
+    if groups:
+        from ..analytics import detect_types
+        from ..widget_data import apply_calculated_columns
+        inputs.df = await asyncio.to_thread(apply_calculated_columns, inputs.df,
+                                            [{k: v for k, v in g.items() if k not in ("columns", "low", "high")}
+                                             for g in groups])
+        groups = [g for g in groups if g["name"] in inputs.df.columns]
+        inputs.type_map = await asyncio.to_thread(detect_types, inputs.df)
+        inputs.profile = await asyncio.to_thread(build_profile, inputs.df, inputs.type_map, inputs.column_meta)
+    inputs.groups = groups
     filters = demand_service.filters_for(dem, ds.id)
     words = demand_service.scope_words(dem, ds.id)
     total = len(inputs.df)
@@ -1067,10 +1661,13 @@ async def prepare(db, user, ds, dem: dict | None):
 
 
 def scope_note(words: list[str], filters: list[dict], scoped_rows: int, total: int, lang: str,
-               dem: dict | None = None, dataset_id: int | None = None) -> str | None:
-    """What the page is limited to -- and, said first, what was asked for
-    that the data does not hold."""
-    parts = [_t(lang, "nomatch", what=m) for m in demand_service.missing_words(dem)]
+               dem: dict | None = None, dataset_id: int | None = None,
+               apart: list[dict] | None = None, names: dict | None = None) -> str | None:
+    """What the page is limited to. What was asked for that the data does
+    not hold is said once, in the check step -- never on every page (persona
+    test 2026-10-12: "This data has nothing called '2015 to 2018'" on pages
+    of a 2015-2018 dataset)."""
+    parts: list[str] = []
     if words:
         what = "; ".join(words)
         parts.append(_t(lang, "scope", what=what, n=f"{scoped_rows:,}", total=f"{total:,}") if filters
@@ -1080,7 +1677,85 @@ def scope_note(words: list[str], filters: list[dict], scoped_rows: int, total: i
             parts.append(_t(lang, "nobase", events=str(b["events"]).replace("_", " "),
                             base=str(b["base"]).replace("_", " ")))
             break
+    for a in apart or []:
+        parts.append(_t(lang, "apart", what=", ".join(f"“{v}”" for v in a["values"]), col=display_name(a["column"], names)))
     return " ".join(parts) or None
+
+
+#: At most this many values are set apart by the check's finding (one "is not"
+#: filter each, every one shown on the dashboard and removable).
+SET_APART_MAX = 8
+
+
+def _not_held(values: set[str] | None, df) -> set[str]:
+    """Of `values`, those this dataset's rows do not hold in any text column."""
+    if not values or df is None:
+        return set(values or set())
+    import pandas as pd
+    held: set[str] = set()
+    for c in df.columns:
+        s = df[c]
+        if pd.api.types.is_numeric_dtype(s) or pd.api.types.is_datetime64_any_dtype(s):
+            continue
+        try:
+            held |= {str(v).strip().casefold() for v in s.dropna().unique()[:5000]}
+        except TypeError:
+            continue
+    return {v for v in values if v not in held}
+
+
+#: Kinds that stand for each other when a chart answers a question.
+_SAME_KIND = {"total": {"total", "count"}, "count": {"count", "total"}}
+
+
+def answers_kind(shows: str | None, wants: str | None) -> bool:
+    """Whether a chart declared as `shows` can answer a question that `wants`
+    that kind of number. Unknown on either side, or 'other'/'list', is not
+    judged. Held-out benchmark 2026-10-13: a chart of average days answered
+    "which branch has the highest return SHARE" under its question."""
+    shows, wants = str(shows or "").lower(), str(wants or "").lower()
+    if not shows or not wants or "other" in (shows, wants) or "list" in (shows, wants):
+        return True
+    return shows in _SAME_KIND.get(wants, {wants})
+
+
+def names_foreign(question: str, foreign: set[str]) -> str | None:
+    """The first value of `foreign` the question names as a whole word."""
+    text = " " + re.sub(r"[^\w]+", " ", (question or "").casefold()) + " "
+    for v in sorted(foreign or set(), key=len, reverse=True):
+        key = re.sub(r"[^\w]+", " ", v).strip()
+        if len(key) >= 2 and f" {key} " in text:
+            return v
+    return None
+
+
+def set_apart(entry: dict | None, df, filters: list[dict]) -> list[dict]:
+    """[{"column", "values", "filters"}]: members the check MEASURED as unlike
+    the rest of their column (written another way, or on another scale -- an
+    index's traded value among companies'), left out of every chart of the
+    design by one visible, removable "is not" filter each. Never removes a
+    row from the data; never when the person's own scope names the column."""
+    import ast
+    out = []
+    scoped = {f.get("column") for f in filters or [] if isinstance(f, dict)}
+    for item in (entry or {}).get("health") or []:
+        col = item.get("column")
+        if item.get("kind") != "odd" or not col or col in scoped or df is None or col not in df.columns:
+            continue
+        values = item.get("values")
+        if not values:                        # checked before `values` was kept: read the rule
+            rule = str((item.get("action") or {}).get("rule") or "")
+            try:
+                values = ast.literal_eval(rule[rule.index("["):]) if "[" in rule else []
+            except (ValueError, SyntaxError):
+                values = []
+        held = set(df[col].dropna().astype(str))
+        values = [str(v) for v in values if str(v) in held]
+        if not values or len(values) > SET_APART_MAX:
+            continue
+        out.append({"column": col, "values": values,
+                    "filters": [{"column": col, "op": "neq", "value": v} for v in values]})
+    return out
 
 
 def _notes(entry: dict | None) -> list[str]:
@@ -1237,9 +1912,10 @@ async def add_rates(pages: list[dict], gate: "Gate", lang: str) -> None:
 def derived_for(pages: list[dict], inputs, made: list[dict] | None = None) -> dict:
     """The percent twins the kept charts use: what the builder must create on
     the dataset before it draws them."""
-    used = json.dumps([w.get("config") for p in pages for w in p.get("widgets") or []], default=str)
-    cols = [{k: v for k, v in c.items() if k not in ("of", "is")}
-            for c in list(getattr(inputs, "shares", None) or []) + list(made or [])
+    used = json.dumps([w.get("config") for p in pages for w in p.get("widgets") or []], default=str, ensure_ascii=False)
+    cols = [{k: v for k, v in c.items() if k not in ("of", "is", "value", "columns", "low", "high")}
+            for c in list(getattr(inputs, "shares", None) or []) + list(getattr(inputs, "groups", None) or [])
+            + list(made or [])
             if f'"{c["name"]}"' in used]
     return {"measures": [], "calculated_columns": cols}
 
@@ -1264,7 +1940,7 @@ def without_scope(widget: dict, scope_filters: list[dict]) -> dict:
 
 
 def _finish(pages: list[dict], dem: dict, note: str | None, lang: str,
-            scope_filters: list[dict] | None = None) -> list[dict]:
+            scope_filters: list[dict] | None = None, refusals: dict | None = None) -> list[dict]:
     asked = {q["id"]: q["text"] for q in dem.get("questions") or []}
     out = []
     for p in pages:
@@ -1280,10 +1956,21 @@ def _finish(pages: list[dict], dem: dict, note: str | None, lang: str,
     # themselves: a question the setup added and could not chart is not theirs.
     answered = {q for p in out for q in p["answers"]}
     own = {q["id"] for q in dem.get("questions") or [] if q.get("asked", True)}
-    missing = [_t(lang, "unanswered", q=text) for q, text in asked.items() if q in own and q not in answered]
+    # "Could not answer" always says why (persona test 2026-10-12: the gender
+    # pay gap, the share of late orders and the price drop per year were all
+    # "could not answer" on data that held the columns).
+    missing = [_t(lang, "unansweredWhy", q=text, why=_reason(refusals.get(q))) if (refusals or {}).get(q)
+               else _t(lang, "unansweredNone", q=text)
+               for q, text in asked.items() if q in own and q not in answered]
     for i, p in enumerate(out):
         p["unanswered"] = missing if i == 0 else []
     return out
+
+
+def _reason(why: str | None) -> str:
+    """A refusal without the chart title it was written against ("'X': ...")."""
+    text = str(why or "").strip()
+    return re.sub(r"^'[^']*':\s*", "", text)
 
 
 PICKS_SCHEMA = {
@@ -1597,7 +2284,8 @@ async def pick_pages(client, cards: list[dict], dem: dict, scope: list[str], sco
 
 async def design(db, user, ds, dem: dict | None, entry: dict | None, lang: str, count: int, client,
                  meaning_map=None, tables: list[str] | None = None, selection: str | None = None,
-                 richness: str | None = None) -> dict:
+                 richness: str | None = None, elsewhere: set[str] | None = None,
+                 foreign: set[str] | None = None, group_size: str | None = None) -> dict:
     """{"proposals": pages to choose from, "reason": why some ideas were dropped}.
 
     One generation and one repair round, like the app's designer: the refused
@@ -1607,15 +2295,28 @@ async def design(db, user, ds, dem: dict | None, entry: dict | None, lang: str, 
     inputs, facts, filters, words, scoped_rows, total = await prepare(db, user, ds, dem)
     if client is None or not getattr(client, "enabled", True):
         return {"proposals": [], "reason": "off"}
+    apart = set_apart(entry, inputs.df, filters)
+    filters = filters + [f for v in apart for f in v["filters"]]
     dem = without_impossible(dem, filters, inputs.df)
     richness = richness_now(richness)
     know = inputs.knowledge
     reading = _reading_for(meaning_map, tables, {str(c) for c in inputs.df.columns})
     messages, allowed = build_messages(inputs.profile, dem, words, scoped_rows,
-                                       _outcome_notes(dem, ds.id) + _notes(entry), count, lang,
-                                       know, facts.get("text"), inputs.shares, reading, richness)
+                                       _outcome_notes(dem, ds.id) + _notes(entry)
+                                       + [f"Rows where `{a['column']}` is " + ", ".join(f"“{v}”" for v in a["values"])
+                                          + " are left out of every chart by filters the person can see and remove: "
+                                          "they are not the same kind of thing as the rest." for a in apart],
+                                       count, lang,
+                                       know, facts.get("text"), inputs.shares, reading, richness,
+                                       getattr(inputs, "groups", None))
     ids = {q["id"] for q in dem.get("questions") or []}
     gate = Gate(inputs, facts, allowed, ids, filters, lang, _given(dem, ds.id), richness)
+    gate.elsewhere, gate.context = set(elsewhere or set()), str(getattr(ds, "name", "") or "")
+    gate.foreign = _not_held(foreign, inputs.df)
+    gate.group_size = group_size if group_size and group_size in inputs.df.columns else None
+    gate.asked_text = {q["id"]: str(q.get("text") or "") for q in dem.get("questions") or [] if q.get("id")}
+    gate.wants = {q["id"]: q["wants"] for q in dem.get("questions") or [] if q.get("id") and q.get("wants")}
+    gate.about = {q["id"]: list(q["about"]) for q in dem.get("questions") or [] if q.get("id") and q.get("about")}
 
     # Where the charts come from (settings.setup_ai_selection, the guided
     # setup's own switch beside the one for "Suggest dashboards"): cards --
@@ -1633,6 +2334,7 @@ async def design(db, user, ds, dem: dict | None, entry: dict | None, lang: str, 
     if not proposed and mode != "cards":
         got = await client.complete_json(messages, PAGES_SCHEMA, max_tokens=9000, temperature=0.2, enforce=True)
         proposed = [p for p in (got or {}).get("pages") or [] if isinstance(p, dict)][:count]
+        gate.names = clean_names(got, inputs.df.columns)
     if not proposed:
         # In cards mode the caller falls back to the platform's own selection.
         return {"proposals": [], "reason": "failed"}
@@ -1683,11 +2385,11 @@ async def design(db, user, ds, dem: dict | None, entry: dict | None, lang: str, 
     await write_answers(pages, gate, dem, lang, client)
     made = derived_for(pages, inputs, gate.made)
     with_captions(pages, gate)
-    note = scope_note(words, filters, scoped_rows, total, lang, dem, ds.id)
+    note = scope_note(words, filters, scoped_rows, total, lang, dem, ds.id, apart, gate.names)
     for column, still in gate.open_notes.items():
         said = _t(lang, "open", col=column.replace("_", " "), values=", ".join(f"“{v}”" for v in still))
         note = f"{note} {said}" if note else said
-    proposals = _finish(pages, dem, note, lang, filters)
+    proposals = _finish(pages, dem, note, lang, filters, gate.refusals)
     # Options, click-to-filter and navigation: plain code, after the charts are chosen (dress.py).
     from . import dress
     try:
@@ -1706,10 +2408,13 @@ async def change(db, user, ds, dem: dict | None, entry: dict | None, page: dict,
     if client is None or not getattr(client, "enabled", True):
         return None
     inputs, facts, filters, words, scoped_rows, total = await prepare(db, user, ds, dem)
+    apart = set_apart(entry, inputs.df, filters)
+    filters = filters + [f for v in apart for f in v["filters"]]
     messages, allowed = build_messages(inputs.profile, dem, words, scoped_rows,
                                        _outcome_notes(dem, ds.id) + _notes(entry), 1, lang,
                                        inputs.knowledge, facts.get("text"), inputs.shares,
-                                       _reading_for(meaning_map, tables, {str(c) for c in inputs.df.columns}))
+                                       _reading_for(meaning_map, tables, {str(c) for c in inputs.df.columns}),
+                                       groups=getattr(inputs, "groups", None))
     scoped = {f["column"] for f in filters}
     current = [{"question": w.get("question") or "", "widget_type": w["widget_type"], "title": w.get("title"),
                 "why": w.get("why") or "",
@@ -1731,6 +2436,7 @@ async def change(db, user, ds, dem: dict | None, entry: dict | None, page: dict,
     # A chart asked for by name may be advanced: the person's word is the condition.
     gate = Gate(inputs, facts, allowed, {q["id"] for q in dem.get("questions") or []}, filters, lang,
                 _given(dem, ds.id))
+    gate.names = clean_names(got, inputs.df.columns)
     pages, _whys = await gate.pages(proposed)
     if not pages or not pages[0]["widgets"]:
         return None
@@ -1738,7 +2444,7 @@ async def change(db, user, ds, dem: dict | None, entry: dict | None, page: dict,
     await write_answers(pages, gate, dem, lang, client)
     made = derived_for(pages, inputs, gate.made)
     with_captions(pages, gate)
-    done = _finish(pages, dem, scope_note(words, filters, scoped_rows, total, lang, dem, ds.id), lang, filters)
+    done = _finish(pages, dem, scope_note(words, filters, scoped_rows, total, lang, dem, ds.id, apart, gate.names), lang, filters)
     if not done:
         return None
     # The page keeps its buttons, filters and click-to-filter; a new chart gets its options (dress.redress).

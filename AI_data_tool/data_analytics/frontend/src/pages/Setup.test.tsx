@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import Setup from './Setup'
-import { setupApi, metadataApi, type SetupJourney, type SetupSummary } from '../services/api'
+import { dataSourcesApi, setupApi, metadataApi, type SetupJourney, type SetupSummary } from '../services/api'
 
 vi.mock('../services/api', async (orig) => {
   const real = await orig<typeof import('../services/api')>()
@@ -14,6 +14,7 @@ vi.mock('../services/api', async (orig) => {
       datasets: vi.fn(), suggestDatasets: vi.fn(), refineDataset: vi.fn(), createDatasets: vi.fn(),
     },
     metadataApi: { ...real.metadataApi, settings: vi.fn() },
+    dataSourcesApi: { ...real.dataSourcesApi, test: vi.fn().mockRejectedValue(new Error('not allowed')) },
   }
 })
 
@@ -200,5 +201,20 @@ describe('Guided setup — Understand', () => {
     renderAt()
     fireEvent.click(await screen.findByRole('button', { name: 'New analysis' }))
     await waitFor(() => expect(setupApi.startFlow).toHaveBeenCalledWith(37))
+  })
+})
+
+describe('Guided setup — a connection that does not answer (persona test, plan 3.1)', () => {
+  it('says so first, from the last test kept with the connection', async () => {
+    vi.mocked(setupApi.get).mockResolvedValue(journey({
+      source: { id: 37, name: 'Cars DB', type: 'sqlite', health: { ok: false, at: '2026-10-12', error: 'Database file not found at /x.db' } } }))
+    renderAt()
+    expect(await screen.findByTestId('setup-unreachable')).toHaveTextContent('Database file not found at /x.db')
+  })
+
+  it('says so from a fresh test when the person may run one', async () => {
+    vi.mocked(dataSourcesApi.test).mockResolvedValueOnce({ ok: false, error: 'could not translate host name' } as never)
+    renderAt()
+    expect(await screen.findByTestId('setup-unreachable')).toHaveTextContent('could not translate host name')
   })
 })

@@ -1,7 +1,7 @@
 import { ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LabelList } from 'recharts'
 import { TT, fmtStr, seriesDash, seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
-import { xAxisProps, yAxisProps, gridProps, legendProps, labelListProps, chartMargin } from './axisOptions'
+import { xAxisProps, yAxisProps, gridProps, legendProps, labelListProps, chartMargin, valueTick } from './axisOptions'
 
 export default function ComparativeTimeSeriesRenderer({ rows, cfg, rtl, measureFmt, measure2Fmt, plotW, plotH, broadcasts, onClickPoint }: ChartRendererProps) {
   const grid = gridProps(cfg)
@@ -24,11 +24,11 @@ export default function ComparativeTimeSeriesRenderer({ rows, cfg, rtl, measureF
         onClick={broadcasts ? (d: any) => d?.activePayload?.[0] && onClickPoint(d.activePayload[0].payload.name) : undefined}>
         {grid && <CartesianGrid {...grid} />}
         <XAxis dataKey="name" {...xAxisProps(cfg, rtl, rows.map((r: any) => String(r.name)), plotW)} />
-        <YAxis yAxisId="left" {...yAxisProps(cfg, rtl, measureFmt, rows.map((r: any) => r.value), undefined, { height: plotH })} tickFormatter={v => fmtStr(v, measureFmt)} />
+        <YAxis yAxisId="left" {...yAxisProps(cfg, rtl, measureFmt, rows.map((r: any) => r.value), undefined, { height: plotH })} tickFormatter={valueTick(cfg, measureFmt)} />
         {/* orientation forced to the opposite side after the spread: this is the second
             (right-hand) axis of a dual-axis pair, while yAxisProps' own rtl-based
             orientation logic assumes a single axis. */}
-        {hasSecond && <YAxis yAxisId="right" {...yAxisProps(cfg, rtl, measure2Fmt, rows.map((r: any) => r.value2), undefined, { height: plotH, title: cfg.y2_axis_label ?? '' })} orientation={rtl ? 'left' : 'right'} tickFormatter={v => fmtStr(v, measure2Fmt)} />}
+        {hasSecond && <YAxis yAxisId="right" {...yAxisProps(cfg, rtl, measure2Fmt, rows.map((r: any) => r.value2), undefined, { height: plotH, title: cfg.y2_axis_label ?? '' })} orientation={rtl ? 'left' : 'right'} tickFormatter={valueTick(cfg, measure2Fmt)} />}
         <Tooltip contentStyle={TT} formatter={(v: unknown, name: string) => [fmtStr(v, name === (cfg.measure2 ?? 'series B') ? measure2Fmt : measureFmt), name]} />
         {legend && <Legend {...legend} wrapperStyle={{ fontSize: 11, ...(rtl ? { direction: 'ltr' as const } : {}) }} />}
         <Line yAxisId="left" type="monotone" dataKey="value" name={cfg.measure ?? 'series A'} stroke={seriesColor(0)} strokeWidth={2} strokeDasharray={seriesDash(0, cfg.series_patterns)} dot={false}>

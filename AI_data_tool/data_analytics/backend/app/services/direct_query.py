@@ -1959,6 +1959,9 @@ def _run_aggregate_plan(source_cfg: dict, dataset, config: dict, shaped_config: 
     ran = [f for f in (plan.filters or [])]
     shaped_config = {**shaped_config,
                      "filters": [f for f in (shaped_config.get("filters") or []) if f not in ran]}
+    # `df` has one row per group: a group-size floor counted here would empty
+    # the chart. Not applied on a live table yet (docs/persona-test, plan 1.6).
+    shaped_config.pop("min_group_rows", None)
     # check_fields off: `df` is the pushed-down GROUP BY (dimension + measure
     # only), and _validate_columns above already refused an unknown field.
     result = get_widget_data_from_df(df, shaped_config, widget_type, flag_partial=False,

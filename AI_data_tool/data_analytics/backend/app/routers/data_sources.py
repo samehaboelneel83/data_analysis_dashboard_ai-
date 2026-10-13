@@ -403,10 +403,22 @@ async def test_data_source(ds_id: int, db: AsyncSession = Depends(get_db), curre
     check_org(ds, current_user, "Data source not found")
     # A live credential probe, so it belongs with the other administration.
     await _administrable_or_404(ds, db, current_user)
-    cfg = dict(ds.config)
+    cfg = {k: v for k, v in dict(ds.config).items() if k != HEALTH_KEY}
     cfg['type'] = ds.type
     result = await asyncio.to_thread(test_connection, cfg)
+    # The last test is kept with the connection, so the list can show which
+    # connections answer (persona test 2026-10-12: four broken connections
+    # looked the same as the working ones).
+    first = str(result.get("error") or "").strip().splitlines()
+    ds.config = {**dict(ds.config or {}), HEALTH_KEY: {
+        "ok": bool(result.get("ok")), "at": datetime.utcnow().isoformat() + "Z",
+        "error": first[0][:300] if first else None}}
+    await db.commit()
     return result
+
+
+#: Where the last connection test is kept in a connection's config.
+HEALTH_KEY = "__health__"
 
 
 @router.get("/{ds_id}/schema")

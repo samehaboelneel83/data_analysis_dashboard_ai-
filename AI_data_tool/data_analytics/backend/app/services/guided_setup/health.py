@@ -72,6 +72,7 @@ T = {
         "placeholder.what": "{n} rows of “{col}” hold {value}, which looks like a code for “unknown”.",
         "placeholder.why": "It is counted, added up and averaged as if it were a real value.",
         "placeholder.todo": "Leave those rows out of charts.",
+        "rule.group": " Almost all of them are “{col}” = {value}: this may be how that group works, so it was not removed by itself.",
         "outliers.what": "“{col}” goes from {lo} to {hi}, and {n} values are far from the rest.",
         "outliers.why": "A few extreme values pull the average away from the typical value ({median}).",
         "outliers.todo": "Prefer the median to the average, and look at the extreme values before trusting totals.",
@@ -89,12 +90,25 @@ T = {
         "dups.what": "{n} rows are exact copies of other rows.",
         "dups.why": "Counts and totals include them twice.",
         "dups.todo": "Remove the copies.",
+        "dups.maybe.what": "{n} rows look the same as other rows, but no column here names each row, so they may be real repeats.",
+        "dups.maybe.why": "Removing them would drop real rows if they are repeats; keeping them counts them twice if they are copies.",
+        "dups.maybe.todo": "Remove them only if each row should be unique.",
         "negative.what": "{n} rows have a negative “{col}”.",
         "negative.why": "An amount like this cannot be below zero, so these are most likely entry mistakes.",
         "negative.todo": "Leave those rows out.",
         "future.what": "{n} rows of “{col}” are dates in the future.",
         "future.why": "Records cannot be dated later than today, so the dates are probably wrong.",
         "future.todo": "Check where these dates come from before charting by date.",
+        "stray.what": "{n} rows of “{col}” are dated far outside the period the rest covers ({lo} to {hi}).",
+        "stray.why": "A few rows years away make a time chart mostly empty and turn them into a baseline for comparisons.",
+        "stray.todo": "Leave them out unless those dates are right.",
+        "subtotal.what": "{n} rows where “{col}” is {value} hold the totals of the other rows (their “{measure}” adds up to about the same).",
+        "subtotal.why": "Adding them to the other rows counts everything twice.",
+        "subtotal.todo": "Leave the total rows out; the other rows add up to the same totals.",
+        "odd.what": "{k} values of “{col}” are written unlike the rest ({values}), in {n} rows.",
+        "odd.scale": "{k} values of “{col}” have “{m}” on another scale from the rest, a hundred times or more apart ({values}), in {n} rows.",
+        "odd.why": "They may be a different kind of thing (totals, adjustments or tests, for example) and would be ranked beside the rest.",
+        "odd.todo": "Leave them out if they are not the same kind of thing.",
         "good.what": "No problems found in {rows} rows and {cols} columns.",
         "good.why": "Empty values, copies, odd codes and extreme values were all checked.",
         "fix.fill": "Treat empty as “Unknown”", "fix.drop_column": "Leave the column out",
@@ -114,6 +128,7 @@ T = {
         "placeholder.what": "{n} صفًا من «{col}» تحمل القيمة {value}، ويبدو أنها رمز لـ«غير معروف».",
         "placeholder.why": "تُعدّ وتُجمع ويُحسب متوسطها كأنها قيمة حقيقية.",
         "placeholder.todo": "استبعد هذه الصفوف من الرسوم.",
+        "rule.group": " كلها تقريبًا «{col}» = {value}: قد تكون هذه طبيعة هذه المجموعة، لذلك لم تُستبعد تلقائيًا.",
         "outliers.what": "«{col}» يتراوح من {lo} إلى {hi}، و{n} قيمة بعيدة عن البقية.",
         "outliers.why": "بضع قيم متطرفة تسحب المتوسط بعيدًا عن القيمة المعتادة ({median}).",
         "outliers.todo": "استخدم الوسيط بدل المتوسط، وراجع القيم المتطرفة قبل الوثوق بالمجاميع.",
@@ -131,12 +146,25 @@ T = {
         "dups.what": "{n} صفًا نسخ مطابقة لصفوف أخرى.",
         "dups.why": "تُحسب في العدّ والمجاميع مرتين.",
         "dups.todo": "احذف النسخ المكررة.",
+        "dups.maybe.what": "{n} صفًا تبدو مطابقة لصفوف أخرى، لكن لا يوجد عمود يميّز كل صف، فقد تكون تكرارات حقيقية.",
+        "dups.maybe.why": "حذفها يُسقط صفوفًا حقيقية إن كانت تكرارات، وإبقاؤها يعدّها مرتين إن كانت نسخًا.",
+        "dups.maybe.todo": "احذفها فقط إذا كان كل صف يجب أن يكون فريدًا.",
         "negative.what": "{n} صفًا بها «{col}» سالب.",
         "negative.why": "قيمة كهذه لا تكون أقل من الصفر، فهي على الأرجح أخطاء إدخال.",
         "negative.todo": "استبعد هذه الصفوف.",
         "future.what": "{n} صفًا من «{col}» تواريخ في المستقبل.",
         "future.why": "لا يمكن أن تكون السجلات بتاريخ بعد اليوم، فالتواريخ غالبًا خاطئة.",
         "future.todo": "تحقق من مصدر هذه التواريخ قبل الرسم حسب التاريخ.",
+        "stray.what": "{n} صفًا من «{col}» مؤرخة بعيدًا خارج الفترة التي تغطيها بقية البيانات ({lo} إلى {hi}).",
+        "stray.why": "بضعة صفوف بعيدة بسنوات تجعل الرسم الزمني فارغًا تقريبًا وتصبح أساسًا للمقارنات.",
+        "stray.todo": "استبعدها ما لم تكن هذه التواريخ صحيحة.",
+        "subtotal.what": "{n} صفًا قيمة «{col}» فيها {value} تحمل مجاميع الصفوف الأخرى (مجموع «{measure}» فيها يساوي مجموع الباقي).",
+        "subtotal.why": "جمعها مع الصفوف الأخرى يحسب كل شيء مرتين.",
+        "subtotal.todo": "استبعد صفوف المجاميع؛ الصفوف الأخرى تعطي المجاميع نفسها.",
+        "odd.what": "{k} قيمة من «{col}» مكتوبة بشكل مختلف عن البقية ({values})، في {n} صفًا.",
+        "odd.scale": "{k} قيمة من «{col}» قيم «{m}» فيها على مقياس آخر غير البقية، بفارق مئة مرة أو أكثر ({values})، في {n} صفًا.",
+        "odd.why": "قد تكون نوعًا مختلفًا من الأشياء (مجاميع أو تسويات أو اختبارات مثلًا) وستُرتَّب بجانب البقية.",
+        "odd.todo": "استبعدها إن لم تكن من النوع نفسه.",
         "good.what": "لم نجد مشكلات في {rows} صف و{cols} عمود.",
         "good.why": "فُحصت القيم الفارغة والنسخ المكررة والرموز الغريبة والقيم المتطرفة.",
         "fix.fill": "اعتبر الفارغ «غير معروف»", "fix.drop_column": "استبعد العمود",
@@ -233,15 +261,48 @@ def detail_of(df: pd.DataFrame, col: str) -> str | None:
     return None
 
 
+#: A column with at least this share of distinct values names each row.
+ROW_KEY_SHARE = 0.95
+
+
+def has_row_key(df: pd.DataFrame) -> bool:
+    """Whether a column names each row: text or whole numbers, almost all
+    distinct. Only then are identical rows certainly copies of one row."""
+    n = len(df)
+    if not n:
+        return False
+    for c in df.columns:
+        s = df[c]
+        if pd.api.types.is_float_dtype(s) or pd.api.types.is_bool_dtype(s) \
+                or pd.api.types.is_datetime64_any_dtype(s):
+            continue
+        try:
+            if s.nunique(dropna=True) >= ROW_KEY_SHARE * n:
+                return True
+        except TypeError:
+            continue
+    return False
+
+
 def column_items(report: dict, df: pd.DataFrame, lang: str, column_meta: dict | None = None) -> list[dict]:
     """Plain lines from the quality report, worst first."""
     rows = int(report.get("rows") or len(df))
     out: list[dict] = []
     if report.get("duplicate_rows"):
         n = int(report["duplicate_rows"])
-        out.append(_item(len(out), "problem", "dups", lang, what=_t(lang, "dups.what", n=f"{n:,}"),
-                         why=_t(lang, "dups.why"), todo=_t(lang, "dups.todo"), rows=n,
-                         action={"kind": "dedupe", "label": _t(lang, "fix.dedupe")}))
+        keyed = has_row_key(df)
+        if keyed:
+            out.append(_item(len(out), "problem", "dups", lang, what=_t(lang, "dups.what", n=f"{n:,}"),
+                             why=_t(lang, "dups.why"), todo=_t(lang, "dups.todo"), rows=n,
+                             action={"kind": "dedupe", "label": _t(lang, "fix.dedupe")}))
+        else:
+            # Nothing here names each row: two real, identical sales lines look
+            # like copies once the invoice number is not in the dataset (persona
+            # test 2026-10-12). Said, and left to the person.
+            out.append(_item(len(out), "warning", "dups", lang, what=_t(lang, "dups.maybe.what", n=f"{n:,}"),
+                             why=_t(lang, "dups.maybe.why"), todo=_t(lang, "dups.maybe.todo"), rows=n,
+                             action={"kind": "dedupe", "label": _t(lang, "fix.dedupe")}))
+        out[-1]["keyed"] = keyed
     for c in report.get("column_report") or []:
         col, pct = c["column"], float(c.get("missing_pct") or 0) / 100
         numeric = col in df.columns and pd.api.types.is_numeric_dtype(df[col]) and df[col].dtype != bool
@@ -368,6 +429,261 @@ def generic_rules(df: pd.DataFrame, lang: str, skip: set[str] | None = None,
                 out.append(_item(len(out), "warning", "future", lang, column=col,
                                  what=_t(lang, "future.what", n=f"{n:,}", col=col),
                                  why=_t(lang, "future.why"), todo=_t(lang, "future.todo"), rows=n))
+            # Dates far outside the period the rest of the data covers: offered as
+            # a fix to accept, never applied by itself (they may be true).
+            from ..relative_dates import stray_dates
+            stray = stray_dates(s)
+            if stray:
+                lo, hi = str(stray["lo"].date()), str((stray["hi"] + timedelta(days=1)).date())
+                rule = f"{_q(col)} >= '{lo}' and {_q(col)} < '{hi}'"
+                out.append(_item(len(out), "warning", "stray", lang, column=col,
+                                 what=_t(lang, "stray.what", n=f"{stray['rows']:,}", col=col, lo=lo,
+                                         hi=str(stray["hi"].date())),
+                                 why=_t(lang, "stray.why"), todo=_t(lang, "stray.todo"), rows=stray["rows"],
+                                 action={"kind": "exclude", "expression": _keep_rows(rule, [col]), "rule": rule,
+                                         "label": _t(lang, "fix.exclude")}))
+    try:
+        out += subtotal_items(df, lang)
+    except Exception:                                               # noqa: BLE001 -- a finding, never a gate
+        pass
+    try:
+        out += odd_items(df, lang)
+    except Exception:                                               # noqa: BLE001
+        pass
+    return out
+
+
+#: A category value is a subtotal when its rows equal the sum of the other
+#: values' rows (within 5%) in at least this share of the groups compared,
+SUBTOTAL_MATCH_SHARE = 0.5
+SUBTOTAL_TOLERANCE = 0.05
+#: ...in at least this share of groups the total is not below its parts...
+SUBTOTAL_COVERS = 0.9
+#: ...and the totals differ by at most this share overall (a total may carry
+#: a few rows its details lack, such as an unrecorded group).
+SUBTOTAL_GAP = 0.12
+SUBTOTAL_MAX_VALUES = 60
+#: Larger tables, and more category columns, are not searched (cost).
+SUBTOTAL_MAX_ROWS = 200_000
+SUBTOTAL_MAX_COLUMNS = 8
+
+
+def subtotal_members(df: pd.DataFrame) -> list[dict]:
+    """[{"column", "value", "rows", "measure"}]: category values whose rows are
+    the totals of their sibling values -- found by arithmetic, not by the
+    word "all" or "total". Persona test 2026-10-12: population summed to
+    162.8 million (twice the real 81.4) because each governorate had a row
+    per gender AND a row for both."""
+    numbers = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c]) and df[c].dtype != bool
+               and df[c].nunique(dropna=True) > 2]
+
+    def year_like(c) -> bool:
+        v = pd.to_numeric(df[c], errors="coerce").dropna()
+        return bool(len(v)) and bool(((v % 1 == 0) & (v >= 1800) & (v <= 2200)).all())
+
+    # The main amount only: the number with the largest total. An age or a
+    # bound can "add up" by the symmetry of the layout (refugees by age band).
+    numbers = [c for c in numbers if not year_like(c)]
+    if not numbers:
+        return []
+    pool = numbers
+    cats = []
+    for c in df.columns:
+        if c in numbers or pd.api.types.is_datetime64_any_dtype(df[c]):
+            continue
+        try:
+            n = int(df[c].nunique(dropna=True))
+        except TypeError:
+            continue
+        if 3 <= n <= SUBTOTAL_MAX_VALUES:
+            cats.append(c)
+    if len(df) > SUBTOTAL_MAX_ROWS:
+        return []
+    cats = cats[:SUBTOTAL_MAX_COLUMNS]
+    # A number one category fixes (an age band's lower bound) describes the
+    # band; it is not an amount to add up.
+    pool = [c for c in pool if not any(df.groupby(o)[c].nunique().max() <= 1 for o in cats)]
+    if not pool:
+        return []
+    numbers = [max(pool, key=lambda c: float(pd.to_numeric(df[c], errors="coerce").abs().sum()))]
+    out = []
+    for c in cats:
+        for value in df[c].dropna().unique().tolist():
+            is_v = df[c] == value
+            # Totals nest: "both genders" rows may exist only for "all ages".
+            # Such a companion column is held at its one value on both sides
+            # and is not a group to compare within.
+            fixed = {o: df.loc[is_v, o].iloc[0] for o in cats if o != c
+                     and df.loc[is_v, o].nunique(dropna=False) == 1 and df[o].nunique(dropna=True) > 1}
+            others = [o for o in cats if o != c and o not in fixed]
+            same = pd.Series(True, index=df.index)
+            for o, held in fixed.items():
+                same &= df[o] == held
+            for m in numbers:
+                v = pd.to_numeric(df[m], errors="coerce")
+                keys = [df[o].astype(str) for o in others] if others else [pd.Series("all", index=df.index)]
+                part = v.where(is_v).groupby(keys).sum(min_count=1)
+                rest = v.where(~is_v & df[c].notna() & same).groupby(keys).sum(min_count=1)
+                both = pd.concat([part, rest], axis=1, keys=["p", "r"]).dropna()
+                both = both[both["p"] != 0]
+                if len(both) < (3 if others else 1):
+                    continue
+                # Weighted by size: small groups with rounded or suppressed
+                # counts do not hide a total that holds for the bulk of the rows.
+                gap = float((both["p"] - both["r"]).abs().sum()) / float(both["p"].abs().sum())
+                close = ((both["p"] - both["r"]).abs() <= SUBTOTAL_TOLERANCE * both["p"].abs()).mean()
+                # A total is never smaller than its parts: in almost every group.
+                covers = (both["p"] >= (1 - SUBTOTAL_TOLERANCE) * both["r"]).mean()
+                if gap <= SUBTOTAL_GAP and close >= SUBTOTAL_MATCH_SHARE and covers >= SUBTOTAL_COVERS:
+                    out.append({"column": str(c), "value": value.item() if hasattr(value, "item") else value,
+                                "rows": int(is_v.sum()), "measure": str(m)})
+                    break
+            if out and out[-1]["column"] == str(c):
+                break                       # one subtotal value per column
+    return out
+
+
+def subtotal_items(df: pd.DataFrame, lang: str) -> list[dict]:
+    out = []
+    for i, sub in enumerate(subtotal_members(df)):
+        col, value = sub["column"], sub["value"]
+        lit = repr(value) if isinstance(value, str) else str(value)
+        rule = f"{_q(col)} != {lit}"
+        out.append(_item(i, "problem", "subtotal", lang, column=col,
+                         what=_t(lang, "subtotal.what", n=f"{sub['rows']:,}", col=col, value=value,
+                                 measure=sub["measure"]),
+                         why=_t(lang, "subtotal.why"), todo=_t(lang, "subtotal.todo"), rows=sub["rows"],
+                         action={"kind": "exclude", "expression": _keep_rows(rule, [col]), "rule": rule,
+                                 "label": _t(lang, "fix.exclude")}))
+    return out
+
+
+#: A column is code-like when its two commonest value shapes cover this share
+#: of its distinct values; a value whose shape is rarer than ODD_SHAPE_SHARE
+#: is written unlike the rest, when such values are at most ODD_MAX_SHARE.
+CODE_SHAPES_SHARE = 0.8
+ODD_SHAPE_SHARE = 0.01
+ODD_MAX_SHARE = 0.03
+ODD_MIN_DISTINCT = 30
+ODD_SHOWN = 6
+
+
+def value_shape(v) -> str:
+    """'85123A' -> '99999A', 'EGX 30' -> 'AAA_99': digits, letters, spaces."""
+    t = re.sub(r"\d", "9", str(v).strip())
+    t = re.sub(r"[^\W\d_]", "A", t)
+    t = re.sub(r"\s", "_", t)
+    return re.sub(r"[^\w]", ".", t)
+
+
+def odd_members(df: pd.DataFrame) -> list[dict]:
+    """[{"column", "values", "rows"}]: in a column of codes written one way
+    (five digits; four letters), the few values written another way. Persona
+    test 2026-10-12: index names ranked among stock tickers as "the most
+    traded companies"; postage and fee lines among product codes as "top
+    products"."""
+    out = []
+    for c in df.columns:
+        s = df[c]
+        if pd.api.types.is_numeric_dtype(s) or pd.api.types.is_datetime64_any_dtype(s) or s.dtype == bool:
+            continue
+        try:
+            distinct = pd.Series(s.dropna().astype(str).unique())
+        except TypeError:
+            continue
+        n = len(distinct)
+        if n < ODD_MIN_DISTINCT:
+            continue
+        shapes = distinct.map(value_shape)
+        counts = shapes.value_counts()
+        if float(counts.iloc[:2].sum()) < CODE_SHAPES_SHARE * n:
+            continue                    # free text, not codes
+        rare = counts[counts < max(1.0, ODD_SHAPE_SHARE * n)].index
+        # A number of another length is the same kind of thing (an amount
+        # written as text: 9,950 beside 10,772), not an odd one out.
+        odd = [v for v in distinct[shapes.isin(rare)].tolist() if not re.fullmatch(r"-?\d+([.,]\d+)?", v.strip())]
+        if not odd or len(odd) > ODD_MAX_SHARE * n:
+            continue
+        rows = int(s.astype(str).isin(odd).sum())
+        out.append({"column": str(c), "values": odd, "rows": rows})
+    return out
+
+
+#: Members on another scale: their typical value is at least SCALE_GAP times
+#: away from every other member's (a gap in the ranked medians, not a long
+#: tail), and they are at most SCALE_MAX_SHARE of the members.
+SCALE_GAP = 100.0
+SCALE_MAX_SHARE = 0.10
+SCALE_MIN_MEMBERS = 10
+SCALE_MIN_ROWS = 3
+SCALE_MAX_ROWS = 200_000
+
+
+def scale_members(df: pd.DataFrame, skip: set[str] | None = None) -> list[dict]:
+    """[{"column", "measure", "values", "rows"}]: members of a category whose
+    typical value of a measure sits in a cluster of its own, orders of
+    magnitude from the rest -- an index's traded value beside companies', a
+    country total beside its regions. Read from the numbers only."""
+    import numpy as np
+    if len(df) > SCALE_MAX_ROWS:
+        df = df.sample(SCALE_MAX_ROWS, random_state=0)
+    from ..widget_data import _is_id_like_column
+    # Amounts only: never an identifier, never a signed number (a profit near
+    # zero is not on another scale).
+    nums = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c]) and df[c].dtype != bool
+            and not _is_id_like_column(str(c)) and not (pd.to_numeric(df[c], errors="coerce") < 0).any()][:12]
+    out = []
+    for c in df.columns:
+        s = df[c]
+        if str(c) in (skip or set()) or c in nums or pd.api.types.is_numeric_dtype(s) \
+                or pd.api.types.is_datetime64_any_dtype(s) or s.dtype == bool:
+            continue
+        keys = s.astype(str).where(s.notna())
+        if not SCALE_MIN_MEMBERS <= keys.nunique() <= 5000:
+            continue
+        sample = keys.dropna().head(200)
+        if len(sample) and pd.to_datetime(sample, errors="coerce", format="mixed").notna().mean() >= 0.9:
+            continue                    # dates written as text: a calendar, not members
+        for m in nums:
+            v = pd.to_numeric(df[m], errors="coerce")
+            pos = v[(v > 0) & keys.notna()]
+            g = pos.groupby(keys[pos.index])
+            med = g.median()[g.size() >= SCALE_MIN_ROWS]
+            if len(med) < SCALE_MIN_MEMBERS:
+                continue
+            logs = np.log10(med.sort_values())
+            gaps = logs.diff().iloc[1:]
+            at = int(gaps.values.argmax()) + 1
+            if float(gaps.max()) < np.log10(SCALE_GAP):
+                continue
+            low, high = list(logs.index[:at]), list(logs.index[at:])
+            odd = high if len(high) <= len(low) else low
+            if len(odd) > SCALE_MAX_SHARE * len(med):
+                continue
+            out.append({"column": str(c), "measure": str(m), "values": [str(x) for x in odd],
+                        "rows": int(keys.isin(odd).sum())})
+            break
+    return out
+
+
+def odd_items(df: pd.DataFrame, lang: str) -> list[dict]:
+    out = []
+    found = odd_members(df)
+    try:
+        found += [{**x, "scale": True} for x in scale_members(df, {o["column"] for o in found})]
+    except Exception:                                               # noqa: BLE001 -- a finding, never a gate
+        pass
+    for i, odd in enumerate(found):
+        col, values = odd["column"], odd["values"]
+        shown = ", ".join(f"“{v}”" for v in values[:ODD_SHOWN]) + (" …" if len(values) > ODD_SHOWN else "")
+        rule = f"{_q(col)} not in {[str(v) for v in values]!r}"
+        out.append(_item(i, "warning", "odd", lang, column=col,
+                         what=_t(lang, "odd.scale" if odd.get("scale") else "odd.what", k=f"{len(values):,}",
+                                 col=col, values=shown, n=f"{odd['rows']:,}", m=odd.get("measure", "")),
+                         why=_t(lang, "odd.why"), todo=_t(lang, "odd.todo"), rows=odd["rows"],
+                         action={"kind": "exclude", "expression": _keep_rows(rule, [col]), "rule": rule,
+                                 "label": _t(lang, "fix.exclude")}))
+        out[-1]["values"] = [str(v) for v in values]
     return out
 
 
@@ -515,6 +831,50 @@ def verify_rule(df: pd.DataFrame, expr: str) -> tuple[int, int] | None:
     return len(judged) - len(kept), len(judged)
 
 
+#: A rule whose broken rows are almost all one value of a category, and most
+#: of that value's rows, describes how that group works rather than a mistake.
+RULE_GROUP_SHARE = 0.8
+RULE_GROUP_COVER = 0.5
+
+
+def rule_describes_group(df: pd.DataFrame, expr: str) -> dict | None:
+    """{"column", "value"} when the rows breaking `expr` are one group's own
+    rows. Persona test 2026-10-12: "a no-charge trip with a fare" removed
+    19,453 trips -- nearly every no-charge trip, since a waived fare is still
+    recorded."""
+    from ..widget_data import apply_filter_expr
+    cols = rule_columns(expr, [str(c) for c in df.columns])
+    if not cols:
+        return None
+    judged = df.dropna(subset=cols)
+    try:
+        kept = apply_filter_expr(judged, expr, silent=False)
+    except Exception:                                               # noqa: BLE001
+        return None
+    broken = judged.loc[~judged.index.isin(kept.index)]
+    if not len(broken):
+        return None
+    for c in judged.columns:
+        if str(c) in cols:
+            continue                # the rule's own columns say what broke, not which group
+        s = judged[c]
+        if pd.api.types.is_numeric_dtype(s) and s.dtype != bool and s.nunique(dropna=True) > 12:
+            continue
+        try:
+            if not 2 <= int(s.nunique(dropna=True)) <= 60:
+                continue
+        except TypeError:
+            continue
+        top = broken[c].value_counts(dropna=True)
+        if top.empty:
+            continue
+        value, n = top.index[0], int(top.iloc[0])
+        group = int((s == value).sum())
+        if n >= RULE_GROUP_SHARE * len(broken) and group and n >= RULE_GROUP_COVER * group:
+            return {"column": str(c), "value": value.item() if hasattr(value, "item") else value}
+    return None
+
+
 async def model_rules(df: pd.DataFrame, brief: dict | None, lang: str, client,
                       column_meta: dict | None = None) -> list[dict]:
     if client is None or not getattr(client, "enabled", True) or df.empty:
@@ -531,12 +891,16 @@ async def model_rules(df: pd.DataFrame, brief: dict | None, lang: str, client,
         if broken < RULE_MIN_ROWS or broken / judged > RULE_MAX_SHARE:
             continue
         cols = rule_columns(expr, [str(c) for c in df.columns]) or []
+        group = rule_describes_group(df, expr)
+        note = _t(lang, "rule.group", col=group["column"], value=group["value"]) if group else ""
         out.append(_item(len(out), "warning", "rule", lang, column=", ".join(cols),
-                         what=f"{str(r.get('what') or '').strip()} ({broken:,} / {judged:,})",
+                         what=f"{str(r.get('what') or '').strip()} ({broken:,} / {judged:,}){note}",
                          why=str(r.get("why") or "").strip(), todo=str(r.get("todo") or "").strip(),
                          rows=broken,
                          action={"kind": "exclude", "expression": _keep_rows(expr, cols), "rule": expr,
                                  "label": _t(lang, "fix.exclude")}))
+        if group:
+            out[-1]["describes"] = group
     return out
 
 
@@ -553,7 +917,7 @@ WORDS_SCHEMA = {
 }
 
 
-def sensible(finding: dict) -> bool:
+def sensible(finding: dict, kinds: dict | None = None) -> bool:
     """False for a finding no reader should be shown.
 
     The statistics engine treats any number it does not know as additive, so
@@ -569,6 +933,11 @@ def sensible(finding: dict) -> bool:
         return False
     if finding.get("kind") in ("trend", "outlier_impact"):
         for col in finding.get("columns") or []:
+            # A column whose kind is stored (amount, count, level...) was
+            # summed or averaged by the engine by that kind: its name decides
+            # nothing. Only an unclassified one is judged by its words.
+            if (kinds or {}).get(str(col)):
+                continue
             if _LEVEL.search(str(col)) and not is_intensive(col):
                 return False
     return True
@@ -622,10 +991,11 @@ def beyond_size(finding: dict, df: pd.DataFrame) -> bool:
     return abs(share - of_rows) >= SIZE_MARGIN
 
 
-async def plain_insights(findings: list[dict], brief: dict | None, lang: str, client) -> list[dict]:
+async def plain_insights(findings: list[dict], brief: dict | None, lang: str, client,
+                         kinds: dict | None = None) -> list[dict]:
     """The strongest findings, reworded for the person's work when the model can."""
     picked = [f for f in sorted(findings, key=lambda f: -(f.get("score") or 0))
-              if f.get("kind") not in _NOT_INSIGHTS and sensible(f)][:MAX_INSIGHTS]
+              if f.get("kind") not in _NOT_INSIGHTS and sensible(f, kinds)][:MAX_INSIGHTS]
     base = [{"id": f"insight:{i}", "tone": "insight", "kind": f.get("kind"),
              "what": f.get("title") or "", "why": f.get("detail") or "", "todo": None,
              # The computed sentences' keys: kept while the words are still the

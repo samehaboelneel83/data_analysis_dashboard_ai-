@@ -10,7 +10,7 @@ import AskIllustration from './ask/AskIllustration'
 import DataPicker, { type PickerItem } from './ask/DataPicker'
 import HistoryPanel from './ask/HistoryPanel'
 import { useConfirm } from '../components/ui/ConfirmDialog'
-import { connectionSuggestions, datasetSuggestions } from './ask/suggestions'
+import { connectionSuggestions, datasetSuggestions, type ColumnClasses } from './ask/suggestions'
 import './ask/ask.css'
 import DatasetListFilter, { useCleanDatasets } from '../components/dataset/DatasetListFilter'
 import { isCertified } from '../lib/cleanDatasets'
@@ -71,6 +71,7 @@ export default function AskAI() {
     ]
   }, [clean.visible, sourceItems, usableDatasets, linkedId])
   const [columnsById, setColumnsById] = useState<Record<number, DatasetColumn[]>>({})
+  const [classesById, setClassesById] = useState<Record<number, ColumnClasses>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -128,7 +129,11 @@ export default function AskAI() {
     if (datasetId == null || columnsById[datasetId] || typeof datasetsApi.get !== 'function') return
     let alive = true
     datasetsApi.get(datasetId)
-      .then(d => { if (alive && d?.columns) setColumnsById(m => ({ ...m, [datasetId]: d.columns })) })
+      .then(d => {
+        if (!alive || !d?.columns) return
+        setColumnsById(m => ({ ...m, [datasetId]: d.columns }))
+        if (d.column_meta) setClassesById(m => ({ ...m, [datasetId]: d.column_meta as ColumnClasses }))
+      })
       .catch(() => { /* suggestions fall back to generic ones */ })
     return () => { alive = false }
   }, [datasetId, columnsById])
@@ -211,8 +216,9 @@ export default function AskAI() {
   useEffect(() => { if (paneOpen && pendingQ) setPendingQ('') }, [paneOpen, pendingQ])
   const columns = datasetId != null ? columnsById[datasetId] : undefined
   const suggestions = useMemo(
-    () => (sourceId != null ? connectionSuggestions(t) : datasetSuggestions(columns, t)),
-    [sourceId, columns, t],
+    () => (sourceId != null ? connectionSuggestions(t)
+      : datasetSuggestions(columns, t, datasetId != null ? classesById[datasetId] : undefined)),
+    [sourceId, columns, t, datasetId, classesById],
   )
   const noData = !loading && !error && items.length === 0
 

@@ -1726,6 +1726,27 @@ function sameSelection(a: unknown, b: unknown[]): boolean {
         </div>
       )}
 
+      {/* Groups left out of a ranking of averages for holding too few rows (min_group_rows). */}
+      {!loading && !hiddenByRule && ((data as { small_groups?: { hidden?: number } } | undefined)?.small_groups?.hidden ?? 0) > 0 && (
+        <div data-testid="small-groups-note" role="note"
+          style={{ fontSize: 10.5, color: 'var(--muted)', padding: '2px 8px 4px', lineHeight: 1.3 }}>
+          {t('wr.smallGroups', {
+            n: ((data as { small_groups: { hidden: number } }).small_groups.hidden).toLocaleString(),
+            min: ((data as { small_groups: { min_rows: number } }).small_groups.min_rows).toLocaleString(),
+          })}
+        </div>
+      )}
+
+      {/* Every group under the floor (the data is small): drawn, but too few rows to rank. */}
+      {!loading && !hiddenByRule && ((data as { small_groups?: { too_few?: number } } | undefined)?.small_groups?.too_few ?? 0) > 0 && (
+        <div data-testid="too-few-to-rank-note" role="note"
+          style={{ fontSize: 10.5, color: 'var(--muted)', padding: '2px 8px 4px', lineHeight: 1.3 }}>
+          {t('wr.tooFewToRank', {
+            min: ((data as { small_groups: { min_rows: number } }).small_groups.min_rows).toLocaleString(),
+          })}
+        </div>
+      )}
+
       {!loading && !hiddenByRule && Array.isArray(data?.ignored_filters) && data.ignored_filters.length > 0 && (
         <div data-testid="ignored-filters-note" role="note"
           style={{ fontSize: 10.5, color: 'var(--muted)', padding: '2px 8px 4px', lineHeight: 1.3 }}>

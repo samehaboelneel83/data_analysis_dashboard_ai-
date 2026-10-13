@@ -951,6 +951,19 @@ def _is_bounded_measure(name: str, column: dict) -> bool:
         return False
 
 
+#: Words for a part of the calendar, as a title says it (English and Arabic).
+_TIME_PARTS = (
+    ("hour_of_day", re.compile(r"\b(hour of (the )?day|by hour|per hour|hourly|time of day)\b|ساعة|الساعات", re.I)),
+    ("weekday", re.compile(r"\b(day of (the )?week|weekdays?|by day of week)\b|أيام الأسبوع|يوم الأسبوع", re.I)),
+    ("month_of_year", re.compile(r"\b(month of (the )?year|by calendar month|seasonality)\b|أشهر السنة|شهر السنة", re.I)),
+)
+
+
+def time_part_named(title: str) -> str | None:
+    """The calendar part a title asks to group by, or None."""
+    return next((grain for grain, words in _TIME_PARTS if words.search(title or "")), None)
+
+
 def polish_widget(widget: dict, profile: dict) -> dict:
     """Fill in the settings an author would set and a model routinely forgets.
 
@@ -984,6 +997,13 @@ def polish_widget(widget: dict, profile: dict) -> dict:
     if isinstance(axis, str) and axis in known and known[axis].get("role") != "datetime" \
             and config.get("dimension_granularity"):
         config.pop("dimension_granularity")
+
+    # A part of the day, week or year named in the title is what the axis
+    # groups by: "Average earnings by hour of day" grouped by DATE drew one
+    # point per day from 2002 to 2024 (persona test 2026-10-12).
+    part = time_part_named(str(widget.get("title") or ""))
+    if part and isinstance(axis, str) and known.get(axis, {}).get("role") == "datetime":
+        config["dimension_granularity"] = part
 
     # A row limit on a grouped TIME axis keeps the earliest N periods: "EGX30
     # index trend" stopped at 2004-Q4 on data running to 2026 (guided-setup
@@ -1042,10 +1062,23 @@ def polish_widget(widget: dict, profile: dict) -> dict:
                     word = "Average" if summ == "avg" else "Median"
                     title = re.sub(r"^(total|sum of)\s+", f"{word} ", title, flags=re.I)
 
+    # An average, a rate or an extreme per group is ranked only over groups with
+    # enough rows behind it (admin setting `min_group_rows`); a total keeps all.
+    if isinstance(dim, str) and not is_time_axis and not config.get("min_group_rows") \
+            and str(config.get("aggregation") or "").lower() in _RANKED_PER_ROW:
+        from ..core.config import settings
+        floor = int(getattr(settings, "min_group_rows", 30) or 0)
+        if floor > 1:
+            config["min_group_rows"] = floor
+
     out = {**widget, "config": config}
     if title is not None:
         out["title"] = title
     return out
+
+
+#: Aggregations that describe a group's typical row, not its total.
+_RANKED_PER_ROW = frozenset({"avg", "mean", "median", "min", "max", "std", "stddev"})
 
 
 #: Distinguishes "caller said nothing" from "caller said there is no model".

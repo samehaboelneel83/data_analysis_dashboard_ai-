@@ -17,6 +17,7 @@ import Upload from './pages/Upload'
 const DatasetDetail = lazy(() => import('./pages/DatasetDetail'))
 import Reports from './pages/Reports'
 import Templates from './pages/Templates'
+import Portal from './pages/Portal'
 import Profile from './pages/Profile'
 import Loader from './components/ui/Loader'
 import ErrorBoundary from './components/ui/ErrorBoundary'
@@ -108,6 +109,7 @@ export default function App() {
               <Route path="datasets/:id" element={<DatasetDetail />} />
               <Route path="reports" element={<Reports />} />
               <Route path="templates" element={<Templates />} />
+              <Route path="portal" element={<Portal />} />
               <Route path="profile" element={<Profile />} />
               <Route path="reports/:id" element={<ReportBuilder />} />
               {/* "Dashboards" alias: the product renamed reports to dashboards

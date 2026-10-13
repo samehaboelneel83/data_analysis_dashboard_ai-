@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Literal, Any, Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 
 class DatasetColumnOut(BaseModel):
@@ -14,6 +14,14 @@ class DatasetColumnOut(BaseModel):
     # so codeless authoring surfaces (S0b's RLS builder) can pre-suggest user/owner
     # columns without a separate round trip through the review endpoints.
     semantic_type: Optional[str] = None
+
+    @computed_field
+    @property
+    def personal(self) -> Optional[str]:
+        """The personal-data type (email, person_name, national_id ...), from the
+        detected type or the name -- the "personal data" mark (persona test 3.7)."""
+        from ..services.pii import personal_type
+        return personal_type(self.name, self.semantic_type)
 
 
 class CalcColumnFormat(BaseModel):
@@ -549,6 +557,14 @@ class ReportOut(BaseModel):
     # authoritative answer for "can others see it" is my_capability on their
     # side. Unowned legacy rows carry False and ignore the regime entirely.
     published: bool = False
+    # Publication details (routers/publishing): how a reader finds it, when it
+    # went out, whether it is archived, and whether viewers may download.
+    category: Optional[str] = None
+    tags: Optional[list] = None
+    published_at: Optional[datetime] = None
+    archived_at: Optional[datetime] = None
+    viewers_may_export: bool = True
+    review_state: str = "none"
     # Sensitivity label (Public/Internal/Confidential/Restricted) or None. Lives in
     # its own table; the read endpoint sets it as a transient attribute, like above.
     classification: Optional[str] = None

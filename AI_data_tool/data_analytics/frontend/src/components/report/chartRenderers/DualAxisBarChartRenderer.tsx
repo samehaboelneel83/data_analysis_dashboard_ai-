@@ -2,7 +2,7 @@ import { ComposedChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Respo
 import { TT, fmtStr, seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
 import { useChartViewport } from './useChartViewport'
-import { axisTitles, xAxisProps, yAxisProps, gridProps, legendProps, labelListProps, chartMargin } from './axisOptions'
+import { axisTitles, xAxisProps, yAxisProps, gridProps, legendProps, labelListProps, chartMargin, valueTick } from './axisOptions'
 import { seriesName } from './axisOptions'
 
 export default function DualAxisBarChartRenderer({ rows, cfg, rtl, measureFmt, measure2Fmt, plotW, plotH, broadcasts, onClickPoint, onBrushChange }: ChartRendererProps) {
@@ -39,8 +39,8 @@ export default function DualAxisBarChartRenderer({ rows, cfg, rtl, measureFmt, m
         {/* orientation re-applied after the spread: yAxisProps derives orientation from
             rtl alone for a single axis, but this is one of a left/right pair, so each
             side must reassert its own place after the builder's spread. */}
-        <YAxis yAxisId="left" {...yAxisProps(cfg, rtl, measureFmt, rows.map((r: any) => r.value), undefined, { height: plotH })} orientation={rtl ? 'right' : 'left'} tickFormatter={v => fmtStr(v, measureFmt)} />
-        {hasSecond && <YAxis yAxisId="right" {...yAxisProps(cfg, rtl, measure2Fmt, rows.map((r: any) => r.value2), undefined, { height: plotH, title: cfg.y2_axis_label ?? titles.measure2 ?? '' })} orientation={rtl ? 'left' : 'right'} tickFormatter={v => fmtStr(v, measure2Fmt)} />}
+        <YAxis yAxisId="left" {...yAxisProps(cfg, rtl, measureFmt, rows.map((r: any) => r.value), undefined, { height: plotH })} orientation={rtl ? 'right' : 'left'} tickFormatter={valueTick(cfg, measureFmt)} />
+        {hasSecond && <YAxis yAxisId="right" {...yAxisProps(cfg, rtl, measure2Fmt, rows.map((r: any) => r.value2), undefined, { height: plotH, title: cfg.y2_axis_label ?? titles.measure2 ?? '' })} orientation={rtl ? 'left' : 'right'} tickFormatter={valueTick(cfg, measure2Fmt)} />}
         <Tooltip contentStyle={TT} formatter={(v: unknown, name: string) => [fmtStr(v, name === name2 ? measure2Fmt : measureFmt), name]} />
         {legend && <Legend {...legend} wrapperStyle={{ fontSize: 11, ...(rtl ? { direction: 'ltr' as const } : {}) }} />}
         <Bar yAxisId="left" dataKey="value" name={seriesName(cfg)} fill={seriesColor(0)} radius={[3, 3, 0, 0]}>

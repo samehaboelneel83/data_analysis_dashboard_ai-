@@ -29,6 +29,16 @@ describe('suggestions', () => {
     expect(s.some(q => /id\b/.test(q))).toBe(false)   // ids are not measures
   })
 
+  it('averages a score and never totals it, and leaves codes out (persona test, plan 2.7)', () => {
+    const cols = [{ name: 'make', dtype: 'object' }, { name: 'car_age_years', dtype: 'int64' },
+      { name: 'listing_no', dtype: 'int64' }]
+    const s = datasetSuggestions(cols, t as never, { car_age_years: { number: 'level' }, listing_no: { number: 'code' } })
+    expect(s.some(q => /^Total/.test(q))).toBe(false)
+    expect(s).toContain('Average car age years per make')
+    expect(s).toContain('Which make has the highest average car age years?')
+    expect(s.some(q => /listing no/.test(q))).toBe(false)
+  })
+
   it('falls back to generic questions when the columns say little', () => {
     const s = datasetSuggestions([], t as never)
     expect(s.length).toBeGreaterThanOrEqual(3)

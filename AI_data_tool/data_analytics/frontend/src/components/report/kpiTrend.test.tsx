@@ -78,3 +78,13 @@ describe('KPI with its history', () => {
     expect(screen.getByText('840')).toBeInTheDocument()
   })
 })
+
+describe('KPI of a change over the period (change_over)', () => {
+  it('shows the percent and both ends with their dates', () => {
+    kpi({ measure: 'close', aggregation: 'avg', change_over: 'day' },
+      { rows: [{ name: 'close', value: 79.86 }],
+        change: { pct: 79.86, from: 42.75, to: 76.89, first: '2023-01-02T00:00:00', last: '2023-12-11T00:00:00' } })
+    expect(screen.getByText('+79.9%')).toBeInTheDocument()
+    expect(screen.getByTestId('kpi-period-change').textContent).toBe('42.75 → 76.89 (2023-01-02 – 2023-12-11)')
+  })
+})

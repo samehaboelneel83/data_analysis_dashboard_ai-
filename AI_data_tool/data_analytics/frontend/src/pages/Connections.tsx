@@ -197,7 +197,10 @@ export default function Connections() {
       )}
       <div className={sources.length > 0 && !srcFilter.noMatches ? 'card dl-conn-list' : undefined}>
         {srcFilter.filtered.map(ds => {
-          const testRes = testResults[ds.id]
+          // The last test kept with the connection (`__health__`), until one is run here.
+          const stored = (ds.config as Record<string, unknown>).__health__ as { ok?: boolean; error?: string | null } | undefined
+          const testRes = ds.id in testResults ? testResults[ds.id] : stored?.ok
+          const testError = testErrors[ds.id] || (stored?.ok === false ? stored.error ?? '' : '')
           return (
             <div key={ds.id} className="dl-conn">
               <span className="dl-conn__icon" aria-hidden>
@@ -212,10 +215,10 @@ export default function Connections() {
                   {ds.config.database ? `/${ds.config.database}` : ''}
                   {ds.config.url ? ` · ${String(ds.config.url).slice(0, 50)}` : ''}
                 </div>
-                {testRes === false && testErrors[ds.id] && (
+                {testRes === false && testError && (
                   <div className="dl-conn__meta" role="status" data-testid="conn-test-error"
                     style={{ color: 'var(--danger)', whiteSpace: 'normal' }}>
-                    {testErrors[ds.id].split('\n')[0].replace(/\s*\(Background on this error.*$/, '').slice(0, 240)}
+                    {testError.split('\n')[0].replace(/\s*\(Background on this error.*$/, '').slice(0, 240)}
                   </div>
                 )}
               </div>
@@ -226,7 +229,7 @@ export default function Connections() {
                 </span>
               )}
               {testRes === false && (
-                <span className="dl-conn__status dl-conn__status--fail" title={testErrors[ds.id] || undefined}>
+                <span className="dl-conn__status dl-conn__status--fail" title={testError || undefined}>
                   <IconLabel icon={XIcon} size={12}>{t('connections.failed')}</IconLabel>
                 </span>
               )}

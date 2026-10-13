@@ -13,6 +13,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { CheckCircle2, ChevronDown, Info, RefreshCw, Sparkles, Undo2 } from 'lucide-react'
+import WaitTime from './WaitTime'
 import { useT } from '../../i18n'
 import { useDirection } from '../../contexts/DirectionContext'
 import { localDigits } from '../../lib/arabicFormats'
@@ -114,7 +115,7 @@ export default function CheckStep({ sourceId, flow, onNext, onBack }: {
           onChanged={() => { polls.current = 0; setGaveUp(false); load() }} />
       )}
       {data.datasets.map(d => (
-        <DatasetCheck key={d.id} d={d} language={language} gaveUp={gaveUp} busy={busy}
+        <DatasetCheck key={d.id} d={d} language={language} gaveUp={gaveUp} busy={busy} usual={data.usual?.check}
           onRetry={retry} onAgain={() => again(d.id)}
           onFix={(item, how) => fix(d.id, item, how)}
           onUndo={(id, redo) => undo(d.id, id, redo)} />
@@ -129,8 +130,8 @@ export default function CheckStep({ sourceId, flow, onNext, onBack }: {
   )
 }
 
-function DatasetCheck({ d, language, gaveUp, busy, onRetry, onAgain, onFix, onUndo }: {
-  d: CheckedDataset; language: string; gaveUp: boolean; busy: string | null
+function DatasetCheck({ d, language, gaveUp, busy, usual, onRetry, onAgain, onFix, onUndo }: {
+  d: CheckedDataset; language: string; gaveUp: boolean; busy: string | null; usual?: number
   onRetry: () => void; onAgain: () => void
   onFix: (item: SetupFindingItem, how: 'fix' | 'check') => void
   onUndo: (actionId: string | null, redo?: boolean) => void
@@ -165,7 +166,7 @@ function DatasetCheck({ d, language, gaveUp, busy, onRetry, onAgain, onFix, onUn
       </div>
       <div aria-live="polite">
         {f.pending && !gaveUp && (
-          <p className="setup-ai setup-ai--pending"><Sparkles size={13} aria-hidden="true" /> {t('setup.k.checking')}</p>
+          <p className="setup-ai setup-ai--pending"><Sparkles size={13} aria-hidden="true" /> {t('setup.k.checking')}<WaitTime since={f.since} usual={usual} /></p>
         )}
         {f.pending && gaveUp && (
           <p className="setup-ai">{t('setup.u.aiSlow')}{' '}

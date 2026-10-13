@@ -152,13 +152,15 @@ def relations(widgets: list[dict], dates: set[str]) -> list[dict]:
     return out
 
 
-def slicers(widgets: list[dict], profile: dict, ineligible: set[str], skip: set[str], lang: str) -> list[dict]:
+def slicers(widgets: list[dict], profile: dict, ineligible: set[str], skip: set[str], lang: str,
+            names: dict | None = None) -> list[dict]:
     """Filter controls for the categories this page's charts split by."""
     from ..analyst_panel import slicers_for
     known = {c["name"] for c in profile.get("columns", [])}
     found = [s for s in slicers_for(widgets, profile, ineligible, limit=MAX_SLICERS + len(skip))
              if s["config"].get("dimension") in known and s["config"]["dimension"] not in skip][:MAX_SLICERS]
-    return [{"widget_type": "slicer", "title": _t(lang, "filter", c=str(s["config"]["dimension"]).replace("_", " ")),
+    from .answer import display_name
+    return [{"widget_type": "slicer", "title": _t(lang, "filter", c=display_name(s["config"]["dimension"], names)),
              # The control the panel chose for how many values there are (analyst_panel.control_for).
              "config": {k: v for k, v in s["config"].items() if k in ("dimension", "slicer_mode")}} for s in found]
 
@@ -176,7 +178,8 @@ def navigation(titles: list[str], here: int, lang: str) -> list[dict]:
     return out[:MAX_NAV]
 
 
-def drill_page(proposals: list[dict], profile: dict, dates: set[str], skip: set[str], lang: str) -> dict | None:
+def drill_page(proposals: list[dict], profile: dict, dates: set[str], skip: set[str], lang: str,
+               names: dict | None = None) -> dict | None:
     """A drill-through page for one value of the category these pages split by
     most, and the charts that open it marked (`drill_to`). The platform's own
     mechanism (analyst_panel.drill_page): a page of type `drillthrough` with a
@@ -208,7 +211,8 @@ def drill_page(proposals: list[dict], profile: dict, dates: set[str], skip: set[
     for w in charts:
         if (w.get("config") or {}).get("dimension") == col:
             w["drill_to"] = "drill"
-    label = str(col).replace("_", " ")
+    from .answer import display_name
+    label = display_name(col, names)
     return {"title": _t(lang, "one", c=label), "rationale": _t(lang, "onewhy", c=label),
             "page_type": "drillthrough", "prompt_column": col, "prompt_label": label[:1].upper() + label[1:],
             "answer": "", "note": None, "answers": [], "unanswered": [],
@@ -254,9 +258,12 @@ async def apply(proposals: list[dict], gate, inputs, lang: str) -> None:
             result = await draws(w) or {}
             values = [v for _n, v in _series(result)]
             additive = str(cfg.get("aggregation") or "") in ("count", "sum", "countd")
-            # A few groups carrying most of a total: bars with the running share.
-            if (wt == "bar" and additive and cfg.get("dimension") not in gate.dates and not cfg.get("dimension2")
-                    and cfg.get("measure") not in gate.percent and is_pareto(values)):
+            # A few groups carrying most of a total: bars with the running share --
+            # only when the chart itself asked for it (`pareto`, set by the plan
+            # from the person's question). Laid on by shape alone, the line read
+            # as noise on plain rankings (persona test 3.5).
+            if (wt == "bar" and cfg.get("pareto") and additive and cfg.get("dimension") not in gate.dates
+                    and not cfg.get("dimension2") and cfg.get("measure") not in gate.percent and is_pareto(values)):
                 wide = {**w, "widget_type": "dual_axis_bar_line",
                         "config": {**{k: v for k, v in cfg.items() if k != "limit"}, "pareto": True, "sort": "desc"}}
                 if (await draws(wide) or {}).get("rows"):
@@ -302,12 +309,12 @@ async def apply(proposals: list[dict], gate, inputs, lang: str) -> None:
         body = [w for w in dressed if w.get("widget_type") != "text"]
         nav = navigation(titles, at, lang) if len(proposals) > 1 else []
         scoped = {f.get("column") for f in p.get("scope_filters") or [] if isinstance(f, dict)}
-        controls = slicers(body, inputs.profile, ineligible, scoped, lang)
+        controls = slicers(body, inputs.profile, ineligible, scoped, lang, getattr(gate, "names", None))
         p["widgets"] = head + nav + controls + body
         p["relations"] = relations(p["widgets"], gate.dates)
     # One more page, reached by clicking a group: never listed among the buttons above.
     scoped_all = {f.get("column") for p in proposals for f in p.get("scope_filters") or [] if isinstance(f, dict)}
-    drill = drill_page(proposals, inputs.profile, set(gate.dates), scoped_all, lang)
+    drill = drill_page(proposals, inputs.profile, set(gate.dates), scoped_all, lang, getattr(gate, "names", None))
     if drill is not None:
         # A way back: the drill-through page has no tab of its own.
         back = navigation(titles[:1] + [drill["title"]], 1, lang) if titles and titles[0] else []
@@ -366,5 +373,6 @@ async def redress(page: dict, previous: dict, gate, inputs, lang: str, richness:
     body = [w for w in dressed if w.get("widget_type") not in _PLAIN]
     nav = [w for w in was if w.get("widget_type") == "button"]
     scoped = {f.get("column") for f in scope}
-    page["widgets"] = head + nav + slicers(body, inputs.profile, inputs.ineligible(), scoped, lang) + body
+    page["widgets"] = head + nav + slicers(body, inputs.profile, inputs.ineligible(), scoped, lang,
+                                           getattr(gate, "names", None)) + body
     page["relations"] = relations(page["widgets"], gate.dates)

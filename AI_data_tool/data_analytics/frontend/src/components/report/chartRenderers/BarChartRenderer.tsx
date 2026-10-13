@@ -45,7 +45,7 @@ function monoTick(t: Record<string, unknown> | false) {
 }
 
 export default function BarChartRenderer({ rows, data, cfg, rtl, broadcasts, localSelected, onClickPoint, measureFmt, ruleStyles, plotW, plotH, onBrushChange }: ChartRendererProps) {
-  const getFill = getFillFactory(broadcasts, localSelected, ruleStyles?.rows)
+  const getFill = getFillFactory(broadcasts, localSelected, ruleStyles?.rows, true)
   const look = designAxes(cfg)
   const mode = (cfg.bar_mode as string) || 'clustered'
   const { rows: seriesRows, series } = toBarSeries(data, mode)

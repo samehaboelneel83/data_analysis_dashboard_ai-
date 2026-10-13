@@ -192,6 +192,9 @@ def missing_roles(widget_type: str, config: dict) -> list[str]:
     required = REQUIRED_ROLES.get(widget_type)
     if not required:
         return []
+    from .multi_measure import measures_as_bars
+    if measures_as_bars(widget_type, config):
+        return []                       # one bar per measure: no category needed
     from .widget_data import resolve_roles
     cfg = config or {}
     have = resolve_roles(cfg)
@@ -490,7 +493,7 @@ def _check_settings(config: dict, keys) -> None:
             probe = value.lower() if isinstance(value, str) and key in _CASE_FOLDED else value
             if probe not in VOCABULARIES[key]:
                 raise InvalidWidget(f"{key} must be one of {', '.join(sorted(VOCABULARIES[key]))}")
-        elif key in ("limit", "suppress_below"):
+        elif key in ("limit", "suppress_below", "min_group_rows"):
             _check_count(key, value)
 
 

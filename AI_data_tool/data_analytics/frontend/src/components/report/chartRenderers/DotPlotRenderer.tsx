@@ -1,7 +1,7 @@
 import { ScatterChart, Scatter, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList } from 'recharts'
 import { TT, fmtStr, seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
-import { axisTitles, xAxisProps, yAxisProps, gridProps, labelListProps } from './axisOptions'
+import { axisTitles, xAxisProps, yAxisProps, gridProps, labelListProps, valueTick } from './axisOptions'
 import { seriesName } from './axisOptions'
 
 export default function DotPlotRenderer({ rows, cfg, rtl, broadcasts, onClickPoint, measureFmt, ruleStyles, plotH }: ChartRendererProps) {
@@ -14,7 +14,7 @@ export default function DotPlotRenderer({ rows, cfg, rtl, broadcasts, onClickPoi
     <ResponsiveContainer width="100%" height="100%">
       <ScatterChart data={rows} layout="vertical" margin={{ top: 4, right: 16, bottom: 4, left: 8 }}>
         {grid && <CartesianGrid {...grid} />}
-        <XAxis type="number" dataKey="value" {...xAxisProps(cfg, rtl, undefined, undefined, { title: titles.measure })} tickFormatter={v => fmtStr(v, measureFmt)} />
+        <XAxis type="number" dataKey="value" {...xAxisProps(cfg, rtl, undefined, undefined, { title: titles.measure })} tickFormatter={valueTick(cfg, measureFmt)} />
         <YAxis type="category" dataKey="name"
           {...yAxisProps(cfg, rtl, undefined, undefined, undefined,
             { categoryLabels: rows.map((r: any) => String(r.name)), height: plotH,

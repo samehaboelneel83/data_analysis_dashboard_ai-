@@ -455,6 +455,32 @@ async def get_report_revision(report_id: int, db: AsyncSession = Depends(get_db)
     return {"revision": obj.revision or 0}
 
 
+@router.get("/{report_id}/listed-records")
+async def get_listed_records(report_id: int, db: AsyncSession = Depends(get_db),
+                             current_user: User = Depends(get_current_user)):
+    """Charts of this dashboard that list single records (one mark per person,
+    account or item), for the share screen's warning (persona test 3.7)."""
+    from ..models.models import Dataset, DatasetColumn
+    from ..services.listed_records import listed
+    report = await _get_report(report_id, db, current_user)
+    widgets = [{"id": w.id, "title": w.title, "page": p.name, "widget_type": w.widget_type, "config": w.config or {}}
+               for p in report.pages for w in p.widgets]
+    ids = {report.dataset_id, *(report.additional_dataset_ids or [])}
+    ids |= {w["config"].get("dataset_id") for w in widgets}
+    ids = {i for i in ids if isinstance(i, int)}
+    semantic: dict[int, dict] = {i: {} for i in ids}
+    meta: dict[int, dict] = {}
+    if ids:
+        for ds_id, name, sem in (await db.execute(
+                select(DatasetColumn.dataset_id, DatasetColumn.name, DatasetColumn.semantic_type)
+                .where(DatasetColumn.dataset_id.in_(ids)))).all():
+            semantic[ds_id][name] = sem
+        for ds_id, cm in (await db.execute(select(Dataset.id, Dataset.column_meta)
+                                           .where(Dataset.id.in_(ids), Dataset.org_id == current_user.org_id))).all():
+            meta[ds_id] = cm or {}
+    return {"items": listed(widgets, semantic, meta, report.dataset_id)}
+
+
 @router.get("/{report_id}/classification")
 async def get_report_classification(report_id: int, db: AsyncSession = Depends(get_db),
                                     current_user: User = Depends(get_current_user)):
@@ -616,6 +642,12 @@ async def set_published(report_id: int, body: dict,
                                  "visible and editable org-wide")
     if not _may_administer_sharing(report, current_user):
         raise HTTPException(403, "Only the dashboard's author or an admin can publish it")
+    if body.get("published") and report.archived_at is not None:
+        raise HTTPException(409, "This dashboard is archived. Restore it before publishing it.")
+    if body.get("published") and not report.published:
+        # Approval, where the organisation asks for one (routers/publishing).
+        from .publishing import approval_gate
+        await approval_gate(db, report, current_user)
     if body.get("published") and not report.published:
         # Report quality as CI (Phase 7.4): when the org turns the gate on,
         # a report with open review errors does not go out to everyone.
@@ -636,6 +668,8 @@ async def set_published(report_id: int, body: dict,
         # E09: publishing distributes what is there now, as its release.
         from ..services.report_release import make_release
         release = await make_release(db, report.id, current_user.id, reason="publish")
+        from .publishing import stamp_published
+        stamp_published(report, current_user)
     await audit(db, current_user,
                 "report.publish" if report.published else "report.unpublish",
                 "report", report.id, report.name)
@@ -672,6 +706,10 @@ async def release_report(report_id: int, body: dict | None = None,
     await require_capability(db, current_user, report_id, "edit")
     if report.published:
         await _publish_gate(db, report)
+        # What already-published readers will see next needs the same approval.
+        from .publishing import approval_gate, stamp_published
+        await approval_gate(db, report, current_user)
+        stamp_published(report, current_user)
     note = (body or {}).get("note")
     release = await make_release(db, report_id, current_user.id, reason="release",
                                  note=note if isinstance(note, str) else None)
@@ -702,59 +740,35 @@ async def list_releases(report_id: int, db: AsyncSession = Depends(get_db),
 @router.get("/{report_id}/grants")
 async def list_grants(report_id: int, db: AsyncSession = Depends(get_db),
                       current_user: User = Depends(get_current_user)):
+    """Everyone a dashboard is shared with directly: people, roles and teams,
+    each with its level, its expiry and what it allows (routers/publishing)."""
+    from .publishing import grant_rows
     report = await db.get(Report, report_id)
     check_org(report, current_user, "Report not found")
     if not _may_administer_sharing(report, current_user):
         raise HTTPException(403, "Only the dashboard's author or an admin can see its grants")
-    rows = (await db.execute(
-        select(ReportUserGrant, User.email)
-        .join(User, User.id == ReportUserGrant.user_id)
-        .where(ReportUserGrant.report_id == report_id)
-        .order_by(ReportUserGrant.id)
-    )).all()
-    return [{"id": g.id, "user_id": g.user_id, "email": email, "level": g.level}
-            for g, email in rows]
+    return await grant_rows(db, report_id)
 
 
 @router.post("/{report_id}/grants", status_code=201)
 async def create_grant(report_id: int, body: dict,
                        db: AsyncSession = Depends(get_db),
                        current_user: User = Depends(get_current_user)):
-    """Share to a user BY EMAIL. An email input rather than a user picker on
-    purpose: members cannot list the org directory, and sharing should not be
-    the endpoint that leaks it -- you share with someone you already know."""
-    from ..core.capability import LEVELS
+    """Share to a person BY EMAIL (members cannot list the org directory, and
+    sharing should not be the endpoint that leaks it), or to a role or a team
+    by id. With an expiry, and with or without the right to download and to
+    share on. Re-sharing updates the share, not a 409. The rules are in
+    routers/publishing.create_or_update_grant."""
+    from pydantic import ValidationError
+    from .publishing import GrantIn, create_or_update_grant
     report = await db.get(Report, report_id)
     check_org(report, current_user, "Report not found")
-    if not _may_administer_sharing(report, current_user):
-        raise HTTPException(403, "Only the dashboard's author or an admin can share it")
-    level = str(body.get("level") or "edit")
-    if level not in LEVELS:
-        raise HTTPException(400, f"level must be one of {', '.join(LEVELS)}")
-    email = str(body.get("email") or "").strip().lower()
-    grantee = (await db.execute(
-        select(User).where(User.email == email, User.org_id == current_user.org_id)
-    )).scalar_one_or_none()
-    if grantee is None:
-        raise HTTPException(404, "No user with that email in your organization")
-    if report.created_by is not None and grantee.id == report.created_by:
-        raise HTTPException(400, "That user is the dashboard's author")
-    existing = (await db.execute(
-        select(ReportUserGrant).where(ReportUserGrant.report_id == report_id,
-                                      ReportUserGrant.user_id == grantee.id)
-    )).scalar_one_or_none()
-    if existing:
-        existing.level = level      # re-sharing updates the level, not a 409
-        grant = existing
-    else:
-        grant = ReportUserGrant(report_id=report_id, user_id=grantee.id, level=level)
-        db.add(grant)
-        await db.flush()
-    await audit(db, current_user, "report.share", "report", report.id,
-                f"{grantee.email}: {level}")
-    await db.commit()
-    return {"id": grant.id, "user_id": grantee.id, "email": grantee.email,
-            "level": level}
+    try:
+        # The level a share had before it could say more: 'edit' when unsaid.
+        asked = GrantIn(**{"level": "edit", **{k: v for k, v in (body or {}).items() if k in GrantIn.model_fields}})
+    except ValidationError as e:
+        raise HTTPException(400, f"That share could not be read: {e.errors()[0].get('msg')}")
+    return await create_or_update_grant(db, report, current_user, asked)
 
 
 @router.delete("/{report_id}/grants/{grant_id}", status_code=204)
@@ -2799,6 +2813,13 @@ async def create_share_link(report_id: int, body: dict, db: AsyncSession = Depen
     report = await db.get(Report, report_id)
     check_org(report, current_user, "Report not found")
     await require_capability(db, current_user, report_id, "edit")
+    from ..core.config import settings as _platform
+    if not _platform.guest_links_enabled:
+        raise HTTPException(403, "Links that open without signing in are switched off for this platform. "
+                                 "Share the dashboard with people, a role or a team instead, or ask an "
+                                 "administrator to allow guest links.")
+    if report.archived_at is not None:
+        raise HTTPException(409, "This dashboard is archived. Restore it before sharing it.")
     from ..services.sensitivity import rank as s_rank, report_effective
     label, reasons = await report_effective(db, report)
     if s_rank(label) >= s_rank("Restricted"):

@@ -255,6 +255,10 @@ _COUNTING = _re.compile(r"\b(activity|activities|how many|number of|count of|bus
                         r"most active|most frequent)\b", _re.I)
 
 
+#: A column that already holds a count: summing it IS counting.
+_COUNT_NAME = _re.compile(r"(^|_)(count|counts|cnt|num|number|n)(_|$)|_count$|^count_|^n_|_n$", _re.I)
+
+
 def measure_fit(question: str, sql: str, family: str) -> ValidationFailure | None:
     """A counting question answered by adding up a column it never named.
 
@@ -283,6 +287,8 @@ def measure_fit(question: str, sql: str, family: str) -> ValidationFailure | Non
     for total in tree.find_all(exp.Sum):
         for col in total.find_all(exp.Column):
             name = col.name or ""
+            if name and _COUNT_NAME.search(name):
+                continue        # a count already made (a summary table's "order_count"): adding it counts
             if name and name.lower().replace("_", " ") not in asked and name.lower() not in asked:
                 return ValidationFailure(
                     "V7", f"the question asks about activity -- how many rows -- but this query "

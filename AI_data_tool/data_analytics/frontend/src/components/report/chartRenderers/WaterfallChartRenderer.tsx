@@ -2,7 +2,7 @@ import { useT } from '../../../i18n'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell, ResponsiveContainer, LabelList } from 'recharts'
 import { fmtStr, TT } from '../chartUtils'
 import type { ChartRendererProps } from './types'
-import { xAxisProps, yAxisProps, gridProps, labelListProps, chartMargin } from './axisOptions'
+import { xAxisProps, yAxisProps, gridProps, labelListProps, chartMargin, valueTick } from './axisOptions'
 
 interface Bar_ { name: string; start: number; delta: number; end: number; total?: boolean }
 
@@ -43,7 +43,7 @@ export default function WaterfallChartRenderer({ data, cfg, rtl, measureFmt, rul
         <YAxis {...yAxisProps(cfg, rtl, measureFmt, bars.flatMap(b => [b.start, b.end]), undefined, { height: plotH })}
           tick={{ fontSize: cfg.axis_tick_size ?? 11, ...(cfg.axis_tick_color ? { fill: cfg.axis_tick_color } : {}) }}
           axisLine={cfg.axis_line ?? true} tickLine={cfg.tick_line ?? true} allowDecimals
-          tickFormatter={v => fmtStr(v, measureFmt)} />
+          tickFormatter={valueTick(cfg, measureFmt)} />
         <Tooltip contentStyle={TT} formatter={(v: any, name: string, props: any) =>
           name === 'delta' ? [`${fmtStr(props.payload.start, measureFmt)} → ${fmtStr(props.payload.end, measureFmt)}`, 'Change'] : [v, name]
         } />

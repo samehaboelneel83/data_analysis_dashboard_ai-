@@ -64,7 +64,13 @@ PROPOSAL_ITEM = {
 }
 PROPOSALS_SCHEMA = {
     "type": "object",
-    "properties": {"proposals": {"type": "array", "items": PROPOSAL_ITEM}},
+    "properties": {"proposals": {"type": "array", "items": PROPOSAL_ITEM},
+                   # Every catalog column holding what the person asked to leave
+                   # out: removed from every proposal by code (plan 1.10).
+                   "excluded_columns": {"type": "array", "items": {
+                       "type": "object",
+                       "properties": {"table": {"type": "string"}, "column": {"type": "string"}},
+                       "required": ["table", "column"]}}},
     "required": ["proposals"],
 }
 REFINE_SCHEMA = {
@@ -170,8 +176,92 @@ async def test_run(db: AsyncSession, user: User, source: DataSource, sql: str) -
 # ── the catalog as the model sees it ────────────────────────────────────────
 
 def catalog_of(facts: list[dict]) -> list[dict]:
-    """The shape `validate_column_references` reads: [{name, columns:[{name}]}]."""
-    return [{"name": t["name"], "columns": [{"name": c.name} for c in t["_columns"]]} for t in facts]
+    """The shape `validate_column_references` reads: [{name, columns:[{name}]}],
+    plus each table's primary key ("pk"), for the join checks."""
+    return [{"name": t["name"], "columns": [{"name": c.name} for c in t["_columns"]],
+             "pk": [c.name for c in t["_columns"] if getattr(c, "is_primary_key", False)]} for t in facts]
+
+
+#: A LEFT JOIN leaving at least this share of rows without a match is said.
+UNMATCHED_NOTE_SHARE = 0.05
+
+
+def join_check_sql(sql: str, family: str, catalog: list[dict]) -> tuple[str, str | None, list[str]] | None:
+    """(SQL counting rows, distinct main-table keys and unmatched rows per LEFT
+    JOIN; the main table's name or None; the LEFT-joined tables' names), or
+    None when the query joins nothing. Persona test 2026-10-12: "one row per
+    delivered order" held 97,015 rows for 96,478 orders; "current employees"
+    kept the 59,900 who had left, with no salary."""
+    import sqlglot
+    from sqlglot import exp
+    try:
+        tree = sqlglot.parse_one(sql, dialect=_dialect(family))
+    except Exception:                                               # noqa: BLE001
+        return None
+    select = tree if isinstance(tree, exp.Select) else tree.find(exp.Select)
+    joins = select.args.get("joins") if select is not None else None
+    frm = (select.args.get("from_") or select.args.get("from")) if select is not None else None
+    if not joins or frm is None or not isinstance(frm.this, exp.Table):
+        return None
+    pks = {str(t["name"]).split(".")[-1].casefold(): t.get("pk") or [] for t in catalog}
+    base = frm.this
+    extra: list = []
+    measures: list = [exp.alias_(exp.Count(this=exp.Star()), "n")]
+    left: list[str] = []
+    key = pks.get(base.name.casefold()) or []
+    if len(key) == 1:
+        extra.append(exp.alias_(exp.column(key[0], table=base.alias_or_name), "__key__"))
+        measures.append(exp.alias_(exp.Count(this=exp.Distinct(expressions=[exp.column("__key__")])), "k"))
+    for i, j in enumerate(joins):
+        if str(j.args.get("side") or "").upper() != "LEFT" or not isinstance(j.this, exp.Table):
+            continue
+        right = j.this
+        on = j.args.get("on")
+        cols = [c for c in (on.find_all(exp.Column) if on is not None else [])
+                if c.table and c.table.casefold() == right.alias_or_name.casefold()]
+        if not cols:
+            continue
+        missing = exp.Is(this=exp.column(cols[0].name, table=right.alias_or_name), expression=exp.Null())
+        extra.append(exp.alias_(exp.Case().when(missing, exp.Literal.number(1)).else_(exp.Literal.number(0)),
+                                f"__u{i}__"))
+        measures.append(exp.alias_(exp.Sum(this=exp.column(f"__u{i}__")), f"u{i}"))
+        left.append(right.name)
+    if len(measures) == 1:
+        return None
+    inner = select.copy()
+    inner.set("expressions", list(inner.expressions) + extra)
+    inner.set("order", None)
+    outer = exp.select(*measures).from_(inner.subquery("q")).sql(dialect=_dialect(family))
+    return outer, (base.name if len(key) == 1 else None), left
+
+
+async def join_notes(db, user, source, sql: str, family: str, catalog: list[dict]) -> dict:
+    """{"repeats": {table, rows, distinct} | None, "unmatched": [{table, share}]}."""
+    from ..agent.policy import PolicyError, apply_policies, load_policies
+    from ..connections import preview_table
+    from .access import _PolicyContext, release
+    built = join_check_sql(sql, family, catalog)
+    out: dict = {"repeats": None, "unmatched": []}
+    if built is None:
+        return out
+    check, base, left = built
+    policies = await load_policies(db, _PolicyContext(source.id, family), user)
+    await release(db)
+    try:
+        secured = apply_policies(check, policies, family)
+        cfg = {**dict(source.config or {}), "type": source.type}
+        got = await asyncio.wait_for(asyncio.to_thread(preview_table, cfg, None, secured, 1), COUNT_TIMEOUT_S)
+        row = dict(zip(got.get("columns") or [], (got.get("rows") or [[]])[0]))
+    except (PolicyError, Exception):                                # noqa: BLE001 -- a note, never a gate
+        return out
+    n = int(row.get("n") or 0)
+    if base and row.get("k") is not None and n > int(row["k"]):
+        out["repeats"] = {"table": base, "rows": n, "distinct": int(row["k"])}
+    for i, table in enumerate(left):
+        u = row.get(f"u{i}")
+        if n and u is not None and int(u) / n >= UNMATCHED_NOTE_SHARE:
+            out["unmatched"].append({"table": table, "share": round(int(u) / n, 3)})
+    return out
 
 
 def _describe(facts: list[dict], words: dict | None) -> str:
@@ -219,7 +309,9 @@ def _rules(lang: str) -> str:
         "- Leave out what does not help: system columns, duplicate copies of the same value in "
         "another language, columns that are almost all empty, links, and personal details "
         "(names, phones, emails, ids of people) unless their work needs them. Honour 'What to "
-        "leave out'.\n"
+        "leave out', and list in excluded_columns EVERY catalog column (table and column, as "
+        "named in the catalog) that holds what they asked to leave out -- whatever language "
+        "they asked in; [] when they asked for nothing to be left out.\n"
         "- Give columns plain snake_case aliases only when the original name is unclear.\n"
         "- When the person asked for a PART of the data -- one kind, one place, one period, a "
         "range ('I need ...', 'only ...', 'under ...', 'since ...') -- the FIRST proposal is "
@@ -309,6 +401,152 @@ def build_refine_prompt(source: DataSource, facts: list[dict], words: dict | Non
 
 # ── proposals ───────────────────────────────────────────────────────────────
 
+def banned_columns(named, catalog: list[dict]) -> set[tuple[str, str]]:
+    """(table, column) pairs, lower-cased, that exist in the catalog."""
+    real = {(str(t["name"]).casefold(), str(c["name"]).casefold())
+            for t in catalog for c in t.get("columns") or []}
+    out = set()
+    for x in named or []:
+        if isinstance(x, dict):
+            key = (str(x.get("table") or "").casefold().split(".")[-1], str(x.get("column") or "").casefold())
+            if key in real or any(r[0].split(".")[-1] == key[0] and r[1] == key[1] for r in real):
+                out.add(key)
+    return out
+
+
+def without_columns(sql: str, family: str, banned: set[tuple[str, str]]) -> tuple[str, list[str]]:
+    """The query with every output column read from a banned (table, column)
+    taken out of its outer SELECT, and the names taken out. Columns used only
+    to join or filter stay where they are: they are not shown."""
+    import sqlglot
+    from sqlglot import exp
+    try:
+        tree = sqlglot.parse_one(sql, dialect=_dialect(family))
+    except Exception:                                               # noqa: BLE001
+        return sql, []
+    select = tree if isinstance(tree, exp.Select) else tree.find(exp.Select)
+    if select is None:
+        return sql, []
+    alias_to_table: dict[str, str] = {}
+    for t in select.find_all(exp.Table):
+        name = t.name.casefold()
+        alias_to_table[(t.alias or t.name).casefold()] = name
+    tables = set(alias_to_table.values())
+    banned_names = {c for _t, c in banned}
+    keep, removed = [], []
+    for proj in select.expressions:
+        cols = list(proj.find_all(exp.Column))
+        hit = False
+        for col in cols:
+            name = col.name.casefold()
+            if name not in banned_names:
+                continue
+            table = alias_to_table.get(col.table.casefold()) if col.table else None
+            owners = {table} if table else {t for t, c in banned if c == name and t in tables}
+            if any((t, name) in banned for t in owners if t):
+                hit = True
+        if hit:
+            removed.append(proj.alias_or_name)
+        else:
+            keep.append(proj)
+    if not removed or not keep:
+        return sql, []
+    select.set("expressions", keep)
+    return tree.sql(dialect=_dialect(family)), removed
+
+
+#: A table this small, with a text column, gives names to the codes that point at it.
+LOOKUP_MAX_ROWS = 10_000
+
+
+def name_for(table: dict) -> str | None:
+    """The column that names a lookup table's rows: its first text column that
+    is neither its key nor a key to another table."""
+    keys = {c.name for c in table["_columns"] if getattr(c, "is_primary_key", False)}
+    keys |= {k["column"] for k in table.get("links") or []}
+    return next((c.name for c in table["_columns"] if c.dtype == "text" and c.name not in keys), None)
+
+
+#: The column a summary query gets for how many rows each of its rows stands for.
+GROUP_SIZE_COLUMN = "row_count"
+
+
+def with_group_size(sql: str, family: str) -> tuple[str, str | None]:
+    """(the query, the column holding each summary row's size): a query that
+    groups (GROUP BY) keeps how many rows each of its rows stands for -- its
+    own COUNT(*) column, or `row_count` added. Held-out benchmark 2026-10-13:
+    a unit of 4 reviews ranked "best" in a one-row-per-unit summary, where no
+    group size was left to judge it by. Read from the query's structure."""
+    import sqlglot
+    from sqlglot import exp
+    try:
+        tree = sqlglot.parse_one(sql, dialect=_dialect(family))
+    except Exception:                                               # noqa: BLE001
+        return sql, None
+    select = tree if isinstance(tree, exp.Select) else None
+    if select is None or not select.args.get("group"):
+        return sql, None
+    for proj in select.expressions:
+        inner = proj.this if isinstance(proj, exp.Alias) else proj
+        if isinstance(inner, exp.Count) and isinstance(inner.this, exp.Star) and proj.alias_or_name:
+            return sql, proj.alias_or_name
+    if GROUP_SIZE_COLUMN in {p.alias_or_name.casefold() for p in select.expressions}:
+        return sql, None
+    select.append("expressions", exp.alias_(exp.Count(this=exp.Star()), GROUP_SIZE_COLUMN))
+    return tree.sql(dialect=_dialect(family)), GROUP_SIZE_COLUMN
+
+
+def with_names(sql: str, family: str, facts: list[dict]) -> tuple[str, list[str]]:
+    """The query with a name beside every shown code that points into a small
+    lookup table (a LEFT JOIN on the declared key), and the names added.
+    Persona test 2026-10-12: departments read "d007" where the database held
+    "Sales" one join away."""
+    import sqlglot
+    from sqlglot import exp
+    try:
+        tree = sqlglot.parse_one(sql, dialect=_dialect(family))
+    except Exception:                                               # noqa: BLE001
+        return sql, []
+    select = tree if isinstance(tree, exp.Select) else tree.find(exp.Select)
+    if select is None or select.args.get("group"):
+        return sql, []
+    by_name = {t["name"].casefold(): t for t in facts}
+    alias_to_table: dict[str, str] = {}
+    for t in select.find_all(exp.Table):
+        alias_to_table[(t.alias or t.name).casefold()] = t.name.casefold()
+    joined = set(alias_to_table.values())
+    shown = {p.alias_or_name.casefold() for p in select.expressions}
+    added: list[str] = []
+    for i, proj in enumerate(list(select.expressions)):
+        col = proj.this if isinstance(proj, exp.Alias) else proj
+        if not isinstance(col, exp.Column) or not col.table:
+            continue
+        owner = by_name.get(alias_to_table.get(col.table.casefold(), ""))
+        if owner is None:
+            continue
+        link = next((k for k in owner.get("links") or [] if k["column"].casefold() == col.name.casefold()), None)
+        lookup = by_name.get(str(link["table"]).casefold()) if link else None
+        if lookup is None or lookup["name"].casefold() in joined or (lookup.get("rows") or 0) > LOOKUP_MAX_ROWS:
+            continue
+        label = name_for(lookup)
+        if not label:
+            continue
+        # The lookup's own word for it ("dept_name"), unless the query already shows one.
+        alias_out = label if label.casefold() not in shown else f"{proj.alias_or_name}_name"
+        if alias_out.casefold() in shown:
+            continue
+        shown.add(alias_out.casefold())
+        nick = f"nm{i}"
+        select.join(exp.Table(this=exp.to_identifier(lookup["name"]), alias=exp.TableAlias(this=exp.to_identifier(nick))),
+                    on=exp.EQ(this=exp.column(col.name, table=col.table), expression=exp.column(link["to_column"], table=nick)),
+                    join_type="LEFT", copy=False)
+        select.append("expressions", exp.alias_(exp.column(label, table=nick), alias_out))
+        added.append(alias_out)
+    if not added:
+        return sql, []
+    return tree.sql(dialect=_dialect(family)), added
+
+
 def _clean_list(v) -> list[str]:
     return [str(x).strip() for x in (v or []) if str(x).strip()][:8]
 
@@ -354,6 +592,7 @@ async def _accept(db, user, source, item: dict, catalog: list[dict], family: str
         # Events without what they are counted against: counts, never rates.
         "counts_only": [{"events": b["events"], "base": b["base"]}
                         for b in (meaning_map.events_without_base(_tables_in(sql, family)) if meaning_map else [])],
+        "joins": await join_notes(db, user, source, sql, family, catalog),
         "includes": _clean_list(item.get("includes")),
         "leaves_out": _clean_list(item.get("leaves_out")),
         "why": str(item.get("why") or "").strip(),
@@ -458,9 +697,25 @@ async def propose(db: AsyncSession, user: User, source: DataSource, brief: dict 
         fixed = await client.complete_json(msgs, REFINE_SCHEMA, max_tokens=2000, temperature=0.1, enforce=True)
         return (fixed or {}).get("proposal")
 
+    # What they asked to leave out, as the model named it in the catalog: taken
+    # out of every query by code, not left to each query's wording (persona
+    # test 2026-10-12: "leave out military numbers" kept `mil_no`).
+    banned = banned_columns((got or {}).get("excluded_columns"), catalog) if (brief or {}).get("exclude") else set()
     accepted: list[dict] = []
     for item in ((got or {}).get("proposals") or [])[:MAX_PROPOSALS]:
         if isinstance(item, dict):
+            if banned and item.get("sql"):
+                sql, removed = without_columns(str(item["sql"]), family, banned)
+                if removed:
+                    item = {**item, "sql": sql,
+                            "leaves_out": _clean_list(item.get("leaves_out")) + removed}
+            if item.get("sql"):
+                sql, named = with_names(str(item["sql"]), family, facts)
+                if named:
+                    item = {**item, "sql": sql}
+                sql, size = with_group_size(str(item["sql"]), family)
+                if size:
+                    item = {**item, "sql": sql, "group_size": size}
             ok = await _accept(db, user, source, item, catalog, family, repair, m)
             if ok:
                 accepted.append(ok)
@@ -512,3 +767,23 @@ async def refine(db: AsyncSession, user: User, source: DataSource, brief: dict |
     revised["history"] = history + [{"role": "user", "text": message},
                                     {"role": "assistant", "text": reply}]
     return revised, reply
+
+
+def narrowed_to(sql: str | None, dialect: str | None = None) -> set[str]:
+    """The text values a dataset's own query keeps it to: the string literals
+    its WHERE compares a column with by `=` or `IN` ("COMI 2023 price history"
+    is `WHERE ticker = 'COMI'`). Read from the query's structure, never from
+    its name. Empty when the query cannot be read."""
+    import sqlglot
+    from sqlglot import exp
+    try:
+        tree = sqlglot.parse_one(sql or "", read=dialect or None)
+    except Exception:                                               # noqa: BLE001
+        return set()
+    out: set[str] = set()
+    for where in tree.find_all(exp.Where):
+        for node in where.find_all(exp.EQ, exp.In):
+            for lit in node.find_all(exp.Literal):
+                if lit.is_string and lit.this.strip():
+                    out.add(lit.this.strip().casefold())
+    return out

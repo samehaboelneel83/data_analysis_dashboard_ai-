@@ -39,7 +39,7 @@ describe('Layout', () => {
     expect(screen.getByRole('link', { name: /Home/i })).toBeInTheDocument()
     // "Dashboards", not "Reports": the rename is label-deep only (the route
     // stays /reports), and the rail is where users read the product name.
-    expect(screen.getByRole('link', { name: /Dashboards/i })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /^Dashboards$/i })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /^Reports$/i })).not.toBeInTheDocument()
   })
 

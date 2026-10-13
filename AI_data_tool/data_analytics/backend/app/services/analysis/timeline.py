@@ -151,3 +151,27 @@ def change_point(values: list[float | None]) -> dict | None:
         return None
     return {"index": int(at), "before": before, "after": after, "shift": after - before,
             "shift_pct": (after - before) / base * 100, "p_value": round(float(p), 4)}
+
+
+#: A month this close (as a ratio) to the same month a year before, both on
+#: the same side of the series' median, repeats a season.
+SEASON_REPEAT_RATIO = 1.25
+
+
+def repeats_a_year_before(monthly, index: int) -> bool:
+    """Whether the month at `index` of a monthly series (indexed by Period)
+    repeats the same month a year before: that month exists, sits on the same
+    side of the series' median, and is within SEASON_REPEAT_RATIO of it."""
+    try:
+        now = monthly.index[index]
+        before = now - 12
+        if before not in monthly.index:
+            return False
+        v, w = float(monthly.iloc[index]), float(monthly[before])
+        mid = float(monthly.median())
+    except Exception:                                               # noqa: BLE001
+        return False
+    if not v or not w or (v > mid) != (w > mid):
+        return False
+    ratio = max(abs(v), abs(w)) / min(abs(v), abs(w))
+    return ratio <= SEASON_REPEAT_RATIO

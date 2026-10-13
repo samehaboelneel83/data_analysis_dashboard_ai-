@@ -27,11 +27,12 @@ from . import health
 
 #: The order fixes are applied in: tidy values first (so copies that differ
 #: only by a space are caught), rows next, whole columns and copies last.
-_ORDER = ("spaces", "textnum", "empty", "placeholder", "negative", "rule", "useless", "constant", "dups")
+_ORDER = ("spaces", "textnum", "empty", "placeholder", "negative", "subtotal", "rule", "useless", "constant", "dups")
 
 T = {
     "en": {
         "dups": "removed {n} copied rows",
+        "subtotal": "left out {n} rows where “{col}” holds the totals of the other rows",
         "spaces": "removed extra spaces in “{col}”",
         "textnum": "turned “{col}” into numbers",
         "empty": "showed empty “{col}” as “Unknown”",
@@ -43,6 +44,7 @@ T = {
     },
     "ar": {
         "dups": "حذفنا {n} صفًا مكررًا",
+        "subtotal": "استبعدنا {n} صفًا يحمل فيها «{col}» مجاميع الصفوف الأخرى",
         "spaces": "حذفنا المسافات الزائدة في «{col}»",
         "textnum": "حوّلنا «{col}» إلى أرقام",
         "empty": "أظهرنا الفارغ في «{col}» على أنه «غير معروف»",
@@ -61,6 +63,12 @@ T = {
 #: were its late parcels (Nile Express, 2026-10-10) -- so it is shown with
 #: "Fix it" and left to the person.
 AI_RULE_AUTO_SHARE = 0.01
+
+
+def _auto_share() -> float:
+    """The admin setting (Platform settings), else the default above."""
+    from ...core.config import settings
+    return float(getattr(settings, "setup_ai_rule_auto_share", AI_RULE_AUTO_SHARE))
 
 
 def key_of(item: dict) -> str:
@@ -90,8 +98,12 @@ def plan(items: list[dict], lang: str, *, undone: set[str] | None = None,
             continue
         if action.get("kind") == "drop_column" and str(action.get("column") or "").casefold() in protect:
             continue
-        if kind == "rule" and rows and (item.get("rows") or 0) / rows > AI_RULE_AUTO_SHARE:
+        if kind == "rule" and rows and (item.get("rows") or 0) / rows > _auto_share():
             continue
+        if kind == "dups" and item.get("keyed") is False:
+            continue        # nothing names each row: "possible copies" are the person's call
+        if kind == "rule" and item.get("describes"):
+            continue        # one group's own rows: shown with "Fix it", never removed by itself
         step = health.prep_step_for(action, lang)
         if step is None:
             continue

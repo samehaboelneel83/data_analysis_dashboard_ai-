@@ -35,6 +35,15 @@ def _fresh_lens_answers():
 
 
 @pytest.fixture(autouse=True)
+def _guest_links_allowed_in_tests(monkeypatch):
+    """Guest links are OFF on a platform until an administrator allows them
+    (settings.guest_links_enabled). The suite's many tests of how a link
+    behaves need it on; the policy itself is tested in test_publishing.py."""
+    from app.core.config import settings
+    monkeypatch.setattr(settings, "guest_links_enabled", True)
+
+
+@pytest.fixture(autouse=True)
 def _no_model_column_classes_by_default(monkeypatch):
     """Asking the model what each number is (services/column_classes.py) is a
     network call that would consume a test's queued fake answers; a test of

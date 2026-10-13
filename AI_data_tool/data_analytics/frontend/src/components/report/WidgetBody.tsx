@@ -451,7 +451,10 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
       ? (first.value ?? '—')
       : (Array.isArray(first) ? first[first.length - 1] : '—')
     const kpiIcon = ruleStyles?.rows?.[0]?.icon
-    const kpiText = fmtStr(val, measureFmt)
+    // A level's change over the period (`change_over`, server period_change.py):
+    // the percent is the number; both ends, in the column's own format, beneath.
+    const change = (data as { change?: { pct: number; from: unknown; to: unknown; first: unknown; last: unknown } }).change
+    const kpiText = change ? `${change.pct > 0 ? '+' : ''}${change.pct.toFixed(1)}%` : fmtStr(val, measureFmt)
     // Its recent history, when the widget asks for one (`sparkline_date`): the
     // change of the last complete period against the one before, and the
     // shape of the periods before that (server: widget_data.kpi_trend).
@@ -475,7 +478,10 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
       </span>
     )
     return (
-      <div dir={rtl ? 'rtl' : undefined} style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: withTrend ? 'stretch' : 'center', justifyContent: 'center', gap: 4, padding: withTrend ? '2px 12px 0' : '0 10px', minWidth: 0, containerType: 'inline-size' }}>
+      // `safe center`: when the card is shorter than its content, the overflow
+      // goes below, never above -- a plain `center` cut the top of the number off
+      // on every KPI with a trend line (persona test 2026-10-12).
+      <div dir={rtl ? 'rtl' : undefined} style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: withTrend ? 'stretch' : 'center', justifyContent: 'safe center', gap: 4, padding: withTrend ? '2px 12px 0' : '0 10px', minWidth: 0, containerType: 'inline-size' }}>
         {/* In a narrow card the change drops under the number instead of cutting it short. */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: withTrend ? 'space-between' : 'center', gap: withTrend ? '2px 8px' : 8, maxWidth: '100%', minWidth: 0, flexWrap: withTrend ? 'wrap' : undefined }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
@@ -499,8 +505,13 @@ export function WidgetBody({ widget, data, fetchError, onRetry, localSelected, o
             : cfg.measure && cfg.aggregation && String(cfg.aggregation).toLowerCase() !== 'sum'
               ? seriesName(cfg) : (cfg.measure || cfg.dimension || 'Value')}
         </div>
+        {change && (
+          <div data-testid="kpi-period-change" dir="ltr" style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {fmtStr(change.from, measureFmt)} → {fmtStr(change.to, measureFmt)} ({String(change.first).slice(0, 10)} – {String(change.last).slice(0, 10)})
+          </div>
+        )}
         {trend && withTrend && (
-          <div data-testid="kpi-trend" style={{ flex: '1 1 auto', minHeight: 24, maxHeight: 72, display: 'flex', flexDirection: 'column', minWidth: 0, margin: '0 -12px' }}
+          <div data-testid="kpi-trend" style={{ flex: '1 1 auto', minHeight: 0, maxHeight: 72, display: 'flex', flexDirection: 'column', minWidth: 0, margin: '0 -12px' }}
             title={`${trend.period}: ${fmtStr(trend.current, measureFmt)} · ${trend.previous_period}: ${fmtStr(trend.previous, measureFmt)}`}>
             <Sparkline values={trend.series.map(p => p.value)} fluid filled color={seriesColor(Number(widget.id) || 0)} />
           </div>

@@ -231,7 +231,7 @@ def repair_and_check(w: dict, profile: dict, column_meta: dict | None = None,
         w = trim_edges(w, edges or {})
         ok, why = validate_widget(w, profile, column_meta)
         if ok:
-            why = (broken_promise(w, profile) or mixes_units(w, mixed)
+            why = (broken_promise(w, profile, dependents or {}) or mixes_units(w, mixed)
                    or date_as_number(w, dates) or dependent_split(w, dependents or {})
                    or same_number_twice(w, identical or {}))
             ok = why is None
@@ -638,8 +638,11 @@ def _mix_from_filter(w: dict) -> dict:
     is only a one-value filter on a bar, the filter becomes the bar's split,
     shown as shares of 100%."""
     cfg = w.get("config")
-    if w.get("widget_type") not in ("bar", "column") or not isinstance(cfg, dict) or cfg.get("dimension2") \
-            or not _MIX_WORDS.search(str(w.get("title") or "")):
+    # A chart that DECLARES what its number is (`shows`) is held to that by the
+    # guided setup's own checks; the title's words decide only for one that
+    # declares nothing (any other designer's widgets).
+    if w.get("shows") or w.get("widget_type") not in ("bar", "column") or not isinstance(cfg, dict) \
+            or cfg.get("dimension2") or not _MIX_WORDS.search(str(w.get("title") or "")):
         return w
     filters = [f for f in cfg.get("filters") or [] if isinstance(f, dict)]
     title = " " + re.sub(r"[^\w]+", " ", str(w.get("title") or "").lower()) + " "
@@ -1056,7 +1059,7 @@ def _aggregation_from_title(w: dict, column_meta: dict | None = None,
     return {**w, "config": {**cfg, "aggregation": agg}} if agg else w
 
 
-def broken_promise(w: dict, profile: dict) -> str | None:
+def broken_promise(w: dict, profile: dict, pairs: dict | None = None) -> str | None:
     """Why a proposed widget's title promises something its config does not
     draw, or None.
 
@@ -1116,6 +1119,10 @@ def broken_promise(w: dict, profile: dict) -> str | None:
     for c in profile.get("columns", []):
         name = c["name"]
         if name in used or name in filtered or c.get("is_identifier") or same_period(name):
+            continue
+        # One fact written twice (fact_sheet.one_to_one: "Late" always with
+        # is_late 1): a chart using one keeps a title naming the other.
+        if set((pairs or {}).get(name) or []) & (used | filtered):
             continue
         if f" {name.lower().replace('_', ' ')} " in title:
             return f"{w.get('title')}: the title names {name}, which the chart does not use"
@@ -1584,8 +1591,14 @@ def series_backbone(profile: dict, ineligible: set[str] | frozenset = frozenset(
     # True rates and averages first (avg_freight_cost, cancellation_rate_pct),
     # then per-day distinct counts (active_sellers): the headline and trend
     # places go to what the analysts read as the day's rates.
-    rates = sorted((c["name"] for c in nums if _averaged(c)),
-                   key=lambda m: 0 if _ALREADY_A_RATE.search(m) else 1)
+    by_name = {c["name"]: c for c in nums}
+
+    def _is_rate(m: str) -> bool:
+        # A stored kind says it (a share, a level, a score, a duration);
+        # the name only for a column nobody classified.
+        kind = by_name.get(m, {}).get("number")
+        return kind in ("share", "level", "score", "duration") if kind else bool(_ALREADY_A_RATE.search(m))
+    rates = sorted((c["name"] for c in nums if _averaged(c)), key=lambda m: 0 if _is_rate(m) else 1)
     if len(nums) < 3:
         return []
     # "total_freight_cost" reads "freight cost": the titles say "Total" themselves.
@@ -1606,7 +1619,7 @@ def series_backbone(profile: dict, ineligible: set[str] | frozenset = frozenset(
     # The typical day for each rate, beside the totals: the daily-ops
     # analysts opened with average item value, average freight per item and
     # the worst cancellation rate (live re-score, 2026-10-02).
-    for m in [r for r in rates if _ALREADY_A_RATE.search(r)][:3]:
+    for m in [r for r in rates if _is_rate(r)][:3]:
         add("kpi", f"Average {re.sub(r'^(avg|mean|average) ', '', label(m))} per day",
             {"measure": m, "aggregation": "avg"}, "summary", 4, f"The daily {label(m)}, averaged over the period.")
     for m in additive[:3]:

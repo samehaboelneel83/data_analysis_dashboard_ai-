@@ -3022,3 +3022,25 @@ describe('hierarchy plan, step 4: a tree widget filters the page (2026-10-10)', 
       { paths: [['Egypt', 'Giza']], columns: ['country', 'city'], granularities: [null, null] }]])
   })
 })
+
+describe('groups too small to rank (persona test, plan 1.6)', () => {
+  it('says how many groups the ranking leaves out', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({
+      type: 'series', dimension: 'zone', rows: [{ name: 'Big', value: 10 }],
+      small_groups: { hidden: 4, min_rows: 30 },
+    } as never)
+    renderWidget({ widget: barWidget() })
+    expect(await screen.findByTestId('small-groups-note'))
+      .toHaveTextContent('4 groups with fewer than 30 rows are not ranked')
+  })
+
+  it('says when the data is too small to rank any group, and hides none', async () => {
+    vi.mocked(widgetDataApi.query).mockResolvedValue({
+      type: 'series', dimension: 'zone', rows: [{ name: 'A', value: 10 }, { name: 'B', value: 9 }],
+      small_groups: { hidden: 0, min_rows: 30, too_few: 2 },
+    } as never)
+    renderWidget({ widget: barWidget() })
+    expect(await screen.findByTestId('too-few-to-rank-note')).toHaveTextContent('fewer than 30 rows')
+    expect(screen.queryByTestId('small-groups-note')).not.toBeInTheDocument()
+  })
+})

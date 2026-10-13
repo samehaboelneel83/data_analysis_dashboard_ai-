@@ -1141,6 +1141,10 @@ def _shape_grid(df: pd.DataFrame, config: dict, *, dim: str, dim2: str, meas, me
     return result
 
 
+#: Aggregations whose groups add up to the whole: every group is kept, however small.
+_ADDITIVE_AGGS = frozenset({"sum", "count", "countd", "count_distinct", "frequency", "pct", ""})
+
+
 def shape_series(df: pd.DataFrame, config: dict) -> dict:
     """
     Main query entry point.  config keys:
@@ -1194,6 +1198,7 @@ def shape_series(df: pd.DataFrame, config: dict) -> dict:
     df = _apply_filters(df, filters)
     if df.empty:
         return {"type": "empty", "rows": [], "total": 0}
+    df = _whole_groups(df, (dim, dim2))
 
     dim_granularity = config.get("dimension_granularity") or None
 
@@ -1375,6 +1380,34 @@ def shape_series(df: pd.DataFrame, config: dict) -> dict:
             grouped = (df.groupby(dim).size().rename("value").rename_axis(dim_key).reset_index())
         else:
             grouped = (df.groupby(dim).size().rename("value").rename_axis(dim_key).reset_index())
+
+        # Too few rows behind a group to rank its average (persona test
+        # 2026-10-12: "best pickup zone: 354" from a handful of trips, "cheapest
+        # governorate" from one listing). Additive totals keep every group.
+        small_hidden = 0
+        #: Groups kept although under the floor, because the data is too small
+        #: for two of them to pass it: drawn, but not to be ranked in words.
+        all_small = 0
+        min_rows = int(config.get("min_group_rows") or 0)
+        # A frame already grouped elsewhere (DuckDB, which applied HAVING) has
+        # one row per group: its sizes say nothing.
+        pre_grouped = df.attrs.get("source_row_count") is not None
+        # Summary rows (a dataset made with GROUP BY) say how many rows each
+        # stands for in `size_column`: a group's size is their sum.
+        size_col = config.get("size_column")
+        size_col = size_col if isinstance(size_col, str) and size_col in df.columns else None
+        if min_rows > 1 and not pre_grouped and str(agg or "").lower() not in _ADDITIVE_AGGS and dim in df.columns:
+            sizes = (pd.to_numeric(df[size_col], errors="coerce").fillna(0).groupby(df[dim]).sum()
+                     if size_col else df.groupby(dim).size())
+            keep = set(sizes[sizes >= min_rows].index)
+            # On data too small for the floor (fewer than two groups would be
+            # left), every group is shown: there is nothing better to rank.
+            if len(keep) >= 2:
+                before = len(grouped)
+                grouped = grouped[grouped[dim_key].isin(keep)]
+                small_hidden = before - len(grouped)
+            elif len(sizes) - len(keep) >= 2:
+                all_small = int(len(sizes) - len(keep))
 
         # Percentage aggregation
         pct_base = None
@@ -1596,6 +1629,11 @@ def shape_series(df: pd.DataFrame, config: dict) -> dict:
                 "reason": "limit",
             },
         }
+        if all_small:
+            result["small_groups"] = {"hidden": 0, "min_rows": min_rows, "too_few": all_small}
+        if small_hidden:
+            # Groups left out for holding fewer rows than `min_group_rows`.
+            result["small_groups"] = {"hidden": small_hidden, "min_rows": min_rows}
         # A table/crosstab/matrix widget with a Dimension set (the configuration
         # ROLE_SPECS marks `category: required`, i.e. the one the Fields pane steers
         # every author into) shapes HERE, not in the raw-table branch above — so this
@@ -4414,6 +4452,10 @@ def _year_before(label: str, grain: str) -> str | None:
     return None                                         # a year's year-before is its previous period
 
 
+#: Unfinished periods a KPI's history may drop from its end, one after another.
+KPI_TREND_TAIL = 3
+
+
 def kpi_trend(df: pd.DataFrame, config: dict, flag_partial: bool = True) -> dict | None:
     """{granularity, series: [{period, value}], current, previous, change,
     change_pct, period, previous_period, partial_dropped} for a KPI, or None
@@ -4448,14 +4490,28 @@ def kpi_trend(df: pd.DataFrame, config: dict, flag_partial: bool = True) -> dict
             and r.get("name") not in (None, "", "NaT")]
     rows.sort(key=lambda r: str(r["name"]))
     dropped = False
-    if flag_partial and len(rows) > KPI_TREND_MIN:
+    # The period the data stops inside, and before it any period left thin by
+    # the same tail (a marketplace's last two months held 16 and 4 orders and
+    # the badge read "-99.3%"; persona test 2026-10-12). At most KPI_TREND_TAIL.
+    seen = df
+    for _ in range(KPI_TREND_TAIL):
+        if not (flag_partial and len(rows) > KPI_TREND_MIN):
+            break
         try:
             from .relative_dates import partial_period
-            dropped = bool(partial_period(df, date_col, grain, {"type": "series", "rows": rows}))
+            unfinished = bool(partial_period(seen, date_col, grain, {"type": "series", "rows": rows}))
         except Exception:  # noqa: BLE001
-            dropped = False
-        if dropped:
+            unfinished = False
+        if not unfinished:
+            break
+        dropped = True
+        try:
+            start = pd.Period(str(rows[-1]["name"]).replace("-Q", "Q"), freq={"quarter": "Q", "year": "Y", "week": "W"}.get(grain, "M" if grain == "month" else "D")).start_time
+            seen = seen[pd.to_datetime(seen[date_col], errors="coerce") < start]
+        except Exception:  # noqa: BLE001
             rows = rows[:-1]
+            break
+        rows = rows[:-1]
     every = {str(r["name"]): float(r["value"]) for r in rows}
     rows = rows[-KPI_TREND_PERIODS:]
     if len(rows) < KPI_TREND_MIN:
@@ -4518,6 +4574,18 @@ def kpi_target(result: dict, config: dict) -> dict | None:
             "lower_is_better": lower_is_better}
 
 
+def _whole_groups(df: pd.DataFrame, cols) -> pd.DataFrame:
+    """A grouping column held as decimals only because it has blanks (a year
+    read as 2000.0) groups as whole numbers, so its names read "2000"."""
+    fix = {}
+    for c in cols:
+        if c and c in df.columns and pd.api.types.is_float_dtype(df[c]):
+            vals = df[c].dropna()
+            if len(vals) and bool(np.isfinite(vals).all()) and bool((vals == np.floor(vals)).all()):
+                fix[c] = df[c].astype("Int64")
+    return df.assign(**fix) if fix else df
+
+
 def get_widget_data_from_df(
     df: pd.DataFrame, config: dict, widget_type: str = "bar",
     measures: list[dict] | None = None, flag_partial: bool = True,
@@ -4533,6 +4601,18 @@ def get_widget_data_from_df(
     `check_fields=False` is for a PRE-AGGREGATED frame (the DuckDB and DirectQuery
     aggregate paths), which holds only the dimension and measure columns and whose
     caller has already validated the config's fields against the dataset."""
+    # A bar of several measures and no category: one bar per measure, each
+    # measure resolved as its own headline number (multi_measure.py).
+    from .period_change import change_over, resolve as resolve_change
+    if change_over(widget_type, config):
+        return resolve_change(config, lambda cfg: get_widget_data_from_df(
+            df, cfg, "kpi", measures, flag_partial, check_fields))
+    from .multi_measure import bars_of_measures, headline_value, measures_as_bars
+    bars = measures_as_bars(widget_type, config)
+    if bars:
+        one = {k: v for k, v in config.items() if k not in ("measures", "sort", "limit")}
+        return bars_of_measures([(m, headline_value(get_widget_data_from_df(
+            df, {**one, "measure": m}, "kpi", measures, flag_partial, check_fields))) for m in bars], config)
     shaper = SHAPERS.get(widget_type, shape_series)
     if check_fields:
         # A field the widget names that is neither a column here nor a defined

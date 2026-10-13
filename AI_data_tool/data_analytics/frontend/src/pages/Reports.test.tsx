@@ -731,6 +731,8 @@ describe('kept from v1: controls', () => {
     fireEvent.click(within(card(1)).getByRole('button', { name: 'Share Revenue' }))
     const dialog = await screen.findByRole('dialog', { name: 'Share Revenue' })
     fireEvent.click(await within(dialog).findByRole('button', { name: 'Remove access for a@x.io' }))
+    // Taking access away is asked about first.
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Remove access' }))
     await waitFor(() => expect(reportGrantsApi.remove).toHaveBeenCalledWith(1, 5))
     await waitFor(() => expect(within(dialog).queryByText('a@x.io')).not.toBeInTheDocument())
   })

@@ -305,3 +305,6 @@
 /* QA4 V7: only the numbers of the col · row tag are monospace; its words
    ("عمود", "صف") are in the text font, so Arabic letters join. */
 .dl-bd-coord bdi { font-family: var(--mono); }
+
+/* A field holding personal data (persona test 3.7). */
+.dl-bd-f__personal { display: inline-flex; color: var(--warning, #d97706); margin-inline-start: 4px; }

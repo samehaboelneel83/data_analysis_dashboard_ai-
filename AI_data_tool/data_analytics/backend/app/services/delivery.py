@@ -295,6 +295,30 @@ async def run_schedule(db, schedule) -> None:
         _log("error", schedule.last_status)
         return
 
+    # A delivery is a download nobody is at the keyboard for: it is decided
+    # again at every run, as its creator stands NOW. An archived dashboard
+    # sends nothing; so does one its creator can no longer open, or may no
+    # longer take the data from (a share that was revoked, expired, or had
+    # its downloads switched off since the schedule was made).
+    from ..core.capability import effective_capability, export_refusal
+    refusal = None
+    if report.archived_at is not None:
+        refusal = "the dashboard is archived"
+    elif await effective_capability(db, creator, report.id) == "none":
+        refusal = "the person who set this up can no longer open the dashboard"
+    else:
+        try:
+            why = await export_refusal(db, creator, report)
+        except Exception:                                   # noqa: BLE001 -- unreadable: do not send
+            why = "access could not be checked"
+        if why:
+            refusal = "the person who set this up may no longer download from the dashboard"
+    if refusal:
+        schedule.last_status = f"not sent: {refusal}"[:200]
+        await db.commit()
+        _log("error", schedule.last_status)
+        return
+
     recipients = valid_recipients(schedule.recipients)
     about["recipients"] = ", ".join(str(r) for r in recipients)[:2000] or None
     if report is not None and not about["subject"]:

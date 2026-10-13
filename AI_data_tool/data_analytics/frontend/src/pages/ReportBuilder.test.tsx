@@ -2601,6 +2601,7 @@ describe('ReportBuilder explains permissions and sensitivity (Phase 7.3)', () =>
     renderBuilder()
     await screen.findByTestId('view-strip')
     expect((await screen.findByTestId('sensitivity-badge')).textContent).toContain('Restricted')
+    expect((await screen.findByTestId('sensitivity-badge')).textContent).toContain('Data:')
     // 7c: Share opens one dialog; the refused guest link is greyed there
     // with the server's reason, and "Your access, and why" is in its footer.
     fireEvent.click(screen.getByRole('button', { name: /^Share$/ }))

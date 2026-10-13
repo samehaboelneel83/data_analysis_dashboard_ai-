@@ -11,6 +11,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { MessageSquare, RefreshCw, Sparkles, Table2, Wrench } from 'lucide-react'
+import WaitTime from './WaitTime'
 import { useT } from '../../i18n'
 import { useDirection } from '../../contexts/DirectionContext'
 import { localDigits } from '../../lib/arabicFormats'
@@ -39,8 +40,10 @@ export default function ChooseDataStep({ sourceId, flow, onDone }: {
   const [answers, setAnswers] = useState(0)
   const [editingBrief, setEditingBrief] = useState(false)
   const [picked, setPicked] = useState<Set<string>>(new Set())
+  const draft = useRef<SetupBrief | null>(null)
   const [names, setNames] = useState<Record<string, string>>({})
   const [adopted, setAdopted] = useState<Set<number>>(new Set())
+  const [allExisting, setAllExisting] = useState(false)
   const [mode, setMode] = useState<'import' | 'directquery'>('import')
   const [creating, setCreating] = useState<Creating[] | null>(null)
   const [gaveUp, setGaveUp] = useState(false)
@@ -91,6 +94,13 @@ export default function ChooseDataStep({ sourceId, flow, onDone }: {
 
   async function create() {
     if (!data) return
+    // What was typed in About you and not yet sent goes with the choice: it
+    // was lost when existing datasets were ticked without "Suggest datasets"
+    // (persona test 2026-10-12).
+    const typed = draft.current
+    if (typed && JSON.stringify(typed) !== JSON.stringify(data.brief ?? {})) {
+      try { await setupApi.update(sourceId, { brief: typed }, flow) } catch { /* the choice still goes ahead */ }
+    }
     const chosen = data.proposals.items.filter(p => picked.has(p.id))
     const kept = [...adopted]
     if (!chosen.length) { await onDone(kept, []); return }
@@ -121,6 +131,11 @@ export default function ChooseDataStep({ sourceId, flow, onDone }: {
 
   if (error) return <LoadError what={t('setup.d.what')} error={error} onRetry={load} />
   if (!data) return <LoadingState />
+  // Unused datasets someone else made (leftover trials, say) are folded away
+  // until asked for; decided by use, never by the name.
+  const leftover = (d: SetupDatasetsStep['existing'][number]) => d.used === 0 && d.mine === false && !adopted.has(d.id)
+  const shownExisting = allExisting ? data.existing : data.existing.filter(d => !leftover(d))
+  const foldedExisting = data.existing.length - shownExisting.length
 
   const asked = data.proposals.asked
   const showBrief = !asked || editingBrief
@@ -130,6 +145,7 @@ export default function ChooseDataStep({ sourceId, flow, onDone }: {
     <div className="setup-understand">
       {showBrief ? (
         <AboutYou initial={data.brief} first={!asked}
+          onChange={b => { draft.current = b }}
           onSubmit={brief => suggest(brief)}
           onSkip={() => asked ? setEditingBrief(false) : suggest({})} />
       ) : (
@@ -157,7 +173,7 @@ export default function ChooseDataStep({ sourceId, flow, onDone }: {
           <p className="setup-section__sub">{t('setup.d.proposalsSub')}</p>
           <div aria-live="polite">
             {data.proposals.pending && !gaveUp && (
-              <p className="setup-ai setup-ai--pending"><Sparkles size={13} aria-hidden="true" /> {t('setup.d.thinking')}</p>
+              <p className="setup-ai setup-ai--pending"><Sparkles size={13} aria-hidden="true" /> {t('setup.d.thinking')}<WaitTime since={data.proposals.since} usual={data.usual?.proposals} /></p>
             )}
             {data.proposals.pending && gaveUp && (
               <p className="setup-ai">{t('setup.u.aiSlow')}{' '}
@@ -193,17 +209,23 @@ export default function ChooseDataStep({ sourceId, flow, onDone }: {
           <h2 id="setup-existing" className="setup-section__title">{t('setup.d.existing')}</h2>
           <p className="setup-section__sub">{t('setup.d.existingSub')}</p>
           <ul className="setup-checklist">
-            {data.existing.map(d => (
+            {shownExisting.map(d => (
               <li key={d.id}>
                 <label>
                   <input type="checkbox" checked={adopted.has(d.id)}
                     onChange={() => setAdopted(s => { const n = new Set(s); if (n.has(d.id)) n.delete(d.id); else n.add(d.id); return n })} />
                   <span>{d.name}</span>
                   {d.rows != null && <span className="setup-section__sub">{t('setup.u.rowsN', { n: num(d.rows) })}</span>}
+                  {d.used != null && <span className="setup-section__sub">{d.used > 0 ? t('setup.d.usedBy', { n: d.used }) : t('setup.d.unused')}</span>}
                 </label>
               </li>
             ))}
           </ul>
+          {foldedExisting > 0 && (
+            <button type="button" className="btn btn-sm btn-ghost" onClick={() => setAllExisting(true)}>
+              {t('setup.d.showUnused', { n: foldedExisting })}
+            </button>
+          )}
         </section>
       )}
 
@@ -283,11 +305,14 @@ const BRIEF_FIELDS: { key: keyof SetupBrief; label: 'setup.d.q.work' | 'setup.d.
   { key: 'exclude', label: 'setup.d.q.exclude', ph: 'setup.d.ph.exclude' },
 ]
 
-function AboutYou({ initial, first, onSubmit, onSkip }: {
+function AboutYou({ initial, first, onSubmit, onSkip, onChange }: {
   initial: SetupBrief; first: boolean; onSubmit: (b: SetupBrief) => void; onSkip: () => void
+  /** Each change, so a choice made without pressing Suggest still keeps it. */
+  onChange?: (b: SetupBrief) => void
 }) {
   const t = useT()
-  const [brief, setBrief] = useState<SetupBrief>(initial)
+  const [brief, setBriefState] = useState<SetupBrief>(initial)
+  const setBrief = (next: (b: SetupBrief) => SetupBrief) => setBriefState(b => { const n = next(b); onChange?.(n); return n })
   const [busy, setBusy] = useState(false)
   return (
     <form className="card setup-card" aria-labelledby="setup-about"
@@ -354,6 +379,19 @@ function ProposalCard({ p, checked, canCreate, allowAi, name, onName, onToggle, 
         <p key={c.events} className="setup-counts-only">
           <span className="setup-badge">{t('setup.d.countsOnly')}</span>{' '}
           {t('setup.d.countsOnlyWhy', { events: c.events.replace(/_/g, ' '), base: c.base.replace(/_/g, ' ') })}
+        </p>
+      ))}
+      {p.joins?.repeats && (
+        <p className="setup-counts-only" data-testid="join-repeats">
+          <span className="setup-badge">{t('setup.d.repeats')}</span>{' '}
+          {t('setup.d.repeatsWhy', { table: p.joins.repeats.table.replace(/_/g, ' '),
+            rows: p.joins.repeats.rows.toLocaleString(), distinct: p.joins.repeats.distinct.toLocaleString() })}
+        </p>
+      )}
+      {(p.joins?.unmatched ?? []).map(u => (
+        <p key={u.table} className="setup-counts-only" data-testid="join-unmatched">
+          <span className="setup-badge">{t('setup.d.unmatched')}</span>{' '}
+          {t('setup.d.unmatchedWhy', { table: u.table.replace(/_/g, ' '), pct: Math.round(u.share * 100) })}
         </p>
       ))}
       <div className="setup-split">

@@ -20,6 +20,7 @@ from .routers import boundary_sets, map_settings, calendar_settings, prediction_
 from .routers import workspace
 from .routers import dataflows
 from .routers import pins
+from .routers import publishing
 from .routers import guided_setup
 from .routers import jobs as jobs_router
 from .routers import automation as automation_router
@@ -110,6 +111,31 @@ async def _migrate(conn):
         "ALTER TABLE reports ADD COLUMN IF NOT EXISTS theme VARCHAR(20) NOT NULL DEFAULT 'default'",
         "ALTER TABLE reports ADD COLUMN IF NOT EXISTS display_rules JSON DEFAULT '[]'",
         "ALTER TABLE reports ADD COLUMN IF NOT EXISTS style JSON DEFAULT '{}'",
+        # ── Publishing and sharing (docs/publishing/PLAN.md; alembic 0068) ───
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS category VARCHAR(60)",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS tags JSON DEFAULT '[]'",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS published_at TIMESTAMP WITH TIME ZONE",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS published_by INTEGER REFERENCES users(id) ON DELETE SET NULL",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP WITH TIME ZONE",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS viewers_may_export BOOLEAN NOT NULL DEFAULT true",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS review_state VARCHAR(12) NOT NULL DEFAULT 'none'",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS review_revision INTEGER",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS review_requested_by INTEGER REFERENCES users(id) ON DELETE SET NULL",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS review_decided_by INTEGER REFERENCES users(id) ON DELETE SET NULL",
+        "ALTER TABLE reports ADD COLUMN IF NOT EXISTS review_note VARCHAR(500)",
+        "CREATE INDEX IF NOT EXISTS ix_reports_category ON reports (category)",
+        "CREATE INDEX IF NOT EXISTS ix_reports_archived_at ON reports (archived_at)",
+        "CREATE INDEX IF NOT EXISTS ix_reports_org_published ON reports (org_id, published)",
+        "ALTER TABLE report_user_grants ALTER COLUMN user_id DROP NOT NULL",
+        "ALTER TABLE report_user_grants ADD COLUMN IF NOT EXISTS role_id INTEGER REFERENCES roles(id) ON DELETE CASCADE",
+        "ALTER TABLE report_user_grants ADD COLUMN IF NOT EXISTS org_unit_id INTEGER REFERENCES org_units(id) ON DELETE CASCADE",
+        "ALTER TABLE report_user_grants ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE",
+        "ALTER TABLE report_user_grants ADD COLUMN IF NOT EXISTS can_export BOOLEAN NOT NULL DEFAULT true",
+        "ALTER TABLE report_user_grants ADD COLUMN IF NOT EXISTS can_share BOOLEAN NOT NULL DEFAULT false",
+        "ALTER TABLE report_user_grants ADD COLUMN IF NOT EXISTS created_by INTEGER REFERENCES users(id) ON DELETE SET NULL",
+        "CREATE INDEX IF NOT EXISTS ix_report_user_grants_role_id ON report_user_grants (role_id)",
+        "CREATE INDEX IF NOT EXISTS ix_report_user_grants_org_unit_id ON report_user_grants (org_unit_id)",
+        "ALTER TABLE org_review_settings ADD COLUMN IF NOT EXISTS require_approval BOOLEAN NOT NULL DEFAULT false",
         # ── Layer 1 — Connectors & Ingestion ────────────────────────────────
         # The four new metadata tables come free from create_all; these are the
         # columns Layer 1 adds to tables that already exist in live databases.
@@ -703,6 +729,8 @@ app.include_router(analysis.router,     prefix="/api/v1")
 app.include_router(analysis.registry_router, prefix="/api/v1")
 app.include_router(reports.router,      prefix="/api/v1")
 app.include_router(report_copilot.router, prefix="/api/v1")
+app.include_router(publishing.router,   prefix="/api/v1")
+app.include_router(publishing.portal,   prefix="/api/v1")
 app.include_router(hierarchy.router,    prefix="/api/v1")
 app.include_router(widget_data.router,  prefix="/api/v1")
 app.include_router(data_sources.router, prefix="/api/v1")

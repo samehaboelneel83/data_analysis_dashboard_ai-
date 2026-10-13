@@ -86,6 +86,9 @@ _SUPPORTED_KEYS = frozenset({
     # returns. Listed because new table widgets are created carrying them, and
     # an unlisted key would push every one of those onto pandas.
     "show_subtotals", "totals_position", "totals_scope",
+    # Groups with fewer rows are left out of a ranking of averages: HAVING below.
+    # `size_column`: on summary rows, the column saying how many rows each stands for.
+    "min_group_rows", "size_column",
 })
 
 
@@ -324,6 +327,14 @@ def _grouped_plan(config: dict, source: str, where: list[str], params: list, dim
         f"WHERE {' AND '.join(where)} "
         f"GROUP BY {dim_expr}"
     )
+    min_rows = int(config.get("min_group_rows") or 0)
+    if min_rows > 1 and not count_mode and str(agg or "").lower() not in ("sum", ""):
+        # Same rule as the pandas path: applied only when two groups or more pass it.
+        size = config.get("size_column")
+        n_expr = f"SUM({_quote_ident(size)})" if isinstance(size, str) and size else "COUNT(*)"
+        sql = (f"WITH g AS ({sql.replace(f'AS __value__ ', f'AS __value__, {n_expr} AS __n__ ', 1)}) "
+               f"SELECT __dim__, __value__ FROM g WHERE __n__ >= {min_rows} "
+               f"OR (SELECT COUNT(*) FROM g WHERE __n__ >= {min_rows}) < 2")
     return DuckPlan(sql=sql, count_sql=count_sql, params=params,
                     probe_sql=probe_sql, dimension=dim, measure=meas or COUNT_COL)
 

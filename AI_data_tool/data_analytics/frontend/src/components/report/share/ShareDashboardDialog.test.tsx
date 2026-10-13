@@ -1,20 +1,25 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderWithProviders as render, screen, fireEvent, waitFor, within } from '../../../test/renderWithProviders'
 import ShareDashboardDialog from './ShareDashboardDialog'
-import { authzApi, reportGrantsApi, reportsApi, shareLinksApi } from '../../../services/api'
+import { authzApi, publishingApi, reportGrantsApi, reportsApi, shareLinksApi, workspaceApi } from '../../../services/api'
 import toast from 'react-hot-toast'
 
 /**
  * The Share dialog (redesign 7c). Pinned: who may change sharing (the author
- * or an admin), that a level change re-sends the grant, that general access is
- * the publish flag, that guest links are greyed with the server's reason, and
+ * or an admin), that a share is changed in place (never re-created, which
+ * would lose its end date and rights), that a role or a team and a removal are
+ * asked about first, that general access is the publish flag, that guest links are greyed with the server's reason, and
  * that a viewer without edit rights gets People only.
  */
 
 vi.mock('../../../services/api', () => ({
   authzApi: { decisions: vi.fn() },
   reportGrantsApi: { list: vi.fn(), create: vi.fn(), remove: vi.fn() },
-  reportsApi: { setPublished: vi.fn() },
+  reportsApi: { setPublished: vi.fn(), listedRecords: vi.fn() },
+  publishingApi: { changeGrant: vi.fn(), get: vi.fn(), releases: vi.fn(), set: vi.fn(), archive: vi.fn(), restore: vi.fn(),
+    rollback: vi.fn(), transfer: vi.fn(), requestReview: vi.fn(), decideReview: vi.fn() },
+  workspaceApi: { shareOptions: vi.fn() },
+  reviewApi: { setApproval: vi.fn() },
   shareLinksApi: { list: vi.fn(), create: vi.fn(), revoke: vi.fn() },
   embedConfigsApi: { list: vi.fn(), create: vi.fn(), setEnabled: vi.fn(), delete: vi.fn() },
 }))
@@ -30,9 +35,27 @@ beforeEach(() => {
   vi.mocked(authzApi.decisions).mockResolvedValue([{ resource: 'report', id: 7, action: 'share_link', allowed: true, reason: '' }] as never)
   vi.mocked(reportGrantsApi.list).mockResolvedValue([{ id: 5, user_id: 2, email: 'omar@x.io', level: 'view' }] as never)
   vi.mocked(shareLinksApi.list).mockResolvedValue([] as never)
+  vi.mocked(reportsApi.listedRecords).mockResolvedValue([] as never)
 })
 
 describe('ShareDashboardDialog', () => {
+  it('says which charts show single records before sharing (persona test 3.7)', async () => {
+    vi.mocked(reportsApi.listedRecords).mockResolvedValue([
+      { widget_id: 1, title: 'Top members', page: 'P', column: 'member_no', kind: 'identifier' },
+      { widget_id: 2, title: 'Contacts', page: 'P', column: 'email', kind: 'email' }] as never)
+    open()
+    const note = await screen.findByTestId('share-listed-records')
+    expect(note).toHaveTextContent('2 charts here show single records')
+    expect(note).toHaveTextContent('“Top members” has one mark per member_no (an identifier).')
+    expect(note).toHaveTextContent('“Contacts” lists email, which holds personal data.')
+  })
+
+  it('says nothing when every chart shows groups', async () => {
+    open()
+    await screen.findByTestId('share-people')
+    expect(screen.queryByTestId('share-listed-records')).not.toBeInTheDocument()
+  })
+
   it('lists the people with access, the owner first', async () => {
     open()
     const people = await screen.findByTestId('share-people')
@@ -52,19 +75,84 @@ describe('ShareDashboardDialog', () => {
     expect(await within(dialog).findByText('b@x.io')).toBeInTheDocument()
   })
 
-  it("changes a person's level by re-sending their grant", async () => {
-    vi.mocked(reportGrantsApi.create).mockResolvedValue({ id: 5, user_id: 2, email: 'omar@x.io', level: 'edit' } as never)
+  it("changes a person's level in place, keeping the share's other terms", async () => {
+    vi.mocked(publishingApi.changeGrant).mockResolvedValue({ id: 5, user_id: 2, email: 'omar@x.io', level: 'edit' } as never)
     open()
     fireEvent.change(await screen.findByLabelText('Access level for omar@x.io'), { target: { value: 'edit' } })
-    await waitFor(() => expect(reportGrantsApi.create).toHaveBeenCalledWith(7, { email: 'omar@x.io', level: 'edit' }))
+    await waitFor(() => expect(publishingApi.changeGrant).toHaveBeenCalledWith(7, 5, { level: 'edit' }))
+    expect(reportGrantsApi.create).not.toHaveBeenCalled()
   })
 
-  it('removes access', async () => {
+  it('removes access only after being asked', async () => {
     vi.mocked(reportGrantsApi.remove).mockResolvedValue(undefined as never)
     open()
     fireEvent.click(await screen.findByRole('button', { name: 'Remove access for omar@x.io' }))
+    const ask = await screen.findByRole('alertdialog')
+    expect(ask).toHaveTextContent('Remove access for omar@x.io?')
+    expect(reportGrantsApi.remove).not.toHaveBeenCalled()
+    fireEvent.click(within(ask).getByRole('button', { name: 'Remove access' }))
     await waitFor(() => expect(reportGrantsApi.remove).toHaveBeenCalledWith(7, 5))
     await waitFor(() => expect(screen.queryByText('omar@x.io')).not.toBeInTheDocument())
+  })
+
+  it('keeps access when the removal is cancelled', async () => {
+    open()
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove access for omar@x.io' }))
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    expect(reportGrantsApi.remove).not.toHaveBeenCalled()
+    expect(screen.getByText('omar@x.io')).toBeInTheDocument()
+  })
+
+  it('shares with a team only after being asked, and says who it reaches', async () => {
+    vi.mocked(workspaceApi.shareOptions).mockResolvedValue({ roles: [{ id: 3, name: 'Analyst' }],
+      org_units: [{ id: 9, name: 'North', parent_id: null, level_name: 'Region' }] } as never)
+    vi.mocked(reportGrantsApi.create).mockResolvedValue({ id: 8, kind: 'team', name: 'North', user_id: null, org_unit_id: 9, email: '', level: 'view' } as never)
+    open()
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'A team' }))
+    await within(dialog).findByRole('option', { name: 'North (Region)' })
+    fireEvent.change(within(dialog).getByLabelText('Choose a team'), { target: { value: '9' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Share' }))
+    const ask = await screen.findByRole('alertdialog')
+    expect(ask).toHaveTextContent('Share with everyone in North (Region)?')
+    expect(reportGrantsApi.create).not.toHaveBeenCalled()
+    fireEvent.click(within(ask).getByRole('button', { name: 'Share' }))
+    await waitFor(() => expect(reportGrantsApi.create).toHaveBeenCalledWith(7, { org_unit_id: 9, level: 'view' }))
+    expect(await within(screen.getByTestId('share-people')).findByText('North')).toBeInTheDocument()
+  })
+
+  it('sends an end date, no downloads, sharing on and a message only when chosen', async () => {
+    vi.mocked(reportGrantsApi.create).mockResolvedValue({ id: 6, user_id: 3, email: 'b@x.io', level: 'view', can_export: false, can_share: true,
+      expires_at: '2030-01-31T23:59:59Z' } as never)
+    open()
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('Email to share with'), { target: { value: 'b@x.io' } })
+    fireEvent.change(within(dialog).getByLabelText('Access level'), { target: { value: 'view' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'More options' }))
+    fireEvent.change(within(dialog).getByLabelText(/Access ends on/), { target: { value: '2030-01-31' } })
+    fireEvent.click(within(dialog).getByLabelText('May download and export'))
+    fireEvent.click(within(dialog).getByLabelText('May share it with other people (view only)'))
+    fireEvent.change(within(dialog).getByLabelText('Message (optional)'), { target: { value: 'For the review' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Invite' }))
+    await waitFor(() => expect(reportGrantsApi.create).toHaveBeenCalled())
+    const body = vi.mocked(reportGrantsApi.create).mock.calls[0][1]
+    expect(body).toMatchObject({ email: 'b@x.io', level: 'view', can_export: false, can_share: true, message: 'For the review' })
+    expect(new Date(body.expires_at as string).getFullYear()).toBe(2030)
+    const people = within(dialog).getByTestId('share-people')
+    expect(people).toHaveTextContent('No downloads')
+    expect(people).toHaveTextContent('May share')
+  })
+
+  it('shows a share that has ended as giving no access, and changes one in place', async () => {
+    vi.mocked(reportGrantsApi.list).mockResolvedValue([{ id: 5, user_id: 2, email: 'omar@x.io', level: 'view',
+      expires_at: '2020-01-01T00:00:00Z', expired: true, can_export: true }] as never)
+    vi.mocked(publishingApi.changeGrant).mockResolvedValue({ id: 5, user_id: 2, email: 'omar@x.io', level: 'view', can_export: false } as never)
+    open()
+    expect(await screen.findByText(/no access now/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Options for omar@x.io' }))
+    fireEvent.click(screen.getAllByLabelText('May download and export')[0])
+    await waitFor(() => expect(publishingApi.changeGrant).toHaveBeenCalledWith(7, 5, { can_export: false }))
   })
 
   it('general access is the publish flag', async () => {
@@ -109,7 +197,8 @@ describe('ShareDashboardDialog', () => {
   it('without edit rights: People only, no link, guest links, embed or schedule', async () => {
     open({ canEdit: false })
     await screen.findByTestId('share-people')
-    expect(screen.queryByRole('tab')).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'Embed' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'Schedule' })).not.toBeInTheDocument()
     expect(screen.queryByTestId('guest-links')).not.toBeInTheDocument()
     expect(authzApi.decisions).not.toHaveBeenCalled()
   })

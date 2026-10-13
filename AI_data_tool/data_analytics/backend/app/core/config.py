@@ -136,6 +136,8 @@ class Settings(BaseSettings):
     setup_dashboard_richness: Literal["basic", "balanced", "rich"] = "balanced"
     # Analyses (guided-setup runs) one connection may hold before one must be removed.
     setup_max_analyses: int = Field(default=60, ge=1)
+    setup_ai_rule_auto_share: float = Field(default=0.01, ge=0, le=1)
+    min_group_rows: int = Field(default=30, ge=0)
     # What each numeric column of a dataset IS (an amount to add up, a level to
     # average, a code...) is asked of the model ONCE per dataset and kept in
     # its column settings (services/column_classes.py). That is what lets the
@@ -310,6 +312,11 @@ class Settings(BaseSettings):
     #: offered, one of each (services/suggest_variety.catalogue_suggestions).
     #: 0 = only the ideas with a finding or a basic behind them.
     suggest_more_types: int = Field(default=12, ge=0, le=40)
+    #: Guest links: a URL that shows a dashboard to anyone who holds it, with
+    #: no sign-in (routers/shared.py). OFF unless an administrator turns it
+    #: on: an anonymous door into data is a policy decision, not a default.
+    #: While off no link can be made and none that exists opens.
+    guest_links_enabled: bool = False
     #: How many rows an ANALYSIS pulls from a live source. Between the two
     #: caps either side of it: the widget cap (10,000) sizes a scatter plot,
     #: the import cap sizes a file on disk. Statistics over 10,000 rows of a

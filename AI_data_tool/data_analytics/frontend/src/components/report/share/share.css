@@ -156,3 +156,29 @@
 /* Revoked and expired guest links, folded (QA2 Visual 9). */
 .shx-more { border: 0; background: none; padding: 4px 0; font: inherit; font-size: 12.5px; color: var(--mc-accent-ink); cursor: pointer; }
 .shx-more:hover { text-decoration: underline; }
+
+/* ── Sharing options and the Publishing tab ───────────────────── */
+.shx-lk { background: none; border: 0; padding: 0; margin-top: 10px; font: inherit; font-size: 13px; color: var(--mc-accent-ink); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.shx-lk:hover { text-decoration: underline; }
+.shx-more { display: flex; flex-direction: column; gap: 10px; margin: 8px 0 4px; padding: 12px 14px; border-radius: 12px; background: var(--bg); border: 1px solid var(--border); }
+.shx-fld { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.shx-fld > span { font-weight: 600; }
+.shx-fld small { font-size: 12px; color: var(--muted); }
+.shx-fld .shx-in { flex: none; height: 36px; }
+.shx-late { color: var(--danger) !important; }
+[data-expired="true"] .shx-av { opacity: .45; }
+.shx-pill { display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 999px; font-size: 12px; font-weight: 700; background: var(--surface2); color: var(--muted); }
+.shx-pill[data-state="published"], .shx-pill[data-state="approved"] { background: var(--mc-success-soft); color: var(--success); }
+.shx-pill[data-state="archived"], .shx-pill[data-state="rejected"] { background: var(--mc-danger-soft); color: var(--danger); }
+.shx-pill[data-state="requested"] { background: var(--mc-warning-soft); color: var(--text); }
+.shx-st { display: flex; align-items: flex-start; gap: 12px; }
+.shx-st .tx { flex: 1; min-width: 0; font-size: 13px; color: var(--muted); line-height: 1.5; }
+.shx-st .tx p { margin: 0; }
+.shx-acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+.shx-acts .btn { height: 34px; }
+
+/* Charts that list single records, said before sharing (persona test 3.7). */
+.shx-listed { display: flex; gap: 8px; align-items: flex-start; margin: 0 0 12px; padding: 8px 10px;
+  border: 1px solid var(--warning, #d97706); border-radius: 8px; background: var(--surface2); font-size: 12.5px; }
+.shx-listed p { margin: 0 0 4px; }
+.shx-listed ul { margin: 0; padding-inline-start: 18px; }

@@ -61,9 +61,10 @@ describe('Guided setup — Dashboard', () => {
     vi.mocked(buildPages).mockResolvedValue(901)
     vi.mocked(setupApi.designsUsed).mockResolvedValue({} as never)
     renderStep()
-    // The first suggestion starts ticked; the person adds the third.
+    // Every suggestion starts ticked (persona test, plan 2.8); the person leaves one out.
     expect(await screen.findByRole('checkbox', { name: 'Use “Overview” as a page' })).toBeChecked()
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Use “The records” as a page' }))
+    expect(screen.getByRole('checkbox', { name: 'Use “The records” as a page' })).toBeChecked()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Use “Over time” as a page' }))
     expect(screen.getByText('One dashboard with 2 pages.')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Create my dashboard (2 pages)' }))
     expect(await screen.findByText('builder')).toBeInTheDocument()
@@ -79,7 +80,9 @@ describe('Guided setup — Dashboard', () => {
   it('needs at least one page', async () => {
     vi.mocked(setupApi.dashboard).mockResolvedValue(step())
     renderStep()
-    fireEvent.click(await screen.findByRole('checkbox', { name: 'Use “Overview” as a page' }))
+    for (const name of ['Overview', 'Over time', 'The records']) {
+      fireEvent.click(await screen.findByRole('checkbox', { name: `Use “${name}” as a page` }))
+    }
     expect(screen.getByText('Tick at least one page.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Create my dashboard/ })).toBeDisabled()
   })

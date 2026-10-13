@@ -125,6 +125,13 @@ def _run_payload(run: AgentRun, steps: list[AgentStep]) -> dict:
     # conversation reopened later is traced exactly as it was when asked.
     evidence = (trace_claims(run.answer, run.question, results, sql)
                 if run.status == "ok" and run.intent != "chat" else None)
+    if evidence and evidence.get("untraced"):
+        from ..services.agent.evidence import set_aside_untraced
+        checked, aside = set_aside_untraced(run.answer or "", evidence)
+        if aside:
+            # The answer shown is the checked part; its numbers traced afresh.
+            evidence = {**trace_claims(checked, run.question, results, sql),
+                        "text": checked, "set_aside": aside}
     return {"results": results,
             "sql": sql,
             "presentation": run.presentation,

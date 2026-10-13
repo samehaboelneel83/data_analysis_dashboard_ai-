@@ -346,6 +346,51 @@ def few_valued(facts: list[dict]) -> list[dict]:
     return out
 
 
+#: Names of a position or sequence within something (the 2nd item of an
+#: order, the 3rd payment): numbered, never added up. Structure words only.
+_SEQUENCE_NAME = re.compile(r"(^|_)(seq|sequence|sequential|position|pos|index|idx|line_no|item_no|rank_no)(_|$)"
+                            r"|(^|_)(item|line)_id$", re.I)
+
+
+#: An end date this far ahead means "still open": the row is a period.
+OPEN_END_YEAR = 9000
+
+
+def holds_periods(table: dict) -> bool:
+    """Whether a table's rows are periods: one of its date columns runs to a
+    far-future date that stands for "not ended yet"."""
+    for c in table.get("_columns") or []:
+        if c.dtype not in ("date", "datetime", "timestamp"):
+            continue
+        s = (table.get("_stats") or {}).get(c.id)
+        hi = str(getattr(s, "max_value", "") or "")
+        if hi[:4].isdigit() and int(hi[:4]) >= OPEN_END_YEAR:
+            return True
+    return False
+
+
+def never_calculated(column: str, stats=None) -> str | None:
+    """Why a numeric column is a code whatever else was said, or None.
+    Persona test 2026-10-12: "Add up: order item id, payment sequential" and
+    "Average: latitude, longitude" on a marketplace's first page."""
+    from ..column_classes import geo_level
+    from ..semantic_guard import is_identifier
+    if is_identifier(column):
+        return "an identifier"
+    if _SEQUENCE_NAME.search(column):
+        return "a position in a sequence"
+    if geo_level(column) in ("latitude", "longitude"):
+        return "a coordinate"
+    lo, hi = getattr(stats, "min_value", None), getattr(stats, "max_value", None)
+    try:
+        lo, hi = float(lo), float(hi)
+    except (TypeError, ValueError):
+        return None
+    if 1800 <= lo <= hi <= 2200 and lo == int(lo) and hi == int(hi):
+        return "a year"
+    return None
+
+
 def plain_number(column: str) -> dict:
     """What a numeric column is, from its name alone: the fallback when no
     model may read the connection."""
@@ -461,11 +506,22 @@ async def build(db: AsyncSession, user: User, source: DataSource, client) -> lis
                     "source": "measured" if f["boolean"] else "ai",
                     "body": {"table": f["table"], "column": f["column"], "boolean": f["boolean"],
                              "values": f["values"]}})
+    stats_of = {(t["name"], c.name): t["_stats"].get(c.id) for t in tables.values() for c in t["_columns"]}
     for table, column in sorted(numeric):
         n = numbers.get((table, column))
         body = ({"kind": n["kind"], "unit": str(n.get("unit") or "")[:12],
                  "direction": n.get("direction") if n.get("direction") in DIRECTIONS else "neither"}
                 if n and n.get("kind") in NUMBER_KINDS else plain_number(column))
+        if body.get("kind") == "amount" and holds_periods(tables[table]):
+            # A row valid "until further notice" (an end date like 9999-01-01)
+            # holds a value OVER a period: adding rows up adds every period a
+            # person or thing was in (persona test 2026-10-12: salary history).
+            body = {**body, "kind": "level", "why": "a value held over a period"}
+            n = None
+        forced = never_calculated(column, stats_of.get((table, column)))
+        if forced and body.get("kind") != "code":
+            body = {**body, "kind": "code", "unit": "", "direction": "neither", "why": forced}
+            n = None                                  # measured, whatever the model said
         out.append({"kind": "number", "subject": f"{table}.{column}", "source": "ai" if n else "measured",
                     "body": {"table": table, "column": column, **body}})
     return out

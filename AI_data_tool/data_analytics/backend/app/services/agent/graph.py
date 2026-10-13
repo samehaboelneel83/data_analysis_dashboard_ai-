@@ -209,6 +209,14 @@ async def run_agent(db, *, question: str, source: DataSource | None = None,
                 continue
             frame = await asyncio.to_thread(analytics.load_file, ds.filename)
             frame = widget_data.apply_rls_filter(frame, expr)
+            # The dataset's Prepare steps, as every chart on it reads them:
+            # Ask AI answered from the raw rows (36.23) beside a dashboard
+            # drawn from the cleaned ones (37.60) -- persona test 2026-10-12.
+            from ..prep import apply_prep_steps, prep_steps_of, resolve_join_frames
+            steps = prep_steps_of(ds)
+            if steps:
+                aux = await resolve_join_frames(db, user, steps)
+                frame = await asyncio.to_thread(apply_prep_steps, frame, steps, aux)
             if denied_here:
                 present = [c for c in frame.columns
                            if c.casefold() in {x.casefold() for x in denied_here}]
@@ -492,6 +500,13 @@ async def run_agent(db, *, question: str, source: DataSource | None = None,
                        # step reworded as "total ROUNDED_VOLUME per service" names
                        # the very column the question never asked for.
                        or measure_fit(effective_question, sql, context.family))
+            if failure is not None and failure.rung == "V7" and attempt == MAX_ATTEMPTS - 1:
+                # V7 is a hint about wording, not a safety rule: when every
+                # repair still adds up a column, that query is answered rather
+                # than refused (persona test 2026-10-12: "when is our busiest
+                # season" on a monthly summary, where COUNT(*) counts months).
+                failures.append({"rung": failure.rung, "detail": failure.detail})
+                failure = None
             if failure is not None:
                 failures.append({"rung": failure.rung, "detail": failure.detail})
                 feedback = f"{failure.rung}: {failure.detail}"

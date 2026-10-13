@@ -212,6 +212,8 @@ export interface DatasetColumn {
    *  when not yet classified. Used by the codeless RLS rule builder to pre-suggest
    *  user/owner columns. */
   semantic_type?: string | null
+  /** The personal-data type (email, person_name, national_id ...), or null: the "personal data" mark. */
+  personal?: string | null
 }
 
 export interface CalcColumnFormat {
@@ -423,6 +425,10 @@ export const dataflowsApi = {
     api.put<{ grants: DataflowGrant[] }>(`/dataflows/${id}/capabilities`,
                                          { grants }).then(r => r.data),
 }
+
+/** A chart that lists single records, by the column that names each one.
+ *  `kind`: 'identifier', or a personal-data type (email, person_name, national_id ...). */
+export interface ListedRecords { widget_id: number; title: string; page: string | null; column: string; kind: string }
 
 export interface ProfiledColumn {
   name: string
@@ -1351,9 +1357,103 @@ export const subscriptionApi = {
 
 export interface ReportGrant {
   id: number
-  user_id: number
+  /** Who the share names: a person, a role or a team. `name` is their email or its name. */
+  kind?: 'user' | 'role' | 'team'
+  name?: string
+  user_id: number | null
+  role_id?: number | null
+  org_unit_id?: number | null
   email: string
   level: 'view' | 'edit' | 'data'
+  expires_at?: string | null
+  expired?: boolean
+  can_export?: boolean
+  can_share?: boolean
+}
+
+/** What a share can say beyond its level (backend routers/publishing.GrantIn). */
+export interface GrantBody {
+  email?: string
+  role_id?: number
+  org_unit_id?: number
+  level: 'view' | 'edit' | 'data'
+  expires_at?: string | null
+  can_export?: boolean
+  can_share?: boolean
+  message?: string
+}
+
+/** What the person asking may do with one dashboard, action by action. The
+ *  server decides each again when asked to do it. */
+export interface ReportAccess {
+  level: 'view' | 'edit' | 'data'
+  view: boolean; interact: boolean; drill: boolean
+  export: boolean; export_refusal: string | null
+  share: boolean; edit: boolean; publish: boolean; administer: boolean; is_owner: boolean
+  via: 'admin' | 'owner' | 'user' | 'role' | 'team' | 'published'
+  expires_at: string | null
+}
+
+export interface ReleaseSummary { id: number; revision: number; reason: string; note: string | null; released_by: number | null; released_at: string | null }
+
+export interface Publication {
+  state: 'draft' | 'published' | 'archived'
+  category: string | null
+  tags: string[]
+  owner: string | null
+  published_at: string | null
+  published_by: string | null
+  updated_at: string | null
+  archived_at: string | null
+  viewers_may_export: boolean
+  release: ReleaseSummary | null
+  unreleased_changes?: boolean
+  review: { required: boolean; state: 'none' | 'requested' | 'approved' | 'rejected'; current: boolean
+            note: string | null; requested_by: string | null; decided_by: string | null }
+  /** Only for the owner: what unpublishing or archiving would touch. */
+  depends?: { shares: number; links: number; schedules: number }
+}
+
+/** Publishing a dashboard: its details, its state, its releases, its owner. */
+export const publishingApi = {
+  access: (id: number) => api.get<ReportAccess>(`/reports/${id}/access`).then(r => r.data),
+  get: (id: number) => api.get<Publication>(`/reports/${id}/publication`).then(r => r.data),
+  set: (id: number, body: { category?: string | null; tags?: string[]; viewers_may_export?: boolean }) =>
+    api.patch<{ category: string | null; tags: string[]; viewers_may_export: boolean }>(`/reports/${id}/publication`, body).then(r => r.data),
+  archive: (id: number) => api.post<{ state: string }>(`/reports/${id}/archive`).then(r => r.data),
+  restore: (id: number) => api.post<{ state: string }>(`/reports/${id}/restore`).then(r => r.data),
+  releases: (id: number) => api.get<ReleaseSummary[]>(`/reports/${id}/releases`).then(r => r.data),
+  rollback: (id: number, releaseId: number) =>
+    api.post<{ release: ReleaseSummary; unreleased_changes: boolean }>(`/reports/${id}/releases/${releaseId}/rollback`).then(r => r.data),
+  transfer: (id: number, email: string) => api.post<{ owner: string }>(`/reports/${id}/owner`, { email }).then(r => r.data),
+  requestReview: (id: number, note?: string) => api.post<{ state: string }>(`/reports/${id}/review/request`, { note }).then(r => r.data),
+  decideReview: (id: number, approve: boolean, note?: string) =>
+    api.post<{ state: string }>(`/reports/${id}/review/decision`, { approve, note }).then(r => r.data),
+  changeGrant: (id: number, grantId: number, body: { level?: string; expires_at?: string; clear_expiry?: boolean; can_export?: boolean; can_share?: boolean }) =>
+    api.patch<ReportGrant>(`/reports/${id}/grants/${grantId}`, body).then(r => r.data),
+}
+
+export interface CatalogItem {
+  id: number; name: string; description: string | null; category: string | null; tags: string[]
+  owner: string | null; is_mine: boolean; level: 'view' | 'edit' | 'data'
+  state: 'draft' | 'published' | 'archived'
+  published_at: string | null; updated_at: string | null; data_as_of: string | null
+  favorite: boolean; last_viewed: string | null; can_export: boolean
+  via: 'owner' | 'user' | 'role' | 'team' | 'folder' | 'published'
+}
+export type CatalogSection = 'all' | 'mine' | 'shared' | 'team' | 'favorites' | 'recent' | 'archived'
+export interface Catalog { items: CatalogItem[]; total: number; limit: number; offset: number; counts: Record<CatalogSection, number> }
+export interface Facet { value: string; count: number }
+export interface PortalDelivery { id: number; report_id: number; report: string; status: string; at: string | null; error: string | null; format: string }
+
+/** The reader's portal: what they may open, found and kept at hand. */
+export const portalApi = {
+  catalog: (q: { section?: CatalogSection; q?: string; category?: string; tag?: string; owner?: string; limit?: number; offset?: number }) =>
+    api.get<Catalog>('/portal/catalog', { params: q }).then(r => r.data),
+  facets: () => api.get<{ categories: Facet[]; tags: Facet[]; owners: Facet[] }>('/portal/facets').then(r => r.data),
+  favorite: (id: number, on: boolean) =>
+    (on ? api.put(`/portal/favorites/${id}`) : api.delete(`/portal/favorites/${id}`)).then(() => undefined),
+  deliveries: () => api.get<PortalDelivery[]>('/portal/deliveries').then(r => r.data),
 }
 
 /** "Share to": per-user grants on one authored dashboard. Distinct from
@@ -1364,7 +1464,7 @@ export interface ReportGrant {
 export const reportGrantsApi = {
   list: (reportId: number) =>
     api.get<ReportGrant[]>(`/reports/${reportId}/grants`).then(r => r.data),
-  create: (reportId: number, body: { email: string; level: 'view' | 'edit' | 'data' }) =>
+  create: (reportId: number, body: GrantBody) =>
     api.post<ReportGrant>(`/reports/${reportId}/grants`, body).then(r => r.data),
   remove: (reportId: number, grantId: number) =>
     api.delete(`/reports/${reportId}/grants/${grantId}`).then(() => undefined),
@@ -1464,6 +1564,10 @@ export const reportsApi = {
   // GET /reports/{id} does.
   getRevision: (id: number) =>
     api.get<{ revision: number }>(`/reports/${id}/revision`).then(r => r.data.revision),
+  /** Charts that list single records (one mark per person, account or item):
+   *  the share screen asks the person to check before sharing (persona test 3.7). */
+  listedRecords: (id: number) =>
+    api.get<{ items: ListedRecords[] }>(`/reports/${id}/listed-records`).then(r => r.data.items),
   /** Sensitivity labels: the current label + the allowed set. */
   getClassification: (id: number) =>
     api.get<{ label: string | null; options: string[]
@@ -2234,7 +2338,9 @@ export const reviewApi = {
     api.get<{ findings: { message: string; widget_id: number; page_id: number; category: string }[]; publish_gate: boolean }>(
       `/reports/${reportId}/review`).then(r => r.data),
   evaluate: (reportId: number) => api.post<PerfEvaluation>(`/reports/${reportId}/evaluate-performance`).then(r => r.data),
-  settings: () => api.get<{ publish_gate: boolean }>('/review-settings').then(r => r.data),
+  settings: () => api.get<{ publish_gate: boolean; require_approval?: boolean }>('/review-settings').then(r => r.data),
+  /** Whether nothing is published or updated without an administrator's approval (admins only). */
+  setApproval: (on: boolean) => api.put<{ publish_gate: boolean; require_approval: boolean }>('/review-settings', { require_approval: on }).then(r => r.data),
   setGate: (on: boolean) => api.put<{ publish_gate: boolean }>('/review-settings', { publish_gate: on }).then(r => r.data),
 }
 
@@ -3581,6 +3687,11 @@ export interface EvidenceClaim {
 export interface AnswerEvidence {
   claims: EvidenceClaim[]
   untraced: number
+  /** The answer with the sentences whose numbers are in no result row taken
+   *  out (the claims count over THIS text); absent when nothing was set aside. */
+  text?: string
+  /** Those sentences, shown under the details. */
+  set_aside?: string[]
 }
 
 /** Set on a run that only re-shows an earlier result ("as a bar chart"). */
@@ -3917,7 +4028,8 @@ export interface SetupBrief {
 
 export interface SetupJourney {
   id: number
-  source: { id: number; name: string; type: string }
+  /** `health`: the connection's last test (kept with it), when one was run. */
+  source: { id: number; name: string; type: string; health?: { ok: boolean; at: string; error: string | null } | null }
   step: SetupStep
   /** 1-based step on the progress bar; `total` is always 4. */
   position: number
@@ -3948,7 +4060,8 @@ export interface SetupScope {
   dataset_id: number
   said: string
   column: string | null
-  op: 'in' | 'gt' | 'gte' | 'lt' | 'lte'
+  /** between: values = [first, last], both included. */
+  op: 'in' | 'gt' | 'gte' | 'lt' | 'lte' | 'between'
   values: (string | number)[]
   matched_rows: number
   of_rows: number
@@ -3965,7 +4078,8 @@ export interface SetupDemand {
   sentence: string
   who: string
   subject: string
-  questions: { id: string; text: string }[]
+  /** `asked`: the person asked it (else the setup added it); `wants`: the kind of number its answer rests on. */
+  questions: { id: string; text: string; asked?: boolean; wants?: string }[]
   exclude: string[]
   scope: SetupScope[]
   source: 'ai' | 'plain' | null
@@ -4025,7 +4139,7 @@ export interface SetupSummary {
   ai?: { used: boolean; pending: boolean; reason: 'off' | 'unavailable' | 'failed' | null }
   overview?: string | null
   overview_source?: 'you' | 'ai' | null
-  totals?: { tables: number; views: number; rows: number; date_from: string | null
+  totals?: { tables: number; views: number; rows: number; rows_known?: boolean; date_from: string | null
              date_to: string | null; dates_exact: boolean }
   tables?: SetupTable[]
   relationships?: { from_table: string; to_table: string }[]
@@ -4055,6 +4169,8 @@ export interface SetupProposal {
   history: { role: 'user' | 'assistant'; text: string }[]
   /** Events without their base: this dataset can count them but not compare groups fairly. */
   counts_only?: { events: string; base: string }[]
+  /** Join checks run on the source: rows of the main table repeated, LEFT JOIN rows with no match. */
+  joins?: { repeats: { table: string; rows: number; distinct: number } | null; unmatched: { table: string; share: number }[] }
   /** Set while a change asked in the chat is being made. */
   refining?: string
   /** Why the last change could not be made ('off' | 'failed' | 'unusable'). */
@@ -4062,13 +4178,21 @@ export interface SetupProposal {
 }
 
 export interface SetupDatasetsStep {
-  proposals: { pending: boolean; failed: string | null; items: SetupProposal[]; language: string | null; asked: boolean }
+  proposals: { pending: boolean; failed: string | null; items: SetupProposal[]; language: string | null; asked: boolean
+               /** When the running step started (server UTC). */
+               since?: string | null }
   brief: SetupBrief
-  existing: { id: number; name: string; rows: number | null; mode: string | null }[]
+  /** `used`: dashboards reading it; `mine`: made by this person. Listed in use first,
+   *  then own; unused ones made by others come last and are folded away. */
+  existing: { id: number; name: string; rows: number | null; mode: string | null; used?: number; mine?: boolean }[]
   chosen: number[]
   can_create: boolean
   allow_ai: boolean
+  /** Median seconds each AI step took over recent analyses ("proposals", "check", "designs"). */
+  usual?: SetupUsualWaits
 }
+
+export type SetupUsualWaits = Partial<Record<'proposals' | 'check' | 'designs', number>>
 
 export interface SetupCreateResult {
   items: { proposal_id: string; name: string; job_id: number | null; dataset_id: number | null; error: string | null }[]
@@ -4099,6 +4223,7 @@ export interface SetupFindings {
   language: string | null
   checked: boolean
   cleaning?: SetupCleaning
+  since?: string | null
 }
 
 export interface SetupCheckStep {
@@ -4106,6 +4231,7 @@ export interface SetupCheckStep {
               /** True when the setup made this dataset, so it cleans it by itself. */
               auto_clean?: boolean; findings: SetupFindings }[]
   demand?: SetupDemand
+  usual?: SetupUsualWaits
 }
 
 /** A drawn chart in miniature: a few numbers, bars, a line, parts of a whole, or rows. */
@@ -4152,10 +4278,11 @@ export interface SetupDesign {
 export interface SetupDashboardStep {
   designs: { pending: boolean; failed: string | null; items: SetupDesign[]; asked: boolean; report_id: number | null
              /** Designs already made into pages of this analysis's dashboard. */
-             used?: string[]; language?: string | null }
+             used?: string[]; language?: string | null; since?: string | null }
   has_data: boolean
   datasets: { id: number; name: string }[]
   demand?: SetupDemand
+  usual?: SetupUsualWaits
 }
 
 export interface DataChangeOptions {

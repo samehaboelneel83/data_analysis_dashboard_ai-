@@ -13,6 +13,7 @@ const STATIC_PAGES: Entry[] = [
   { kind: 'page', label: 'Ask AI', hint: 'page', to: '/ask', labelKey: 'nav.askAi', hintKey: 'palette.page' },  // i18n-ok: the English name a search matches; shown through labelKey
   { kind: 'page', label: 'Upload', hint: 'page', to: '/upload', labelKey: 'nav.upload', hintKey: 'palette.page' },  // i18n-ok: the English name a search matches; shown through labelKey
   { kind: 'page', label: 'Dashboards', hint: 'page', to: '/reports', labelKey: 'nav.dashboards', hintKey: 'palette.page' },  // i18n-ok: the English name a search matches; shown through labelKey
+  { kind: 'page', label: 'My dashboards', hint: 'page', to: '/portal', labelKey: 'pub.nav', hintKey: 'palette.page' },  // i18n-ok: the English name a search matches; shown through labelKey
   { kind: 'page', label: 'Templates', hint: 'page', to: '/templates', labelKey: 'tpl.nav', hintKey: 'palette.page' },  // i18n-ok: the English name a search matches; shown through labelKey
   { kind: 'page', label: 'Insights', hint: 'page', to: '/insights', labelKey: 'nav.insights', hintKey: 'palette.page' },  // i18n-ok: the English name a search matches; shown through labelKey
   { kind: 'page', label: 'Connections', hint: 'page', to: '/connections', labelKey: 'nav.connections', hintKey: 'palette.page' },  // i18n-ok: the English name a search matches; shown through labelKey

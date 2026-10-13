@@ -2,7 +2,7 @@ import { useId } from 'react'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Brush, LabelList } from 'recharts'
 import { TT, fmtStr, COLORS } from '../chartUtils'
 import type { ChartRendererProps } from './types'
-import { xAxisProps, yAxisProps, gridProps, labelListProps, legendProps, chartMargin } from './axisOptions'
+import { xAxisProps, yAxisProps, gridProps, labelListProps, legendProps, chartMargin, valueTick } from './axisOptions'
 import { useChartViewport } from './useChartViewport'
 import { seriesName } from './axisOptions'
 import { toBarSeries } from './barSeries'
@@ -31,7 +31,7 @@ export default function AreaChartRenderer({ rows, data, cfg, rtl, broadcasts, on
       >
         {grid && <CartesianGrid {...grid} />}
         <XAxis dataKey="name" {...xAxisProps(cfg, rtl, view.visible.map((r: any) => String(r.name)), plotW)} />
-        <YAxis {...yAxisProps(cfg, rtl, measureFmt, values, undefined, { height: plotH })} tickFormatter={v => fmtStr(v, measureFmt)} />
+        <YAxis {...yAxisProps(cfg, rtl, measureFmt, values, undefined, { height: plotH })} tickFormatter={valueTick(cfg, measureFmt)} />
         <Tooltip contentStyle={TT} formatter={(v: unknown, name: unknown) =>
           [fmtStr(v, measureFmt), multi ? String(name ?? '') : seriesName(cfg)]} />
         {legend && <Legend {...legend} wrapperStyle={{ fontSize: 10 }} />}

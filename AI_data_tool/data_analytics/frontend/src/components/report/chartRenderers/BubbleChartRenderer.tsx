@@ -1,7 +1,7 @@
 import { ScatterChart, Scatter, ZAxis, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Cell, Line, ResponsiveContainer, LabelList } from 'recharts'
 import { COLORS, TT, fmtStr } from '../chartUtils'
 import type { ChartRendererProps } from './types'
-import { axisTitles, xAxisProps, yAxisProps, gridProps, legendProps, labelListProps, chartMargin } from './axisOptions'
+import { axisTitles, xAxisProps, yAxisProps, gridProps, legendProps, labelListProps, chartMargin, valueTick } from './axisOptions'
 
 // v1 simplification: when a numeric `color` role is set (no `group`), interpolate a single
 // accent-to-warning color ramp by normalized value. No gradient legend is rendered yet.
@@ -60,10 +60,10 @@ export default function BubbleChartRenderer({ rows, data, cfg, rtl, broadcasts, 
         {/* Both axes are measures compared with EACH OTHER, not with zero:
             salaries of 57K-81K on a 0-100K axis crowded seven bubbles into one
             corner (HR re-test 2026-10-02). The builders' own domain still wins. */}
-        <XAxis type="number" dataKey="x" name="x" domain={['auto', 'auto']} {...xAxisProps(cfg, rtl, undefined, undefined, { title: cfg.x_axis_label ?? titles.measure })} tickFormatter={v => fmtStr(v, measureFmt)} />
+        <XAxis type="number" dataKey="x" name="x" domain={['auto', 'auto']} {...xAxisProps(cfg, rtl, undefined, undefined, { title: cfg.x_axis_label ?? titles.measure })} tickFormatter={valueTick(cfg, measureFmt)} />
         {/* allowDecimals forced true after the spread: this axis never set it before, so
             Recharts' own default (true) applied, unlike the builder's false default. */}
-        <YAxis type="number" dataKey="y" name="y" {...yAxisProps(cfg, rtl, measure2Fmt, rows.map((r: any) => r.y), undefined, { height: plotH, title: cfg.y_axis_label ?? titles.measure2 })} allowDecimals tickFormatter={v => fmtStr(v, measure2Fmt)} />
+        <YAxis type="number" dataKey="y" name="y" {...yAxisProps(cfg, rtl, measure2Fmt, rows.map((r: any) => r.y), undefined, { height: plotH, title: cfg.y_axis_label ?? titles.measure2 })} allowDecimals tickFormatter={valueTick(cfg, measure2Fmt)} />
         <ZAxis type="number" dataKey="size" range={[60, 600]} />
         <Tooltip contentStyle={TT} cursor={{ strokeDasharray: '3 3' }}
           formatter={(v: unknown, name: string) => [name === 'x' ? fmtStr(v, measureFmt) : name === 'y' ? fmtStr(v, measure2Fmt) : String(v), name]} />

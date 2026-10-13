@@ -9,6 +9,8 @@ this person's charts are actually built from.
 """
 from __future__ import annotations
 
+import re
+
 import pandas as pd
 
 #: Share of a text column's values that parse as numbers for it to count as
@@ -63,6 +65,39 @@ def _placeholder(s: pd.Series, column: str, column_meta: dict | None = None) -> 
     return None
 
 
+#: Rows read when looking for the column that names a code.
+LABEL_SAMPLE_ROWS = 50_000
+_UNKNOWN_WORDS = re.compile(r"\b(unknown|null|n/?a|none|not known|missing|غير معروف)\b", re.I)
+
+
+def label_of(df: pd.DataFrame, column: str, value) -> str | None:
+    """The name another column gives this code, when one text column names
+    every code of `column` with exactly one label. Persona test 2026-10-12: a
+    trips table held payment code 0 beside the label "Flex fare trip" (4.7% of
+    rows), and 0 was removed as "a code for unknown"."""
+    sample = df.head(LABEL_SAMPLE_ROWS)
+    codes = sample[column]
+    hit = codes == value
+    if not bool(hit.any()):
+        return None
+    for other in sample.columns:
+        if other == column:
+            continue
+        s = sample[other]
+        if pd.api.types.is_numeric_dtype(s) or s.dtype == bool:
+            continue
+        pairs = pd.DataFrame({"c": codes, "l": s}).dropna()
+        if pairs.empty or pairs["c"].nunique() < 2 or pairs["l"].nunique() < 2:
+            continue
+        # A lookup's name: one label per code AND one code per label.
+        if int(pairs.groupby("c")["l"].nunique().max()) != 1 or int(pairs.groupby("l")["c"].nunique().max()) != 1:
+            continue
+        labels = pairs.loc[pairs["c"] == value, "l"]
+        if len(labels) >= 0.9 * int(hit.sum()):
+            return str(labels.iloc[0])
+    return None
+
+
 def _column(df: pd.DataFrame, c: str, column_meta: dict | None = None) -> dict:
     s = df[c]
     rows = len(df)
@@ -73,6 +108,11 @@ def _column(df: pd.DataFrame, c: str, column_meta: dict | None = None) -> dict:
     if rows > 1 and distinct <= 1:
         issues.append("constant" if distinct == 1 else "empty")
     placeholder = _placeholder(s, c, column_meta)
+    if placeholder and not isinstance(placeholder[0], str):
+        # A code another column names is a real value unless its name says unknown.
+        label = label_of(df, c, placeholder[0])
+        if label is not None and label.strip() and not _UNKNOWN_WORDS.search(label):
+            placeholder = None
     if placeholder:
         value, n = placeholder
         shown = f'"{value}"' if isinstance(value, str) else str(value)

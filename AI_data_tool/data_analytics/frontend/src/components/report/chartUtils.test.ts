@@ -199,3 +199,16 @@ describe('display units', () => {
     expect(fmtStr(42, { type: 'percent', decimals: 0, scale: 'thousands' })).toContain('42')
   })
 })
+
+describe('one series, one colour (persona test 3.5)', () => {
+  it('gives every bar of one measure the first colour, but keeps a rule fill', () => {
+    const getFill = getFillFactory(false, null, [null, { fill: '#f87171' }, null], true)
+    expect(getFill('a', 0).fill).toBe(COLORS[0])
+    expect(getFill('b', 1).fill).toBe('#f87171')
+    expect(getFill('c', 2).fill).toBe(COLORS[0])
+  })
+  it('parts of a whole keep a colour each', () => {
+    const getFill = getFillFactory(false, null)
+    expect(getFill('b', 1).fill).toBe(COLORS[1])
+  })
+})

@@ -3,7 +3,7 @@ import { rich } from '../../../i18n/pages/modelsMaps'
 import { ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 import { TT, fmtStr, seriesColor } from '../chartUtils'
 import type { ChartRendererProps } from './types'
-import { gridProps, xAxisProps, yAxisProps, chartMargin } from './axisOptions'
+import { gridProps, xAxisProps, yAxisProps, chartMargin, valueTick } from './axisOptions'
 
 /**
  * History as a solid line, forecast as a dashed one, the 95% interval as a band.
@@ -62,7 +62,7 @@ export default function ForecastChartRenderer({ data, cfg, rtl, measureFmt, plot
       <ComposedChart data={joined} margin={chartMargin(rtl, { top: 4, right: 8, bottom: 20, left: 0 })}>
         {grid && <CartesianGrid {...grid} />}
         <XAxis dataKey="name" {...xAxisProps(cfg, rtl, joined.map((d: any) => String(d.name)), plotW)} />
-        <YAxis {...yAxisProps(cfg, rtl, measureFmt, [...history.map(r => r.value), ...forecast.map(f => f.hi)], undefined, { height: plotH })} tickFormatter={v => fmtStr(v, measureFmt)} />
+        <YAxis {...yAxisProps(cfg, rtl, measureFmt, [...history.map(r => r.value), ...forecast.map(f => f.hi)], undefined, { height: plotH })} tickFormatter={valueTick(cfg, measureFmt)} />
         <Tooltip contentStyle={TT} formatter={(v: unknown, name: string) =>
           [fmtStr(v, measureFmt), name === 'yhat' ? 'forecast' : name === 'band' ? 'interval' : name]} />
         {/* The interval band: an invisible base to `lo`, then the lo->hi delta. */}
