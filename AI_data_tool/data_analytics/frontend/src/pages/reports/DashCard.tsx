@@ -39,7 +39,7 @@ export function Badge({ r }: { r: ReportSummary }) {
   const t = useT()
   if (provenance(r).suggested) return <span className="dsh-bdg ai" title={t('dsh.suggestedTitle')}><Sparkles size={12} aria-hidden />{t('dsh.badge.ai')}</span>
   const s = statusOf(r)
-  if (!s) return null
+  if (s === 'open') return <span className="dsh-bdg open" title={t('qaf.st.openTitle')}><i />{t('qaf.st.open')}</span>
   return s === 'pub'
     ? <span className="dsh-bdg pub" title={t('dsh.publishedTitle')}><i />{t('dsh.badge.published')}</span>
     : <span className="dsh-bdg draft" title={t('home.draftTitle')}><i />{t('dsh.badge.draft')}</span>

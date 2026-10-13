@@ -586,7 +586,7 @@ describe('creating a dashboard', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Create a dashboard' })
     fireEvent.click(within(dialog).getByRole('button', { name: /^Create$/ }))
     await waitFor(() => expect(reportsApi.create).toHaveBeenCalledWith({ name: 'Untitled dashboard' }))
-    expect(await screen.findByTestId('where')).toHaveTextContent('/reports/42?pick=data')
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/reports/42?pick=data'))
   })
 
   it('Blank with a dataset and a folder files it there', async () => {
@@ -601,7 +601,7 @@ describe('creating a dashboard', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: /^Create$/ }))
     await waitFor(() => expect(reportsApi.create).toHaveBeenCalledWith({ name: 'Q3', dataset_id: 4 }))
     await waitFor(() => expect(workspaceApi.create).toHaveBeenCalledWith({ node_type: 'report', report_id: 42, parent_id: 5 }))
-    expect(await screen.findByTestId('where')).toHaveTextContent('/reports/42')
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/reports/42'))
   })
 
   it('Template adds the template page and drops the empty default page', async () => {

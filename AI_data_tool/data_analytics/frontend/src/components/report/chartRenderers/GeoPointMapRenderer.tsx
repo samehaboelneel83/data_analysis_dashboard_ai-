@@ -1,10 +1,10 @@
-import { useT } from '../../../i18n'
 import { useMemo, useRef, useState } from 'react'
 import type { ChartRendererProps } from './types'
 import { fmtStr, TT, seriesColor } from '../chartUtils'
 import { COUNTRIES, COUNTRY_SET, matchCountry, countryCentroid } from '../geo/worldGeometry'
 import { MapSvg, MAP_WRAP_STYLE, useMapBox } from '../geo/MapFrame'
 import { MapDataTable, mapSummary } from '../geo/MapDataTable'
+import { useT } from '../../../i18n'
 import { useRegionSet } from '../geo/regionSetCache'
 
 interface Marker { name: string; value: number; x: number; y: number
@@ -49,7 +49,7 @@ export function markersWithin(markers: { name: string; x: number; y: number }[],
  */
 function GeoPointMapRenderer({ rows, data, cfg, measureFmt, ruleStyles, variant, broadcasts,
                               localSelected, onClickPoint, plotW, plotH }: ChartRendererProps & { variant: 'points' | 'bubbles' }) {
-  const t9 = useT()
+  const t = useT()
   const { ref, w, h, tiles, view } = useMapBox(plotW, plotH)
   // The author's boundary set (Egypt's governorates), drawn as outlines over
   // the country base so a reader can tell which governorate a site sits in.
@@ -146,11 +146,13 @@ function GeoPointMapRenderer({ rows, data, cfg, measureFmt, ruleStyles, variant,
   const hasValues = useMemo(() => (rows as Record<string, unknown>[]).some(r => typeof r.value === 'number'), [rows])
   const measure = (cfg as { measure?: string })?.measure
   const dimension = (cfg as { dimension?: string })?.dimension
-  const kind = `${variant === 'bubbles' ? 'Bubble map' : 'Point map'}${hasValues && measure ? ` of ${measure}` : ''}${dimension ? ` by ${dimension}` : ''}`
+  const base = t(variant === 'bubbles' ? 'pg.modelsMaps.map.bubble' : 'pg.modelsMaps.map.point')
+  const withMeasure = hasValues && measure ? t('pg.modelsMaps.map.of', { kind: base, measure }) : base
+  const kind = dimension ? t('pg.modelsMaps.map.by', { kind: withMeasure, dimension }) : withMeasure
   const entries = useMemo(() => markers.map(m => ({ label: m.name, value: m.value })), [markers])
   const summary = hasValues
-    ? mapSummary(kind, entries, measureFmt)
-    : `${kind}: ${entries.length} ${entries.length === 1 ? 'place' : 'places'}`
+    ? mapSummary(kind, entries, measureFmt, t)
+    : t('pg.modelsMaps.map.justPlaces', { kind, places: t('pg.modelsMaps.map.places', { n: entries.length }) })
   const interactive = !!broadcasts && markers.length > 0
 
   const radius = (v: number) =>
@@ -291,9 +293,9 @@ function GeoPointMapRenderer({ rows, data, cfg, measureFmt, ruleStyles, variant,
             {entries.slice(0, 200).map((e, i) => <li key={`${e.label}-${i}`}>{e.label}</li>)}
           </ul>}
       {broadcasts && markers.length > 0 && (
-        <div style={{ position: 'absolute', top: 4, right: 8, fontSize: 10,
+        <div style={{ position: 'absolute', top: 4, insetInlineEnd: 8, fontSize: 10,
           color: 'var(--muted)', pointerEvents: 'none' }}>
-          {t9('cr.shiftDrag')}
+          {t('pg.modelsMaps.map.shiftDrag')}
         </div>
       )}
       {hover && (
@@ -303,9 +305,9 @@ function GeoPointMapRenderer({ rows, data, cfg, measureFmt, ruleStyles, variant,
         </div>
       )}
       {unmatched > 0 && (
-        <div data-testid="geo-unmatched" style={{ position: 'absolute', bottom: 4, left: 8,
+        <div data-testid="geo-unmatched" style={{ position: 'absolute', bottom: 4, insetInlineStart: 8,
           fontSize: 10, color: 'var(--muted)' }}>
-          {t9(unmatched === 1 ? 'cr.rowNoCountry' : 'cr.rowsNoCountry', { n: unmatched })}
+          {t('pg.modelsMaps.map.noCountry', { n: unmatched })}
         </div>
       )}
     </div>

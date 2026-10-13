@@ -141,9 +141,9 @@ describe('key influencers renderer (redesign KI-7)', () => {
     render(<ResultFor kind="key_influencers" result={ki} params={{}} />)
     expect(screen.getByTestId('key-influencers')).toBeInTheDocument()
     const lifts = screen.getAllByTestId('influencer-lift').map(e => e.textContent)
-    expect(lifts[0]).toMatch(/1\.62× more/)
-    expect(lifts[1]).toMatch(/0\.52× less/)
-    expect(lifts[2]).toMatch(/0\.87× less/)
+    expect(lifts[0]).toMatch(/62% higher/)
+    expect(lifts[1]).toMatch(/48% lower/)
+    expect(lifts[2]).toMatch(/13% lower/)
     expect(screen.getAllByTestId('influencer-bar')).toHaveLength(3)
   })
 

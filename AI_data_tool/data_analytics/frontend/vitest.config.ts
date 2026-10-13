@@ -7,6 +7,8 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     globals: true,
+    // Room for the 5s findBy / waitFor in setup.ts under a full, parallel run.
+    testTimeout: 20000,
     // _ui_refresh_backup/ holds a local backup copy of src/, never test it
     exclude: [...configDefaults.exclude, '_ui_refresh_backup/**'],
   },

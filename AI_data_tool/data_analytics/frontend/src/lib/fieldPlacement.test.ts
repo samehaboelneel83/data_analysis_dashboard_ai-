@@ -31,3 +31,29 @@ describe('which role a dropped field fills (QA4 E2)', () => {
     expect(roleForField(kpi, {}, 'units', true)?.role).toBe('measure')
   })
 })
+
+describe('a hierarchy widget takes fields as its levels (QA6 B2)', () => {
+  const sunburst = ROLE_SPECS.sunburst
+
+  it('offers a Levels role, so Assign data shows it', () => {
+    expect(sunburst.find(rf => rf.role === 'levels')).toMatchObject({ multi: true })
+    for (const wt of ['tree', 'sunburst', 'icicle', 'circle_pack', 'dendrogram', 'org'] as const)
+      expect(ROLE_SPECS[wt].some(rf => rf.role === 'levels')).toBe(true)
+  })
+
+  it('a category field dropped on a sunburst fills its levels, and the next one goes on the end', () => {
+    expect(roleForField(sunburst, {}, 'region', false)?.role).toBe('levels')
+    expect(roleForField(sunburst, { levels: ['region'] }, 'country', false)?.role).toBe('levels')
+  })
+
+  it('never the same column twice, never a quantity, never past the deepest level', () => {
+    expect(roleForField(sunburst, { levels: ['region'] }, 'region', false)).toBeNull()
+    expect(roleForField(sunburst, { measure: 'revenue' }, 'units', true)).toBeNull()
+    expect(roleForField(sunburst, {}, 'revenue', true)?.role).toBe('measure')
+    expect(roleForField(sunburst, { levels: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] }, 'i', false)).toBeNull()
+  })
+
+  it('not while the widget is drawn parent-child, which ignores levels', () => {
+    expect(roleForField(sunburst, { id_col: 'id', parent_col: 'parent' }, 'region', false)).toBeNull()
+  })
+})

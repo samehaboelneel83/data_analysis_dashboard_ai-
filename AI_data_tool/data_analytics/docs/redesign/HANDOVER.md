@@ -1,31 +1,31 @@
 # Datalytics redesign: handover
 
-Written 2026-10-06 for a new Claude session, on another account, that cannot see the
-previous session or its saved memory notes. Read this first, then `PLAN.md` (its Log
-section has the details of every step), then `DATALYTICS_REDESIGN_HANDOFF.md`.
+Written 2026-10-06, brought up to date 2026-10-12 at the end of the autopilot run.
+For anyone picking the work up without the earlier sessions. Read this first, then
+`AUTOPILOT.md` (the last work order and its progress log), then `PLAN.md` (the Log of
+every earlier step and the backend follow-ups table).
 
 ## 1. Where we are
 
-- **Steps 1, 2, 3a–3c, 4a, 4b and 4-revert are done.** GATE A and GATE B are approved.
-- **Datasets** (list and detail, all tabs, Share dialog) and **Ask AI** are finished and
-  stay as implemented.
-- **Ask AI uses the v1 layout and look, with fixes.** It does not use the step 4 boards
-  (see section 2).
-- **Steps 5 and 6 (Home, Viewer, Builder) are cancelled in their current form.** They
-  will be replaced by designs from another Claude Design project, "Home Redesign" and
-  "Dashboards Parts 1–4". Those will be exported to
-  `/media/saeed/New Volume1/projects/design-handoff-2/`. Nothing there yet means: wait.
-- **After that come** Upload, Connections, Lineage and the AI button.
-- **No step is in progress.** Do not start one until the owner says so and the new
-  designs are in `design-handoff-2/`.
-- **Last commits on `said`:**
+- **The frontend redesign is done (Phase 1, no backend changes).** Every step in
+  `PLAN.md` and `AUTOPILOT.md` is ticked, FINAL included.
+- **Redesigned:** Datasets (list, detail, all tabs, Share), Home, Dashboards list,
+  Share / Export / Version history, View and Present, Builder, Ask AI (with the robot
+  and the history rail), Lineage, Upload, the floating Ask AI button, Connections
+  (list, drawer, review page), plus the 9-polish items. Arabic covers all of these and
+  the shared components (i18n-2).
+- **Next:** the owner's final QA, then the owner opens the PR from `said` to `main`.
+  Nothing is in progress.
+- **Last commits on `said`** (newest first; the owner pushes):
 
   | Commit | What |
   |---|---|
-  | `c99a7c3` | Refresh popup fix + PLAN |
-  | `8818373` | Ask AI back to v1 |
-  | `7b50e5c` | Datasets row menu fix |
-  | (newer) | This handover |
+  | (newest) | FINAL docs: this handover, PLAN.md, AUTOPILOT.md |
+  | `42149f0` | step 10A: the flaky full-run tests |
+  | `40d6965` | step 9: i18n-2 remaining English |
+  | `d9e9e4b` | step 8: 9-polish |
+  | `14d1f5f` / `f15c78b` | step 7: Connections |
+  | `c4e49b3` · `eda59e5` · `08651bd` / `e66ae7d` | steps 6, 5, 4: AI button, Upload, Lineage |
 
 ## 2. Decisions the owner made (all still in force)
 
@@ -124,24 +124,27 @@ section has the details of every step), then `DATALYTICS_REDESIGN_HANDOFF.md`.
   implemented. Steps 5 and 6 are replaced by the new design project (section 1). The
   theme and design system stay.
 - **Keep until FINAL:** test datasets 7 ("Student cohorts (test)") and 8 ("ID only
-  (test)").
+  (test)"). FINAL has passed; they now wait for the owner (section 7).
+- **Autopilot (2026-10-12):** thousands grouping for quantity columns only; the Builder
+  canvas is not mirrored in Arabic; dashboards open in View; Present auto-play starts
+  off; never change the teammate's features (Guided setup, HierarchyRenderer/Sunburst,
+  condition boxes, no-code formulas) beyond integration and translation.
 - **The owner's uncommitted edits** to `docker-compose.yml` and `docker-compose2.yml`
   (the `init.sql` mount removed) are theirs. **Never stage or commit them.**
 
 ## 3. Environment
 
 **Drive and folders**
-- **Repo:** `/media/saeed/New Volume1/projects/data_analysis_dashboard_ai-`.
+- **Repo:** `/media/saeed/New Volume2/projects/data_analysis_dashboard_ai-`.
   - The app is under `AI_data_tool/data_analytics/`: `frontend/`, `backend/`,
     `docker-compose.yml`.
-  - The drive mounts as **"New Volume1"** since a reboot on 2026-10-06.
+  - The drive's mount name has changed with reboots ("New Volume1", now
+    **"New Volume2"**). Older notes and logs name "New Volume1"; read them as the
+    current mount.
 - **Don't delete the leftover `/media/saeed/New Volume` folder.** Docker left it as an
-  empty, root-owned skeleton (not a git repo). The owner wants it kept: it keeps the
-  drive mounting at "New Volume1".
-  - Agent sessions may start with their working directory set to that old path. Always
-    use absolute "New Volume1" paths.
-  - Check you're in the real repo with `ls -d <path>/.git`. The mount name could change
-    after another reboot.
+  empty, root-owned skeleton (not a git repo). The owner wants it kept.
+  - Check you're in the real repo with `ls -d <path>/.git`.
+- **Captures** are outside the repo, in `/media/saeed/New Volume2/projects/redesign-captures/`.
 
 **Docker**
 - **Run `docker compose down` before shutting the machine down** (from
@@ -162,9 +165,16 @@ section has the details of every step), then `DATALYTICS_REDESIGN_HANDOFF.md`.
 - Node 20 comes from **nvm**, and the agent's shell doesn't read `~/.bashrc`. Prefix
   commands with `source ~/.nvm/nvm.sh && …`.
 - From `frontend/`:
-  - `npx vitest run` (about 278 files, 3688 tests);
+  - `npx vitest run` (359 files, 4480 tests, about 75 s; green three runs in a row);
   - `npm run build` (runs `tsc` first);
   - `npx tsc --noEmit -p .`.
+
+**A second dev server** (for "before" captures or a branch check)
+- Start it with `VITE_API_URL=same-origin npx vite --port <port>`. Without that the
+  page calls :8000 directly and the backend's CORS refuses any port but 3000/3001.
+- A git worktree with a symlinked `node_modules` loads React twice in dev mode (a blank
+  page). Build it instead: `VITE_API_URL=same-origin npx vite build && npx vite preview --port <port>`.
+- The Analysis tab waits about 8 s for `/analysis/registry`; give a capture that long.
 
 **Login and other notes**
 - **Seeded login** (local test credentials, also in the repo's CLAUDE.md):
@@ -199,6 +209,18 @@ section has the details of every step), then `DATALYTICS_REDESIGN_HANDOFF.md`.
   - `components/ActionMenu.tsx`: use `portal` (and `align="end"`) for a menu inside
     anything that clips or scrolls, such as table cards.
   - `components/ui/ConfirmDialog` (`useConfirm`).
+  - `components/ai/AskFab.tsx`: the floating Ask AI button (View mode).
+- **Autopilot pages:** `pages/lineage/` (`model.ts` pure graph logic, `Graph.tsx`,
+  `SidePanel.tsx`, `ListView.tsx`, `exportPng.ts`), `pages/upload/readFile.ts`
+  (browser-side preview), `pages/Connections.tsx` with `pages/connections/`.
+- **i18n page files:** `src/i18n/pages/*.ts`, spread into `en.ts` / `ar.ts` (Ask AI,
+  Lineage `lin2.*`, Upload `up2.*`, Connections `cn2.*`, polish `pol.*` / `mt2.*`,
+  i18n-2 `i2d.*` and `i2c.*`). Plurals use `{n, plural, …}` with Arabic forms through
+  each file's `arCount`; an English plural branch must not start with a word.
+- **Guards:** `src/test/hardcodedStrings.ts` with one `strings.*.test.ts` per area
+  (`// i18n-ok` exempts a line that must stay as it is, such as code samples).
+- **Numbers in tables:** `lib/displayNumber.ts` `formatTableCell` (column format, else
+  grouped quantities; never years or ids).
   - `components/ui/PromptDialog`.
   - Tests render through `test/renderWithProviders.tsx`.
 
@@ -219,37 +241,44 @@ section has the details of every step), then `DATALYTICS_REDESIGN_HANDOFF.md`.
     a narrow window.
   - `audit_refresh.mjs`: the dataset header's refresh popup (fakes an imported
     dataset).
-  - Run them with `source ~/.nvm/nvm.sh && node frontend/e2e/capture/redesign/<script> <outdir>`.
+  - Autopilot: `cap_10d.mjs`, `qa_ap3_ask.mjs` (39 checks), `cap_ap5.mjs` …
+    `cap_ap9.mjs` (one per step), and `reg_final.mjs` (every main page, EN light +
+    AR dark: console errors, page errors, 5xx calls, sideways overflow).
+  - Run them with `source ~/.nvm/nvm.sh && BASE=http://localhost:<port> node frontend/e2e/capture/redesign/<script> <outdir>`.
 - **Saved preferences:** the scripts log in through the UI and set
   `localStorage` `theme`, `datalytics.language` and `datalytics.direction` before
   loading a page.
 - **Design boards** for the finished steps are in `docs/redesign/boards/`. The new
-  Home/Dashboards designs will arrive in `/media/saeed/New Volume1/projects/design-handoff-2/`.
+  Home/Dashboards and Ask AI designs used are in `projects/design-handoff-2/` and
+  `design-handoff-3/` (next to the repo on the same drive).
 
 ## 6. Known flaky tests
 
-- **`src/pages/Lineage.test.tsx`**, "re-draws the edges when direction flips on a
-  MOUNTED page": fails now and then in the full run, and passes alone. Fixing it is
-  scheduled for FINAL.
-- **`src/components/report/chartRenderers/geoRenderers.test.tsx`:** failed to *load*
-  once in a full run (2026-10-06), then passed alone and on the next full run. Watch it.
-- **If a full run fails only on these,** re-run the file alone before treating it as
-  real.
+- **None now.** The six files that failed only in a full run waited on heavy renders
+  with Testing Library's default 1s. `src/test/setup.ts` now allows 5s
+  (`asyncUtilTimeout`), `vitest.config.ts` 20s per test, and the URL-line checks in
+  `Reports` / `Home` retry. Three full runs in a row passed (`42149f0`).
+- **If one fails again,** re-run the file alone, then look for a check that reads
+  something already on the page once (`expect(await findBy…).toHave…`) instead of
+  waiting for it to change.
 
-## 7. Clean-up list for FINAL
+## 7. Clean-up that needs the owner (not done)
 
-- Test datasets 7 and 8.
-- Test chat threads.
-- The owner's uncommitted `init.sql` / docker-compose edits: ask the owner, don't touch.
-- `frontend/src/pages/ask/AskIllustration.tsx` is still used (v1 hero). The unused
-  `.dl-ask--hero` CSS note in the 4b log no longer applies, because the revert brought
-  the hero back.
-- Fix the flaky `Lineage.test.tsx`.
-- Backend follow-ups (PLAN.md table) are for the backend phases, not FINAL.
+- **Test datasets 7** ("Student cohorts (test)") **and 8** ("ID only (test)").
+- **QA chat threads** in Ask AI.
+- **Dashboard "QA3-Builder" #16** (not made by a QA run; the owner decides).
+- **The "profit" column** the QA runs met.
+- **The uncommitted `init.sql` change** and the `docker-compose.yml` /
+  `docker-compose2.yml` edits: the owner's, never staged.
+- **Seen in the final pass, left as is:** in View and Present, widgets inside a
+  container (tab group) keep their own grid slots empty (original code; see the FINAL
+  entry in PLAN.md).
 
 ## 8. What to do next
 
-Nothing until the owner asks. When they do, the likely first task is to read
-`/media/saeed/New Volume1/projects/design-handoff-2/` (Home Redesign, Dashboards
-Parts 1–4), propose sub-steps for PLAN.md with gates in the same style, and wait for
-approval before coding.
+- The owner's final QA, then the PR from `said` to `main`.
+- **Backend phases:** the full list of backend follow-ups is the table in `PLAN.md`
+  ("Backend follow-ups"), one row per item found during the frontend steps, the
+  autopilot's included (Lineage, Upload, AI button, Connections).
+- **Still English, outside every list so far:** `FolderShareDialog` and the embed page
+  (`EmbeddedReport`) have no translation hook yet.

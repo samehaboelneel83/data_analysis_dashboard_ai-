@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react'
-import { AlignHorizontalDistributeCenter, AlignStartHorizontal, AlignStartVertical, Copy, Database, Filter, FilterX, Gauge } from 'lucide-react'
+import { AlignHorizontalDistributeCenter, AlignStartHorizontal, AlignStartVertical, Copy, Database, Filter, FilterX, Gauge, GripVertical } from 'lucide-react'
 import type { Widget } from '../../types/report'
 import { useCrossFilter } from '../../components/report/CrossFilterContext'
 import { useT } from '../../i18n'
@@ -96,12 +96,19 @@ export function GroupBox({ layouts, containerW, onAlignLeft, onAlignTop, onDistr
 /** On hover, focus or selection in edit mode: the quick actions the
  *  prototype floats over a widget. WidgetRenderer's own header keeps delete
  *  and its ⋮ menu. */
-export function EditToolbar({ title, onDuplicate, onAssign, onFilters }: {
+export function EditToolbar({ title, onDuplicate, onAssign, onFilters, onDragStart }: {
   title: string; onDuplicate?: () => void; onAssign: () => void; onFilters: () => void
+  /** 9-polish: a grip that starts the widget's own move (arrow keys nudge it too). */
+  onDragStart?: (e: React.MouseEvent) => void
 }) {
   const t = useT()
   return (
     <div className="dl-bd-wt" role="toolbar" aria-label={t('bd.wt.aria', { title })}>
+      {onDragStart && (
+        <span className="dl-bd-wt__grip" onMouseDown={onDragStart} title={t('pol.dragHandle')} aria-hidden>
+          <GripVertical size={14} />
+        </span>
+      )}
       {onDuplicate && (
         <button type="button" onClick={onDuplicate} aria-label={t('bd.wt.dup', { title })} title={t('bd.wt.dupShort')}><Copy size={14} aria-hidden /></button>
       )}

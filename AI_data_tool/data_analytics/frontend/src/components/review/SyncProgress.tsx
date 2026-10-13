@@ -1,7 +1,8 @@
-import { useT, type MessageKey, type TranslateFn } from '../../i18n'
 import type { SyncRun } from '../../services/api'
 import { useDirection } from '../../contexts/DirectionContext'
 import { friendlyMessage } from '../../lib/friendlyError'
+import { useT, type MessageKey, type TranslateFn } from '../../i18n'
+import { localDigits } from '../../lib/arabicFormats'
 
 /**
  * Per-stage outcome of a metadata sync.
@@ -13,15 +14,19 @@ import { friendlyMessage } from '../../lib/friendlyError'
  */
 
 const STAGE_LABELS: Record<string, MessageKey> = {
-  discover: 'syp.stage.discover', profile: 'syp.stage.profile', sample: 'syp.stage.sample',
-  infer_keys: 'syp.stage.inferKeys', infer_semantic: 'syp.stage.inferSemantic', drift: 'syp.stage.drift',
+  discover: 'i2c.sp.discover',
+  profile: 'i2c.sp.profile',
+  sample: 'i2c.sp.sample',
+  infer_keys: 'i2c.sp.inferKeys',
+  infer_semantic: 'i2c.sp.inferSemantic',
+  drift: 'i2c.sp.drift',
 }
-/** The server's status words (ok, failed, skipped, partial, running), in the reader's language. */
+
+/** The words for a status the server sends; an unknown one shows as sent. */
 const STATUS_LABELS: Record<string, MessageKey> = {
-  ok: 'syp.st.ok', failed: 'syp.st.failed', skipped: 'syp.st.skipped', partial: 'syp.st.partial',
-  running: 'syp.st.running', pending: 'syp.st.pending',
+  ok: 'i2c.sp.st.ok', failed: 'i2c.sp.st.failed', skipped: 'i2c.sp.st.skipped',
+  partial: 'i2c.sp.st.partial', running: 'i2c.sp.st.running', pending: 'syp.st.pending',
 }
-const status = (t: TranslateFn, s: string) => (STATUS_LABELS[s] ? t(STATUS_LABELS[s]) : s)
 
 const STATUS_COLOR: Record<string, string> = {
   ok: '#16785a',
@@ -29,23 +34,23 @@ const STATUS_COLOR: Record<string, string> = {
   skipped: '#64748b',
 }
 
-function stageDetail(t: TranslateFn, name: string, detail?: Record<string, any>): string | null {
+function stageDetail(name: string, t: TranslateFn, detail?: Record<string, any>): string | null {
   if (!detail) return null
   if (name === 'infer_keys' && detail.proposed != null) {
-    return t('syp.d.proposed', { n: detail.proposed, k: detail.high_confidence ?? 0 })
+    return t('i2c.sp.proposed', { n: localDigits(String(detail.proposed)), h: localDigits(String(detail.high_confidence ?? 0)) })
   }
   if (name === 'profile' && detail.columns_profiled != null) {
-    return t('syp.d.columns', { n: detail.columns_profiled })
+    return t('i2c.sp.columns', { n: localDigits(String(detail.columns_profiled)) })
   }
   if (name === 'infer_semantic') {
     const parts: string[] = []
-    if (detail.semantic_types) parts.push(t('syp.d.typed', { n: detail.semantic_types }))
-    if (detail.descriptions) parts.push(t('syp.d.described', { n: detail.descriptions }))
-    if (detail.llm_used === false) parts.push(t('syp.d.noModel'))
-    return parts.join(', ') || null
+    if (detail.semantic_types) parts.push(t('i2c.sp.typed', { n: localDigits(String(detail.semantic_types)) }))
+    if (detail.descriptions) parts.push(t('i2c.sp.described', { n: localDigits(String(detail.descriptions)) }))
+    if (detail.llm_used === false) parts.push(t('i2c.sp.noModel'))
+    return parts.join(t('i2c.sp.sep')) || null
   }
   if (name === 'drift') {
-    if (detail.changed === false) return t('syp.d.noChange')
+    if (detail.changed === false) return t('i2c.sp.noChange')
     return detail.summary ?? null
   }
   if (detail.reason) return detail.reason
@@ -53,14 +58,14 @@ function stageDetail(t: TranslateFn, name: string, detail?: Record<string, any>)
 }
 
 export default function SyncProgress({ run }: { run: SyncRun | null }) {
-  const t9 = useT()
   // The interface's language, not the browser's: "27م 4:07:09 2026/9/" on an
   // English page (live QA 2026-09-28).
   const { language } = useDirection()
+  const t = useT()
   if (!run || run.status === 'never_run') {
     return (
       <p style={{ color: '#64748b', fontSize: 13 }}>
-        {t9('syp.never')}
+        {t('i2c.sp.never')}
       </p>
     )
   }
@@ -68,21 +73,21 @@ export default function SyncProgress({ run }: { run: SyncRun | null }) {
   return (
     <div>
       <div style={{ fontSize: 13, marginBottom: 8 }}>
-        {t9('syp.lastRun')} <strong>{status(t9, run.status)}</strong>
+        {t('i2c.sp.lastRun')} <strong>{STATUS_LABELS[run.status] ? t(STATUS_LABELS[run.status]) : run.status}</strong>
         {run.finished_at && <> · {new Date(run.finished_at).toLocaleString(language, { dateStyle: 'medium', timeStyle: 'medium' })}</>}
       </div>
       <ol style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: 13 }}>
         {run.stages.map(stage => {
-          const detail = stageDetail(t9, stage.name, stage.detail)
+          const detail = stageDetail(stage.name, t, stage.detail)
           return (
             <li key={stage.name} style={{ display: 'flex', gap: 10, padding: '4px 0' }}>
               <span style={{ color: STATUS_COLOR[stage.status] ?? '#64748b', fontWeight: 600, minWidth: 62 }}>
-                {status(t9, stage.status)}
+                {STATUS_LABELS[stage.status] ? t(STATUS_LABELS[stage.status]) : stage.status}
               </span>
-              <span style={{ minWidth: 170 }}>{STAGE_LABELS[stage.name] ? t9(STAGE_LABELS[stage.name]) : stage.name}</span>
+              <span style={{ minWidth: 170 }}>{STAGE_LABELS[stage.name] ? t(STAGE_LABELS[stage.name]) : stage.name}</span>
               <span style={{ color: '#64748b' }}>
                 {stage.error ? <Friendly text={stage.error} /> : detail}
-                {stage.ms != null && stage.status !== 'skipped' && ` · ${stage.ms}ms`}
+                {stage.ms != null && stage.status !== 'skipped' && ` · ${t('i2c.sp.ms', { n: localDigits(String(stage.ms)) })}`}
               </span>
             </li>
           )
@@ -99,14 +104,14 @@ export default function SyncProgress({ run }: { run: SyncRun | null }) {
 
 /** A driver error in plain words, with the original behind "Technical details". */
 function Friendly({ text }: { text: string }) {
-  const t9 = useT()
+  const t = useT()
   const nice = friendlyMessage(text)
   if (nice === text) return <>{text}</>
   return (
     <span>
       {nice}
       <details className="dl-conn-test__raw" style={{ display: 'inline-block', marginInlineStart: 8, verticalAlign: 'top' }}>
-        <summary>{t9('eb.details')}</summary>
+        <summary>{t('sb.tech')}</summary>
         <pre>{text}</pre>
       </details>
     </span>

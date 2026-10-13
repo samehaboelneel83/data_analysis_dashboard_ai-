@@ -3,6 +3,8 @@ import { boundarySetsApi, type BoundaryPack, type BoundarySetSummary } from '../
 import PackTermsConfirm from './PackTermsConfirm'
 import { useT, type TranslateFn } from '../../i18n'
 import { rich } from '../../i18n/pages/modelsMaps'
+import { boundarySetName } from '../../i18n/pages/adminPlatform'
+import { useDirection } from '../../contexts/DirectionContext'
 
 /**
  * Which shapes a region map draws — and how a new set gets here.
@@ -30,6 +32,7 @@ export default function BoundarySetPicker({ value, onChange, inheritedName }: {
   inheritedName?: string | null
 }) {
   const t = useT()
+  const { language } = useDirection()
   const [sets, setSets] = useState<BoundarySetSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -114,7 +117,7 @@ export default function BoundarySetPicker({ value, onChange, inheritedName }: {
         <option value="">{t('pg.modelsMaps.ml.countries')}</option>
         {(sets ?? []).map(s => (
           <option key={s.id} value={String(s.id)}>
-            {s.name} ({s.feature_count})
+            {boundarySetName(t as never, language, s.name)} ({s.feature_count})
           </option>
         ))}
         {/* The widget's own set, when the list has not arrived yet or no longer

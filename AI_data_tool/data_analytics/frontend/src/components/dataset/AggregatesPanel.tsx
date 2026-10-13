@@ -54,16 +54,16 @@ export default function AggregatesPanel({ datasetId, mode }: { datasetId: number
       setGrain(g => Array.from(new Set([...p.rls_columns, ...g])))
     } catch (e) {
       setLoadError((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-        ?? 'Could not load aggregates')
+        ?? t('i2d.agg.loadFailed'))
     }
-  }, [datasetId])
+  }, [datasetId, t])
 
   useEffect(() => { if (mode === 'directquery') void load() }, [load, mode])
 
   if (mode !== 'directquery') {
     return (
       <p style={{ padding: 12, fontSize: 12, color: 'var(--muted)' }}>
-        {t('ag.notLive')}
+        {t('i2d.agg.notDqBefore')} <strong>DirectQuery</strong> {t('i2d.agg.notDqAfter')}{/* // i18n-ok: a product name */}
       </p>
     )
   }
@@ -72,11 +72,11 @@ export default function AggregatesPanel({ datasetId, mode }: { datasetId: number
       return (
         <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-start' }}>
           <p style={{ fontSize: 12, color: 'var(--danger)', margin: 0 }}>{loadError}</p>
-          <button type="button" className="btn btn-sm" onClick={() => void load()}>{t('tk.retry')}</button>
+          <button type="button" className="btn btn-sm" onClick={() => void load()}>{t('bc.dialogs.loadErr.retry')}</button>
         </div>
       )
     }
-    return <p style={{ padding: 12, fontSize: 12, color: 'var(--muted)' }}>{t('fs.loading')}</p>
+    return <p style={{ padding: 12, fontSize: 12, color: 'var(--muted)' }}>{t('common.loading')}</p>
   }
 
   const toggle = (c: string) => setGrain(g => g.includes(c) ? g.filter(x => x !== c) : [...g, c])
@@ -113,7 +113,7 @@ export default function AggregatesPanel({ datasetId, mode }: { datasetId: number
       await load()
     } catch (e) {
       setError((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-        ?? (editing ? 'Could not update the aggregate' : 'Could not create the aggregate'))
+        ?? (editing ? t('i2d.agg.updateFailed') : t('i2d.agg.createFailed')))
     } finally { setBusy(false) }
   }
   const rebuild = async (it: AggregateListItem) => {
@@ -123,7 +123,7 @@ export default function AggregatesPanel({ datasetId, mode }: { datasetId: number
       await load()
     } catch (e) {
       setError((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-        ?? 'Could not rebuild the aggregate')
+        ?? t('i2d.agg.rebuildFailed'))
     } finally { setBusy(false) }
   }
   const label: React.CSSProperties = { display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--muted)' }
@@ -147,7 +147,7 @@ export default function AggregatesPanel({ datasetId, mode }: { datasetId: number
           <table className="dl-aggs__table">
             <thead><tr>
               <th>{t('agg3.col.name')}</th><th>{t('agg3.col.grain')}</th><th>{t('agg3.col.measures')}</th><th className="dl-ov__num">{t('agg3.col.rows')}</th>
-              <th>{t('agg3.col.refresh')}</th><th>{t('agg3.col.status')}</th><th aria-label={t('ag.actions')} />
+              <th>{t('agg3.col.refresh')}</th><th>{t('agg3.col.status')}</th><th aria-label={t('i2d.agg.actions')} />
             </tr></thead>
             <tbody>
               {items.map(it => {
@@ -171,9 +171,9 @@ export default function AggregatesPanel({ datasetId, mode }: { datasetId: number
                             ? t('agg3.refreshed', { when: formatDate(it.dataset.last_refreshed_at) }) : t('agg3.notRefreshed')}</span>}
                     </td>
                     <td className="dl-aggs__row-actions">
-                      <button type="button" className="btn btn-sm" onClick={() => editItem(it)} disabled={busy}>{t('fs.edit')}</button>
+                      <button type="button" className="btn btn-sm" onClick={() => editItem(it)} disabled={busy}>{t('i2d.c.edit')}</button>
                       {REBUILD_HINT.test(it.last_error ?? '') && (
-                        <button type="button" className="btn btn-sm" onClick={() => void rebuild(it)} disabled={busy}>{t('dd.rebuild')}</button>
+                        <button type="button" className="btn btn-sm" onClick={() => void rebuild(it)} disabled={busy}>{t('i2d.c.rebuild')}</button>
                       )}
                     </td>
                   </tr>
@@ -193,73 +193,74 @@ export default function AggregatesPanel({ datasetId, mode }: { datasetId: number
         <h4>{editing ? t('agg3.edit', { name }) : t('agg3.new')}</h4>
         <p className="dl-aggs__sub">{t('agg3.formSub')}</p>
         <fieldset className="dl-aggs__set">
-          <legend>{t('ag.grain')}</legend>
+          <legend>{t('i2d.agg.grain')}</legend>
           <div className="dl-aggs__checks">
             {pre.grain_candidates.map(c => (
               <label key={c} className={grain.includes(c) ? 'dl-aggs__chip dl-aggs__chip--on' : 'dl-aggs__chip'}>
                 <input type="checkbox" aria-label={c} checked={grain.includes(c)}
-                  disabled={lock(c)} title={lock(c) ? t('ag.lockedTip') : undefined} onChange={() => toggle(c)} />
+                  disabled={lock(c)} title={lock(c) ? t('i2d.agg.lockTitle') : undefined} onChange={() => toggle(c)} />
                 {lock(c) && <Lock size={10} aria-hidden />}{c}
               </label>
             ))}
           </div>
           {pre.rls_columns.length > 0 && (
             <p className="dl-aggs__sub">
-              <Lock size={11} aria-hidden /> {t(pre.rls_columns.length === 1 ? 'ag.lockedOne' : 'ag.lockedMany', { cols: pre.rls_columns.join(', ') })}
+              <Lock size={11} aria-hidden /> <bdi>{pre.rls_columns.join(', ')}</bdi>{' '}
+              {t(pre.rls_columns.length === 1 ? 'i2d.agg.lockedOne' : 'i2d.agg.lockedMany')}
             </p>
           )}
         </fieldset>
 
         <fieldset className="dl-aggs__set">
-          <legend>{t('ag.measures')}</legend>
+          <legend>{t('agg3.col.measures')}</legend>
           <div className="dl-aggs__row">
             <div>
-              <label htmlFor="agg-mcol" style={label}>{t('ag.measureColumn')}</label>
+              <label htmlFor="agg-mcol" style={label}>{t('i2d.agg.measureColumn')}</label>
               <select id="agg-mcol" value={mCol} onChange={e => setMCol(e.target.value)}>
-                <option value="">{t('ag.choose')}</option>
+                <option value="">{t('i2d.agg.chooseShort')}</option>
                 {pre.measure_candidates.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
             <div>
-              <label htmlFor="agg-magg" style={label}>{t('al.fn.group')}</label>
+              <label htmlFor="agg-magg" style={label}>{t('i2d.c.aggregation')}</label>
               <select id="agg-magg" value={mAgg} onChange={e => setMAgg(e.target.value)}>
                 {AGGS.map(a => <option key={a} value={a}>{a}</option>)}
               </select>
             </div>
-            <button type="button" className="btn btn-sm" disabled={!mCol} title={!mCol ? t('ag.chooseFirst') : undefined}
+            <button type="button" className="btn btn-sm" disabled={!mCol} title={!mCol ? t('i2d.agg.needColumn') : undefined}
               onClick={() => { setMeasures(m => [...m, { column: mCol, agg: mAgg }]); setMCol('') }}>
-              {t('ag.addMeasure')}
+              {t('i2d.agg.addMeasure')}
             </button>
           </div>
           <div className="dl-aggs__checks">
             {measures.map((m, i) => (
               <span key={i} className="dl-aggs__chip dl-aggs__chip--on">
                 {m.agg}({m.column}) → <code>{m.name ?? `${m.column}_${m.agg}`}</code>
-                <button type="button" className="dl-ov__linkish" aria-label={t('ag.removeNamed', { what: `${m.agg}(${m.column})` })}
-                  onClick={() => setMeasures(ms => ms.filter((_, j) => j !== i))}>{t('ag.remove')}</button>
+                <button type="button" className="dl-ov__linkish" aria-label={t('i2d.agg.removeWhat', { what: `${m.agg}(${m.column})` })}
+                  onClick={() => setMeasures(ms => ms.filter((_, j) => j !== i))}>{t('i2d.agg.remove')}</button>
               </span>
             ))}
-            <span className="dl-aggs__chip">row_count</span> {/* i18n-ok */}
+            <span className="dl-aggs__chip">row_count</span>{/* // i18n-ok: a column name */}
           </div>
         </fieldset>
 
         <div className="dl-aggs__row">
           <div>
-            <label htmlFor="agg-name" style={label}>{t('ag.name')}</label>
+            <label htmlFor="agg-name" style={label}>{t('agg3.col.name')}</label>
             <input id="agg-name" value={name} onChange={e => setName(e.target.value)}
-              disabled={!!editing} title={editing ? t('ag.nameFixed') : undefined} />
+              disabled={!!editing} title={editing ? t('i2d.agg.nameFixed') : undefined} />
           </div>
           <div>
-            <label htmlFor="agg-every" style={label}>{t('ag.refreshEvery')}</label>
+            <label htmlFor="agg-every" style={label}>{t('i2d.agg.refreshEvery')}</label>
             <input id="agg-every" type="number" min={5} value={every} onChange={e => setEvery(e.target.value)}
-              placeholder={t('ag.never')} style={{ inlineSize: 110 }} />
+              placeholder={t('i2d.agg.never')} style={{ inlineSize: 110 }} />
           </div>
           <button type="button" className="btn btn-primary btn-sm" onClick={submit}
-            disabled={busy || !name.trim() || grain.length === 0 || measures.length === 0} title={!name.trim() ? t('ag.needName') : grain.length === 0 ? t('ag.needGrain') : measures.length === 0 ? t('ag.needMeasure') : undefined}>
-            {busy ? (editing ? t('cm.saving') : t('al.creating')) : (editing ? t('ag.saveChanges') : t('ag.create'))}
+            disabled={busy || !name.trim() || grain.length === 0 || measures.length === 0} title={!name.trim() ? t('i2d.agg.needName') : grain.length === 0 ? t('i2d.agg.needGrain') : measures.length === 0 ? t('i2d.agg.needMeasure') : undefined}>
+            {busy ? (editing ? t('i2d.c.saving') : t('i2d.c.creating')) : (editing ? t('i2d.agg.saveChanges') : t('i2d.agg.createAgg'))}
           </button>
           {editing && (
-            <button type="button" className="btn btn-sm" onClick={resetForm} disabled={busy}>{t('cm.cancel')}</button>
+            <button type="button" className="btn btn-sm" onClick={resetForm} disabled={busy}>{t('common.cancel')}</button>
           )}
         </div>
         {error && <p className="dl-aggs__error">{error}</p>}

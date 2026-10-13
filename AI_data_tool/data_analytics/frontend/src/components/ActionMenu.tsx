@@ -105,15 +105,27 @@ export default function ActionMenu({
         ? Math.max(4, tRect.right - mRect.width) : tRect.left
       setFixedAt({ top, left })
     }
-  }, [open, portal, align])
-  // A portalled menu stays put on the page while the canvas scrolls under
-  // it, so it closes instead of floating away from its widget.
+  }, [open, portal])
+  // A portalled menu is fixed to the window, so a scroll under it would leave
+  // it floating away from its button. It follows the button instead, and
+  // closes only once the button has left the window. (Closing on any scroll
+  // shut the menu as soon as it opened while a smooth scroll was still
+  // settling: the Ask AI card's Export menu, autopilot step 3.)
   useEffect(() => {
     if (!open || !portal) return
-    const onScroll = () => setOpen(false)
+    let last = triggerRef.current?.getBoundingClientRect()
+    const onScroll = () => {
+      const tr = triggerRef.current
+      if (!tr || !last) return
+      const r = tr.getBoundingClientRect()
+      if (r.bottom < 0 || r.top > window.innerHeight || r.right < 0 || r.left > window.innerWidth) { setOpen(false); return }
+      const dx = r.left - last.left, dy = r.top - last.top
+      last = r
+      if (dx || dy) setFixedAt(prev => (prev ? { top: prev.top + dy, left: prev.left + dx } : prev))
+    }
     window.addEventListener('scroll', onScroll, true)
     return () => window.removeEventListener('scroll', onScroll, true)
-  }, [open, portal])
+  }, [open, portal, align])
 
   // Focus the active item as arrow navigation moves it.
   useEffect(() => {

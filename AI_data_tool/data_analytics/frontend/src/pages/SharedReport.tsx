@@ -1,4 +1,3 @@
-import { useT } from '../i18n'
 import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { sharedApi } from '../services/api'
@@ -7,6 +6,7 @@ import { CrossFilterProvider } from '../components/report/CrossFilterContext'
 import FilterBar from '../components/report/FilterBar'
 import FloatingFilterWindow from '../components/report/FloatingFilterWindow'
 import { applyTheme } from '../components/report/chartUtils'
+import { useT } from '../i18n'
 
 /** Cross-source mappings the server publishes with a report (Phase 6.1): the
  *  relationships among its datasets and, per dataset, only the column names
@@ -32,8 +32,10 @@ const RATE_LIMITED = Symbol('rate-limited')
  * no credentials to re-query with.
  */
 export default function SharedReport() {
-  const t9 = useT()
   const { token } = useParams()
+  // Inside the app's DirectionProvider (App.tsx), so the guest reads the
+  // language the switcher holds; without one, useT falls back to English.
+  const t = useT()
   const [report, setReport] = useState<(Report & { column_formats?: Record<string, unknown>; pinned?: boolean }) | null>(null)
   const [data, setData] = useState<Record<number, unknown> | null>(null)
   const [pageIdx, setPageIdx] = useState(0)
@@ -81,7 +83,7 @@ export default function SharedReport() {
         STATIC.has(w.widget_type) ? Promise.resolve(null) : fetchWidget(token, w)))
       setReport(r)
       setData(Object.fromEntries(widgets.map((w, i) => [w.id, results[i]])))
-    }).catch(() => setError('This link does not exist or has expired.'))
+    }).catch(() => setError(t('i2c.sr.expired')))
   }, [token])
 
   function retryWidget(w: Widget) {
@@ -94,7 +96,7 @@ export default function SharedReport() {
       {error}
     </div>
   )
-  if (!report || data === null) return <div style={{ padding: 40, color: 'var(--muted)' }}>{t9('common.loading')}</div>
+  if (!report || data === null) return <div style={{ padding: 40, color: 'var(--muted)' }}>{t('common.loading')}</div>
 
   // The server already omits non-normal pages for guest links; this filter is
   // defense-in-depth (never trust the client's data shape blindly) and keeps
@@ -105,7 +107,7 @@ export default function SharedReport() {
   // belong in the tab strip here.
   const pages = report.pages.filter(p => p.page_type === 'normal')
   if (pages.length === 0) return (
-    <div style={{ padding: 40, color: 'var(--muted)' }}>{t9('shr.noPage')}</div>
+    <div style={{ padding: 40, color: 'var(--muted)' }}>{t('i2c.sr.noPage')}</div>
   )
   const page = pages[Math.min(pageIdx, pages.length - 1)]
   const CELL = 62
@@ -116,19 +118,19 @@ export default function SharedReport() {
         borderBottom: '1px solid var(--border)', background: 'var(--surface)' }}>
         <strong style={{ fontSize: 14 }}>{report.name}</strong>
         {report.classification && (
-          <span title={t9('shr.sensitivity')} style={{
+          <span title={t('i2c.sr.sensitivity')} style={{
             fontSize: 11, fontWeight: 800, letterSpacing: '.06em', textTransform: 'uppercase',
             color: '#fff', padding: '2px 7px', borderRadius: 4,
             background: ({ Public: '#2e7d32', Internal: '#1565c0', Confidential: '#e65100', Restricted: '#c62828' } as Record<string, string>)[report.classification] ?? '#666' }}>
             {report.classification}
           </span>
         )}
-        <span style={{ fontSize: 11, color: 'var(--muted)' }}>{t9('shr.readOnly')}</span>
+        <span style={{ fontSize: 11, color: 'var(--muted)' }}>{t('i2c.sr.readOnly')}</span>
         {report.pinned && (
-          <span title={t9('shr.pinnedTip')}
+          <span title={t('i2c.sr.pinnedTip')}
             style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', border: '1px solid var(--border)',
               borderRadius: 4, padding: '2px 6px' }}>
-            {t9('shr.pinned')}
+            {t('i2c.sr.pinned')}
           </span>
         )}
         {pages.length > 1 && (
@@ -191,11 +193,11 @@ export default function SharedReport() {
                   justifyContent: 'center', gap: 8, height: '100%', border: '1px dashed var(--border)',
                   borderRadius: 8, background: 'var(--surface)', color: 'var(--muted)', fontSize: 12,
                   textAlign: 'center', padding: 10 }}>
-                  <span>{t9('shr.rateLimited')}</span>
+                  <span>{t('i2c.sr.rateLimited')}</span>
                   <button onClick={() => retryWidget(w)}
                     style={{ padding: '3px 10px', fontSize: 11, borderRadius: 6, border: '1px solid var(--border)',
                       background: 'var(--surface2)', color: 'var(--text)', cursor: 'pointer' }}>
-                    {t9('sb.retry')}
+                    {t('i2c.sr.retry')}
                   </button>
                 </div>
               ) : (
@@ -211,7 +213,7 @@ export default function SharedReport() {
           ))}
         </div>
         {narrow && pages.length > 1 && (
-          <div role="tablist" aria-label={t9('shx.ex.pages')} style={{ position: 'fixed', bottom: 10, left: 0, right: 0,
+          <div role="tablist" aria-label={t('i2c.sr.pages')} style={{ position: 'fixed', bottom: 10, left: 0, right: 0,
             display: 'flex', justifyContent: 'center', gap: 6 }}>
             {pages.map((p, i) => (
               <button key={p.id} role="tab" aria-selected={i === pageIdx} aria-label={p.name} onClick={() => setPageIdx(i)}

@@ -48,7 +48,7 @@ describe('Lineage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/could not load/i)
     // THE assertion. "No connections — uploads only" is a factual claim about
     // the user's estate, and it must not appear when we never got an answer.
-    expect(screen.queryByText(/uploads only/i)).toBeNull()
+    expect(screen.queryByText(/uploads only|Lineage appears when/i)).toBeNull()
   })
 
   it('still shows the genuine empty state when the server says empty', async () => {
@@ -57,7 +57,8 @@ describe('Lineage', () => {
       { sources: [], datasets: [], reports: [] } as never)
     wrap(<Lineage />)
 
-    expect(await screen.findByText(/uploads only/i)).toBeInTheDocument()
+    // Step 11: the design's empty state, which says what will appear and how to start.
+    expect(await screen.findByText(/Lineage appears when you connect data/i)).toBeInTheDocument()
     expect(screen.queryByRole('alert')).toBeNull()
   })
 

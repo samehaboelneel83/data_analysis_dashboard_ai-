@@ -1,4 +1,5 @@
 import type { MessageKey, TranslateFn } from '../i18n'
+import { fieldUse } from './semanticGuard'
 
 /**
  * QA5 L3: a column's type code ("numeric", "datetime"…) as the UI shows it, in
@@ -35,4 +36,16 @@ export function dtypeShort(t: TranslateFn, code: string | null | undefined): str
   const c = code ?? ''
   const k = ALIAS[c.toLowerCase()]
   return k ? t(`pg.types.short.${k}` as MessageKey) : c.slice(0, 4).toUpperCase()
+}
+
+/** QA6 B4: when a stored number is used as something else (a year as a
+ *  category, a latitude as geography), that use as a badge and its
+ *  explanation; null when the type already says how it is used. */
+export function storedNumberUse(t: TranslateFn, name: string, dtype: string | null | undefined,
+                                role?: string | null): { tag: string; tip: string } | null {
+  if (dtype !== 'numeric') return null
+  const use = fieldUse({ name, dtype }, role)
+  if (use === 'category') return { tag: t('pg.types.use.category'), tip: t('pg.types.use.categoryTip') }
+  if (use === 'geo') return { tag: t('pg.types.use.geo'), tip: t('pg.types.use.geoTip') }
+  return null
 }

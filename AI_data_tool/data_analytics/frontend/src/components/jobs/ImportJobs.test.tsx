@@ -36,7 +36,7 @@ async function openAndImport() {
   vi.mocked(dataSourcesApi.preview).mockResolvedValue({ columns: ['region'], rows: [['east']], total: 1 })
   render(<MemoryRouter><SchemaBrowser ds={DS} onClose={() => {}} /></MemoryRouter>)
   fireEvent.click(await screen.findByText('sales'))
-  await screen.findByText(/1 rows preview/)
+  await screen.findByText(/1 row preview/)
   fireEvent.click(screen.getByText(/Import as Dataset/))
 }
 
@@ -91,7 +91,7 @@ describe('SchemaBrowser follows its import job', () => {
     vi.mocked(dataSourcesApi.import).mockResolvedValue({ id: 5, name: 'sales', row_count: 0, col_count: 1, mode: 'directquery' })
     render(<MemoryRouter><SchemaBrowser ds={DS} onClose={() => {}} /></MemoryRouter>)
     fireEvent.click(await screen.findByText('sales'))
-    await screen.findByText(/1 rows preview/)
+    await screen.findByText(/1 row preview/)
     fireEvent.click(screen.getByText('DirectQuery'))
     fireEvent.click(screen.getByText(/Create DirectQuery Dataset/))
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/datasets/5?new=1'))

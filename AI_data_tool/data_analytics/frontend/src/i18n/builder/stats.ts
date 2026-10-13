@@ -34,6 +34,13 @@ export const en = {
   'bc.stats.footTested': "Tested on the {n} rows behind these two bars, after this chart's filters.",
   'bc.stats.footSignificance': "Significance at {alpha}; with many rows, tiny differences are 'significant'. The effect size says how much the groups overlap; the size of the gap says how much it matters.",
   'bc.stats.footNotCause': 'An observed difference, not a cause.',
+  // QA6 A7: the size of the gap, composed from the server's numbers.
+  'bc.stats.gapRowsMore': '{a} has {n} more rows than {b}{pct}.',
+  'bc.stats.gapRowsFewer': '{a} has {n} fewer rows than {b}{pct}.',
+  'bc.stats.gapHigher': '{what}: {a} {va} vs {b} {vb} -- {n} higher{pct}.',
+  'bc.stats.gapLower': '{what}: {a} {va} vs {b} {vb} -- {n} lower{pct}.',
+  'bc.stats.whatMean': 'Average {measure}',
+  'bc.stats.whatMedian': 'Median {measure}',
 } as const
 
 export const ar: Record<keyof typeof en, string> = {
@@ -58,4 +65,10 @@ export const ar: Record<keyof typeof en, string> = {
   'bc.stats.footTested': 'اختُبرت الصفوف الواقعة خلف هذين العمودين، وعددها {n}، بعد تطبيق عوامل تصفية هذا المخطط.',
   'bc.stats.footSignificance': 'مستوى الدلالة {alpha}؛ ومع كثرة الصفوف تصبح الفروق الضئيلة «ذات دلالة». يبيّن حجم الأثر مدى تداخل المجموعتين، ويبيّن حجم الفجوة مدى أهميتها.',
   'bc.stats.footNotCause': 'فرق مُلاحَظ، لا علاقة سببية.',
+  'bc.stats.gapRowsMore': 'عدد صفوف {a} يزيد على عدد صفوف {b} بمقدار {n}{pct}.',
+  'bc.stats.gapRowsFewer': 'عدد صفوف {a} يقل عن عدد صفوف {b} بمقدار {n}{pct}.',
+  'bc.stats.gapHigher': '{what}: {a} {va} مقابل {b} {vb}، أعلى بمقدار {n}{pct}.',
+  'bc.stats.gapLower': '{what}: {a} {va} مقابل {b} {vb}، أقل بمقدار {n}{pct}.',
+  'bc.stats.whatMean': 'متوسط {measure}',
+  'bc.stats.whatMedian': 'وسيط {measure}',
 }

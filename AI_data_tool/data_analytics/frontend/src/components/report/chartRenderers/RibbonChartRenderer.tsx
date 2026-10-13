@@ -101,7 +101,7 @@ export default function RibbonChartRenderer({ data, cfg, rtl, ruleStyles, broadc
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 10px', justifyContent: 'center', padding: '4px 6px 0', fontSize: 10 }}>
           {colsAxis.map((c, j) => (
             <span key={c} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-              <span className="ribbon-legend-swatch" style={{ width: 8, height: 8, borderRadius: 2, background: COLORS[j % COLORS.length] }} />
+              <span className="ribbon-legend-swatch dl-key-swatch" style={{ width: 8, height: 8, borderRadius: 2, background: COLORS[j % COLORS.length] }} />
               {c}
             </span>
           ))}

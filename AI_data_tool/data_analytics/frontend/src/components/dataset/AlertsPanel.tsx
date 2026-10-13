@@ -37,14 +37,14 @@ import { storedStatus } from '../../lib/storedStatus'
  *  the widget sandbox, so the palette must not offer anything it would reject. */
 const alertFuncs = (t: TranslateFn) => [
   {
-    label: t('al.fn.group'), color: '#f472b6',
+    label: t('i2d.c.aggregation'), color: '#f472b6',
     items: [
-      { label: 'SUM(col)', snippet: 'SUM()', back: 1, hint: t('al.fn.sum') },  // i18n-ok: a function's signature
-      { label: 'AVG(col)', snippet: 'AVG()', back: 1, hint: t('al.fn.avg') },  // i18n-ok
-      { label: 'COUNT(col)', snippet: 'COUNT()', back: 1, hint: t('al.fn.count') },  // i18n-ok
-      { label: 'COUNTD(col)', snippet: 'COUNTD()', back: 1, hint: t('al.fn.countd') },  // i18n-ok
-      { label: 'MIN(col)', snippet: 'MIN()', back: 1, hint: t('al.fn.min') },  // i18n-ok
-      { label: 'MAX(col)', snippet: 'MAX()', back: 1, hint: t('al.fn.max') },  // i18n-ok
+      { label: 'SUM(col)', snippet: 'SUM()', back: 1, hint: t('i2d.al.fn.sum') }, // i18n-ok: a function, code
+      { label: 'AVG(col)', snippet: 'AVG()', back: 1, hint: t('i2d.al.fn.avg') }, // i18n-ok: a function, code
+      { label: 'COUNT(col)', snippet: 'COUNT()', back: 1, hint: t('i2d.al.fn.count') }, // i18n-ok: a function, code
+      { label: 'COUNTD(col)', snippet: 'COUNTD()', back: 1, hint: t('i2d.al.fn.countd') }, // i18n-ok: a function, code
+      { label: 'MIN(col)', snippet: 'MIN()', back: 1, hint: t('i2d.al.fn.min') }, // i18n-ok: a function, code
+      { label: 'MAX(col)', snippet: 'MAX()', back: 1, hint: t('i2d.al.fn.max') }, // i18n-ok: a function, code
     ],
   },
 ]
@@ -128,7 +128,7 @@ export default function AlertsPanel({ datasetId, columns }: {
         ...(kind === 'change' ? { change_pct: Number(changePct), change_direction: direction } : {}),
       }))
     } catch (e: unknown) {
-      setTestError((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'The test could not run')
+      setTestError((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? t('i2d.al.testFailed'))
     } finally { setTesting(false) }
   }
 
@@ -150,7 +150,7 @@ export default function AlertsPanel({ datasetId, columns }: {
       // rejected: name 'os' is not defined"). Anything generic would leave the
       // user editing at random.
       setSaveError((e as { response?: { data?: { detail?: string } } })
-        ?.response?.data?.detail ?? 'The alert could not be created')
+        ?.response?.data?.detail ?? t('i2d.al.createFailed'))
     } finally {
       setSaving(false)
     }
@@ -158,8 +158,8 @@ export default function AlertsPanel({ datasetId, columns }: {
 
   const remove = async (alert: DataAlert) => {
     if (!await confirm({
-      title: t('al.deleteQ', { name: alert.name }),
-      body: t('al.deleteBody'),
+      title: t('i2d.al.deleteTitle', { name: alert.name }),
+      body: t('i2d.al.deleteBody'),
     })) return
     await alertsApi.remove(datasetId, alert.id)
     load()
@@ -168,7 +168,7 @@ export default function AlertsPanel({ datasetId, columns }: {
   if (loadError) {
     return <LoadError what="the alerts on this dataset" error={loadError} onRetry={load} />
   }
-  if (!alerts) return <p style={{ color: 'var(--muted)' }}>{t('fs.loading')}</p>
+  if (!alerts) return <p style={{ color: 'var(--muted)' }}>{t('common.loading')}</p>
 
   return (
     <section className="dl-rules__card">
@@ -190,47 +190,48 @@ export default function AlertsPanel({ datasetId, columns }: {
             <label htmlFor="alert-name" style={label}>{t('alerts.name')}</label>
             <input id="alert-name" value={name} style={{ width: '100%' }}
               onChange={e => setName(e.target.value)}
-              placeholder={t('al.nameExample')} />
+              placeholder={t('i2d.al.namePh')} />
           </div>
 
-          <div role="radiogroup" aria-label={t('al.whatToWatch')} style={{ display: 'flex', gap: 14, marginBottom: 10, fontSize: 12 }}>
+          <div role="radiogroup" aria-label={t('i2d.al.watch')} style={{ display: 'flex', gap: 14, marginBottom: 10, fontSize: 12 }}>
             <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
               <input type="radio" name="alert-kind" checked={kind === 'condition'} onChange={() => { setKind('condition'); setTest(null) }} />
-              {t('al.kindCondition')}
+              {t('i2d.al.kindCondition')}
             </label>
             <label style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
               <input type="radio" name="alert-kind" checked={kind === 'change'} onChange={() => { setKind('change'); setTest(null) }} />
-              {t('al.kindChange')}
+              {t('i2d.al.kindChange')}
             </label>
           </div>
 
           <div style={{ marginBottom: 10 }}>
-            <label htmlFor="alert-expr" style={label}>{kind === 'condition' ? t('alerts.condition') : t('al.numberToWatch')}</label>
+            <label htmlFor="alert-expr" style={label}>{kind === 'condition' ? t('alerts.condition') : t('i2d.al.numberToWatch')}</label>
             <ExpressionBuilder
               columns={columns} functionsCatalog={alertFuncs(t)}
               value={expression} onChange={v => { setExpression(v); setTest(null) }}
               layout="flat" rows={2} textareaId="alert-expr"
-              placeholder={kind === 'condition' ? 'SUM(amount) < 100000' : 'COUNT(id)'} />  {/* i18n-ok: an expression */}
+              placeholder={kind === 'condition' ? 'SUM(amount) < 100000' : 'COUNT(id)'} // i18n-ok: code samples
+            />
           </div>
 
           {kind === 'change' && (
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, fontSize: 12, flexWrap: 'wrap' }}>
-              {t('al.fireWhen')}
-              <select aria-label={t('al.direction')} value={direction} onChange={e => setDirection(e.target.value as 'up' | 'down' | 'any')}>
-                <option value="any">{t('al.moves')}</option>
-                <option value="up">{t('al.rises')}</option>
-                <option value="down">{t('al.falls')}</option>
+              {t('i2d.al.fireWhen')}
+              <select aria-label={t('i2d.al.direction')} value={direction} onChange={e => setDirection(e.target.value as 'up' | 'down' | 'any')}>
+                <option value="any">{t('i2d.al.dirAny')}</option>
+                <option value="up">{t('i2d.al.dirUp')}</option>
+                <option value="down">{t('i2d.al.dirDown')}</option>
               </select>
-              {t('al.byAtLeast')}
-              <input aria-label={t('al.changePercent')} type="number" min={1} value={changePct}
+              {t('i2d.al.byAtLeast')}
+              <input aria-label={t('i2d.al.changePct')} type="number" min={1} value={changePct}
                 onChange={e => setChangePct(e.target.value)} style={{ width: 70 }} />
-              {t('al.sincePrevious')}
+              {t('i2d.al.sincePrev')}
             </div>
           )}
 
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
             <button className="btn btn-sm" disabled={!expression.trim() || testing} onClick={() => void runTest()}>
-              {testing ? t('al.testing') : t('al.testNow')}
+              {testing ? t('i2d.al.testing') : t('i2d.al.testNow')}
             </button>
             {test && (
               <span role="status" data-testid="alert-test-result" style={{ fontSize: 12,
@@ -244,16 +245,18 @@ export default function AlertsPanel({ datasetId, columns }: {
               <label htmlFor="alert-emails" style={label}>{t('alerts.email')}</label>
               <input id="alert-emails" value={emails} style={{ width: '100%' }}
                 onChange={e => setEmails(e.target.value)}
-                placeholder="one@example.com, two@example.com" />  {/* i18n-ok: addresses */}
+                placeholder="one@example.com, two@example.com" // i18n-ok: email addresses
+              />
               <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
                 {t('alerts.comma')}
               </div>
             </div>
             <div style={{ flex: '1 1 260px' }}>
-              <label htmlFor="alert-webhook" style={label}>{t('al.webhook')}</label>
+              <label htmlFor="alert-webhook" style={label}>{t('i2d.al.webhook')}</label>
               <input id="alert-webhook" value={webhook} style={{ width: '100%' }}
                 onChange={e => setWebhook(e.target.value)}
-                placeholder="https://…" /> {/* i18n-ok */}
+                placeholder="https://…" // i18n-ok: a URL
+              />
             </div>
             <div style={{ width: 150 }}>
               <label htmlFor="alert-interval" style={label}>{t('alerts.every')}</label>
@@ -261,11 +264,11 @@ export default function AlertsPanel({ datasetId, columns }: {
                 onChange={e => setInterval(Number(e.target.value))}>
                 {/* 15 is the floor the endpoint clamps to; offering 5 here would
                     silently become 15 on save. */}
-                <option value={15}>{t('al.every15')}</option>
-                <option value={30}>{t('al.every30')}</option>
-                <option value={60}>{t('al.everyHour')}</option>
-                <option value={360}>{t('al.every6h')}</option>
-                <option value={1440}>{t('al.everyDay')}</option>
+                <option value={15}>{t('i2d.al.minutes', { n: localDigits('15') })}</option>
+                <option value={30}>{t('i2d.al.minutes', { n: localDigits('30') })}</option>
+                <option value={60}>{t('i2d.al.hour')}</option>
+                <option value={360}>{t('i2d.al.hours', { n: localDigits('6') })}</option>
+                <option value={1440}>{t('i2d.al.day')}</option>
               </select>
             </div>
           </div>
@@ -276,13 +279,13 @@ export default function AlertsPanel({ datasetId, columns }: {
           )}
 
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn btn-primary btn-sm" disabled={!complete || saving} title={!complete ? t('al.incomplete') : undefined}
+            <button className="btn btn-primary btn-sm" disabled={!complete || saving} title={!complete ? t('i2d.al.needAll') : undefined}
               onClick={() => void create()}>
-              {saving ? t('al.creating') : t('ws.create')}
+              {saving ? t('i2d.c.creating') : t('i2d.al.create')}
             </button>
             <button className="btn btn-sm" onClick={() => {
               setAdding(false); setSaveError(null)
-            }}>{t('cm.cancel')}</button>
+            }}>{t('common.cancel')}</button>
           </div>
         </div>
       )}

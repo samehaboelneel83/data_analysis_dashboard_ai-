@@ -333,6 +333,27 @@ function verdict(t: TranslateFn, test: DifferenceTest, a: string, b: string, mea
   })
 }
 
+/** QA6 A7: the size of the gap in the data's own units, composed from the
+ *  server's numbers ("Development has 300 more rows than Sales (+15.8%)"),
+ *  so Arabic does not show the English sentence. Without the numbers, the
+ *  server's sentence is shown as sent. */
+function gapSentence(t: TranslateFn, test: DifferenceTest, a: string, b: string, measure: string | null): ReactNode {
+  const g = test.business
+  if (!g || typeof g.absolute !== 'number') return g ? isolateNumbers(g.sentence) : null
+  // As the server writes it: whole numbers from 100 up, else 2 dp.
+  const n = (v: number) => Math.abs(v) >= 100 || Number.isInteger(v)
+    ? Math.round(v).toLocaleString('en-US') : v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const up = g.absolute >= 0
+  const pct = g.percent == null ? '' : <> ({num(`${up ? '+' : '−'}${Math.abs(g.percent).toFixed(1)}%`)})</>
+  if (test.question === 'row counts')
+    return fill(t, up ? 'bc.stats.gapRowsMore' : 'bc.stats.gapRowsFewer', { a: nameOf(a), b: nameOf(b), n: num(n(Math.abs(g.absolute))), pct })
+  const va = test.values[a], vb = test.values[b]
+  if (typeof va !== 'number' || typeof vb !== 'number') return isolateNumbers(g.sentence)
+  const what = t(test.effect_name === 'rank_biserial' ? 'bc.stats.whatMedian' : 'bc.stats.whatMean', { measure: measure ?? '' })
+  return fill(t, up ? 'bc.stats.gapHigher' : 'bc.stats.gapLower', { what: nameOf(what), a: nameOf(a), b: nameOf(b),
+    va: num(n(va)), vb: num(n(vb)), n: num(n(Math.abs(g.absolute))), pct })
+}
+
 /** The server's three fixed footnotes, recognised and translated; any other
  *  caveat is shown as sent. */
 function footnote(t: TranslateFn, c: string): ReactNode {
@@ -359,8 +380,10 @@ export function EvidenceChip({ test, p_text, effect_name, effect_size, effect_la
       {/* QA5b S6: each part in its own isolate. As one plain string the Arabic
           line ran "t", "Welch", "p = 0.8487" and "Cohen's d -0.0119" together
           into one left-to-right stretch and read out of order. */}
+      {/* QA6 A7: the statistic and its value are one left-to-right unit, so
+          the brackets read "(Cohen's d -0.0119)", not the value first. */}
       <span>{fill(t, 'bc.canvas.effectChip', { test: nameOf(testName), p: num(p_text), label,
-        name: <bdi dir="ltr">{EFFECT_WORD[effect_name] ?? effect_name}</bdi>, size: num(effect_size) })}</span>
+        stat: num(`${EFFECT_WORD[effect_name] ?? effect_name} ${effect_size}`) })}</span>
     </span>
   )
 }
@@ -415,7 +438,10 @@ export function DifferenceDialog({ datasetId, dimension, measure, aggregation, g
       {!res && !err && <div style={{ color: 'var(--muted)' }}>{tr('bc.canvas.testingRows')}</div>}
       {res && (
         <div data-testid="difference-result" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div dir="auto" style={{ fontWeight: 600 }}>{local ? isolateNumbers(res.summary) : res.summary}</div>
+          {/* QA6 A7: in Arabic the summary is what each test's verdict and
+              gap below already say, composed in Arabic; the English server
+              sentence is not shown on top of them. */}
+          {!local && <div dir="auto" style={{ fontWeight: 600 }}>{res.summary}</div>}
           {res.tests.map((t, i) => (
             <div key={i} style={{ borderInlineStart: '2px solid var(--border)', paddingInlineStart: 8 }}>
               <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.04em' }} dir="auto">{known(tr, QUESTION_KEY, t.question)}</div>
@@ -424,7 +450,7 @@ export function DifferenceDialog({ datasetId, dimension, measure, aggregation, g
               </div>
               {t.business && (
                 <div data-testid="difference-business" style={{ fontSize: 12.5, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '2px 8px', margin: '4px 0' }}>
-                  <span style={{ color: 'var(--muted)' }}>{tr('bc.canvas.gapSize')}</span><b dir="auto">{local ? isolateNumbers(t.business.sentence) : t.business.sentence}</b>
+                  <span style={{ color: 'var(--muted)' }}>{tr('bc.canvas.gapSize')}</span><b dir="auto">{local ? gapSentence(tr, t, res.population.group_a, res.population.group_b, res.population.measure) : t.business.sentence}</b>
                   <span style={{ color: 'var(--muted)' }}>{tr('bc.canvas.statEffect')}</span>
                   <span>{tr('bc.canvas.effectOverlap', { label: known(tr, EFFECT_LABEL_KEY, t.effect_label) })}</span>
                 </div>

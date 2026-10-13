@@ -544,8 +544,8 @@ describe('DatasetDetail key influencers', () => {
   it('says whether a factor raises or lowers the outcome', async () => {
     // "1.92x" alone reads as good news even when the outcome is churn.
     await openAndRun()
-    expect(screen.getByText(/1\.92× more/)).toBeInTheDocument()
-    expect(screen.getByText(/0\.38× less/)).toBeInTheDocument()
+    expect(screen.getByText(/92% higher/)).toBeInTheDocument()
+    expect(screen.getByText(/62% lower/)).toBeInTheDocument()
   })
 
   it('always shows the not-causation caveat', async () => {

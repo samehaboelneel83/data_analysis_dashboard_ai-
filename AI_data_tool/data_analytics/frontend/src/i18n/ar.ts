@@ -14,14 +14,24 @@ import { ar as pgModelsMaps } from './pages/modelsMaps'
 import { ar as pgTypes } from './pages/types'
 import { ar as pgTemplates } from './pages/templates'
 import { ar as pgPublishing } from './pages/publishing'
+import { ar as pgAskAi } from './pages/askAi'
+import { ar as pgLineage } from './pages/lineage'
+import { ar as pgUpload } from './pages/upload'
+import { ar as pgConnections } from './pages/connections'
+import { ar as pgPolish } from './pages/polish'
+import { ar as pgI2d } from './pages/i18n2Dataset'
+import { ar as pgI2c } from './pages/i18n2Common'
+import { ar as pgQaf } from './pages/qaf'
 
 /** Arabic UI strings. Keys must match `en.ts` exactly. */
 export const ar: Record<MessageKey, string> = {
   ...bcCanvas, ...bcPanes, ...bcRules, ...bcShell, ...bcStats, ...bcDialogs,
   // 8-i18n: the pages outside the Builder, one module per area (i18n/pages/).
   ...pgAdminSecurity, ...pgAdminPlatform, ...pgDataPages, ...pgPanelsA, ...pgPanelsB, ...pgModelsMaps, ...pgTypes, ...pgTemplates, ...pgPublishing,
+  ...pgAskAi, ...pgLineage, ...pgUpload, ...pgConnections, ...pgPolish, ...pgI2d, ...pgI2c, ...pgQaf,
   'nav.home': 'الرئيسية',
   'nav.askAi': 'اسأل الذكاء الاصطناعي',
+  'fab.tip': 'اسأل الذكاء الاصطناعي عن هذه اللوحة',
   'nav.datasets': 'مجموعات البيانات',
   'nav.glossary': 'المسرد',
   'glossary.subtitle': 'المصطلحات التي تستخدمها شركتك والقواعد التي تحكمها. يقرؤها «اسأل الذكاء الاصطناعي» والرؤى ومصمم اللوحات — والقاعدة المعلَّمة «دائمًا» (مثل: السجل المفتوح هو الصف الذي تاريخ نهايته فارغ) تُطبَّق على كل سؤال في ذلك الاتصال.',
@@ -2616,6 +2626,22 @@ export const ar: Record<MessageKey, string> = {
   'dsh.tpl.quad': 'مقارنة من أربع لوحات',
   'dsh.tpl.geo': 'خريطة وتفاصيل',
   'dsh.tpl.detail': 'مخطط وتفاصيل',
+  'dsh.tplp.overview': 'نظرة عامة',
+  'dsh.tplp.comparison': 'مقارنة',
+  'dsh.tplp.geography': 'الجغرافيا',
+  'dsh.tplp.detail': 'التفاصيل',
+  'dsh.tplw.kpi': 'مؤشر {n}',
+  'dsh.tplw.breakdown': 'التوزيع',
+  'dsh.tplw.trend': 'الاتجاه',
+  'dsh.tplw.byCategory': 'حسب الفئة',
+  'dsh.tplw.overTime': 'عبر الزمن',
+  'dsh.tplw.share': 'الحصص',
+  'dsh.tplw.detail': 'التفاصيل',
+  'dsh.tplw.byRegion': 'حسب المنطقة',
+  'dsh.tplw.total': 'الإجمالي',
+  'dsh.tplw.topRegions': 'أعلى المناطق',
+  'dsh.tplw.filter': 'تصفية',
+  'dsh.tplw.detailRows': 'صفوف التفاصيل',
   'al.cad.none': 'غير مجدول',
   'al.cad.day': 'يوميًا',
   'al.cad.days': 'كل {n} أيام',
@@ -2997,10 +3023,10 @@ export const ar: Record<MessageKey, string> = {
   'hm.tile.rows': '{n} صف',
   'hm.tile.none': 'لا يوجد بعد',
   'hm.tile.failed': 'تعذّر التحميل',
-  'hm.tile.lastRefresh': 'آخر تحديث',
+  'hm.tile.lastRefresh': 'آخر تحديث للبيانات',
   'hm.tile.noRefreshes': 'لا توجد تحديثات بعد',
-  'hm.tile.noJobs': 'لا توجد مهام بعد',
-  'hm.tile.noJobs24': 'لا توجد مهام خلال آخر 24 ساعة',
+  'hm.tile.noJobs': 'التحديثات المجدولة: لا شيء بعد',
+  'hm.tile.noJobs24': 'التحديثات المجدولة: لا شيء خلال 24 ساعة',
   'hm.tile.jobsFailed': 'فشلت {n} من {of} مهمة',
   'hm.tile.jobsOk': '{of} مهمة، لم يفشل أيّ منها',
   'hm.tile.failing': 'يتعذّر تحديث {n} من مجموعات البيانات',
@@ -3442,8 +3468,8 @@ export const ar: Record<MessageKey, string> = {
   'chat.dl.csv': 'تنزيل CSV',
   'chat.dl.xlsx': 'تنزيل Excel',
   'chat.dl.pdf': 'تنزيل PDF',
-  'res.rows': '{n} صفًا',
-  'res.rowsShowing': '{n} صفًا، يُعرض {shown}',
+  'res.rows': '{n, plural, zero {# صف} one {صف واحد} two {صفّان} few {# صفوف} many {# صفًا} other {# صف}}',
+  'res.rowsShowing': '{n, plural, zero {# صف} one {صف واحد} two {صفّان} few {# صفوف} many {# صفًا} other {# صف}}، يُعرض {shown}',
   'res.catalog': 'من فهرس البيانات، وليس من استعلام',
   'res.none': 'لا توجد صفوف.',
   'ans3.tables': 'الجداول التي رُوجعت: {list}',
@@ -4661,6 +4687,11 @@ export const ar: Record<MessageKey, string> = {
   'setup.u.syncFailed': 'تعذّر على Datalytics قراءة قاعدة البيانات. راجع الاتصال من صفحة المراجعة ثم حاول مرة أخرى.',
   'setup.u.empty': 'لا تحتوي قاعدة البيانات على جداول يمكن لـ Datalytics قراءتها.',
   'setup.u.openReview': 'افتح صفحة المراجعة',
+  'setup.u.neverRead': 'لم تقرأ Datalytics قاعدة البيانات هذه بعد، ولا شيء يقرؤها الآن. اقرأها لتظهر جداولها هنا.',
+  'setup.u.slowSync': 'تستغرق قراءة قاعدة البيانات هذه وقتًا أطول من المعتاد. يمكنك بدء القراءة من جديد أو العودة لاحقًا، فتقدّمك محفوظ.',
+  'setup.u.readNow': 'اقرأ قاعدة البيانات الآن',
+  'setup.u.askAdmin': 'قراءة قاعدة البيانات إجراء خاص بالمسؤول: اطلب من أحد مسؤولي مؤسستك بدءها.',
+  'setup.u.backHome': 'العودة إلى الرئيسية',
   'setup.u.holds': 'ماذا تحتوي قاعدة البيانات',
   'setup.u.byAi': 'كتبه الذكاء الاصطناعي',
   'setup.u.byYou': 'كتبته أنت',

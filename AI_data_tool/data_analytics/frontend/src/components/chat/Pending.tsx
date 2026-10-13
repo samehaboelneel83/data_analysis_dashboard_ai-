@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useT } from '../../i18n'
 import { localDigits } from '../../lib/arabicFormats'
+import RobotHead from './RobotHead'
+import { Square } from 'lucide-react'
 
 /** What the chat shows between pressing Send and the answer arriving.
  *
@@ -32,7 +34,9 @@ function isDashboardRequest(question: string): boolean {
     /suggest|propose|recommend|build|create|make|design|give me|show me|i need|i want/.test(q)
 }
 
-export default function Pending({ question }: { question: string }) {
+/** The wait's clock: whole seconds since it started, as words, and whether
+ *  the wait has become unusual. One per pending question. */
+export function usePendingClock(question: string) {
   const t = useT()
   const [seconds, setSeconds] = useState(0)
   const started = useRef(Date.now())
@@ -50,6 +54,23 @@ export default function Pending({ question }: { question: string }) {
   const time = localDigits(seconds < 60
     ? t('pend.secs', { n: seconds })
     : t('pend.mins', { m: Math.floor(seconds / 60), s: seconds % 60 }))
+  return { time, unusual, designing }
+}
+
+/** QAF M3: stop waiting. It lets go of the request in this page only; the
+ *  server may still finish the run. */
+function StopButton({ onStop }: { onStop: () => void }) {
+  const t = useT()
+  return (
+    <button type="button" className="btn btn-ghost btn-sm dl-stop" onClick={onStop} title={t('qaf.ask.stopTitle')}>
+      <Square size={12} aria-hidden fill="currentColor" /> {t('qaf.ask.stop')}
+    </button>
+  )
+}
+
+export default function Pending({ question, onStop }: { question: string; onStop?: () => void }) {
+  const t = useT()
+  const { time, unusual, designing } = usePendingClock(question)
 
   return (
     <div
@@ -62,6 +83,7 @@ export default function Pending({ question }: { question: string }) {
         <span className="dl-pending__pulse" aria-hidden />
         <span className="dl-pending__title">{designing ? t('pend.designing') : t('ask.analyzing')}</span>
         <span className="dl-pending__time">{time}</span>
+        {onStop && <StopButton onStop={onStop} />}
       </div>
       <div className="dl-pending__skeleton" aria-hidden>
         <span style={{ width: '72%' }} /><span style={{ width: '54%' }} />
@@ -71,6 +93,39 @@ export default function Pending({ question }: { question: string }) {
         <div className="dl-pending__note">
           {designing ? t('pend.slowDashboards') : t('pend.slow')}
         </div>
+      )}
+    </div>
+  )
+}
+
+/** Step 10, Part B: the same wait as a card on the Ask AI page -- the robot's
+ *  head thinking, "Analyzing your data…", what is being asked about, the
+ *  elapsed time, and a skeleton of the answer to come. No step list: the
+ *  server does not report its stages (GATE 0). */
+export function LoadingCard({ question, scopeName, onStop }: { question: string; scopeName: string; onStop?: () => void }) {
+  const t = useT()
+  const { time, unusual, designing } = usePendingClock(question)
+  return (
+    <div className="dl-ac dl-ac--loading" aria-busy="true" data-testid="loading-card">
+      <div className="dl-ac__head">
+        <RobotHead state="thinking" live />
+        <div className="dl-ac__id">
+          <div className="dl-ac__who">{designing ? t('pend.designing') : t('ask2.load.title')}</div>
+          {scopeName && <div className="dl-ac__meta"><bdi>{scopeName}</bdi></div>}
+        </div>
+        {/* polite, and only the time: the title does not change. */}
+        <span className="dl-ac__time" role="timer" aria-live="off">{time}</span>
+        {onStop && <StopButton onStop={onStop} />}
+      </div>
+      <div className="dl-ac__skel" aria-hidden="true">
+        <i style={{ width: '92%' }} /><i style={{ width: '68%' }} />
+        <div className="dl-ac__skel-chart">
+          {[62, 48, 84, 40, 70, 56, 76].map((h, i) => <i key={i} style={{ height: `${h}%` }} />)}
+        </div>
+        <i style={{ width: '36%' }} />
+      </div>
+      {unusual && (
+        <p className="dl-ac__note">{designing ? t('pend.slowDashboards') : t('pend.slow')}</p>
       )}
     </div>
   )

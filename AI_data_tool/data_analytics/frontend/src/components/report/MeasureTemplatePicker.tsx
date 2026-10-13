@@ -99,7 +99,7 @@ function SummaryForm({ columns, onBuilt }: FormProps) {
   const t = useT()
   const [how, setHow] = useState<Summary>('SUM')
   const [column, setColumn] = useState('')
-  useEffect(() => { onBuilt(buildSummary({ how, column })) }, [how, column]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { onBuilt(buildSummary({ how, column }, t as never)) }, [how, column]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div style={row}>
       <HowSelect value={how} onChange={v => { setHow(v); setColumn('') }} aria={t('pg.panelsA.mt.howA')} />
@@ -116,7 +116,7 @@ function RatioForm({ columns, onBuilt }: FormProps) {
   const [op, setOp] = useState<RatioOp>('div')
   const [howB, setHowB] = useState<Summary>('SUM')
   const [b, setB] = useState('')
-  useEffect(() => { onBuilt(buildRatio({ howA, a, op, howB, b })) }, [howA, a, op, howB, b]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { onBuilt(buildRatio({ howA, a, op, howB, b }, t as never)) }, [howA, a, op, howB, b]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <div style={row}>
@@ -141,7 +141,7 @@ function ShareForm({ columns, onBuilt }: FormProps) {
   const t = useT()
   const [how, setHow] = useState<Summary>('SUM')
   const [column, setColumn] = useState('')
-  useEffect(() => { onBuilt(buildShare({ how, column })) }, [how, column]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { onBuilt(buildShare({ how, column }, t as never)) }, [how, column]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <div style={row}>
@@ -162,7 +162,7 @@ function OnlyForm({ columns, onBuilt }: FormProps) {
   const [column, setColumn] = useState('')
   const [joiner, setJoiner] = useState<SqlJoiner>('and')
   const [conds, setConds] = useState<CondNode[]>(() => [{ ...newRow('data'), id: `m${++seq}` }])
-  useEffect(() => { onBuilt(buildOnly({ how, column, joiner, conds, name: '' }, numeric)) }, [how, column, joiner, conds, numeric]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { onBuilt(buildOnly({ how, column, joiner, conds, name: '' }, numeric, t as never)) }, [how, column, joiner, conds, numeric]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <div style={row}>

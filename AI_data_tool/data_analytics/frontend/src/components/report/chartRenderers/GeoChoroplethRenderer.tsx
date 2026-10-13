@@ -1,4 +1,3 @@
-import { useT } from '../../../i18n'
 import { useMemo, useState } from 'react'
 import type { ChartRendererProps } from './types'
 import { fmtStr, TT, seriesColor } from '../chartUtils'
@@ -6,6 +5,7 @@ import { matchRegion, regionBoundsPoints, regionLabel } from '../geo/worldGeomet
 import { MapSvg, MAP_WRAP_STYLE, useMapBox } from '../geo/MapFrame'
 import { useRegionSet } from '../geo/regionSetCache'
 import { MapDataTable, mapSummary } from '../geo/MapDataTable'
+import { useT } from '../../../i18n'
 
 /**
  * Choropleth: countries shaded by measure value.
@@ -25,7 +25,7 @@ import { MapDataTable, mapSummary } from '../geo/MapDataTable'
 export default function GeoChoroplethRenderer({ rows, data, cfg, measureFmt, broadcasts,
                                                localSelected, onClickPoint,
                                                geography, plotW, plotH }: ChartRendererProps) {
-  const t9 = useT()
+  const t = useT()
   const { ref, w, h, tiles, view } = useMapBox(plotW, plotH)
   // Precedence, and the order matters: the widget's own setting is a DELIBERATE
   // override and must beat the dataset's classification, which in turn beats
@@ -83,8 +83,9 @@ export default function GeoChoroplethRenderer({ rows, data, cfg, measureFmt, bro
     return v == null ? [] : [{ label: regionLabel(f, set) || String(i), value: v }]
   }), [set, byFeature])
   const measure = (cfg as { measure?: string })?.measure
-  const kind = `Map of ${measure ?? 'value'}${dimension ? ` by ${dimension}` : ''}`
-  const summary = mapSummary(kind, entries, measureFmt)
+  const kind = t(dimension ? 'pg.modelsMaps.map.choroplethBy' : 'pg.modelsMaps.map.choropleth',
+    { measure: measure ?? t('pg.modelsMaps.map.value').toLowerCase(), dimension: dimension ?? '' })
+  const summary = mapSummary(kind, entries, measureFmt, t)
   const interactive = !!broadcasts && entries.length > 0
 
   const scale = (v: number) => {
@@ -154,18 +155,17 @@ export default function GeoChoroplethRenderer({ rows, data, cfg, measureFmt, bro
         </div>
       )}
       {loading && (
-        <div data-testid="geo-loading" style={{ position: 'absolute', top: 6, left: 8,
-          fontSize: 10, color: 'var(--muted)' }}>{t9('cr.loadingBoundaries')}</div>
+        <div data-testid="geo-loading" style={{ position: 'absolute', top: 6, insetInlineStart: 8,
+          fontSize: 10, color: 'var(--muted)' }}>{t('pg.modelsMaps.map.loadingBoundaries')}</div>
       )}
       {error && (
-        <div role="alert" style={{ position: 'absolute', top: 6, left: 8,
+        <div role="alert" style={{ position: 'absolute', top: 6, insetInlineStart: 8,
           fontSize: 10, color: 'var(--danger)' }}>{error}</div>
       )}
       {!loading && unmatched > 0 && (
-        <div data-testid="geo-unmatched" style={{ position: 'absolute', bottom: 4, left: 8,
+        <div data-testid="geo-unmatched" style={{ position: 'absolute', bottom: 4, insetInlineStart: 8,
           fontSize: 10, color: 'var(--muted)' }}>
-          {setId != null ? t9(unmatched === 1 ? 'cr.rowNoRegion' : 'cr.rowsNoRegion', { n: unmatched }) : t9(unmatched === 1 ? 'cr.rowNoCountry' : 'cr.rowsNoCountry', { n: unmatched })}
-          
+          {t(setId != null ? 'pg.modelsMaps.map.noRegion' : 'pg.modelsMaps.map.noCountry', { n: unmatched })}
           {/* Named, so the reader knows WHICH places are missing from the
               picture -- a count alone cannot be acted on. */}
           {unmatchedNames.length > 0 && `: ${unmatchedNames.slice(0, 3).join(', ')}${unmatchedNames.length > 3 ? '…' : ''}`}

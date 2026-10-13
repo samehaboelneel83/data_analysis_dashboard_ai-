@@ -32,7 +32,9 @@ const GEO_LEVEL_OPTIONS: { value: NonNullable<ColumnMeta['geo_level']>; numeric:
   { value: 'country', numeric: false }, { value: 'region', numeric: false }, { value: 'city', numeric: false },
   { value: 'postcode', numeric: false }, { value: 'latitude', numeric: true }, { value: 'longitude', numeric: true },
 ]
-const SUMMARY_LABEL: Record<string, string> = Object.fromEntries(SUMMARIES.map(x => [x, x]))
+const isSummary = (v: string) => SUMMARIES.includes(v)
+/** The summary as a lower-case word ("average"), for a sentence. */
+const summaryWord = (v: string, t: ReturnType<typeof useT>) => (isSummary(v) ? t(`cols3.agg.${v}` as MessageKey) : v)
 
 /** A short code that needs a gloss ("d001", "M", "CS") -- not a value already
  *  written in words. Mirrors `is_code_like` in services/insights.py. */
@@ -85,7 +87,7 @@ function useAs(name: string, dtype: string, meta: ColumnMeta | undefined, t: Ret
   const classed = meta ? { [name]: meta } : undefined
   if (role === 'measure' || (!role && dtype === 'numeric' && nonAdditiveKind(name, classed) === null)) {
     const agg = meta?.aggregation ?? defaultSummary(name, classed)
-    const aggWord = SUMMARY_LABEL[agg] ? t(`cols3.agg.${agg}` as MessageKey) : agg
+    const aggWord = summaryWord(agg, t)
     return { label: t('cols3.use.measure', { agg: aggWord }), measure: true }
   }
   if (role === 'temporal' || (!role && dtype === 'datetime')) return { label: t('cols3.use.time'), measure: false }
@@ -159,7 +161,7 @@ export default function ColumnMeaningPanel(
       toast.success(note)
       onSaved?.()
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail ?? 'Could not save')
+      toast.error(e?.response?.data?.detail ?? t('i2d.cm.saveFailed'))
     } finally { setBusy(false) }
   }
 
@@ -175,17 +177,17 @@ export default function ColumnMeaningPanel(
       // Said plainly, because it is the surprising half: the sentence just
       // became the answer for every dataset built from that table.
       toast.success(r.shared
-        ? t('cm.savedShared', { object: String(r.object), column: String(r.column) })
-        : t('cm.savedHere'))
+        ? t('i2d.cm.savedShared', { source: `${r.object}.${r.column}` })
+        : t('i2d.cm.savedHere'))
       setEditing(null)
       onSaved?.()
     } catch (e: any) {
-      toast.error(e?.response?.data?.detail ?? t('cm.saveFailed'))
+      toast.error(e?.response?.data?.detail ?? t('i2d.cm.descFailed'))
     } finally { setBusy(false) }
   }
 
   return (
-    <section className="dl-cols" aria-label={t('cm.sectionLabel')}>
+    <section className="dl-cols" aria-label={t('i2d.cm.section')}>
       {dataset.grain && (
         <p className="dl-cols__grain">
           <strong>{dataset.business_name || dataset.name}</strong>{' — '}{dataset.grain}
@@ -315,21 +317,21 @@ function ColumnRow(p: {
         <td className="dl-cols__means">
           {p.editing ? (
             <div className="dl-cols__edit">
-              <input value={p.draft} autoFocus disabled={p.busy} placeholder={t('cm.whatFor')}
+              <input value={p.draft} autoFocus disabled={p.busy} placeholder={t('i2d.cm.descPh')}
                 onChange={e => p.setDraft(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') p.onSave(); if (e.key === 'Escape') p.onCancel() }} />
               <button type="button" className="btn btn-primary btn-sm" onClick={p.onSave} disabled={p.busy}>
-                {p.busy ? t('cm.saving') : t('cm.save')}
+                {p.busy ? t('i2d.c.saving') : t('i2d.c.save')}
               </button>
-              <button type="button" className="btn btn-sm" onClick={p.onCancel} disabled={p.busy}>{t('cm.cancel')}</button>
+              <button type="button" className="btn btn-sm" onClick={p.onCancel} disabled={p.busy}>{t('common.cancel')}</button>
             </div>
           ) : p.canEdit ? (
             <button type="button" className={`dl-cols__desc${p.description ? '' : ' dl-cols__desc--empty'}`}
-              aria-label={t('cm.describe', { c: p.name })} onClick={p.onStart} dir="auto">
+              aria-label={t('i2d.cm.describe', { col: p.name })} onClick={p.onStart} dir="auto">
               {p.description || t('cols3.addDescription')} <Pencil size={11} aria-hidden />
             </button>
           ) : (
-            <span className={p.description ? '' : 'dl-cols__muted'} dir="auto">{p.description || 'Not described yet'}</span>
+            <span className={p.description ? '' : 'dl-cols__muted'} dir="auto">{p.description || t('i2d.cm.notDescribed')}</span>
           )}
           {useful.length > 0 && (
             <div className="dl-cols__gloss">{useful.slice(0, 8).map(([raw, label]) => `${raw} = ${label}`).join(', ')}</div>
@@ -359,24 +361,28 @@ function ColumnRow(p: {
           <td colSpan={6}>
             <div>
               <label>
-                {t('cm.treatAs')}
-                <select disabled={p.busy} value={p.meta?.role ?? ''} aria-label={t('cm.roleFor', { c: c.name })}
+                {t('i2d.cm.treatAs')}
+                <select disabled={p.busy} value={p.meta?.role ?? ''} aria-label={t('i2d.cm.roleFor', { col: c.name })}
                   onChange={e => void p.patchMeta(c.name, { role: (e.target.value || undefined) as ColumnMeta['role'] },
                     e.target.value ? t(`meaning.now.${e.target.value}` as MessageKey, { col: c.name }) : t('meaning.now.detected', { col: c.name }))}>
-                  <option value="">{t('cm.detected')}</option>
-                  {ROLES.map(r => <option key={r} value={r} title={t(`cm.roleWhy.${r}` as MessageKey)}>{t(`cm.role.${r}` as MessageKey)}</option>)}
+                  <option value="">{t('i2d.cm.detected')}</option>
+                  {ROLES.map(r => <option key={r} value={r} title={t(`i2d.cm.why.${r}` as MessageKey)}>{t(`i2d.cm.role.${r}` as MessageKey)}</option>)}
                 </select>
               </label>
               {(c.dtype === 'numeric' || p.meta?.role === 'measure') && p.meta?.role !== 'identifier' && p.meta?.role !== 'category' && (
-                <label title={t('cm.summariseTip')}>
-                  {t('cm.summariseAs')}
-                  <select disabled={p.busy} value={p.meta?.aggregation ?? ''} aria-label={t('cm.summaryFor', { c: c.name })}
+                <label title={t('i2d.cm.summaryTitle')}>
+                  {t('i2d.cm.summariseAs')}
+                  <select disabled={p.busy} value={p.meta?.aggregation ?? ''} aria-label={t('i2d.cm.summaryFor', { col: c.name })}
                     onChange={e => void p.patchMeta(c.name, { aggregation: e.target.value || undefined },
                       e.target.value
-                        ? t('meaning.summaryNow', { col: c.name, how: SUMMARY_LABEL[e.target.value] ? t(`cols3.agg.${e.target.value}` as MessageKey) : e.target.value })
+                        ? t('meaning.summaryNow', { col: c.name, how: summaryWord(e.target.value, t) })
                         : t('meaning.summaryAuto', { col: c.name }))}>
-                    <option value="">{t('cm.auto', { how: t(`cols3.agg.${SUMMARY_LABEL[defaultSummary(c.name, p.meta ? { [c.name]: { ...p.meta, aggregation: undefined } } : undefined)] ?? 'sum'}` as MessageKey) })}</option>
-                    {SUMMARIES.map(x => <option key={x} value={x}>{t(`cm.sum.${x}` as MessageKey)}</option>)}
+                    {/* The automatic summary of what this column IS (its stored class), not of its name alone. */}
+                    {(() => {
+                      const auto = defaultSummary(c.name, p.meta ? { [c.name]: { ...p.meta, aggregation: undefined } } : undefined)
+                      return <option value="">{t('i2d.cm.auto', { how: isSummary(auto) ? summaryWord(auto, t) : t('cols3.agg.sum') })}</option>
+                    })()}
+                    {SUMMARIES.map(x => <option key={x} value={x}>{t(`i2d.cm.sum.${x}` as MessageKey)}</option>)}
                   </select>
                 </label>
               )}
@@ -478,21 +484,21 @@ function ColumnRow(p: {
               {/* An OUTCOME worth explaining: what lets the "what drives X"
                   analyses run without being told what X is. */}
               <label>
-                <input type="checkbox" disabled={p.busy} aria-label={t('cm.explainFor', { c: c.name })} checked={p.target !== undefined}
+                <input type="checkbox" disabled={p.busy} aria-label={t('i2d.cm.explain', { col: c.name })} checked={p.target !== undefined}
                   onChange={e => void p.patchMeta(c.name, { target_candidate_priority: e.target.checked ? 10 : undefined },
                     e.target.checked ? t('meaning.outcomeOn', { col: c.name }) : t('meaning.outcomeOff', { col: c.name }))} />
-                {t('cm.worthExplaining')}{p.target !== undefined && <span className="dl-cols__muted"> ({p.target})</span>}
+                {t('i2d.cm.worth')}{p.target !== undefined && <span className="dl-cols__muted"> ({localDigits(String(p.target))})</span>}
               </label>
               {/* Not the same as hiding it, and the tooltip has to say so or
                   the two controls read as duplicates. */}
-              <label title={t('cm.suggestTip')}>
-                <input type="checkbox" disabled={p.busy} aria-label={t('cm.suggestFor', { c: c.name })} checked={p.eligible}
+              <label title={t('i2d.cm.suggestTitle')}>
+                <input type="checkbox" disabled={p.busy} aria-label={t('i2d.cm.suggest', { col: c.name })} checked={p.eligible}
                   onChange={e => void p.patchMeta(c.name, { eligible_for_suggestion: e.target.checked ? undefined : false },
                     e.target.checked ? t('meaning.suggestOn', { col: c.name }) : t('meaning.suggestOff', { col: c.name }))} />
-                {t('cm.maySuggest')}
+                {t('i2d.cm.maySuggest')}
               </label>
               <label title={t('cols3.hideTitle')}>
-                <input type="checkbox" disabled={p.busy} aria-label={t('cm.hideFor', { c: c.name })} checked={!!p.meta?.hidden}
+                <input type="checkbox" disabled={p.busy} aria-label={t('i2d.cm.hide', { col: c.name })} checked={!!p.meta?.hidden}
                   onChange={e => void p.patchMeta(c.name, { hidden: e.target.checked ? true : undefined },
                     e.target.checked ? t('cols3.hiddenNow', { col: c.name }) : t('cols3.shownNow', { col: c.name }))} />
                 {t('cols3.hide')}

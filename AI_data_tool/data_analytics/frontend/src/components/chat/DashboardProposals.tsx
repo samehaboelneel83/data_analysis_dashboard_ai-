@@ -1,7 +1,8 @@
-import { useT } from '../../i18n'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { dataSourcesApi, reportsApi } from '../../services/api'
+import { useT } from '../../i18n'
+import { localDigits } from '../../lib/arabicFormats'
 
 /** One dashboard the agent proposed: the query that builds its data, and the
  *  tiles to put over it. Mirrors `services/suggest_dashboard.SUGGESTION_SCHEMA`. */
@@ -81,8 +82,8 @@ const linkish: React.CSSProperties = {
 export default function DashboardProposals(
   { presentation }: { presentation: DashboardProposalsPresentation },
 ) {
-  const t9 = useT()
   const navigate = useNavigate()
+  const t = useT()
   const [busy, setBusy] = useState<number | null>(null)
   const [failed, setFailed] = useState<Record<number, string>>({})
   const [openSql, setOpenSql] = useState<Record<number, boolean>>({})
@@ -103,7 +104,7 @@ export default function DashboardProposals(
         presentation.source_id, proposal.title, undefined, proposal.sql, 'import')
       const report = await reportsApi.create({
         name: proposal.title,
-        description: proposal.purpose || `Proposed by the AI for a ${presentation.for_role}.`,
+        description: proposal.purpose || t('i2c.dp.description', { role: presentation.for_role }),
         dataset_id: dataset.id,
       })
       const pageId = report.pages?.[0]?.id
@@ -146,7 +147,7 @@ export default function DashboardProposals(
       // proposed, so a failure here is worth reading rather than retrying.
       setFailed(prev => ({
         ...prev,
-        [index]: (e as Error)?.message || 'something went wrong',
+        [index]: (e as Error)?.message || t('i2c.dp.wrong'),
       }))
     } finally {
       setBusy(null)
@@ -161,19 +162,18 @@ export default function DashboardProposals(
       <div style={{ fontSize: 12, marginBottom: 6 }}>
         <a href={`/setup/${presentation.source_id}`}
           onClick={e => { e.preventDefault(); navigate(`/setup/${presentation.source_id}`) }}>
-          {rtl ? 'جرّب الإعداد الموجَّه: اختيار البيانات وفحصها ثم تصميم اللوحة خطوة بخطوة'  // i18n-ok: follows the answer's language
-               : 'Try the guided setup: choose and check the data, then design the dashboard step by step'}
+          {t('i2c.dp.guided')}
         </a>
       </div>
       {brief && (
         <div style={{ ...card, fontSize: 12 }}>
-          {brief.role && <div><b>{rtl ? 'دورك: ' : 'Your role: ' /* i18n-ok: follows the answer's language */}</b>{brief.role}</div>}
+          {brief.role && <div><b>{t('i2c.dp.role')}</b>{' '}<bdi>{brief.role}</bdi></div>}
           {brief.understanding && (
-            <div style={{ marginTop: 6 }}><b>{rtl ? 'ما تحتويه البيانات: ' : 'What this data holds: ' /* i18n-ok: follows the answer's language */}</b>
+            <div style={{ marginTop: 6 }}><b>{t('i2c.dp.holds')}</b>{' '}
               {brief.understanding}</div>)}
           {!!brief.questions?.length && (
             <div style={{ marginTop: 6 }}>
-              <b>{rtl ? 'الأسئلة التي تغيّر قراراتك:' : 'The questions that change your decisions:' /* i18n-ok: follows the answer's language */}</b>
+              <b>{t('i2c.dp.questions')}</b>
               <ol style={{ margin: '4px 0 0', paddingInlineStart: 18 }}>
                 {brief.questions.map((q, qi) => (
                   <li key={qi} style={{ padding: '1px 0' }}>{q.question}
@@ -183,7 +183,7 @@ export default function DashboardProposals(
             </div>)}
           {!!brief.cannot_answer?.length && (
             <div style={{ marginTop: 6, color: 'var(--muted)' }}>
-              <b>{rtl ? 'لا تستطيع هذه البيانات الإجابة عن:' : 'This data cannot answer:' /* i18n-ok: follows the answer's language */}</b>
+              <b>{t('i2c.dp.cannot')}</b>
               <ul style={{ margin: '4px 0 0', paddingInlineStart: 18 }}>
                 {brief.cannot_answer.map((x, xi) => <li key={xi}>{x}</li>)}
               </ul>
@@ -213,14 +213,14 @@ export default function DashboardProposals(
                 cursor: busy === null ? 'pointer' : 'default',
                 background: 'var(--accent)', color: 'var(--mc-accent-fg)',
               }}>
-              {busy === i ? t9('sdd.building') : t9('dp.create')}
+              {busy === i ? t('i2c.dp.building') : t('i2c.dp.create')}
             </button>
             <button style={linkish}
                     onClick={() => setOpenSql(s => ({ ...s, [i]: !s[i] }))}>
-              {openSql[i] ? t9('ask.hideSql') : t9('ask.showSql')}
+              {openSql[i] ? t('i2c.dp.hideSql') : t('i2c.dp.showSql')}
             </button>
             <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-              {p.widgets.length === 1 ? t9('dp.oneWidget') : t9('dp.nWidgets', { n: p.widgets.length })}
+              {t('i2c.dp.widgets', { n: localDigits(String(p.widgets.length)) })}
             </span>
           </div>
 
@@ -233,7 +233,7 @@ export default function DashboardProposals(
 
           {failed[i] && (
             <div style={{ marginTop: 8, fontSize: 12, color: 'var(--danger, #b4232a)' }}>
-              {t9('dp.failed', { why: failed[i] })}
+              {t('i2c.dp.buildFail')} {failed[i]}
             </div>
           )}
         </div>

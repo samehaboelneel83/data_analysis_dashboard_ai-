@@ -2,6 +2,7 @@ import { useT } from '../../../i18n'
 import { Suspense, useEffect, useState, type ComponentType } from 'react'
 import type { ChartRendererProps } from './types'
 import { MeasuredChart } from '../MeasuredChart'
+import { MapLoading } from '../geo/MapDataTable'
 
 /** Chart types with an animation role — must match ANIMATION_TYPES in widget_data.py. */
 export const ANIMATION_WIDGETS = ['bar', 'line', 'area', 'scatter', 'step', 'dot_plot', 'pie', 'donut',
@@ -71,7 +72,7 @@ export default function AnimatedRenderer({ Inner, props, onFrame }: {
         {!isMap && (res.type === 'empty' || !(res.rows?.length))
           ? <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: 11, color: 'var(--muted)' }}>{t9('cr.noRowsIn', { label: String(frame.label) })}</div>
-          : <Suspense fallback={<div style={{ fontSize: 11, color: 'var(--muted)', padding: 8 }}>{t9('cr.loadingMap')}</div>}>
+          : <Suspense fallback={<MapLoading />}>
               <MeasuredChart>{(w, h) => (
                 <Inner {...props} data={shown} rows={res.rows ?? []} cfg={cfg} plotW={w} plotH={h} />
               )}</MeasuredChart>

@@ -1,4 +1,3 @@
-import { useT } from '../../i18n'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useModalDialog } from '../ui/useModalDialog'
@@ -6,6 +5,8 @@ import {
   dataSourcesApi, reportsApi,
   type SimilarDataset, type SourceDashboardSuggestion,
 } from '../../services/api'
+import { useT } from '../../i18n'
+import { localDigits } from '../../lib/arabicFormats'
 
 /**
  * "I have connected a database and I do not know what to do with it."
@@ -38,8 +39,8 @@ const Z_OVERLAY = 1000
 export default function SuggestFromSourceDialog(
   { sourceId, sourceName, synced, onClose }: SuggestFromSourceDialogProps,
 ) {
-  const t9 = useT()
   const navigate = useNavigate()
+  const t = useT()
   // The shared hook, not a hand-rolled key listener: it supplies Escape, the
   // focus trap and focus restoration together, and `overlayCoverage.test.ts`
   // structurally refuses any viewport overlay that does not use it. That pin
@@ -57,7 +58,7 @@ export default function SuggestFromSourceDialog(
 
   const ask = async () => {
     const who = role.trim()
-    if (!who) { setReason('Say who the dashboard is for.'); return }
+    if (!who) { setReason(t('i2c.sfs.sayWho')); return }
     setBusy(true)
     setReason('')
     setSuggestion(null)
@@ -70,7 +71,7 @@ export default function SuggestFromSourceDialog(
         // 200 with a reason, not an error: "the model is off" and "nothing
         // safe could be proposed" are both normal answers to a request for a
         // suggestion, and the reason is more useful than a toast.
-        setReason(got.reason || 'No dashboard could be designed from this data.')
+        setReason(got.reason || t('i2c.sfs.noDesign'))
         return
       }
       setSuggestion(got.suggestion)
@@ -87,7 +88,7 @@ export default function SuggestFromSourceDialog(
         setSimilar(matches)
       } catch { /* the proposal stands on its own */ }
     } catch (e: any) {
-      setReason(e?.response?.data?.detail ?? 'The suggestion could not be made.')
+      setReason(e?.response?.data?.detail ?? t('i2c.sfs.failed'))
     } finally { setBusy(false) }
   }
 
@@ -102,7 +103,7 @@ export default function SuggestFromSourceDialog(
         sourceId, suggestion.title, undefined, suggestion.sql, 'import')
       const report = await reportsApi.create({
         name: suggestion.title,
-        description: t9('sfs.proposedFor', { role: role.trim(), source: sourceName }),
+        description: t('i2c.sfs.description', { role: role.trim(), source: sourceName }),
         dataset_id: dataset.id,
       })
       const pageId = report.pages?.[0]?.id
@@ -137,7 +138,7 @@ export default function SuggestFromSourceDialog(
       // Named, not swallowed: the query already ran against the database when it
       // was proposed, so a failure here is worth reading rather than retrying.
       setReason(e?.response?.data?.detail ?? (e as Error)?.message
-                ?? 'The dashboard could not be built.')
+                ?? t('i2c.sfs.buildFail'))
     } finally { setBuilding(false) }
   }
 
@@ -151,35 +152,35 @@ export default function SuggestFromSourceDialog(
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', display: 'flex',
       alignItems: 'center', justifyContent: 'center', zIndex: Z_OVERLAY }}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={t9('sfs.title')}
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={t('i2c.sfs.title')}
         style={{ background: 'var(--surface)', border: '1px solid var(--border)',
           borderRadius: 12, padding: 24, width: 560, maxWidth: '92vw',
           maxHeight: '88vh', overflowY: 'auto' }}>
 
         <h2 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 4px' }}>
-          {t9('sfs.title')}
+          {t('i2c.sfs.title')}
         </h2>
         <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 16px' }}>
-          {t9('sfs.intro', { source: sourceName })}
+          {t('i2c.sfs.introA')} <bdi>{sourceName}</bdi>{t('i2c.sfs.introB')}
         </p>
 
         {!synced && (
           <p style={{ fontSize: 12, color: 'var(--muted)', border: '1px solid var(--border)',
             borderRadius: 6, padding: 10, marginBottom: 12 }}>
-            {t9('sfs.notSynced')}
+            {t('i2c.sfs.notSynced')}
           </p>
         )}
 
         <label style={label}>
-          {t9('sfs.who')}
+          {t('i2c.sfs.who')}
           <input style={input} value={role} autoFocus disabled={busy || building}
-            placeholder={t9('sfs.whoPh')}
+            placeholder={t('sfs.whoPh')}
             onChange={e => setRole(e.target.value)} />
         </label>
         <label style={{ ...label, marginTop: 10 }}>
-          {t9('sfs.goal')}
+          {t('i2c.sfs.goal')}
           <input style={input} value={goal} disabled={busy || building}
-            placeholder={t9('sfs.goalPh')}
+            placeholder={t('sfs.goalPh')}
             onChange={e => setGoal(e.target.value)} />
         </label>
 
@@ -194,7 +195,7 @@ export default function SuggestFromSourceDialog(
             {/* The engine, named (Part IV criterion 10): the design is the AI
                 model's; the query below is the evidence it rests on. */}
             <div data-testid="suggestion-source" style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 2 }}>
-              {t9('sfs.designedBy')}
+              {t('i2c.sfs.engine')}
             </div>
             <ul style={{ margin: '6px 0 0', padding: 0, listStyle: 'none' }}>
               {suggestion.widgets.map((w, i) => (
@@ -206,7 +207,7 @@ export default function SuggestFromSourceDialog(
             </ul>
             <details style={{ marginTop: 8 }}>
               <summary style={{ fontSize: 11, color: 'var(--muted)', cursor: 'pointer' }}>
-                {t9('sfs.query')}
+                {t('i2c.sfs.query')}
               </summary>
               <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap', margin: '6px 0 0' }}>
                 {suggestion.sql}
@@ -219,10 +220,10 @@ export default function SuggestFromSourceDialog(
           <div style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 12,
             marginTop: 10 }}>
             <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
-              {t9('sfs.already')}
+              {t('i2c.sfs.similarTitle')}
             </div>
             <p style={{ fontSize: 11, color: 'var(--muted)', margin: '0 0 6px' }}>
-              {t9('sfs.alreadyWhy')}
+              {t('i2c.sfs.similarBody')}
             </p>
             <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
               {similar.map(m => (
@@ -234,8 +235,8 @@ export default function SuggestFromSourceDialog(
                     {m.name}
                   </button>
                   <span style={{ color: 'var(--muted)' }}>
-                    {' '}{t9('sfs.covers', { pct: Math.round(m.coverage * 100) })}
-                    {m.by_name && ` ${t9('sfs.byName')}`}
+                    {' '}{t('i2c.sfs.covers', { pct: localDigits(String(Math.round(m.coverage * 100))) })}
+                    {m.by_name && <>{' '}{t('i2c.sfs.byName')}</>}
                   </span>
                 </li>
               ))}
@@ -245,25 +246,25 @@ export default function SuggestFromSourceDialog(
 
         <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
           {!suggestion ? (
-            <button onClick={() => void ask()} disabled={busy || !synced} title={!synced ? t9('sfs.syncFirst') : undefined}
+            <button onClick={() => void ask()} disabled={busy || !synced} title={!synced ? t('i2c.sfs.syncFirst') : undefined}
               style={{ fontSize: 12, padding: '6px 14px', borderRadius: 6, border: 'none',
                 background: 'var(--accent, #2563eb)', color: 'var(--mc-accent-fg)',
                 cursor: busy || !synced ? 'default' : 'pointer', opacity: busy || !synced ? .6 : 1 }}>
-              {busy ? t9('sfs.designing') : t9('sfs.suggest')}
+              {busy ? t('i2c.sfs.designing') : t('i2c.sfs.suggest')}
             </button>
           ) : (
             <button onClick={() => void create()} disabled={building}
               style={{ fontSize: 12, padding: '6px 14px', borderRadius: 6, border: 'none',
                 background: 'var(--accent, #2563eb)', color: 'var(--mc-accent-fg)',
                 cursor: building ? 'default' : 'pointer', opacity: building ? .6 : 1 }}>
-              {building ? t9('sdd.building') : t9('sfs.create')}
+              {building ? t('i2c.sfs.building') : t('i2c.sfs.create')}
             </button>
           )}
           <button onClick={onClose} disabled={busy || building}
             style={{ fontSize: 12, padding: '6px 14px', borderRadius: 6,
               border: '1px solid var(--border)', background: 'var(--surface)',
               color: 'var(--text)', cursor: 'pointer' }}>
-            {suggestion ? t9('sfs.notThis') : t9('common.cancel')}
+            {suggestion ? t('i2c.sfs.notThis') : t('common.cancel')}
           </button>
         </div>
       </div>

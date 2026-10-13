@@ -200,7 +200,7 @@ describe('the question box', () => {
     const box = await screen.findByRole('textbox', { name: /Ask a question about your data/ })
     fireEvent.change(box, { target: { value: 'Which region grew?' } })
     fireEvent.submit(box.closest('form')!)
-    expect(await screen.findByTestId('where')).toHaveTextContent('/ask?q=Which%20region%20grew%3F')
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/ask?q=Which%20region%20grew%3F'))
   })
 
   it('offers starters from the newest dataset it can ask about, scoped to it', async () => {
@@ -209,7 +209,7 @@ describe('the question box', () => {
     renderHome()
     const group = await screen.findByRole('group', { name: 'Suggested questions about Sales' })
     fireEvent.click(within(group).getAllByRole('button')[0])
-    expect(await screen.findByTestId('where')).toHaveTextContent('/ask?dataset=4&q=')
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/ask?dataset=4&q='))
   })
 
   it('is locked, saying why, while the model server is unreachable', async () => {
@@ -310,6 +310,19 @@ describe('outage and first run', () => {
     await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
     expect(screen.queryByTestId('home-onboarding')).not.toBeInTheDocument()
     expect(screen.queryByText(/No dashboards yet/)).not.toBeInTheDocument()
+  })
+
+  it('9-polish: the whole-page error says so plainly, with the server’s words, Try again and where else to go', async () => {
+    vi.mocked(reportsApi.list).mockRejectedValue({ response: { data: { detail: 'database is starting up' } } })
+    renderHome()
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Home could not be loaded')
+    expect(alert).toHaveTextContent('database is starting up')
+    expect(within(alert).getByRole('link', { name: /Datasets/ })).toHaveAttribute('href', '/datasets')
+    vi.mocked(reportsApi.list).mockResolvedValue([] as never)
+    vi.mocked(datasetsApi.list).mockResolvedValue([] as never)
+    fireEvent.click(within(alert).getByRole('button', { name: /Try again/ }))
+    await waitFor(() => expect(screen.queryByText('Home could not be loaded')).toBeNull())
   })
 
   it('an empty workspace gets the setup steps, and the question box says why it is locked', async () => {

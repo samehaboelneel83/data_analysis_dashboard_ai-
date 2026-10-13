@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
+import { Table2 } from 'lucide-react'
 import { useDirection } from '../../contexts/DirectionContext'
 import { useT } from '../../i18n'
 import { localDigits } from '../../lib/arabicFormats'
-import { formatCell, readingValue } from '../../lib/displayNumber'
+import { formatCell, formatCellGrouped, readingValue } from '../../lib/displayNumber'
+import { nonAdditiveKind } from '../../lib/semanticGuard'
 import BarChartRenderer from '../report/chartRenderers/BarChartRenderer'
 import LineChartRenderer from '../report/chartRenderers/LineChartRenderer'
 import PieChartRenderer from '../report/chartRenderers/PieChartRenderer'
 import { MeasuredChart } from '../report/MeasuredChart'
 import type { AgentPresentation, AgentResult, EvidenceClaim } from '../../services/api'
+import CardSection from './CardSection'
 import './answerEvidence.css'
 
 /**
@@ -176,10 +179,14 @@ function NoRows() {
   return <span style={{ fontSize: 12, color: 'var(--muted)' }}>{t('res.none')}</span>
 }
 
-export function ResultGrid({ result, focus }: {
+export function ResultGrid({ result, focus, grouped }: {
   result: AgentResult
   focus?: Omit<EvidenceFocus, 'result'> | null
+  /** Step 10, the answer card: numbers are grouped by thousands and held
+   *  left-to-right, except in a year, identifier or coordinate column. */
+  grouped?: boolean
 }) {
+  const quantity = result.columns.map(c => !!grouped && !nonAdditiveKind(c))
   const box = useRef<HTMLDivElement>(null)
   const col = focus?.column != null ? result.columns.indexOf(focus.column) : -1
   const marked = (i: number, j: number) => !!focus && j === col
@@ -217,7 +224,9 @@ export function ResultGrid({ result, focus }: {
                     style={{ padding: '4px 8px', borderBottom: '1px solid var(--border)',
                     whiteSpace: 'nowrap', textAlign: typeof v === 'number' ? 'end' : 'start',
                     fontVariantNumeric: 'tabular-nums' }}>
-                    {cellText(v)}
+                    {!grouped ? cellText(v)
+                      : typeof v === 'number' ? <bdi dir="ltr">{quantity[j] ? formatCellGrouped(v) : cellText(v)}</bdi>
+                      : quantity[j] ? formatCellGrouped(v) : cellText(v)}
                   </td>
                 ))}
               </tr>
@@ -356,28 +365,63 @@ function Kpi({ result, focused }: { result: AgentResult; focused?: boolean }) {
   )
 }
 
-export default function ResultView({ results, presentation, focus }: {
+/** The chart an answer's result is drawn as, if any: the server's named
+ *  format, or the one the result's shape suggests. One rule for the picture
+ *  and for the card's "Auto chart" chip. */
+export function drawnChart(result: AgentResult | undefined, presentation?: AgentPresentation | null): 'bar' | 'line' | 'pie' | null {
+  if (!result || !(result.total > 0)) return null
+  const format = presentation?.format
+  if (format === 'bar' || format === 'line' || format === 'pie') return format
+  const auto = autoChart(result)
+  return auto === 'bar' || auto === 'line' ? auto : null
+}
+
+export default function ResultView({ results, presentation, focus, sectioned }: {
   results: AgentResult[]
   presentation?: AgentPresentation | null
   /** A number of the answer to point at (E11). */
   focus?: EvidenceFocus | null
+  /** Step 10: inside an answer card. The chart sits in its own frame and the
+   *  rows are a collapsible band, "Rows behind this answer", with their count:
+   *  closed under a chart, open when the rows are all there is. */
+  sectioned?: boolean
 }) {
   const t = useT()
   const [rowsOpen, setRowsOpen] = useState(false)
+  // Rows with no chart above them start open; the reader can still close them.
+  const [gridClosed, setGridClosed] = useState(false)
   // A number in a charted result lives in the rows under the chart: open them.
-  useEffect(() => { if (focus) setRowsOpen(true) }, [focus])
-  const format = presentation?.format
-  const chartable = (format === 'bar' || format === 'line' || format === 'pie') ? format : null
+  useEffect(() => { if (focus) { setRowsOpen(true); setGridClosed(false) } }, [focus])
   return (
-    <div className="dl-result">
+    <div className={sectioned ? 'dl-result dl-result--card' : 'dl-result'}>
       {results.map((r, i) => {
-        const auto = chartable ? null : autoChart(r)
-        const drawn = chartable ?? (auto === 'bar' || auto === 'line' ? auto : null)
-        const showChart = !!drawn && r.total > 0
+        const auto = autoChart(r)
+        const drawn = drawnChart(r, presentation)
+        const showChart = !!drawn
         const here = focus && focus.result === i ? focus : null
+        if (sectioned) {
+          const kpi = !presentationChart(presentation) && auto === 'kpi'
+          const open = showChart ? rowsOpen : !gridClosed
+          return (
+            <div key={`${r.step}-${i}`}>
+              {kpi && <Kpi result={r} focused={!!here} />}
+              {showChart && (
+                <figure className="dl-ac__chart">
+                  <ResultChart result={r} format={drawn!} x={presentation?.x} y={presentation?.y} />
+                </figure>
+              )}
+              {!kpi && (
+                <CardSection icon={Table2} label={t('ask2.ans.rowsBehind')} count={r.total} open={open}
+                  onToggle={() => (showChart ? setRowsOpen(o => !o) : setGridClosed(c => !c))}>
+                  <ResultGrid result={r} focus={here} grouped />
+                </CardSection>
+              )}
+            </div>
+          )
+        }
         return (
           <div key={`${r.step}-${i}`}>
-            {auto === 'kpi' && <Kpi result={r} focused={!!here} />}
+            {!presentationChart(presentation) && auto === 'kpi' && <Kpi result={r} focused={!!here} />}
             {showChart ? (
               <>
                 <div className="dl-result__chart">
@@ -388,10 +432,11 @@ export default function ResultView({ results, presentation, focus }: {
                   onClick={() => setRowsOpen(o => !o)}>
                   {rowsOpen ? t('ask.hideRows') : t('ask.showRows', { n: localDigits(String(r.total)) })}
                 </button>
-                {rowsOpen && <ResultGrid result={r} focus={here} />}
+                {/* QAF 10: the answer card's number rule in the compact view too. */}
+                {rowsOpen && <ResultGrid result={r} focus={here} grouped />}
               </>
-            ) : auto === 'kpi' ? null : (
-              <ResultGrid result={r} focus={here} />
+            ) : !presentationChart(presentation) && auto === 'kpi' ? null : (
+              <ResultGrid result={r} focus={here} grouped />
             )}
           </div>
         )
@@ -399,3 +444,5 @@ export default function ResultView({ results, presentation, focus }: {
     </div>
   )
 }
+
+const presentationChart = (p?: AgentPresentation | null) => p?.format === 'bar' || p?.format === 'line' || p?.format === 'pie'

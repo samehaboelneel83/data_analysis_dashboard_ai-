@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Database, LayoutDashboard, Plug, RefreshCw } from 'lucide-react'
+import { Link, useNavigate } from 'react-router-dom'
+import { CloudOff, Database, LayoutDashboard, Plug, RefreshCw, Sparkles } from 'lucide-react'
+import { detailToText } from '../lib/friendlyError'
 import {
   agentApi, dataSourcesApi, datasetsApi, lineageApi, monitoringApi, reportsApi, setupApi,
   type ActivityRow, type DataSource, type DatasetSummary, type LineageGraph, type RecentReport, type RefreshRunRow,
 } from '../services/api'
 import type { Report } from '../types/report'
 import { useOptionalAuth } from '../contexts/AuthContext'
-import LoadError from '../components/ui/LoadError'
 import Loader from '../components/ui/Loader'
 import { formatTimeAgo, useT } from '../i18n'
 import { localDigits } from '../lib/arabicFormats'
@@ -21,6 +21,7 @@ import DatasetsSection, { askable, recentDatasets } from './home/DatasetsSection
 import { ActivityCard, JobsCard } from './home/AdminCards'
 import { feedItems, handle, jobsDigest } from './home/feeds'
 import { firstPageWidgets } from './home/Thumb'
+import { statusCounts } from './reports/model'
 import './home/home.css'
 
 /**
@@ -106,11 +107,27 @@ export default function Home() {
 
   if (opening) return <Loader label={t('common.loading')} />
 
+  // 9-polish: the whole page could not be read. Said as that (never as an
+  // empty workspace), with the server's own words, Try again, and the pages
+  // that load on their own and may still work.
   if (loadError) {
+    const said = detailToText((loadError as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail)
     return (
-      <div>
-        <h1 className="dl-page-title" style={{ marginBottom: 16 }}>{t('nav.home')}</h1>
-        <LoadError what={t('home.workspace')} error={loadError} onRetry={load} />
+      <div className="dl-home-err">
+        <h1 className="dl-sr-only">{t('nav.home')}</h1>
+        <section className="dl-home-err__card" role="alert">
+          <span className="dl-home-err__ic" aria-hidden><CloudOff size={28} /></span>
+          <h2>{t('pol.homeErr.title')}</h2>
+          <p>{t('pol.homeErr.body')}</p>
+          {said && <p className="dl-home-err__said" dir="auto">{said}</p>}
+          <button type="button" className="btn btn-primary" onClick={load}><RefreshCw size={15} aria-hidden /> {t('pol.homeErr.retry')}</button>
+          <nav className="dl-home-err__go" aria-label={t('pol.homeErr.elsewhere')}>
+            <span>{t('pol.homeErr.elsewhere')}</span>
+            <Link to="/datasets"><Database size={14} aria-hidden /> {t('nav.datasets')}</Link>
+            <Link to="/reports"><LayoutDashboard size={14} aria-hidden /> {t('nav.dashboards')}</Link>
+            <Link to="/ask"><Sparkles size={14} aria-hidden /> {t('nav.askAi')}</Link>
+          </nav>
+        </section>
       </div>
     )
   }
@@ -124,7 +141,7 @@ export default function Home() {
   const name = (() => { const h = handle(user?.email); return h === '?' ? '' : h[0].toUpperCase() + h.slice(1) })()
 
   // ── tiles ──
-  const published = reports.filter(r => r.published).length
+  const status = statusCounts(reports)
   // The same total as the Datasets list: every row count the server reports,
   // a live dataset's included; one with no count adds nothing (QA B7).
   const rows = datasets.reduce((s, d) => s + (d.row_count ?? 0), 0)
@@ -146,7 +163,7 @@ export default function Home() {
   }
   const tiles: Tile[] = [
     { key: 'dashboards', icon: LayoutDashboard, label: t('nav.dashboards'), value: n(reports.length), to: '/reports',
-      sub: reports.length ? t('hm.tile.published', { n: n(published) }) : t('hm.tile.none') },
+      sub: reports.length ? t(status.open ? 'qaf.home.status' : 'qaf.home.status2', { pub: n(status.pub), draft: n(status.draft), open: n(status.open) }) : t('hm.tile.none') },
     { key: 'datasets', icon: Database, label: t('nav.datasets'), value: n(datasets.length), to: '/datasets',
       sub: datasets.length ? t('hm.tile.rows', { n: n(rows) }) : t('hm.tile.none') },
     sources.error

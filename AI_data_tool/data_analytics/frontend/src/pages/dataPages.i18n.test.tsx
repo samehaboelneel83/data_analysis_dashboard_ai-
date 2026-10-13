@@ -103,11 +103,13 @@ describe('Connections in Arabic', () => {
 
     expect(await screen.findByRole('button', { name: 'دمج قواعد البيانات' })).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'اختبار' }))
+    fireEvent.click(screen.getByRole('button', { name: /^اختبار Live DB/ }))
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith('«⁨Live DB⁩» — تم الاتصال'))
 
     fireEvent.click(screen.getByRole('button', { name: /اتصال جديد/ }))
     const dialog = await screen.findByRole('dialog', { name: 'اتصال جديد' })
+    // Autopilot 7: the drawer starts on the type grid.
+    fireEvent.click(screen.getByRole('button', { name: /^التالي/ }))
     expect(dialog).toHaveTextContent('اسم الاتصال *')
     expect(screen.getByRole('button', { name: 'إنشاء الاتصال' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'اختبار الاتصال' })).toBeInTheDocument()

@@ -31,13 +31,18 @@
 .dsh-tfoot { margin: 16px 6px 0; padding: 12px; border-radius: 10px; background: var(--bg); font-size: 12px; color: var(--muted); display: flex; gap: 8px; line-height: 1.45; }
 .dsh-tfoot svg { flex: none; margin-top: 2px; }
 .dsh-tnote { margin: 6px 10px; font-size: 12px; color: var(--muted); }
+.dsh-tskel { display: flex; flex-direction: column; gap: 10px; margin: 8px 10px; }
+.dsh-tskel i { height: 14px; border-radius: 6px; background: var(--surface2); }
+.dsh-tskel i:nth-child(2) { width: 70%; } .dsh-tskel i:nth-child(3) { width: 55%; }
+@media (prefers-reduced-motion: no-preference) { .dsh-tskel i { animation: dsh-tskel 1.4s ease-in-out infinite; } }
+@keyframes dsh-tskel { 50% { opacity: .45; } }
 .dsh-tnote button { background: none; border: 0; padding: 0; color: var(--mc-accent-ink); font: inherit; font-weight: 600; cursor: pointer; }
 
 .dsh-ib { width: 28px; height: 28px; display: inline-grid; place-items: center; border: 0; border-radius: 8px; background: none; color: var(--muted); cursor: pointer; padding: 0; flex: none; }
 .dsh-ib:hover, .dsh-ib[aria-expanded="true"] { background: var(--surface2); color: var(--text); }
 
 /* ── Main column ──────────────────────────────────────────────── */
-.dsh-main { flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden; }
+.dsh-main { flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden; container: dshmain / inline-size; }
 .dsh-page { max-width: 1280px; margin: 0 auto; padding: 26px 32px 64px; position: relative; }
 .dsh-hd { display: flex; align-items: flex-end; gap: 16px; margin-bottom: 18px; flex-wrap: wrap; }
 .dsh-hd .tt { flex: 1; min-width: 260px; }
@@ -132,6 +137,7 @@
 .dsh-bdg i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .dsh-bdg.draft { background: var(--surface2); color: var(--muted); }
 .dsh-bdg.pub { background: var(--mc-success-soft); color: var(--success); }
+.dsh-bdg.open { background: transparent; color: var(--muted); box-shadow: inset 0 0 0 1px var(--border); }
 .dsh-bdg.ai { background: var(--accent-soft); color: var(--mc-accent-ink); }
 
 /* ── List view ────────────────────────────────────────────────── */
@@ -297,4 +303,23 @@
 @media (hover: none) {
   .dsh-ov { opacity: 1; transform: none; pointer-events: auto; }
   .dsh-ck, .dsh-ra .q, .dsh-tirow .dsh-timenu, .dsh-sh .dsh-shmenu { opacity: 1; }
+}
+
+/* QAF 8: the toolbar stays on one line down to a 1180px window. It gets
+   tighter as the column narrows: first the "Dataset:" / "Sort:" words go,
+   then the dropdowns show their icon only (the value stays in the menu's
+   label and tooltip), the status tabs close up and the search shrinks.
+   Narrower than that, it wraps. */
+@container dshmain (max-width: 1000px) {
+  .dsh-tb .dsh-dd .v { display: none; }
+  .dsh-tb .dsh-srch { flex-basis: 150px; min-width: 150px; }
+  .dsh-tb .dsh-dd .val { max-width: 120px; }
+}
+@container dshmain (max-width: 760px) {
+  .dsh-tb { gap: 6px; padding: 6px; }
+  .dsh-tb .dsh-dd { padding: 0; width: 36px; justify-content: center; }
+  .dsh-tb .dsh-dd .val, .dsh-tb .dsh-dd > svg:last-child { display: none; }
+  .dsh-tb .dsh-seg button { padding: 0 7px; }
+  .dsh-tb .dsh-srch { flex-basis: 100px; min-width: 100px; }
+  .dsh-tb .dsh-srch kbd { display: none; }
 }

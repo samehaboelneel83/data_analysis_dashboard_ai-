@@ -68,3 +68,22 @@ describe('readingValue (chart value labels)', () => {
     expect(readingValue(2024)).toBe(2024)
   })
 })
+
+describe('formatTableCell (9-polish)', () => {
+  it('groups a quantity, but never a year, id or a whole number written as text', async () => {
+    const { formatTableCell } = await import('./displayNumber')
+    expect(formatTableCell(2348914, true)).toBe('2,348,914')
+    expect(formatTableCell(-1234.5678, true)).toBe('-1,234.57')
+    expect(formatTableCell(2026, false)).toBe('2026')
+    expect(formatTableCell('104233', true)).toBe('104233')
+    expect(formatTableCell(null, true)).toBe('')
+  })
+  it('uses the column’s own number format: currency, decimals, percent', async () => {
+    const { formatTableCell } = await import('./displayNumber')
+    expect(formatTableCell(1234.5, true, { type: 'currency', symbol: '$', decimals: 2 })).toBe('$ 1,234.50')
+    expect(formatTableCell(1234.5, true, { type: 'currency', symbol: 'ر.س', decimals: 0 })).toBe('1,235 ر.س')
+    expect(formatTableCell(12.345, true, { type: 'percent', decimals: 1 })).toBe('12.3%')
+    expect(formatTableCell(9.876, true, { type: 'integer' })).toBe('10')
+    expect(formatTableCell('abc', true, { type: 'currency' })).toBe('abc')
+  })
+})

@@ -295,7 +295,7 @@ describe('WorkspaceTree', () => {
       // is restricted is to open the dialog, which is how restrictions get
       // lost. It is a MARKER -- the action itself lives in the menu.
       show({ roots: [folder({ role_ids: [3, 4] })], unfiled: [] })
-      const badge = await screen.findByLabelText('Sales is restricted to 2 role(s)')
+      const badge = await screen.findByLabelText('Sales is restricted to 2 roles')
       expect(badge.getAttribute('title')).toMatch(/restricted to 2 role/i)
     })
 

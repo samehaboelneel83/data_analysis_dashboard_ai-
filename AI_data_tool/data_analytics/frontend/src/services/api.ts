@@ -682,6 +682,21 @@ export const datasetsApi = {
     fd.append('mode', mode)
     return api.post<BatchUploadResult>('/datasets/batch', fd).then(r => r.data)
   },
+  /** The same two uploads, reporting how much of the request has been sent
+   *  (0-1), for the Upload page's progress (autopilot step 5). Additions:
+   *  `upload` and `uploadBatch` above are unchanged. */
+  uploadWithProgress: (file: File, name: string, desc: string, sheet: string | undefined, onSent: (part: number) => void) => {
+    const fd = new FormData()
+    fd.append('file', file); fd.append('name', name); fd.append('description', desc)
+    if (sheet) fd.append('sheet', sheet)
+    return api.post<Dataset>('/datasets', fd, { onUploadProgress: e => { if (e.total) onSent(e.loaded / e.total) } }).then(r => r.data)
+  },
+  uploadBatchWithProgress: (files: File[], name: string, desc: string, mode: BatchUploadMode, onSent: (part: number) => void) => {
+    const fd = new FormData()
+    files.forEach(f => fd.append('files', f))
+    fd.append('name', name); fd.append('description', desc); fd.append('mode', mode)
+    return api.post<BatchUploadResult>('/datasets/batch', fd, { onUploadProgress: e => { if (e.total) onSent(e.loaded / e.total) } }).then(r => r.data)
+  },
 }
 
 export type BatchUploadMode = 'separate' | 'append'
@@ -3760,12 +3775,17 @@ export const agentApi = {
       { title }).then(r => r.data),
   remove: (conversationId: number) =>
     api.delete(`/agent/conversations/${conversationId}`).then(() => undefined),
-  ask: (conversationId: number, question: string) =>
+  /** QAF M3: `signal` (optional) lets the reader stop waiting. Aborting drops
+   *  the client's request only; the server may still finish the run (a
+   *  server-side cancel is AN2). */
+  ask: (conversationId: number, question: string, signal?: AbortSignal) =>
     api.post<AgentAnswer>(`/agent/conversations/${conversationId}/ask`,
-      { question }).then(r => r.data),
+      { question }, signal ? { signal } : undefined).then(r => r.data),
   runDetail: (runId: number) =>
     api.get<{ steps: { sql: string | null; status: string; result_rows?: AgentResult | null }[]
-              context_objects?: string[] | null }>(
+              context_objects?: string[] | null
+              /** How long the whole run took. */
+              ms?: number | null }>(
       `/agent/runs/${runId}`).then(r => r.data),
   /** Download one answer's result as Excel or PDF, built server-side from
    *  the stored snapshot (CSV stays client-side -- the rows are already in

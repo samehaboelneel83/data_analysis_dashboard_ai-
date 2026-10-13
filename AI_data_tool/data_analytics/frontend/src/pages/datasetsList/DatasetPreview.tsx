@@ -7,7 +7,8 @@ import { useT, type MessageKey } from '../../i18n'
 import { dtypeShort } from '../../lib/dtypeName'
 import { localDigits } from '../../lib/arabicFormats'
 import { isCertified } from '../../lib/cleanDatasets'
-import { formatCell } from '../../lib/displayNumber'
+import { formatTableCell } from '../../lib/displayNumber'
+import { nonAdditiveKind } from '../../lib/semanticGuard'
 import { dataPreviewApi, reportsApi, sensitivityApi, type DatasetSummary, type LineageGraph } from '../../services/api'
 import { dashboardsOf, sourceKind } from './classify'
 
@@ -40,7 +41,9 @@ export default function DatasetPreview({ ds, graph, meId, fmtBytes }: {
     if (id == null) return
     let live = true
     Promise.resolve().then(() => dataPreviewApi?.query?.(id, [], [], PREVIEW_ROWS, 0))
-      .then(r => { if (live && r) setRows({ columns: r.columns, rows: r.rows }) }).catch(() => {})
+      // QAF M5: a DirectQuery dataset's preview ignores the limit server-side
+      // (10,000 rows came back for 4); keep only what was asked for.
+      .then(r => { if (live && r) setRows({ columns: r.columns, rows: r.rows.slice(0, PREVIEW_ROWS) }) }).catch(() => {})
     Promise.resolve().then(() => sensitivityApi?.get?.(id))
       .then(r => { if (live && r) setLabel(r.effective ?? r.label ?? null) }).catch(() => {})
     return () => { live = false }
@@ -118,7 +121,7 @@ export default function DatasetPreview({ ds, graph, meId, fmtBytes }: {
                 <tr key={i}>{shownCols.map((_, j) => {
                   const v = r[j]
                   return <td key={j} dir="auto" className={typeof v === 'number' ? 'dl-dsl__num' : undefined}>
-                    {formatCell(v as string | number | boolean | null)}
+                    {formatTableCell(v as string | number | boolean | null, !nonAdditiveKind(shownCols[j]))}
                   </td>
                 })}</tr>
               ))}

@@ -241,6 +241,7 @@ SURFACES: list[Surface] = [
     Surface("column profile cards", "GET", "/api/v1/datasets/{ds}/profile"),
     Surface("health checks", "GET", "/api/v1/datasets/{ds}/health"),
     Surface("decision problems", "GET", "/api/v1/datasets/{ds}/decision-problems"),
+    Surface("column lineage", "GET", "/api/v1/datasets/{ds}/column-lineage", params={"name": "headcount"}),
 ]
 
 #: `/datasets/{dataset_id}/...` routes deliberately NOT walked here, each with
