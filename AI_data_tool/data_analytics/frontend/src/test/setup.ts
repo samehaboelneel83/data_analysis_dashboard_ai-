@@ -1,4 +1,5 @@
 import '@testing-library/jest-dom'
+import { configure } from '@testing-library/react'
 
 // jsdom doesn't implement matchMedia -- Layout.tsx's theme detection (and anything
 // that renders it) needs this polyfilled globally.
@@ -59,3 +60,10 @@ for (const name of ['NumberFormat', 'DateTimeFormat', 'PluralRules', 'RelativeTi
   Pinned.supportedLocalesOf = Original.supportedLocalesOf
   ;(Intl as any)[name] = Pinned
 }
+
+// FINAL (flaky tests): the six files that failed only in a full run all waited
+// on a heavy render (the builder, a chart, a map, a dynamic import) with the
+// default 1s for findBy / waitFor. A full run keeps every core busy, so that
+// second ran out while the same test alone passed. A found element still
+// returns at once; only a slow one gets longer.
+configure({ asyncUtilTimeout: 5000 })

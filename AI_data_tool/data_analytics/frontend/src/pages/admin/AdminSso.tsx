@@ -46,7 +46,8 @@ export default function AdminSso() {
         setConfigured(!!c.configured)
         const p = (c.protocol as 'oidc' | 'saml') || 'oidc'
         setProtocol(p)
-        setEnabled(c.enabled ?? true)
+        // QAF 25: the stored value -- nothing stored is not "enabled".
+        setEnabled(c.configured ? (c.enabled ?? false) : false)
         setDomain(c.email_domain ?? '')
         setIssuer(c.issuer ?? '')
         setClientId(c.client_id ?? '')
@@ -196,6 +197,11 @@ export default function AdminSso() {
         <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} />
         {t('sso.enabled')}
       </label>)}
+      {configured && enabled && !(domain.trim() && issuer.trim()) && (
+        <p role="note" data-testid="sso-empty-warning" style={{ fontSize: 12, color: 'var(--mc-warning, #a46b16)', margin: '0 0 8px' }}>
+          {t('qaf.sso.emptyEnabled')}
+        </p>
+      )}
 
       <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
         <button className="btn btn-primary" onClick={save} disabled={saving}>

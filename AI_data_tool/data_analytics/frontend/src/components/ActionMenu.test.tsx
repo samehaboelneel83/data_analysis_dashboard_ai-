@@ -164,3 +164,23 @@ describe('ActionMenu portal (5.10)', () => {
     expect(menu.style.position).toBe('fixed')
   })
 })
+
+describe('a portalled menu and scrolling (autopilot step 3)', () => {
+  it('follows its button while it stays in the window, and closes once it has left', () => {
+    const { getByRole, queryByRole } = render(
+      <ActionMenu portal label="Export" items={[{ key: 'a', label: 'Download CSV', onSelect: () => {} }]} />)
+    const trigger = getByRole('button', { name: 'Export' })
+    let top = 100
+    trigger.getBoundingClientRect = () => ({ top, bottom: top + 30, left: 50, right: 150, width: 100, height: 30, x: 50, y: top, toJSON: () => ({}) })
+    fireEvent.click(trigger)
+    const menu = getByRole('menu')
+    const before = parseFloat(menu.style.top)
+    top = 60
+    fireEvent.scroll(window)
+    expect(getByRole('menu')).toBeInTheDocument()
+    expect(parseFloat(getByRole('menu').style.top)).toBe(before - 40)
+    top = -200
+    fireEvent.scroll(window)
+    expect(queryByRole('menu')).toBeNull()
+  })
+})

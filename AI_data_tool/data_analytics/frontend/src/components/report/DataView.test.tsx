@@ -21,6 +21,16 @@ describe('DataView', () => {
     expect(dataPreviewApi.query).toHaveBeenCalledWith(10, [], [], 100, 0, undefined, 'asc', undefined)
   })
 
+  it('rounds a calculated float, so no "-336.69000000000005" tail shows (QA6 A2)', async () => {
+    vi.mocked(dataPreviewApi.query).mockResolvedValue({
+      columns: ['region', 'profit'], rows: [['east', -336.69000000000005], ['west', 2024]], total: 2,
+    })
+    render(<DataView datasetId={10} />)
+    expect(await screen.findByText('-336.69')).toBeInTheDocument()
+    expect(screen.getByText('2,024')).toBeInTheDocument()
+    expect(screen.queryByText(/336\.6900/)).not.toBeInTheDocument()
+  })
+
   it('shows a loading state before data arrives', () => {
     vi.mocked(dataPreviewApi.query).mockReturnValue(new Promise(() => {}))
     render(<DataView datasetId={10} />)

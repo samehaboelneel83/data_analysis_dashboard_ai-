@@ -39,3 +39,12 @@
 }
 .dl-share__rls svg { color: var(--muted); flex: none; margin-block-start: 2px; }
 .dl-share__foot { margin: 0; }
+
+/* 9-polish: type-ahead for who to share with. */
+.dl-share__ta { position: relative; flex: 1; min-inline-size: 170px; display: flex; }
+.dl-share__ta .dl-share__pick { flex: 1; }
+.dl-share__ta-list { position: absolute; top: calc(100% + 4px); inset-inline: 0; z-index: 30; margin: 0; padding: 4px; list-style: none; max-height: 240px; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--mc-border-strong); border-radius: 10px; box-shadow: var(--dl-shadow-overlay); }
+.dl-share__ta-list li { padding: 7px 10px; border-radius: 7px; font-size: 13px; cursor: pointer; }
+.dl-share__ta-list li.is-act { background: var(--surface2); }
+.dl-share__ta-none { color: var(--muted); cursor: default !important; }

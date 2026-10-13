@@ -35,3 +35,14 @@ describe('measure forms', () => {
     expect(buildOnly({ how: 'SUM', column: 'revenue', joiner: 'and', conds: [], name: '' }, new Set())).toBeNull()
   })
 })
+
+describe('default names in the reader’s language (autopilot 9)', () => {
+  it('uses the translator when given, English otherwise', async () => {
+    const { buildSummary, buildRatio, buildShare } = await import('./measureTemplates')
+    const { translate } = await import('../i18n')
+    const ar = ((k: string, v?: Record<string, string | number>) => translate('ar', k as never, v)) as never
+    expect(buildSummary({ how: 'SUM', column: 'revenue' }, ar)!.name).toBe('إجمالي revenue')
+    expect(buildRatio({ howA: 'SUM', a: 'profit', op: 'pct_of', howB: 'SUM', b: 'revenue' }, ar)!.name).toBe('profit كنسبة % من revenue')
+    expect(buildShare({ how: 'SUM', column: 'units' })!.name).toBe('% of total units')
+  })
+})

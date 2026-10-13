@@ -3,6 +3,7 @@ import type { ChartRendererProps } from './types'
 import { fmtStr, seriesColor } from '../chartUtils'
 import type { CalcColumnFormat } from '../../../services/api'
 import { useT } from '../../../i18n'
+import { localDigits } from '../../../lib/arabicFormats'
 import { fromPaths, stateOf, toggle, toPaths, type CheckState, type TreeNode } from '../../../lib/slicerTree'
 
 /**
@@ -70,6 +71,7 @@ function TreeRows({ node, rtl, fmt, path, tree, ticked, onTick, selectable }: {
 }) {
   // Collapsed by default below the second level: an org chart that opens fully
   // expanded is a wall, and the reader has not asked for the leaves yet.
+  const t = useT()
   const [open, setOpen] = useState(node.depth < 2)
   const kids = node.children ?? []
   const hasKids = kids.length > 0
@@ -82,7 +84,7 @@ function TreeRows({ node, rtl, fmt, path, tree, ticked, onTick, selectable }: {
       }}>
         {hasKids ? (
           <button onClick={() => setOpen(o => !o)}
-            aria-label={open ? `Collapse ${node.name}` : `Expand ${node.name}`}
+            aria-label={open ? t('i2c.hz.collapse', { name: node.name }) : t('i2c.hz.expand', { name: node.name })}
             aria-expanded={open}
             style={{
               border: 'none', background: 'none', cursor: 'pointer', padding: 0,
@@ -123,7 +125,7 @@ function TreeRows({ node, rtl, fmt, path, tree, ticked, onTick, selectable }: {
           paddingInlineStart: (node.depth + 1) * INDENT + 16,
           fontSize: 11, color: 'var(--muted)', fontStyle: 'italic',
         }}>
-          + {node.omitted} more not shown
+          {t('i2c.hz.moreNotShown', { n: localDigits(String(node.omitted)) })}
         </div>
       )}
     </div>
@@ -277,7 +279,7 @@ function Sunburst({ node, fmt, onZoomInto, onZoomOut }: {
   return (
     <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}
-        role="group" aria-label="Sunburst hierarchy">
+        role="group" aria-label={t('i2c.hz.sunburst')}>
         {segments}
         {/* The centre zooms back out one level. */}
         {onZoomOut && (
@@ -353,6 +355,7 @@ function packCircles(node: Node, cx: number, cy: number, r: number,
 }
 
 function CirclePack({ node, fmt }: { node: Node; fmt?: CalcColumnFormat | null }) {
+  const t = useT()
   const size = 260
   const circles = useMemo(() => {
     const out: Circle[] = []
@@ -363,7 +366,7 @@ function CirclePack({ node, fmt }: { node: Node; fmt?: CalcColumnFormat | null }
   return (
     <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}
-        role="img" aria-label="Circle packing hierarchy">
+        role="img" aria-label={t('i2c.hz.circlePack')}>
         {circles.map((c, i) => (
           <circle key={`${c.node.name}-${c.depth}-${i}`}
             cx={c.cx} cy={c.cy} r={Math.max(c.r, 0)}
@@ -390,6 +393,7 @@ function CirclePack({ node, fmt }: { node: Node; fmt?: CalcColumnFormat | null }
 function LinkTree({ node, fmt, compact }: {
   node: Node; fmt?: CalcColumnFormat | null; compact: boolean
 }) {
+  const t = useT()
   const kids = node.children ?? []
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 0 }}>
@@ -417,7 +421,7 @@ function LinkTree({ node, fmt, compact }: {
             ))}
             {!!node.omitted && (
               <div style={{ fontSize: 10, color: 'var(--muted)', fontStyle: 'italic' }}>
-                + {node.omitted} more
+                {t('i2c.hz.more', { n: localDigits(String(node.omitted)) })}
               </div>
             )}
           </div>
@@ -432,6 +436,7 @@ function LinkTree({ node, fmt, compact }: {
 export default function HierarchyRenderer(
   { data, rtl, measureFmt, treePaths, onTreeChange }: ChartRendererProps,
 ) {
+  const t = useT()
   const fullRoot: Node | undefined = data?.root
   const kind: string = data?.type ?? 'tree'
   // Click-to-zoom on the partition layouts: a view of one branch, local to the
@@ -447,7 +452,7 @@ export default function HierarchyRenderer(
   const onTick = (tree: TreeNode, path: string[]) => onTreeChange?.(toPaths(trees, toggle(tree, path, ticked)))
 
   if (!root || !(root.children?.length)) {
-    return <div style={{ color: 'var(--muted)', fontSize: 12, padding: 8 }}>No data.</div>
+    return <div style={{ color: 'var(--muted)', fontSize: 12, padding: 8 }}>{t('i2c.hz.noData')}</div>
   }
 
   const count = nodeCount(fullRoot!)
@@ -487,8 +492,7 @@ export default function HierarchyRenderer(
           branches never reached the page. */}
       {data?.truncated && (
         <div style={{ fontSize: 10, color: 'var(--muted)', padding: '2px 8px' }}>
-          Showing the first {count.toLocaleString()} nodes; deeper branches were
-          not loaded.
+          {t('i2c.hz.truncated', { n: localDigits(count.toLocaleString('en-US')) })}
         </div>
       )}
     </div>

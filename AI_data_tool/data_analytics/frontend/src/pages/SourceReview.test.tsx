@@ -692,7 +692,7 @@ describe('arriving while a sync is already running', () => {
   it('does not follow a run that has already finished', async () => {
     const status = vi.spyOn(metadataApi, 'syncStatus')
     renderPage()
-    await screen.findByText(/maps/)
+    await screen.findAllByText(/maps/)
     expect(status).not.toHaveBeenCalled()
   })
 })

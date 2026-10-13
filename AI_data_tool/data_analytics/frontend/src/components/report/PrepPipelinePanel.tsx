@@ -9,6 +9,8 @@ import {
   withKey, newStep, kindLabel, optLabel,
 } from './prepPipeline/model'
 import { useT, type TranslateFn } from '../../i18n'
+import { formatTableCell } from '../../lib/displayNumber'
+import { nonAdditiveKind } from '../../lib/semanticGuard'
 import { tNodes } from './prepPipeline/tNodes'
 import { StepEditor } from './prepPipeline/StepEditor'
 import { joinPairs, suggestJoinKeys } from './prepPipeline/join'
@@ -480,7 +482,7 @@ export default function PrepPipelinePanel({ datasetId, columns, datasetName, ini
               <tbody>
                 {preview.sample.rows.slice(0, 5).map((row, i) => (
                   <tr key={i}>{row.map((v, j) => (
-                    <td key={j} style={{ padding: '3px 6px', borderBottom: '1px solid var(--border)' }}>{String(v ?? '')}</td>
+                    <td key={j} style={{ padding: '3px 6px', borderBottom: '1px solid var(--border)' }}>{formatTableCell(v as string | number | boolean | null, !nonAdditiveKind(preview.sample.columns[j]))}</td>
                   ))}</tr>
                 ))}
               </tbody>

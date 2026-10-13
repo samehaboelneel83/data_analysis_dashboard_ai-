@@ -49,7 +49,7 @@ describe('clarification', () => {
     // Set-apart terms first, then plain mentions (QA B3: "final score").
     expect(chips).toEqual(['Use faculty', 'Use final_score', 'Show all faculties'])
     fireEvent.click(screen.getByRole('button', { name: 'Use faculty' }))
-    await waitFor(() => expect(agentApi.ask).toHaveBeenLastCalledWith(7, 'Use faculty'))
+    await waitFor(() => expect(agentApi.ask).toHaveBeenLastCalledWith(7, 'Use faculty', expect.any(AbortSignal)))
   })
 })
 

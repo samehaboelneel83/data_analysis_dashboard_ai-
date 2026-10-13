@@ -84,6 +84,8 @@ describe('QA5 F4: credential fields in admin forms are not autofilled', () => {
 
   it('the connection dialog', () => {
     renderIn('en', <ConnectionModal catalog={CATALOG as never} onSave={() => {}} onClose={() => {}} />)
+    // Autopilot 7: past the type grid to the details.
+    fireEvent.click(screen.getByRole('button', { name: /^(Next|التالي)/ }))
     const dlg = screen.getByRole('dialog')
     expectNoAutofill(dlg)
     expect(dlg.querySelector('input[type=password]')?.getAttribute('name')).toBe('conn-password')
@@ -110,6 +112,8 @@ describe('QA5 L6: connector field labels', () => {
 
   it('the connection dialog in Arabic', () => {
     renderIn('ar', <ConnectionModal catalog={CATALOG as never} onSave={() => {}} onClose={() => {}} />)
+    // Autopilot 7: past the type grid to the details.
+    fireEvent.click(screen.getByRole('button', { name: /^(Next|التالي)/ }))
     const dlg = screen.getByRole('dialog')
     expect(within(dlg).getByText('المضيف *')).toBeInTheDocument()
     expect(dlg.textContent).not.toMatch(/Username|Password/)

@@ -20,6 +20,11 @@ export const en = {
   'pg.types.calculated': 'Calculated',
 
   'pg.types.short.numeric': 'NUM',
+  // QA6 B4: a stored number used as something else, beside its type badge.
+  'pg.types.use.category': 'CAT',
+  'pg.types.use.geo': 'GEO',
+  'pg.types.use.categoryTip': 'Stored as a number, used as a category: it groups rows and is never added up (a year, an identifier).',
+  'pg.types.use.geoTip': 'Stored as a number, used as a map coordinate.',
   'pg.types.short.integer': 'INT',
   'pg.types.short.float': 'DEC',
   'pg.types.short.categorical': 'TXT',
@@ -46,6 +51,10 @@ export const ar: Record<keyof typeof en, string> = {
   'pg.types.calculated': 'محسوب',
 
   'pg.types.short.numeric': 'رقم',
+  'pg.types.use.category': 'فئة',
+  'pg.types.use.geo': 'جغرافي',
+  'pg.types.use.categoryTip': 'مخزّن كرقم ويُستخدم كفئة: يجمّع الصفوف ولا يُجمع أبدًا (كالسنة أو المعرّف).',
+  'pg.types.use.geoTip': 'مخزّن كرقم ويُستخدم كإحداثي على الخريطة.',
   'pg.types.short.integer': 'صحيح',
   'pg.types.short.float': 'عشري',
   'pg.types.short.categorical': 'نص',

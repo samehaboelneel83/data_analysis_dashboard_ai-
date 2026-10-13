@@ -235,6 +235,7 @@ SURFACES: list[Surface] = [
             denied_variant={"body": {"dataset_id": "{ds}", "dimensions": ["salary"]}}),
     Surface("semantic rows", "GET", "/api/v1/semantic/datasets/{ds}/rows"),
     Surface("dependents", "GET", "/api/v1/datasets/{ds}/dependents", params={"name": "headcount"}),
+    Surface("column lineage", "GET", "/api/v1/datasets/{ds}/column-lineage", params={"name": "headcount"}),
 ]
 
 #: `/datasets/{dataset_id}/...` routes deliberately NOT walked here, each with

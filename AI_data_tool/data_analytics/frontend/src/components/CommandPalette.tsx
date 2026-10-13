@@ -4,40 +4,46 @@ import { datasetsApi, reportsApi, dataSourcesApi } from '../services/api'
 import { useModalDialog } from './ui/useModalDialog'
 import { AuthContext } from '../contexts/AuthContext'
 import { ArrowRight, Cable, Database, LayoutDashboard, Zap } from 'lucide-react'
-import { useT, type MessageKey } from '../i18n'
+import { en, useT, type MessageKey } from '../i18n'
 
 interface Entry { kind: 'report' | 'dataset' | 'connection' | 'page' | 'command'; label: string; hint: string; to: string; labelKey?: MessageKey; hintKey?: MessageKey }
 
+/** A fixed entry. `label` and `hint` keep the ENGLISH words so a search typed
+ *  in English still finds the entry in an Arabic interface; what the reader
+ *  sees goes through `labelKey` / `hintKey`. */
+const fixed = (kind: 'page' | 'command', labelKey: MessageKey, hintKey: MessageKey, to: string): Entry =>
+  ({ kind, label: en[labelKey], hint: en[hintKey], to, labelKey, hintKey })
+
 const STATIC_PAGES: Entry[] = [
-  { kind: 'page', label: 'Home', hint: 'page', to: '/', labelKey: 'nav.home', hintKey: 'palette.page' },
-  { kind: 'page', label: 'Ask AI', hint: 'page', to: '/ask', labelKey: 'nav.askAi', hintKey: 'palette.page' },
-  { kind: 'page', label: 'Upload', hint: 'page', to: '/upload', labelKey: 'nav.upload', hintKey: 'palette.page' },
-  { kind: 'page', label: 'Dashboards', hint: 'page', to: '/reports', labelKey: 'nav.dashboards', hintKey: 'palette.page' },
-  { kind: 'page', label: 'Insights', hint: 'page', to: '/insights', labelKey: 'nav.insights', hintKey: 'palette.page' },
-  { kind: 'page', label: 'Connections', hint: 'page', to: '/connections', labelKey: 'nav.connections', hintKey: 'palette.page' },
-  { kind: 'page', label: 'Lineage', hint: 'page', to: '/lineage', labelKey: 'nav.lineage', hintKey: 'palette.page' },
+  fixed('page', 'nav.home', 'palette.page', '/'),
+  fixed('page', 'nav.askAi', 'palette.page', '/ask'),
+  fixed('page', 'nav.upload', 'palette.page', '/upload'),
+  fixed('page', 'nav.dashboards', 'palette.page', '/reports'),
+  fixed('page', 'nav.insights', 'palette.page', '/insights'),
+  fixed('page', 'nav.connections', 'palette.page', '/connections'),
+  fixed('page', 'nav.lineage', 'palette.page', '/lineage'),
 ]
 
 // Shown only to org admins -- same gate as the rail's Monitoring and Admin
 // sections. A palette entry a role cannot open is a dead control with a
 // friendlier font.
 const ADMIN_PAGES: Entry[] = [
-  { kind: 'page', label: 'Refresh & jobs', hint: 'monitoring', to: '/monitoring/jobs', labelKey: 'nav.jobs', hintKey: 'palette.monitoring' },
-  { kind: 'page', label: 'Deliveries', hint: 'monitoring', to: '/monitoring/deliveries', labelKey: 'nav.deliveries', hintKey: 'palette.monitoring' },
-  { kind: 'page', label: 'Activity', hint: 'monitoring', to: '/monitoring/activity', labelKey: 'nav.activity', hintKey: 'palette.monitoring' },
-  { kind: 'page', label: 'Column security', hint: 'admin', to: '/admin/column-security-rules', labelKey: 'nav.columnSecurity', hintKey: 'palette.admin' },
-  { kind: 'page', label: 'Row security', hint: 'admin', to: '/admin/row-security-rules', labelKey: 'nav.rowSecurity', hintKey: 'palette.admin' },
-  { kind: 'page', label: 'Connection rules (Ask AI)', hint: 'admin', to: '/admin/connection-rules', hintKey: 'palette.admin' },
+  fixed('page', 'nav.jobs', 'palette.monitoring', '/monitoring/jobs'),
+  fixed('page', 'nav.deliveries', 'palette.monitoring', '/monitoring/deliveries'),
+  fixed('page', 'nav.activity', 'palette.monitoring', '/monitoring/activity'),
+  fixed('page', 'nav.columnSecurity', 'palette.admin', '/admin/column-security-rules'),
+  fixed('page', 'nav.rowSecurity', 'palette.admin', '/admin/row-security-rules'),
+  fixed('page', 'i2c.cp.connRules', 'palette.admin', '/admin/connection-rules'),
 ]
 
 /** Things to DO rather than places to go. `to` is either a route or a
  *  `cmd:` id the palette runs itself. */
 const COMMANDS: Entry[] = [
-  { kind: 'command', label: 'Create a dashboard', hint: 'command', to: '/reports?new=1', labelKey: 'palette.cmd.newDashboard', hintKey: 'palette.command' },
-  { kind: 'command', label: 'Upload a file', hint: 'command', to: '/upload', labelKey: 'palette.cmd.upload', hintKey: 'palette.command' },
-  { kind: 'command', label: 'Ask a question about your data', hint: 'command', to: '/ask', labelKey: 'palette.cmd.ask', hintKey: 'palette.command' },
-  { kind: 'command', label: 'Connect a data source', hint: 'command', to: '/connections', labelKey: 'palette.cmd.connect', hintKey: 'palette.command' },
-  { kind: 'command', label: 'Switch light / dark theme', hint: 'command', to: 'cmd:theme', labelKey: 'palette.cmd.theme', hintKey: 'palette.command' },
+  fixed('command', 'palette.cmd.newDashboard', 'palette.command', '/reports?new=1'),
+  fixed('command', 'palette.cmd.upload', 'palette.command', '/upload'),
+  fixed('command', 'palette.cmd.ask', 'palette.command', '/ask'),
+  fixed('command', 'palette.cmd.connect', 'palette.command', '/connections'),
+  fixed('command', 'palette.cmd.theme', 'palette.command', 'cmd:theme'),
 ]
 
 const KIND_ICON: Record<Entry['kind'], React.ReactNode> = {
@@ -129,13 +135,13 @@ export default function CommandPalette() {
         ...COMMANDS,
         ...STATIC_PAGES,
         ...(isAdmin ? ADMIN_PAGES : []),
-        ...reports.map(r => ({ kind: 'report' as const, label: r.name, hint: 'dashboard', hintKey: 'palette.dashboard' as const, to: `/reports/${r.id}` })),
+        ...reports.map(r => ({ kind: 'report' as const, label: r.name, hint: en['palette.dashboard'], hintKey: 'palette.dashboard' as const, to: `/reports/${r.id}` })),
         ...datasets.map(d => ({ kind: 'dataset' as const, label: d.name,
-          hint: d.mode === 'directquery' ? 'dataset · live' : 'dataset',
+          hint: d.mode === 'directquery' ? en['palette.datasetLive'] : en['palette.dataset'],
           hintKey: (d.mode === 'directquery' ? 'palette.datasetLive' : 'palette.dataset') as MessageKey,
           to: `/datasets/${d.id}` })),
         ...connections.map(c => ({ kind: 'connection' as const, label: c.name,
-          hint: 'connection', hintKey: 'palette.connection' as const, to: `/connections/${c.id}/review` })),
+          hint: en['palette.connection'], hintKey: 'palette.connection' as const, to: `/connections/${c.id}/review` })),
       ])
     } catch { setIndex([...COMMANDS, ...STATIC_PAGES, ...(isAdmin ? ADMIN_PAGES : [])]) }
   }, [index, isAdmin])

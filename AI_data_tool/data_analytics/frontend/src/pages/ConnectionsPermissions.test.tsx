@@ -77,9 +77,14 @@ describe('Connections, as a non-admin', () => {
        now passes whether they are withheld or merely un-opened -- it would go
        green on a leak. The MENU is what must be absent, and with no trigger
        there is no way to reach either item. */
+    // Autopilot 7: the ⋯ menu is on every row (it holds Metadata), so what
+    // must be absent is the two items inside it.
     renderAs(false)
     await screen.findByText('Moodle LMS (Egyptian University)')
-    expect(screen.queryByRole('button', { name: /more actions/i })).toBeNull()
+    fireEvent.click(screen.getAllByRole('button', { name: /more actions/i })[0])
+    expect(screen.getByRole('menuitem', { name: /Metadata/i })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: /Edit/i })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: /Delete/i })).toBeNull()
   })
 
   it('says why the actions are absent, rather than just hiding them', async () => {
@@ -160,7 +165,7 @@ describe('Connections: a failed test says why, and keeps saying it (role tour, 2
       error: 'could not translate host name "qa-db.invalid" to address' } as never)
     renderAs(true)
     await screen.findByText('Moodle LMS (Egyptian University)')
-    fireEvent.click(screen.getByRole('button', { name: 'Test' }))
+    fireEvent.click(screen.getAllByRole('button', { name: /^Test / })[0])
     expect(await screen.findByTestId('conn-test-error'))
       .toHaveTextContent('could not translate host name "qa-db.invalid"')
   })

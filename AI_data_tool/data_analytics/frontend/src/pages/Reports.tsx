@@ -4,6 +4,7 @@ import {
   ArrowDownUp, ArrowRight, ChevronDown, Database, Download, Folder, FolderInput, FolderOpen, FolderPlus, LayoutDashboard,
   LayoutGrid, LayoutTemplate, Link2, List, Pencil, Plus, Search, SearchX, Share2, Sparkles, SquareDashedBottom, Trash2, X,
   Globe, GlobeLock, Users, Clock,
+  PencilRuler,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import LoadError from '../components/ui/LoadError'
@@ -11,7 +12,9 @@ import Loader from '../components/ui/Loader'
 import ActionMenu, { type ActionMenuItem } from '../components/ActionMenu'
 import { useBulkSelection } from '../lib/useBulkSelection'
 import { looksLikeTestData } from '../lib/testData'
-import { pageTemplatesApi, reportsApi, datasetsApi, workspaceApi } from '../services/api'
+import { reportsApi, datasetsApi, workspaceApi } from '../services/api'
+import { addBuiltinPage } from '../lib/builtinTemplates'
+import { useDirection } from '../contexts/DirectionContext'
 import type { ReportSummary, DatasetSummary } from '../services/api'
 import type { WorkspaceTree } from '../types/report'
 import { useConfirm } from '../components/ui/ConfirmDialog'
@@ -23,7 +26,7 @@ import { localDigits } from '../lib/arabicFormats'
 import SuggestDashboardsDialog from '../components/dataset/SuggestDashboardsDialog'
 import ShareDashboardDialog from '../components/report/share/ShareDashboardDialog'
 import { loadCollapsed, saveCollapsed, sectionsFor, reportNodes, type FolderSection } from './reports/listParts'
-import { flatFolders, folderOf, reportsUnder, sharedWithMe, statusOf, type FlatFolder } from './reports/model'
+import { flatFolders, folderOf, reportsUnder, sharedWithMe, statusOf, statusCounts, type FlatFolder } from './reports/model'
 import FolderNav, { type View } from './reports/FolderNav'
 import { DashCard, DashRow } from './reports/DashCard'
 import { MoveDialog, NewDashboardDialog, type NewChoice, type NewMode } from './reports/dialogs'
@@ -58,6 +61,7 @@ const detail = (e: unknown, fallback: string) => {
 
 export default function Reports() {
   const t = useT()
+  const { language } = useDirection()
   const navigate = useNavigate()
   const confirm = useConfirm()
   const prompt = usePrompt()
@@ -79,7 +83,7 @@ export default function Reports() {
   const repFilter = useListFilter(reports, r => [r.name, r.description, dsName(r)], t('dsh.search'), { always: true })
 
   const [view, setView] = useState<View>('all')
-  const [status, setStatus] = useState<'all' | 'draft' | 'pub'>('all')
+  const [status, setStatus] = useState<'all' | 'draft' | 'pub' | 'open'>('all')
   const [dsFilter, setDsFilter] = useState<number | null>(null)
   const [sort, setSortState] = useState(() => read(SORT_KEY, ['recent', 'name'], 'recent') as 'recent' | 'name')
   const [layout, setLayoutState] = useState(() => read(LAYOUT_KEY, ['grid', 'list'], 'grid') as 'grid' | 'list')
@@ -149,7 +153,7 @@ export default function Reports() {
       if (c.mode === 'tpl' && c.template) {
         // A template adds its page; the empty default page goes, so the new
         // dashboard opens on the template rather than on a blank first page.
-        await pageTemplatesApi.addFrom(r.id, { builtin: c.template })
+        await addBuiltinPage(r.id, c.template, language, t)
         const first = r.pages?.[0]?.id
         if (first != null) await reportsApi.deletePage(r.id, first).catch(() => {})
       }
@@ -213,11 +217,27 @@ export default function Reports() {
   }
   const moveMany = async (rs: ReportSummary[], parentId: number | null, targetName: string | null) => {
     let moved = 0
+    // Where each one was, so the move can be taken back (9-polish).
+    const before = rs.map(r => [r, nodes.get(r.id)?.parent_id ?? null] as const)
     try {
       for (const r of rs) if (await moveOne(r, parentId)) moved++
-      if (moved) toast.success(rs.length === 1
+      const said = rs.length === 1
         ? t('dsh.toast.moved', { name: rs[0].name, to: targetName ?? t('dsh.notInFolder') })
-        : t('dsh.toast.movedMany', { n: localDigits(String(moved)), to: targetName ?? t('dsh.notInFolder') }))
+        : t('dsh.toast.movedMany', { n: localDigits(String(moved)), to: targetName ?? t('dsh.notInFolder') })
+      if (moved) toast.success(tt => (
+        <span className="dl-toast-undo">
+          {said}
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => {
+            toast.dismiss(tt.id)
+            void (async () => {
+              try {
+                for (const [r, from] of before) if (await moveOne(r, from)) { /* moved back */ }
+                toast.success(t('pol.moveUndone'))
+              } catch (e) { toast.error(detail(e, t('dsh.toast.moveRefused'))) } finally { await loadTree() }
+            })()
+          }}>{t('bd.keys.undo')}</button>
+        </span>
+      ), { duration: 8000 })
     } catch (e) {
       // The server's answer is the answer: a folder this viewer cannot manage,
       // the cycle guard. Shown as given, never pre-empted.
@@ -291,6 +311,7 @@ export default function Reports() {
     const edit = canEdit(r)
     return [
       { key: 'open', label: t('dsh.open'), icon: <ArrowRight size={14} />, onSelect: () => openReport(`/reports/${r.id}`) },
+      ...(edit ? [{ key: 'openEdit', label: t('pol.openEdit'), icon: <PencilRuler size={14} />, onSelect: () => openReport(`/reports/${r.id}?edit=1`) }] : []),
       ...(canAdminister(r) ? [{ key: 'share', label: t('dsh.shareDots'), icon: <Share2 size={14} />, onSelect: () => setSharing(r) }] : []),
       { key: 'link', label: t('dsh.copyLink'), icon: <Link2 size={14} />, onSelect: () => void copyLink(r) },
       ...(edit && tree ? [{ key: 'move', label: t('dsh.moveDots'), icon: <FolderInput size={14} />, onSelect: () => setMoving([r]) }] : []),
@@ -329,7 +350,7 @@ export default function Reports() {
     recent: recentIds ? recentIds.filter(id => known.has(id)).length : null,
     shared: tree ? reports.filter(r => shared.has(r.id)).length : null,
   }
-  const statusCount = (s: 'all' | 'draft' | 'pub') => reports.filter(r => s === 'all' || statusOf(r) === s).length
+  const stCounts = useMemo(() => statusCounts(reports), [reports])
   const usedDatasets = (datasets ?? []).filter(d => reports.some(r => r.dataset_id === d.id))
 
   // Leaving a view that no longer exists (a deleted folder, a failed tree).
@@ -593,7 +614,7 @@ export default function Reports() {
         creating={newFolder} onStartFolder={() => setNewFolder(true)} onCreateFolder={name => void createFolder(name)}
         onCancelFolder={() => setNewFolder(false)} onSubfolder={f => void subfolder(f)} onRename={f => void renameFolder(f)}
         onDelete={f => void removeFolder(f)} dropFor={dropFor} overTarget={overTarget}
-        dragHint={reports.some(canEdit)} ready={!loading && !loadError} />
+        dragHint={reports.some(canEdit)} ready={!loading && !loadError} treeReady={tree != null} />
       <div className={`dsh-main${selectMode ? ' dsh-selmode' : ''}`}>
         <div className="dsh-page">
           <div className="dsh-hd">
@@ -625,10 +646,11 @@ export default function Reports() {
                 </label>
               )}
               <div className="dsh-seg" role="group" aria-label={t('dsh.col.status')}>
-                {(['all', 'draft', 'pub'] as const).map(s => (
+                {/* An "Everyone" tab only when such dashboards exist, so the tabs add up. */}
+                {(['all', 'draft', 'pub', ...(stCounts.open ? ['open'] as const : [])] as const).map(s => (
                   <button key={s} type="button" aria-pressed={status === s} onClick={() => setStatus(s)}>
-                    {t(s === 'all' ? 'dsh.st.all' : s === 'draft' ? 'dsh.st.drafts' : 'dsh.st.published')}
-                    <span className="n">{localDigits(String(statusCount(s)))}</span>
+                    {t(s === 'all' ? 'dsh.st.all' : s === 'draft' ? 'dsh.st.drafts' : s === 'pub' ? 'dsh.st.published' : 'qaf.st.open')}
+                    <span className="n">{localDigits(String(stCounts[s]))}</span>
                   </button>
                 ))}
               </div>
@@ -640,7 +662,7 @@ export default function Reports() {
               )}
               <span className="dsh-sp" />
               <ActionMenu label={t('dsh.sortIs', { sort: sortLabel })} align="end" triggerClassName="dsh-dd"
-                trigger={<><ArrowDownUp size={15} aria-hidden /><span className="v">{t('dsh.sort')}:</span> {sortLabel}<ChevronDown size={14} aria-hidden /></>}
+                trigger={<><ArrowDownUp size={15} aria-hidden /><span className="v">{t('dsh.sort')}:</span> <span className="val">{sortLabel}</span><ChevronDown size={14} aria-hidden /></>}
                 items={[{ key: 'recent', label: t('dsh.sort.recent'), onSelect: () => setSort('recent') },
                   { key: 'name', label: t('dsh.sort.name'), onSelect: () => setSort('name') }]} />
               <div className="dsh-seg ic" role="group" aria-label={t('dashboards.view')} data-testid="dashboards-layout">

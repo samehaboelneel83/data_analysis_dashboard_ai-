@@ -5,13 +5,15 @@ import type { DataSource, ConnectorSpec } from '../../services/api'
 import toast from 'react-hot-toast'
 import { Z_OVERLAY } from '../../lib/zIndex'
 import IconLabel from '../../components/ui/IconLabel'
-import { Check, TriangleAlert, X as XIcon } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Check, Database, Search, TriangleAlert, X as XIcon } from 'lucide-react'
+import { localDigits } from '../../lib/arabicFormats'
 import { useModalDialog } from '../../components/ui/useModalDialog'
 import { blankConfigFor } from './typeMaps'
 import { friendlyMessage } from '../../lib/friendlyError'
 import { useT } from '../../i18n'
 import { useDirection } from '../../contexts/DirectionContext'
-import { connectorFieldLabel } from '../../i18n/pages/adminPlatform'
+import { connectorFieldLabel, connectorOptionLabel } from '../../i18n/pages/adminPlatform'
+import './connections.css'
 
 /* ── Connection Form Modal ─────────────────────────────── */
 export function ConnectionModal({ initial, catalog, onSave, onClose }: {
@@ -35,6 +37,10 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
     ? (catalog.find(s => s.custom_connector_id === initial.custom_connector_id)?.key ?? initial?.type ?? catalog[0]?.key ?? 'postgresql')
     : (initial?.type ?? catalog[0]?.key ?? 'postgresql')
   const [type,    setType]    = useState(initialType)
+  // Autopilot step 7: a new connection starts by choosing its type from a
+  // grid (the design's two-step drawer); editing opens on the details.
+  const [step, setStep] = useState<1 | 2>(initial ? 2 : 1)
+  const [typeQuery, setTypeQuery] = useState('')
   const [cfg,     setCfg]     = useState<Record<string, unknown>>(
     initial?.config ?? blankConfigFor(specOf(initial?.type ?? catalog[0]?.key ?? ''))
   )
@@ -154,19 +160,59 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
 
   const inp = { style: fieldStyle }
 
+  const tq = typeQuery.trim().toLowerCase()
+  const cards = catalog.filter(c => !tq || c.label.toLowerCase().includes(tq) || c.key.includes(tq))
+  const title = isEdit ? tr('cn2.drawer.edit', { name: initial!.name }) : tr('cn2.drawer.new')
+
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', display: 'flex',
-      alignItems: 'center', justifyContent: 'center', zIndex: Z_OVERLAY }}>
-      <div ref={dialogRef} role="dialog" aria-modal="true"
-        aria-label={isEdit ? tr('pg.dataPages.conn.editTitle') : tr('pg.dataPages.conn.newTitle')}
-        style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12,
-        padding: 24, width: 480, maxWidth: '90vw', maxHeight: '90vh', overflowY: 'auto' }}>
-
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>{isEdit ? tr('pg.dataPages.conn.editTitle') : tr('pg.dataPages.conn.newTitle')}</h2>
+    <div className="dl-cn-scrim" style={{ zIndex: Z_OVERLAY }} onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={title} className="dl-cn-drawer">
+        <header className="dl-cn-drawer__h">
+          <h2>{title}</h2>
           <button type="button" onClick={onClose} aria-label={tr('pg.dataPages.close')} title={tr('pg.dataPages.close')} className="dl-wicon"><XIcon size={16} aria-hidden /></button>
-        </div>
+        </header>
+        {!isEdit && (
+          <ol className="dl-cn-steps" aria-label={tr('up2.steps')}>
+            <li className={step === 1 ? 'is-now' : 'is-done'} aria-current={step === 1 ? 'step' : undefined}>
+              <span>{step === 1 ? localDigits('1') : <Check size={12} aria-hidden />}</span>{tr('cn2.step.type')}
+            </li>
+            <li className={step === 2 ? 'is-now' : ''} aria-current={step === 2 ? 'step' : undefined}><span>{localDigits('2')}</span>{tr('cn2.step.details')}</li>
+          </ol>
+        )}
 
+        {step === 1 ? (
+          <div className="dl-cn-drawer__bd">
+            <label className="dl-cn-search dl-cn-search--full">
+              <Search size={16} aria-hidden />
+              <input value={typeQuery} onChange={e => setTypeQuery(e.target.value)} placeholder={tr('cn2.typeSearch')} aria-label={tr('cn2.typeSearch')} autoFocus autoComplete="off" name="connection-type-search" />
+            </label>
+            {cards.length ? (
+              <div className="dl-cn-types" role="radiogroup" aria-label={tr('cn2.step.type')}>
+                {cards.map(c => (
+                  <button key={c.key} type="button" role="radio" aria-checked={type === c.key} className="dl-cn-type"
+                    onClick={() => changeType(c.key)} onDoubleClick={() => { changeType(c.key); setStep(2) }}>
+                    <span className={`dl-cn-logo dl-cn-logo--${c.base_type ?? c.key}`} aria-hidden><Database size={18} /></span>
+                    <b dir="auto">{c.label}</b>
+                    {c.default_port != null && <small dir="ltr">:{c.default_port}</small>}
+                  </button>
+                ))}
+              </div>
+            ) : <p className="dl-cn-muted">{tr('cn2.noTypes', { q: typeQuery.trim() })}</p>}
+            <footer className="dl-cn-drawer__f">
+              <span className="dl-cn-grow" />
+              <button type="button" className="btn btn-ghost" onClick={onClose}>{tr('cn2.cancel')}</button>
+              <button type="button" className="btn btn-primary" onClick={() => setStep(2)}>{tr('cn2.next')} <ArrowRight size={15} aria-hidden className="dl-flip" /></button>
+            </footer>
+          </div>
+        ) : (
+        <div className="dl-cn-drawer__bd">
+        {!isEdit && (
+          <div className="dl-cn-chosen">
+            <span className={`dl-cn-logo dl-cn-logo--${spec?.base_type ?? type}`} aria-hidden><Database size={16} /></span>
+            <b dir="auto">{spec?.label ?? type}</b>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setStep(1)}><ArrowLeft size={14} aria-hidden className="dl-flip" /> {tr('cn2.change')}</button>
+          </div>
+        )}
         {/* Name */}
         <label style={{ display: 'block', marginBottom: 12 }}>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{tr('pg.dataPages.conn.nameLabel')}</div>
@@ -204,8 +250,9 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
           </label>
         )}
 
-        {/* Type — grouped by category, from the catalog */}
-        <label style={{ display: 'block', marginBottom: 16 }}>
+        {/* Type — grouped by category, from the catalog. A new connection
+            chose it on step 1; the select stays for editing. */}
+        <label style={{ display: isEdit ? 'block' : 'none', marginBottom: 16 }}>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{tr('pg.dataPages.conn.type')}</div>
           <select value={type} onChange={e => changeType(e.target.value)} {...inp}>
             {Object.entries(grouped).map(([cat, specs]) => (
@@ -235,7 +282,7 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
               {f.kind === 'select' ? (
                 <select value={(cfg[f.name] as string) ?? (f.default as string) ?? ''}
                   onChange={e => setField(f.name, e.target.value)} {...inp}>
-                  {f.options.map(o => <option key={o} value={o}>{o}</option>)}
+                  {f.options.map(o => <option key={o} value={o}>{connectorOptionLabel(tr, language, f.name, o)}</option>)}
                 </select>
               ) : (
                 <input
@@ -267,8 +314,8 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
           </div>
         )}
 
-        {/* Buttons */}
-        <div style={{ display: 'flex', gap: 8, marginTop: 20 }}>
+        {/* Buttons: pinned to the drawer's foot like step 1's (QAF 23). */}
+        <footer className="dl-cn-drawer__f dl-cn-drawer__f--form">
           <button className="btn btn-primary" onClick={handleSave} disabled={saving} style={{ flex: 1 }}>
             {saving ? tr('pg.dataPages.saving') : isEdit ? tr('pg.dataPages.saveChanges') : tr('pg.dataPages.conn.create')}
           </button>
@@ -279,7 +326,9 @@ export function ConnectionModal({ initial, catalog, onSave, onClose }: {
             : tr('pg.dataPages.conn.testConnection')}
           </button>
           <button className="btn btn-ghost" onClick={onClose} style={{ fontSize: 12, padding: '6px 14px' }}>{tr('common.cancel')}</button>
+        </footer>
         </div>
+        )}
       </div>
     </div>
   )

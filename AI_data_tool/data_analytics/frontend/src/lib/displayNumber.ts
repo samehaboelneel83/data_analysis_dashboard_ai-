@@ -69,3 +69,53 @@ export function formatCell(v: string | number | boolean | null | undefined): str
   if (Number.isInteger(n)) return localDigits(String(v))
   return localDigits(Math.abs(n) >= 1 ? trimZeros(n.toFixed(2)) : sig3(n))
 }
+
+/**
+ * A cell of an answer's rows on the Ask AI card: `formatCell`, with the
+ * thousands grouped ("2,348,914"). Only for a column that holds a quantity:
+ * the caller leaves years, identifiers and coordinates to `formatCell`,
+ * where "2,024" would be its own wrong. A whole number that arrives as text
+ * (a code, a phone number) is never grouped.
+ */
+export function formatCellGrouped(v: string | number | boolean | null | undefined): string {
+  if (v == null) return ''
+  const n = typeof v === 'number' ? v
+    : typeof v === 'string' && /^[-+]?\d+\.\d+$/.test(v.trim()) ? Number(v) : null
+  if (n == null || !Number.isFinite(n)) return String(v)
+  const text = Number.isInteger(n) ? String(n) : Math.abs(n) >= 1 ? trimZeros(n.toFixed(2)) : sig3(n)
+  if (/e/i.test(text)) return localDigits(text)
+  const [whole, frac] = text.split('.')
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+  return localDigits(frac ? `${grouped}.${frac}` : grouped)
+}
+
+/** What a data table needs to know about a column to show its cells. */
+export interface CellFormat { type?: string; decimals?: number; symbol?: string; symbol_position?: 'before' | 'after'; prefix?: string; suffix?: string }
+
+/**
+ * A cell of a data table (9-polish): the column's own number format when the
+ * dataset has one -- a currency with its symbol, a fixed number of decimals,
+ * a percent -- and otherwise `formatCell` with the thousands grouped for a
+ * quantity column. A year, an identifier or a coordinate is never grouped
+ * (the caller passes `quantity` false for those, from `nonAdditiveKind`).
+ * Display only: edits, exports and the stored value are unchanged.
+ */
+export function formatTableCell(v: string | number | boolean | null | undefined, quantity: boolean, fmt?: CellFormat | null): string {
+  if (v == null) return ''
+  const n = typeof v === 'number' ? v : typeof v === 'string' && /^[-+]?\d+(\.\d+)?$/.test(v.trim()) ? Number(v) : null
+  if (n != null && Number.isFinite(n) && fmt && ['number', 'integer', 'currency', 'percent'].includes(fmt.type ?? '')) {
+    const d = fmt.type === 'integer' ? 0 : fmt.decimals ?? 2
+    const fixed = n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d, useGrouping: fmt.type !== 'percent' })
+    const pre = fmt.prefix ?? '', suf = fmt.suffix ?? ''
+    if (fmt.type === 'percent') return localDigits(`${pre}${fixed}%${suf}`)
+    if (fmt.type === 'currency') {
+      const sym = fmt.symbol ?? '$'
+      const after = fmt.symbol_position ? fmt.symbol_position === 'after' : /[؀-ۿ]/.test(sym)
+      return localDigits(after ? `${pre}${fixed} ${sym}${suf}` : `${pre}${sym} ${fixed}${suf}`)
+    }
+    return localDigits(`${pre}${fixed}${suf}`)
+  }
+  // A whole number written as text (a code, a phone number) is not grouped.
+  if (quantity && (typeof v === 'number' || (typeof v === 'string' && /^[-+]?\d+\.\d+$/.test(v.trim())))) return formatCellGrouped(v)
+  return formatCell(v)
+}

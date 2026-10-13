@@ -5,6 +5,7 @@ import type { DataSource, Job, SavedQuery } from '../../services/api'
 import SqlEditor from './SqlEditor'
 import ModeExplainer from './ModeExplainer'
 import { useT } from '../../i18n'
+import { localDigits } from '../../lib/arabicFormats'
 import ImportJobRow from '../../components/jobs/ImportJobRow'
 import { useJob } from '../../components/jobs/useJob'
 import { newIdempotencyKey } from '../../components/jobs/idempotency'
@@ -177,7 +178,7 @@ export function SchemaBrowser({ ds, onClose, onQueued }: {
     try {
       if (mode === 'directquery') {
         const r = await dataSourcesApi.import(ds.id, dsName, selected ?? undefined, query.trim() || undefined, mode)
-        toast.success(`"${r.name}" connected — queries the live source directly`)
+        toast.success(t('i2c.sb.connected', { name: r.name }))
         navigate(`/datasets/${r.id}?new=1`)
         return
       }
@@ -198,7 +199,7 @@ export function SchemaBrowser({ ds, onClose, onQueued }: {
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', display: 'flex',
       alignItems: 'center', justifyContent: 'center', zIndex: Z_OVERLAY }}>
       <div ref={dialogRef} role="dialog" aria-modal="true"
-        aria-label={`Browse ${ds.name}`}
+        aria-label={t('i2c.sb.browse', { name: ds.name })}
         style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12,
         width: '85vw', maxWidth: 1100, height: '80vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
@@ -291,12 +292,12 @@ export function SchemaBrowser({ ds, onClose, onQueued }: {
               ) : (
                 <SqlEditor value={query} onChange={setQuery} onRun={handleRunQuery} label={t('sb.custom')}
                   tables={tables.map(x => x.name)} columnsByTable={columnsByTable} onNeedColumns={needColumns}
-                  placeholder="SELECT * FROM table WHERE …   (Ctrl+Enter runs)" />
+                  placeholder={t('i2c.sb.sqlPh')} />
               )}
               <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
                 <button className="btn btn-ghost btn-sm" onClick={handleRunQuery} disabled={pvLoad}
                   style={{ fontSize: 11 }}>
-                  ▶ Run Preview
+                  {t('i2c.sb.run')}
                 </button>
                 {ds.type !== 'api' && saveName == null && (
                   <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: 11 }} disabled={!query.trim()}
@@ -335,7 +336,7 @@ export function SchemaBrowser({ ds, onClose, onQueued }: {
               )}
               {!pvLoad && !preview && !pvError && (
                 <div style={{ padding: 20, color: 'var(--muted)', fontSize: 12 }}>
-                  Select a table or run a query to preview data
+                  {t('i2c.sb.pick')}
                 </div>
               )}
               {!pvLoad && preview && (
@@ -370,7 +371,7 @@ export function SchemaBrowser({ ds, onClose, onQueued }: {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0 }}>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <div style={{ fontSize: 11, color: 'var(--muted)', flexShrink: 0 }}>
-                    {preview.total} rows preview
+                    {t('i2c.sb.rowsPreview', { n: localDigits(String(preview.total)) })}
                   </div>
                   {ds.type !== 'api' && (
                     <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: 11, flexShrink: 0 }}

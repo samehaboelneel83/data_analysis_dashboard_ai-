@@ -1,337 +1,302 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import Lineage from './Lineage'
 import { DirectionProvider } from '../contexts/DirectionContext'
-import { lineageApi } from '../services/api'
+import { lineageApi, type LineageGraph } from '../services/api'
 import { axeViolations } from '../test/axe'
 
 vi.mock('../services/api', () => ({ lineageApi: { graph: vi.fn() } }))
 
+/** Step 11: the Lineage explorer, Part A -- the graph, cards, edges, toolbar,
+ *  search, filters, issues only, pan / zoom / fit and the mini-map. */
+
+const load = (over: Partial<Record<string, unknown>> = {}) => ({
+  last_refreshed_at: new Date(Date.now() - 2 * 3600_000).toISOString(), strategy: 'full', cursor_column: null, staleness: 'fresh', ...over,
+}) as LineageGraph['datasets'][number]['load']
+const GRAPH: LineageGraph = {
+  sources: [{ id: 1, name: 'Warehouse', type: 'postgresql' }],
+  datasets: [
+    { id: 5, name: 'Orders', mode: 'import', source_id: 1, joins: [6], extraction_kind: 'query', transform: { count: 2, kinds: ['filter_rows', 'sort'] }, load: load() },
+    { id: 6, name: 'Customers', mode: 'import', source_id: null, joins: [], extraction_kind: 'csv', transform: { count: 0, kinds: [] }, load: load({ staleness: 'never', last_refreshed_at: null }) },
+    { id: 7, name: 'Live stock', mode: 'directquery', source_id: 1, joins: [], extraction_kind: 'query', transform: { count: 0, kinds: [] }, load: load(), health: 'failing' },
+    { id: 8, name: 'Spare', mode: 'import', source_id: 1, joins: [], extraction_kind: 'query', transform: { count: 0, kinds: [] }, load: load() },
+  ],
+  reports: [{ id: 9, name: 'Sales', dataset_ids: [5] }, { id: 10, name: 'Stock board', dataset_ids: [7] }],
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
-  vi.mocked(lineageApi.graph).mockResolvedValue({
-    sources: [{ id: 1, name: 'Warehouse', type: 'postgres' }],
-    datasets: [
-      {
-        id: 5, name: 'Orders', mode: 'import', source_id: 1, joins: [6],
-        extraction_kind: 'query',
-        transform: { count: 2, kinds: ['filter_rows', 'sort'] },
-        load: { last_refreshed_at: new Date(Date.now() - 2 * 3600_000).toISOString(), strategy: 'incremental', cursor_column: 'updated_at', staleness: 'fresh' },
-      },
-      {
-        id: 6, name: 'Customers', mode: 'import', source_id: null, joins: [],
-        extraction_kind: 'csv',
-        transform: { count: 0, kinds: [] },
-        load: { last_refreshed_at: null, strategy: null, cursor_column: null, staleness: 'never' },
-      },
-    ],
-    reports: [{ id: 9, name: 'Sales', dataset_ids: [5] }],
+  vi.mocked(lineageApi.graph).mockResolvedValue(structuredClone(GRAPH))
+})
+
+const page = () => render(<MemoryRouter><DirectionProvider><Lineage /></DirectionProvider></MemoryRouter>)
+const card = (name: string) => screen.getByRole('button', { name: new RegExp(`^${name},`) })
+const cls = (name: string) => card(name).className
+
+describe('the graph', () => {
+  it('draws sources, datasets and reports as cards, with uploads as their own source', async () => {
+    page()
+    await screen.findByRole('button', { name: /^Orders,/ })
+    for (const n of ['Warehouse', 'Uploaded files', 'Orders', 'Customers', 'Live stock', 'Spare', 'Sales', 'Stock board']) expect(card(n)).toBeInTheDocument()
+    expect(card('Orders')).toHaveTextContent('Import')
+    expect(card('Orders')).toHaveTextContent('2 steps')
+    expect(card('Live stock')).toHaveTextContent('DirectQuery')
+    expect(card('Warehouse')).toHaveTextContent('PostgreSQL')
+    expect(card('Sales')).toHaveTextContent('reads 1 dataset')
+    expect(card('Orders')).toHaveAccessibleName('Orders, Dataset. Feeds from 2, used by 1.')
+  })
+
+  it('draws an edge per flow: extract, join (dashed) and reads; red out of a failing dataset', async () => {
+    const { container } = page()
+    await screen.findByRole('button', { name: /^Orders,/ })
+    const edge = (from: string, to: string) => container.querySelector(`g[data-from="${from}"][data-to="${to}"]`)
+    expect(edge('src:1', 'ds:5')).toHaveClass('dl-ln-e--extract')
+    expect(edge('src:upload', 'ds:6')).toHaveClass('dl-ln-e--extract')
+    expect(edge('ds:6', 'ds:5')).toHaveClass('dl-ln-e--join')
+    expect(edge('ds:5', 'rep:9')).toHaveClass('dl-ln-e--reads')
+    expect(edge('ds:7', 'rep:10')).toHaveClass('is-bad')
+    expect(edge('ds:5', 'rep:9')).not.toHaveClass('is-bad')
+  })
+
+  it('marks issues: a failing refresh, a report reading it, and a dataset nothing uses', async () => {
+    page()
+    await screen.findByRole('button', { name: /^Orders,/ })
+    expect(card('Live stock').querySelector('.dl-ln-iss--fail')).toHaveAttribute('title', 'Refresh failing')
+    expect(card('Stock board').querySelector('.dl-ln-iss--broken')).toHaveAttribute('title', 'Uses data whose refresh is failing')
+    expect(card('Spare').querySelector('.dl-ln-iss--orphan')).toHaveAttribute('title', 'No reports use it')
+    expect(card('Orders').querySelector('.dl-ln-iss')).toBeNull()
+    expect(screen.getByRole('button', { name: /Show issues only/ })).toHaveTextContent('3')
+  })
+
+  it('a click lights the whole path and fades the rest; a second click clears it', async () => {
+    page()
+    await screen.findByRole('button', { name: /^Orders,/ })
+    fireEvent.click(card('Orders'))
+    expect(card('Orders')).toHaveAttribute('aria-pressed', 'true')
+    for (const n of ['Warehouse', 'Customers', 'Uploaded files', 'Sales']) expect(cls(n)).toContain('is-on')
+    for (const n of ['Live stock', 'Spare', 'Stock board']) expect(cls(n)).toContain('is-dim')
+    fireEvent.click(card('Orders'))
+    expect(cls('Spare')).not.toContain('is-dim')
+  })
+
+  it('folds a long column into "+ N more", and opens it', async () => {
+    const many = structuredClone(GRAPH)
+    for (let i = 0; i < 12; i++) many.reports.push({ id: 100 + i, name: `Board ${i}`, dataset_ids: [5] })
+    vi.mocked(lineageApi.graph).mockResolvedValue(many)
+    page()
+    const more = await screen.findByRole('button', { name: '+ 4 more reports' })
+    fireEvent.click(more)
+    expect(screen.getByRole('button', { name: 'Show fewer' })).toBeInTheDocument()
+    expect(card('Board 11')).toBeInTheDocument()
   })
 })
 
-describe('Lineage', () => {
-  it('marks a failing dataset and every report it reaches, through joins (pipeline phase 2)', async () => {
-    vi.mocked(lineageApi.graph).mockResolvedValue({
-      sources: [],
-      datasets: [
-        { id: 5, name: 'Orders', mode: 'import', source_id: null, joins: [6], extraction_kind: 'query',
-          transform: { count: 0, kinds: [] }, health: 'ok',
-          load: { last_refreshed_at: null, strategy: null, cursor_column: null, staleness: 'never' } },
-        { id: 6, name: 'Customers', mode: 'import', source_id: null, joins: [], extraction_kind: 'query',
-          transform: { count: 0, kinds: [] }, health: 'failing',
-          load: { last_refreshed_at: null, strategy: null, cursor_column: null, staleness: 'never' } },
-      ],
-      reports: [{ id: 9, name: 'Sales', dataset_ids: [5] }, { id: 10, name: 'Other', dataset_ids: [] }],
-    })
-    render(<MemoryRouter><Lineage /></MemoryRouter>)
-    await screen.findByText('Sales')
-    expect(screen.getByTitle('Refresh failing')).toBeInTheDocument()
-    // Sales reads Orders, which joins the failing Customers.
-    expect(screen.getAllByTitle('Uses data whose refresh is failing')).toHaveLength(1)
+describe('the toolbar', () => {
+  it('search lists matches; picking one makes it pulse', async () => {
+    page()
+    await screen.findByRole('button', { name: /^Orders,/ })
+    const box = screen.getByRole('combobox', { name: 'Find a source, dataset or report…' })
+    fireEvent.change(box, { target: { value: 'stock' } })
+    const list = screen.getByRole('listbox')
+    expect(within(list).getAllByRole('option').map(o => o.textContent)).toEqual(['Live stockDataset', 'Stock boardReport'])
+    fireEvent.keyDown(box, { key: 'ArrowDown' })
+    fireEvent.keyDown(box, { key: 'Enter' })
+    expect(cls('Stock board')).toContain('is-hit')
+    fireEvent.change(box, { target: { value: 'zzz' } })
+    expect(screen.getByText('No matches')).toBeInTheDocument()
   })
 
-  it('renders the three columns with nodes and edge annotations', async () => {
-    render(<MemoryRouter><Lineage /></MemoryRouter>)
-    expect(await screen.findByText('Warehouse')).toBeInTheDocument()
-    expect(screen.getByText('Orders')).toBeInTheDocument()
-    expect(screen.getByText(/joins 1/)).toBeInTheDocument()
-    expect(screen.getByText('Sales')).toBeInTheDocument()
-    expect(screen.getByText('reads 1 dataset')).toBeInTheDocument()
+  it('filters fade what fails them and move nothing', async () => {
+    page()
+    await screen.findByRole('button', { name: /^Orders,/ })
+    const top = card('Spare').style.top
+    fireEvent.click(screen.getByRole('button', { name: /Show issues only/ }))
+    expect(cls('Orders')).toContain('is-dim')
+    expect(cls('Live stock')).not.toContain('is-dim')
+    expect(cls('Spare')).not.toContain('is-dim')
+    expect(card('Spare').style.top).toBe(top)
+    fireEvent.click(screen.getByRole('button', { name: /Show issues only/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Mode' }))
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'DirectQuery' }))
+    expect(cls('Live stock')).not.toContain('is-dim')
+    expect(cls('Stock board')).not.toContain('is-dim')
+    expect(cls('Orders')).toContain('is-dim')
+    expect(screen.getByRole('button', { name: 'DirectQuery' })).toHaveClass('is-on')
   })
 
-  it('renders ETL badges from extraction/transform/load fields', async () => {
-    render(<MemoryRouter><Lineage /></MemoryRouter>)
-    await screen.findByText('Orders')
-    const eBadges = screen.getAllByText('E')
-    expect(eBadges.length).toBe(2)
-    expect(eBadges[0]).toHaveAttribute('title', 'Extracted from: query')
-    expect(eBadges[1]).toHaveAttribute('title', 'Extracted from: csv')
-
-    const tBadge = screen.getByText('T')
-    expect(tBadge).toHaveAttribute('title', '2 active steps: filter_rows, sort')
-
-    const lBadges = screen.getAllByText('L')
-    expect(lBadges[0]).toHaveAttribute('title', expect.stringContaining('Refreshed'))
-    expect(lBadges[0]).toHaveAttribute('title', expect.stringContaining('incremental'))
-    expect(lBadges[1]).toHaveAttribute('title', 'Never refreshed')
+  it('node type is a multi-choice menu worked by keyboard', async () => {
+    page()
+    await screen.findByRole('button', { name: /^Orders,/ })
+    fireEvent.click(screen.getByRole('button', { name: 'Node type' }))
+    const menu = screen.getByRole('menu', { name: 'Node type' })
+    const [src] = within(menu).getAllByRole('menuitemcheckbox')
+    expect(src).toHaveFocus()
+    fireEvent.click(src)
+    expect(screen.getByRole('menu')).toBeInTheDocument()
+    expect(src).toHaveAttribute('aria-checked', 'true')
+    fireEvent.keyDown(menu, { key: 'Escape' })
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(cls('Orders')).toContain('is-dim')
+    expect(cls('Warehouse')).not.toContain('is-dim')
   })
-})
 
-describe('Lineage empty columns', () => {
-  it('says plainly when there are no datasets or reports yet, instead of a silent blank column', async () => {
-    vi.mocked(lineageApi.graph).mockResolvedValue({
-      sources: [{ id: 1, name: 'Warehouse', type: 'postgres' }],
-      datasets: [],
-      reports: [],
-    })
-    render(<MemoryRouter><Lineage /></MemoryRouter>)
-    expect(await screen.findByText('Warehouse')).toBeInTheDocument()
-    expect(screen.getByText(/No datasets yet/)).toBeInTheDocument()
-    expect(screen.getByText(/No reports yet/)).toBeInTheDocument()
+  it('source type lists the types there are, by their usual names', async () => {
+    page()
+    await screen.findByRole('button', { name: /^Orders,/ })
+    fireEvent.click(screen.getByRole('button', { name: 'Source type' }))
+    expect(screen.getAllByRole('menuitemradio').map(o => o.textContent)).toEqual(['PostgreSQL', 'File'])
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'File' }))
+    expect(cls('Customers')).not.toContain('is-dim')
+    expect(cls('Orders')).toContain('is-dim')
   })
 })
 
-describe('the graph is operable without a mouse', () => {
-  // "Click a node to trace its connections" is the whole point of this page,
-  // and it was a bare <div onClick>: a keyboard user could read the graph but
-  // never select anything in it.
-  const nodeFor = (name: string) =>
-    screen.getByRole('button', { name: new RegExp(name, 'i') })
-
-  it('exposes each node as a focusable button', async () => {
-    render(<MemoryRouter><Lineage /></MemoryRouter>)
-    await screen.findByText('Warehouse')
-    const node = nodeFor('Orders')
-    expect(node).toHaveAttribute('tabIndex', '0')
-    node.focus()
-    expect(document.activeElement).toBe(node)
+describe('pan, zoom and the mini-map', () => {
+  it('zooms with the buttons and the wheel, and fits back', async () => {
+    page()
+    await screen.findByRole('button', { name: /^Orders,/ })
+    const pct = () => screen.getByTestId('zoom-pct').textContent
+    const start = pct()
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }))
+    expect(pct()).not.toBe(start)
+    fireEvent.click(screen.getByRole('button', { name: 'Fit to screen' }))
+    expect(pct()).toBe(start)
+    fireEvent.wheel(screen.getByRole('region', { name: /Lineage graph/ }), { deltaY: -100 })
+    expect(pct()).not.toBe(start)
   })
 
-  it('keeps the link that opens a node OUTSIDE the node button', async () => {
-    // A link inside a role="button" is unreachable to a screen reader
-    // (axe: nested-interactive); it sits beside the button in the same box.
-    render(<MemoryRouter><Lineage /></MemoryRouter>)
-    await screen.findByText('Warehouse')
-    const node = nodeFor('Orders')
-    expect(node.querySelector('a, button')).toBeNull()
-    const open = screen.getByRole('link', { name: 'Open Orders' })
-    expect(node.contains(open)).toBe(false)
-    expect(node.parentElement?.contains(open)).toBe(true)
+  it('drags the background to pan', async () => {
+    page()
+    await screen.findByRole('button', { name: /^Orders,/ })
+    const world = screen.getByTestId('lineage-world')
+    const before = world.style.transform
+    const cv = screen.getByRole('region', { name: /Lineage graph/ })
+    // jsdom has no PointerEvent: mouse events carrying the pointer's fields.
+    const ptr = (type: string, x: number, y: number) => fireEvent(cv, Object.assign(
+      new MouseEvent(type, { bubbles: true, clientX: x, clientY: y, button: 0 }), { pointerId: 1 }))
+    ptr('pointerdown', 100, 100); ptr('pointermove', 160, 130); ptr('pointerup', 160, 130)
+    expect(world.style.transform).not.toBe(before)
   })
 
-  it('selects a node with Enter', async () => {
-    render(<MemoryRouter><Lineage /></MemoryRouter>)
-    await screen.findByText('Warehouse')
-    const node = nodeFor('Orders')
-    expect(node).toHaveAttribute('aria-pressed', 'false')
-    fireEvent.keyDown(node, { key: 'Enter' })
-    expect(nodeFor('Orders')).toHaveAttribute('aria-pressed', 'true')
-  })
-
-  it('selects a node with Space, which a real button also answers to', async () => {
-    render(<MemoryRouter><Lineage /></MemoryRouter>)
-    await screen.findByText('Warehouse')
-    fireEvent.keyDown(nodeFor('Orders'), { key: ' ' })
-    expect(nodeFor('Orders')).toHaveAttribute('aria-pressed', 'true')
-  })
-
-  it('deselects on a second press, matching the click behaviour', async () => {
-    render(<MemoryRouter><Lineage /></MemoryRouter>)
-    await screen.findByText('Warehouse')
-    fireEvent.keyDown(nodeFor('Orders'), { key: 'Enter' })
-    fireEvent.keyDown(nodeFor('Orders'), { key: 'Enter' })
-    expect(nodeFor('Orders')).toHaveAttribute('aria-pressed', 'false')
+  it('draws every visible card in the mini-map', async () => {
+    page()
+    await screen.findByRole('button', { name: /^Orders,/ })
+    expect(screen.getByRole('img', { name: /Mini-map/ }).querySelectorAll('rect:not(.dl-ln-mini__vp)')).toHaveLength(8)
   })
 })
 
-
-/**
- * Edge geometry must follow the reading direction.
- *
- * `dir="rtl"` mirrors the COLUMNS (they are flex children), but the connector
- * curves are SVG coordinates the browser knows nothing about. The original code
- * always drew from the source's RIGHT edge to the target's LEFT, which is only
- * correct while sources sit left of targets -- in RTL the curves swept off the
- * wrong side and stopped meeting the nodes they connect.
- *
- * jsdom reports every rect as zero (see jsdom-layout notes), so the nodes are
- * given real geometry here: without it every coordinate is 0 and the assertions
- * below would pass against a degenerate path regardless of direction.
- */
-describe('Lineage edges mirror with the page direction', () => {
-  /** Lay the three columns out left-to-right, or mirrored when `rtl`. */
-  function stubLayout(rtl: boolean) {
-    const COLUMN_X: Record<string, [number, number]> = rtl
-      // mirrored: sources on the right, reports on the left
-      ? { Warehouse: [700, 900], Orders: [400, 600], Customers: [400, 600], Sales: [100, 300] }
-      : { Warehouse: [100, 300], Orders: [400, 600], Customers: [400, 600], Sales: [700, 900] }
-
-    Element.prototype.getBoundingClientRect = function (this: Element) {
-      const text = this.textContent ?? ''
-      const hit = Object.keys(COLUMN_X).find(name => text.startsWith(name))
-      // The container: the full canvas.
-      if (!hit || text.includes('Warehouse') && text.includes('Sales')) {
-        return { left: 0, right: 1000, top: 0, bottom: 600, width: 1000, height: 600, x: 0, y: 0, toJSON: () => ({}) } as DOMRect
-      }
-      const [left, right] = COLUMN_X[hit]
-      return { left, right, top: 100, bottom: 160, width: right - left, height: 60, x: left, y: 100, toJSON: () => ({}) } as DOMRect
-    }
-  }
-
-  const originalRect = Element.prototype.getBoundingClientRect
-  afterEach(() => { Element.prototype.getBoundingClientRect = originalRect })
-
-  /** The x the first edge STARTS at, parsed out of its `M x y` command. */
-  async function firstEdgeStartX(): Promise<number> {
-    // The edges are painted by a requestAnimationFrame effect (see Lineage's
-    // direction re-measure), so a node being on screen does NOT mean its edges
-    // are. Reading straight after findByText raced that frame and failed about
-    // one full-suite run in six, always on whichever test ran first.
-    let path: Element | null = null
-    await waitFor(() => {
-      path = document.querySelector('svg path')
-      expect(path, 'expected at least one edge to be drawn').not.toBeNull()
-    })
-    const d = path!.getAttribute('d') ?? ''
-    const m = /^M ([\d.-]+) /.exec(d)
-    expect(m, `unparseable path: ${d}`).not.toBeNull()
-    return Number(m![1])
-  }
-
-  it('leaves the source box on its RIGHT in a left-to-right page', async () => {
-    stubLayout(false)
-    document.documentElement.dir = 'ltr'
-    render(<DirectionProvider><MemoryRouter><Lineage /></MemoryRouter></DirectionProvider>)
-    await screen.findByText('Orders')
-    // Source column spans 100..300, so an edge out of it starts at its right edge.
-    expect(await firstEdgeStartX()).toBe(300)
+describe('focus, the side panel and the list (Part B)', () => {
+  it('the focus bar narrows the path: upstream only, downstream only, one hop', async () => {
+    page()
+    await screen.findByRole('button', { name: /^Orders,/ })
+    fireEvent.click(card('Orders'))
+    expect(screen.getByText('Focused on:')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: 'Upstream only' }))
+    expect(cls('Warehouse')).toContain('is-on')
+    expect(cls('Sales')).toContain('is-dim')
+    fireEvent.click(screen.getByRole('radio', { name: 'Downstream only' }))
+    expect(cls('Sales')).toContain('is-on')
+    expect(cls('Warehouse')).toContain('is-dim')
+    fireEvent.click(screen.getByRole('radio', { name: 'Both' }))
+    fireEvent.click(card('Customers'))
+    fireEvent.click(screen.getByRole('radio', { name: '1 hop' }))
+    expect(cls('Orders')).toContain('is-on')
+    expect(cls('Sales')).toContain('is-dim')
+    fireEvent.click(screen.getByRole('button', { name: 'Clear focus' }))
+    expect(screen.queryByText('Focused on:')).toBeNull()
   })
 
-  it('leaves the source box on its LEFT once the page is right-to-left', async () => {
-    // THE regression. Before the fix this still read the right edge, so the
-    // curve began on the far side of the node and crossed the whole canvas.
-    stubLayout(true)
-    document.documentElement.dir = 'rtl'
+  it('the side panel says what a change touches, what feeds it, what uses it, and opens it', async () => {
+    page()
+    await screen.findByRole('button', { name: /^Orders,/ })
+    fireEvent.click(card('Customers'))
+    const side = screen.getByRole('complementary', { name: 'Customers' })
+    expect(within(side).getByRole('note')).toHaveTextContent('If Customers changes, 1 dataset and 1 report are affected.')
+    expect(within(side).getByText('Uploaded files')).toBeInTheDocument()
+    expect(within(side).queryByText('Last refreshed')).toBeNull()
+    expect(within(side).getByRole('link', { name: 'Open' })).toHaveAttribute('href', '/datasets/6')
+    expect(within(side).getByRole('link', { name: 'Ask AI about this' })).toHaveAttribute('href', '/ask?dataset=6')
+    fireEvent.click(within(side).getByRole('button', { name: /Orders/ }))
+    expect(screen.getByRole('complementary', { name: 'Orders' })).toBeInTheDocument()
+    fireEvent.click(card('Spare'))
+    expect(screen.getByRole('complementary', { name: 'Spare' })).toHaveTextContent('Nothing depends on this yet.')
+    fireEvent.click(card('Sales'))
+    expect(within(screen.getByRole('complementary', { name: 'Sales' })).queryByRole('link', { name: 'Ask AI about this' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('complementary')).toBeNull()
+  })
+
+  it('the list view: counts, status, the chain, filters, and back to the graph', async () => {
+    page()
+    await screen.findByRole('button', { name: /^Orders,/ })
+    fireEvent.click(screen.getByRole('radio', { name: 'List' }))
+    const row = (name: string) => screen.getByRole('button', { name: `Show ${name} in the graph` }).closest('tr')!
+    expect(within(row('Orders')).getAllByRole('cell').map(c => c.textContent)).toEqual(['', 'Orders', 'Import', '2', '1', '2 hours ago', 'Healthy'])
+    expect(row('Live stock')).toHaveTextContent('Refresh failing')
+    fireEvent.click(screen.getByRole('button', { name: 'Show the chain of Orders' }))
+    expect(document.querySelector('.dl-ln-chain')).toHaveTextContent('WarehouseUploaded filesCustomersOrdersSales')
+    fireEvent.click(screen.getByRole('button', { name: /Show issues only/ }))
+    expect(screen.queryByRole('button', { name: 'Show Orders in the graph' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Show Spare in the graph' }))
+    expect(screen.getByRole('radio', { name: 'Graph' })).toHaveAttribute('aria-checked', 'true')
+    expect(card('Spare')).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('arrow keys move between cards: in a column, and along the connections', async () => {
+    page()
+    await screen.findByRole('button', { name: /^Orders,/ })
+    const tabbable = () => document.querySelectorAll('.dl-ln-n[tabindex="0"]')
+    expect(tabbable()).toHaveLength(1)
+    fireEvent.click(card('Orders'))
+    fireEvent.keyDown(card('Orders'), { key: 'ArrowRight' })
+    expect(card('Sales')).toHaveFocus()
+    expect(card('Sales')).toHaveAttribute('tabindex', '0')
+    fireEvent.keyDown(card('Sales'), { key: 'ArrowLeft' })
+    expect(card('Orders')).toHaveFocus()
+    fireEvent.keyDown(card('Orders'), { key: 'ArrowDown' })
+    expect(document.activeElement).not.toBe(card('Orders'))
+    expect((document.activeElement as HTMLElement).dataset.key).toMatch(/^ds:/)
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' })
+    expect(screen.queryByText('Focused on:')).toBeNull()
+  })
+
+  it('opens focused on a node from a link', async () => {
+    render(<MemoryRouter initialEntries={['/lineage?focus=ds:7']}><DirectionProvider><Lineage /></DirectionProvider></MemoryRouter>)
+    expect(await screen.findByRole('complementary', { name: 'Live stock' })).toBeInTheDocument()
+    expect(card('Live stock')).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('shows a loading skeleton while it asks', () => {
+    vi.mocked(lineageApi.graph).mockReturnValue(new Promise(() => {}))
+    const { container } = page()
+    expect(container.querySelector('.dl-ln[aria-busy="true"] .dl-ln-skel')).not.toBeNull()
+    expect(screen.getByText('Loading the lineage graph…')).toBeInTheDocument()
+  })
+})
+
+describe('direction and accessibility', () => {
+  it('mirrors the flow in Arabic: sources on the right', async () => {
     localStorage.setItem('datalytics.direction', 'rtl')
-    render(<DirectionProvider><MemoryRouter><Lineage /></MemoryRouter></DirectionProvider>)
-    await screen.findByText('Orders')
-    // Mirrored, the source column spans 700..900 and the edge leaves at 700.
-    expect(await firstEdgeStartX()).toBe(700)
-    localStorage.clear()
-    document.documentElement.dir = 'ltr'
+    try {
+      page()
+      await screen.findByRole('button', { name: /^Orders/ })
+      const left = (k: string) => parseFloat((document.querySelector(`[data-key="${k}"]`) as HTMLElement).style.left)
+      expect(left('src:1')).toBeGreaterThan(left('ds:5'))
+      expect(left('ds:5')).toBeGreaterThan(left('rep:9'))
+    } finally { localStorage.removeItem('datalytics.direction') }
   })
-})
 
-describe('switching direction re-measures without a manual refresh', () => {
-  /**
-   * THE bug: the edges kept their old geometry until something else forced a
-   * re-render, so a user had to refresh the page after switching to Arabic.
-   *
-   * Not a race -- a guaranteed ordering problem. `dir` is applied in
-   * DirectionProvider's effect, and React runs a CHILD's effects BEFORE its
-   * ancestors', so this page measured the columns before the browser had
-   * mirrored them. The fix measures again on the next animation frame.
-   */
-  const originalRect = Element.prototype.getBoundingClientRect
-  afterEach(() => { Element.prototype.getBoundingClientRect = originalRect })
+  it('says plainly when the graph could not be loaded', async () => {
+    vi.mocked(lineageApi.graph).mockRejectedValue(new Error('down'))
+    page()
+    expect(await screen.findByRole('button', { name: /retry|try again/i })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: /Lineage graph/ })).toBeNull()
+  })
 
-  function layout(rtl: boolean) {
-    const X: Record<string, [number, number]> = rtl
-      ? { Warehouse: [700, 900], Orders: [400, 600], Customers: [400, 600], Sales: [100, 300] }
-      : { Warehouse: [100, 300], Orders: [400, 600], Customers: [400, 600], Sales: [700, 900] }
-    Element.prototype.getBoundingClientRect = function (this: Element) {
-      const text = this.textContent ?? ''
-      const hit = Object.keys(X).find(n => text.startsWith(n))
-      if (!hit || (text.includes('Warehouse') && text.includes('Sales'))) {
-        return { left: 0, right: 1000, top: 0, bottom: 600, width: 1000, height: 600, x: 0, y: 0, toJSON: () => ({}) } as DOMRect
-      }
-      const [left, right] = X[hit]
-      return { left, right, top: 100, bottom: 160, width: right - left, height: 60, x: left, y: 100, toJSON: () => ({}) } as DOMRect
-    }
-  }
-
-  const firstEdgeStartX = () => {
-    const d = document.querySelector('svg path')?.getAttribute('d') ?? ''
-    return Number(/^M ([\d.-]+) /.exec(d)?.[1])
-  }
-
-  it('re-draws the edges when direction flips on a MOUNTED page', async () => {
-    layout(false)
-    localStorage.clear()
-    const { rerender } = render(
-      <DirectionProvider><MemoryRouter><Lineage /></MemoryRouter></DirectionProvider>)
-    await screen.findByText('Orders')
-    // waitFor, not a bare assertion: the edges are painted by a
-    // requestAnimationFrame effect, so a node being on screen does not mean
-    // its edges are. Reading straight after findByText raced that frame and
-    // failed as `expected NaN to be 300` about one full-suite run in five --
-    // the same trap the other block's helper already guards against.
-    // The timeout is not decoration. waitFor's default is one second, and the
-    // re-measure is two rAF frames behind a re-render; under a full-suite run
-    // that window closes late often enough to fail as "expected 300 to be 700"
-    // while passing every time the file runs alone. A longer wait cannot make a
-    // broken re-measure pass -- it never arrives at all -- so patience here
-    // costs nothing and removes a failure that looks like an RTL regression.
-    await waitFor(() => expect(firstEdgeStartX()).toBe(300), { timeout: 8000 })  // LTR: leaves the source's right
-
-    // The mirrored layout arrives, exactly as it does when the user toggles.
-    layout(true)
-    localStorage.setItem('datalytics.direction', 'rtl')
-    rerender(
-      <DirectionProvider><MemoryRouter><Lineage /></MemoryRouter></DirectionProvider>)
-
-    // Without the rAF re-measure this stays 300 -- the stale value the user
-    // had to refresh away.
-    await waitFor(() => expect(firstEdgeStartX()).toBe(700), { timeout: 8000 })
-    localStorage.clear()
-    // vitest caps a test at 5s by default, so a waitFor allowed longer than
-    // that never gets to finish -- the run fails as "Test timed out" instead,
-    // which looks like a hang rather than the slow frame it is.
-  }, 20000)
-})
-
-describe('Lineage accessibility', () => {
   it('has no structural accessibility violations', async () => {
-    const { container } = render(<MemoryRouter><Lineage /></MemoryRouter>)
-    await screen.findByText('Warehouse')
-    expect(await axeViolations(container)).toEqual([])
-  })
-})
-
-describe('Lineage search and path (3.12)', () => {
-  const graphWithStray = () => vi.mocked(lineageApi.graph).mockResolvedValue({
-    sources: [{ id: 1, name: 'Warehouse', type: 'postgres' }, { id: 2, name: 'Sheets', type: 'gsheets' }],
-    datasets: [
-      { id: 5, name: 'Orders', mode: 'import', source_id: 1, joins: [6], extraction_kind: null,
-        transform: { count: 0, kinds: [] }, load: { last_refreshed_at: null, strategy: null, cursor_column: null, staleness: 'never' } },
-      { id: 6, name: 'Customers', mode: 'import', source_id: null, joins: [], extraction_kind: null,
-        transform: { count: 0, kinds: [] }, load: { last_refreshed_at: null, strategy: null, cursor_column: null, staleness: 'never' } },
-      { id: 7, name: 'Budget', mode: 'import', source_id: 2, joins: [], extraction_kind: null,
-        transform: { count: 0, kinds: [] }, load: { last_refreshed_at: null, strategy: null, cursor_column: null, staleness: 'never' } },
-    ],
-    reports: [{ id: 9, name: 'Sales', dataset_ids: [5] }, { id: 10, name: 'Finance', dataset_ids: [7] }],
-  } as never)
-
-  it('the search box narrows the graph by name', async () => {
-    graphWithStray()
-    render(<MemoryRouter><Lineage /></MemoryRouter>)
-    await screen.findByText('Budget')
-    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'budg' } })
-    expect(screen.getByText('Budget')).toBeInTheDocument()
-    expect(screen.queryByText('Orders')).not.toBeInTheDocument()
-    expect(screen.queryByText('Sales')).not.toBeInTheDocument()
-  })
-
-  it('"Show only this path" keeps everything upstream and downstream of the selection', async () => {
-    graphWithStray()
-    render(<MemoryRouter><Lineage /></MemoryRouter>)
-    const box = await screen.findByRole('checkbox', { name: /show only this path/i })
-    expect(box).toBeDisabled()
-    fireEvent.click(screen.getByRole('button', { name: /^Sales/ }))
-    fireEvent.click(screen.getByRole('checkbox', { name: /show only this path/i }))
-    // Sales <- Orders <- (Warehouse, Customers): the whole chain stays
-    for (const n of ['Sales', 'Orders', 'Customers', 'Warehouse']) expect(screen.getByText(n)).toBeInTheDocument()
-    for (const n of ['Budget', 'Finance', 'Sheets']) expect(screen.queryByText(n)).not.toBeInTheDocument()
+    const { container } = page()
+    await screen.findByRole('button', { name: /^Orders,/ })
+    await waitFor(async () => expect(await axeViolations(container)).toEqual([]))
   })
 })

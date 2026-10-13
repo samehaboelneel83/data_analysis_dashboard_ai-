@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import toast from 'react-hot-toast'
 import { usePrompt } from '../ui/PromptDialog'
-import { AlertTriangle, Code2, Copy, Database, Download, Pencil, RotateCcw, Sparkles, ThumbsDown, ThumbsUp, User } from 'lucide-react'
+import { AlertTriangle, BarChart3, ChevronDown, ChevronRight, Code2, CornerDownRight, Copy, Database, Download, LineChart, Pencil, PieChart, RotateCcw, Sparkles, ThumbsDown, ThumbsUp, User } from 'lucide-react'
 import { agentApi, dataSourcesApi } from '../../services/api'
 import type { AgentAnswer, AgentMessage, AgentPresentation, AgentResult, AnswerEvidence } from '../../services/api'
-import Pending from './Pending'
-import ResultView, { downloadCsv, focusFor, type EvidenceFocus } from './ResultView'
+import Pending, { LoadingCard } from './Pending'
+import ResultView, { downloadCsv, drawnChart, focusFor, type EvidenceFocus } from './ResultView'
 import AnalysisResult, { isAnalysisResult } from './AnalysisResult'
 import ChoiceOptions, { isChoices } from './ChoiceOptions'
 import DashboardProposals, { type DashboardProposalsPresentation }
@@ -15,11 +15,18 @@ import { useDirection } from '../../contexts/DirectionContext'
 import { majorityDir } from '../../lib/autoDir'
 import { renderTextWithLinks } from '../../lib/inlineMarkup'
 import { aiLimitMessage } from '../../lib/aiLimit'
+import { isCanceledRequest } from '../../lib/canceledRequest'
 import Composer from './Composer'
 import AnswerText from './AnswerText'
 import { columnsMentioned } from './clarifyColumns'
 import { useAiOffline } from '../../pages/ask/useAiOffline'
 import AddToDashboard from './AddToDashboard'
+import RobotHead, { type HeadState } from './RobotHead'
+import CardSection from './CardSection'
+import ActionMenu, { type ActionMenuItem } from '../ActionMenu'
+import SqlBlock from './SqlBlock'
+import { REACTION_MS } from '../../pages/ask/robotMood'
+import { localDigits } from '../../lib/arabicFormats'
 import SaveAsRule, { looksLikeDefinition } from './SaveAsRule'
 import { answerToWidget, type WidgetDraft } from './answerWidget'
 import '../../pages/ask/ask.css'
@@ -65,9 +72,27 @@ export interface ChatPaneProps {
   /** A question to start the box with (Home's question box and its starters
    *  hand one over through `/ask?q=`). Put in the box, never sent for you. */
   initialInput?: string
+  /** Step 10: what an empty thread shows instead of the starter chips -- the
+   *  Ask AI page's "What would you like to know?" hero and its suggestion
+   *  cards. Handed the pane's own send, so a card is sent like a typed question. */
+  startView?: (ask: (question: string) => void, busy: boolean) => ReactNode
+  /** Step 10: what the pane is doing, for the Ask AI page's robot -- the
+   *  question box has focus or text (`compose-on`) or neither, a key in it, a
+   *  question sent, and how it came back. `rest` when the pane goes away. */
+  onActivity?: (what: 'compose-on' | 'compose-off' | 'key' | 'running' | 'answer' | 'error' | 'rest') => void
+  /** Step 10: the Ask AI page's cards -- the question as a bubble, the wait
+   *  as a loading card, each reply as a card with the robot's head, a header
+   *  (what was asked about, how long it took, how many rows), the chart, and
+   *  "Rows behind this answer" and "Show SQL" as bands. `scopeName` is the
+   *  dataset or connection. Without it (the builder's copilot) the pane keeps
+   *  its compact look. */
+  card?: { scopeName: string }
 }
 
-type MessageKind = 'answer' | 'clarify' | 'error' | 'limit'
+/** QAF 16: the server's words for a model endpoint that did not answer. */
+const MODEL_DOWN = /model endpoint could not|ConnectTimeout|ConnectError|connection refused|could not reach|timed out/i
+
+type MessageKind = 'answer' | 'clarify' | 'error' | 'limit' | 'stopped'
 
 interface ChatMessage {
   id: number
@@ -84,6 +109,11 @@ interface ChatMessage {
   intent?: string | null
   /** The answer's numbers, traced to the rows by the server (E11). */
   evidence?: AnswerEvidence | null
+  /** How long the run took, read once from the run after the answer arrived
+   *  (step 10). Absent on a stored thread and when that read fails. */
+  ms?: number | null
+  /** It arrived while the reader was watching (not loaded with a thread). */
+  fresh?: boolean
 }
 
 /** Same target as this pane's: same data source id, or the same set of
@@ -138,7 +168,7 @@ function isProposals(p: unknown): p is DashboardProposalsPresentation {
 }
 
 export default function ChatPane({ dataSourceId, datasetIds, conversationId, onConversationCreated,
-  suggestions, datasetColumns, onAddToPage, initialInput }: ChatPaneProps) {
+  suggestions, datasetColumns, onAddToPage, initialInput, startView, onActivity, card }: ChatPaneProps) {
   const t = useT()
   const { direction } = useDirection()
   // Model and server text: markup rendered, laid out by its majority script.
@@ -165,6 +195,8 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
    *  work. "Designing dashboards · 2m 14s" reads very differently from a
    *  greyed-out button when the wait is four minutes long. */
   const [pending, setPending] = useState<string | null>(null)
+  // QAF M3: the running ask's controller, so Stop can let go of it.
+  const askAbort = useRef<AbortController | null>(null)
   // Cache of fetched SQL per run id, for runs stored before the answer
   // carried its SQL -- "Show SQL" fetches once per message, not per click.
   const [sqlByRun, setSqlByRun] = useState<Record<number, string[]>>({})
@@ -222,6 +254,26 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
       .finally(() => { if (seq === loadSeq.current) setLoading(false) })
   }, [owned, conversationId])
 
+  // The newest reply's moment (step 10): its head is happy, or shaken, for a
+  // few seconds, then calm. One at a time; cleared when the pane goes away.
+  const [reaction, setReaction] = useState<{ msg: number; state: 'happy' | 'error' } | null>(null)
+  const reactionTimer = useRef<ReturnType<typeof setTimeout>>()
+  const react = (msg: number, state: 'happy' | 'error') => {
+    clearTimeout(reactionTimer.current)
+    setReaction({ msg, state })
+    reactionTimer.current = setTimeout(() => setReaction(null), REACTION_MS)
+  }
+  useEffect(() => () => clearTimeout(reactionTimer.current), [])
+  // What a screen reader hears when a reply lands (the wait announces itself).
+  const [announce, setAnnounce] = useState('')
+
+  const [composerFocused, setComposerFocused] = useState(false)
+  const composing = composerFocused || input !== ''
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { onActivity?.(composing ? 'compose-on' : 'compose-off') }, [composing])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => () => onActivity?.('rest'), [])
+
   const target = dataSourceId != null ? { dataSourceId } : { datasetIds }
 
   // Keep the newest turn in view as questions and answers arrive.
@@ -240,6 +292,8 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
     if (choice === undefined) setInput('')
     setBusy(true)
     setPending(question)
+    setAnnounce('')
+    onActivity?.('running')
     setMessages(m => [...m, { id: nextId++, role: 'user', text: question }])
 
     try {
@@ -264,20 +318,49 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
           setConvId(cid)
         }
       }
-      const result = await agentApi.ask(cid, question)
-      setMessages(m => [...m, fromAnswer(result)])
+      const ctl = new AbortController()
+      askAbort.current = ctl
+      const result = await agentApi.ask(cid, question, ctl.signal)
+      const reply: ChatMessage = { ...fromAnswer(result), fresh: true }
+      setMessages(m => [...m, reply])
+      onActivity?.(result.status === 'failed' ? 'error' : 'answer')
+      if (card) {
+        if (reply.kind === 'answer') react(reply.id, 'happy')
+        else if (reply.kind === 'error') react(reply.id, 'error')
+        setAnnounce(reply.kind === 'answer' ? t('ask2.live.ready') : '')
+        // The run's duration, for the card's header: one read after the answer
+        // is on screen, never awaited by it; nothing is shown if it fails.
+        if (reply.kind === 'answer' && result.run_id != null) {
+          void agentApi.runDetail(result.run_id)
+            .then(d => {
+              if (typeof d.ms === 'number') setMessages(m => m.map(x => (x.id === reply.id ? { ...x, ms: d.ms } : x)))
+            })
+            .catch(() => {})
+        }
+      }
     } catch (e) {
       // A limit is not a failure to answer: no "rephrase" advice, and the
       // reason in the open rather than under Technical details (E11).
+      if (isCanceledRequest(e)) {
+        // Stopped by the reader: not a failure, no error card or rephrase advice.
+        setMessages(m => [...m, { id: nextId++, role: 'assistant', kind: 'stopped', text: t('qaf.ask.stopped') }])
+        onActivity?.('answer')
+        return
+      }
       const limit = aiLimitMessage(e, t)
-      setMessages(m => [...m, limit
+      const failed: ChatMessage = limit
         ? { id: nextId++, role: 'assistant', kind: 'limit', text: limit }
-        : { id: nextId++, role: 'assistant', kind: 'error', text: t('chat.unreachable') }])
+        : { id: nextId++, role: 'assistant', kind: 'error', text: t('chat.unreachable'), fresh: true }
+      setMessages(m => [...m, failed])
+      onActivity?.('error')
+      if (card && !limit) react(failed.id, 'error')
     } finally {
+      askAbort.current = null
       setBusy(false)
       setPending(null)
     }
   }
+  const stopAsking = () => askAbort.current?.abort()
 
   const rate = async (runId: number, rating: 'up' | 'down', comment?: string) => {
     setFeedbackByRun(m => ({ ...m, [runId]: rating })) // optimistic
@@ -418,7 +501,9 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
     }
   }
   const pendingTurn = pending !== null ? turns[turns.length - 1] : null
-  const rephrase = (suggestions ?? []).slice(0, 3)
+  // QAF 16: a suggestion that is the question just asked is no suggestion.
+  const same = (a: string, b?: string) => a.trim().toLowerCase() === (b ?? '').trim().toLowerCase()
+  const rephraseFor = (question?: string) => (suggestions ?? []).filter(s => !same(s, question)).slice(0, 3)
 
   return (
     <div className="dl-chat">
@@ -426,7 +511,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
         {loading && <p className="dl-chat__note">{t('common.loading')}</p>}
         {loadError && <p role="alert" className="dl-chat__note dl-chat__note--error">{loadError}</p>}
         {!loading && !loadError && messages.length === 0 && (
-          suggestions && suggestions.length > 0 ? (
+          startView ? (pending === null ? startView(q => void send(q), busy) : null) : suggestions && suggestions.length > 0 ? (
             <div className="dl-chat__start">
               <p className="dl-chat__start-title">{t('ask.tryOne')}</p>
               <div className="dl-chips" role="group" aria-label={t('ask.suggested')}>
@@ -443,44 +528,55 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
           )
         )}
 
-        {turns.map(turn => {
+        {turns.map((turn, turnIndex) => {
           const msg = turn.answer
           const isPending = turn === pendingTurn && !msg
+          const newest = turnIndex === turns.length - 1
           return (
             <article key={turn.key} className={`dl-turn${msg?.kind === 'error' ? ' dl-turn--error' : ''}`}
               aria-label={turn.question?.text}>
-              {turn.question && (
+              {turn.question && (card ? (
+                <header className="dl-qb"><p dir="auto">{turn.question.text}</p></header>
+              ) : (
                 <header className="dl-turn__q">
                   <span className="dl-turn__avatar" aria-hidden><User size={14} /></span>
                   <p className="dl-turn__q-text" dir="auto">{turn.question.text}</p>
                 </header>
-              )}
+              ))}
               {turn.question && dataSourceId != null && looksLikeDefinition(turn.question.text) && (
                 <div className="dl-turn__rule" style={{ display: 'flex', justifyContent: 'flex-end', paddingInlineEnd: 34 }}>
                   <SaveAsRule sourceId={dataSourceId} text={turn.question.text} />
                 </div>
               )}
-              {isPending && <Pending question={turn.question?.text ?? ''} />}
+              {isPending && (card
+                ? <LoadingCard question={turn.question?.text ?? ''} scopeName={card.scopeName} onStop={stopAsking} />
+                : <Pending question={turn.question?.text ?? ''} onStop={stopAsking} />)}
               {msg && (
-                <div className="dl-turn__a">
-                  <span className="dl-turn__avatar dl-turn__avatar--ai" aria-hidden><Sparkles size={14} /></span>
-                  <div className="dl-turn__body">
-                    {msg.kind === 'limit' ? (
+                <div className={card ? `dl-ac dl-ac--${msg.kind ?? 'answer'}` : 'dl-turn__a'}>
+                  {card
+                    ? cardHead(msg, newest && reaction?.msg === msg.id ? reaction.state : 'idle', newest)
+                    : <span className="dl-turn__avatar dl-turn__avatar--ai" aria-hidden><Sparkles size={14} /></span>}
+                  <div className={card ? 'dl-ac__body' : 'dl-turn__body'}>
+                    {msg.kind === 'stopped' ? (
+                      <p className="dl-answer-stopped" role="status" data-testid="ai-stopped">{msg.text}</p>
+                    ) : msg.kind === 'limit' ? (
                       <div className="dl-answer-error" role="status" data-testid="ai-limit">
                         <p className="dl-answer-error__title">
                           <AlertTriangle size={16} aria-hidden /> {t('ai.limit.title')}
                         </p>
                         <p className="dl-answer-error__hint" dir={majorityDir(msg.text, direction)}>{modelText(msg.text)}</p>
                       </div>
+                    ) : msg.kind === 'error' && card ? (
+                      errorCard(msg, turn.question?.text)
                     ) : msg.kind === 'error' ? (
                       <div className="dl-answer-error">
                         <p className="dl-answer-error__title">
-                          <AlertTriangle size={16} aria-hidden /> {t('ask.err.title')}
+                          <AlertTriangle size={16} aria-hidden /> {MODEL_DOWN.test(msg.text) ? t('chat.unreachable') : t('ask.err.title')}
                         </p>
-                        <p className="dl-answer-error__hint">{t('ask.err.hint')}</p>
-                        {rephrase.length > 0 && (
+                        {!MODEL_DOWN.test(msg.text) && <p className="dl-answer-error__hint">{t('ask.err.hint')}</p>}
+                        {!MODEL_DOWN.test(msg.text) && rephraseFor(turn.question?.text).length > 0 && (
                           <div className="dl-chips dl-chips--small" role="group" aria-label={t('ask.err.tryInstead')}>
-                            {rephrase.map(s => (
+                            {rephraseFor(turn.question?.text).map(s => (
                               <button key={s} type="button" className="dl-chip" disabled={busy}
                                 onClick={() => void send(s)}>{s}</button>
                             ))}
@@ -535,7 +631,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
                              there are no rows -- same channel, dispatched by kind. */
                           <AnalysisResult presentation={msg.presentation} />
                         ) : msg.results && msg.results.length > 0 && (
-                          <ResultView results={msg.results} presentation={msg.presentation}
+                          <ResultView results={msg.results} presentation={msg.presentation} sectioned={!!card}
                             focus={evidenceFocus?.msg === msg.id ? evidenceFocus.at : null} />
                         )}
                         {/* Where this answer came from (Part IV criterion 10). The
@@ -543,7 +639,7 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
                             the test's -- a reader has to be able to tell which. */}
                         <AnswerSource msg={msg} />
                         {msg.runId != null && (
-                          answerActions(msg, turn.question?.text)
+                          card ? cardActions(msg, turn.question?.text) : answerActions(msg, turn.question?.text)
                         )}
                         {why && why.run === msg.runId && (
                           <form className="dl-why" onSubmit={e => {
@@ -569,11 +665,14 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
           )
         })}
         <div ref={endRef} />
+        {card && <p className="dl-sr-only" role="status" aria-live="polite" data-testid="ask-live">{announce}</p>}
       </div>
-      <div className="dl-chat__composer">
+      <div className="dl-chat__composer" onFocus={() => setComposerFocused(true)} onBlur={() => setComposerFocused(false)}>
         {offline && <p role="status" className="dl-chat__note dl-chat__note--error dl-chat__offline" data-testid="ai-offline">{t('off.title')}</p>}
-        <Composer value={input} onChange={setInput} onSend={() => void send()} busy={busy}
-          locked={offline} lockedHint={offline ? t('off.composer') : undefined} />
+        <Composer value={input} onChange={v => { setInput(v); onActivity?.('key') }} onSend={() => void send()} busy={busy}
+          locked={offline} lockedHint={offline ? t('off.composer') : undefined}
+          page={card ? { name: card.scopeName } : undefined} />
+        {card && <p className="dl-ask__disc">{t('ask2.disclaimer')}</p>}
       </div>
     </div>
   )
@@ -692,6 +791,190 @@ export default function ChatPane({ dataSourceId, datasetIds, conversationId, onC
       </div>
     )
   }
+  /** Step 10: a card's header -- the robot's head in this message's state,
+   *  who is answering, what was asked about, how long the run took (when the
+   *  run said so) and how many rows came back, and the chart it was drawn as. */
+  function cardHead(msg: ChatMessage, state: HeadState, live: boolean) {
+    const plain = msg.kind === 'answer' && !isProposals(msg.presentation) && !isAnalysisResult(msg.presentation)
+    const results = plain ? (msg.results ?? []) : []
+    const chart = drawnChart(results[0], msg.presentation)
+    const ChartIcon = chart === 'line' ? LineChart : chart === 'pie' ? PieChart : BarChart3
+    const rows = results.reduce((n, r) => n + (Number(r.total) || 0), 0)
+    const took = typeof msg.ms !== 'number' ? null
+      : msg.ms < 60_000 ? t('ask2.ans.secs', { n: (msg.ms / 1000).toFixed(1) })
+      : t('pend.mins', { m: Math.floor(msg.ms / 60_000), s: Math.round((msg.ms % 60_000) / 1000) })
+    return (
+      <div className="dl-ac__head">
+        <RobotHead state={state} live={live} />
+        <div className="dl-ac__id">
+          {msg.kind === 'error'
+            ? <h3 className="dl-ac__who dl-ac__who--error">{t('ask2.err.title')}</h3>
+            : <div className="dl-ac__who">{t('ask2.ans.who')}</div>}
+          {msg.kind !== 'error' && (
+            <div className="dl-ac__meta" data-testid="answer-meta">
+              {card!.scopeName && <bdi>{card!.scopeName}</bdi>}
+              {took && <bdi data-testid="answer-took">{localDigits(took)}</bdi>}
+              {results.length > 0 && <span>{localDigits(t('ask2.pick.rows', { n: rows }))}</span>}
+            </div>
+          )}
+        </div>
+        {chart && (
+          <span className="dl-ac__chip" data-testid="answer-chart-chip">
+            <ChartIcon size={14} aria-hidden /> {t('ask2.ans.autoChart', { kind: t(`ask2.chart.${chart}`) })}
+          </span>
+        )}
+      </div>
+    )
+  }
+
+  /** Step 10, Part C: what a failed question shows -- why, in words; the
+   *  dataset's own columns to start again from; the server's text under
+   *  "Technical details"; Edit question and Retry. The server sends one raw
+   *  string and no reason or rephrasings (backend row), so the sentence is
+   *  general and the suggestions are the page's, built from the columns. A
+   *  request that never reached the agent says only that. */
+  function errorCard(msg: ChatMessage, question?: string) {
+    // QAF 16: a run that failed because the model endpoint did not answer is
+    // stored like any failed run; only its text tells. It gets the
+    // "could not reach" card, also when reopened from history, and no chips.
+    // (Matched on the server's words; a reason code is a backend row.)
+    const ran = msg.runId != null && !MODEL_DOWN.test(msg.text)
+    const [before, after = ''] = t('ask2.err.why', { name: '\uE000' }).split('\uE000')
+    return (
+      <>
+        <div className="dl-err" role={msg.fresh ? 'alert' : undefined}>
+          <p className="dl-err__why">
+            {!ran ? (msg.runId != null ? t('chat.unreachable') : msg.text)
+              : card!.scopeName ? <>{before}<bdi><b>{card!.scopeName}</b></bdi>{after}</>
+              : t('ask2.err.whyPlain')}
+          </p>
+          {ran && rephraseFor(question).length > 0 && (
+            <div className="dl-err__try">
+              <div className="dl-err__try-l" id={`dl-err-try-${msg.id}`}>{t('ask2.err.tryColumns')}</div>
+              <div className="dl-err__chips" role="group" aria-labelledby={`dl-err-try-${msg.id}`}>
+                {rephraseFor(question).map(s => (
+                  <button key={s} type="button" className="dl-err__chip" disabled={busy || offline} onClick={() => void send(s)}>
+                    <CornerDownRight size={14} aria-hidden className="dl-flip" /> {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        {(ran || msg.runId != null) && (
+          <details className="dl-err__td">
+            <summary><ChevronRight size={15} aria-hidden className="dl-flip" /> {t('ask.err.details')}</summary>
+            <pre dir="ltr">{msg.text}</pre>
+          </details>
+        )}
+        {question && (
+          <div className="dl-ac__acts">
+            <button type="button" className="dl-act dl-act--primary" onClick={() => setInput(question)}>
+              <Pencil size={14} aria-hidden /> {t('err3.edit')}
+            </button>
+            <button type="button" className="dl-act" disabled={busy || offline} onClick={() => void send(question)}>
+              <RotateCcw size={14} aria-hidden /> {t('ask.retry')}
+            </button>
+          </div>
+        )}
+      </>
+    )
+  }
+
+  /** Step 10: a card's foot -- "Show SQL" as a band, then the actions: add to
+   *  a dashboard, copy, rate; on the far side the downloads, Edit question
+   *  and Retry. The same handlers as the compact bar. */
+  function cardActions(msg: ChatMessage, question?: string) {
+    const runId = msg.runId!
+    const sqlable = !(msg.intent === 'chat' || isProposals(msg.presentation)
+      || isAnalysisResult(msg.presentation))
+    const draft = datasetColumns && (datasetIds?.length === 1 || (onAddToPage && datasetIds?.length))
+      ? answerToWidget(msg.results?.[0], msg.sql ?? sqlByRun[runId], datasetColumns,
+          msg.presentation?.x, msg.presentation?.y)
+      : null
+    const answerTitle = question ?? msg.text.slice(0, 80)
+    const open = openRun.has(runId)
+    // One menu for every way out of the page: the three files and, on a
+    // connection, a dataset. The same handlers as the compact bar's buttons.
+    const exports: ActionMenuItem[] = [
+      ...(msg.results && msg.results.some(r => r.total > 0) ? [
+        { key: 'csv', label: t('chat.dl.csv'), icon: <Download size={14} aria-hidden />,
+          onSelect: () => downloadCsv(msg.results!, `ask-ai-result-${runId}.csv`) },
+        { key: 'xlsx', label: t('chat.dl.xlsx'), icon: <Download size={14} aria-hidden />,
+          onSelect: () => void downloadFile(runId, 'xlsx') },
+        { key: 'pdf', label: t('chat.dl.pdf'), icon: <Download size={14} aria-hidden />,
+          onSelect: () => void downloadFile(runId, 'pdf') },
+      ] : []),
+      ...(sqlable && dataSourceId != null ? [
+        { key: 'dataset', label: saving === runId ? t('ans3.saving') : t('ask.saveDataset'), icon: <Database size={14} aria-hidden />,
+          onSelect: () => void saveAsDataset(msg), disabled: saving !== null, disabledReason: t('ans3.saving') },
+      ] : []),
+    ]
+    return (
+      <>
+        {sqlable && (
+          <CardSection icon={Code2} label={open ? t('ask.hideSql') : t('ask.showSql')} open={open}
+            onToggle={() => void toggleSql(msg)}>
+            <div className="dl-sqlb">
+              <button type="button" className="dl-act dl-sqlb__copy" onClick={() => void copySql(msg)} aria-label={t('ask.copySql')}>
+                <Copy size={14} aria-hidden /> {t('ask.copy')}
+              </button>
+              {sqlLoading.has(runId) ? (
+                <span className="dl-chat__note">{t('common.loading')}</span>
+              ) : (
+                ((msg.sql && msg.sql.length ? msg.sql : sqlByRun[runId]) ?? []).map((sql, i) => <SqlBlock key={i} sql={sql} />)
+              )}
+            </div>
+            {msg.contextObjects && msg.contextObjects.length > 0 && (
+              <div className="dl-sql__tables">{t('ans3.tables', { list: msg.contextObjects.join(', ') })}</div>
+            )}
+          </CardSection>
+        )}
+        <div className="dl-ac__acts">
+          {draft && onAddToPage && (
+            <button type="button" className="dl-act dl-act--primary" data-testid="add-to-page"
+              onClick={() => void onAddToPage(draft, answerTitle)}>
+              <Sparkles size={14} aria-hidden /> <span className="dl-act__text">{t('ask.addToPage')}</span>
+            </button>
+          )}
+          {draft && !onAddToPage && datasetIds && (
+            <AddToDashboard datasetId={datasetIds[0]} draft={draft} title={answerTitle} />
+          )}
+          <button type="button" className="dl-act" onClick={() => void copyAnswer(msg)} aria-label={t('ask.copyAnswer')} title={t('ask.copyAnswer')}>
+            <Copy size={14} aria-hidden /> <span className="dl-act__text">{t('ask.copy')}</span>
+          </button>
+          <span className="dl-actions__sep" aria-hidden />
+          <button type="button" className="dl-act dl-act--icon"
+            aria-label={t('ask.good')} title={t('ask.good')}
+            aria-pressed={feedbackByRun[runId] === 'up'}
+            onClick={() => void rate(runId, 'up')}>
+            <ThumbsUp size={15} aria-hidden />
+          </button>
+          <button type="button" className="dl-act dl-act--icon"
+            aria-label={t('ask.bad')} title={t('ask.bad')}
+            aria-pressed={feedbackByRun[runId] === 'down'}
+            onClick={() => void rate(runId, 'down')}>
+            <ThumbsDown size={15} aria-hidden />
+          </button>
+          <span className="dl-actions__grow" />
+          {exports.length > 0 && (
+            <ActionMenu items={exports} label={t('ask2.ans.export')} portal align="end" triggerClassName="dl-act"
+              trigger={<><Download size={14} aria-hidden /> <span className="dl-act__text">{t('ask2.ans.export')}</span> <ChevronDown size={13} aria-hidden /></>} />
+          )}
+          {question && (
+            <>
+              <button type="button" className="dl-act" title={t('err3.edit')} onClick={() => setInput(question)}>
+                <Pencil size={14} aria-hidden /> <span className="dl-act__text">{t('err3.edit')}</span>
+              </button>
+              <button type="button" className="dl-act" title={t('ask.retry')} disabled={busy || offline} onClick={() => void send(question)}>
+                <RotateCcw size={14} aria-hidden /> <span className="dl-act__text">{t('ask.retry')}</span>
+              </button>
+            </>
+          )}
+        </div>
+      </>
+    )
+  }
 }
 
 /** One line naming the engine behind an assistant answer, and its evidence.
@@ -711,7 +994,7 @@ export function answerSource(msg: Pick<ChatMessage, 'intent' | 'results' | 'sql'
 
 function AnswerSource({ msg }: { msg: ChatMessage }) {
   const t = useT()
-  if (msg.role !== 'assistant' || msg.kind === 'error' || msg.kind === 'clarify' || msg.kind === 'limit') return null
+  if (msg.role !== 'assistant' || msg.kind === 'error' || msg.kind === 'clarify' || msg.kind === 'limit' || msg.kind === 'stopped') return null
   return (
     <div data-testid="answer-source" style={{ marginTop: 6, fontSize: 10.5, color: 'var(--muted)' }}>
       <span aria-hidden>ⓘ </span>{answerSource(msg, t)}

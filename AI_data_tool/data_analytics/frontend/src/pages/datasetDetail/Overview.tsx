@@ -6,13 +6,14 @@ import { formatTimeAgo, useT, type MessageKey } from '../../i18n'
 import { localDigits } from '../../lib/arabicFormats'
 import { certificationOf, isCertified } from '../../lib/cleanDatasets'
 import { summary as checkSummary } from '../../components/dataset/ChecksPanel'
-import {
+import { predictionModelsApi,
   adminAuditApi, datasetsApi, lineageApi, monitoringApi,
   type CheckResult, type DataAlert, type DataCheck, type Dataset, type LineageGraph, type PipelineHealth,
 } from '../../services/api'
 import type { Tab } from './constants'
 import { typeName } from '../datasetsList/classify'
 import { typeTag, useColumnProfile, type Analysis } from './columnProfile'
+import { storedNumberUse } from '../../lib/dtypeName'
 import './overview.css'
 
 /**
@@ -111,7 +112,14 @@ export default function Overview(p: OverviewProps) {
         <aside className="dl-ov__side">
           <section className="dl-ov__card" data-testid="overview-used-by">
             <header className="dl-ov__card-head">
-              <h3>{t('ov3.usedBy')}</h3><span className="dl-ov__muted">{localDigits(String(usedBy.length))}</span>
+              <h3>{t('ov3.usedBy')}</h3>
+              {/* QAF 11: by kind, so the dashboards figure is the one the list and
+                  Lineage show; alerts and derived datasets are counted apart. */}
+              <span className="dl-ov__muted" data-testid="used-by-count">{localDigits([
+                dashboards.length ? t('qaf.ov.dash', { n: dashboards.length }) : null,
+                derived.length ? t('qaf.ov.ds', { n: derived.length }) : null,
+                alerts.length ? t('qaf.ov.alerts', { n: alerts.length }) : null,
+              ].filter(Boolean).join(' · '))}</span>
             </header>
             {usedBy.length === 0
               ? <p className="dl-ov__muted">{t('ov3.usedBy.none')}</p>
@@ -129,7 +137,7 @@ export default function Overview(p: OverviewProps) {
                   {/* The count above covers all of them; past eight, say how
                       many more and where they are (QA B7). */}
                   {usedBy.length > 8 && (
-                    <li><Link to="/lineage" className="dl-ov__muted">{t('ov3.usedBy.more', { n: localDigits(String(usedBy.length - 8)) })}</Link></li>
+                    <li><Link to={`/lineage?focus=ds:${ds.id}`} className="dl-ov__muted">{t('ov3.usedBy.more', { n: localDigits(String(usedBy.length - 8)) })}</Link></li>
                   )}
                 </ul>
               )}
@@ -146,7 +154,7 @@ export default function Overview(p: OverviewProps) {
               <span className="dl-ov__node"><LayoutGrid size={14} aria-hidden />
                 {graph ? (dashboards.length ? t('ov3.lineage.boards', { n: localDigits(String(dashboards.length)) }) : t('ov3.lineage.noBoards')) : '…'}</span>
             </div>
-            <Link to="/lineage" className="dl-ov__link">{t('ov3.lineage.open')}</Link>
+            <Link to={`/lineage?focus=ds:${ds.id}`} className="dl-ov__link">{t('ov3.lineage.open')}</Link>
           </section>
 
           {!empty && (
@@ -192,6 +200,16 @@ function Facts({ ds }: { ds: Dataset }) {
   const kind = (ds as { catalog?: { kind?: string } }).catalog?.kind
   const when = new Date(ds.created_at)
   const lang = useDirection().language === 'ar' ? 'ar-u-nu-latn' : 'en-GB'
+  const [models, setModels] = useState<number | null>(null)
+  useEffect(() => {
+    let alive = true
+    // Optional: without the list the fact is simply not shown.
+    let ask: Promise<unknown> = Promise.resolve(null)
+    try { ask = Promise.resolve(predictionModelsApi.list(ds.id)) } catch { /* no models API here */ }
+    ask.then(list => { if (alive && Array.isArray(list)) setModels(new Set(list.map((m: { name: string }) => m.name)).size) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [ds.id])
   return (
     <section className="dl-ov__facts" aria-label={t('ov3.facts')}>
       <div><span>{t('dsl.pv.rows')}</span><strong>{live && !ds.row_count ? '—' : localDigits(ds.row_count.toLocaleString('en-US'))}</strong></div>
@@ -199,6 +217,12 @@ function Facts({ ds }: { ds: Dataset }) {
       <div><span>{kind === 'upload' || (!ds.data_source_id && !kind) ? t('dsl.pv.uploaded') : t('dsl.pv.created')}</span>
         <strong>{localDigits(when.toLocaleString(lang, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }))}</strong></div>
       <div><span>{t('datasets.col.size')}</span><strong>{live ? '—' : fmtBytes(ds.file_size)}</strong></div>
+      {/* 9-polish: the prediction models trained on it, one per name (the
+          champion), linked to the Models tab. Hidden until known. */}
+      {models != null && (
+        <div data-testid="overview-models"><span>{t('pol.models')}</span>
+          <strong><Link to={`/datasets/${ds.id}?tab=models`} className="dl-ov__link">{localDigits(String(models))}</Link></strong></div>
+      )}
     </section>
   )
 }
@@ -378,7 +402,9 @@ function GlanceRow({ ds, name, dtype, missing, analysis, flagged }: {
   const { dist, sum } = useColumnProfile(ds, name, analysis)
   return (
     <tr data-flagged={flagged || undefined}>
-      <td><span className="dl-ov__colname" dir="auto">{name}</span><span className="dl-ov__tag">{typeTag(t, dtype)}</span></td>
+      <td><span className="dl-ov__colname" dir="auto">{name}</span><span className="dl-ov__tag">{typeTag(t, dtype)}</span>
+        {(() => { const u = storedNumberUse(t, name, dtype, (ds.column_meta as Record<string, { role?: string }> | undefined)?.[name]?.role)
+          return u && <span className="dl-ov__tag" title={u.tip}>{u.tag}</span> })()}</td>
       <td>{dist}</td>
       <td className="dl-ov__num">{localDigits(`${Math.round(missing)}%`)}</td>
       <td className="dl-ov__sum">{sum}</td>

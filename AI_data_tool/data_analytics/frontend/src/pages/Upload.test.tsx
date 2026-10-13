@@ -1,339 +1,244 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import Upload, { batchBaseName } from './Upload'
 import { datasetsApi } from '../services/api'
 import toast from 'react-hot-toast'
 
 /**
- * The upload page after it learned to take several files.
- *
- * Two behaviours carry the real risk:
- *
- *   - A single ordinary file must still take the OLD path. That flow (upload,
- *     then land on the new dataset) is what everyone already knows, and the
- *     batch endpoint returns a different shape, so routing one file through it
- *     would silently change what happens on success.
- *
- *   - A partial failure must not navigate away. The per-file errors are the
- *     only record of which files were rejected and why; leaving the page
- *     throws that away and the user has no idea what to fix.
+ * The Upload page (autopilot step 5): choose, review, import. What carries
+ * the risk, kept from v1: one ordinary file takes the single-file endpoint
+ * and several take the batch; a partial failure keeps the per-file errors on
+ * screen; a reused name or a duplicate content is said; a workbook's sheets
+ * are offered when the server names them; nothing uploads twice.
  */
 
-const navigate = vi.fn()
-
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual<any>('react-router-dom')
-  return { ...actual, useNavigate: () => navigate }
-})
-
-vi.mock('react-hot-toast', () => ({
-  // Callable too: a plain toast() carries the duplicate-upload warning.
-  default: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }),
-}))
-
+vi.mock('react-hot-toast', () => ({ default: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }))
 vi.mock('../services/api', () => ({
-  datasetsApi: { upload: vi.fn(), uploadBatch: vi.fn(), list: vi.fn() },
+  datasetsApi: { uploadWithProgress: vi.fn(), uploadBatchWithProgress: vi.fn(), list: vi.fn() },
 }))
 
-const file = (name: string, body = 'a,b\n1,2\n') =>
-  new File([body], name, { type: 'text/csv' })
-
-function show() {
-  return render(<MemoryRouter><Upload /></MemoryRouter>)
-}
-
-function pick(files: File[]) {
-  const input = document.querySelector('input[type=file]') as HTMLInputElement
+const file = (name: string, body = 'a,b\n1,2\n') => new File([body], name, { type: 'text/csv' })
+const show = () => render(<MemoryRouter><Upload /></MemoryRouter>)
+const settle = () => act(async () => { for (let i = 0; i < 10; i++) await Promise.resolve() })
+async function pick(files: File[]) {
+  const input = screen.getByTestId('upload-input') as HTMLInputElement
   Object.defineProperty(input, 'files', { value: files, configurable: true })
   fireEvent.change(input)
+  await waitFor(() => expect(screen.getByRole('button', { name: /^Import/ })).toBeEnabled())
 }
-
-const submit = () => fireEvent.click(screen.getByText('Upload', { selector: 'button' }))
+const importNow = () => fireEvent.click(screen.getByRole('button', { name: /^Import/ }))
+const single = () => vi.mocked(datasetsApi.uploadWithProgress)
+const batch = () => vi.mocked(datasetsApi.uploadBatchWithProgress)
 
 beforeEach(() => {
   vi.clearAllMocks()
-  ;(datasetsApi.upload as any).mockResolvedValue({ id: 7, name: 'one' })
-  ;(datasetsApi.list as any).mockResolvedValue([])
-  ;(datasetsApi.uploadBatch as any).mockResolvedValue({
-    items: [{ source_filename: 'a.csv', status: 'created', dataset: { id: 1 }, error: null }],
-    created: 1, failed: 0, mode: 'separate',
+  single().mockResolvedValue({ id: 7, name: 'Sales', row_count: 2, col_count: 2, file_size: 10 } as never)
+  vi.mocked(datasetsApi.list).mockResolvedValue([])
+  batch().mockResolvedValue({ items: [{ source_filename: 'a.csv', status: 'created', dataset: { id: 1, name: 'a' }, error: null },
+    { source_filename: 'b.csv', status: 'created', dataset: { id: 2, name: 'b' }, error: null }], created: 2, failed: 0, mode: 'separate' } as never)
+})
+
+describe('choosing', () => {
+  it('starts on the drop zone, with recent uploads and tips beside it', async () => {
+    vi.mocked(datasetsApi.list).mockResolvedValue([
+      { id: 3, name: 'Old sales', filename: '/app/uploads/x/old.csv', created_at: '2026-01-01T00:00:00Z' },
+      { id: 4, name: 'From a database', filename: undefined, created_at: '2026-02-01T00:00:00Z' },
+    ] as never)
+    show()
+    expect(screen.getByRole('heading', { name: 'Drop your files here' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Browse files' })).toBeInTheDocument()
+    expect(await screen.findByRole('link', { name: /Old sales/ })).toHaveAttribute('href', '/datasets/3')
+    expect(screen.queryByText('From a database')).toBeNull()
+    expect(screen.getByRole('link', { name: /Connect a database/ })).toHaveAttribute('href', '/connections')
+    expect(screen.getByTestId('upload-input')).toHaveAttribute('accept', expect.stringContaining('.accdb'))
+    expect(screen.getByTestId('upload-input')).toHaveAttribute('multiple')
+  })
+
+  it('shows the drop state while files are dragged over', () => {
+    show()
+    const zone = screen.getByRole('heading', { name: 'Drop your files here' }).closest('.dl-up-drop')!
+    fireEvent.dragOver(zone)
+    expect(screen.getByRole('heading', { name: 'Release to add them' })).toBeInTheDocument()
   })
 })
 
-describe('Upload', () => {
-  it('explains what is missing when Upload is clicked with no file', () => {
+describe('reviewing', () => {
+  it('names the dataset from the file and previews its first rows, read in the browser', async () => {
     show()
-    const button = screen.getByText('Upload', { selector: 'button' }) as HTMLButtonElement
-    expect(button.disabled).toBe(false)
-    submit()
-    expect(toast.error).toHaveBeenCalledWith('Please select a file and enter a name')
+    await pick([file('enrolments_2025.csv', 'id,faculty,enrolled_on\n1,Law,05/09/2025\n2,Arts,06/09/2025\n3,,07/09/2025\n')])
+    expect(screen.getByRole('textbox', { name: 'Dataset name' })).toHaveValue('Enrolments 2025')
+    expect(screen.getByTestId('preview-stats')).toHaveTextContent('3 rows3 columns1 empty cell')
+    expect(screen.getByRole('note')).toHaveTextContent('Dates in enrolled_on could be day/month or month/day.')
+    const table = screen.getByRole('table')
+    expect(within(table).getAllByRole('columnheader').map(h => h.textContent)).toEqual(['idNumber', 'facultyText', 'enrolled_onDate'])
+    expect(single()).not.toHaveBeenCalled()
   })
 
-  it('accepts several files at once', () => {
+  it('says a workbook is previewed after import, and still imports it', async () => {
     show()
-    const input = document.querySelector('input[type=file]') as HTMLInputElement
-    expect(input.multiple).toBe(true)
+    await pick([new File(['x'], 'book.xlsx')])
+    expect(screen.getByText(/A preview of XLSX files needs the server/)).toBeInTheDocument()
   })
 
-  it('offers Access files as an accepted format', () => {
+  it('keeps a typed name, and says when it is already used', async () => {
+    vi.mocked(datasetsApi.list).mockResolvedValue([{ id: 1, name: 'Sales', filename: 'x.csv', created_at: '' }] as never)
     show()
-    const input = document.querySelector('input[type=file]') as HTMLInputElement
-    expect(input.accept).toContain('.accdb')
-    expect(input.accept).toContain('.mdb')
+    await pick([file('first.csv')])
+    const name = screen.getByRole('textbox', { name: 'Dataset name' })
+    fireEvent.change(name, { target: { value: 'Sales' } })
+    expect(await screen.findByRole('status')).toHaveTextContent('You already have a dataset named "Sales"')
+    fireEvent.click(screen.getByRole('button', { name: 'Add more files' }))
+    await pick([file('second.csv')])
+    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('Sales')
   })
 
-  it('sends one ordinary file through the single-file endpoint', async () => {
+  it('removes a file, and back to the start when none is left', async () => {
     show()
-    pick([file('solo.csv')])
-    submit()
-
-    await waitFor(() => expect(datasetsApi.upload).toHaveBeenCalled())
-    expect(datasetsApi.uploadBatch).not.toHaveBeenCalled()
-    // ...and still lands the user on the dataset it just made.
-    expect(navigate).toHaveBeenCalledWith('/datasets/7?new=1')   // E06: lands with its profile running
+    await pick([file('a.csv'), file('b.csv')])
+    expect(screen.getByText('2 datasets ready to import')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Remove a.csv' }))
+    expect(screen.getByText('1 dataset ready to import')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Remove b.csv' }))
+    expect(screen.getByRole('heading', { name: 'Drop your files here' })).toBeInTheDocument()
   })
 
-  it('sends an Access file through the batch endpoint even on its own', async () => {
-    // One .accdb yields one dataset per table, which the single-file endpoint
-    // cannot express -- it rejects them with a pointer to /batch.
+  it('combines several files into one dataset only when asked', async () => {
     show()
-    pick([file('sales.accdb')])
-    submit()
-
-    await waitFor(() => expect(datasetsApi.uploadBatch).toHaveBeenCalled())
-    expect(datasetsApi.upload).not.toHaveBeenCalled()
+    await pick([file('sales_q1.csv'), file('sales_q2.csv')])
+    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('sales_q')
+    const sw = screen.getByRole('switch', { name: 'Combine into one dataset' })
+    expect(sw).toHaveAttribute('aria-checked', 'false')
+    fireEvent.click(sw)
+    expect(screen.getByText('1 dataset ready to import')).toBeInTheDocument()
+    importNow(); await settle()
+    expect(batch()).toHaveBeenCalledWith(expect.any(Array), 'sales_q', '', 'append', expect.any(Function))
   })
 
-  it('sends several files through the batch endpoint', async () => {
+  it('an Access file is explained, and goes through the batch even alone', async () => {
     show()
-    pick([file('a.csv'), file('b.csv')])
-    submit()
-
-    await waitFor(() => expect(datasetsApi.uploadBatch).toHaveBeenCalled())
-    const [files, , , mode] = (datasetsApi.uploadBatch as any).mock.calls[0]
-    expect(files).toHaveLength(2)
-    expect(mode).toBe('separate')
-  })
-
-  describe('the separate/append choice', () => {
-    it('is hidden for a single file, where it would mean nothing', () => {
-      show()
-      pick([file('solo.csv')])
-      expect(screen.queryByText(/single dataset/i)).toBeNull()
-    })
-
-    it('appears once there is more than one file', () => {
-      show()
-      pick([file('a.csv'), file('b.csv')])
-      expect(screen.getByText(/Separate datasets/i)).toBeTruthy()
-      expect(screen.getByText(/single dataset/i)).toBeTruthy()
-    })
-
-    it('changes what the request asks for', async () => {
-      show()
-      pick([file('a.csv'), file('b.csv')])
-      fireEvent.click(screen.getByDisplayValue('append'))
-      submit()
-
-      await waitFor(() => expect(datasetsApi.uploadBatch).toHaveBeenCalled())
-      expect((datasetsApi.uploadBatch as any).mock.calls[0][3]).toBe('append')
-    })
-  })
-
-  describe('partial failure', () => {
-    beforeEach(() => {
-      ;(datasetsApi.uploadBatch as any).mockResolvedValue({
-        items: [
-          { source_filename: 'good.csv', status: 'created', dataset: { id: 1 }, error: null },
-          { source_filename: 'bad.txt', status: 'error', dataset: null,
-            error: 'Unsupported file type: .txt' },
-        ],
-        created: 1, failed: 1, mode: 'separate',
-      })
-    })
-
-    it('lists which files failed, and why', async () => {
-      show()
-      pick([file('good.csv'), file('bad.txt')])
-      submit()
-
-      expect(await screen.findByText('bad.txt')).toBeTruthy()
-      expect(screen.getByText(/Unsupported file type/)).toBeTruthy()
-    })
-
-    it('stays on the page so the errors survive', async () => {
-      show()
-      pick([file('good.csv'), file('bad.txt')])
-      submit()
-
-      await screen.findByText('bad.txt')
-      expect(navigate).not.toHaveBeenCalled()
-    })
-
-    it('lets the user try again rather than leaving the button spinning', async () => {
-      show()
-      pick([file('good.csv'), file('bad.txt')])
-      submit()
-
-      await screen.findByText('bad.txt')
-      const button = screen.getByText('Upload', { selector: 'button' }) as HTMLButtonElement
-      expect(button.disabled).toBe(false)
-    })
-  })
-
-  describe('upload in progress', () => {
-    it('shows a dedicated loading state while the upload is in flight, not just the button label', async () => {
-      // Distinct wording from the button's own "Uploading…" label -- this proves
-      // a SEPARATE, more visible affordance exists, not a re-match of the button.
-      let resolveUpload: (v: any) => void
-      ;(datasetsApi.upload as any).mockReturnValue(new Promise(res => { resolveUpload = res }))
-      show()
-      pick([file('solo.csv')])
-      submit()
-
-      await waitFor(() => expect(screen.getByText(/uploading and processing/i)).toBeInTheDocument())
-      resolveUpload!({ id: 7, name: 'one' })
-    })
-  })
-
-  it('renders the errors when the whole request is rejected', async () => {
-    // A total failure comes back as an HTTP error carrying the same body.
-    ;(datasetsApi.uploadBatch as any).mockRejectedValue({
-      response: { data: { detail: {
-        items: [{ source_filename: 'x.txt', status: 'error', dataset: null,
-                  error: 'Unsupported file type: .txt' }],
-        created: 0, failed: 1, mode: 'separate',
-      } } },
-    })
-
-    show()
-    pick([file('x.txt'), file('y.txt')])
-    submit()
-
-    expect(await screen.findByText('x.txt')).toBeTruthy()
-    expect(navigate).not.toHaveBeenCalled()
+    await pick([new File(['x'], 'legacy.accdb')])
+    expect(screen.getByText(/An Access database becomes one dataset per table/)).toBeInTheDocument()
+    importNow(); await settle()
+    expect(batch()).toHaveBeenCalled()
+    expect(single()).not.toHaveBeenCalled()
   })
 })
 
-describe('the name a batch suggests', () => {
-  // The server appends each file's own stem to this base, so seeding it with
-  // the first file's whole stem put that stem in twice -- the duplicated
-  // "qa_sample" fragment QA saw in the dataset list.
-  it('uses what the file names share, not the first one whole', () => {
-    expect(batchBaseName([file('qa_sample.csv'), file('qa_sample2.csv')]))
-      .toBe('qa_sample')
+describe('importing', () => {
+  it('one ordinary file: the single endpoint, its progress, then where to go next', async () => {
+    let finish!: (v: unknown) => void
+    single().mockImplementation((_f, _n, _d, _s, onSent) => { onSent(0.4); return new Promise(r => { finish = r }) as never })
+    show()
+    await pick([file('sales.csv')])
+    importNow(); await settle()
+    expect(screen.getByRole('heading', { name: 'Importing Sales…' })).toBeInTheDocument()
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '40')
+    finish({ id: 7, name: 'Sales', row_count: 1200, col_count: 9, file_size: 2048 }); await settle()
+    expect(screen.getByRole('heading', { name: 'Dataset imported' })).toBeInTheDocument()
+    expect(screen.getByText('1,200 rows')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Open dataset/ })).toHaveAttribute('href', '/datasets/7?new=1')
+    expect(screen.getByRole('link', { name: /Ask AI about it/ })).toHaveAttribute('href', '/ask?dataset=7')
+    fireEvent.click(screen.getByRole('button', { name: /Upload another/ }))
+    expect(screen.getByRole('heading', { name: 'Drop your files here' })).toBeInTheDocument()
   })
 
-  it('trims a trailing separator off the shared prefix', () => {
-    expect(batchBaseName([file('q3_sales.csv'), file('q3_costs.csv')]))
-      .toBe('q3')
+  it('does not upload twice from a double click', async () => {
+    single().mockReturnValue(new Promise(() => {}) as never)
+    show()
+    await pick([file('sales.csv')])
+    const go = screen.getByRole('button', { name: /^Import/ })
+    fireEvent.click(go); fireEvent.click(go); await settle()
+    expect(single()).toHaveBeenCalledTimes(1)
   })
 
-  it('falls back to the first stem when the files share nothing', () => {
-    expect(batchBaseName([file('sales.csv'), file('costs.csv')]))
-      .toBe('sales')
+  it('says when the content repeats a dataset you have', async () => {
+    single().mockResolvedValue({ id: 8, name: 'Copy', row_count: 1, col_count: 1, duplicate_of: { id: 3, name: 'Original' } } as never)
+    show()
+    await pick([file('copy.csv')])
+    importNow(); await settle()
+    expect(screen.getByRole('note')).toHaveTextContent('It has the same content as “Original”, which you already have.')
   })
 
-  it('keeps a single file\'s own stem', () => {
-    expect(batchBaseName([file('sales.csv')])).toBe('sales')
+  it('several files: lists every dataset made', async () => {
+    show()
+    await pick([file('a.csv'), file('b.csv')])
+    importNow(); await settle()
+    expect(batch()).toHaveBeenCalledWith(expect.any(Array), 'a', '', 'separate', expect.any(Function))
+    expect(screen.getByRole('heading', { name: '2 datasets imported' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'b' })).toHaveAttribute('href', '/datasets/2?new=1')
   })
 })
 
-describe('a name that is already taken (BUG-027)', () => {
-  it('says so while typing, without blocking the upload', async () => {
-    ;(datasetsApi.list as any).mockResolvedValue([{ id: 3, name: 'Sales 2024' }])
+describe('when it fails', () => {
+  it('keeps the per-file errors of a partial batch on screen', async () => {
+    batch().mockResolvedValue({ items: [{ source_filename: 'a.csv', status: 'created', dataset: { id: 1, name: 'a' }, error: null },
+      { source_filename: 'b.csv', status: 'error', dataset: null, error: 'not a table' }], created: 1, failed: 1, mode: 'separate' } as never)
     show()
-    await waitFor(() => expect(datasetsApi.list).toHaveBeenCalled())
-    const input = screen.getByPlaceholderText('My dataset')
-    fireEvent.change(input, { target: { value: '  sales 2024 ' } })
-    expect(await screen.findByRole('status')).toHaveTextContent('You already have a dataset named "sales 2024"')
-
-    pick([file('x.csv')])
-    submit()
-    await waitFor(() => expect(datasetsApi.upload).toHaveBeenCalled())
+    await pick([file('a.csv'), file('b.csv')])
+    importNow(); await settle()
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent('1 imported, 1 failed')
+    expect(alert).toHaveTextContent('b.csv not a table')
+    expect(within(alert).getByRole('link', { name: 'Open dataset' })).toHaveAttribute('href', '/datasets/1?new=1')
   })
 
-  it('stays quiet for a new name, or when the list cannot be read', async () => {
-    ;(datasetsApi.list as any).mockRejectedValue(new Error('offline'))
+  it('the whole batch rejected: the errors, and Try again back to the review', async () => {
+    batch().mockRejectedValue({ response: { data: { detail: { items: [{ source_filename: 'a.csv', status: 'error', dataset: null, error: 'bad' }], failed: 1 } } } })
     show()
-    fireEvent.change(screen.getByPlaceholderText('My dataset'), { target: { value: 'Sales 2024' } })
-    await waitFor(() => expect(datasetsApi.list).toHaveBeenCalled())
-    expect(screen.queryByText(/already have a dataset/)).toBeNull()
+    await pick([file('a.csv'), file('b.csv')])
+    importNow(); await settle()
+    expect(screen.getByRole('alert')).toHaveTextContent('a.csv bad')
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(screen.getByRole('switch')).toBeInTheDocument()
+  })
+
+  it('a single file refused: the server text under Technical details', async () => {
+    single().mockRejectedValue({ response: { data: { detail: 'line 3 has 7 fields' } } })
+    show()
+    await pick([file('sales.csv')])
+    importNow(); await settle()
+    expect(screen.getByRole('heading', { name: 'Couldn’t import Sales' })).toBeInTheDocument()
+    expect(screen.getByText('Technical details')).toBeInTheDocument()
+    expect(screen.getByText('line 3 has 7 fields')).toBeInTheDocument()
+  })
+
+  it('a workbook with several sheets: back to the review to choose one, or all', async () => {
+    single().mockRejectedValueOnce({ response: { data: { detail: { message: 'several sheets', sheets: ['Jan', 'Feb'] } } } })
+    show()
+    await pick([new File(['x'], 'book.xlsx')])
+    importNow(); await settle()
+    const select = screen.getByRole('combobox', { name: 'Sheet' })
+    expect(within(select).getAllByRole('option').map(o => o.textContent)).toEqual(['Jan', 'Feb', 'All sheets: one dataset each'])
+    fireEvent.change(select, { target: { value: 'Feb' } })
+    importNow(); await settle()
+    expect(single()).toHaveBeenLastCalledWith(expect.any(File), 'Book', '', 'Feb', expect.any(Function))
+  })
+
+  it('"All sheets" sends the one file to the batch', async () => {
+    single().mockRejectedValueOnce({ response: { data: { detail: { message: 'x', sheets: ['Jan', 'Feb'] } } } })
+    show()
+    await pick([new File(['x'], 'book.xlsx')])
+    importNow(); await settle()
+    fireEvent.change(screen.getByRole('combobox', { name: 'Sheet' }), { target: { value: '\u0000all' } })
+    importNow(); await settle()
+    expect(batch()).toHaveBeenCalled()
+  })
+
+  it('asks for a name before importing', async () => {
+    show()
+    await pick([file('a.csv')])
+    fireEvent.change(screen.getByRole('textbox', { name: 'Dataset name' }), { target: { value: '  ' } })
+    importNow()
+    expect(toast.error).toHaveBeenCalledWith('Give the dataset a name')
+    expect(single()).not.toHaveBeenCalled()
   })
 })
 
-describe('an upload that repeats a dataset you already have (E07)', () => {
-  it('says which one, after a single upload, and still opens the new dataset', async () => {
-    ;(datasetsApi.upload as any).mockResolvedValue({ id: 8, name: 'Sales again', duplicate_of: { id: 3, name: 'Sales' } })
-    show()
-    fireEvent.change(screen.getByPlaceholderText('My dataset'), { target: { value: 'Sales again' } })
-    pick([file('x.csv')])
-    submit()
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/datasets/8?new=1'))
-    expect(toast).toHaveBeenCalledWith(
-      '"Sales again" has the same content as "Sales", which you already have.', expect.anything())
-  })
-
-  it('names each repeated file of a batch, and stays quiet for the rest', async () => {
-    ;(datasetsApi.uploadBatch as any).mockResolvedValue({
-      items: [
-        { source_filename: 'a.csv', status: 'created', dataset: { id: 1, name: 'B — a', duplicate_of: { id: 3, name: 'Sales' } }, error: null },
-        { source_filename: 'b.csv', status: 'created', dataset: { id: 2, name: 'B — b', duplicate_of: null }, error: null },
-      ],
-      created: 2, failed: 0, mode: 'separate',
-    })
-    show()
-    fireEvent.change(screen.getByPlaceholderText('My dataset'), { target: { value: 'B' } })
-    pick([file('a.csv'), file('b.csv')])
-    submit()
-    await waitFor(() => expect(navigate).toHaveBeenCalled())
-    expect(toast).toHaveBeenCalledTimes(1)
-    expect((toast as any).mock.calls[0][0]).toContain('"B — a" has the same content as "Sales"')
-  })
-})
-
-describe('a workbook with data on several sheets (E07)', () => {
-  const refusal = {
-    response: { data: { detail: { message: 'The workbook has 2 sheets with data: Sales, Costs.', sheets: ['Sales', 'Costs'] } } },
-  }
-
-  it('offers the sheets the server named, and sends the chosen one', async () => {
-    ;(datasetsApi.upload as any).mockRejectedValueOnce(refusal)
-    show()
-    fireEvent.change(screen.getByPlaceholderText('My dataset'), { target: { value: 'Book' } })
-    pick([file('book.xlsx')])
-    submit()
-    const select = await screen.findByRole('combobox') as HTMLSelectElement
-    expect(toast.error).toHaveBeenCalledWith('The workbook has 2 sheets with data: Sales, Costs.')
-    expect(Array.from(select.options).map(o => o.textContent)).toEqual(['Sales', 'Costs', 'All sheets — one dataset each'])
-    fireEvent.change(select, { target: { value: 'Costs' } })
-    submit()
-    await waitFor(() => expect(datasetsApi.upload).toHaveBeenLastCalledWith(expect.any(File), 'Book', '', 'Costs'))
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/datasets/7?new=1'))
-  })
-
-  it('"All sheets" sends the one file to the batch path', async () => {
-    ;(datasetsApi.upload as any).mockRejectedValueOnce(refusal)
-    show()
-    fireEvent.change(screen.getByPlaceholderText('My dataset'), { target: { value: 'Book' } })
-    pick([file('book.xlsx')])
-    submit()
-    const select = await screen.findByRole('combobox')
-    fireEvent.change(select, { target: { value: (select as HTMLSelectElement).options[2].value } })
-    submit()
-    await waitFor(() => expect(datasetsApi.uploadBatch).toHaveBeenCalledWith([expect.any(File)], 'Book', '', 'separate'))
-    expect(datasetsApi.upload).toHaveBeenCalledTimes(1)
-  })
-
-  it('forgets the sheets when another file is picked', async () => {
-    ;(datasetsApi.upload as any).mockRejectedValueOnce(refusal)
-    show()
-    fireEvent.change(screen.getByPlaceholderText('My dataset'), { target: { value: 'Book' } })
-    pick([file('book.xlsx')])
-    submit()
-    await screen.findByRole('combobox')
-    pick([file('other.csv')])
-    expect(screen.queryByRole('combobox')).toBeNull()
-  })
+describe('batchBaseName', () => {
+  const f = (n: string) => new File([''], n)
+  it('uses what the file names share, not the first one whole', () => expect(batchBaseName([f('qa_sample.csv'), f('qa_sample2.csv')])).toBe('qa_sample'))
+  it('trims a trailing separator off the shared prefix', () => expect(batchBaseName([f('sales_q1.csv'), f('sales_q2.csv')])).toBe('sales_q'))
+  it('falls back to the first stem when the files share nothing', () => expect(batchBaseName([f('alpha.csv'), f('beta.csv')])).toBe('alpha'))
+  it("keeps a single file's own stem", () => expect(batchBaseName([f('report.final.csv')])).toBe('report.final'))
 })

@@ -11,15 +11,24 @@ import { en as pgPanelsA } from './pages/panelsA'
 import { en as pgPanelsB } from './pages/panelsB'
 import { en as pgModelsMaps } from './pages/modelsMaps'
 import { en as pgTypes } from './pages/types'
+import { en as pgAskAi } from './pages/askAi'
+import { en as pgLineage } from './pages/lineage'
+import { en as pgUpload } from './pages/upload'
+import { en as pgConnections } from './pages/connections'
+import { en as pgPolish } from './pages/polish'
+import { en as pgI2d } from './pages/i18n2Dataset'
+import { en as pgI2c } from './pages/i18n2Common'
+import { en as pgQaf } from './pages/qaf'
 
 /** English UI strings. Arabic lives in `ar.ts`; keep the two key sets identical. */
 export const en = {
   // QA3 Batch C: the builder's strings, one module per area (i18n/builder/).
   ...bcCanvas, ...bcPanes, ...bcRules, ...bcShell, ...bcStats, ...bcDialogs,
   // 8-i18n: the pages outside the Builder, one module per area (i18n/pages/).
-  ...pgAdminSecurity, ...pgAdminPlatform, ...pgDataPages, ...pgPanelsA, ...pgPanelsB, ...pgModelsMaps, ...pgTypes,
+  ...pgAdminSecurity, ...pgAdminPlatform, ...pgDataPages, ...pgPanelsA, ...pgPanelsB, ...pgModelsMaps, ...pgTypes, ...pgAskAi, ...pgLineage, ...pgUpload, ...pgConnections, ...pgPolish, ...pgI2d, ...pgI2c, ...pgQaf,
   'nav.home': 'Home',
   'nav.askAi': 'Ask AI',
+  'fab.tip': 'Ask AI about this dashboard',
   'nav.datasets': 'Datasets',
   'nav.glossary': 'Glossary',
   'glossary.subtitle': 'The words your company uses and the rules behind them. Ask AI, Insights and the dashboard designer read these — a rule marked “Always” (for example, current employees are rows whose to_date is 9999-01-01) is applied to every question on that connection.',
@@ -1090,6 +1099,23 @@ export const en = {
   'dsh.tpl.quad': 'Four-panel comparison',
   'dsh.tpl.geo': 'Map and detail',
   'dsh.tpl.detail': 'Chart + detail',
+  // QA6 A10: the built-in templates' page titles and widget titles.
+  'dsh.tplp.overview': 'Overview',
+  'dsh.tplp.comparison': 'Comparison',
+  'dsh.tplp.geography': 'Geography',
+  'dsh.tplp.detail': 'Detail',
+  'dsh.tplw.kpi': 'KPI {n}',
+  'dsh.tplw.breakdown': 'Breakdown',
+  'dsh.tplw.trend': 'Trend',
+  'dsh.tplw.byCategory': 'By category',
+  'dsh.tplw.overTime': 'Over time',
+  'dsh.tplw.share': 'Share',
+  'dsh.tplw.detail': 'Detail',
+  'dsh.tplw.byRegion': 'By region',
+  'dsh.tplw.total': 'Total',
+  'dsh.tplw.topRegions': 'Top regions',
+  'dsh.tplw.filter': 'Filter',
+  'dsh.tplw.detailRows': 'Detail rows',
   'al.cad.none': 'not scheduled',
   'al.cad.day': 'every {n} day',
   'al.cad.days': 'every {n} days',
@@ -1441,10 +1467,10 @@ export const en = {
   'hm.tile.rows': '{n} rows',
   'hm.tile.none': 'None yet',
   'hm.tile.failed': 'Couldn\'t load',
-  'hm.tile.lastRefresh': 'Last refresh',
+  'hm.tile.lastRefresh': 'Last data update',
   'hm.tile.noRefreshes': 'No refreshes yet',
-  'hm.tile.noJobs': 'No jobs yet',
-  'hm.tile.noJobs24': 'No jobs in the last 24 hours',
+  'hm.tile.noJobs': 'Scheduled refreshes: none yet',
+  'hm.tile.noJobs24': 'Scheduled refreshes: none in 24 hours',
   'hm.tile.jobsFailed': '{n} of {of} jobs failed',
   'hm.tile.jobsOk': '{of} jobs, none failed',
   'hm.tile.failing': '{n} datasets failing to refresh',
@@ -1886,8 +1912,8 @@ export const en = {
   'chat.dl.csv': 'Download CSV',
   'chat.dl.xlsx': 'Download Excel',
   'chat.dl.pdf': 'Download PDF',
-  'res.rows': '{n} rows',
-  'res.rowsShowing': '{n} rows, showing {shown}',
+  'res.rows': '{n, plural, one {# row} other {# rows}}',
+  'res.rowsShowing': '{n, plural, one {# row} other {# rows}}, showing {shown}',
   'res.catalog': 'from the data catalog, not a query',
   'res.none': 'No rows.',
   'ans3.tables': 'Tables considered: {list}',
@@ -3090,6 +3116,12 @@ export const en = {
   'setup.u.syncFailed': 'Datalytics could not read this database. Check the connection on the review page, then try again.',
   'setup.u.empty': 'This database has no tables Datalytics can read.',
   'setup.u.openReview': 'Open the review page',
+  // QA6 B1: a connection nothing is reading.
+  'setup.u.neverRead': 'Datalytics has not read this database yet, and nothing is reading it now. Read it to see its tables here.',
+  'setup.u.slowSync': 'Reading this database is taking longer than usual. You can start it again, or come back later: your progress is kept.',
+  'setup.u.readNow': 'Read the database now',
+  'setup.u.askAdmin': 'Reading a database is an admin action: ask an admin of your organisation to start it.',
+  'setup.u.backHome': 'Back to Home',
   'setup.u.holds': 'What this database holds',
   'setup.u.byAi': 'Written by AI',
   'setup.u.byYou': 'Written by you',

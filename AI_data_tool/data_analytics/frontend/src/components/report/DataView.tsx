@@ -5,6 +5,8 @@ import DataViewsBar from './DataViewsBar'
 import { AuthContext } from '../../contexts/AuthContext'
 import PrepStepsPanel from './PrepStepsPanel'
 import { useT } from '../../i18n'
+import { formatTableCell } from '../../lib/displayNumber'
+import { nonAdditiveKind } from '../../lib/semanticGuard'
 
 const PAGE_SIZE = 100
 
@@ -29,7 +31,9 @@ export default function DataView({ datasetId, mode }: { datasetId: number; mode?
 
   const load = useCallback(() => {
     dataPreviewApi.query(datasetId, [], [], PAGE_SIZE, offset, sortBy, sortDir,
-      search || undefined).then(setData)
+      search || undefined)
+      // QAF M5: a DirectQuery dataset's preview may ignore the limit; one page only.
+      .then(d => setData({ ...d, rows: d.rows.slice(0, PAGE_SIZE) }))
   }, [datasetId, offset, sortBy, sortDir, search])
 
   useEffect(() => { load() }, [load, mode])
@@ -87,7 +91,7 @@ export default function DataView({ datasetId, mode }: { datasetId: number; mode?
             </thead>
             <tbody>
               {data.rows.map((row, i) => (
-                <tr key={i}>{(row as unknown[]).map((v, j) => <td key={j}>{v == null ? '—' : String(v)}</td>)}</tr>
+                <tr key={i}>{(row as unknown[]).map((v, j) => <td key={j}>{v == null ? '—' : formatTableCell(v as string | number | boolean, !nonAdditiveKind(data.columns[j]))}</td>)}</tr>
               ))}
             </tbody>
           </table>

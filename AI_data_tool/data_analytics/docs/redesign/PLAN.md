@@ -1,7 +1,7 @@
 # Datalytics redesign — implementation plan
 
 Source of truth: `DATALYTICS_REDESIGN_HANDOFF.md` and `boards/` in this folder (for the
-finished steps; Ask AI follows v1, see below). New sessions: read `HANDOVER.md` first.
+finished steps; Ask AI follows the step 10 design, see below). New sessions: read `HANDOVER.md` first.
 Work happens on branch `said`; the pre-redesign commit is tagged `before-redesign`.
 Nothing is pushed.
 
@@ -30,7 +30,14 @@ Nothing is pushed.
 - [x] 4-revert Ask AI back to the v1 layout with fixes; Datasets menu clipping fixes
   - >> GATE B: stop, report Ask AI — **approved 2026-10-06**
 
-> **Ask AI decision (2026-10-06, owner):** the Ask AI page uses the v1 layout and look
+> **Ask AI decision replaced (2026-10-11, owner):** Ask AI is rebuilt from the new design
+> (step 10, handoff `design-handoff-3/ask-ai/`). This replaces the GATE B decision below
+> to keep Ask AI as v1. The v1 improvements listed there are kept in the new layout.
+> Phase 1 rules still win over the design's own brief: no stubs or fake data (no timed
+> progress steps, no canned suggestions or history), desktop only (≥1180px, usable to
+> 1024px), our icons/fonts/tokens, translations as full templates.
+>
+> **Ask AI decision (2026-10-06, owner, replaced above):** the Ask AI page uses the v1 layout and look
 > (as at `120e0ef`) with fixes. The step 4 boards in `boards/step4-ask-ai-phase1/` are
 > no longer the spec for it. Kept from step 4: translations, Pending without timed
 > stages, the themed delete dialog, offline detection (locks the question box with one
@@ -105,7 +112,7 @@ Nothing is pushed.
   - >> GATE E: stop, report the Builder
 - [x] 7-QA2 Fixes from the second QA report `/media/saeed/New Volume1/projects/redesign-captures/qa-2/QA_REPORT_2.md` (owner, after GATE E): Broken N1 (raw JSX on the Insights button), N2 (Version history and opening a dashboard must not force Edit mode; check v1), N3 (39 revisions at 13:01 with repeated numbers: display bug or autosave), N4 (Arabic hover toolbar covers the widget ⋮ menu), N5 (one-line `key` fix in CustomGraphRenderer.tsx only); B8 with the QA steps exactly; V1 and V4 at 1280 px and 125% zoom; V10 leftovers (dark Data table white square, Platform settings context column); Visual 6–10; Translation 10, 11, 12, 14, 15 and the Key influencers footnotes. A failing test before each fix where possible; before/after captures. B3, B4/13/16 and B6 go to "Backend follow-ups"; the remaining T1 items stay in 8-i18n.
   - >> stop and report
-- [ ] 7-QA3 Fixes from the third QA report `/media/saeed/New Volume1/projects/redesign-captures/qa-3/QA_REPORT_3.md` (owner): Batch A builder behaviour (A1–A10); Batch B builder visuals (B1–B6); Batch C builder Arabic (ar.ts) with a check against hard-coded English in Builder components; Batch D round-2 leftovers (D1 breadcrumb at 125%, D2 dark tooltip label, D3 list ⋯ column, D4 one locale-driven date formatter, D5 Insights number isolation).
+- [x] 7-QA3 Fixes from the third QA report `/media/saeed/New Volume1/projects/redesign-captures/qa-3/QA_REPORT_3.md` (owner): Batch A builder behaviour (A1–A10); Batch B builder visuals (B1–B6); Batch C builder Arabic (ar.ts) with a check against hard-coded English in Builder components; Batch D round-2 leftovers (D1 breadcrumb at 125%, D2 dark tooltip label, D3 list ⋯ column, D4 one locale-driven date formatter, D5 Insights number isolation).
   - [x] Batch A
   - >> GATE A: stop, captures EN + AR before/after
   - [x] Batches B–D
@@ -131,8 +138,19 @@ Nothing is pushed.
   - These are counted by the same scanner (`src/test/hardcodedStrings.ts`); add each file to `BUILDER_FILES` once translated.
 - [x] 7-QA5 Fixes from the fifth QA report `/media/saeed/New Volume1/projects/redesign-captures/qa-5/QA_REPORT_5.md`: F1–F4, R1–R4, L1–L9. One GATE; then push and a short QA6 on these items only.
 - [x] 7-QA5b Small fixes before QA6 (S1–S6), one commit, no GATE: delete dialogs open on Cancel, the cross-filter tooltip, automatic chart titles, audit-trail action names, hierarchy and sensitivity labels in Arabic, the Welch evidence line in right-to-left.
-- [ ] Then: Upload, Connections, Lineage, the AI button
-- [ ] FINAL Full regression: all tests, build, capture every screen, compare against all designs, final summary, fix the flaky `Lineage.test.tsx` (and watch `geoRenderers.test.tsx` and ReportBuilder's "report-level display rules" under load), and a clean-up list (test datasets 7 and 8, chat threads, the uncommitted init.sql edit). QA3 adds: dashboard "QA3-Builder" #16 (made 00:01; share link made and revoked 00:02–00:03; not made by the QA3 run, so the owner decides), and the cached insights QA3 may have saved on "Demo — Sales" and in the Builder AI panel. QA3 adds: stop the port-3002 Vite server ("before" captures) and remove its worktree (`git worktree remove` on the scratchpad `before` folder).
+- [x] Merge `origin/main` (emad: guided setup, Fields panel fixes, SQL injection hardening, condition boxes, no-code formulas, hierarchies across widgets, pgAdmin) into `said`: a fast-forward to `fa573bd`, no conflicts; `36c3001` adds the new column-lineage route to the security inventory.
+- [x] 7-QA6 Fixes from QA round 6 (`redesign-captures/qa-6/`): A1–A10 (our leftovers) and B1–B4 (merged work). One GATE.
+- [x] 10 Ask AI redesign (design handoff `design-handoff-3/ask-ai/`; closed 2026-10-12, see AUTOPILOT.md steps 1–2). Reference captures: `redesign-captures/10-askai/design/`.
+  - [x] Part 0 Inventory — GATE 0 approved 2026-10-11 with decisions: duration from one `GET /agent/runs/{id}` after each answer (never delays it; nothing shown if it fails); Edit question on answers too (secondary); composer limit stays 2000 (warning from 1800); error chips kept, labelled as column-based suggestions; picker keeps Connections, no "Synced" line, a fixed hint with the last pick; loading shows elapsed time and a skeleton only.
+  - [x] A Layout, hero, picker, step 2 and suggestion cards
+    - >> GATE A; then A2, the owner's change to the empty page (two columns, chooser always open)
+  - [x] B Loading and answer cards (after A3/A4: the robot, then the approved prototype ported; the robot's head is the cards' avatar)
+    - >> GATE B
+  - [x] C Error card and composer (with the two GATE B changes: grouped numbers in the answer's rows, the Export menu)
+    - >> GATE C
+  - [x] D History rail (from here on the work order and its log are in `AUTOPILOT.md`)
+- [x] Then: Upload, Connections, Lineage, the AI button (AUTOPILOT.md steps 4–7), 9-polish and i18n-2 (steps 8–9)
+- [x] FINAL Full regression: all tests, build, capture every screen, compare against all designs, final summary, fix the flaky `Lineage.test.tsx` (and watch `geoRenderers.test.tsx`, `PrepPipelinePanel.test.tsx` ("shows the previewed shape…", failed once in a full run on 2026-10-11, passes alone), `Reports.test.tsx` ("Blank with no data opens the builder…", the same) and ReportBuilder's "report-level display rules" under load), and a clean-up list (test datasets 7 and 8, chat threads, the uncommitted init.sql edit). QA3 adds: dashboard "QA3-Builder" #16 (made 00:01; share link made and revoked 00:02–00:03; not made by the QA3 run, so the owner decides), and the cached insights QA3 may have saved on "Demo — Sales" and in the Builder AI panel. QA3 adds: stop the port-3002 Vite server ("before" captures) and remove its worktree (`git worktree remove` on the scratchpad `before` folder).
   - >> GATE F: stop, final report
 
 ## Backend follow-ups (found during the frontend steps)
@@ -187,6 +205,31 @@ Not part of the frontend steps (1–7); candidates for the handoff's section 7 p
 | 7-QA3-N3 (after the client fix) | Opening no longer writes. A layout edit still costs one version per widget it stores: the first edit of an old 4-widget page added 5 (the page + 4 widgets), its undo 5 more. | Still needed: a batch layout endpoint (one version per action), an atomic revision, and a way to clear `layout_mode` (PATCH drops a null, so undo writes `''`). The 50-version cap stays. |
 | 7-QA2 N3 | One automatic layout pass (Executive packing when a page is first edited) left 39 versions in half a second, with repeated revision numbers; the burst can also push older versions past the retention window | Every widget save snapshots a version and the revision is read-then-bumped without a lock. Needs one version per user action (a batch layout endpoint, or coalescing saves seconds apart) and an atomic revision increment. The history now shows such a burst as one entry. |
 | 7-QA2 T12 (seen again in QA3) | Insights narrative, finding titles and details are English in the Arabic UI | The insights endpoint takes no language; the engine writes English. Needs the UI language on the request (AP3). The pane's own words are translated. |
+| 7-QA6 B1 (merged guided setup) | A connection that was never synced waits forever on setup step 1: `guided_setup.py:320-324` reports `syncing` whenever `sync_status` is `pending`, but `pending` with no `SyncRun` means "never read". Only `create_data_source` starts a sync; the seeded demo source (`demo_content.seed_demo_directquery`) and any connection made before guided setup never get one. | The client now says so and offers "Read the database now" (admins, `POST /data-sources/{id}/sync`) and a way back. Backend (teammate): report `syncing` only while a run is active, else a `never_synced` status; start the sync when setup opens on a never-read source the caller can administer; have the demo seeder sync its source. |
+| 7-QA6 A7 | "Is this difference real?" `summary` and `tests[].business.sentence` are English prose | In Arabic the client now composes the gap from `business.absolute`/`percent` and `tests[].values`, and leaves out the summary. The server should send codes and numbers (with T12). |
+| 7-QA6 A10 | The built-in page templates (`services/page_templates.py`) carry English page and widget names | The client renames the page and the template's widget titles right after adding it in Arabic. The built-ins should carry message keys. |
+| 7-QA6 A6 | Connector select options (TLS modes, auth types) are bare codes | The client names them by `field.code` with the code kept in view. The connector catalog should send labels or keys. |
+| 10 Ask AI (GATE 0) | Progress stages while a question runs (understanding → query → running → chart) | `/ask` is one synchronous call: no streaming, no stage events, no cancel (AN2). The page shows elapsed time and a skeleton only. |
+| 10 Ask AI (GATE 0) | The run's duration on the `/ask` response | Only `GET /agent/runs/{id}` has `ms`; the page makes that extra call after each answer. It should come back with the answer. |
+| 10 Ask AI (Part B) | The run's duration on stored messages | `GET /agent/conversations/{id}/messages` carries each run without `ms`, so an answer in a reopened thread shows no duration (the page does not fetch every run). |
+| 10 Ask AI (GATE 0) | History: last-activity time and a failed flag per thread | `GET /agent/conversations` has `created_at` only; whether a thread's last question failed is visible per message, not on the list, so the rail cannot mark failed questions. |
+| 10 Ask AI (GATE 0) | Error reasons and rephrase suggestions | `error` is one raw string; no reason code and no suggested rephrasings (with AN1/B3). The error card shows a generic message, the raw text under Technical details, and column-based suggestions built by the client. |
+| 10 Ask AI (GATE 0) | A connection's sync status in the picker ("Synced 15 min ago") | `DataSourceOut` has no sync status or time; the picker says only the type. |
+| 10 Ask AI (GATE 0) | Recently used datasets per user | No endpoint (`RecentView` tracks reports only); the picker's Recent is this browser's own picks. |
+| 11 Lineage (autopilot 4) | Owner, creation date and row count per node | `GET /datasets/lineage/graph` has none of them, so there is no Owner filter and the side panel leaves them out. |
+| 11 Lineage (autopilot 4) | A connection's status on its lineage node | The graph lists sources by name and type only; the design's "Connected" / "Broken source" needs the last test result. |
+| Upload (autopilot 5) | Preview of Excel, Parquet, XML and Access files before import | The page reads CSV/TSV/JSON in the browser; the others need a server-side dry run. |
+| Upload (autopilot 5) | Import settings: column types, header row, delimiter, encoding, date format | `POST /datasets` takes only file, name, description and sheet. |
+| Upload (autopilot 5) | A sample dataset to try, and per-file status within a batch | No endpoint for one sample; a batch is one request with no per-file progress. |
+| AI button (autopilot 6) | A count of new insights for a dataset | The button's badge needs it without running a full scan (`POST /datasets/{id}/insights` computes them). |
+| Connections (autopilot 7) | A connection's stored status, last check and stability | Status is shown only from this session's test or the latest metadata sync; the design's "checked 8 min ago" and "Unstable: 3 of the last 5 checks" need stored test results. |
+| Connections (autopilot 7) | Table count per connection in the list | Only the schema call or a sync gives it; the list does not call either per row. |
+| FIX-QAF M3 | A simple question took 49 s on the Ask AI page: the model failed the JSON contract three times and the server retried each time (`LLM JSON contract not met… after 3 attempts`, run 33); the SQL step took 2 s. The page and the floating panel already make the same call | A retry budget / overall timeout for the agent's model calls, and a server-side cancel (AN2). The page's Stop only lets go of the request. |
+| FIX-QAF M5 | `POST /datasets/{id}/data-preview` ignores `limit` for a DirectQuery dataset: 10,000 rows (785 KB) came back for `limit: 4` | Push the limit (and offset) down for DirectQuery. The client now keeps only the rows it asked for, but the download is still the whole page. |
+| FIX-QAF 14 | A model trained before model cards (the seeded "Demo — Revenue model") has an empty `card`: no baseline, test size, training size or trainer | Backfill or compute the card for such models; the panel now leaves those facts out instead of showing dashes. |
+| FIX-QAF 16 | A run that failed because the model endpoint did not answer is stored as an ordinary failed run ("the model endpoint could not classify the question") | A reason code on failed runs (e.g. `model_unreachable`), with the error-reasons row above; the client matches the server's words for now. |
+| FIX-QAF 24 | Column-security rules can only be created and deleted | A `PATCH /admin/column-security-rules/{id}` so they can be edited like row-security rules. |
+| FIX-QAF 26 | Audit trail details are bare strings whose meaning depends on the action ("1d", "3", "?") | Structured details (named fields) per action; the client words the two shapes it knows (link expiry, link id). |
 | 7-QA B6 | Ask AI is slow (about 70 s for a simple answer, about 4 min before a clarification), with no timeout or cancel | Needs a server-side timeout and a cancel endpoint (AN2: stream progress + cancel). |
 
 ## Log
@@ -1101,3 +1144,246 @@ QA5 confirmed E0, E1, E2, V2–V6 and V8 from 7-QA4, and the 8-i18n pages (mostl
 - Re-pinned: the ConfirmDialog focus and Tab-order tests.
 - Full suite: 329 files / 4168 tests pass (4 workers). Type-check and build pass.
 - Captures: `e2e/capture/redesign/cap_qa5b.mjs` (S1, S3–S6) and `cap_qa5b_s2.mjs` (S2), EN light and AR light/dark. Before is :3002 at `7cba905` (S2 at `c235968`); after is in `redesign-captures/qa-5b-fixes/{before,after}/`. S1 before: focus on Delete, and Enter deleted the scratch dashboard; after: focus on Cancel, and it survives.
+
+### 7-QA6 Fixes from QA round 6 — the commit that adds this entry
+
+QA6 (Claude in Chrome, `redesign-captures/qa-6/`) confirmed F2, F4, R1, R3, L1–L5, L8, S1–S5 and the share plural («7 أيام»), and that the redesign still behaves after the merge (M4: Shift+click count, a field drop on an empty KPI, an Edit click does not cross-filter, the page does not scroll).
+
+**Part A, our leftovers:**
+- **A1 (F1)** A widget with a custom background now sets `color: var(--text)` on itself, so text a renderer leaves uncoloured inherits the widget's contrast. That covers the donut key's percentages, which were white on yellow in the dark theme. The custom keys' swatches (donut, ribbon) get the outline (`.dl-key-swatch`). Recharts legends (pie, funnel, treemap) were already covered.
+- **A2 (F3)** Every data-row table uses `formatCell`: the report Data view, the dataset Data grid (the edit box keeps the raw value), the Query builder preview and the dataflow preview. "-336.69000000000005" now shows as "-336.69".
+- **A3 (R2)** One CSS rule instead of a `dir` on each input. In RTL, every text-like input and textarea without its own `dir` is `unicode-bidi: plaintext`: "-5", "$-1,200" and a column name read LTR, and Arabic stays RTL. Checked in Chromium. This covers the Builder, rules, filters, condition boxes and the step editor.
+- **A4 (R4)** The map's "Loading map…", "Loading boundaries…", "Shift-drag to select an area", the hidden table ("Place / Value", "… and N more", the unplaced-rows caption), the screen-reader summary and the "did not match" notes are translated, with plurals. The notes sit at the inline start. `MapDataTable`, `GeoPointMapRenderer` and `GeoChoroplethRenderer` are in the guard.
+- **A5 (L7)** The Fields ⌖ pop-up, the geography check and the boundary-set picker name a starter pack's set as Admin → Maps does (`boundarySetName`, matched by the pack's English name). An uploaded set keeps its own name.
+- **A6 (L6)** TLS modes and auth types show as «مطلوب (require)» in Arabic (`connectorOptionLabel`); the value sent stays the code. English shows the code as before.
+- **A7 (S6)** In Arabic, the difference dialog composes the gap sentence from the server's numbers and leaves out the English summary, which the per-test verdict and gap already say. English is unchanged. The chip's brackets hold one LTR unit, "(Cohen's d -0.0119)". Server sentences with no Arabic version stay as sent (T12).
+- **A8** Every placeholder is `unicode-bidi: plaintext`, so the formula box's Arabic placeholder reads in order while typed formulas stay LTR.
+- **A9 (S2)** The floating "⌗ 1 filter" badge comes from the initial commit (`ffb94de`), not from our work or main's. It was `position: fixed; right: 18px`, so in Arabic it sat over the sidebar. It now measures the element it is rendered in (the canvas column) and takes its inline-START corner, still `fixed`. The inline end belongs to the floating Ask AI button, which it covered in both languages. The label and header are translated with plurals («عامل تصفية واحد»).
+- **A10 (S3)** A built-in page template added in Arabic gets its page name and title, and the widget titles the template set, renamed right after it is added (`lib/builtinTemplates`). Like automatic titles, they keep the language they were made in. Used by the new-dashboard dialog, the page template menu and the Templates pane.
+
+**Part B, the merged work:**
+- **B1, cause: merged code (`5662985`) plus the demo seed; not ours.** The demo connection was seeded without a sync run (`sync_runs` is empty), and nothing else starts one, so `guided_setup.py` reports `syncing` forever (backend row above). Step 1 now tells a never-read connection apart from a running sync. It offers "Read the database now" to admins and asks others to ask an admin, and always gives a way back.
+- **B2, cause: our E2 planner plus the original role table (`ffb94de`); the merge only made it visible.** The hierarchy types had only a Value role, our planner skipped multi roles, and a dropped hierarchy always made a new bar.
+  - Now `levels` is a role ("Levels (outer first)", multi) on the six hierarchy types, so Assign data shows it.
+  - A category field dropped on a sunburst goes on the end of its levels (up to 8; never a quantity; never in parent-child mode).
+  - A hierarchy dropped on, or assigned to, a hierarchy widget becomes its ordered levels (`hierarchyChain`).
+  - The Properties checkboxes and the role share one list.
+- **B3, cause: inside `HierarchyRenderer.tsx` (not touched by our commits), for the teammate.** The renderer draws plain SVG, so our tooltip, number and contrast work never reaches it.
+  - Every segment is `seriesColor(0)`, faded by depth (also icicle and circle pack).
+  - The sunburst draws no labels and no legend.
+  - The only tooltip is a native `<title>`.
+  - The grey bar is most likely a scrollbar: a fixed 260px SVG under the new ZoomTrail in an `overflow: auto` body.
+  - Suggested: colour by top-level branch, label arcs that fit, size the SVG to its box (viewBox or a ResizeObserver) with `overflow: hidden`, and add a legend and a chartUtils tooltip.
+- **B4, cause: the interaction.** The merge (`aefc389`) made the Fields panel treat `year` as a category, while the Data view (QA5 L3) showed the stored type and Assign data used the dtype alone.
+  - One rule now: `fieldUse` in `lib/semanticGuard`. It is used by the Fields panel (`isNumericField`), Assign data (`fieldKind`) and the Data view and Overview.
+  - The Fields glyph shows the storage ("#" for year) and its colour shows the use.
+  - The Data view adds a "CAT"/«فئة» badge, with an explanation, next to "NUM".
+
+**Notes (no change):** calculated columns belong to the dataset, so they appear in every report on it (a product question for the owner and the teammate). Deleting a widget has no confirmation (undo is there). The "DATE / NUM / TXT" badges and the server's audit "report:16" / "1d" are accepted as they are. Dataset 1 ("Demo — Sales") has a calculated column `profit` that A2 was seen on; it is not one of ours, so the owner decides.
+
+**Tests:**
+- New: planner levels (4), `fieldUse`/`storedNumberUse`/`hierarchyChain` (4), QA6 labels A5/A6/A10 (3), floating badge in Arabic (1), setup never-read (3), Data view rounding (1), Arabic average gap (1).
+- Re-pinned: the evidence chip isolates and the Arabic gap and summary (`differenceArabic`), and the badge drag (inline start).
+- Full suite: 346 files / 4333 tests pass. Type-check and build pass.
+- Captures: `e2e/capture/redesign/cap_qa6.mjs`, EN light and AR light/dark. Before is :3011 at `36c3001`; after is in `redesign-captures/qa-6-fixes/{before,after}/`, with each run's log.
+
+### 10-A Ask AI: layout, hero, picker, step 2 — the commit that adds this entry
+
+The owner decided to build Ask AI from the new design (handoff `design-handoff-3/ask-ai/`), replacing the GATE B decision (recorded at the top). Reference captures of every prototype state, EN/AR × light/dark at 1440px and some at 1024px: `redesign-captures/10-askai/design/`.
+
+- **Page grid.** The page bleeds to the content edges by cancelling `--dl-shell-pad`. It has:
+  - an 880px chat column that scrolls, with the question box at its foot and the disclaimer under it;
+  - History on the inline end, 288px.
+  - Folding History hides it, and the row's History button brings it back.
+  - Below 1180px History is an overlay from the inline end over a scrim (checked at 1024px).
+- **Hero** (`AskHero`, `AskIllustration`). The design's robot and five cards are rebuilt from boxes and two small SVGs. The robot keeps a light body and a dark screen in both themes through its own tokens, taken from the neutral scale (`--dl-bot-*`); no literal colours.
+  - Motion: the cards float, the robot bobs and blinks, the antenna pulses, the dotted lines flow, the bars regrow, and the hero parts rise in. Transform and opacity only; all off under `prefers-reduced-motion`.
+  - Not done (rule 6): the mouse-follow tilt, the spotlight and the background blobs.
+  - The headline's last word is in the accent.
+- **Empty page.** Step 1 with the large picker: "Choose a dataset or connection", the counts with plurals, and "Try: <the reader's last pick>" (fixed, no cycling). The question box shows locked, with "Choose your data above to start asking". `?q=` from Home and the test-data filter are kept.
+- **Picker** (`DataPicker`):
+  - The list opens in a portal, fixed under the trigger, and flips above when there is no room below.
+  - All / Datasets / Connections tabs (only when there are both kinds).
+  - Recent (this browser's picks, plus datasets made in the last day), then Datasets, then Connections.
+  - Rows show a tile, the name with the typed part marked, "rows · columns" with plurals (a connection: its type), and "Updated <date>" (datasets only; no "Synced" line, a backend row). The selected row has a check.
+  - Footer: key hints and Upload dataset. The keyboard works as before.
+  - In the "Asking about" row it is a compact chip.
+- **Dataset picked.** The "Asking about" row (chip, rows · columns, History button). A new thread opens by default (the design's state). The threads are in History, one click away; before, the newest thread opened.
+  - The empty thread shows "What would you like to know?" and Step 2's suggestion cards: icon, question, and the dataset's own columns in mono, LTR.
+  - The cards come from `datasetSuggestionCards`, the same questions as before, built only from the dataset's real columns and types; the chips list derives from it.
+  - `ChatPane` takes a `startView` for its empty thread.
+- **Strings:** `i18n/pages/askAi.ts` (`ask2.*`), with Arabic from `ask-data.js`, full templates and plural forms. The design's "Synced" («زُومن») is not carried over, since there is no sync line; if one comes with the backend row, it reads «تمت المزامنة». The new guard `test/strings.askAi.test.ts` covers every Part A file and checks the key and placeholder parity.
+- **CSS:** `pages/ask/askLayout.css`. The old hero, illustration, picker, workspace and drawer rules in `ask.css` are gone; History's list styling stays for Part D.
+
+**Tests:**
+- New: `askPartA.test.tsx` (10): cards from real columns, hero, picker counts/tabs/highlight/plurals/Arabic, the start view sending through the pane; the Ask AI guard (6).
+- Re-pinned: 4 AskAI tests (locked box before Step 1; a new chat by default).
+- Full suite: 348 files / 4349 tests pass. The flaky `Lineage.test.tsx` failed once under the capture load and passes alone (15/15). Type-check and build pass.
+- Captures: `e2e/capture/redesign/cap_10a.mjs` (empty, open, search, picked, picked at 1024, History overlay at 1024), EN/AR × light/dark. Before is :3011 at `4a86b44`; after is in `redesign-captures/10-askai/A-{before,after}/`.
+
+### 10-A2 Ask AI empty page in two columns (owner's change at GATE A) — the commit that adds this entry
+
+- The empty page is two columns, wider than the chat column (1120px max). On the inline start is the data chooser; on the inline end are the picture, "Ask your data anything" and the subtitle, vertically centred. Logical properties throughout, so Arabic mirrors.
+- **The chooser is always open** (`DataPicker size="inline"`), with no trigger or popover:
+  - "Step 1 · Choose your data", the search box on its own line, the All / Datasets / Connections tabs under it.
+  - The Recent / Datasets / Connections groups with their meta lines, and Upload dataset at the foot.
+  - ↑ ↓ Home End Enter work in the search box; Escape clears the search (the footer says "to clear the search").
+  - It does not take focus on load.
+  - The page does not scroll; the list scrolls inside its column.
+- Below 1280px the picture scales down (72%, its box with it) and the type steps down; checked at 1024px.
+- The question box stays locked at the foot. After a dataset is chosen, Step 2 is unchanged: the context row with the compact chip and its popover, the small hero, the cards.
+- **Tests:**
+  - New: the inline chooser (2): open without a trigger, with search, tabs, list and Upload; arrows/Enter choose, and Escape clears.
+  - Re-pinned: 3 AskAI tests no longer click a trigger.
+  - Full suite 348 files / 4351 tests pass; type-check and build pass.
+- Captures: `cap_10a.mjs` `empty` and `empty-1024`, EN/AR × light/dark. Before is :3011 at `70b38f2`; after is in `redesign-captures/10-askai/A2-{before,after}/`.
+
+
+### 10-A3 Ask AI: the new robot (owner's request, before Part B) — the commit that adds this entry
+
+- **The robot is redrawn** (`pages/ask/AskRobot.tsx`): an original full-body inline SVG, not a photo. A round helmet head, a large dark glossy visor with two round glowing eyes, ear pods with an accent ring, a small torso, jointed arms with mitten hands, short legs in rounded boots, soft shading.
+  - Colours are tokens only: the light body and dark visor through `--dl-bot-*` (now with `--dl-bot-joint`), the eyes, ear rings and chest light in `--accent` with a soft glow. The old antenna is gone.
+  - Separate groups: head, ears, visor, eyes (look / glance / each eye's blink), torso, each arm (with its forearm), legs. Each group has one job, so the motions add up.
+- **The cards stay** (bar chart, donut, chat bubble, table, typing bubble), placed again around the taller shape (the picture is 460×284), with the dotted lines re-routed.
+- **Idle loop:** a gentle float, a blink every 4.2s, a glance to each side in an 11s loop, a small wave every 8s (shoulder and elbow), ear rings and eye glow pulsing.
+- **Reactions** (`pages/ask/robotMood.ts`, a small store the picture reads, so the page does not re-render):
+  - typing: it looks at the box being typed in, for 1.6s after the last key. Down at the question box in step 2; across at the data chooser on the empty page, where the question box is locked.
+  - a question running: smaller eyes, up, drifting and taking turns to glow; faster rings.
+  - an answer: smiling eyes, arms up, two small hops; 3.2s.
+  - an error: the head tilts, one eye wide and one narrow, rings dim; 3.6s.
+  - `ChatPane` reports these through a new optional `onActivity` prop (typing, running, answer, error, rest); the builder mount passes none.
+- **Arabic:** the whole picture is mirrored (`.dl-ill__stage`), so the waving arm and the glance toward the chooser are on the right sides. The cards hold no text.
+- **Reduced motion:** every animation and transition is off and the pose does not change; only the eyes' shape follows the mood. Checked in the browser: two captures 2.5s apart are identical.
+- **Step 2:** the same robot, smaller (112×140), without the cards.
+- **Known limit, for Part B:** the hero leaves the page when a question is sent, so the running, answer and error reactions are wired and tested but cannot be seen yet. The typing reaction is live. Proposal for Part B: the same head as the avatar on the loading, answer and error cards, reading the same mood.
+
+**Tests:**
+- New: `askRobot.test.tsx` (11): the parts as separate groups, the small picture without cards, the moods and their timings, what `ChatPane` reports, and the CSS (keyframes use transform and opacity only, no literal colour, the Arabic mirror, reduced motion). `AskRobot.tsx` is in the Ask AI guard.
+- Full suite: 349 files / 4363 tests. Two failed in the full run, in files this step does not touch (`ReportBuilder.test.tsx` E09 and `SourceReview.live.test.tsx`), and both files pass alone (174/174). Type-check and build pass.
+- Captures: `cap_10a.mjs` `empty` and `picked` (EN/AR × light/dark, and at 1024px), and the new `cap_10robot.mjs`: the picture at 2×, each reaction, 30 frames of the idle loop (`idle-00…29.png`, `idle-sheet.png`, `idle-loop.gif`) and the reduced-motion pair. Before is :3001 at `c3e8b6e`, taken before the change; after is in `redesign-captures/10-askai/R-{before,after}/`. In the captures, thinking / happy / error are set on the robot directly (see the limit above), and the model endpoints are faked as up so the question box can be typed in.
+
+### 10-A4 Ask AI: the approved robot prototype, ported (replaces 10-A3's drawing) — the commit that adds this entry
+
+The owner approved a prototype, `design-handoff-3/ask-ai/robot/ask-robot.html`. It was opened in a browser first and every control tried (states, the seven moves, pointer, hover, click, typing, 20s idle, theme and direction); captures of it are in `redesign-captures/10-askai/design/robot/`. The 10-A3 robot is gone.
+
+- **Component** (`pages/ask/AskRobot.tsx`): `state` = idle | typing | thinking | happy | error | sleep, `nod` (a keystroke counter) and `bare` (the step-2 robot). The SVG shapes, gradients, transform origins and keyframe timings are the prototype's. Ids became classes (`dl-bot__*`, `dl-ill__*`) and gradient ids are per instance. The demo controls are not ported.
+- **Colours → tokens:** accent `--accent`; glow = accent mixed with the robot's highlight; body, joints and visor from the neutral scale (`--dl-bot-*`, light body and dark visor in both themes); shadow `--dl-bot-shade`; warning `--warning`; the sweat drop, the hover chest light and the confetti use the chart series tokens (`--dl-series-1…4`) instead of a fixed set. No literal colour.
+- **Behaviour ported:**
+  - Idle routine: a random move every 6–9s (wave, look around, jump, dance, scan, stretch, spin), only while idle and while the tab is visible. The prototype's code waits 5.5–9s; the brief's 6–9s is used.
+  - Pointer: the eyes follow a mouse or pen, only while idle (never a touch). Hover enlarges the eyes. A click, or Enter / Space, does a spin or a jump with 12 sparks.
+  - Typing: a nod on each keystroke.
+  - Sleep after 20s with no pointer, key or scroll activity while idle (closed eyes, Zzz, slower float); any activity wakes it with the wide eyes. Returning to idle restarts the 20s.
+  - Ambient: antenna pulse, spinning ear rings, chest beat, packets flowing along the links, and the animated cards.
+- **Wiring** (`pages/ask/robotMood.ts`, a store the picture reads, so the page does not re-render):
+  - typing while the question box has focus or text (`ChatPane` reports `compose-on` / `compose-off` / `key` through `onActivity`);
+  - thinking while a question runs (links glow, cards highlight);
+  - happy for 3.5s at an answer, with 28 confetti; error for 3.5s when it fails;
+  - idle otherwise; sleep is the robot's own and only happens in idle.
+- **Placement:** the full stage on the empty page (560×460, as wide as its column below that; the old scale at 1279px is gone). Step 2: the robot alone, 124px wide.
+- **Arabic:** the stage is mirrored, as in the prototype (the pointer's x is mirrored with it).
+- **Reduced motion:** no animation or transition, and no routine, gaze, nod, confetti, sparks or packets. Checked in the browser: two captures 2.5s apart are identical.
+- **Accessibility:** the robot is a `<button>` with a translated label (`ask2.robot.label`); everything else in the picture is `aria-hidden`. Under reduced motion a press would do nothing, so it is a plain hidden picture, not a button.
+- **Timers:** the routine and the sleep clock stop while the tab is hidden; every timer and listener is dropped on unmount.
+
+**Deviations from the prototype (our rules win):**
+- *Transform and opacity only.* Where the prototype animated something else, an overlay fades instead: the table's row scan (background), the donut's growing arc (dash length), the cards' highlight while thinking (border and shadow), and the links while thinking (dash offset → an opacity pulse). The chest light changes colour on hover without a transition.
+- The packets keep the prototype's SVG `animateMotion` along the link paths (a motion transform; nothing else can follow a curve with transform alone). They are not rendered under reduced motion.
+- The nod is removed after it plays; in the prototype the first nod stopped the head's sway for good.
+- The empty page's question box is locked, so there "typing" is the data chooser's search box (focus or text). Not in the brief; easy to remove.
+
+**Known limit, for Part B (unchanged from 10-A3):** the hero leaves the page when a question is sent, so thinking, happy and error are wired and tested but are not seen on the page yet; typing, sleep, the routine, the pointer and the click are live. This needs the owner's decision: the robot as the avatar on Part B's loading / answer / error cards, or the hero kept during the first question.
+
+**Tests:**
+- `askRobot.test.tsx` rewritten (21): the stage and the bare robot; the button and its label; the state mapping through the real `ChatPane` (focus or text → typing, a pending ask → thinking, an answer → happy with confetti → idle, a failure → error → idle, a nod per key); sleep after 20s and waking; no sleep outside idle; the routine's 6–9s and its stop outside idle; the hidden tab; click, hover and gaze; no timers after unmount; reduced motion; and the CSS (keyframes and transitions use transform and opacity only, no literal colour, the mirror).
+- Full suite: 349 files / 4373 tests pass, except `PrepPipelinePanel.test.tsx` (not touched here), which failed once in the full run and passes alone. Type-check and build pass.
+- Captures: `cap_10a.mjs` `empty` and `picked` at 1440 and 1024, EN/AR × light/dark; `cap_10robot.mjs`: the picture at 2× in each state, frames of thinking, happy, error, sleep, the wake-up and a click, 60 frames of the idle routine (`idle-sheet.png`, `idle-loop.gif`) and the reduced-motion pair. Before is :3001 at `3fc13ca`, taken before the change; after is in `redesign-captures/10-askai/R2-{before,after}/` (`states-sheet.png`, `step2-sheet.png` and `frames-sheet.png` are quick views). Typing and sleep are real in the captures; thinking / happy / error go through the page's own store (see the limit above); the model endpoints are faked as up in the browser so the question box can be typed in.
+
+### 10-B Ask AI: the loading card and the answer card — the commit that adds this entry
+
+The owner approved the robot port (10-A4, with its departures) and decided: the robot's head is the avatar on the cards.
+
+- **Only the Ask AI page is laid out as cards.** `ChatPane` takes `card={{ scopeName }}` from the page; the builder's copilot mounts pass nothing and keep the compact turn (pinned by a test). Styles: `pages/ask/askCards.css`.
+- **Question:** a bubble at the inline end (no user avatar).
+- **Loading card** (`LoadingCard` in `Pending.tsx`, sharing the wait's clock with the compact one): the thinking head, "Analyzing your data…", the dataset or connection, the elapsed time, and a skeleton (two lines, seven bars, one line). No step list (GATE 0). `aria-busy`; the "still working" note after 20s is kept.
+- **Answer card:**
+  - Header: the head, "Datalytics AI", then "data · duration · rows", and an "Auto chart · Bar / Line / Pie" chip when a chart is drawn (hidden below 1180px).
+  - **Duration:** one `GET /agent/runs/{id}` after the answer is on screen, never awaited by it; nothing is shown if the read fails or has no `ms`. A stored thread's answers show no duration (backend row).
+  - The answer text at 17px with its numbers marked (the evidence links are unchanged).
+  - The chart in its own frame; then **"Rows behind this answer"** as a band with the count: closed under a chart, open when the rows are all there is (`ResultView sectioned`; `drawnChart` is the one rule for the picture and the chip).
+  - **"Show SQL"** as a band: the statement left-to-right with keywords and strings picked out (`SqlBlock`, display only) and Copy in its corner; the tables line under it.
+  - Actions: Add to dashboard (primary), Copy, 👍 / 👎 (the "What was wrong?" field as before); on the far side CSV / Excel / PDF, Save as dataset (connections), **Edit question** (GATE 0) and Retry.
+  - A hidden live region says "Answer ready" when an answer lands.
+- **The head** (`components/chat/RobotHead.tsx`, the same drawing as the hero's: `AskRobot` now exports its head and its defs): head, visor, eyes, ear rings and antenna, 48px wide (37px tall).
+  - Loading: the thinking face (dots, scan line, orbiters, fast rings).
+  - An answer: happy eyes and a small hop for 3.5s, then calm. A failure: the shake, "?" and sweat drop for 3.5s, then calm.
+  - Calm is the eyes blinking only: no sway, routine, pointer or sleep.
+  - Only the newest card's head moves; older ones are still, with calm eyes. Reduced motion: every head is still, with the right eyes for its state (the error tilt is held without the animation).
+- **Clarification, limit and error replies** sit in the same card with the same header; their content is unchanged here (the error card is Part C).
+
+**Kept as they are (differences from the design, by rule):**
+- The chart is the app's own renderer (one colour per category, axis titles), not the design's single-colour horizontal bars; the rows use the app's grid (no totals row: the result has none).
+- No "N / 500" or other composer change (Part C). The 👍 / 👎 labels stay "Good answer" / "Bad answer".
+- Excel, PDF, CSV and Save as dataset are not in the design; they exist, so they stay.
+
+**Tests:**
+- New: `askCards.test.tsx` (14): the bubble and the loading card (busy, the clock, no steps, the thinking head); the header, chip and live region; the duration (one read, after the answer, hidden on failure or no `ms`); the rows band (closed under a chart, open for a plain table); the SQL band (LTR, marked, Copy); Edit question; the head's states and that only the newest moves; a stored thread (no per-message reads); no timers after unmount; the compact look outside the page; the Arabic strings; the SQL tokens.
+- The Ask AI guard covers `RobotHead`, `CardSection`, `SqlBlock` and `Pending`.
+- Full suite: 350 files / 4391 tests; one failed in the full run, `Reports.test.tsx` ("Blank with no data opens the builder…", not touched here), and that file passes alone (73/73). Type-check and build pass.
+- Captures: `e2e/capture/redesign/cap_10b.mjs` (browser-only data: the answer, the run's duration, model endpoints up), EN/AR × light/dark: loading, the answer landing (happy head), the answer, rows and SQL open, a line chart, a plain table, a new answer under a stored one, and the answer and loading at 1024px. Before is :3001 at `2f98a95`; after is in `redesign-captures/10-askai/B-{before,after}/`.
+
+### 10-C Ask AI: the error card and the question box, with the GATE B changes — the commit that adds this entry
+
+GATE B was approved with two changes; the owner accepted the app's chart renderer, the 48×37 head, the rows band open when there is no chart, the chip hidden below 1180px, the Good / Bad answer labels and no duration on reopened threads.
+
+**GATE B change 1, the rows' numbers.**
+- The rows already went through the shared `formatCell` (rounding, locale digits; the RTL table rule isolates a cell). What they lacked was thousands separators, and `formatCell` leaves those out on purpose: it formats every column a question returns, and "2,024" for a year or "104,233" for an id is wrong.
+- So the answer card's rows use a new `formatCellGrouped` (in `lib/displayNumber`, the same rounding and digits, with the thousands grouped) for quantity columns only. A column that `semanticGuard.nonAdditiveKind` reads as a year, an identifier or a coordinate keeps `formatCell`. A whole number that arrives as text is never grouped. Each number cell is held left-to-right (`<bdi dir="ltr">`).
+- No totals row. The other data tables and the builder's compact grid are unchanged (pinned by a test).
+- **For the owner:** if every data table should group thousands, that is a change to `formatCell` itself and needs the same year/id rule in each table; it was not done here.
+
+**GATE B change 2, the actions row.** Add to dashboard (primary), Copy, 👍 / 👎, **Export ▾**, Edit question, Retry. Export is the app's `ActionMenu` (portalled; arrows, Enter, Escape, focus back on the button) holding Download CSV / Excel / PDF and, on a connection, Save as dataset. Below 1100px the labels of Copy, Export, Edit question and Retry collapse to icons with tooltips (Add to dashboard keeps its words).
+
+**Part C, the error card** (design `.er`):
+- The robot's head (the error look for 3.5s, then calm) stands where the design has its "?" tile; the title is "I couldn't answer that one".
+- One sentence naming the data: "I couldn't match your question to **Demo — Sales**. Try rephrasing it, or start from its columns." It is general because the server sends one raw string and no reason (backend row).
+- "Try asking about these columns" with up to three chips: the page's own suggestions, built from the dataset's real columns (GATE 0). A chip asks it.
+- "Technical details", closed: the server's text, mono, left-to-right.
+- Edit question (primary; refills the box) and Retry.
+- A request that never reached the agent says only "Could not reach the agent. Try again.", with Edit question and Retry: no column advice and nothing under Technical details, because nothing was matched and nothing came back.
+- `role="alert"` only on a failure that arrives while the reader is there; a reopened thread's old failures are not announced.
+- The AI-limit and clarification replies keep their content in the same card (not in the design; unchanged).
+
+**Part C, the question box** (design `.cmp`; `Composer page`):
+- The field on top (16px, grows to 168px); inside the same frame, the key hint ("Enter to send · Shift + Enter for a new line", as keys), the count and Send. The placeholder names the data: "Ask about Demo — Sales…".
+- The limit stays 2000 and the count turns to the warning colour from 1801 (GATE 0), not the design's 500 / 450.
+- Locked before step 1: dashed, with the pill "Complete step 1 first". Paused while the model is down: dashed, with the existing sentence as its placeholder and the line above it.
+- Send is disabled while the box is empty. Enter sends, Shift+Enter is a new line, and an IME composition is left alone.
+- The disclaimer is under the box in the chat too.
+- Below 1100px the key hint is hidden and the count keeps the far side.
+- The builder's copilot keeps the compact box (pinned).
+
+**Tests:**
+- `askCards.test.tsx` grew to 27: the grouped rows (and never a year or id), the compact grid unchanged, the Export menu by keyboard and on a connection, the error card (sentence, chips, details, Edit / Retry, the unreachable case, no alert on a reopened thread, Arabic), and the question box (placeholder, keys, count, the 1800 warning, Enter / Shift+Enter / composition, the compact box elsewhere).
+- `Composer.tsx` is in the Ask AI guard.
+- Full suite: 350 files / 4405 tests. Three failed in the full run, none in a file this step touches: `ReportBuilder.test.tsx` (E03), `WidgetRenderer.test.tsx` (QA2 T14) and `geoRenderers.test.tsx` (the time map); the three files pass alone (407/407). Type-check and build pass.
+- Captures: `e2e/capture/redesign/cap_10c.mjs` (browser-only data), EN/AR × light/dark: the rows open, the Export menu open, the actions at 1024px, the error landing, the error, its details open, the error at 1024px, and the question box empty, with text, near the limit, locked, paused and at 1024px. Before is :3001 at `1bd7389`; after is in `redesign-captures/10-askai/C-{before,after}/`.
+
+### Step 10: where I stopped (2026-10-12)
+
+- **Done and committed on `said`:** Part 0, A, A2, the robot (A3, replaced by A4, the approved prototype), B (`9cfa530`) and C with the two GATE B changes (`6ad139d`). The working tree was clean when this note was written.
+- **Waiting at GATE C** for the owner's review. Nothing of Part D is started.
+- **Open questions for the owner at GATE C:**
+  - Should every data table group thousands? Today only the answer card's rows do, for quantity columns; the shared `formatCell` is unchanged.
+  - Should `WidgetRenderer.test.tsx` (QA2 T14) go on the FINAL flaky list? It failed once in a full run on 2026-10-11 and passes alone.
+- **Next:** Part D, the History rail, from what the server already stores (`GET /agent/conversations` has `created_at` only, with no last-activity time and no failed flag: backend rows above). Then GATE D.
+- **To pick this up in a new session:**
+  - The repo is on the drive that now mounts as "New Volume2"; the "New Volume1" paths in older notes are stale.
+  - The model server is unreachable on this machine, so every Ask AI capture uses browser-only data (`cap_10a.mjs`, `cap_10robot.mjs`, `cap_10b.mjs`, `cap_10c.mjs`).
+  - Captures are outside the repo, in `/media/saeed/New Volume2/projects/redesign-captures/10-askai/`.
+
+### FINAL (AUTOPILOT step 10) — `42149f0` and the commit that adds this entry
+
+- **Flaky tests fixed at the shared cause:** the six files that failed only in a full run (Lineage — that test went with the redesign —, PrepPipelinePanel, Reports, ReportBuilder, WidgetRenderer, geoRenderers) all waited on a heavy render with Testing Library's default 1s, which a full run (one worker per core) can use up. `src/test/setup.ts` sets `asyncUtilTimeout: 5000` (a found element still returns at once) and `vitest.config.ts` a 20s test timeout. Four checks of the always-present URL line (`Reports`, `Home`) read it once before the navigation landed; they now retry. Full suite 359 files / 4480 tests, **three runs in a row green**, no slower (71–84 s).
+- **Regression pass** (`e2e/capture/redesign/reg_final.mjs`, EN light + AR dark, 13 pages incl. Present and Admin): 26/26 with no console errors, page errors, 5xx calls or sideways overflow. Captures in `redesign-captures/final-regression/`.
+- **Seen, not changed (an approved behaviour):** in View and Present, widgets that live inside a container (e.g. the two "(tab)" KPI cards on "Demo — World Sales Map") are drawn only inside it, but their own grid slots stay reserved, leaving an empty band. Original code (`ReportBuilder.tsx` container filter); packing it would change the layout readers see.
+- **Clean-up done:** the scratch worktrees are removed and no dev server is left running. **Owner's clean-up list:** HANDOVER.md section 7.

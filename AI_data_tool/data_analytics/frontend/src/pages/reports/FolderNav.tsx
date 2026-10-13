@@ -21,7 +21,7 @@ export interface DropProps {
 }
 
 export default function FolderNav({ view, onView, counts, folders, treeFailed, onRetryTree, creating, onStartFolder,
-  onCreateFolder, onCancelFolder, onSubfolder, onRename, onDelete, dropFor, overTarget, dragHint, ready }: {
+  onCreateFolder, onCancelFolder, onSubfolder, onRename, onDelete, dropFor, overTarget, dragHint, ready, treeReady = true }: {
   view: View
   onView: (v: View) => void
   counts: { all: number; recent: number | null; shared: number | null }
@@ -41,6 +41,9 @@ export default function FolderNav({ view, onView, counts, folders, treeFailed, o
   /** False while the list is loading or failed: counts would be zeros that
    *  are not true, and "No folders yet" would be a guess. */
   ready: boolean
+  /** QAF 7: false until the folder tree has loaded (it loads apart from the
+   *  list): a skeleton, not "No folders yet", in the meantime. */
+  treeReady?: boolean
 }) {
   const t = useT()
   const [name, setName] = useState('')
@@ -106,7 +109,12 @@ export default function FolderNav({ view, onView, counts, folders, treeFailed, o
           </div>
         )
       })}
-      {ready && !treeFailed && !folders.length && !creating && <p className="dsh-tnote">{t('dsh.noFolders')}</p>}
+      {!treeReady && !treeFailed && (
+        <div className="dsh-tskel" aria-busy="true" aria-label={t('common.loading')} data-testid="folders-loading">
+          <i /><i /><i />
+        </div>
+      )}
+      {ready && treeReady && !treeFailed && !folders.length && !creating && <p className="dsh-tnote">{t('dsh.noFolders')}</p>}
       {dragHint && folders.length > 0 && (
         <div className="dsh-tfoot"><Info size={14} aria-hidden /><span>{t('dsh.dragHint')}</span></div>
       )}

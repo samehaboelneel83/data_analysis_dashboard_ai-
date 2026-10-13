@@ -22,6 +22,9 @@ import NotFound from './NotFound'
 import { formatTimeAgo, useT, type MessageKey } from '../i18n'
 import ActionMenu from '../components/ActionMenu'
 import { localDigits } from '../lib/arabicFormats'
+import { formatTableCell, type CellFormat } from '../lib/displayNumber'
+import { nonAdditiveKind } from '../lib/semanticGuard'
+import { storedNumberUse } from '../lib/dtypeName'
 import Overview, { fmtBytes } from './datasetDetail/Overview'
 import { typeTag } from './datasetDetail/columnProfile'
 import AnalysisNav, { HASH_PICK, analysesFor, type AnalysisPick } from './datasetDetail/AnalysisNav'
@@ -102,7 +105,7 @@ export default function DatasetDetail() {
       navigate(`/reports/${(report as { id: number }).id}?edit=1`)
     } catch (e) {
       toast.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-        ?? 'Could not create the dashboard')
+        ?? tr('i2d.dd.dashFailed'))
       setBuilding(false)
     }
   }
@@ -323,7 +326,8 @@ export default function DatasetDetail() {
         // rather than silently sent and dropped server-side (see the note
         // rendered above the table for this same reason).
         const result = await dataPreviewApi.query(dsId, [], [], PAGE_SIZE, 0)
-        if (latest()) setPreview(result)
+        // QAF M5: the server ignores the limit here; draw one page only.
+        if (latest()) setPreview({ ...result, rows: result.rows.slice(0, PAGE_SIZE) })
         return
       }
       const activeFilters: DataPreviewFilter[] = frows
@@ -335,7 +339,7 @@ export default function DatasetDetail() {
       )
       if (latest()) setPreview(result)
     } catch (err: any) {
-      const msg = err?.response?.data?.detail ?? 'Failed to load data'
+      const msg = err?.response?.data?.detail ?? tr('i2d.dd.loadDataFailed')
       if (latest()) setPvError(msg)
     } finally {
       if (latest()) setPvLoading(false)
@@ -364,12 +368,12 @@ export default function DatasetDetail() {
       const next = mergeCellEdit(existing, { keyColumn, column, key: rowKey, value })
       await prepApi.set(dsId, next)
       setPrepSteps(next)
-      toast.success(`Saved as a prep step — ${column} for ${rowKey}`)
+      toast.success(tr('i2d.dd.cellSaved', { column, key: rowKey }))
       await loadPreview()
     } catch (err: unknown) {
       const detail = (err as { response?: { data?: { detail?: string } } })
         ?.response?.data?.detail
-      toast.error(detail ?? (err as Error)?.message ?? 'Could not save the correction')
+      toast.error(detail ?? (err as Error)?.message ?? tr('i2d.dd.cellFailed'))
     }
   }, [preview, keyColumn, dsId, loadPreview])
 
@@ -387,11 +391,11 @@ export default function DatasetDetail() {
     try {
       const r = await analysisApi.run(dsId)
       setAnalysis(r)
-      toast.success('Analysis complete')
+      toast.success(tr('i2d.dd.analysisDone'))
     } catch (e) {
       const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
-      setProfileError(typeof detail === 'string' ? detail : (e as Error)?.message || 'no response')
-      toast.error('Analysis failed')
+      setProfileError(typeof detail === 'string' ? detail : (e as Error)?.message || tr('i2d.dd.noResponse'))
+      toast.error(tr('i2d.dd.analysisFailed'))
     }
     finally { setRunning(false) }
   }
@@ -449,7 +453,7 @@ export default function DatasetDetail() {
       const result = await filterExprApi.preview(dsId, filterExpr, calcCols)
       setFilterPreview(result)
     } catch {
-      setFilterPreview({ ok: false, error: 'Request failed', total: 0 })
+      setFilterPreview({ ok: false, error: tr('i2d.dd.requestFailed'), total: 0 })
     }
   }
 
@@ -461,10 +465,10 @@ export default function DatasetDetail() {
       setDs(updated)
       setSavedFilter(val || null)
       setFilterPreview(null)
-      toast.success(val ? 'Global filter saved' : 'Global filter cleared')
+      toast.success(val ? tr('i2d.dd.filterSaved') : tr('i2d.dd.filterCleared'))
       if (tab === 'data') loadPreview(0, filterRows, calcCols, sortBy, sortDir, search)
     } catch {
-      toast.error('Failed to save filter')
+      toast.error(tr('i2d.dd.filterFailed'))
     } finally {
       setFilterSaving(false)
     }
@@ -560,10 +564,10 @@ export default function DatasetDetail() {
       const updated = await datasetsApi.setSchedule(dsId, minutes)
       setDs(updated)
       toast.success(minutes
-        ? `Refreshing automatically every ${minutes} minutes`
-        : 'Automatic refresh turned off')
+        ? tr('i2d.dd.scheduleOn', { n: localDigits(String(minutes)) })
+        : tr('i2d.dd.scheduleOff'))
     } catch (err: any) {
-      toast.error(err?.response?.data?.detail ?? 'Could not change the schedule')
+      toast.error(err?.response?.data?.detail ?? tr('i2d.dd.scheduleFailed'))
     } finally {
       setSavingSchedule(false)
     }
@@ -575,10 +579,10 @@ export default function DatasetDetail() {
     try {
       const sources = await dataSourcesApi.list()
       const src = sources.find(s => s.id === ds.data_source_id)
-      if (!src) { toast.error('Original connection no longer exists'); return }
+      if (!src) { toast.error(tr('i2d.dd.connGone')); return }
       setEditingQuerySource(src)
     } catch {
-      toast.error('Could not load the connection')
+      toast.error(tr('i2d.dd.connFailed'))
     } finally {
       setQueryEditLoading(false)
     }
@@ -662,7 +666,7 @@ export default function DatasetDetail() {
     setSegmentError(null)
     analysisApi.segment(ds.id)
       .then(setSegment)
-      .catch((err: any) => setSegmentError(err?.response?.data?.detail ?? 'Segmentation failed'))
+      .catch((err: any) => setSegmentError(err?.response?.data?.detail ?? tr('i2d.dd.segmentFailed')))
       .finally(() => setSegmentBusy(false))
   }, [ds])
 
@@ -672,7 +676,7 @@ export default function DatasetDetail() {
     setRulesError(null)
     analysisApi.associationRules(ds.id)
       .then(setRules)
-      .catch((err: any) => setRulesError(notReadyOr(err, 'Could not mine rules', tr('ov.notReady'))))
+      .catch((err: any) => setRulesError(notReadyOr(err, tr('i2d.dd.rulesFailed'), tr('ov.notReady'))))
       .finally(() => setRulesBusy(false))
   }, [ds])
 
@@ -682,7 +686,7 @@ export default function DatasetDetail() {
     setInfluencerError(null)
     analysisApi.keyInfluencers(ds.id, target)
       .then(setInfluencers)
-      .catch((err: any) => setInfluencerError(notReadyOr(err, 'Could not find influencers', tr('ov.notReady'))))
+      .catch((err: any) => setInfluencerError(notReadyOr(err, tr('i2d.dd.influencersFailed'), tr('ov.notReady'))))
       .finally(() => setInfluencerBusy(false))
   }, [ds])
 
@@ -857,15 +861,15 @@ export default function DatasetDetail() {
                 {refreshMode === 'incremental' && (
                   <select value={refreshCursorCol} onChange={e => setRefreshCursorCol(e.target.value)}
                     className="input" style={{ width: '100%', fontSize: 12, marginBottom: 8 }}
-                    aria-label="Watermark column">
-                    <option value="">Watermark column…</option>
+                    aria-label={tr('i2d.dd.watermark')}>
+                    <option value="">{tr('i2d.dd.watermarkPick')}</option>
                     {ds.columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
                   </select>
                 )}
                 <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                   <button className="btn btn-ghost btn-sm" onClick={() => setShowRefreshMenu(false)}>{tr('common.cancel')}</button>
                   <button className="btn btn-primary btn-sm"
-                    disabled={refreshMode === 'incremental' && !refreshCursorCol} title={refreshMode === 'incremental' && !refreshCursorCol ? 'An incremental refresh needs a cursor column: choose one first' : undefined}
+                    disabled={refreshMode === 'incremental' && !refreshCursorCol} title={refreshMode === 'incremental' && !refreshCursorCol ? tr('i2d.dd.needCursor') : undefined}
                     onClick={() => handleRefresh(refreshMode, refreshCursorCol)}>
                     {tr('dataset.run')}
                   </button>
@@ -880,7 +884,7 @@ export default function DatasetDetail() {
                   : {}}>
                   <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>{tr('dataset.autoRefresh')}</div>
                   <select
-                    aria-label="Automatic refresh interval"
+                    aria-label={tr('i2d.dd.autoInterval')}
                     disabled={savingSchedule}
                     value={afterSource ? 'after' : ds.refresh_interval_minutes ?? ''}
                     onChange={e => {
@@ -972,7 +976,7 @@ export default function DatasetDetail() {
         <div>
             {analysis?.sampled && (
               <div style={{ marginBottom: 12, fontSize: 12, color: 'var(--muted)', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px' }}>
-                Based on a live sample of {analysis.sample_size?.toLocaleString()} of {analysis.total_rows?.toLocaleString()} rows.
+                {tr('i2d.dd.sampled', { n: localDigits((analysis.sample_size ?? 0).toLocaleString('en-US')), total: localDigits((analysis.total_rows ?? 0).toLocaleString('en-US')) })}
               </div>
             )}
           {/* Guided setup phase 5: plain first, the full column table below. */}
@@ -988,7 +992,7 @@ export default function DatasetDetail() {
                 </h2>
                 <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
                   <table>
-                    <thead><tr><th>Column</th><th>Count</th><th>Mean</th><th>Std</th><th>Min</th><th>Median</th><th>Max</th><th>Missing%</th></tr></thead>
+                    <thead><tr>{(['column', 'count', 'mean', 'std', 'min', 'median', 'max', 'missing'] as const).map(h => <th key={h}>{tr(`i2d.dd.st.${h}`)}</th>)}</tr></thead>
                     <tbody>
                       {numCols.map(([col, s]: [string, any]) => (
                         <tr key={col}>
@@ -1029,16 +1033,16 @@ export default function DatasetDetail() {
                         <>
                           <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
                             {String(s.min).slice(0, s.granularity === 'date' ? 10 : 16)} → {String(s.max).slice(0, s.granularity === 'date' ? 10 : 16)}
-                            <span style={{ fontFamily: 'var(--mono)' }}> · {s.range_days}d span · {s.n_unique} unique</span>
-                            {s.missing_pct > 0 && <span style={{ color: s.missing_pct > 10 ? 'var(--danger)' : undefined }}> · {s.missing_pct}% missing</span>}
-                            {s.gaps_over_7d > 0 && <span> · {s.gaps_over_7d} gap{s.gaps_over_7d === 1 ? '' : 's'} &gt;7d</span>}
+                            <span style={{ fontFamily: 'var(--mono)' }}> · {tr('i2d.dd.dt.span', { n: localDigits(String(s.range_days)) })} · {tr('i2d.dd.unique', { n: localDigits(String(s.n_unique)) })}</span>
+                            {s.missing_pct > 0 && <span style={{ color: s.missing_pct > 10 ? 'var(--danger)' : undefined }}> · {tr('i2d.dd.dt.missing', { pct: localDigits(String(s.missing_pct)) })}</span>}
+                            {s.gaps_over_7d > 0 && <span> · {tr('i2d.dd.dt.gaps', { n: localDigits(String(s.gaps_over_7d)), d: localDigits('7') })}</span>}
                           </div>
                           {s.monthly_counts && (() => {
                             const max = Math.max(...s.monthly_counts.map((m: any) => m.count), 1)
                             return (
                               <div style={{ marginBottom: 8 }}>
                                 <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 3 }}>
-                                  {tr('ov.byMonth')}{s.busiest_period ? ` — busiest ${s.busiest_period.period} (${s.busiest_period.count.toLocaleString()})` : ''}
+                                  {tr('ov.byMonth')}{s.busiest_period ? <> — {tr('i2d.dd.dt.busiest')} <bdi>{s.busiest_period.period}</bdi> (<bdi>{localDigits(s.busiest_period.count.toLocaleString('en-US'))}</bdi>)</> : ''}
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'flex-end', gap: 1, height: 28 }}>
                                   {s.monthly_counts.map((m: any) => (
@@ -1085,7 +1089,7 @@ export default function DatasetDetail() {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
                   {catCols.map(([col, s]: [string, any]) => (
                     <div key={col} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 14 }}>
-                      <div style={{ fontWeight: 700, marginBottom: 6 }}>{col} <span style={{ color: 'var(--muted)', fontSize: 12, fontWeight: 400 }}>({s.n_unique} unique)</span></div>
+                      <div style={{ fontWeight: 700, marginBottom: 6 }}>{col} <span style={{ color: 'var(--muted)', fontSize: 12, fontWeight: 400 }}>({tr('i2d.dd.unique', { n: localDigits(String(s.n_unique)) })})</span></div>
                       {(s.top_values ?? []).slice(0, 5).map((v: any) => (
                         <div key={v.value} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '2px 0', color: 'var(--muted)' }}>
                           <span style={{ color: 'var(--text)' }}>{isMissingLabel(v.value) ? <em>{tr('setup.u.emptyValue')}</em> : v.value}</span>
@@ -1116,13 +1120,13 @@ export default function DatasetDetail() {
                 <section id="influencers" style={{ marginBottom: 24 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
                     <h2 style={{ fontSize: 15, fontWeight: 700 }}>{tr('ov.keyInfluencers')}</h2>
-                    <select value={influencerTarget} aria-label="Outcome to explain"
+                    <select value={influencerTarget} aria-label={tr('i2d.dd.outcome')}
                       onChange={e => { setInfluencerTarget(e.target.value); setInfluencers(null); setInfluencerNeedsPick(false) }}
                       style={{ fontSize: 12 }}>
                       <option value="">{tr('ki.chooseOutcome')}</option>
                       {ds.columns.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
                     </select>
-                    <button className="btn btn-sm" disabled={influencerBusy || !influencerTarget} title={!influencerTarget ? 'Choose the column to explain first' : undefined}
+                    <button className="btn btn-sm" disabled={influencerBusy || !influencerTarget} title={!influencerTarget ? tr('i2d.dd.needOutcome') : undefined}
                       onClick={() => runInfluencers(influencerTarget)}>
                       {influencerBusy ? tr('ov.analysing')
                           : influencers ? <IconLabel icon={RefreshCw}>{tr('ov.rerun')}</IconLabel>
@@ -1229,16 +1233,16 @@ export default function DatasetDetail() {
                     {segment && (
                       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 14 }}>
                         <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 10 }}>
-                          k = {segment.meta.params.k} clusters over {segment.meta.params.columns.join(', ')}
-                          {' · '}silhouette {segment.meta.silhouette.toFixed(3)}
-                          {' · '}{segment.meta.n_rows_used.toLocaleString()} rows clustered
+                          {tr('i2d.dd.seg.clusters', { k: localDigits(String(segment.meta.params.k)) })} <bdi>{segment.meta.params.columns.join(', ')}</bdi>
+                          {' · '}{tr('i2d.dd.seg.silhouette', { s: localDigits(segment.meta.silhouette.toFixed(3)) })}
+                          {' · '}{tr('i2d.dd.seg.rows', { n: localDigits(segment.meta.n_rows_used.toLocaleString('en-US')) })}
                         </div>
                         <table>
                           <thead>
                             <tr>
-                              <th>Cluster</th>
-                              <th>Size</th>
-                              {segment.meta.params.columns.map(c => <th key={c}>{c} (mean)</th>)}
+                              <th>{tr('i2d.dd.seg.cluster')}</th>
+                              <th>{tr('i2d.dd.seg.size')}</th>
+                              {segment.meta.params.columns.map(c => <th key={c}><bdi>{c}</bdi> ({tr('i2d.dd.seg.mean')})</th>)}
                             </tr>
                           </thead>
                           <tbody>
@@ -1295,17 +1299,17 @@ export default function DatasetDetail() {
                                 {(f.novelty === 'new' || f.novelty === 'changed') && (
                                   <span style={{ background: 'var(--accent)', color: 'var(--surface)',
                                     borderRadius: 3, padding: '0 4px', fontSize: 8, fontWeight: 700 }}>
-                                    {f.novelty === 'new' ? 'NEW' : 'CHANGED'}
+                                    {f.novelty === 'new' ? tr('i2d.dd.new') : tr('i2d.dd.changed')}
                                   </span>
                                 )}
-                                <button aria-label={`Pin finding: ${f.title}`}
-                                  title="Pin to your dashboard — re-evaluated live on every visit"
+                                <button aria-label={tr('i2d.dd.pinFinding', { title: f.title })}
+                                  title={tr('i2d.dd.pinTitle')}
                                   onClick={() => void pinsApi
                                     .create({ dataset_id: ds.id,
                                               finding_key: findingKey(f) })
                                     .then(r => toast.success(r.already_pinned
-                                      ? 'Already on your dashboard' : 'Pinned to your dashboard'))
-                                    .catch(() => toast.error('Could not pin this finding'))}
+                                      ? tr('i2d.dd.pinAlready') : tr('i2d.dd.pinned')))
+                                    .catch(() => toast.error(tr('i2d.dd.pinFailed')))}
                                   style={{ background: 'none', border: 'none', cursor: 'pointer',
                                     fontSize: 11, padding: 0, marginInlineStart: 'auto' }}><Pin size={12} /></button>
                                 <span style={{ fontSize: 10.5, color: 'var(--muted)', marginInlineStart: 'auto' }}>{Math.round(f.score * 100)}</span>
@@ -1338,21 +1342,20 @@ export default function DatasetDetail() {
                   <section id="anomalies" style={{ marginBottom: 24 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
                       <h2 style={{ fontSize: 15, fontWeight: 700 }}>{tr('ov.anomalies')}</h2>
-                      <select value={outlierColumn} aria-label="Column to inspect for outliers"
+                      <select value={outlierColumn} aria-label={tr('i2d.dd.outlierColumn')}
                         onChange={e => setOutlierColumn(e.target.value)} style={{ fontSize: 12 }}>
-                        <option value="">choose a numeric column…</option>
+                        <option value="">{tr('i2d.dd.outlierPick')}</option>
                         {ds.columns.filter(c => c.dtype === 'numeric').map(c => (
                           <option key={c.name} value={c.name}>{c.name}</option>
                         ))}
                       </select>
-                      <button className="btn btn-sm" disabled={!outlierColumn} title={!outlierColumn ? 'Choose a numeric column first' : undefined}
+                      <button className="btn btn-sm" disabled={!outlierColumn} title={!outlierColumn ? tr('i2d.dd.needNumeric') : undefined}
                         onClick={() => setOutlierOpen(true)}>
                         <IconLabel icon={TriangleAlert}>{tr('ov.inspectOutliers')}</IconLabel>
                       </button>
                     </div>
                     <p style={{ fontSize: 12, color: 'var(--muted)' }}>
-                      Box-plot fences, the outlying rows themselves, and what they do to the total
-                      and the mean — on the same secured data widgets read.
+                      {tr('i2d.dd.outlierCopy')}
                     </p>
                   </section>
                 )}
@@ -1442,7 +1445,7 @@ export default function DatasetDetail() {
               <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: 12,
                             display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 12 }}>
-                  Built from {derivedSourceNames || 'other datasets'}
+                  {tr('i2d.dd.builtFrom')} {derivedSourceNames ? <bdi>{derivedSourceNames}</bdi> : tr('i2d.dd.otherDatasets')}
                   {derivedFrom.built_at && <> · {new Date(String(derivedFrom.built_at)).toLocaleString()}</>}
                 </span>
                 <button className="btn btn-ghost" style={{ fontSize: 12 }}
@@ -1452,19 +1455,19 @@ export default function DatasetDetail() {
                     try {
                       const updated = await prepApi.rebuild(dsId)
                       setDs(updated)
-                      toast.success('Rebuilt from the current source data')
+                      toast.success(tr('i2d.dd.rebuilt'))
                     } catch (e: any) {
                       // 409s name what broke (a deleted source, a vanished join
                       // key); showing the server's words is the whole point.
-                      toast.error(e?.response?.data?.detail || 'Rebuild failed')
+                      toast.error(e?.response?.data?.detail || tr('i2d.dd.rebuildFailed'))
                     } finally {
                       setRebuilding(false)
                     }
                   }}>
-                  {rebuilding ? 'Rebuilding…' : 'Rebuild'}
+                  {rebuilding ? tr('i2d.dd.rebuilding') : tr('i2d.c.rebuild')}
                 </button>
                 <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-                  This does not update on its own.
+                  {tr('i2d.dd.snapshot')}
                 </span>
               </div>
             )}
@@ -1591,7 +1594,7 @@ export default function DatasetDetail() {
                 functionsCatalog={FILTER_FUNC_CATS}
                 value={filterExpr}
                 onChange={next => { setFilterExpr(next); setFilterPreview(null) }}
-                placeholder={"الفئة == 'ضابط' AND المرتب > 20000"}
+                placeholder={tr('i2d.dd.filterPh')}
                 rows={3}
               />
               {filterPreview && (
@@ -1701,7 +1704,7 @@ export default function DatasetDetail() {
                 {editCells && (
                   <>
                     <label htmlFor="cell-edit-key" style={{ fontSize: 11, color: 'var(--muted)' }}>
-                      Rows identified by
+                      {tr('i2d.dd.rowsBy')}
                     </label>
                     <select id="cell-edit-key" value={keyColumn || preview.columns[0]}
                       onChange={e => { setKeyColumn(e.target.value); setEditingAt(null) }}
@@ -1710,9 +1713,7 @@ export default function DatasetDetail() {
                       {preview.columns.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
                     <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-                      Corrections are saved as a prep step — the uploaded file is
-                      never changed, and removing the step restores the original.
-                      Every row sharing the key value is corrected.
+                      {tr('i2d.dd.editNote')}
                     </span>
                   </>
                 )}
@@ -1720,17 +1721,17 @@ export default function DatasetDetail() {
             )}
 
             {pvLoading && (
-              <div style={{ textAlign: 'center', padding: 40 }}><LoadingState label="Loading data…" /></div>
+              <div style={{ textAlign: 'center', padding: 40 }}><LoadingState label={tr('i2d.dd.loadingData')} /></div>
             )}
             {!pvLoading && preview && preview.rows.length === 0 && (
-              <EmptyState icon={Search} title="No rows match"
-                description="Try adjusting or clearing the filters and search above." />
+              <EmptyState icon={Search} title={tr('i2d.dd.noRows')}
+                description={tr('i2d.dd.noRowsBody')} />
             )}
             {!pvLoading && preview && preview.rows.length > 0 && (
               <>
                 {ds.mode === 'directquery' && (
                   <div style={{ marginBottom: 8, fontSize: 12, color: 'var(--muted)', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px', flexShrink: 0 }}>
-                    Showing the first {PAGE_SIZE} rows live from the source. Filtering, sorting, search, and calculated columns aren't supported yet for DirectQuery previews.
+                    {tr('i2d.dd.dqPreview', { n: localDigits(String(PAGE_SIZE)) })}
                   </div>
                 )}
                 <div style={{ flex: 1, overflow: 'auto', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8 }}>
@@ -1755,6 +1756,8 @@ export default function DatasetDetail() {
                               {calcColNames.has(c)
                                 ? <span className="dl-data3__type dl-data3__type--fx">ƒx</span>
                                 : <span className="dl-data3__type">{typeTag(tr, colTypes[c] ?? '')}</span>}
+                              {(() => { const u = storedNumberUse(tr, c, colTypes[c], (ds?.column_meta as Record<string, { role?: string }> | undefined)?.[c]?.role)
+                                return u && <span className="dl-data3__type" title={u.tip}>{u.tag}</span> })()}
                               {c}
                               <span aria-hidden="true" style={{ marginInlineStart: 4, color: isSorted ? 'var(--accent)' : 'var(--border)', fontSize: 11 }}>
                                 {isSorted ? (sortDir === 'asc' ? '↑' : '↓') : '↕'}
@@ -1788,7 +1791,7 @@ export default function DatasetDetail() {
                                 ? () => setEditingAt({ row: i, column }) : undefined}>
                               {isEditing ? (
                                 <input autoFocus defaultValue={v == null ? '' : String(v)}
-                                  aria-label={`Edit ${column} for ${rowKey}`}
+                                  aria-label={tr('i2d.dd.editCell', { column, key: rowKey })}
                                   onBlur={e => { setEditingAt(null); saveCellEdit(i, column, e.target.value) }}
                                   onKeyDown={e => {
                                     if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
@@ -1799,7 +1802,7 @@ export default function DatasetDetail() {
                                     padding: '1px 3px', background: 'var(--surface2)',
                                     border: '1px solid var(--accent)', borderRadius: 3,
                                     color: 'var(--text)' }} />
-                              ) : v == null ? <span style={{ color: 'var(--muted)' }}>—</span> : String(v)}
+                              ) : v == null ? <span style={{ color: 'var(--muted)' }}>—</span> : formatTableCell(v as string | number | boolean, !nonAdditiveKind(column), (ds?.column_formats as Record<string, CellFormat> | undefined)?.[column])}
                             </td>
                             )
                           })}
@@ -1838,27 +1841,27 @@ export default function DatasetDetail() {
             {!pvLoading && pvError && (
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 40 }}>
                 <FolderOpen size={32} color="var(--muted)" aria-hidden />
-                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>Dataset file not found</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>{tr('i2d.dd.fileMissing')}</div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center', maxWidth: 360 }}>{pvError}</div>
                 {ds?.data_source_id && (ds?.source_table || ds?.source_query) ? (
                   <button className="btn btn-primary btn-sm" onClick={() => handleRefresh('full')} disabled={refreshing}
                     style={{ marginTop: 8 }}>
-                    {refreshing ? refreshStage : '↻ Refresh from source'}
+                    {refreshing ? refreshStage : tr('i2d.dd.refreshFromSource')}
                   </button>
                 ) : ds?.data_source_id ? (
                   <div style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center', maxWidth: 320 }}>
-                    Original query not recorded.{' '}
-                    <Link to={`/connections/${ds.data_source_id}/review`} style={{ color: 'var(--accent)' }}>Re-import from this connection</Link>{' '}
-                    to restore this dataset.
+                    {tr('i2d.dd.queryMissing')}{' '}
+                    <Link to={`/connections/${ds.data_source_id}/review`} style={{ color: 'var(--accent)' }}>{tr('i2d.dd.reimport')}</Link>{' '}
+                    {tr('i2d.dd.toRestore')}
                   </div>
                 ) : (
-                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>Re-upload the file to restore this dataset.</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>{tr('i2d.dd.reupload')}</div>
                 )}
               </div>
             )}
             {!pvLoading && !preview && !pvError && (
               <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 13 }}>
-                Loading data…
+                {tr('i2d.dd.loadingData')}
               </div>
             )}
           </div>

@@ -146,3 +146,15 @@ async function rasterise(svg: SVGSVGElement, clone: SVGSVGElement, scale: number
     URL.revokeObjectURL(url)
   }
 }
+
+/** Copy a widget's chart to the clipboard as a PNG (9-polish: the View hover
+ *  menu's Copy image), through the same picture "Export as image" saves.
+ *  Returns how many basemap tiles could not be included. */
+export async function copyChartImage(root: ParentNode | null | undefined): Promise<number> {
+  const svg = pickChartSvg(root)
+  if (!svg) throw new Error('no chart')
+  const { dataUrl, dropped } = await svgToPng(svg, 2)
+  const png = await (await fetch(dataUrl)).blob()
+  await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })])
+  return dropped
+}

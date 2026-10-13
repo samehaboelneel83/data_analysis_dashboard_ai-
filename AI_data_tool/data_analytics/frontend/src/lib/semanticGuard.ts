@@ -114,3 +114,32 @@ export function isIdentifier(column: string | undefined | null, meta?: MetaMap):
   if (markedMeasure(meta?.[column])) return false
   return nonAdditiveKind(column) === 'identifier'
 }
+
+/** How a field is USED, which can differ from how it is STORED: "year" is
+ *  stored as a number and used as a category. */
+export type FieldUse = 'measure' | 'category' | 'date' | 'geo'
+
+/**
+ * QA6 B4: the one rule for a field's use. "year" was a category (Aa) in the
+ * Fields panel, "Number" in the Data view, and a measure in Assign data --
+ * three places, three answers. Now each asks this, and shows the storage
+ * type beside the use where they differ ("Number · category").
+ *
+ * The author's role wins; a calculated field is a measure; a stored date is a
+ * date; a stored number is a measure unless its name says it is an
+ * identifier, a year (category) or a coordinate (geography); anything else
+ * is a category.
+ */
+export function fieldUse(col: { name: string; dtype?: string | null }, role?: string | null): FieldUse {
+  if (role === 'measure') return 'measure'
+  if (role === 'geography') return 'geo'
+  if (role === 'temporal') return 'date'
+  if (role) return 'category'
+  if (col.dtype === 'calculated') return 'measure'
+  if (col.dtype === 'datetime' || col.dtype === 'date') return 'date'
+  if (col.dtype === 'numeric') {
+    const kind = nonAdditiveKind(col.name)
+    return kind === 'coordinate' ? 'geo' : kind ? 'category' : 'measure'
+  }
+  return 'category'
+}

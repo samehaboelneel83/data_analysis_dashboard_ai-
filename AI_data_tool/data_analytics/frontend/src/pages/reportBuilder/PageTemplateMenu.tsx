@@ -3,6 +3,8 @@ import toast from 'react-hot-toast'
 import { reportsApi, pageTemplatesApi } from '../../services/api'
 import { useConfirm } from '../../components/ui/ConfirmDialog'
 import { useT } from '../../i18n'
+import { addBuiltinPage } from '../../lib/builtinTemplates'
+import { useDirection } from '../../contexts/DirectionContext'
 import { localDigits } from '../../lib/arabicFormats'
 import { TEMPLATE_NAMES } from '../reports/dialogs'
 
@@ -54,6 +56,7 @@ export function PageTemplateMenu({ reportId, activePageId, onClose, onAdded }: {
   const [naming, setNaming] = useState<string | null>(null)
   const confirm = useConfirm()
   const t = useT()
+  const { language } = useDirection()
   const count = (n: number) => t('bc.rules.tpl.count', { n: localDigits(String(n)) })
   useEffect(() => {
     pageTemplatesApi.builtins().then(setBuiltins).catch(() => {})
@@ -74,7 +77,7 @@ export function PageTemplateMenu({ reportId, activePageId, onClose, onAdded }: {
       <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', padding: '4px 10px' }}>{t('bc.rules.tpl.builtins')}</div>
       {builtins.map(b => (
         <button key={b.key} role="menuitem" style={item}
-          onClick={() => pageTemplatesApi.addFrom(reportId, { builtin: b.key })
+          onClick={() => addBuiltinPage(reportId, b.key, language, t)
             .then(onAdded).catch(() => toast.error(t('bd.tpl.addFailed')))}>
           {TEMPLATE_NAMES[b.key] ? t(TEMPLATE_NAMES[b.key]) : b.name} <span style={{ color: 'var(--muted)' }}>{count(b.widgets)}</span>
         </button>

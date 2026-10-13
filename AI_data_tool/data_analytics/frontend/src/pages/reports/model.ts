@@ -77,10 +77,20 @@ export function folderOf(tree: WorkspaceTree | null): Map<number, number | null>
 }
 
 /** Draft / Published as the server means them. A legacy report (no author)
- *  is outside the publish regime and is neither. */
-export function statusOf(r: ReportSummary): 'draft' | 'pub' | null {
-  if (r.created_by == null) return null
+ *  is outside the publish regime: the server opens it to every member of the
+ *  organisation (`_report_access_gate`), so it is "open", never a draft. */
+export type DashStatus = 'draft' | 'pub' | 'open'
+export function statusOf(r: Pick<ReportSummary, 'created_by' | 'published'>): DashStatus {
+  if (r.created_by == null) return 'open'
   return r.published ? 'pub' : 'draft'
+}
+
+/** QAF M2: the one count of each status, for the Dashboards tabs and Home, so
+ *  the parts always add up to the whole. */
+export function statusCounts(rs: Pick<ReportSummary, 'created_by' | 'published'>[]): Record<DashStatus | 'all', number> {
+  const out = { all: rs.length, draft: 0, pub: 0, open: 0 }
+  for (const r of rs) out[statusOf(r)]++
+  return out
 }
 
 /** Suggest dashboards writes its provenance into the description, in one of
